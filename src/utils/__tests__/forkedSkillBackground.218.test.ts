@@ -6,7 +6,9 @@ import {
 import { FORKED_SKILL_LAUNCH_TAG } from '../../constants/xml.js'
 import type { CommandBase, PromptCommand } from '../../types/command.js'
 import {
+  assertForkedSkillResumeAllowed,
   formatForkedSkillLaunchMarker,
+  ForkedSkillResumeRefusedError,
   shouldBackgroundForkedSkill,
 } from '../forkedSkillBackground.js'
 
@@ -112,5 +114,41 @@ describe('formatForkedSkillLaunchMarker (densable 2.1.218 gsd)', () => {
     )
     const parsed = JSON.parse(json) as { description: string }
     expect(parsed.description.length).toBe(4096)
+  })
+})
+
+describe('assertForkedSkillResumeAllowed (densable Ywo subset)', () => {
+  test('skips when no forkedSkillName witness (not a forked-skill agent)', async () => {
+    await assertForkedSkillResumeAllowed({ agentId: 'a1' })
+  })
+
+  test('cold witness with unresolved skill refuses', async () => {
+    await expect(
+      assertForkedSkillResumeAllowed({
+        agentId: 'a1',
+        forkedSkillName: 'this-skill-does-not-exist-ywo-289',
+      }),
+    ).rejects.toMatchObject({
+      name: 'ForkedSkillResumeRefusedError',
+      code: 'forked_skill_resume_skill_unresolved',
+    } satisfies Partial<ForkedSkillResumeRefusedError>)
+  })
+})
+
+describe('assertForkedSkillResumeAllowed Ywo overlay (289)', () => {
+  test('source lock: syncedSkills + Z7 veto unique English', async () => {
+    const { readFileSync } = await import('fs')
+    const src = readFileSync(
+      new URL('../forkedSkillBackground.ts', import.meta.url),
+      'utf-8',
+    )
+    expect(src).toContain('forked_skill_resume_sync_vetoed')
+    expect(src).toContain('forked_skill_resume_allowed_tools_failed')
+    expect(src).toContain('replaceCommandRules: true')
+    expect(src).toContain('frozenCommandDenies')
+    expect(src).toContain('input.frozenCommandDenies')
+    expect(src).toContain('an account-synced skill that is currently disabled')
+    expect(src).toContain('isForkCapableSkill')
+    expect(src).toContain('resolveTrustedSkillAllowedTools')
   })
 })

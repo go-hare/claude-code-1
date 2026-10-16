@@ -12,6 +12,7 @@
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 import {
+  DATAVIZ_MENU_DESCRIPTION,
   DATAVIZ_SKILL_DESCRIPTION,
   DATAVIZ_SKILL_NAME,
   SKILL_FILES,
@@ -26,6 +27,7 @@ const { content: SKILL_BODY } = parseFrontmatter(SKILL_MD)
 export function registerDatavizSkill(): void {
   registerBundledSkill({
     name: DATAVIZ_SKILL_NAME,
+    menuDescription: DATAVIZ_MENU_DESCRIPTION,
     description: DATAVIZ_SKILL_DESCRIPTION,
     userInvocable: true,
     files: SKILL_FILES,

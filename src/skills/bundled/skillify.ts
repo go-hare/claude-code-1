@@ -1,40 +1,10 @@
-import { getSessionMemoryContent } from '../../services/SessionMemory/sessionMemoryUtils.js'
-import type { Message } from '../../types/message.js'
-import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
 import { registerBundledSkill } from '../bundledSkills.js'
-
-function extractUserMessages(messages: Message[]): string[] {
-  return messages
-    .filter(m => m.type === 'user')
-    .map(m => {
-      const content = m.message?.content
-      if (typeof content === 'string') return content
-      if (!Array.isArray(content)) return ''
-      return content
-        .filter(
-          (b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text',
-        )
-        .map(b => b.text)
-        .join('\n')
-    })
-    .filter(text => text.trim().length > 0)
-}
 
 const SKILLIFY_PROMPT = `# Skillify {{userDescriptionBlock}}
 
 You are capturing this session's repeatable process as a reusable skill.
 
-## Your Session Context
-
-Here is the session memory summary:
-<session_memory>
-{{sessionMemory}}
-</session_memory>
-
-Here are the user's messages during this session. Pay attention to how they steered the process, to help capture their detailed preferences in the skill:
-<user_messages>
-{{userMessages}}
-</user_messages>
+Review the conversation above — it is your source material. Pay particular attention to the user's messages (how they steered and corrected the process) and the tools/commands that were actually used.
 
 ## Your Task
 
@@ -141,7 +111,7 @@ IMPORTANT: see the next section below for the per-step annotations you can optio
 - Keep simple skills simple -- a 2-step skill doesn't need annotations on every step
 
 **Frontmatter rules:**
-- \`allowed-tools\`: Minimum permissions needed (use patterns like \`Bash(gh:*)\` not \`Bash\`)
+- \`allowed-tools\`: Minimum permissions needed (use patterns like \`Bash(gh *)\` not \`Bash\`)
 - \`context\`: Only set \`context: fork\` for self-contained skills that don't need mid-process user input.
 - \`when_to_use\` is CRITICAL -- tells the model when to auto-invoke. Start with "Use when..." and include trigger phrases. Example: "Use when the user wants to cherry-pick a PR to a release branch. Examples: 'cherry-pick to release', 'CP this PR', 'hotfix'."
 - \`arguments\` and \`argument-hint\`: Only include if the skill takes parameters. Use \`$name\` in the body for substitution.
@@ -177,21 +147,14 @@ export function registerSkillifySkill(): void {
     userInvocable: true,
     disableModelInvocation: true,
     argumentHint: '[description of the process you want to capture]',
-    async getPromptForCommand(args, context) {
-      const sessionMemory =
-        (await getSessionMemoryContent()) ?? 'No session memory available.'
-      const userMessages = extractUserMessages(
-        getMessagesAfterCompactBoundary(context.messages),
-      )
-
+    async getPromptForCommand(args) {
       const userDescriptionBlock = args
         ? `The user described this process as: "${args}"`
         : ''
-
-      const prompt = SKILLIFY_PROMPT.replace('{{sessionMemory}}', sessionMemory)
-        .replace('{{userMessages}}', userMessages.join('\n\n---\n\n'))
-        .replace('{{userDescriptionBlock}}', userDescriptionBlock)
-
+      const prompt = SKILLIFY_PROMPT.replace(
+        '{{userDescriptionBlock}}',
+        userDescriptionBlock,
+      )
       return [{ type: 'text', text: prompt }]
     },
   })

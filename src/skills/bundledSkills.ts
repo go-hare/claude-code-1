@@ -4,7 +4,9 @@ import { mkdir, open } from 'fs/promises'
 import { dirname, isAbsolute, join, normalize, sep as pathSep } from 'path'
 import type { ToolUseContext } from '../Tool.js'
 import type { Command } from '../types/command.js'
+import type { EffortValue } from '../utils/effort.js'
 import { logForDebugging } from '../utils/debug.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
 import { getBundledSkillsRoot } from '../utils/permissions/filesystem.js'
 import type { HooksSettings } from '../utils/settings/types.js'
 
@@ -25,8 +27,29 @@ export type BundledSkillDefinition = {
   disableModelInvocation?: boolean
   userInvocable?: boolean
   isEnabled?: () => boolean
+  /**
+   * densable 2.1.218 `sdr` — first arg token → target command name
+   * (`/design sync` → `design-sync`).
+   */
+  subcommands?: Record<string, string>
+  /** densable `subcommandsBareOnly` — redirect only on a bare first token. */
+  subcommandsBareOnly?: boolean
+  /**
+   * densable `survivesBundledKillSwitch` — still registered when
+   * `disableBundledSkills` / `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` is on.
+   */
+  survivesBundledKillSwitch?: boolean
   hooks?: HooksSettings
   context?: 'inline' | 'fork'
+  /**
+   * densable `k_n` — dynamic fork vs inline. Copied onto the prompt command.
+   */
+  getContext?(args: string, context: ToolUseContext): 'inline' | 'fork'
+  getEffort?(args: string, context: ToolUseContext): EffortValue | undefined
+  getDefaultEffort?(
+    args: string,
+    context: ToolUseContext,
+  ): { value?: EffortValue; notice?: string } | undefined
   agent?: string
   /** Shown while the skill prompt is running (default "running"). */
   progressMessage?: string
@@ -49,6 +72,8 @@ export type BundledSkillDefinition = {
 
 // Internal registry for bundled skills
 const bundledSkills: Command[] = []
+/** densable `bundledSkillKillSwitchSurvivors` — gold Foe(). */
+const bundledSkillKillSwitchSurvivors = new WeakSet<Command>()
 
 /**
  * Register a bundled skill that will be available to the model.
@@ -115,13 +140,27 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     hooks: definition.hooks,
     skillRoot,
     context: definition.context,
+    ...(definition.getContext !== undefined
+      ? { getContext: definition.getContext }
+      : {}),
+    ...(definition.getEffort !== undefined
+      ? { getEffort: definition.getEffort }
+      : {}),
+    ...(definition.getDefaultEffort !== undefined
+      ? { getDefaultEffort: definition.getDefaultEffort }
+      : {}),
     agent: definition.agent,
     isEnabled: definition.isEnabled,
+    subcommands: definition.subcommands,
+    subcommandsBareOnly: definition.subcommandsBareOnly,
     isHidden: !(definition.userInvocable ?? true),
     progressMessage: definition.progressMessage ?? 'running',
     getPromptForCommand,
   }
   bundledSkills.push(command)
+  if (definition.survivesBundledKillSwitch) {
+    bundledSkillKillSwitchSurvivors.add(command)
+  }
 }
 
 /**
@@ -129,6 +168,34 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
  * Returns a copy to prevent external mutation.
  */
 export function getBundledSkills(): Command[] {
+  let settingsDisable = false
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js')
+    settingsDisable = getInitialSettings().disableBundledSkills === true
+  } catch {
+    // Settings optional at skill query.
+  }
+  try {
+    const { isBundledSkillsDisabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+    if (
+      isBundledSkillsDisabled({
+        settingsDisableBundledSkills: settingsDisable,
+      })
+    ) {
+      return bundledSkills.filter(s => bundledSkillKillSwitchSurvivors.has(s))
+    }
+  } catch {
+    if (
+      isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BUNDLED_SKILLS) ||
+      settingsDisable
+    ) {
+      return bundledSkills.filter(s => bundledSkillKillSwitchSurvivors.has(s))
+    }
+  }
   return [...bundledSkills]
 }
 

@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle'
 import { shouldAutoEnableClaudeInChrome } from 'src/utils/claudeInChrome/setup.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { registerBatchSkill } from './batch.js'
 import { registerClaudeInChromeSkill } from './claudeInChrome.js'
 import { registerDebugSkill } from './debug.js'
@@ -21,6 +20,11 @@ import { registerDreamSkill } from './dream.js'
 import { registerUpdateConfigSkill } from './updateConfig.js'
 import { registerDeepResearchSkill } from './deepResearch.js'
 import { registerVerifySkill } from './verify.js'
+import { registerFewerPermissionPromptsSkill } from './fewerPermissionPrompts.js'
+import { registerExplainUsageSkill } from './explainUsage.js'
+import { registerMemoryTypesSkill } from './memoryTypes.js'
+import { registerPrSkill } from './pr.js'
+import { registerGoldOfficialMissingSkills } from './goldOfficialMissingSkills.js'
 
 /**
  * Initialize all bundled skills.
@@ -32,36 +36,9 @@ import { registerVerifySkill } from './verify.js'
  * 3. Import and call that function here
  */
 export function initBundledSkills(): void {
-  // Official cae densable — env OR settings.disableBundledSkills.
-  let settingsDisable = false
-  try {
-    const { getInitialSettings } =
-      require('../../utils/settings/settings.js') as {
-        getInitialSettings: () => { disableBundledSkills?: boolean }
-      }
-    settingsDisable = getInitialSettings().disableBundledSkills === true
-  } catch {
-    // Settings optional at skill init.
-  }
-  try {
-    const { isBundledSkillsDisabled } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
-    if (
-      isBundledSkillsDisabled({
-        settingsDisableBundledSkills: settingsDisable,
-      })
-    ) {
-      return
-    }
-  } catch {
-    if (
-      isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BUNDLED_SKILLS) ||
-      settingsDisable
-    ) {
-      return
-    }
-  }
+  // Gold Foe(): always register. getBundledSkills() filters to
+  // survivesBundledKillSwitch survivors when disableBundledSkills /
+  // CLAUDE_CODE_DISABLE_BUNDLED_SKILLS is on (`design`, `doctor`).
   registerUpdateConfigSkill()
   registerKeybindingsSkill()
   registerVerifySkill()
@@ -88,19 +65,23 @@ export function initBundledSkills(): void {
   registerCronListSkill()
   registerCronDeleteSkill()
   registerDreamSkill()
+  registerFewerPermissionPromptsSkill()
+  registerExplainUsageSkill()
+  registerMemoryTypesSkill()
+  registerPrSkill()
+  registerGoldOfficialMissingSkills()
+  {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { registerScheduleRemoteAgentsSkill } =
+      require('./scheduleRemoteAgents.js') as typeof import('./scheduleRemoteAgents.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    registerScheduleRemoteAgentsSkill()
+  }
   if (feature('REVIEW_ARTIFACT')) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { registerHunterSkill } = require('./hunter.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
     registerHunterSkill()
-  }
-  if (feature('AGENT_TRIGGERS_REMOTE')) {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const {
-      registerScheduleRemoteAgentsSkill,
-    } = require('./scheduleRemoteAgents.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    registerScheduleRemoteAgentsSkill()
   }
   // Gold zas / Oy0 — always register; CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL
   // gates isEnabled (not feature('BUILDING_CLAUDE_APPS')).
@@ -124,11 +105,5 @@ export function initBundledSkills(): void {
   }
   if (shouldAutoEnableClaudeInChrome()) {
     registerClaudeInChromeSkill()
-  }
-  if (feature('RUN_SKILL_GENERATOR')) {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { registerRunSkillGeneratorSkill } = require('./runSkillGenerator.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    registerRunSkillGeneratorSkill()
   }
 }

@@ -48,6 +48,7 @@ import {
   splitPathInFrontmatter,
 } from '../utils/frontmatterParser.js'
 import { getFsImplementation } from '../utils/fsOperations.js'
+import { wrapSkillAllowedToolsGetter } from '../utils/permissions/skillAllowedToolsTrust.js'
 import { isPathGitignored } from '../utils/git/gitignore.js'
 import { logError } from '../utils/log.js'
 import {
@@ -432,6 +433,14 @@ export function createSkillCommand({
     loadedFrom,
     hooks: finalHooks,
     skillRoot: baseDir,
+    ...(finalAllowedTools.length > 0
+      ? {
+          getAllowedTools: wrapSkillAllowedToolsGetter(
+            { name: skillName, source, allowedTools: finalAllowedTools },
+            finalAllowedTools,
+          ),
+        }
+      : {}),
     async getPromptForCommand(args, toolUseContext) {
       let finalContent = baseDir
         ? `Base directory for this skill: ${baseDir}\n\n${markdownContent}`
@@ -452,6 +461,17 @@ export function createSkillCommand({
         const skillDir =
           process.platform === 'win32' ? baseDir.replace(/\\/g, '/') : baseDir
         finalContent = finalContent.replace(/\$\{CLAUDE_SKILL_DIR\}/g, skillDir)
+      }
+
+      try {
+        const { replaceDevModsPlaceholder } = await import(
+          '../utils/plugins/pluginDevMods.js'
+        )
+        finalContent = await replaceDevModsPlaceholder(finalContent, {
+          isPreload: toolUseContext.options?.isSkillPreload === true,
+        })
+      } catch {
+        // densable wfr optional when plugin_dev_mods host is absent
       }
 
       // Replace ${CLAUDE_SESSION_ID} with the current session ID

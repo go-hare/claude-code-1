@@ -36,6 +36,8 @@ export function registerDoctorSkill(): void {
     userInvocable: true,
     disableModelInvocation: true,
     progressMessage: DOCTOR_SKILL_PROGRESS_MESSAGE,
+    // densable An() survivesBundledKillSwitch:!0
+    survivesBundledKillSwitch: true,
     isEnabled: () => !isEnvTruthy(process.env.DISABLE_DOCTOR_COMMAND),
     async getPromptForCommand(args) {
       let text = DOCTOR_SKILL_PROMPT

@@ -30,6 +30,11 @@ import { runAsyncAgentLifecycle } from '@claude-code/builtin-tools/tools/AgentTo
 import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
 import type { ToolUseContext } from '../Tool.js'
 import type { CommandBase, PromptCommand } from '../types/command.js'
+import { overlayForkedCommandAppState } from './forkedAgent.js'
+import { parseToolListFromCLI } from './permissions/permissionSetup.js'
+import { resolveTrustedSkillAllowedTools } from './permissions/skillAllowedToolsTrust.js'
+import { isSyncSkillsEnabled } from './residualFinalEnvGates.js'
+import { isForkCapableSkill } from './skills/skillExecutionContext.js'
 import type { AgentId } from '../types/ids.js'
 import { asAgentId } from '../types/ids.js'
 import type { Message } from '../types/message.js'
@@ -86,6 +91,121 @@ export function formatForkedSkillLaunchMarker(
     description,
   })
   return `<${FORKED_SKILL_LAUNCH_TAG}>${escapeXml(body)}</${FORKED_SKILL_LAUNCH_TAG}>`
+}
+
+/**
+ * densable Ywo tail — resolve a fork-capable skill and its permission overlay
+ * (ije allowed tools / frozenCommandDenies / Jbn). Disk scoping/provenance
+ * (W3e/fIt/Kwo) lives in `forkedSkillScoping.ts`; resumeAgent reads it first.
+ *
+ * Never export minify `Ywo` / `Z7` / `ije` / `Jbn`.
+ */
+export class ForkedSkillResumeRefusedError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ForkedSkillResumeRefusedError'
+  }
+}
+
+export type ForkedSkillResumeOverlay = {
+  allowedTools: string[]
+  disallowedTools: string[]
+  frozenCommandDenies: string[]
+  wrapToolUseContext: (context: ToolUseContext) => ToolUseContext
+}
+
+export async function assertForkedSkillResumeAllowed(input: {
+  agentId: string
+  forkedSkillName?: string
+  cwd?: string
+  getAppState?: () => AppState
+  /** densable `_.frozenCommandDenies` from disk scoping when status==="valid". */
+  frozenCommandDenies?: string[]
+}): Promise<ForkedSkillResumeOverlay | undefined> {
+  // No live or sidecar witness → not a forked-skill agent (skip).
+  // Cold resume must pass sidecar forkedSkillName; omitting it is the skip.
+  if (input.forkedSkillName === undefined) return undefined
+  const skillName = input.forkedSkillName
+  const { getCwd } = await import('./cwd.js')
+  const { getSkillToolCommands } = await import('../commands.js')
+  const cwd = input.cwd ?? getCwd()
+  const listed = await getSkillToolCommands(cwd)
+  const mcpPromptCommands =
+    input
+      .getAppState?.()
+      .mcp.commands.filter(
+        cmd => cmd.type === 'prompt' && cmd.loadedFrom === 'mcp',
+      ) ?? []
+  const skill = [...listed, ...mcpPromptCommands].find(
+    cmd => cmd.name === skillName && cmd.type === 'prompt',
+  ) as (CommandBase & PromptCommand) | undefined
+  // Gold: a?.type!=="prompt"||a.context!=="fork"&&a.getContext===void 0
+  if (skill?.type !== 'prompt' || !isForkCapableSkill(skill)) {
+    throw new ForkedSkillResumeRefusedError(
+      'forked_skill_resume_skill_unresolved',
+      `Agent ${input.agentId} ran as forked skill ${skillName}, which no longer resolves to a fork-capable skill; refusing to resume it without its permission scoping.`,
+    )
+  }
+  // Gold Z7() — skills sync currently off / denied by policy.
+  if (skill.loadedFrom === 'syncedSkills' && !isSyncSkillsEnabled()) {
+    throw new ForkedSkillResumeRefusedError(
+      'forked_skill_resume_sync_vetoed',
+      `Agent ${input.agentId} ran as forked skill ${skillName}, an account-synced skill that is currently disabled (skills sync turned off or denied by policy); refusing to resume it.`,
+    )
+  }
+  let allowedTools: string[]
+  try {
+    // Gold ije — getAllowedTools ?? allowedTools; untrusted source → [].
+    allowedTools = parseToolListFromCLI(
+      await resolveTrustedSkillAllowedTools(skill),
+    )
+  } catch (err) {
+    throw new ForkedSkillResumeRefusedError(
+      'forked_skill_resume_allowed_tools_failed',
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+  const disallowedTools = parseToolListFromCLI(skill.disallowedTools ?? [])
+  // Gold yt=_?.frozenCommandDenies??session.alwaysDenyRules.command??[]
+  const frozenCommandDenies =
+    input.frozenCommandDenies ??
+    input.getAppState?.().toolPermissionContext.alwaysDenyRules.command ??
+    []
+  const layers = [
+    ...(allowedTools.length === 0
+      ? []
+      : [{ kind: 'allowed_tools' as const, allowedTools }]),
+    ...(disallowedTools.length === 0
+      ? []
+      : [{ kind: 'disallowed_tools' as const, disallowedTools }]),
+  ]
+  return {
+    allowedTools,
+    disallowedTools,
+    frozenCommandDenies,
+    wrapToolUseContext(context) {
+      // Gold Jbn(..., {replaceCommandRules:!0, frozenCommandDenies:yt})
+      return {
+        ...context,
+        getAppState: overlayForkedCommandAppState(
+          context.getAppState,
+          allowedTools,
+          disallowedTools,
+          {
+            replaceCommandRules: true,
+            frozenCommandDenies,
+          },
+        ),
+        permissionLayers:
+          layers.length > 0
+            ? [...(context.permissionLayers ?? []), ...layers]
+            : context.permissionLayers,
+      }
+    },
+  }
 }
 
 function truncateDescription(description: string, max = 50): string {
@@ -189,6 +309,25 @@ export async function launchBackgroundForkedSkill({
     command.model ||
     undefined
 
+  // densable Kwo — write scoping + provenance marker next to transcript
+  // before register; write failure → null (forked_skill_scoping_write_failed).
+  try {
+    const { writeForkedSkillScoping } = await import('./forkedSkillScoping.js')
+    await writeForkedSkillScoping(agentId, {
+      skillName: command.name,
+      attributionName: command.name,
+      ...(agentDefinition.effort !== undefined
+        ? { effort: agentDefinition.effort as string | number }
+        : {}),
+    })
+  } catch (err) {
+    logForDebugging(
+      `Failed to write forked-skill scoping sidecar: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: shortDescription,
@@ -266,6 +405,7 @@ export async function launchBackgroundForkedSkill({
           onCacheSafeParams,
           description: shortDescription,
           name: displayName,
+          forkedSkillName: command.name,
         }),
       metadata,
       description: shortDescription,

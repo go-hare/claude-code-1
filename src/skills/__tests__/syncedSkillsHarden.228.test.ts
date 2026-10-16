@@ -92,6 +92,11 @@ describe('densable 2.1.228 #12 xTt / o__ harden body', () => {
     expect(
       shouldHardenSkillBody('syncedSkills', { CLAUDE_CODE_IS_COWORK: '1' }),
     ).toBe(false)
+    expect(
+      shouldHardenSkillBody('syncedSkills', {
+        CLAUDE_CODE_ENTRYPOINT: 'remote_cowork',
+      }),
+    ).toBe(false)
   })
 
   test('mcp always hardened; local skills never', () => {

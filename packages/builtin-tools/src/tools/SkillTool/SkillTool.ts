@@ -42,6 +42,7 @@ import { z } from 'zod/v4'
 import {
   addInvokedSkill,
   clearInvokedSkillsForAgent,
+  getInvokedSkillsForAgent,
   getSessionId,
 } from 'src/bootstrap/state.js'
 import { COMMAND_MESSAGE_TAG } from 'src/constants/xml.js'
@@ -52,6 +53,11 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getAgentContext } from 'src/utils/agentContext.js'
+import {
+  resolveSkillEffort,
+  resolveSkillExecutionContext,
+} from 'src/utils/skills/skillExecutionContext.js'
+import { elideByteIdenticalSkillReinvocation } from 'src/utils/skills/skillReinvocation.js'
 import { errorMessage } from 'src/utils/errors.js'
 import {
   extractResultText,
@@ -74,7 +80,10 @@ import {
   getToolUseIDFromParentMessage,
   tagMessagesWithToolUseID,
 } from '../utils.js'
-import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
+import {
+  isCoordinatorMainThread,
+  isCoordinatorMode,
+} from 'src/coordinator/coordinatorMode.js'
 import { SKILL_TOOL_NAME } from './constants.js'
 import { getPrompt } from './prompt.js'
 
@@ -245,10 +254,11 @@ async function executeForkedSkill(
       ? [...(context.permissionLayers ?? []), ...contextLayers]
       : context.permissionLayers
 
-  // Merge skill's effort into the agent definition so runAgent applies it
+  // Gold `J=e.getEffort?.(s||"",r)??e.getDefaultEffort?.(s||"",r)?.value??e.effort`
+  const resolvedEffort = resolveSkillEffort(command, args || '', context)
   const agentDefinition =
-    command.effort !== undefined
-      ? { ...baseAgent, effort: command.effort }
+    resolvedEffort !== undefined
+      ? { ...baseAgent, effort: resolvedEffort }
       : baseAgent
 
   logForDebugging(
@@ -402,6 +412,10 @@ export const outputSchema = lazySchema(() => {
       .describe('Tools allowed by this skill'),
     model: z.string().optional().describe('Model override if specified'),
     status: z.literal('inline').optional().describe('Execution status'),
+    readOnly: z
+      .boolean()
+      .optional()
+      .describe('Coordinator main-thread read-only skill load'),
   })
 
   // Output schema for forked skills
@@ -775,126 +789,159 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
 
-    const commands = await getAllCommands(context)
-    const command = findCommand(commandName, commands)
+    // densable Skill call: save → set activeSkill → IQ → fork only when !IQ.
+    const previousActiveSkill = context.options.activeSkill
+    context.options.activeSkill = commandName
+    const coordinatorMain = isCoordinatorMainThread(context.agentId)
+    let dispatched = false
+    try {
+      const commands = await getAllCommands(context)
+      const command = findCommand(commandName, commands)
+      if (command) {
+        context.options.activeSkill =
+          command.type === 'prompt' && command.unqualifiedName != null
+            ? command.unqualifiedName
+            : command.name
+      }
 
-    // Track skill usage for ranking
-    recordSkillUsage(commandName)
+      // Track skill usage for ranking (gold skips this on coordinator main)
+      if (!coordinatorMain) {
+        recordSkillUsage(commandName)
+      }
 
-    // Check if skill should run as a forked sub-agent
-    if (command?.type === 'prompt' && command.context === 'fork') {
-      return executeForkedSkill(
-        command,
-        commandName,
-        args,
-        context,
-        canUseTool,
-        parentMessage,
-        onProgress,
+      // densable `k_n(g,n||"",s)==="fork"&&!k`
+      if (
+        command?.type === 'prompt' &&
+        resolveSkillExecutionContext(command, args || '', context) === 'fork' &&
+        !coordinatorMain
+      ) {
+        try {
+          return await executeForkedSkill(
+            command,
+            commandName,
+            args,
+            context,
+            canUseTool,
+            parentMessage,
+            onProgress,
+          )
+        } finally {
+          context.options.activeSkill = previousActiveSkill
+        }
+      }
+
+      // Snapshot prior invoke content before processPromptSlashCommand records.
+      const skillAgentId = getAgentContext()?.agentId ?? null
+      const priorContent = getInvokedSkillsForAgent(skillAgentId).get(
+        `${skillAgentId ?? ''}:${commandName}`,
+      )?.content
+
+      // Process the skill with optional args
+      const { processPromptSlashCommand } = await import(
+        'src/utils/processUserInput/processSlashCommand.js'
       )
-    }
+      const processedCommand = await processPromptSlashCommand(
+        commandName,
+        args || '', // Pass args if provided
+        commands,
+        context,
+        [],
+        coordinatorMain,
+      )
 
-    // Process the skill with optional args
-    const { processPromptSlashCommand } = await import(
-      'src/utils/processUserInput/processSlashCommand.js'
-    )
-    const processedCommand = await processPromptSlashCommand(
-      commandName,
-      args || '', // Pass args if provided
-      commands,
-      context,
-    )
+      if (!processedCommand.shouldQuery) {
+        throw new Error('Command processing failed')
+      }
 
-    if (!processedCommand.shouldQuery) {
-      throw new Error('Command processing failed')
-    }
+      // Extract metadata from the command
+      const allowedTools = coordinatorMain
+        ? []
+        : processedCommand.allowedTools || []
+      const model = coordinatorMain ? undefined : processedCommand.model
+      const effort = coordinatorMain ? undefined : processedCommand.effort
 
-    // Extract metadata from the command
-    const allowedTools = processedCommand.allowedTools || []
-    const model = processedCommand.model
-    const effort = command?.type === 'prompt' ? command.effort : undefined
+      const isBuiltIn = builtInCommandNames().has(commandName)
+      const isBundled =
+        command?.type === 'prompt' && command.source === 'bundled'
+      const isOfficialSkill =
+        command?.type === 'prompt' && isOfficialMarketplaceSkill(command)
+      const sanitizedCommandName =
+        isBuiltIn || isBundled || isOfficialSkill ? commandName : 'custom'
 
-    const isBuiltIn = builtInCommandNames().has(commandName)
-    const isBundled = command?.type === 'prompt' && command.source === 'bundled'
-    const isOfficialSkill =
-      command?.type === 'prompt' && isOfficialMarketplaceSkill(command)
-    const sanitizedCommandName =
-      isBuiltIn || isBundled || isOfficialSkill ? commandName : 'custom'
-
-    const wasDiscoveredField =
-      feature('EXPERIMENTAL_SKILL_SEARCH') &&
-      remoteSkillModules!.isSkillSearchEnabled()
-        ? {
-            was_discovered:
-              context.discoveredSkillNames?.has(commandName) ?? false,
-          }
-        : {}
-    const pluginMarketplace =
-      command?.type === 'prompt' && command.pluginInfo
-        ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
-        : undefined
-    const queryDepth = context.queryTracking?.depth ?? 0
-    const parentAgentId = getAgentContext()?.agentId
-    logEvent('tengu_skill_tool_invocation', {
-      command_name:
-        sanitizedCommandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      // _PROTO_skill_name routes to the privileged skill_name BQ column
-      // (unredacted, all users); command_name stays in additional_metadata as
-      // the redacted variant for general-access dashboards.
-      _PROTO_skill_name:
-        commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-      execution_context:
-        'inline' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      invocation_trigger: (queryDepth > 0
-        ? 'nested-skill'
-        : 'claude-proactive') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      query_depth: queryDepth,
-      ...(parentAgentId && {
-        parent_agent_id:
-          parentAgentId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }),
-      ...wasDiscoveredField,
-      skill_name:
-        commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...(command?.type === 'prompt' && {
-        skill_source:
-          command.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }),
-      ...(command?.loadedFrom && {
-        skill_loaded_from:
-          command.loadedFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }),
-      ...(command?.kind && {
-        skill_kind:
-          command.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }),
-      ...(command?.type === 'prompt' &&
-        command.pluginInfo && {
-          _PROTO_plugin_name: command.pluginInfo.pluginManifest
-            .name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-          ...(pluginMarketplace && {
-            _PROTO_marketplace_name:
-              pluginMarketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
-          }),
-          plugin_name: (isOfficialSkill
-            ? command.pluginInfo.pluginManifest.name
-            : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          plugin_repository: (isOfficialSkill
-            ? command.pluginInfo.repository
-            : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          ...buildPluginCommandTelemetryFields(command.pluginInfo),
+      const wasDiscoveredField =
+        feature('EXPERIMENTAL_SKILL_SEARCH') &&
+        remoteSkillModules!.isSkillSearchEnabled()
+          ? {
+              was_discovered:
+                context.discoveredSkillNames?.has(commandName) ?? false,
+            }
+          : {}
+      const pluginMarketplace =
+        command?.type === 'prompt' && command.pluginInfo
+          ? parsePluginIdentifier(command.pluginInfo.repository).marketplace
+          : undefined
+      const queryDepth = context.queryTracking?.depth ?? 0
+      const parentAgentId = getAgentContext()?.agentId
+      logEvent('tengu_skill_tool_invocation', {
+        command_name:
+          sanitizedCommandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        // _PROTO_skill_name routes to the privileged skill_name BQ column
+        // (unredacted, all users); command_name stays in additional_metadata as
+        // the redacted variant for general-access dashboards.
+        _PROTO_skill_name:
+          commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+        execution_context: (coordinatorMain
+          ? 'read-only'
+          : 'inline') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        invocation_trigger: (queryDepth > 0
+          ? 'nested-skill'
+          : 'claude-proactive') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        query_depth: queryDepth,
+        ...(parentAgentId && {
+          parent_agent_id:
+            parentAgentId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         }),
-    })
+        ...wasDiscoveredField,
+        skill_name:
+          commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        ...(command?.type === 'prompt' && {
+          skill_source:
+            command.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(command?.loadedFrom && {
+          skill_loaded_from:
+            command.loadedFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(command?.kind && {
+          skill_kind:
+            command.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(command?.type === 'prompt' &&
+          command.pluginInfo && {
+            _PROTO_plugin_name: command.pluginInfo.pluginManifest
+              .name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+            ...(pluginMarketplace && {
+              _PROTO_marketplace_name:
+                pluginMarketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+            }),
+            plugin_name: (isOfficialSkill
+              ? command.pluginInfo.pluginManifest.name
+              : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            plugin_repository: (isOfficialSkill
+              ? command.pluginInfo.repository
+              : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...buildPluginCommandTelemetryFields(command.pluginInfo),
+          }),
+      })
 
-    // Get the tool use ID from the parent message for linking newMessages
-    const toolUseID = getToolUseIDFromParentMessage(
-      parentMessage,
-      SKILL_TOOL_NAME,
-    )
+      // Get the tool use ID from the parent message for linking newMessages
+      const toolUseID = getToolUseIDFromParentMessage(
+        parentMessage,
+        SKILL_TOOL_NAME,
+      )
 
-    // Tag user messages with sourceToolUseID so they stay transient until this tool resolves
-    const newMessages = tagMessagesWithToolUseID(
-      processedCommand.messages.filter(
+      // Tag user messages with sourceToolUseID so they stay transient until this tool resolves
+      const filteredMessages = processedCommand.messages.filter(
         (m): m is UserMessage | AttachmentMessage | SystemMessage => {
           if (m.type === 'progress') {
             return false
@@ -911,93 +958,112 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
           }
           return true
         },
-      ),
-      toolUseID,
-    )
+      )
+      const renderedContent = getInvokedSkillsForAgent(skillAgentId).get(
+        `${skillAgentId ?? ''}:${commandName}`,
+      )?.content
+      const newMessages = tagMessagesWithToolUseID(
+        elideByteIdenticalSkillReinvocation({
+          messages: filteredMessages,
+          contextMessages: context.messages,
+          commandName,
+          args,
+          priorContent,
+          renderedContent,
+        }),
+        toolUseID,
+      )
 
-    logForDebugging(
-      `SkillTool returning ${newMessages.length} newMessages for skill ${commandName}`,
-    )
+      logForDebugging(
+        `SkillTool returning ${newMessages.length} newMessages for skill ${commandName}`,
+      )
 
-    // Note: addInvokedSkill and registerSkillHooks are called inside
-    // processPromptSlashCommand (via getMessagesForPromptSlashCommand), so
-    // calling them again here would double-register hooks and rebuild
-    // skillContent redundantly.
+      // Note: addInvokedSkill and registerSkillHooks are called inside
+      // processPromptSlashCommand (via getMessagesForPromptSlashCommand), so
+      // calling them again here would double-register hooks and rebuild
+      // skillContent redundantly.
 
-    // Return success with newMessages and contextModifier
-    return {
-      data: {
-        success: true,
-        commandName,
-        allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
-        model,
-      },
-      newMessages,
-      contextModifier(ctx) {
-        let modifiedContext = ctx
+      // Return success with newMessages and contextModifier
+      dispatched = true
+      return {
+        data: {
+          success: true,
+          commandName,
+          allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
+          model,
+          ...(coordinatorMain && { readOnly: true }),
+        },
+        newMessages,
+        contextModifier(ctx) {
+          let modifiedContext = ctx
 
-        // Update allowed tools if specified
-        if (allowedTools.length > 0) {
-          // Capture the current getAppState to chain modifications properly
-          const previousGetAppState = modifiedContext.getAppState
-          modifiedContext = {
-            ...modifiedContext,
-            getAppState() {
-              // Use the previous getAppState, not the closure's context.getAppState,
-              // to properly chain context modifications
-              const appState = previousGetAppState()
-              return {
-                ...appState,
-                toolPermissionContext: {
-                  ...appState.toolPermissionContext,
-                  alwaysAllowRules: {
-                    ...appState.toolPermissionContext.alwaysAllowRules,
-                    command: [
-                      ...new Set([
-                        ...(appState.toolPermissionContext.alwaysAllowRules
-                          .command || []),
-                        ...allowedTools,
-                      ]),
-                    ],
+          // Update allowed tools if specified
+          if (allowedTools.length > 0) {
+            // Capture the current getAppState to chain modifications properly
+            const previousGetAppState = modifiedContext.getAppState
+            modifiedContext = {
+              ...modifiedContext,
+              getAppState() {
+                // Use the previous getAppState, not the closure's context.getAppState,
+                // to properly chain context modifications
+                const appState = previousGetAppState()
+                return {
+                  ...appState,
+                  toolPermissionContext: {
+                    ...appState.toolPermissionContext,
+                    alwaysAllowRules: {
+                      ...appState.toolPermissionContext.alwaysAllowRules,
+                      command: [
+                        ...new Set([
+                          ...(appState.toolPermissionContext.alwaysAllowRules
+                            .command || []),
+                          ...allowedTools,
+                        ]),
+                      ],
+                    },
                   },
-                },
-              }
-            },
+                }
+              },
+            }
           }
-        }
 
-        // Carry [1m] suffix over — otherwise a skill with `model: opus` on an
-        // opus[1m] session drops the effective window to 200K and trips autocompact.
-        if (model) {
-          modifiedContext = {
-            ...modifiedContext,
-            options: {
-              ...modifiedContext.options,
-              mainLoopModel: resolveSkillModelOverride(
-                model,
-                ctx.options.mainLoopModel,
-              ),
-            },
+          // Carry [1m] suffix over — otherwise a skill with `model: opus` on an
+          // opus[1m] session drops the effective window to 200K and trips autocompact.
+          if (model) {
+            modifiedContext = {
+              ...modifiedContext,
+              options: {
+                ...modifiedContext.options,
+                mainLoopModel: resolveSkillModelOverride(
+                  model,
+                  ctx.options.mainLoopModel,
+                ),
+              },
+            }
           }
-        }
 
-        // Override effort level if skill specifies one
-        if (effort !== undefined) {
-          const previousGetAppState = modifiedContext.getAppState
-          modifiedContext = {
-            ...modifiedContext,
-            getAppState() {
-              const appState = previousGetAppState()
-              return {
-                ...appState,
-                effortValue: effort,
-              }
-            },
+          // Override effort level if skill specifies one
+          if (effort !== undefined) {
+            const previousGetAppState = modifiedContext.getAppState
+            modifiedContext = {
+              ...modifiedContext,
+              getAppState() {
+                const appState = previousGetAppState()
+                return {
+                  ...appState,
+                  effortValue: effort,
+                }
+              },
+            }
           }
-        }
 
-        return modifiedContext
-      },
+          return modifiedContext
+        },
+      }
+    } finally {
+      if (coordinatorMain || !dispatched) {
+        context.options.activeSkill = previousActiveSkill
+      }
     }
   },
 

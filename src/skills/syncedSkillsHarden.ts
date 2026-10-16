@@ -112,7 +112,8 @@ export function isSyncedSkillRemoteHostEnv(
 ): boolean {
   return (
     isEnvTruthy(env.CLAUDE_CODE_REMOTE) ||
-    isEnvTruthy(env.CLAUDE_CODE_IS_COWORK)
+    isEnvTruthy(env.CLAUDE_CODE_IS_COWORK) ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork'
   )
 }
 
@@ -133,6 +134,7 @@ export function isUntrustedRemoteSkillSource(
     case 'syncedSkills':
     case 'mcp':
     case 'memoryStore':
+    case 'attachedFolder':
       return true
     default:
       return false
