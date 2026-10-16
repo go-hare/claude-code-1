@@ -149,6 +149,7 @@ import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
+  getMainThreadAgentType,
   getSessionId,
 } from './bootstrap/state.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
@@ -780,9 +781,11 @@ async function* queryLoop(
   | ToolBridgeEvent,
   Terminal
 > {
-  // Immutable params — never reassigned during the query loop.
+  // Immutable params — never reassigned during the query loop except
+  // systemPrompt, which densable 2.1.289 rebuilds from the new tool names
+  // after refreshTools when the pool changes.
+  let { systemPrompt } = params
   const {
-    systemPrompt,
     userContext,
     systemContext,
     canUseTool,
@@ -3746,15 +3749,136 @@ async function* queryLoop(
     })
 
     // Refresh tools between turns so newly-connected MCP servers become available
+    const toolsBeforeRefresh = updatedToolUseContext.options.tools
     if (updatedToolUseContext.options.refreshTools) {
       const refreshedTools = updatedToolUseContext.options.refreshTools()
       if (refreshedTools !== updatedToolUseContext.options.tools) {
+        const oldMcpCount = count(
+          updatedToolUseContext.options.tools,
+          tool => !!tool.mcpInfo,
+        )
+        const newMcpCount = count(refreshedTools, tool => !!tool.mcpInfo)
+        if (oldMcpCount !== newMcpCount) {
+          logEvent('tengu_mcp_tools_refreshed_mid_turn', {
+            oldMcpCount,
+            newMcpCount,
+            recovered: oldMcpCount === 0 && newMcpCount > 0,
+          })
+        }
         updatedToolUseContext = {
           ...updatedToolUseContext,
           options: {
             ...updatedToolUseContext.options,
             tools: refreshedTools,
           },
+        }
+      }
+    }
+    // densable 2.1.289 refreshMcpClients after refreshTools (gold query
+    // after PostToolBatch / tengu_query_before_attachments).
+    if (updatedToolUseContext.options.refreshMcpClients) {
+      const refreshedClients = updatedToolUseContext.options.refreshMcpClients()
+      updatedToolUseContext = {
+        ...updatedToolUseContext,
+        options: {
+          ...updatedToolUseContext.options,
+          mcpClients: refreshedClients,
+        },
+      }
+    }
+    // densable 2.1.289 analog: tool names changed → rebuild system prompt.
+    // Gold query loop does not rebuild; fork keeps the entry snapshot.
+    const toolsAfterRefresh = updatedToolUseContext.options.tools
+    const toolNamesChanged =
+      toolsAfterRefresh !== toolsBeforeRefresh &&
+      toolsAfterRefresh.map(tool => tool.name).join('\0') !==
+        toolsBeforeRefresh.map(tool => tool.name).join('\0')
+    if (toolNamesChanged) {
+      const isForkChild =
+        querySource === 'agent:builtin:fork' ||
+        updatedToolUseContext.agentType === 'fork' ||
+        updatedToolUseContext.options.querySource === 'agent:builtin:fork'
+      if (!isForkChild) {
+        const additionalWorkingDirectories = Array.from(
+          updatedToolUseContext
+            .getAppState()
+            .toolPermissionContext.additionalWorkingDirectories.keys(),
+        )
+        if (updatedToolUseContext.agentId) {
+          const { DEFAULT_AGENT_PROMPT, enhanceSystemPromptWithEnvDetails } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./constants/prompts.js') as typeof import('./constants/prompts.js')
+          const { mergeAppendSubagentSystemPrompt } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./utils/appendSubagentPrompt.js') as typeof import('./utils/appendSubagentPrompt.js')
+          const { asSystemPrompt } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./utils/systemPromptType.js') as typeof import('./utils/systemPromptType.js')
+          const agentType = updatedToolUseContext.agentType
+          const agentDefinition = agentType
+            ? updatedToolUseContext.options.agentDefinitions.activeAgents.find(
+                agent => agent.agentType === agentType,
+              )
+            : undefined
+          const enabledToolNames = new Set(
+            toolsAfterRefresh.map(tool => tool.name),
+          )
+          let basePrompt: string[]
+          try {
+            basePrompt = agentDefinition
+              ? [
+                  agentDefinition.getSystemPrompt({
+                    toolUseContext: updatedToolUseContext,
+                  }),
+                ]
+              : [DEFAULT_AGENT_PROMPT]
+          } catch {
+            basePrompt = [DEFAULT_AGENT_PROMPT]
+          }
+          systemPrompt = asSystemPrompt(
+            mergeAppendSubagentSystemPrompt({
+              basePrompt: await enhanceSystemPromptWithEnvDetails(
+                basePrompt,
+                updatedToolUseContext.options.mainLoopModel,
+                additionalWorkingDirectories,
+                enabledToolNames,
+              ),
+              appendSubagentSystemPrompt:
+                updatedToolUseContext.options.appendSubagentSystemPrompt,
+              useExactTools:
+                updatedToolUseContext.options.querySource?.startsWith(
+                  'agent:observer:',
+                ) === true,
+            }),
+          )
+        } else {
+          const { getSystemPrompt } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./constants/prompts.js') as typeof import('./constants/prompts.js')
+          const { buildEffectiveSystemPrompt } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./utils/systemPrompt.js') as typeof import('./utils/systemPrompt.js')
+          const defaultSystemPrompt = await getSystemPrompt(
+            toolsAfterRefresh,
+            updatedToolUseContext.options.mainLoopModel,
+            additionalWorkingDirectories,
+            updatedToolUseContext.options.mcpClients,
+          )
+          const agentType = getMainThreadAgentType()
+          const mainThreadAgentDefinition = agentType
+            ? updatedToolUseContext.options.agentDefinitions.activeAgents.find(
+                agent => agent.agentType === agentType,
+              )
+            : undefined
+          systemPrompt = buildEffectiveSystemPrompt({
+            mainThreadAgentDefinition,
+            toolUseContext: updatedToolUseContext,
+            customSystemPrompt:
+              updatedToolUseContext.options.customSystemPrompt,
+            defaultSystemPrompt,
+            appendSystemPrompt:
+              updatedToolUseContext.options.appendSystemPrompt,
+          })
         }
       }
     }
