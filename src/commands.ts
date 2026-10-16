@@ -3,7 +3,7 @@ import addDir from './commands/add-dir/index.js'
 import autofixPr from './commands/autofix-pr/index.js'
 import backfillSessions from './commands/backfill-sessions/index.js'
 import btw from './commands/btw/index.js'
-import goal from './commands/goal.js'
+import goal, { goalNonInteractive } from './commands/goal/index.js'
 import {
   autoModeSetup,
   autoModeSetupNonInteractive,
@@ -20,7 +20,7 @@ import copy from './commands/copy/index.js'
 import desktop from './commands/desktop/index.js'
 import commitPushPr from './commands/commit-push-pr.js'
 import compact from './commands/compact/index.js'
-import config from './commands/config/index.js'
+import config, { configNonInteractive } from './commands/config/index.js'
 import { context, contextNonInteractive } from './commands/context/index.js'
 // cost/index.ts re-exports usage — /cost is now an alias of /usage
 import diff from './commands/diff/index.js'
@@ -36,6 +36,9 @@ import keybindings from './commands/keybindings/index.js'
 import lang from './commands/lang/index.js'
 import login from './commands/login/index.js'
 import logout from './commands/logout/index.js'
+import designConsent from './commands/design-consent/index.js'
+import designRevoke from './commands/design-revoke/index.js'
+import designLogin from './commands/design-login/index.js'
 import installGitHubApp from './commands/install-github-app/index.js'
 import installSlackApp from './commands/install-slack-app/index.js'
 import breakCache, {
@@ -229,11 +232,6 @@ const poor = feature('POOR')
       require('./commands/poor/index.js') as typeof import('./commands/poor/index.js')
     ).default
   : null
-const goalCmd = feature('GOAL')
-  ? (
-      require('./commands/goal/index.js') as typeof import('./commands/goal/index.js')
-    ).default
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import thinkback from './commands/thinkback/index.js'
 import thinkbackPlay from './commands/thinkback-play/index.js'
@@ -403,6 +401,7 @@ const COMMANDS = memoize((): Command[] => [
   color,
   compact,
   config,
+  configNonInteractive,
   copy,
   desktop,
   context,
@@ -413,6 +412,7 @@ const COMMANDS = memoize((): Command[] => [
   fast,
   files,
   goal,
+  goalNonInteractive,
   autoModeSetup,
   autoModeSetupNonInteractive,
   heapDump,
@@ -477,7 +477,6 @@ const COMMANDS = memoize((): Command[] => [
     : [sessionForkCmd, ...(subtaskCmdModule ? [subtaskCmdModule] : [])]),
   ...(buddy ? [buddy] : []),
   ...(poor ? [poor] : []),
-  ...(goalCmd ? [goalCmd] : []),
   ...(proactive ? [proactive] : []),
   ...(monitorCmd ? [monitorCmd] : []),
   ...(coordinatorCmd ? [coordinatorCmd] : []),
@@ -501,6 +500,9 @@ const COMMANDS = memoize((): Command[] => [
   exportCommand,
   sandboxToggle,
   ...(!isUsing3PServices() ? [logout, login()] : []),
+  designConsent,
+  designRevoke,
+  designLogin,
   passes,
   ...(peersCmd ? [peersCmd] : []),
   ...(attachCmd ? [attachCmd] : []),
@@ -748,6 +750,16 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
 })
 
 /**
+ * densable Ade — drop local-jsx in headless so findCommand hits the local twin
+ * (`goalNonInteractive`, `contextNonInteractive`, `configNonInteractive`, …). Gold `kDe`.
+ */
+function finalizeCommandList(commands: Command[]): Command[] {
+  return getIsNonInteractiveSession()
+    ? filterCommandsForHeadless(commands)
+    : commands
+}
+
+/**
  * Returns commands available to the current user. The expensive loading is
  * memoized, but availability and isEnabled checks run fresh every call so
  * auth changes (e.g. /login) take effect immediately.
@@ -770,7 +782,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
 
   if (dynamicSkills.length === 0) {
-    return applySyncedSkillShadowFilter(baseCommands)
+    return finalizeCommandList(applySyncedSkillShadowFilter(baseCommands))
   }
 
   // Dedupe dynamic skills - only add if not already present
@@ -785,8 +797,8 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   if (uniqueDynamicSkills.length === 0) {
     // Re-run Hxb so session interactivity changes after load still yield
     // help/feedback claims for plugin aliases (loadAllCommands is memoized).
-    return applySyncedSkillShadowFilter(
-      stripCollidingPluginAliases(baseCommands),
+    return finalizeCommandList(
+      applySyncedSkillShadowFilter(stripCollidingPluginAliases(baseCommands)),
     )
   }
 
@@ -795,17 +807,21 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const insertIndex = baseCommands.findIndex(c => builtInNames.has(c.name))
 
   if (insertIndex === -1) {
-    return applySyncedSkillShadowFilter(
-      stripCollidingPluginAliases([...baseCommands, ...uniqueDynamicSkills]),
+    return finalizeCommandList(
+      applySyncedSkillShadowFilter(
+        stripCollidingPluginAliases([...baseCommands, ...uniqueDynamicSkills]),
+      ),
     )
   }
 
-  return applySyncedSkillShadowFilter(
-    stripCollidingPluginAliases([
-      ...baseCommands.slice(0, insertIndex),
-      ...uniqueDynamicSkills,
-      ...baseCommands.slice(insertIndex),
-    ]),
+  return finalizeCommandList(
+    applySyncedSkillShadowFilter(
+      stripCollidingPluginAliases([
+        ...baseCommands.slice(0, insertIndex),
+        ...uniqueDynamicSkills,
+        ...baseCommands.slice(insertIndex),
+      ]),
+    ),
   )
 }
 

@@ -443,6 +443,32 @@ export async function* getTimestampedHistory(): AsyncGenerator<TimestampedHistor
 }
 
 /**
+ * densable `_Fo` / `countForProject` — project-window History N/M total.
+ * Walks log entries (not session-reordered getHistory). Optional display
+ * predicate (mode filter). Caps at MAX_HISTORY_ITEMS of project hits.
+ * Catch → null (Gie shows bare "History").
+ */
+export async function countHistoryForProject(
+  predicate?: (display: string) => boolean,
+): Promise<number | null> {
+  const currentProject = getProjectRoot()
+  let scanned = 0
+  let matched = 0
+  try {
+    for await (const entry of makeLogEntryReader()) {
+      if (!entry || typeof entry.project !== 'string') continue
+      if (entry.project !== currentProject) continue
+      scanned++
+      if (!predicate || predicate(entry.display)) matched++
+      if (scanned >= MAX_HISTORY_ITEMS) break
+    }
+  } catch {
+    return null
+  }
+  return matched
+}
+
+/**
  * Get history entries for the current project, with current session's entries first.
  *
  * Entries from the current session are yielded before entries from other sessions,

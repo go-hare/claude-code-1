@@ -430,7 +430,12 @@ import { createRemoteSessionConfig } from './remote/RemoteSessionManager.js';
 import { createDirectConnectSession, DirectConnectError } from './server/createDirectConnectSession.js';
 import { initializeLspServerManager } from './services/lsp/manager.js';
 import { shouldEnablePromptSuggestion } from './services/PromptSuggestion/promptSuggestion.js';
-import { type AppState, getDefaultAppState, IDLE_SPECULATION_STATE } from './state/AppStateStore.js';
+import {
+  type AppState,
+  createEmptyLiveReplicas,
+  getDefaultAppState,
+  IDLE_SPECULATION_STATE,
+} from './state/AppStateStore.js';
 import { onChangeAppState } from './state/onChangeAppState.js';
 import { createStore } from './state/store.js';
 import { asSessionId } from './types/ids.js';
@@ -1213,6 +1218,15 @@ export async function main() {
 
   // Initialize entrypoint based on mode - needs to be set before any event is logged
   initializeEntrypoint(isNonInteractive);
+
+  // densable $n: consume credential descriptors before client type so a
+  // websocket FD still counts as a remote client after the read.
+  {
+    const { consumeStartupCredentialDescriptors } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/authFileDescriptor.js') as typeof import('./utils/authFileDescriptor.js');
+    consumeStartupCredentialDescriptors();
+  }
 
   // Determine client type
   const clientType = (() => {
@@ -4693,6 +4707,7 @@ async function run(): Promise<CommanderCommand> {
         // densable 2.1.214 endedByModel — EndConversation session lock
         endedByModel: false,
         fastMode: getInitialFastModeSetting(resolvedInitialModel),
+        liveReplicas: createEmptyLiveReplicas(),
         ...(isAdvisorEnabled() && advisorModel && { advisorModel }),
         // densable MQA: implicit session team when swarms are on.
         // KAIROS assistantTeamContext wins (same team, keeps isLeader).
@@ -5639,6 +5654,31 @@ async function run(): Promise<CommanderCommand> {
           });
         }
       } else {
+        // densable 2.1.289: defaultToAgentsView → mount Fleet (entryChannel default_home)
+        // instead of REPL when fleet is enabled and not disableAgentView-gated.
+        if (feature('BG_SESSIONS')) {
+          const { getGlobalConfig } = await import('./utils/config.js');
+          const { getAgentViewDisabledReason, isBareLaunchArgv } = await import('./utils/residualUiEnvGates.js');
+          const { getInitialSettings } = await import('./utils/settings/settings.js');
+          const bareTtyLaunch =
+            isBareLaunchArgv(process.argv.slice(2)) && process.stdin.isTTY === true && process.stdout.isTTY === true;
+          const wantAgentsHome = bareTtyLaunch && getGlobalConfig().defaultToAgentsView === true;
+          const settingsDisableAgentView = getInitialSettings()?.disableAgentView === true;
+          const disabledReason = getAgentViewDisabledReason(process.env, settingsDisableAgentView);
+          if (wantAgentsHome && !disabledReason) {
+            try {
+              root.unmount();
+            } catch {
+              // ignore unmount races before agents mount
+            }
+            const { agentsMain } = await import('./cli/agents.js');
+            await agentsMain([]);
+            // process.exit — FleetView/Ink can leave event-loop handles (same as cli agents).
+            // eslint-disable-next-line custom-rules/no-process-exit
+            process.exit(0);
+          }
+        }
+
         // Pass unresolved hooks promise to REPL so it can render immediately
         // instead of blocking ~500ms waiting for SessionStart hooks to finish.
         // REPL will inject hook messages when they resolve and await them before
@@ -5743,12 +5783,18 @@ async function run(): Promise<CommanderCommand> {
           clearBridgeSessionMetaAfterQpeHandoff(replResult.alreadyOpened);
           const { renderAgentView } = await import('./screens/AgentView.js');
           const { formatLeftArrowResumeHint } = await import('./screens/fleetView/helpers.js');
+          // densable Rdt(M) — demote session permission mode into inherited bag for Fleet.
+          const { demoteInheritedPermissionMode } = await import('./screens/fleetView/fleetDispatchDefaults.js');
+          const leftArrowDispatchDefaults = demoteInheritedPermissionMode(permissionMode);
           let fleetResult: { resumeHintRequested?: boolean; forkSessionId?: string } = {};
           if (!handoff.ok) {
             process.stderr.write(`${handoff.error}\n`);
             // Still open fleet view without origin (matches empty-open fallback).
             // Daemon may not have been ensured (spawn fail path) — let AgentView ensure.
-            fleetResult = await renderAgentView({ enteredViaLeftArrow: true });
+            fleetResult = await renderAgentView({
+              enteredViaLeftArrow: true,
+              dispatchDefaults: leftArrowDispatchDefaults,
+            });
           } else {
             // Official CLAUDE_AGENTS_SELECT / initialJobId = short; isOrigin uses it.
             process.env.CLAUDE_AGENTS_SELECT = handoff.short;
@@ -5759,6 +5805,7 @@ async function run(): Promise<CommanderCommand> {
               currentSessionId: handoff.sessionId,
               restoreSessionId: handoff.short,
               daemonAlreadyEnsured: true,
+              dispatchDefaults: leftArrowDispatchDefaults,
             });
           }
           // densable: originSpawn.resumeHintRequested + transcriptMaterialized → stderr resume line

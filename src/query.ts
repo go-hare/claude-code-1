@@ -43,7 +43,11 @@ import type {
   TombstoneMessage,
 } from './types/message.js'
 import { logError } from './utils/log.js'
-import { isAbortError } from './utils/errors.js'
+import {
+  ControlStreamClosedError,
+  errorMessage,
+  isAbortError,
+} from './utils/errors.js'
 import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   isPromptTooLongMessage,
@@ -120,7 +124,11 @@ import { ESCALATED_MAX_TOKENS } from './utils/context.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './services/analytics/growthbook.js'
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js'
 import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.js'
-import { executeStopFailureHooks } from './utils/hooks.js'
+import {
+  executePostToolBatchHooks,
+  executeStopFailureHooks,
+  hasHookForEvent,
+} from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
 import type { PromptCacheTtl } from './utils/promptCacheTtl.js'
 import type { QueuedCommand } from './types/textInputTypes.js'
@@ -177,6 +185,34 @@ const taskSummaryModule = feature('BG_SESSIONS')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
+/** densable Acn / ip — tool_calls payload from the resolved batch. */
+function collectPostToolBatchCalls(
+  toolUseBlocks: ToolUseBlock[],
+  toolResults: Array<UserMessage | AttachmentMessage>,
+): Array<{
+  tool_name: string
+  tool_input: unknown
+  tool_use_id: string
+  tool_response?: unknown
+}> {
+  const responses = new Map<string, unknown>()
+  for (const result of toolResults) {
+    if (result.type === 'user' && Array.isArray(result.message.content)) {
+      for (const block of result.message.content) {
+        if (block.type === 'tool_result') {
+          responses.set(block.tool_use_id, block.content)
+        }
+      }
+    }
+  }
+  return toolUseBlocks.map(block => ({
+    tool_name: block.name,
+    tool_input: block.input,
+    tool_use_id: block.id,
+    tool_response: responses.get(block.id),
+  }))
+}
+
 function* yieldMissingToolResultBlocks(
   assistantMessages: AssistantMessage[],
   errorMessage: string,
@@ -223,6 +259,28 @@ function* yieldMissingToolResultBlocks(
  * rules, ye will be punished with an entire day of debugging and hair pulling.
  */
 const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
+
+/**
+ * densable fl(e, o) — emit spinner recovering bag when the loop continues
+ * for max_output_tokens_recovery. Gold skips when o (agentId) is set.
+ */
+function announceOutputLimitRecovery(
+  transition: Continue | undefined,
+  toolUseContext: ToolUseContext,
+): void {
+  try {
+    if (toolUseContext.agentId !== undefined) return
+    if (transition?.reason !== 'max_output_tokens_recovery') return
+    // densable u(r,o): setMode("requesting", recovery) atomically.
+    toolUseContext.setStreamMode?.('requesting')
+    toolUseContext.setOutputLimitRecovery?.({
+      attempt: transition.attempt,
+      limit: MAX_OUTPUT_TOKENS_RECOVERY_LIMIT,
+    })
+  } catch (err) {
+    logError(err)
+  }
+}
 
 /** densable `Blt` — inserted meta user text on the first malformed tool_use. */
 export const MALFORMED_TOOL_USE_RETRY_PROMPT =
@@ -437,6 +495,17 @@ export type QueryParams = {
   // budget for the whole agentic turn; `remaining` is computed per iteration
   // from cumulative API usage. See configureTaskBudgetParams in claude.ts.
   taskBudget?: { total: number }
+  /**
+   * densable Aa `requiresHandback` — SubagentHandback arm. Semantic field on
+   * query params (gold BODY in Aa); not a public minify-shaped API.
+   */
+  requiresHandback?: boolean
+  /**
+   * densable qC → Gut `thinkingStripPlan` / `advisorStripPlan`. Compact
+   * qjt threads these into runQuery; Lv peels attachments at normalize.
+   */
+  thinkingStripPlan?: import('./utils/thinking.js').ThinkingStripPlan
+  advisorStripPlan?: import('./utils/messages.js').AdvisorStripPlan
   deps?: QueryDeps
 }
 
@@ -462,6 +531,109 @@ type State = {
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
   transition: Continue | undefined
+}
+
+/**
+ * densable Aa p7e / bounce — if the subagent is armed for SubagentHandback
+ * and has not delivered, inject a meta bounce (capped at yGo=3) instead of
+ * ending the turn. Never export minify `p7e`/`yGo`.
+ */
+function* enforceHandbackSend(
+  toolUseContext: ToolUseContext,
+): Generator<UserMessage, UserMessage | undefined> {
+  const agentId = toolUseContext.agentId
+  if (agentId === undefined) return undefined
+  try {
+    const {
+      formatHandbackSendEnforceMessage,
+      HANDBACK_SEND_ENFORCE_MAX,
+      lookupHandbackReport,
+    } =
+      require('./utils/subagentHandback.js') as typeof import('./utils/subagentHandback.js')
+    const { hasHandbackWaitKids, sweepStaleKeepaliveReasons, updateTaskState } =
+      require('./utils/task/framework.js') as typeof import('./utils/task/framework.js')
+    const { isLocalAgentTask } =
+      require('./tasks/LocalAgentTask/LocalAgentTask.js') as typeof import('./tasks/LocalAgentTask/LocalAgentTask.js')
+    const getAppState = toolUseContext.getAppState
+    const setAppState =
+      toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
+    const task = getAppState().tasks[agentId]
+    const delivered = lookupHandbackReport(
+      isLocalAgentTask(task) ? task : undefined,
+      agentId,
+    )
+    const bounces =
+      isLocalAgentTask(task) && typeof task.handbackBounces === 'number'
+        ? task.handbackBounces
+        : 0
+    // densable Yq — sweep stale keepalive holds before d9e wait-kids.
+    sweepStaleKeepaliveReasons(agentId, setAppState)
+    const waitingOnChildren = hasHandbackWaitKids(agentId, getAppState)
+    if (
+      delivered !== undefined &&
+      delivered.length === 0 &&
+      !waitingOnChildren &&
+      bounces < HANDBACK_SEND_ENFORCE_MAX
+    ) {
+      updateTaskState(agentId, setAppState, t => {
+        if (!isLocalAgentTask(t)) return t
+        return { ...t, handbackBounces: bounces + 1 }
+      })
+      const bounce = createUserMessage({
+        content: formatHandbackSendEnforceMessage(),
+        isMeta: true,
+      })
+      yield bounce
+      return bounce
+    }
+  } catch (err) {
+    logForDebugging(
+      `Subagent hand-back enforcement failed: ${errorMessage(err)}`,
+      {
+        level: 'error',
+      },
+    )
+  }
+  return undefined
+}
+
+/**
+ * densable Aa turn-end p7e — bounce on completed / max_turns /
+ * toolRequestedEndTurn, not only the zero-tool_use completed exit.
+ */
+function* maybeHandbackBounce(
+  params: QueryParams,
+  querySource: QuerySource,
+  toolUseContext: ToolUseContext,
+): Generator<UserMessage, UserMessage | undefined> {
+  if (!params.requiresHandback || toolUseContext.agentId === undefined) {
+    return undefined
+  }
+  const { getQuerySourceFamily: querySourceFamily } =
+    require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+  if (querySourceFamily(querySource) === 'auxiliary') return undefined
+  return yield* enforceHandbackSend(toolUseContext)
+}
+
+/**
+ * densable Aa after bounce: Z3n && CDo leftover → skill_inline_command_handoff.
+ */
+function maybeSkillInlineCommandHandoffNotRun(
+  messages: Message[],
+  thisTurnAssistants: Message[],
+  querySource: QuerySource,
+  agentId: string | undefined,
+): void {
+  const { getQuerySourceFamily: querySourceFamily } =
+    require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+  if (querySourceFamily(querySource) === 'auxiliary') return
+  const { maybeLogSkillInlineCommandHandoffNotRun } =
+    require('./utils/skills/skillInlineCommandHandoff.js') as typeof import('./utils/skills/skillInlineCommandHandoff.js')
+  maybeLogSkillInlineCommandHandoffNotRun(
+    messages,
+    thisTurnAssistants,
+    agentId ?? null,
+  )
 }
 
 export async function* query(
@@ -795,6 +967,8 @@ async function* queryLoop(
     skipCacheWrite,
     agentCacheTtlOverride,
     managedInstructionsOnly,
+    thinkingStripPlan,
+    advisorStripPlan,
   } = params
   const deps = params.deps ?? productionDeps()
 
@@ -903,6 +1077,27 @@ async function* queryLoop(
       turnCount,
       thinkingOnlyNudged,
     } = state
+
+    // densable fl(H.transition, f.agentId) — gold skips when agentId is set
+    // (subagent spinner store is per-id via $xe). Analog: only the main REPL
+    // wires setOutputLimitRecovery; subagents have no spinner row.
+    announceOutputLimitRecovery(state.transition, toolUseContext)
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { bindPluginDevModsSession, markPluginDevModsTurnRunning } =
+        require('./utils/plugins/pluginDevMods.js') as typeof import('./utils/plugins/pluginDevMods.js')
+      markPluginDevModsTurnRunning(true)
+      bindPluginDevModsSession({
+        canUseTool,
+        toolContext: ac => ({
+          ...toolUseContext,
+          abortController: ac,
+        }),
+      })
+    } catch {
+      // optional until plugin_dev_mods host is present
+    }
 
     // Skill discovery prefetch — per-iteration (uses findWritePivot guard
     // that returns early on non-write iterations). Discovery runs while the
@@ -1500,6 +1695,11 @@ async function* queryLoop(
     let pendingFallbackCreditCode: string | undefined
     // densable vu — model that minted the credit (original refusing model)
     let pendingFallbackCreditMintModel: string | undefined
+    // densable Jn / qa — first-flag preference ask on this request
+    let refusalFallbackPreferencePending = false
+    let refusalFallbackPreferenceChoice:
+      | import('./utils/printRequestDialog.js').RefusalFallbackResult
+      | undefined
 
     // densable 2.1.222 #6 — Br/To capture + ARd clear once per query API loop
     // (main/subagent only). Stamps set by MCP tool call; cost attrs only for
@@ -1609,10 +1809,16 @@ async function* queryLoop(
                     resolveRefusalFallbackModelAndLane,
                     isRefusalFallbackEnabled,
                     getSwitchModelsOnFlag,
+                    shouldAskRefusalFallbackPreference,
                   } =
                     require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
                   if (!isRefusalFallbackEnabled()) return {}
                   const isMainThread = toolUseContext.agentId === undefined
+                  refusalFallbackPreferencePending =
+                    shouldAskRefusalFallbackPreference({
+                      toolUseContext,
+                      isMainThread,
+                    })
                   // densable lkd: serverLane via dkd() (vK && $c("switchModelsOnFlag", true))
                   const arm = planRefusalFallbackArm({
                     currentModel,
@@ -1621,6 +1827,7 @@ async function* queryLoop(
                     requestDialog: toolUseContext.requestDialog,
                     isMainThread,
                     switchModelsOnFlag: getSwitchModelsOnFlag(),
+                    preferenceQuestionPending: refusalFallbackPreferencePending,
                     resolveArmedFallbackModel: () => {
                       // densable y$c arm → _$c: when entitlement overlay is
                       // unavailable and target is opus-5, substitute opus-4-8.
@@ -1679,6 +1886,9 @@ async function* queryLoop(
                     ...(arm.visibleModel !== undefined && {
                       fallbackCreditLaneArmed: true,
                     }),
+                    ...(refusalFallbackPreferencePending && {
+                      refusalFallbackPreferencePending: true,
+                    }),
                   }
                 } catch {
                   return {}
@@ -1708,6 +1918,8 @@ async function* queryLoop(
               advisorModel: appState.advisorModel,
               skipCacheWrite,
               agentCacheTtlOverride,
+              thinkingStripPlan,
+              advisorStripPlan,
               agentId: toolUseContext.agentId,
               isBackgroundAgent: toolUseContext.isBackgroundAgent,
               requestDialog: toolUseContext.requestDialog,
@@ -2020,6 +2232,32 @@ async function* queryLoop(
                 }
               } catch {
                 // densable optional
+              }
+              // densable ke=Jn&&!xe&&!X — qa on fallback_request, else FXl
+              // stays in claude.ts. Silent arm skips the preference ask.
+              if (
+                refusalFallbackPreferencePending &&
+                fb.silentArmAtTrigger !== true
+              ) {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const { askRefusalFallbackPreference } =
+                    require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                  refusalFallbackPreferenceChoice =
+                    await askRefusalFallbackPreference({
+                      canUseTool,
+                      toolUseContext,
+                      originalModel: fb.originalModel,
+                      fallbackModel: fb.fallbackModel,
+                      apiRefusalCategory: fb.apiRefusalCategory,
+                      telemetry: {
+                        original_model: fb.originalModel,
+                        fallback_model: fb.fallbackModel,
+                      },
+                    })
+                } catch {
+                  refusalFallbackPreferenceChoice = 'retry_fallback'
+                }
               }
               // Do not push into assistantMessages; stream will throw
               // FallbackTriggeredError for the actual model switch retry.
@@ -2345,211 +2583,234 @@ async function* queryLoop(
           }
         } catch (innerError) {
           if (innerError instanceof FallbackTriggeredError && fallbackModel) {
-            // Fallback was triggered - switch model and retry
-            // Prefer the error's fallback model (refusal path may route via g_i).
-            const switchTo =
-              innerError.fallbackModel &&
-              typeof innerError.fallbackModel === 'string'
-                ? innerError.fallbackModel
-                : fallbackModel
-            currentModel = switchTo
-            attemptWithFallback = true
+            // densable qa cancelled/edit_prompt — do not switch. Gold
+            // abort(_l("refusal-fallback-edit")) on pause.
+            if (
+              refusalFallbackPreferenceChoice === 'cancelled' ||
+              refusalFallbackPreferenceChoice === 'edit_prompt'
+            ) {
+              if (refusalFallbackPreferenceChoice === 'edit_prompt') {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const { createAbortErrorReason } =
+                    require('./utils/abortController.js') as typeof import('./utils/abortController.js')
+                  toolUseContext.abortController.abort(
+                    createAbortErrorReason('refusal-fallback-edit'),
+                  )
+                } catch {
+                  toolUseContext.abortController.abort()
+                }
+              }
+              assistantMessages.length = 0
+              toolResults.length = 0
+              toolUseBlocks.length = 0
+              needsFollowUp = false
+            } else {
+              // Fallback was triggered - switch model and retry
+              // Prefer the error's fallback model (refusal path may route via g_i).
+              const switchTo =
+                innerError.fallbackModel &&
+                typeof innerError.fallbackModel === 'string'
+                  ? innerError.fallbackModel
+                  : fallbackModel
+              currentModel = switchTo
+              attemptWithFallback = true
 
-            // Official BMg densable — rebind AppState + latch previous models.
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              const {
-                planRefusalFallbackAppStateRebind,
-                applyRefusalFallbackAppStateRebind,
-                applyRefusalFallbackLatchArm,
-              } =
-                require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              const {
-                getMainLoopModelOverride,
-                setMainLoopModelOverride,
-                setRefusalFallbackModelLatch,
-                markRefusalFallbackOccurred,
-              } =
-                require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
-              const appState = toolUseContext.getAppState()
-              applyRefusalFallbackLatchArm({
-                fallbackModel: switchTo,
-                previousOverride: getMainLoopModelOverride(),
-                previousAppStateModel: appState.mainLoopModel,
-                previousModelForSession: appState.mainLoopModelForSession,
-                setLatch: setRefusalFallbackModelLatch,
-                setMainLoopModelOverride,
-                markOccurred: markRefusalFallbackOccurred,
-              })
-              const rebind = planRefusalFallbackAppStateRebind({
-                appStateModel: switchTo,
-                forSessionValue: null,
-                overrideValue: switchTo,
-                currentMainLoopModel: appState.mainLoopModel,
-                currentMainLoopModelForSession:
-                  appState.mainLoopModelForSession,
-                fastMode: appState.fastMode,
-              })
-              applyRefusalFallbackAppStateRebind({
-                plan: rebind,
-                setAppState: toolUseContext.setAppState as unknown as (
-                  f: (prev: {
-                    mainLoopModel?: string | null
-                    mainLoopModelForSession?: string | null
-                    fastMode?: boolean
-                    [k: string]: unknown
-                  }) => {
-                    mainLoopModel?: string | null
-                    mainLoopModelForSession?: string | null
-                    fastMode?: boolean
-                    [k: string]: unknown
-                  },
-                ) => void,
-                setMainLoopModelOverride,
-              })
-            } catch {
-              // BMg densable optional
-            }
-
-            // Clear assistant messages since we'll retry the entire request
-            yield* yieldMissingToolResultBlocks(
-              assistantMessages,
-              'Model fallback triggered',
-            )
-            assistantMessages.length = 0
-            toolResults.length = 0
-            toolUseBlocks.length = 0
-            needsFollowUp = false
-
-            // Discard pending results from the failed attempt and create a
-            // fresh executor. This prevents orphan tool_results (with old
-            // tool_use_ids) from leaking into the retry.
-            if (streamingToolExecutor) {
-              streamingToolExecutor.discard()
-              // densable XId onReset → ARd(U.options,V)
-              clearActiveMcpStamps(toolUseContext.options, attributeMcpUsage)
-              streamingToolExecutor = new StreamingToolExecutor(
-                toolUseContext.options.tools,
-                canUseTool,
-                toolUseContext,
-              )
-            }
-
-            // Update tool use context with new model
-            toolUseContext.options.mainLoopModel = switchTo
-
-            // Thinking signatures are model-bound: replaying a protected-thinking
-            // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
-            // Strip before retry so the fallback model gets clean history.
-            if (process.env.USER_TYPE === 'ant') {
-              messagesForQuery = stripSignatureBlocks(messagesForQuery)
-            }
-
-            // Log the fallback event
-            logEvent('tengu_model_fallback_triggered', {
-              original_model:
-                innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              fallback_model:
-                switchTo as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              entrypoint:
-                'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              queryChainId: queryChainIdForAnalytics,
-              queryDepth: queryTracking.depth,
-            })
-
-            // Official densable (2.1.x): reason discriminates Host stream.
-            // - model_not_found → system/model_fallback (permanent switch)
-            // - overloaded / default → warning only (capacity 529 path)
-            const fallbackReason =
-              'reason' in innerError &&
-              typeof (innerError as { reason?: unknown }).reason === 'string'
-                ? (innerError as { reason: string }).reason
-                : 'overloaded'
-            if (fallbackReason === 'model_not_found') {
-              // Permanent primary-model failure: rebind session model (official
-              // BD + setAppState mainLoopModel) and emit Host model_fallback.
+              // Official BMg densable — rebind AppState + latch previous models.
               try {
                 // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const { setMainLoopModelOverride } =
+                const {
+                  planRefusalFallbackAppStateRebind,
+                  applyRefusalFallbackAppStateRebind,
+                  applyRefusalFallbackLatchArm,
+                } =
+                  require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const {
+                  getMainLoopModelOverride,
+                  setMainLoopModelOverride,
+                  setRefusalFallbackModelLatch,
+                  markRefusalFallbackOccurred,
+                } =
                   require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
-                setMainLoopModelOverride(switchTo)
-                toolUseContext.setAppState(prev => ({
-                  ...prev,
-                  mainLoopModel: switchTo,
-                  mainLoopModelForSession: null,
-                }))
+                const appState = toolUseContext.getAppState()
+                applyRefusalFallbackLatchArm({
+                  fallbackModel: switchTo,
+                  previousOverride: getMainLoopModelOverride(),
+                  previousAppStateModel: appState.mainLoopModel,
+                  previousModelForSession: appState.mainLoopModelForSession,
+                  setLatch: setRefusalFallbackModelLatch,
+                  setMainLoopModelOverride,
+                  markOccurred: markRefusalFallbackOccurred,
+                })
+                const rebind = planRefusalFallbackAppStateRebind({
+                  appStateModel: switchTo,
+                  forSessionValue: null,
+                  overrideValue: switchTo,
+                  currentMainLoopModel: appState.mainLoopModel,
+                  currentMainLoopModelForSession:
+                    appState.mainLoopModelForSession,
+                  fastMode: appState.fastMode,
+                })
+                applyRefusalFallbackAppStateRebind({
+                  plan: rebind,
+                  setAppState: toolUseContext.setAppState as unknown as (
+                    f: (prev: {
+                      mainLoopModel?: string | null
+                      mainLoopModelForSession?: string | null
+                      fastMode?: boolean
+                      [k: string]: unknown
+                    }) => {
+                      mainLoopModel?: string | null
+                      mainLoopModelForSession?: string | null
+                      fastMode?: boolean
+                      [k: string]: unknown
+                    },
+                  ) => void,
+                  setMainLoopModelOverride,
+                })
               } catch {
-                // optional
+                // BMg densable optional
               }
-              // Official yields system/model_fallback once; QueryEngine maps
-              // camelCase → snake_case Host wire. Do not also
-              // emitModelFallbackSdk (would double on stream-json drain).
-              yield {
-                type: 'system' as const,
-                subtype: 'model_fallback' as const,
-                content: `Switched to ${renderModelName(switchTo)} because ${renderModelName(innerError.originalModel)} is not available`,
-                level: 'warning' as const,
-                trigger: 'model_not_found' as const,
-                originalModel: innerError.originalModel,
-                fallbackModel: switchTo,
-                isMeta: false as const,
-                timestamp: new Date().toISOString(),
-                uuid: randomUUID(),
-              }
-            } else {
-              yield createSystemMessage(
-                `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
-                'warning',
-              )
-            }
 
-            continue
-          }
-          // densable multi-exit: En end + convolute_arcades error outcome
-          if (convoluteArcadesRetryActive) {
-            convoluteArcadesRetryActive = false
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              const { resolveConvoluteArcadesRetryOutcome } =
-                require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
-              const outcome = resolveConvoluteArcadesRetryOutcome({
-                path: 'error',
-                silentStitchPending,
-              })
-              silentStitchPending = false
-              silentStitchText = undefined
-              partialResponseMetaMessage = undefined
-              exactSalvagePackage = undefined
-              logEvent('tengu_convolute_arcades_retry_outcome', {
-                outcome:
-                  outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              // Clear assistant messages since we'll retry the entire request
+              yield* yieldMissingToolResultBlocks(
+                assistantMessages,
+                'Model fallback triggered',
+              )
+              assistantMessages.length = 0
+              toolResults.length = 0
+              toolUseBlocks.length = 0
+              needsFollowUp = false
+
+              // Discard pending results from the failed attempt and create a
+              // fresh executor. This prevents orphan tool_results (with old
+              // tool_use_ids) from leaking into the retry.
+              if (streamingToolExecutor) {
+                streamingToolExecutor.discard()
+                // densable XId onReset → ARd(U.options,V)
+                clearActiveMcpStamps(toolUseContext.options, attributeMcpUsage)
+                streamingToolExecutor = new StreamingToolExecutor(
+                  toolUseContext.options.tools,
+                  canUseTool,
+                  toolUseContext,
+                )
+              }
+
+              // Update tool use context with new model
+              toolUseContext.options.mainLoopModel = switchTo
+
+              // Thinking signatures are model-bound: replaying a protected-thinking
+              // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
+              // Strip before retry so the fallback model gets clean history.
+              if (process.env.USER_TYPE === 'ant') {
+                messagesForQuery = stripSignatureBlocks(messagesForQuery)
+              }
+
+              // Log the fallback event
+              logEvent('tengu_model_fallback_triggered', {
+                original_model:
+                  innerError.originalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                fallback_model:
+                  switchTo as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                entrypoint:
+                  'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 queryChainId: queryChainIdForAnalytics,
                 queryDepth: queryTracking.depth,
-                querySource:
-                  querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               })
-            } catch {
-              silentStitchPending = false
-              silentStitchText = undefined
-              partialResponseMetaMessage = undefined
-              exactSalvagePackage = undefined
+
+              // Official densable (2.1.x): reason discriminates Host stream.
+              // - model_not_found → system/model_fallback (permanent switch)
+              // - overloaded / default → warning only (capacity 529 path)
+              const fallbackReason =
+                'reason' in innerError &&
+                typeof (innerError as { reason?: unknown }).reason === 'string'
+                  ? (innerError as { reason: string }).reason
+                  : 'overloaded'
+              if (fallbackReason === 'model_not_found') {
+                // Permanent primary-model failure: rebind session model (official
+                // BD + setAppState mainLoopModel) and emit Host model_fallback.
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const { setMainLoopModelOverride } =
+                    require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+                  setMainLoopModelOverride(switchTo)
+                  toolUseContext.setAppState(prev => ({
+                    ...prev,
+                    mainLoopModel: switchTo,
+                    mainLoopModelForSession: null,
+                  }))
+                } catch {
+                  // optional
+                }
+                // Official yields system/model_fallback once; QueryEngine maps
+                // camelCase → snake_case Host wire. Do not also
+                // emitModelFallbackSdk (would double on stream-json drain).
+                yield {
+                  type: 'system' as const,
+                  subtype: 'model_fallback' as const,
+                  content: `Switched to ${renderModelName(switchTo)} because ${renderModelName(innerError.originalModel)} is not available`,
+                  level: 'warning' as const,
+                  trigger: 'model_not_found' as const,
+                  originalModel: innerError.originalModel,
+                  fallbackModel: switchTo,
+                  isMeta: false as const,
+                  timestamp: new Date().toISOString(),
+                  uuid: randomUUID(),
+                }
+              } else {
+                yield createSystemMessage(
+                  `Switched to ${renderModelName(switchTo)} due to high demand for ${renderModelName(innerError.originalModel)}`,
+                  'warning',
+                )
+              }
             }
-            yield {
-              type: 'refusal_continuation' as const,
-              phase: 'end' as const,
-            } as unknown as Message
-            refusalContinuationActive = false
-          } else if (refusalContinuationActive) {
-            // densable refusal_no_fallback / chain exhausted → phase end
-            refusalContinuationActive = false
-            exactSalvagePackage = undefined
-            yield {
-              type: 'refusal_continuation' as const,
-              phase: 'end' as const,
-            } as unknown as Message
+          } else {
+            // densable multi-exit: En end + convolute_arcades error outcome
+            if (convoluteArcadesRetryActive) {
+              convoluteArcadesRetryActive = false
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                const { resolveConvoluteArcadesRetryOutcome } =
+                  require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
+                const outcome = resolveConvoluteArcadesRetryOutcome({
+                  path: 'error',
+                  silentStitchPending,
+                })
+                silentStitchPending = false
+                silentStitchText = undefined
+                partialResponseMetaMessage = undefined
+                exactSalvagePackage = undefined
+                logEvent('tengu_convolute_arcades_retry_outcome', {
+                  outcome:
+                    outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  queryChainId: queryChainIdForAnalytics,
+                  queryDepth: queryTracking.depth,
+                  querySource:
+                    querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              } catch {
+                silentStitchPending = false
+                silentStitchText = undefined
+                partialResponseMetaMessage = undefined
+                exactSalvagePackage = undefined
+              }
+              yield {
+                type: 'refusal_continuation' as const,
+                phase: 'end' as const,
+              } as unknown as Message
+              refusalContinuationActive = false
+            } else if (refusalContinuationActive) {
+              // densable refusal_no_fallback / chain exhausted → phase end
+              refusalContinuationActive = false
+              exactSalvagePackage = undefined
+              yield {
+                type: 'refusal_continuation' as const,
+                phase: 'end' as const,
+              } as unknown as Message
+            }
+            throw innerError
           }
-          throw innerError
         }
       }
       // densable: successful serve after refusal_continuation begin → phase end
@@ -3212,6 +3473,25 @@ async function* queryLoop(
         }
       }
 
+      // densable Aa: yield handback bounce (j) + skill_inline not_run BEFORE
+      // Stop/goal. Gold stuffs j into Qe so a later preventContinuation can
+      // still end the agent, but the meta is already on the stream.
+      let handbackBounce: UserMessage | undefined
+      {
+        const bounce = yield* maybeHandbackBounce(
+          params,
+          querySource,
+          toolUseContext,
+        )
+        maybeSkillInlineCommandHandoffNotRun(
+          messagesForQuery,
+          assistantMessages,
+          querySource,
+          toolUseContext.agentId,
+        )
+        handbackBounce = bounce
+      }
+
       const stopHookResult = yield* handleStopHooks(
         messagesForQuery,
         assistantMessages,
@@ -3229,7 +3509,9 @@ async function* queryLoop(
 
       if (stopHookResult.blockingErrors.length > 0) {
         const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS = resolveStopHookBlockCap()
-        if (stopHookBlockCount + 1 >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
+        // densable Z=_r+1 includes not_met.
+        const nextBlockCount = stopHookBlockCount + 1
+        if (nextBlockCount >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
           yield createSystemMessage(
             `Stop hook blocked ${MAX_CONSECUTIVE_STOP_HOOK_BLOCKS} consecutive times. Ending turn to prevent infinite loop.`,
             'warning',
@@ -3241,6 +3523,7 @@ async function* queryLoop(
             ...messagesForQuery,
             ...assistantMessages,
             ...stopHookResult.blockingErrors,
+            ...(handbackBounce ? [handbackBounce] : []),
           ],
           toolUseContext,
           autoCompactTracking: tracking,
@@ -3254,7 +3537,7 @@ async function* queryLoop(
           maxOutputTokensOverride: undefined,
           pendingToolUseSummary: undefined,
           stopHookActive: true,
-          stopHookBlockCount: stopHookBlockCount + 1,
+          stopHookBlockCount: nextBlockCount,
           turnCount,
           thinkingOnlyNudged,
           transition: { reason: 'stop_hook_blocking' },
@@ -3312,6 +3595,24 @@ async function* queryLoop(
             queryDepth: queryTracking.depth,
           })
         }
+      }
+
+      if (handbackBounce) {
+        state = {
+          messages: [...messagesForQuery, ...assistantMessages, handbackBounce],
+          toolUseContext,
+          autoCompactTracking: tracking,
+          maxOutputTokensRecoveryCount: 0,
+          hasAttemptedReactiveCompact: false,
+          maxOutputTokensOverride: undefined,
+          pendingToolUseSummary: undefined,
+          stopHookActive,
+          stopHookBlockCount: 0,
+          turnCount,
+          thinkingOnlyNudged,
+          transition: { reason: 'next_turn' },
+        }
+        continue
       }
 
       return { reason: 'completed' }
@@ -3513,6 +3814,8 @@ async function* queryLoop(
       return { reason: 'tool_deferred' }
     }
     if (shouldPreventContinuation) {
+      // densable: hook_stopped does not bounce. Gold Aa skill_inline is on
+      // the zero-tool completed bundle only — not PostTool preventContinuation.
       return { reason: 'hook_stopped' }
     }
     // densable 2.1.283 Ud @ 190790198 — StructuredOutput / MCP claude/endTurn
@@ -3524,17 +3827,103 @@ async function* queryLoop(
         source:
           toolRequestedEndTurn as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
-      yield* handleStopHooks(
-        messagesForQuery,
-        assistantMessages,
-        systemPrompt,
-        userContext,
-        systemContext,
-        updatedToolUseContext,
-        querySource,
-        stopHookActive,
-        toolRequestedEndTurn,
-      )
+      // densable ip @195421735 — Acn; blocking discarded (no model re-invoke).
+      try {
+        const permissionMode =
+          updatedToolUseContext.getAppState().toolPermissionContext.mode
+        for await (const result of executePostToolBatchHooks(
+          collectPostToolBatchCalls(toolUseBlocks, toolResults),
+          `hook-${deps.uuid()}`,
+          updatedToolUseContext,
+          permissionMode,
+          updatedToolUseContext.abortController.signal,
+        )) {
+          if (result.message) yield result.message
+          if (result.blockingError || result.preventContinuation) {
+            logForDebugging(
+              `[end-turn] PostToolBatch block discarded (turn ended by ${
+                toolRequestedEndTurn === 'tool' ? 'tool result' : 'MCP end-turn'
+              }, no model re-invoke): ${
+                result.blockingError?.blockingError ??
+                result.stopReason ??
+                'preventContinuation'
+              }`,
+            )
+          }
+        }
+      } catch (err) {
+        if (!(err instanceof ControlStreamClosedError)) throw err
+        logForDebugging('PostToolBatch hooks cancelled (control stream closed)')
+      }
+      if (updatedToolUseContext.abortController.signal.aborted) {
+        if (feature('CHICAGO_MCP') && !updatedToolUseContext.agentId) {
+          try {
+            const { cleanupComputerUseAfterTurn } = await import(
+              './utils/computerUse/cleanup.js'
+            )
+            await cleanupComputerUseAfterTurn(updatedToolUseContext)
+          } catch {
+            // Failures are silent — this is dogfooding cleanup, not critical path
+          }
+        }
+        if (
+          !shouldSuppressInterruptionMessage(
+            updatedToolUseContext.abortController.signal.reason,
+          )
+        ) {
+          yield createUserInterruptionMessage({
+            toolUse: false,
+            interruptedByShutdown: isShutdownAbortReason(
+              updatedToolUseContext.abortController.signal.reason,
+            )
+              ? true
+              : undefined,
+          })
+        }
+      }
+      // densable Aa: bounce before Stop (Stop result still discarded here —
+      // gold's preventContinuation is on the no-tool completed path).
+      // Gold skill_inline not_run is on the zero-tool completed bundle only.
+      {
+        const bounce = yield* maybeHandbackBounce(
+          params,
+          querySource,
+          updatedToolUseContext,
+        )
+        yield* handleStopHooks(
+          messagesForQuery,
+          assistantMessages,
+          systemPrompt,
+          userContext,
+          systemContext,
+          updatedToolUseContext,
+          querySource,
+          stopHookActive,
+          toolRequestedEndTurn,
+        )
+        if (bounce) {
+          state = {
+            messages: [
+              ...messagesForQuery,
+              ...assistantMessages,
+              ...toolResults,
+              bounce,
+            ],
+            toolUseContext: updatedToolUseContext,
+            autoCompactTracking: tracking,
+            maxOutputTokensRecoveryCount: 0,
+            hasAttemptedReactiveCompact: false,
+            maxOutputTokensOverride: undefined,
+            pendingToolUseSummary: undefined,
+            stopHookActive,
+            stopHookBlockCount: 0,
+            turnCount,
+            thinkingOnlyNudged,
+            transition: { reason: 'next_turn' },
+          }
+          continue
+        }
+      }
       return { reason: 'completed' }
     }
 
@@ -3561,6 +3950,119 @@ async function* queryLoop(
       queryChainId: queryChainIdForAnalytics,
       queryDepth: queryTracking.depth,
     })
+
+    // densable Acn @195489328 — after tengu_query_before_attachments, before
+    // refreshTools. Exit 2 / preventContinuation stops the agentic loop.
+    {
+      const postBatchSessionId = updatedToolUseContext.agentId ?? getSessionId()
+      if (
+        hasHookForEvent(
+          'PostToolBatch',
+          updatedToolUseContext.getAppState(),
+          postBatchSessionId,
+        )
+      ) {
+        const hookId = `hook-${deps.uuid()}`
+        const permissionMode =
+          updatedToolUseContext.getAppState().toolPermissionContext.mode
+        let postBatchStopped = false
+        let postBatchStopReason: string | undefined
+        try {
+          for await (const result of executePostToolBatchHooks(
+            collectPostToolBatchCalls(toolUseBlocks, toolResults),
+            hookId,
+            updatedToolUseContext,
+            permissionMode,
+            updatedToolUseContext.abortController.signal,
+          )) {
+            if (
+              result.message &&
+              !(
+                result.message.type === 'attachment' &&
+                result.message.attachment?.type === 'hook_blocking_error'
+              )
+            ) {
+              yield result.message
+            }
+            if (
+              result.additionalContexts &&
+              result.additionalContexts.length > 0
+            ) {
+              const ctx = createAttachmentMessage({
+                type: 'hook_additional_context',
+                content: result.additionalContexts,
+                hookName: 'PostToolBatch',
+                toolUseID: hookId,
+                hookEvent: 'PostToolBatch',
+              })
+              yield ctx
+              toolResults.push(ctx)
+            }
+            if (result.blockingError) {
+              postBatchStopped = true
+              postBatchStopReason ??= result.blockingError.blockingError
+            }
+            if (result.preventContinuation) {
+              postBatchStopped = true
+              postBatchStopReason ??= result.stopReason
+            }
+          }
+        } catch (err) {
+          if (!(err instanceof ControlStreamClosedError)) throw err
+          logForDebugging(
+            'PostToolBatch hooks cancelled (control stream closed)',
+          )
+        }
+        if (updatedToolUseContext.abortController.signal.aborted) {
+          if (feature('CHICAGO_MCP') && !updatedToolUseContext.agentId) {
+            try {
+              const { cleanupComputerUseAfterTurn } = await import(
+                './utils/computerUse/cleanup.js'
+              )
+              await cleanupComputerUseAfterTurn(updatedToolUseContext)
+            } catch {
+              // Failures are silent — this is dogfooding cleanup, not critical path
+            }
+          }
+          if (
+            !shouldSuppressInterruptionMessage(
+              updatedToolUseContext.abortController.signal.reason,
+            )
+          ) {
+            yield createUserInterruptionMessage({
+              toolUse: false,
+              interruptedByShutdown: isShutdownAbortReason(
+                updatedToolUseContext.abortController.signal.reason,
+              )
+                ? true
+                : undefined,
+            })
+          }
+          return { reason: 'aborted_tools' }
+        }
+        if (postBatchStopped) {
+          yield createAttachmentMessage({
+            type: 'hook_stopped_continuation',
+            message:
+              postBatchStopReason || 'Execution stopped by PostToolBatch hook',
+            hookName: 'PostToolBatch',
+            toolUseID: hookId,
+            hookEvent: 'PostToolBatch',
+          })
+          yield* handleStopHooks(
+            messagesForQuery,
+            assistantMessages,
+            systemPrompt,
+            userContext,
+            systemContext,
+            updatedToolUseContext,
+            querySource,
+            stopHookActive,
+          )
+          return { reason: 'hook_stopped' }
+        }
+      }
+    }
 
     // Get queued commands snapshot before processing attachments.
     // These will be sent as attachments so Claude can respond to them in the current turn.
@@ -3786,25 +4288,31 @@ async function* queryLoop(
         },
       }
     }
-    // densable 2.1.289 analog: tool names changed → rebuild system prompt.
-    // Gold query loop does not rebuild; fork keeps the entry snapshot.
+    // densable 2.1.289: tool names changed → rebuild system prompt from the
+    // new list (getSystemPrompt / mho analog). Entry snapshot is not kept.
     const toolsAfterRefresh = updatedToolUseContext.options.tools
     const toolNamesChanged =
       toolsAfterRefresh !== toolsBeforeRefresh &&
       toolsAfterRefresh.map(tool => tool.name).join('\0') !==
         toolsBeforeRefresh.map(tool => tool.name).join('\0')
     if (toolNamesChanged) {
+      // Fork child: keep the entry snapshot. FORK_AGENT.getSystemPrompt is
+      // empty; spawn threaded parent bytes via override.systemPrompt so the
+      // prompt-cache prefix stays identical. Rebuilding would replace them
+      // with DEFAULT_AGENT_PROMPT or '' and may splice append-subagent.
       const isForkChild =
         querySource === 'agent:builtin:fork' ||
         updatedToolUseContext.agentType === 'fork' ||
         updatedToolUseContext.options.querySource === 'agent:builtin:fork'
       if (!isForkChild) {
+        // Lazy: prompts / systemPrompt sit above query in the graph.
         const additionalWorkingDirectories = Array.from(
           updatedToolUseContext
             .getAppState()
             .toolPermissionContext.additionalWorkingDirectories.keys(),
         )
         if (updatedToolUseContext.agentId) {
+          // Subagent: rebuild from this agent's prompt, not the main-thread catalog.
           const { DEFAULT_AGENT_PROMPT, enhanceSystemPromptWithEnvDetails } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('./constants/prompts.js') as typeof import('./constants/prompts.js')
@@ -3845,6 +4353,8 @@ async function* queryLoop(
               ),
               appendSubagentSystemPrompt:
                 updatedToolUseContext.options.appendSubagentSystemPrompt,
+              // Observer spawn is useExactTools (skip append). Fork keeps the
+              // entry snapshot above.
               useExactTools:
                 updatedToolUseContext.options.querySource?.startsWith(
                   'agent:observer:',
@@ -3915,6 +4425,36 @@ async function* queryLoop(
 
     // Check if we've reached the max turns limit
     if (maxTurns && nextTurnCount > maxTurns) {
+      {
+        const bounce = yield* maybeHandbackBounce(
+          params,
+          querySource,
+          toolUseContextWithQueryTracking,
+        )
+        if (bounce) {
+          state = {
+            messages: messagesForQuery.concat(
+              assistantMessages,
+              toolResults,
+              bounce,
+            ),
+            toolUseContext: toolUseContextWithQueryTracking,
+            autoCompactTracking: tracking,
+            // Stay at the cap so the bounce turn can call SubagentHandback;
+            // yGo-exhausted bounce returns undefined and we still stop below.
+            turnCount: maxTurns,
+            maxOutputTokensRecoveryCount: 0,
+            hasAttemptedReactiveCompact: false,
+            pendingToolUseSummary: nextPendingToolUseSummary,
+            maxOutputTokensOverride: undefined,
+            stopHookActive,
+            stopHookBlockCount: 0,
+            thinkingOnlyNudged,
+            transition: { reason: 'next_turn' },
+          }
+          continue
+        }
+      }
       yield createAttachmentMessage({
         type: 'max_turns_reached',
         maxTurns,

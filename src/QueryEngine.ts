@@ -87,6 +87,12 @@ import {
   processUserInput,
 } from './utils/processUserInput/processUserInput.js'
 import { fetchSystemPromptParts } from './utils/queryContext.js'
+import {
+  credentialsStoreFor,
+  getPinnedCredentials,
+} from './utils/storageV5/credentialsStore.js'
+import { getPinnedStorageV5 } from './utils/storageV5/index.js'
+import { ToolStateSlots } from './utils/toolState.js'
 import { setCwd } from './utils/Shell.js'
 import {
   flushSessionStorage,
@@ -139,6 +145,7 @@ import {
 function getCoordinatorUserContext(
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
+  tools?: ReadonlyArray<{ name: string; searchHint?: string }>,
 ): { [k: string]: string } {
   if (!feature('COORDINATOR_MODE')) return {}
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -146,7 +153,7 @@ function getCoordinatorUserContext(
     require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js')
   /* eslint-enable @typescript-eslint/no-require-imports */
   if (typeof mod?.getCoordinatorUserContext !== 'function') return {}
-  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir)
+  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir, tools)
 }
 
 // Dead code elimination: conditional import for snip compaction
@@ -201,6 +208,13 @@ export type QueryEngineConfig = {
   /** Official toolAliases — SDK-renamed tools for leftover Ld resume. */
   toolAliases?: Record<string, string>
   /**
+   * densable `wN`. Print passes one bag into every `ask()`; a missing
+   * bag becomes one slot map for this engine.
+   */
+  toolState?: ToolStateSlots
+  /** Session credentials handle. Headless falls back to the pinned store. */
+  credentials?: ToolUseContext['credentials']
+  /**
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
    * snip boundary; otherwise returns the replayed snip result. Injected by
@@ -215,6 +229,17 @@ export type QueryEngineConfig = {
     yieldedSystemMsg: Message,
     store: Message[],
   ) => { messages: Message[]; executed: boolean } | undefined
+}
+
+/**
+ * Headless tool context credentials. Explicit config wins, then the startup
+ * pin, then the store for pinned storageV5 (densable `D.credentials`).
+ */
+function headlessCredentials(
+  explicit: ToolUseContext['credentials'],
+): ToolUseContext['credentials'] {
+  if (explicit !== undefined) return explicit
+  return getPinnedCredentials() ?? credentialsStoreFor(getPinnedStorageV5())
 }
 
 /**
@@ -243,9 +268,11 @@ export class QueryEngine {
   private discoveredSkillNames = new Set<string>()
   private loadedNestedMemoryPaths = new Set<string>()
   private pendingNestedMemoryTriggers = new Set<string>()
+  private sessionToolState: ToolStateSlots
 
   constructor(config: QueryEngineConfig) {
     this.config = config
+    this.sessionToolState = config.toolState ?? new ToolStateSlots()
     this.mutableMessages = config.initialMessages ?? []
     this.abortController = config.abortController ?? createAbortController()
     this.permissionDenials = []
@@ -268,6 +295,8 @@ export class QueryEngine {
       wakeupSource?: string
       origin?: MessageOrigin
       shouldQuery?: boolean
+      /** densable 2.1.289 print task-notification coalesce hold stamp */
+      queryHeldForNextTurn?: boolean
     },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
@@ -370,6 +399,7 @@ export class QueryEngine {
       ...getCoordinatorUserContext(
         mcpClients,
         isScratchpadEnabled() ? getScratchpadDir() : undefined,
+        tools,
       ),
     }
 
@@ -454,6 +484,8 @@ export class QueryEngine {
       },
       abortController: this.abortController,
       readFileState: this.readFileState,
+      toolState: this.sessionToolState,
+      credentials: headlessCredentials(this.config.credentials),
       nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
@@ -546,7 +578,7 @@ export class QueryEngine {
       }
     }
 
-    const {
+    let {
       messages: messagesFromUserInput,
       shouldQuery,
       allowedTools,
@@ -572,8 +604,16 @@ export class QueryEngine {
       modelScheduledOrigin: options?.modelScheduledOrigin,
       wakeupSource: options?.wakeupSource,
       origin: options?.origin,
+      shouldQuery: options?.shouldQuery,
+      queryHeldForNextTurn: options?.queryHeldForNextTurn,
       querySource: 'sdk',
     })
+
+    // densable: coalesce/hold may force shouldQuery:false even when
+    // processUserInput would default plain-text notifications to true.
+    if (options?.shouldQuery === false) {
+      shouldQuery = false
+    }
 
     // densable cun after Art: skip human-like (jy); fill origin only when unset.
     // Fws on !isMeta users so scheduled-task RZn still lands on the prompt.
@@ -712,6 +752,8 @@ export class QueryEngine {
       },
       abortController: this.abortController,
       readFileState: this.readFileState,
+      toolState: this.sessionToolState,
+      credentials: headlessCredentials(this.config.credentials),
       nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
@@ -999,6 +1041,16 @@ export class QueryEngine {
         case 'tombstone':
           // Tombstone messages are control signals for removing messages, skip them
           break
+        case 'active_goal': {
+          // densable worker: setAppState only (no idle-checkin cancel here).
+          const value =
+            (message as { value?: AppState['activeGoal'] | null }).value ??
+            undefined
+          setAppState(prev =>
+            prev.activeGoal === value ? prev : { ...prev, activeGoal: value },
+          )
+          break
+        }
         case 'assistant': {
           // Capture stop_reason if already set (synthetic messages). For
           // streamed responses, this is null at content_block_stop time;
@@ -1591,6 +1643,10 @@ export async function* ask({
   modelScheduledOrigin,
   wakeupSource,
   origin,
+  shouldQuery,
+  queryHeldForNextTurn,
+  toolState,
+  credentials,
   cwd,
   tools,
   mcpClients,
@@ -1634,6 +1690,12 @@ export async function* ask({
   modelScheduledOrigin?: boolean
   wakeupSource?: string
   origin?: MessageOrigin
+  /** densable 2.1.289 print task-notification coalesce */
+  shouldQuery?: boolean
+  queryHeldForNextTurn?: boolean
+  /** densable `wN` shared across print's per-command engines. */
+  toolState?: ToolStateSlots
+  credentials?: ToolUseContext['credentials']
   cwd: string
   tools: Tools
   verbose?: boolean
@@ -1696,6 +1758,8 @@ export async function* ask({
     abortController,
     orphanedPermission,
     deferredToolUse,
+    toolState,
+    credentials,
     ...(feature('HISTORY_SNIP')
       ? {
           snipReplay: (yielded: Message, store: Message[]) => {
@@ -1718,6 +1782,8 @@ export async function* ask({
       modelScheduledOrigin,
       wakeupSource,
       origin,
+      shouldQuery,
+      queryHeldForNextTurn,
     })
   } finally {
     setReadFileCache(engine.getReadFileState())

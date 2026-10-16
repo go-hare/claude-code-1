@@ -59,10 +59,60 @@ import {
   createCacheSafeParams,
   saveCacheSafeParams,
 } from '../utils/forkedAgent.js'
+import { getSessionId } from '../bootstrap/state.js'
+import { getTotalOutputTokens } from '../cost-tracker.js'
+import { isHookEqual } from '../utils/hooks/hooksSettings.js'
+import { getSessionHooks } from '../utils/hooks/sessionHooks.js'
+
+/** Internal forks must not run extractMemories (gold stopHooks is !agentId). */
+function isInternalExtractQuerySource(querySource: QuerySource): boolean {
+  return (
+    querySource === 'away_summary' ||
+    querySource === 'prompt_suggestion' ||
+    querySource === 'extract_memories' ||
+    querySource === 'compact' ||
+    querySource === 'auto_dream' ||
+    querySource === 'agent_summary' ||
+    querySource === 'memdir_aki_extract'
+  )
+}
+
+function isGoalPromptHook(
+  hook: unknown,
+  condition: string | undefined,
+): hook is { type: 'prompt'; prompt: string } {
+  if (!condition) return false
+  if (typeof hook !== 'object' || hook === null) return false
+  const h = hook as { type?: string; prompt?: string }
+  return h.type === 'prompt' && h.prompt === condition
+}
+
+/**
+ * densable Ne — hook still registered on Stop (z5n / isHookEqual).
+ * SubagentStop never hits this: Stop registry only.
+ */
+function matchRegisteredStopHook(
+  appState: Parameters<typeof getSessionHooks>[0],
+  sessionId: string,
+  hook: unknown,
+): hook is { type: 'prompt'; prompt: string } {
+  if (!hook || typeof hook !== 'object' || !('type' in hook)) return false
+  const candidate = hook as { type?: string; prompt?: string }
+  if (candidate.type !== 'prompt') return false
+  const matchers =
+    getSessionHooks(appState, sessionId, 'Stop').get('Stop') ?? []
+  return matchers.some(matcher =>
+    matcher.hooks.some(registered =>
+      isHookEqual(registered, hook as { type: 'prompt'; prompt: string }),
+    ),
+  )
+}
 
 type StopHookResult = {
   blockingErrors: Message[]
   preventContinuation: boolean
+  /** densable `goalPass` / `me` — not_met still yields to the model. */
+  goalPass?: string
 }
 
 export async function* handleStopHooks(
@@ -166,7 +216,8 @@ export async function* handleStopHooks(
       feature('EXTRACT_MEMORIES') &&
       !toolUseContext.agentId &&
       isExtractModeActive() &&
-      !poorMode
+      !poorMode &&
+      !isInternalExtractQuerySource(querySource)
     ) {
       // Fire-and-forget in both interactive and non-interactive. For -p/SDK,
       // print.ts drains the in-flight promise after flushing the response
@@ -390,12 +441,19 @@ export async function* handleStopHooks(
       toolUseContext.agentType,
     )
 
+    // densable ht — main-thread snapshot for error/timeout only.
+    // met / not_met re-read live getAppState().activeGoal after Ne.
+    const goalAtStop = toolUseContext.agentId
+      ? undefined
+      : toolUseContext.getAppState().activeGoal
+
     // Consume all progress messages and get blocking errors
     let stopHookToolUseID = ''
     let hookCount = 0
     let preventedContinuation = false
     let stopReason = ''
     let hasOutput = false
+    let goalPass: string | undefined
     const hookErrors: string[] = []
     const hookInfos: StopHookInfo[] = []
 
@@ -430,9 +488,25 @@ export async function* handleStopHooks(
               )
               // Non-blocking errors always have output
               hasOutput = true
+              if (isGoalPromptHook(result.hook, goalAtStop?.condition)) {
+                logEvent('tengu_feature_bad', {
+                  feature_name:
+                    'goal_met' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code:
+                    'evaluator_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              }
             } else if (attachment.type === 'hook_error_during_execution') {
               hookErrors.push(attachment.content as string)
               hasOutput = true
+              if (isGoalPromptHook(result.hook, goalAtStop?.condition)) {
+                logEvent('tengu_feature_bad', {
+                  feature_name:
+                    'goal_met' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  error_code:
+                    'evaluator_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+              }
             } else if (attachment.type === 'hook_success') {
               // Check if successful hook produced any stdout/stderr
               if (
@@ -440,6 +514,53 @@ export async function* handleStopHooks(
                 (attachment.stderr && (attachment.stderr as string).trim())
               ) {
                 hasOutput = true
+              }
+              // densable: Ne then live $e. ht is not the met gate.
+              const goalHook = result.hook
+              const sessionId = getSessionId()
+              if (
+                attachment.hookEvent === 'Stop' &&
+                matchRegisteredStopHook(
+                  toolUseContext.getAppState(),
+                  sessionId,
+                  goalHook,
+                )
+              ) {
+                const { removeSessionHook } = await import(
+                  '../utils/hooks/sessionHooks.js'
+                )
+                removeSessionHook(
+                  toolUseContext.setAppState,
+                  sessionId,
+                  'Stop',
+                  goalHook,
+                )
+                const liveGoal = toolUseContext.getAppState().activeGoal
+                if (liveGoal?.condition === goalHook.prompt) {
+                  goalPass = 'met'
+                  const iterations = (liveGoal.iterations ?? 0) + 1
+                  const durationMs = Date.now() - (liveGoal.setAt ?? Date.now())
+                  const tokens =
+                    getTotalOutputTokens() - (liveGoal.tokensAtStart ?? 0)
+                  yield { type: 'active_goal', value: undefined }
+                  yield createAttachmentMessage({
+                    type: 'goal_status',
+                    met: true,
+                    condition: goalHook.prompt,
+                    reason: result.stopReason,
+                    iterations,
+                    durationMs,
+                    tokens,
+                  })
+                  logEvent('tengu_goal_achieved', {
+                    promptLength: goalHook.prompt.length,
+                    iterations,
+                    durationMs,
+                    tokens,
+                    origin: (liveGoal.origin ??
+                      'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  })
+                }
               }
             }
             // Extract per-hook duration for timing visibility.
@@ -456,6 +577,18 @@ export async function* handleStopHooks(
             }
           }
         }
+      }
+      // densable ae.timedOut: ht snapshot only; skip blocking/success for this result.
+      if (result.timedOut) {
+        if (goalAtStop && isGoalPromptHook(result.hook, goalAtStop.condition)) {
+          logEvent('tengu_feature_bad', {
+            feature_name:
+              'goal_met' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_code:
+              'evaluator_timeout' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        }
+        continue
       }
       if (result.blockingError || result.preventContinuation) {
         if (endTurnSource) {
@@ -474,8 +607,34 @@ export async function* handleStopHooks(
             blockingErrors.push(userMessage)
             yield userMessage
             hasOutput = true
-            // Add to hookErrors so it appears in the summary
-            hookErrors.push(result.blockingError.blockingError)
+            // densable not_met: Ne then live $e. SubagentStop never matches Stop registry.
+            const registered = matchRegisteredStopHook(
+              toolUseContext.getAppState(),
+              getSessionId(),
+              result.hook,
+            )
+            const liveGoal = toolUseContext.getAppState().activeGoal
+            if (
+              registered &&
+              liveGoal &&
+              isGoalPromptHook(result.hook, liveGoal.condition)
+            ) {
+              goalPass = 'not_met'
+              const nextGoal = {
+                ...liveGoal,
+                iterations: liveGoal.iterations + 1,
+                lastReason: result.stopReason,
+              }
+              yield { type: 'active_goal', value: nextGoal }
+              yield createAttachmentMessage({
+                type: 'goal_status',
+                met: false,
+                condition: liveGoal.condition,
+                reason: result.stopReason,
+              })
+            } else {
+              hookErrors.push(result.blockingError.blockingError)
+            }
           }
           // Check if hook wants to prevent continuation
           if (result.preventContinuation) {
@@ -549,12 +708,12 @@ export async function* handleStopHooks(
     }
 
     if (preventedContinuation) {
-      return { blockingErrors: [], preventContinuation: true }
+      return { blockingErrors: [], preventContinuation: true, goalPass }
     }
 
     // Collect blocking errors from stop hooks
     if (blockingErrors.length > 0) {
-      return { blockingErrors, preventContinuation: false }
+      return { blockingErrors, preventContinuation: false, goalPass }
     }
 
     // After Stop hooks pass, run TeammateIdle and TaskCompleted hooks if this is a teammate
@@ -678,7 +837,7 @@ export async function* handleStopHooks(
       }
     }
 
-    return { blockingErrors: [], preventContinuation: false }
+    return { blockingErrors: [], preventContinuation: false, goalPass }
   } catch (error) {
     const durationMs = Date.now() - hookStartTime
     logEvent('tengu_stop_hook_error', {
