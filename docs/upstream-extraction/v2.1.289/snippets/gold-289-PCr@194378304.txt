@@ -1,0 +1,1 @@
+function PCr(e){let t=Yen(e);return t!==null&&(t.startsWith(On)||t.startsWith(Pn))}

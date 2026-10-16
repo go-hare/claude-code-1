@@ -1,0 +1,1 @@
+function V3(e,r){if(e==="")return"/";if(r==="s3")return e;let n=[];for(let g of e.split("/")){if(g===""||g===".")continue;if(g==="..")n.pop();else n.push(g)}let s=n.length>0&&e.endsWith("/")?"/":"",h=`/${n.join("/")}${s}`;return O0(h).replace(/%2F/gi,"/")}

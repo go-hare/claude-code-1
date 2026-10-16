@@ -1,0 +1,1 @@
+function Ch(e,t){let r=LT(t,e.name);if(FT(e))return[[r,e]];else if(qT(e)&&typeof e.nested<"u")return Object.keys(e.nested).map((i)=>Ch(e.nested[i],r)).reduce((i,s)=>i.concat(s),[]);return[]}

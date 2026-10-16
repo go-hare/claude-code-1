@@ -1,0 +1,1 @@
+function Ch(m){return(l,p,{verbose:h})=>{if(h||typeof l!=="object"||l===null)return null;let M=R_[m];if(!M)return null;return e(Ne,{height:1,children:e(n,{dimColor:!0,children:M})})}}

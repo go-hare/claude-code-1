@@ -1,0 +1,1 @@
+function nQo(e,n){let r=n.replace(/\s+/g," ").trim(),s=e.replace(/\s+/g," ").trim(),g=/[\s;&|()<>]/;for(let h=s.indexOf(r);h!==-1;h=s.indexOf(r,h+1)){let b=s[h-1],w=s[h+r.length];if((b===void 0||g.test(b))&&(w===void 0||g.test(w)))return!0}return!1}

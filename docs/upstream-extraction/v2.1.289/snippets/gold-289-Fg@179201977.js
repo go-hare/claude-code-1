@@ -1,0 +1,1 @@
+function Fg(t){return/^[\\/]\?\?[\\/]/.test(t)}

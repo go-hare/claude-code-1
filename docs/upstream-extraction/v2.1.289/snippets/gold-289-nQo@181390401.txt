@@ -1,0 +1,1 @@
+function nQo(){return C.state?.config?.path??null}

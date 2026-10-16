@@ -1,0 +1,1 @@
+function Or(e){return e.source!=="cliArg"&&e.source!=="toolsNarrowing"}

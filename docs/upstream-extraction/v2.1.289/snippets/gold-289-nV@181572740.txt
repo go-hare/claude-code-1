@@ -1,0 +1,1 @@
+function nV(){return u.getStore()!==void 0}

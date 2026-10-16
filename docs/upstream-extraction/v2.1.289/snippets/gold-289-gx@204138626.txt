@@ -1,0 +1,1 @@
+function gx(e,t){if(e.tail=new xa(t,e.tail,null,e),!e.head)e.head=e.tail;e.length++}

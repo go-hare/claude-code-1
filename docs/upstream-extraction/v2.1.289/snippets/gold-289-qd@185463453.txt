@@ -1,0 +1,1 @@
+function qd(){return Zv().backgroundTasksDisabled||a.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS||Or()}

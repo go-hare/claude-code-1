@@ -1,0 +1,1 @@
+function irr(e){return e?.kind==="peer"&&(e.handback===!0||e.flagged===!0)}

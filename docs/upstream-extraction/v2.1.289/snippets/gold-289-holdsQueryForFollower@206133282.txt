@@ -1,0 +1,1 @@
+uldQuery===!1&&this.queuedBefore(s).some((g)=>bi(g)&&g.handedOffTurn!==void 0))break;n.push(this.messageQueue.dequeue(Pl))}return n}holdsQueryForFollower(e,r){if(this.deferredHumanTurnQueued())return!1;let n=this.messageQueue.peek((s)=>Pl(s)&&s.handbackPointer!==!0);return n!==void 0&&Ch(e,n)&&r(n)&&!this.prewaitLatch.isDoomBoundary(e,n)}noteTurnEnded(e){this.lastDisp

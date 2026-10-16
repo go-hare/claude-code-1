@@ -1,0 +1,1 @@
+function Fg(e){return e.type!=="user"&&e.type!=="bash_command"&&e.type!=="control_response"&&e.type!=="queued_notification"&&e.type!=="workflow_launch"&&e.type!=="session_notice"&&e.type!=="control_request"}

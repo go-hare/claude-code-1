@@ -1,0 +1,1 @@
+function Oh(e){let n=B(e).trim(),r=[...n];return r.length>64?`${r.slice(0,64).join("")}\u2026`:n}

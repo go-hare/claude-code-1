@@ -1,0 +1,1 @@
+function T8r(e){return e.findLast((n)=>Pbt(n.turnAttributionKey)!==void 0)?.turnAttributionKey}

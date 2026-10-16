@@ -1,0 +1,1 @@
+function Fg(e){return jg.test(e)&&ta(e,"(")!==ta(e,")")}

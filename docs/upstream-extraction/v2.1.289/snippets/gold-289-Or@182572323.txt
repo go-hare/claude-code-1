@@ -1,0 +1,1 @@
+function Or(e){let o=new Set;for(let[r,t]of e.files)for(let n of bo(t.scanned.program)){if("problem"in n)throw t.scanned.refuse(n.at,n.problem);let s=So({spelled:n.spelled,file:r,root:e.root});if("problem"in s)throw t.scanned.refuse(n.at,s.problem);o.add(s.module)}return[...o].sort()}

@@ -1,0 +1,1 @@
+function T4o(){return Zv().backgroundLaunchRule!==void 0&&!Ier()}

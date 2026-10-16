@@ -1,0 +1,1 @@
+function QM(n,r){let t=ke(o);return Boolean(n||r||t)}

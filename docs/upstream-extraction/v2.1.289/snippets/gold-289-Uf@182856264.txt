@@ -1,0 +1,1 @@
+function Uf(e){let t=new WeakSet;return{argumentFor:(o)=>{let r=e(o);if(typeof r==="object"&&r!==null)t.add(r);return r},isDelivered:(o)=>typeof o==="object"&&o!==null&&t.has(o)}}

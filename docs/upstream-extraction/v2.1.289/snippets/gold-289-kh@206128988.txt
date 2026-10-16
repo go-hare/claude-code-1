@@ -1,0 +1,1 @@
+function kh(e){return e.drainOnly===!0&&e.resumedTurnUserMessageUuid!==void 0}

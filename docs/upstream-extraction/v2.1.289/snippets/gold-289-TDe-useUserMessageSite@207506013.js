@@ -1,0 +1,1 @@
+function TDe({messageId:d,stored:t,text:o,isExpanded:a,task:i,sender:m,draw:u}){let g=Bn(i),l=Bn(m),p=jO("UserMessage",()=>({requestId:d,props:{text:o,origin:vzn(t),isExpanded:a,...i!==void 0&&{task:i},...m!==void 0&&{from:m}}}),[d,o,t,a,g,l]);return a1(p,(c)=>u(c.props.text),E(p.props.origin))}

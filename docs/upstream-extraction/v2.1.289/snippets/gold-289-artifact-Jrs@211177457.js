@@ -1,0 +1,1 @@
+function Jrs(e){switch(e?.mode){case void 0:case"owner":return"private to the user";case"unknown":return"shared, audience unrecognized";case"org":case"users":case"public":case"agent_scoped":return`shared with ${Loe(e.mode)}`}}

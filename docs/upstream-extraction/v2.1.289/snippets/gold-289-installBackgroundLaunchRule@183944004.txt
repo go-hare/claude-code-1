@@ -1,0 +1,13 @@
+roundDeadlineDisabled(){return this.#s}get backgroundLaunchRule(){return this.#n}disableBackgroundTasks(){this.#e=!0}disableBackgroundAgentLaunch(){this.#o=!0}disableRemoteAgentIsolation(){this.#r=!0}installBackgroundLaunchRule(e){if(!this.#e)throw Error("A background launch rule needs background tasks disabled first");if(typeof e.parameterDescription!=="string")throw Error("A background launch rule needs parameterDescription to be a string");if(this.#n!==void 0)throw Error("A background launch rule is already installed");this.#n=e}disableBackgroundDeadline(){this.#s=!0}disableUnsandboxedCommands(){this.#t=!0}}var t=new z(()=>new Oer);function Zv(){return n.getStore()??t.of(U().host)}var n=new r;function R4o(e,o){return n.run(e,o)}
+export{Oer,Zv,R4o};
+.// @bun @bytecode
+// Claude Code is a Beta product per Anthropic's Commercial Terms of Service.
+// By using Claude Code, you agree that all code acceptance or rejection decisions you make,
+// and the associated conversations in context, constitute Feedback under Anthropic's Commercial Terms,
+// and may be used to improve Anthropic's products, including training models.
+// You are responsible for reviewing any code suggestions before use.
+
+// (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
+
+// Version: 2.1.289
+function JBt(n,i){let t=n.get(i);if(t)return t;let e=o(i),r;for(let[u,a]of n){let s=o(u);if(!s.includes("*")){if(s===e)return a}else if(r===void 0&&m(s,e))r=a}return r}function o(n){if(!n.startsWith("domain:"))return n;return`domain:${n.slice(7).toLowerCase().replace(/(?<=[^*.])\.+(?=(:\d+)?$)/,"")}`}function m(n,i){if(!n.startsWith("domain:")||!i.startsWith("domain:"))return!1;if(n==="domain:*")return!0;let t;if(n.startsWith("domain:*."))t=`^domain:(?:[^.:]+\\.)+${c(n.slice(9))}$`;else t=`^domain:${c(n.slice(7))}$`;return new RegExp(t,"i").test(i)}function c(n){return n.split("*").map((i)=>i.replace(/[.+?^${}()|[\

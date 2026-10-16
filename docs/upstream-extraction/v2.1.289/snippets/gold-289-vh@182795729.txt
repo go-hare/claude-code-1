@@ -1,0 +1,1 @@
+function vh(e){if(typeof e!=="function")throw TypeError("a function was expected");return e}

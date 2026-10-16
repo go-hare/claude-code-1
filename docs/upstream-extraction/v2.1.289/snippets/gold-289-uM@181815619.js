@@ -1,0 +1,1 @@
+function uM(e){return e?.kind==="peer"&&e.senderTaskId!==void 0||e?.kind==="observer"}

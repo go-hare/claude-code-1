@@ -1,0 +1,1 @@
+function DS(e,n){if(process.env.CLAUDE_CODE_ENTRYPOINT==="local-agent")return!0;if(e==="claudeai-proxy")return!0;if(n&&lS(n))return!0;if(n&&Vx(n))return!0;return!1}

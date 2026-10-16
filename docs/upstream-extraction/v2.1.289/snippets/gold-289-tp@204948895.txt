@@ -1,0 +1,1 @@
+function tp(e){let t=e.match(/^(.+?)\[1m\]$/i);return t?t[1].trim():e}

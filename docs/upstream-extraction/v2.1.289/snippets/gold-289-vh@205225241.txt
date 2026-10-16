@@ -1,0 +1,1 @@
+function vh(e){return`device:dc:${KN("sha256").update(e).digest("hex")}`}

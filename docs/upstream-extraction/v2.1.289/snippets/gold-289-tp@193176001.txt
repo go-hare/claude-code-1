@@ -1,0 +1,1 @@
+function tp(n){let u=n.cachedLayout;if(u)return u;let f=n.yogaNode;if(!f)return;let m=f.getComputedLeft(),y=f.getComputedTop(),g=n.parentNode;while(g){let x=g.cachedLayout;if(x)return{x:x.x+m,y:x.y+y,width:f.getComputedWidth(),height:f.getComputedHeight()};if(g.yogaNode)m+=g.yogaNode.getComputedLeft(),y+=g.yogaNode.getComputedTop();g=g.parentNode}return}

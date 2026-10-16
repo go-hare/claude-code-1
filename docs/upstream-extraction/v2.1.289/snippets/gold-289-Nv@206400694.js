@@ -1,0 +1,1 @@
+function Nv(e,r){return e.findIndex((n)=>n.type==="assistant"&&Array.isArray(n.message.content)&&n.message.content.some((s)=>s?.type==="tool_use"&&s.id===r))}

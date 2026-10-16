@@ -1,0 +1,1 @@
+function a$r(e){return!1}

@@ -1,0 +1,1 @@
+function Z3n(){return k(tQo,!0)!==!1}

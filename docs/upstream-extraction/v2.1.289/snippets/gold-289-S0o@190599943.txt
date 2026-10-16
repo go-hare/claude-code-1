@@ -1,0 +1,1 @@
+function S0o(e){let n=e[0]?.ccrTurnId;return e.every((r)=>r.ccrTurnId===n)?n:void 0}

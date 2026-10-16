@@ -1,0 +1,1 @@
+function GVt(e){let n=Akn(e,(r)=>$M(r," ",{keepEmojiJoiners:!0}));return n===""?"":rt(n,d7r)}

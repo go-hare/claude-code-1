@@ -1,0 +1,1 @@
+function xD(e){if(typeof e==="string")return e.trim().startsWith("/");if(!Array.isArray(e))return!1;let n=e.at(-1);return n?.type==="text"&&typeof n.text==="string"&&n.text.trim().startsWith("/")}

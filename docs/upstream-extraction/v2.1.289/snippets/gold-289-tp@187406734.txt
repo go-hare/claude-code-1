@@ -1,0 +1,1 @@
+function tp(e){return e.agentId===Ve()}

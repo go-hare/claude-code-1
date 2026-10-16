@@ -1,0 +1,1 @@
+function BCn(e){return e.kind==="peer"&&e.name||e.from}

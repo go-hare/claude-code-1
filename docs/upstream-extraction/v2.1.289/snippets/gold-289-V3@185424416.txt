@@ -1,0 +1,1 @@
+function V3(e,n){let r=!1;for(let s of e){if(s.pollEvent===void 0)continue;r=!0,s.pollEvent.settleDropped?.(new P(`poll event discarded undelivered: ${n}`,"poll event discarded undelivered"))}if(r)m("poll_event_delivery","discarded")}

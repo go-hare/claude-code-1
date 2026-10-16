@@ -1,0 +1,1 @@
+function C(e,t){return{get session(){return e.session},get storageV5(){return e.storageV5},get agentId(){return e.agentId},get taskRegistry(){return e.taskRegistry},get agentLifecycle(){return e.agentLifecycle},get messageQueue(){return e.messageQueue},get toolUseId(){return t.toolUseId}}}

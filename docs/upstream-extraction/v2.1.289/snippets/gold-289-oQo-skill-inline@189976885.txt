@@ -1,0 +1,3 @@
+function oQo(e,n){let r=new Map;for(let s of e)if(s.type==="user"){let g=s.promptShellHandOff;if(g===void 0||g.agentId!==n)continue;for(let h of g.commands){let b=`${h.tool}
+${h.command}`;if(!r.has(b))r.set(b,{entry:h,pending:h.command.split(`
+`).filter((w)=>w.trim()!=="")})}}else if(s.type==="assistant"&&r.size>0)for(let g of s.message.content){if(g.type!=="tool_use")continue;let h=g.input;if(typeof h!=="object"||h===null||!("command"in h)||typeof h.command!=="string")continue;let b=h.command;for(let[w,M]of r){if(M.entry.tool!==g.name)continue;if(M.pending=M.pending.filter((B)=>!nQo(b,B)),M.pending.length===0)r.delete(w)}}return[...r.values()].map((s)=>s.entry)}

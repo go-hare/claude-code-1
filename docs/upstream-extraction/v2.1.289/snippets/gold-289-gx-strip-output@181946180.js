@@ -1,0 +1,1 @@
+function gx(e){return e.type==="system"&&e.subtype==="task_notification"?{...e,output_file:""}:e}

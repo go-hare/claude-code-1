@@ -1,0 +1,1 @@
+function vDo(e){return Math.max(e.findLastIndex((n)=>n.type==="user"&&(n.promptSource!==void 0||n.isMeta!==!0&&n.stackedExpansion!==!0&&!qA(n))),0)}

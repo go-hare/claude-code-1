@@ -1,0 +1,1 @@
+function Ch(e,r){return r.priority===e.priority&&r.workload===e.workload&&!!r.isMeta===!!e.isMeta&&!!r.skipAttachments===!!e.skipAttachments&&r.wakeupSource===e.wakeupSource&&r.ccrTurnId===e.ccrTurnId&&xbt(r)===xbt(e)&&vh(e)&&vh(r)}

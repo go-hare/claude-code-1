@@ -1,0 +1,1 @@
+function vh(e,n){if(e.size===0)return;Qc([...e.keys()],n);let r=[...e.values()].map((s)=>s.instance);for(let s of n.staleListeners)s(r)}

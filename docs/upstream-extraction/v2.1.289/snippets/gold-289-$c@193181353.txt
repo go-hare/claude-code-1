@@ -1,0 +1,1 @@
+function $c(n){switch(n){case 2:return Qn;case 3:return fn;case 0:return hi;case 1:return zn}}

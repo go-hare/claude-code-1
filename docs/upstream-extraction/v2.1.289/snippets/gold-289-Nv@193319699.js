@@ -1,0 +1,1 @@
+function Nv(n,u){let f=n.absoluteRectsCur;return n.absoluteRectsPrev.some((m)=>!m.withinParent&&!f.some((y)=>y.x===m.x&&y.y===m.y&&y.width===m.width&&y.height===m.height)&&u.blitsOver(m))}

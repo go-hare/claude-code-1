@@ -1,0 +1,1 @@
+function nV(e){let r=e.split(Nr.sep),n="";for(let s of r){if(!s)continue;let h=n+Nr.sep+s;try{let g=Tt.statSync(h);if(g.isFile()||g.isSymbolicLink())return!0}catch{break}n=h}return!1}

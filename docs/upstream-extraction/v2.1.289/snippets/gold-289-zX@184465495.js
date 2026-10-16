@@ -1,0 +1,1 @@
+function zX(e,r){switch(e){case Kt.ScalarType.STRING:return"string";case Kt.ScalarType.BOOL:return"boolean";case Kt.ScalarType.UINT64:case Kt.ScalarType.SFIXED64:case Kt.ScalarType.FIXED64:case Kt.ScalarType.SINT64:case Kt.ScalarType.INT64:return r?"string":"bigint";case Kt.ScalarType.BYTES:return"Uint8Array";default:return"number"}}

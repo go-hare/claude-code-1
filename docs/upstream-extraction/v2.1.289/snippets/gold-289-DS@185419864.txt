@@ -1,0 +1,1 @@
+function DS(e){return e.mode==="poll-event"}

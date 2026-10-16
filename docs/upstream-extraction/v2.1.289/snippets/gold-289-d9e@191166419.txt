@@ -1,0 +1,1 @@
+function d9e(e,n){if(!e)return!1;let r=n.get(e);if(!Tn(r))return!1;let s=GB();for(let g of XC(r)){if(g.startsWith("agent:"))return!0;if(r.isBackgrounded&&(g.startsWith("workflow:")||a$r(g)))return!0;if(s&&r.isBackgrounded&&g.startsWith("bash:"))return!0}return!1}

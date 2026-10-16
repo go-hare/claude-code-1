@@ -1,0 +1,1 @@
+function Ph(o){var s=o.alternate;if(s!==null&&(o=s.child,o!==null)){s.child=null;do s=o.sibling,o.sibling=null,o=s;while(o!==null)}}

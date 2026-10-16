@@ -1,0 +1,1 @@
+function sOo(e){let n=e.at(-1);if(n===void 0||!n.text.startsWith(BX))return{report:e,savedFilesNote:void 0,reportCutNote:void 0};let r=e.at(-2),s=r?.text.startsWith(gzn)?r:void 0;return{report:e.slice(0,s?-2:-1),savedFilesNote:n,reportCutNote:s}}

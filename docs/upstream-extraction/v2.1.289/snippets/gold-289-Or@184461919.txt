@@ -1,0 +1,1 @@
+function Or(e){if(!e)throw Error()}

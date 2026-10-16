@@ -1,0 +1,1 @@
+function jg(m){let l=m,p=Zoe.find((M)=>l.startsWith(M));if(p)l=l.slice(p.length);let h=l.lastIndexOf(Ag)+Ag.length;if(h>Ag.length-1){let M=l.slice(h);if(u_t.includes(M)||g3r.includes(M))l=l.slice(0,h)}return l.replace(/^<agent-message[^>]*>\n/,"").replace(/\n<\/agent-message>$/,"")}

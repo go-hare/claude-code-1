@@ -1,0 +1,1 @@
+function YBe(e,n="their database",r="write into"){if(e===void 0)return"";if(e.probeFailed||e.role===void 0||e.role==="unknown")return" Couldn't confirm whether this artifact is yours.";return e.role==="owner"?"":` This artifact belongs to someone else \u2014 approving will ${r} ${n}.`}

@@ -1,0 +1,1 @@
+function vh(e){if(!mut(e)||e.taskId===void 0||!HP(e.origin)||e.uuid!==void 0||e.taskDelivery!==void 0||e.userResumeNotice===!0||e.stopHookActive===!0||e.shouldQuery===!1||typeof e.value!=="string")return!1;let r=e.value.trim(),n=`<${Fu}>`,s=`</${Fu}>`;return r.startsWith(n)&&r.indexOf(n,1)===-1&&r.endsWith(s)&&r.indexOf(s)===r.length-s.length&&zr(r,wC)!==null}
