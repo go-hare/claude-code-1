@@ -78,9 +78,24 @@ function isDesignOauthSlot(value: unknown): value is DesignOauthSlot {
 
 /** densable `upe(r)` @195240182 — `Un().readAsync()?.designOauth` */
 export async function readDesignOauth(
-  _storageV5?: unknown,
+  credentials?: unknown,
 ): Promise<DesignOauthSlot | null> {
   try {
+    if (
+      credentials !== null &&
+      credentials !== undefined &&
+      typeof credentials === 'object'
+    ) {
+      const bag = credentials as {
+        designOauth?: unknown
+        readAsync?: () => Promise<{ designOauth?: unknown } | null>
+      }
+      if (isDesignOauthSlot(bag.designOauth)) return bag.designOauth
+      if (typeof bag.readAsync === 'function') {
+        const stored = await bag.readAsync()
+        if (isDesignOauthSlot(stored?.designOauth)) return stored.designOauth
+      }
+    }
     if (designOauth) return designOauth
     const bag = await getSecureStorage().readAsync()
     const slot = (bag as { designOauth?: unknown } | null)?.designOauth
@@ -95,6 +110,41 @@ export async function readDesignOauth(
       },
     )
     return null
+  }
+}
+
+export type ClaudeAiOauthTokens = {
+  accessToken: string
+  refreshToken: string | null
+  scopes: string[]
+}
+
+/**
+ * densable `il` / `EK`. Host-cached (`jfe` promise until `O0e` / cache clear).
+ * Order: env `CLAUDE_CODE_OAUTH_TOKEN` via `mn`; then hover-rest `psr`
+ * (bg snapshot, then FD reader with this handle) or the sync FD read; a
+ * non-snapshot FD token is returned before storage; otherwise the credentials
+ * handle (`readCredentials` / `claudeAiOauth` / `readAsync`) or secure storage.
+ */
+export async function readClaudeAiOauthFromCredentials(
+  credentials: unknown,
+): Promise<ClaudeAiOauthTokens | null> {
+  const { getClaudeAIOAuthTokensAsync } = await import('../../utils/auth.js')
+  const tokens = await getClaudeAIOAuthTokensAsync(credentials)
+  if (
+    typeof tokens?.accessToken !== 'string' ||
+    tokens.accessToken.length === 0
+  ) {
+    return null
+  }
+  const scopes = tokens.scopes
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken:
+      typeof tokens.refreshToken === 'string' ? tokens.refreshToken : null,
+    scopes: Array.isArray(scopes)
+      ? scopes.filter((scope): scope is string => typeof scope === 'string')
+      : [],
   }
 }
 
@@ -233,6 +283,12 @@ export async function runDesignOAuthFlow(
   opts?: {
     onAuthUrl?: (url: string, manualUrl: string) => void
     onManualCode?: (set: (code: string, state: string) => void) => void
+    /**
+     * Host login passes `onAuthUrl` and must not also open a browser.
+     * `/design-login` passes both callbacks and opens a browser unless the
+     * session is remote.
+     */
+    skipBrowserOpen?: boolean
   },
 ): Promise<DesignLoginIqtResult> {
   if (signal?.aborted) {
@@ -277,7 +333,9 @@ export async function runDesignOAuthFlow(
         {
           loginWithClaudeAi: true,
           skipProfileFetch: true,
-          ...(onAuthUrl !== undefined ? { skipBrowserOpen: true } : {}),
+          ...((opts?.skipBrowserOpen ?? onAuthUrl !== undefined)
+            ? { skipBrowserOpen: true }
+            : {}),
         },
       ),
       new Promise<never>((_, reject) => {
