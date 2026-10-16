@@ -123,7 +123,13 @@ import { useSessionServices } from '../../context/sessionServices.js';
 import { type FeedbackDraftsSetting } from '../../utils/feedbackDrafts/constants.js';
 import { isSendFeedbackSessionEnabled, setFeedbackDraftsSetting } from '../../utils/feedbackDrafts/gates.js';
 import { isLeftArrowFleetEnabled } from '../../utils/leftArrowVia.js';
-import { isRefusalFallbackEnabled } from '../../utils/refusalFallback.js';
+import {
+  coerceSwitchModelsOnFlagConfigInput,
+  formatSwitchModelsOnFlagConfigValue,
+  isRefusalFallbackEnabled,
+  persistSwitchModelsOnFlag,
+  SWITCH_MODELS_ON_FLAG_LABELS,
+} from '../../utils/refusalFallback.js';
 import { uniq } from '../../utils/array.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { re } from '../../utils/plugins/escapeSafeText.js';
@@ -179,13 +185,22 @@ type SettingBase =
       searchText: string;
     };
 
-type Setting =
+export type ConfigSettingLock = {
+  reason?: string;
+  source?: string;
+  reasonShipsOffBox?: boolean;
+  writableWhileLocked?: string[];
+};
+
+export type Setting =
   | (SettingBase & {
       value: boolean;
       onChange(value: boolean): void;
       type: 'boolean';
       // densable row flag; panel does not consume it (CLI key=value host does).
       consentGated?: boolean;
+      canWithdraw?: () => boolean;
+      lock?: ConfigSettingLock;
     })
   | (SettingBase & {
       value: string;
@@ -194,15 +209,25 @@ type Setting =
       type: 'enum';
       // densable: pickToCommit opens EnumPicker (crossSessionInbound + IRn string+options).
       pickToCommit?: boolean;
+      // densable: coerce for /config key=value host (panel does not consume it).
+      coerce?(raw: string): string | undefined;
       // densable row flag; panel does not consume it (CLI key=value host does).
       consentGated?: boolean;
+      canWithdraw?: () => boolean;
+      lock?: ConfigSettingLock;
     })
   | (SettingBase & {
       // For enums that are set by a custom component, we don't need to pass options,
       // but we still need a value to display in the top-level config menu
       value: string;
+      options?: string[];
+      optionsHint?: string;
       onChange(value: string): void;
       type: 'managedEnum';
+      coerce?(raw: string): string | undefined;
+      consentGated?: boolean;
+      canWithdraw?: () => boolean;
+      lock?: ConfigSettingLock;
     });
 
 /** densable IRn `je` — plugin /config rows cannot be written over Remote Control. */
@@ -288,6 +313,15 @@ export async function persistPluginConfigOption(
   if (result.error) return { error: result.error };
   clearPluginOptionsCache();
   return;
+}
+
+/** densable we — core catalog then IRn plugin rows. */
+export function weConfigPluginRows(
+  core: Setting[],
+  plugins: readonly LoadedPlugin[],
+  opts: PluginConfigSettingsOpts = {},
+): Setting[] {
+  return [...core, ...pluginConfigSettings(plugins, opts)];
 }
 
 /**
@@ -386,248 +420,79 @@ type SubMenu =
   | 'Language'
   | 'EnableAutoUpdates'
   | 'EnumPicker';
-export function Config({
-  onClose,
-  context,
-  setTabsHidden,
-  onIsSearchModeChange,
-  contentHeight,
-}: Props): React.ReactNode {
-  const { headerFocused, focusHeader } = useTabHeaderFocus();
-  const insideModal = useIsInsideModal();
-  const [, setTheme] = useTheme();
-  const themeSetting = useThemeSetting();
-  const [globalConfig, setGlobalConfig] = useState(getGlobalConfig());
-  const initialConfig = React.useRef(getGlobalConfig());
-  const [settingsData, setSettingsData] = useState(getInitialSettings());
-  const initialSettingsData = React.useRef(getInitialSettings());
-  const [currentOutputStyle, setCurrentOutputStyle] = useState<OutputStyle>(
-    settingsData?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME,
-  );
-  const initialOutputStyle = React.useRef(currentOutputStyle);
-  const [currentLanguage, setCurrentLanguage] = useState<string | undefined>(settingsData?.language);
-  const initialLanguage = React.useRef(currentLanguage);
-  // densable 247 Ni: toggle reads he[tt()], not closed-over L / be[c??L].
-  const [selectedIndex, setSelectedIndexState] = useState(0);
-  const selectedIndexLive = useRef(0);
-  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
-    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
-    selectedIndexLive.current = next;
-    setSelectedIndexState(next);
-  };
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [isSearchMode, setIsSearchMode] = useState(false);
-  const isTerminalFocused = useTerminalFocus();
-  const terminalSize = useTerminalSize();
-  // densable sda: size against modal columns (terminal-4) when fullscreen.
-  const { rows, columns } = useModalOrTerminalSize(terminalSize);
-  // densable sda X: label col = min(44, max(14, columns-16))
-  const labelWidth = configLabelColumnWidth(columns);
-  // densable sda: measure keyboard-hint footer (flexShrink:0) so list height
-  // never steals its rows — fullscreen /config was clipping the footer.
-  const footerRef = useRef<DOMElement>(null);
-  const [footerHeight, setFooterHeight] = useState(1);
-  // contentHeight is set by Settings.tsx (same value passed to Tabs to fix
-  // pane height across all tabs — prevents layout jank when switching).
-  // densable: maxVisible = max(5, contentHeight - 8 - footerHeight).
-  const paneCap = contentHeight ?? Math.min(Math.floor(rows * 0.8), 30);
-  const maxVisible = configMaxVisibleRows(paneCap, footerHeight);
-  const mainLoopModel = useAppState(s => s.mainLoopModel);
-  const verbose = useAppState(s => s.verbose);
-  const thinkingEnabled = useAppState(s => s.thinkingEnabled);
-  const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
-  const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled);
-  const enabledPlugins = useAppState(s => s.plugins.enabled);
-  const [pluginConfigEpoch, setPluginConfigEpoch] = useState(0);
-  const currentDefaultPermissionMode = permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default');
-  // Show auto in the default-mode dropdown when the user has opted in OR the
-  // config is fully 'enabled' — even if currently circuit-broken ('disabled'),
-  // an opted-in user should still see it in settings (it's a temporary state).
-  const showAutoInDefaultModePicker = feature('TRANSCRIPT_CLASSIFIER')
-    ? hasAutoModeOptInAnySource() || getAutoModeEnabledState() === 'enabled'
-    : false;
-  // Chat/Transcript view picker is visible to entitled users (pass the GB
-  // gate) even if they haven't opted in this session — it IS the persistent
-  // opt-in. 'chat' written here is read at next startup by main.tsx which
-  // sets userMsgOptIn if still entitled.
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const showDefaultViewPicker =
-    feature('KAIROS') || feature('KAIROS_BRIEF')
-      ? (
-          require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js')
-        ).isBriefEntitled()
-      : false;
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  const setAppState = useSetAppState();
-  const [changes, setChanges] = useState<{ [key: string]: unknown }>({});
-  const initialThinkingEnabled = React.useRef(thinkingEnabled);
-  // Per-source settings snapshots for revert-on-escape. getInitialSettings()
-  // returns merged-across-sources which can't tell us what to delete vs
-  // restore; per-source snapshots + updateSettingsForSource's
-  // undefined-deletes-key semantics can. Lazy-init via useState (no setter) to
-  // avoid reading settings files on every render — useRef evaluates its arg
-  // eagerly even though only the first result is kept.
-  const [initialLocalSettings] = useState(() => getSettingsForSource('localSettings'));
-  const [initialUserSettings] = useState(() => getSettingsForSource('userSettings'));
-  const initialThemeSetting = React.useRef(themeSetting);
-  // AppState fields Config may modify — snapshot once at mount.
-  const store = useAppStateStore();
-  const [initialAppState] = useState(() => {
-    const s = store.getState();
-    return {
-      mainLoopModel: s.mainLoopModel,
-      mainLoopModelForSession: s.mainLoopModelForSession,
-      verbose: s.verbose,
-      thinkingEnabled: s.thinkingEnabled,
-      fastMode: s.fastMode,
-      promptSuggestionEnabled: s.promptSuggestionEnabled,
-      awaySummaryEnabled: s.awaySummaryEnabled,
-      isBriefOnly: s.isBriefOnly,
-      replBridgeEnabled: s.replBridgeEnabled,
-      replBridgeOutboundOnly: s.replBridgeOutboundOnly,
-      settings: s.settings,
-    };
-  });
-  // Bootstrap state snapshot — userMsgOptIn is outside AppState, so
-  // revertChanges needs to restore it separately. Without this, cycling
-  // defaultView to 'chat' then Escape leaves the tool active while the
-  // display filter reverts — the exact ambient-activation behavior this
-  // PR's entitlement/opt-in split is meant to prevent.
-  const [initialUserMsgOptIn] = useState(() => getUserMsgOptIn());
-  // Set on first user-visible change; gates revertChanges() on Escape so
-  // opening-then-closing doesn't trigger redundant disk writes.
-  const isDirty = React.useRef(false);
-  const [showThinkingWarning, setShowThinkingWarning] = useState(false);
-  const [showSubmenu, setShowSubmenu] = useState<SubMenu | null>(null);
-  // densable Ye/Fe — setting id for EnumPicker (pickToCommit enums).
-  const [enumPickerId, setEnumPickerId] = useState<string | null>(null);
-  // densable Pe / w0t — tengu_maple_sundial (default false).
-  const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
-  // densable w/T — Lf().hasClaudeMdExternalIncludesApproved === true.
-  const [externalIncludesApproved, setExternalIncludesApproved] = useState(
-    () => getCurrentProjectConfig().hasClaudeMdExternalIncludesApproved === true,
-  );
-  // densable Jr — Pe && managedEnum && showExternalIncludesDialog && w.
-  const isMapleJrExternalIncludes = useCallback(
-    (setting: Setting) =>
-      mapleSundial &&
-      setting.type === 'managedEnum' &&
-      setting.id === 'showExternalIncludesDialog' &&
-      externalIncludesApproved,
-    [mapleSundial, externalIncludesApproved],
-  );
-  // densable sda: measure keyboard-hint footer after paint so maxVisible can
-  // reserve its rows (flexShrink:0 alone isn't enough when list height is
-  // computed up-front).
-  useLayoutEffect(() => {
-    if (!footerRef.current) return;
-    const h = measureElement(footerRef.current).height;
-    if (h > 0 && h !== footerHeight) setFooterHeight(h);
-  }, [headerFocused, isSearchMode, columns, rows, footerHeight, showSubmenu]);
+
+/** densable hKe bag — snapshot the panel (or /config key=value ce()) feeds the catalog. */
+export type ConfigHkeBag = {
+  globalConfig: GlobalConfig;
+  setGlobalConfig: (next: GlobalConfig) => void;
+  settingsData: SettingsJson;
+  setSettingsData: React.Dispatch<React.SetStateAction<SettingsJson>>;
+  verbose: boolean;
+  thinkingEnabled: boolean;
+  isFastMode: boolean;
+  promptSuggestionEnabled: boolean;
+  mainLoopModel: string | null;
+  currentOutputStyle: OutputStyle;
+  currentLanguage: string | undefined;
+  themeSetting: string;
+  storageV5: unknown;
+  isConnectedToIde: boolean;
+  isFileCheckpointingAvailable: boolean;
+  shouldShowExternalIncludesToggle: boolean;
+  autoUpdaterDisabledReason: string | false | undefined;
+  showDefaultViewPicker: boolean;
+  showAutoInDefaultModePicker: boolean;
+  currentDefaultPermissionMode: PermissionMode;
+  mapleSundial: boolean;
+  F: (patch: SettingsJson) => unknown;
+  B: <K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) => unknown;
+  W: (updater: (current: GlobalConfig) => GlobalConfig) => void;
+  setAppState: ReturnType<typeof useSetAppState>;
+  setChanges: React.Dispatch<React.SetStateAction<{ [key: string]: unknown }>>;
+  onChangeMainModelConfig: (value: string | null) => void;
+  onChangeVerbose: (value: boolean) => void;
+};
+
+/**
+ * densable hKe — pure catalog of /config rows from a bag. Plugin rows are
+ * concatenated by we() (gold V1n), not here.
+ */
+export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
   const {
-    query: searchQuery,
-    setQuery: setSearchQuery,
-    cursorOffset: searchCursorOffset,
-  } = useSearchInput({
-    isActive: isSearchMode && showSubmenu === null && !headerFocused,
-    onExit: () => setIsSearchMode(false),
-    onExitUp: focusHeader,
-    // Ctrl+C/D must reach Settings' useExitOnCtrlCD; 'd' also avoids
-    // double-action (delete-char + exit-pending).
-    passthroughCtrlKeys: ['c', 'd'],
-  });
-
-  // Tell the parent when Config's own Esc handler is active so Settings cedes
-  // confirm:no. Only true when search mode owns the keyboard — not when the
-  // tab header is focused (then Settings must handle Esc-to-close).
-  const ownsEsc = isSearchMode && !headerFocused;
-  React.useEffect(() => {
-    onIsSearchModeChange?.(ownsEsc);
-  }, [ownsEsc, onIsSearchModeChange]);
-
-  const { storageV5 } = useSessionServices();
-  const isConnectedToIde = hasAccessToIDEExtensionDiffFeature(context.options.mcpClients);
-
-  const isFileCheckpointingAvailable = !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING);
-
-  // densable bvr F/B/W. Official: if $t() && D !== undefined, pass D as last
-  // persist arg. Local has no $t()/tn().storageV5 host — disk path (omit D).
-  function F(patch: SettingsJson) {
-    return updateSettingsForSource('userSettings', patch);
-  }
-  function B<K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) {
-    return updateSettingsForSource('userSettings', { [key]: value } as SettingsJson);
-  }
-  function W(updater: (current: GlobalConfig) => GlobalConfig) {
-    saveGlobalConfig(updater);
-  }
-
-  const memoryFiles = React.use(getMemoryFiles(true)) as MemoryFileInfo[];
-  const shouldShowExternalIncludesToggle = hasExternalClaudeMdIncludes(memoryFiles);
-
-  const autoUpdaterDisabledReason = getAutoUpdaterDisabledReason();
-
-  function onChangeMainModelConfig(value: string | null): void {
-    const previousModel = mainLoopModel;
-    logEvent('tengu_config_model_changed', {
-      from_model: previousModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      to_model: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    });
-    // densable 2.1.218 #31 — Rft/uU/dU on `/config model=` path
-    if (isFastModeEnabled()) {
-      clearFastModeCooldown();
-    }
-    let fastSuffix = '';
-    setAppState(prev => {
-      const prevFast = !!prev.fastMode;
-      const nextFast = resolveFastModeAfterModelSwitch(value, prev.fastMode);
-      const billed = isBilledAsExtraUsage(value, nextFast, isOpus1mMergeEnabled());
-      const { nextFastMode, suffix } = applyFastModeOnModelSwitch(value, prev.fastMode, {
-        billedAsExtraUsage: billed,
-      });
-      fastSuffix = suffix;
-      return {
-        ...prev,
-        mainLoopModel: value,
-        mainLoopModelForSession: null,
-        ...(nextFastMode !== prevFast ? { fastMode: nextFastMode } : null),
-      };
-    });
-    setChanges(prev => {
-      const valStr = modelDisplayString(value) + fastSuffix;
-      if ('model' in prev) {
-        const { model, ...rest } = prev;
-        return { ...rest, model: valStr };
-      }
-      return { ...prev, model: valStr };
-    });
-  }
-
-  function onChangeVerbose(value: boolean): void {
-    // Update the global config to persist the setting
-    W(current => ({ ...current, verbose: value }));
-    setGlobalConfig({ ...getGlobalConfig(), verbose: value });
-
-    // Update the app state for immediate UI feedback
-    setAppState(prev => ({
-      ...prev,
-      verbose: value,
-    }));
-    setChanges(prev => {
-      if ('verbose' in prev) {
-        const { verbose, ...rest } = prev;
-        return rest;
-      }
-      return { ...prev, verbose: value };
-    });
-  }
-
-  // TODO: Add MCP servers
-  // densable U_c — section-order the rows we already have; do not invent.
-  // densable Ee/IRn: append enabled-plugin userConfig rows after the core catalog.
-  void pluginConfigEpoch;
-  const settingsItems: Setting[] = [
-    ...sortConfigCatalog([
+    globalConfig,
+    setGlobalConfig,
+    settingsData,
+    setSettingsData,
+    verbose,
+    thinkingEnabled,
+    isFastMode,
+    promptSuggestionEnabled,
+    mainLoopModel,
+    currentOutputStyle,
+    currentLanguage,
+    themeSetting,
+    storageV5,
+    isConnectedToIde,
+    isFileCheckpointingAvailable,
+    shouldShowExternalIncludesToggle,
+    autoUpdaterDisabledReason,
+    showDefaultViewPicker,
+    showAutoInDefaultModePicker,
+    currentDefaultPermissionMode,
+    mapleSundial,
+    F,
+    B,
+    W,
+    setAppState,
+    setChanges,
+    onChangeMainModelConfig,
+    onChangeVerbose,
+  } = n;
+  void setAppState;
+  void setChanges;
+  void mainLoopModel;
+  return {
+    settings: sortConfigCatalog([
       // Global settings
       {
         id: 'autoCompact',
@@ -668,23 +533,24 @@ export function Config({
             } satisfies Setting,
           ]
         : []),
-      // densable E6i()=DX() — refusal-fallback lane. Label pUm.
+      // densable vfn()?[{id:"switchModelsOnFlag"... type:"enum" B9/ro/Efn}]
       ...(isRefusalFallbackEnabled()
         ? [
             {
               id: 'switchModelsOnFlag',
               label: 'Switch models when a message is flagged',
-              value: settingsData?.switchModelsOnFlag ?? true,
-              type: 'boolean' as const,
-              onChange(switchModelsOnFlag: boolean) {
-                F({ switchModelsOnFlag });
+              value: formatSwitchModelsOnFlagConfigValue(settingsData?.switchModelsOnFlag),
+              options: [SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically, SWITCH_MODELS_ON_FLAG_LABELS.askEachTime],
+              type: 'enum' as const,
+              pickToCommit: true,
+              coerce: coerceSwitchModelsOnFlagConfigInput,
+              onChange(value: string) {
+                const enabled = value === SWITCH_MODELS_ON_FLAG_LABELS.switchAutomatically;
                 setSettingsData(prev => ({
                   ...prev,
-                  switchModelsOnFlag,
+                  switchModelsOnFlag: enabled,
                 }));
-                logEvent('tengu_refusal_fallback_setting_changed', {
-                  enabled: switchModelsOnFlag,
-                });
+                void persistSwitchModelsOnFlag(enabled, 'config', storageV5);
               },
             } satisfies Setting,
           ]
@@ -1379,7 +1245,8 @@ export function Config({
             ? [
                 {
                   id: 'defaultToAgentsView',
-                  label: 'Open agents view by default',
+                  // densable 2.1.289 bvr catalog label (SEA "Start in agent view")
+                  label: 'Start in agent view',
                   value: globalConfig.defaultToAgentsView ?? false,
                   type: 'boolean' as const,
                   onChange(defaultToAgentsView: boolean) {
@@ -1996,14 +1863,366 @@ export function Config({
           ]
         : []),
     ]),
-    ...pluginConfigSettings(enabledPlugins, {
-      storageV5,
-      ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
-      onPersisted() {
-        setPluginConfigEpoch(n => n + 1);
-      },
-    }),
-  ];
+  };
+}
+
+/**
+ * densable ce — bag for hKe from a /config command context (no panel React
+ * setters). Gold `shouldShowExternalIncludesToggle: !1`.
+ */
+export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHkeBag {
+  const r = context.getAppState();
+  const settingsData = getInitialSettings();
+  const globalConfig = getGlobalConfig();
+  const noopSetSettings: ConfigHkeBag['setSettingsData'] = () => {};
+  const noopSetChanges: ConfigHkeBag['setChanges'] = () => {};
+  function F(patch: SettingsJson) {
+    return updateSettingsForSource('userSettings', patch, undefined, context.storageV5);
+  }
+  function B<K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) {
+    return updateSettingsForSource('userSettings', { [key]: value } as SettingsJson, undefined, context.storageV5);
+  }
+  function W(updater: (current: GlobalConfig) => GlobalConfig) {
+    saveGlobalConfig(updater);
+  }
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const showDefaultViewPicker =
+    feature('KAIROS') || feature('KAIROS_BRIEF')
+      ? (
+          require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js')
+        ).isBriefEntitled()
+      : false;
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return {
+    globalConfig,
+    setGlobalConfig: next => {
+      saveGlobalConfig(() => next);
+    },
+    settingsData,
+    setSettingsData: noopSetSettings,
+    verbose: r.verbose,
+    thinkingEnabled: r.thinkingEnabled,
+    isFastMode: isFastModeEnabled() ? r.fastMode : false,
+    promptSuggestionEnabled: r.promptSuggestionEnabled,
+    mainLoopModel: r.mainLoopModel,
+    currentOutputStyle: (settingsData?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME) as OutputStyle,
+    currentLanguage: settingsData?.language,
+    themeSetting: globalConfig.theme,
+    storageV5: context.storageV5,
+    isConnectedToIde: hasAccessToIDEExtensionDiffFeature(context.options.mcpClients),
+    isFileCheckpointingAvailable: !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING),
+    shouldShowExternalIncludesToggle: false,
+    autoUpdaterDisabledReason: getAutoUpdaterDisabledReason(),
+    showDefaultViewPicker,
+    showAutoInDefaultModePicker: feature('TRANSCRIPT_CLASSIFIER')
+      ? hasAutoModeOptInAnySource() || getAutoModeEnabledState() === 'enabled'
+      : false,
+    currentDefaultPermissionMode: permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default'),
+    mapleSundial: getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false),
+    F,
+    B,
+    W,
+    setAppState: context.setAppState,
+    setChanges: noopSetChanges,
+    onChangeMainModelConfig(value) {
+      if (isFastModeEnabled()) clearFastModeCooldown();
+      context.setAppState(prev => {
+        const prevFast = !!prev.fastMode;
+        const nextFast = resolveFastModeAfterModelSwitch(value, prev.fastMode);
+        const billed = isBilledAsExtraUsage(value, nextFast, isOpus1mMergeEnabled());
+        const { nextFastMode } = applyFastModeOnModelSwitch(value, prev.fastMode, { billedAsExtraUsage: billed });
+        return {
+          ...prev,
+          mainLoopModel: value,
+          mainLoopModelForSession: null,
+          ...(nextFastMode !== prevFast ? { fastMode: nextFastMode } : null),
+        };
+      });
+    },
+    onChangeVerbose(value) {
+      W(current => ({ ...current, verbose: value }));
+      context.setAppState(prev => ({ ...prev, verbose: value }));
+    },
+  };
+}
+
+export function Config({
+  onClose,
+  context,
+  setTabsHidden,
+  onIsSearchModeChange,
+  contentHeight,
+}: Props): React.ReactNode {
+  const { headerFocused, focusHeader } = useTabHeaderFocus();
+  const insideModal = useIsInsideModal();
+  const [, setTheme] = useTheme();
+  const themeSetting = useThemeSetting();
+  const [globalConfig, setGlobalConfig] = useState(getGlobalConfig());
+  const initialConfig = React.useRef(getGlobalConfig());
+  const [settingsData, setSettingsData] = useState(getInitialSettings());
+  const initialSettingsData = React.useRef(getInitialSettings());
+  const [currentOutputStyle, setCurrentOutputStyle] = useState<OutputStyle>(
+    settingsData?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME,
+  );
+  const initialOutputStyle = React.useRef(currentOutputStyle);
+  const [currentLanguage, setCurrentLanguage] = useState<string | undefined>(settingsData?.language);
+  const initialLanguage = React.useRef(currentLanguage);
+  // densable 247 Ni: toggle reads he[tt()], not closed-over L / be[c??L].
+  const [selectedIndex, setSelectedIndexState] = useState(0);
+  const selectedIndexLive = useRef(0);
+  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
+    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
+    selectedIndexLive.current = next;
+    setSelectedIndexState(next);
+  };
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const isTerminalFocused = useTerminalFocus();
+  const terminalSize = useTerminalSize();
+  // densable sda: size against modal columns (terminal-4) when fullscreen.
+  const { rows, columns } = useModalOrTerminalSize(terminalSize);
+  // densable sda X: label col = min(44, max(14, columns-16))
+  const labelWidth = configLabelColumnWidth(columns);
+  // densable sda: measure keyboard-hint footer (flexShrink:0) so list height
+  // never steals its rows — fullscreen /config was clipping the footer.
+  const footerRef = useRef<DOMElement>(null);
+  const [footerHeight, setFooterHeight] = useState(1);
+  // contentHeight is set by Settings.tsx (same value passed to Tabs to fix
+  // pane height across all tabs — prevents layout jank when switching).
+  // densable: maxVisible = max(5, contentHeight - 8 - footerHeight).
+  const paneCap = contentHeight ?? Math.min(Math.floor(rows * 0.8), 30);
+  const maxVisible = configMaxVisibleRows(paneCap, footerHeight);
+  const mainLoopModel = useAppState(s => s.mainLoopModel);
+  const verbose = useAppState(s => s.verbose);
+  const thinkingEnabled = useAppState(s => s.thinkingEnabled);
+  const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
+  const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled);
+  const enabledPlugins = useAppState(s => s.plugins.enabled);
+  const [pluginConfigEpoch, setPluginConfigEpoch] = useState(0);
+  const currentDefaultPermissionMode = permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default');
+  // Show auto in the default-mode dropdown when the user has opted in OR the
+  // config is fully 'enabled' — even if currently circuit-broken ('disabled'),
+  // an opted-in user should still see it in settings (it's a temporary state).
+  const showAutoInDefaultModePicker = feature('TRANSCRIPT_CLASSIFIER')
+    ? hasAutoModeOptInAnySource() || getAutoModeEnabledState() === 'enabled'
+    : false;
+  // Chat/Transcript view picker is visible to entitled users (pass the GB
+  // gate) even if they haven't opted in this session — it IS the persistent
+  // opt-in. 'chat' written here is read at next startup by main.tsx which
+  // sets userMsgOptIn if still entitled.
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const showDefaultViewPicker =
+    feature('KAIROS') || feature('KAIROS_BRIEF')
+      ? (
+          require('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js') as typeof import('@claude-code/builtin-tools/tools/BriefTool/BriefTool.js')
+        ).isBriefEntitled()
+      : false;
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const setAppState = useSetAppState();
+  const [changes, setChanges] = useState<{ [key: string]: unknown }>({});
+  const initialThinkingEnabled = React.useRef(thinkingEnabled);
+  // Per-source settings snapshots for revert-on-escape. getInitialSettings()
+  // returns merged-across-sources which can't tell us what to delete vs
+  // restore; per-source snapshots + updateSettingsForSource's
+  // undefined-deletes-key semantics can. Lazy-init via useState (no setter) to
+  // avoid reading settings files on every render — useRef evaluates its arg
+  // eagerly even though only the first result is kept.
+  const [initialLocalSettings] = useState(() => getSettingsForSource('localSettings'));
+  const [initialUserSettings] = useState(() => getSettingsForSource('userSettings'));
+  const initialThemeSetting = React.useRef(themeSetting);
+  // AppState fields Config may modify — snapshot once at mount.
+  const store = useAppStateStore();
+  const [initialAppState] = useState(() => {
+    const s = store.getState();
+    return {
+      mainLoopModel: s.mainLoopModel,
+      mainLoopModelForSession: s.mainLoopModelForSession,
+      verbose: s.verbose,
+      thinkingEnabled: s.thinkingEnabled,
+      fastMode: s.fastMode,
+      promptSuggestionEnabled: s.promptSuggestionEnabled,
+      awaySummaryEnabled: s.awaySummaryEnabled,
+      isBriefOnly: s.isBriefOnly,
+      replBridgeEnabled: s.replBridgeEnabled,
+      replBridgeOutboundOnly: s.replBridgeOutboundOnly,
+      settings: s.settings,
+    };
+  });
+  // Bootstrap state snapshot — userMsgOptIn is outside AppState, so
+  // revertChanges needs to restore it separately. Without this, cycling
+  // defaultView to 'chat' then Escape leaves the tool active while the
+  // display filter reverts — the exact ambient-activation behavior this
+  // PR's entitlement/opt-in split is meant to prevent.
+  const [initialUserMsgOptIn] = useState(() => getUserMsgOptIn());
+  // Set on first user-visible change; gates revertChanges() on Escape so
+  // opening-then-closing doesn't trigger redundant disk writes.
+  const isDirty = React.useRef(false);
+  const [showThinkingWarning, setShowThinkingWarning] = useState(false);
+  const [showSubmenu, setShowSubmenu] = useState<SubMenu | null>(null);
+  // densable Ye/Fe — setting id for EnumPicker (pickToCommit enums).
+  const [enumPickerId, setEnumPickerId] = useState<string | null>(null);
+  // densable Pe / w0t — tengu_maple_sundial (default false).
+  const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
+  // densable w/T — Lf().hasClaudeMdExternalIncludesApproved === true.
+  const [externalIncludesApproved, setExternalIncludesApproved] = useState(
+    () => getCurrentProjectConfig().hasClaudeMdExternalIncludesApproved === true,
+  );
+  // densable Jr — Pe && managedEnum && showExternalIncludesDialog && w.
+  const isMapleJrExternalIncludes = useCallback(
+    (setting: Setting) =>
+      mapleSundial &&
+      setting.type === 'managedEnum' &&
+      setting.id === 'showExternalIncludesDialog' &&
+      externalIncludesApproved,
+    [mapleSundial, externalIncludesApproved],
+  );
+  // densable sda: measure keyboard-hint footer after paint so maxVisible can
+  // reserve its rows (flexShrink:0 alone isn't enough when list height is
+  // computed up-front).
+  useLayoutEffect(() => {
+    if (!footerRef.current) return;
+    const h = measureElement(footerRef.current).height;
+    if (h > 0 && h !== footerHeight) setFooterHeight(h);
+  }, [headerFocused, isSearchMode, columns, rows, footerHeight, showSubmenu]);
+  const {
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    cursorOffset: searchCursorOffset,
+  } = useSearchInput({
+    isActive: isSearchMode && showSubmenu === null && !headerFocused,
+    onExit: () => setIsSearchMode(false),
+    onExitUp: focusHeader,
+    // Ctrl+C/D must reach Settings' useExitOnCtrlCD; 'd' also avoids
+    // double-action (delete-char + exit-pending).
+    passthroughCtrlKeys: ['c', 'd'],
+  });
+
+  // Tell the parent when Config's own Esc handler is active so Settings cedes
+  // confirm:no. Only true when search mode owns the keyboard — not when the
+  // tab header is focused (then Settings must handle Esc-to-close).
+  const ownsEsc = isSearchMode && !headerFocused;
+  React.useEffect(() => {
+    onIsSearchModeChange?.(ownsEsc);
+  }, [ownsEsc, onIsSearchModeChange]);
+
+  const { storageV5 } = useSessionServices();
+  const isConnectedToIde = hasAccessToIDEExtensionDiffFeature(context.options.mcpClients);
+
+  const isFileCheckpointingAvailable = !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING);
+
+  // densable bvr F/B/W. Official: if $t() && D !== undefined, pass D as last
+  // persist arg. Local has no $t()/tn().storageV5 host — disk path (omit D).
+  function F(patch: SettingsJson) {
+    return updateSettingsForSource('userSettings', patch);
+  }
+  function B<K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) {
+    return updateSettingsForSource('userSettings', { [key]: value } as SettingsJson);
+  }
+  function W(updater: (current: GlobalConfig) => GlobalConfig) {
+    saveGlobalConfig(updater);
+  }
+
+  const memoryFiles = React.use(getMemoryFiles(true)) as MemoryFileInfo[];
+  const shouldShowExternalIncludesToggle = hasExternalClaudeMdIncludes(memoryFiles);
+
+  const autoUpdaterDisabledReason = getAutoUpdaterDisabledReason();
+
+  function onChangeMainModelConfig(value: string | null): void {
+    const previousModel = mainLoopModel;
+    logEvent('tengu_config_model_changed', {
+      from_model: previousModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      to_model: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    // densable 2.1.218 #31 — Rft/uU/dU on `/config model=` path
+    if (isFastModeEnabled()) {
+      clearFastModeCooldown();
+    }
+    let fastSuffix = '';
+    setAppState(prev => {
+      const prevFast = !!prev.fastMode;
+      const nextFast = resolveFastModeAfterModelSwitch(value, prev.fastMode);
+      const billed = isBilledAsExtraUsage(value, nextFast, isOpus1mMergeEnabled());
+      const { nextFastMode, suffix } = applyFastModeOnModelSwitch(value, prev.fastMode, {
+        billedAsExtraUsage: billed,
+      });
+      fastSuffix = suffix;
+      return {
+        ...prev,
+        mainLoopModel: value,
+        mainLoopModelForSession: null,
+        ...(nextFastMode !== prevFast ? { fastMode: nextFastMode } : null),
+      };
+    });
+    setChanges(prev => {
+      const valStr = modelDisplayString(value) + fastSuffix;
+      if ('model' in prev) {
+        const { model, ...rest } = prev;
+        return { ...rest, model: valStr };
+      }
+      return { ...prev, model: valStr };
+    });
+  }
+
+  function onChangeVerbose(value: boolean): void {
+    // Update the global config to persist the setting
+    W(current => ({ ...current, verbose: value }));
+    setGlobalConfig({ ...getGlobalConfig(), verbose: value });
+
+    // Update the app state for immediate UI feedback
+    setAppState(prev => ({
+      ...prev,
+      verbose: value,
+    }));
+    setChanges(prev => {
+      if ('verbose' in prev) {
+        const { verbose, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, verbose: value };
+    });
+  }
+
+  // TODO: Add MCP servers
+  // densable U_c — section-order the rows we already have; do not invent.
+  // densable Ee/IRn: append enabled-plugin userConfig rows after the core catalog.
+  void pluginConfigEpoch;
+  const { settings: coreSettings } = hKe({
+    globalConfig,
+    setGlobalConfig,
+    settingsData,
+    setSettingsData,
+    verbose,
+    thinkingEnabled,
+    isFastMode,
+    promptSuggestionEnabled,
+    mainLoopModel,
+    currentOutputStyle,
+    currentLanguage,
+    themeSetting,
+    storageV5,
+    isConnectedToIde,
+    isFileCheckpointingAvailable,
+    shouldShowExternalIncludesToggle,
+    autoUpdaterDisabledReason,
+    showDefaultViewPicker,
+    showAutoInDefaultModePicker,
+    currentDefaultPermissionMode,
+    mapleSundial,
+    F,
+    B,
+    W,
+    setAppState,
+    setChanges,
+    onChangeMainModelConfig,
+    onChangeVerbose,
+  });
+  const settingsItems: Setting[] = weConfigPluginRows(coreSettings, enabledPlugins, {
+    storageV5,
+    ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
+    onPersisted() {
+      setPluginConfigEpoch(n => n + 1);
+    },
+  });
 
   // Filter settings based on search query
   const filteredSettingsItems = React.useMemo(() => {
