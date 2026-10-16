@@ -42,6 +42,8 @@ export type GoalCheckinActiveGoal = {
   lastDeferralPassAt?: number
   /** densable 2.1.246 idleCheckinCount — burst cap, cleared by d9n. */
   idleCheckinCount?: number
+  /** densable lastReason — Stop not_met evaluator reason. */
+  lastReason?: string
 }
 
 export type GoalDeferringTask = {

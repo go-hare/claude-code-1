@@ -1,215 +1,202 @@
 /**
- * `/goal` slash command — set, view, or control the persistent thread
- * goal that drives auto-continuation across turns.
+ * densable 2.1.289 `/goal` local-jsx — Dialog `v` + helper `k` + `_t` call.
  *
- * Subcommands
- * -----------
- * `/goal`              -> show current status
- * `/goal status`       -> alias of bare `/goal`
- * `/goal clear`        -> remove the active goal (persists tombstone)
- * `/goal pause`        -> pause auto-continuation
- * `/goal resume`       -> resume from paused state
- * `/goal continue`     -> reset turn counter after max-turns and continue
- * `/goal complete`     -> mark complete (manual override; tools usually do this)
- * `/goal <objective>`  -> set a new goal; if one is already active and not
- *                         complete, a confirmation dialog appears first.
+ * Gold empty: `if(t==="")return e(v,{messages,onDone:()=>u(void 0,{display:"skip"})})`
+ * Gold set: `u(\`Goal set: ${t}\`,{shouldQuery:!0,metaMessages:[Xbn(t)]})`
+ * Gold clear/too_long/gate: onDone display:"system", return null.
+ *
+ * Do not export minify names (v/k/_t/Xqr/s3t/gi). Do not invent a footer pill.
  */
 import * as React from 'react';
-
-import type { LocalJSXCommandContext } from 'src/commands.js';
+import { useState } from 'react';
+import { Box, Byline, Dialog, KeyboardShortcutHint, StatusIcon, Text, useInterval } from '@anthropic/ink';
+import { getTotalOutputTokens } from '../../bootstrap/state.js';
+import { useAppState } from '../../state/AppState.js';
+import type { LocalJSXCommandCall } from '../../types/command.js';
+import type { Message } from '../../types/message.js';
+import { formatDuration, formatNumber } from '../../utils/format.js';
+import { firstLineOf, plural } from '../../utils/stringUtils.js';
 import {
-  clearGoal,
-  completeGoal,
-  continueGoalFromMaxTurns,
-  formatGoalElapsed,
-  formatGoalStatusLabel,
-  getGoal,
-  incrementGoalTurns,
-  MAX_GOAL_TURNS,
-  pauseGoal,
-  resumeGoal,
-  setGoal,
-} from 'src/services/goal/goalState.js';
-import { persistCurrentGoal, persistGoalClear } from 'src/services/goal/goalStorage.js';
-import type { LocalJSXCommandOnDone } from 'src/types/command.js';
-import { removeByFilter } from 'src/utils/messageQueueManager.js';
-import { GoalReplaceConfirmDialog } from './GoalReplaceConfirmDialog.js';
+  applyGoalClear,
+  applyGoalSet,
+  GOAL_SYSTEM_MESSAGE,
+  isGoalClearKeyword,
+  logGoalTooLong,
+  MAX_GOAL_CONDITION_LENGTH,
+} from '../goal.js';
 
-const MAX_OBJECTIVE_CHARS = 4000;
-const MAX_DISPLAY_CHARS = 80;
+/** densable s3t = "◎" (◎). */
+const GOAL_ACTIVE_MARK = '◎';
 
-function truncateForDisplay(objective: string): string {
-  const firstLine = objective.split('\n')[0] ?? objective;
-  if (firstLine.length <= MAX_DISPLAY_CHARS) return firstLine;
-  return firstLine.slice(0, MAX_DISPLAY_CHARS) + '…';
-}
+type GoalStatusDialogProps = {
+  messages: Message[];
+  onDone: () => void;
+};
 
-function drainGoalContinuationQueue(): void {
-  removeByFilter(cmd => {
-    const kind =
-      typeof cmd.origin === 'string'
-        ? cmd.origin
-        : cmd.origin && typeof cmd.origin === 'object'
-          ? cmd.origin.kind
-          : undefined;
-    return kind === 'goal-continuation' || kind === 'goal-budget-limit';
-  });
-}
+type AchievedGoal = {
+  condition: string;
+  iterations?: number;
+  durationMs?: number;
+  tokens?: number;
+};
 
-function formatGoalStatus(): string {
-  const goal = getGoal();
-  if (!goal) {
-    return 'No active goal. Set one with `/goal <objective>`.';
+/** densable Xqr — last non-sentinel met goal_status. */
+function findLastAchievedGoal(messages: readonly Message[]): AchievedGoal | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const attachment = msg?.type === 'attachment' ? msg.attachment : undefined;
+    if (attachment?.type !== 'goal_status') continue;
+    if (!attachment.met || attachment.sentinel) continue;
+    const condition = attachment.condition;
+    if (typeof condition !== 'string' || condition.length === 0) continue;
+    return {
+      condition,
+      iterations: typeof attachment.iterations === 'number' ? attachment.iterations : undefined,
+      durationMs: typeof attachment.durationMs === 'number' ? attachment.durationMs : undefined,
+      tokens: typeof attachment.tokens === 'number' ? attachment.tokens : undefined,
+    };
   }
-  const tokens = goal.tokenBudget !== null ? `${goal.tokensUsed} / ${goal.tokenBudget}` : `${goal.tokensUsed}`;
-  const lines = [
-    `Goal: ${goal.objective}`,
-    `Status: ${formatGoalStatusLabel(goal.status)}`,
-    `Time: ${formatGoalElapsed(goal)}`,
-    `Tokens: ${tokens}`,
-    `Continuation turns: ${goal.turnsExecuted}`,
-  ];
+  return null;
+}
 
-  if (goal.status === 'max_turns') {
-    lines.push(
-      `Hint: Max continuation turns reached (${MAX_GOAL_TURNS}). Run \`/goal continue\` to reset and continue.`,
+/** densable k — "Label: children" row. */
+function GoalField({ label, children }: { label: string; children: React.ReactNode }): React.ReactNode {
+  return (
+    <Box flexDirection="row">
+      <Box flexShrink={0}>
+        <Text dimColor>
+          {label}
+          {': '}
+        </Text>
+      </Box>
+      <Box flexGrow={1}>
+        <Text wrap="wrap">{children}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+/** densable Xr — empty-state body + optional hint. */
+function EmptyHint({ children, hint }: { children: React.ReactNode; hint?: React.ReactNode }): React.ReactNode {
+  if (!hint) {
+    return <Text dimColor>{children}</Text>;
+  }
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>{children}</Text>
+      <Text dimColor>{hint}</Text>
+    </Box>
+  );
+}
+
+function GoalStatusDialog({ messages, onDone }: GoalStatusDialogProps): React.ReactNode {
+  const activeGoal = useAppState(s => s.activeGoal);
+  const [, setTick] = useState(0);
+  useInterval(() => setTick(n => n + 1), activeGoal ? 1000 : null);
+
+  if (activeGoal) {
+    const elapsed = formatDuration(Date.now() - activeGoal.setAt, {
+      mostSignificantOnly: true,
+    });
+    const tokenDelta = getTotalOutputTokens() - activeGoal.tokensAtStart;
+    const subtitle = [
+      `running ${elapsed}`,
+      activeGoal.iterations > 0 && `${activeGoal.iterations} ${plural(activeGoal.iterations, 'turn')}`,
+      `${formatNumber(tokenDelta)} tokens`,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <Dialog
+        title={`${GOAL_ACTIVE_MARK} Goal active`}
+        subtitle={subtitle}
+        onCancel={onDone}
+        inputGuide={() => (
+          <Byline>
+            <Text>/goal clear to stop early</Text>
+            <KeyboardShortcutHint shortcut="Esc" action="dismiss" />
+          </Byline>
+        )}
+      >
+        <Box flexDirection="column">
+          <GoalField label="Goal">{activeGoal.condition}</GoalField>
+          {activeGoal.lastReason ? (
+            <GoalField label="Last check">{firstLineOf(activeGoal.lastReason.trim())}</GoalField>
+          ) : null}
+        </Box>
+      </Dialog>
     );
   }
 
-  return lines.join('\n');
-}
-
-function applySetGoal(objective: string): string {
-  setGoal(objective);
-  incrementGoalTurns();
-  persistCurrentGoal();
-  return 'Goal set.';
-}
-
-export async function call(
-  onDone: LocalJSXCommandOnDone,
-  _context: LocalJSXCommandContext,
-  args: string,
-): Promise<React.ReactNode> {
-  const trimmed = args.trim();
-
-  if (!trimmed || trimmed.toLowerCase() === 'status') {
-    onDone(formatGoalStatus(), { display: 'system' });
-    return null;
-  }
-
-  const lower = trimmed.toLowerCase();
-
-  if (lower === 'clear') {
-    const cleared = clearGoal();
-    if (cleared) {
-      persistGoalClear();
-      drainGoalContinuationQueue();
+  const achieved = findLastAchievedGoal(messages);
+  if (achieved) {
+    const bits: string[] = [];
+    if (achieved.durationMs !== undefined) {
+      bits.push(formatDuration(achieved.durationMs, { mostSignificantOnly: true }));
     }
-    onDone(cleared ? 'Goal cleared.' : 'No active goal to clear.', {
-      display: 'system',
-    });
-    return null;
-  }
-
-  if (lower === 'pause') {
-    const g = pauseGoal();
-    if (g) {
-      persistCurrentGoal();
-      drainGoalContinuationQueue();
+    if (achieved.iterations !== undefined) {
+      bits.push(`${achieved.iterations} ${plural(achieved.iterations, 'turn')}`);
     }
-    onDone(g ? 'Goal paused.' : 'No active goal to pause.', {
-      display: 'system',
-    });
-    return null;
-  }
-
-  if (lower === 'resume') {
-    const current = getGoal();
-    if (current?.status === 'max_turns') {
-      onDone(
-        `Goal reached max continuation turns (${MAX_GOAL_TURNS}). Run \`/goal continue\` to reset turn counter and continue.`,
-        { display: 'system' },
-      );
-      return null;
+    if (achieved.tokens !== undefined) {
+      bits.push(`${formatNumber(achieved.tokens)} tokens`);
     }
-    const g = resumeGoal();
-    if (g) persistCurrentGoal();
-    onDone(g ? 'Goal resumed.' : 'No paused goal to resume.', {
-      display: 'system',
-      shouldQuery: Boolean(g),
-    });
-    return null;
-  }
-
-  if (lower === 'continue') {
-    const g = continueGoalFromMaxTurns();
-    if (g) persistCurrentGoal();
-    onDone(
-      g
-        ? `Goal continuation counter reset (0/${MAX_GOAL_TURNS}). Continuing...`
-        : 'Current goal is not in max-turns state.',
-      {
-        display: 'system',
-        shouldQuery: Boolean(g),
-      },
+    return (
+      <Dialog
+        title={
+          <>
+            <StatusIcon status="success" withSpace />
+            Goal achieved
+          </>
+        }
+        subtitle={bits.join(' · ')}
+        color="success"
+        onCancel={onDone}
+        inputGuide={() => (
+          <Byline>
+            <Text>/goal {'<condition>'} to set another</Text>
+            <KeyboardShortcutHint shortcut="Esc" action="dismiss" />
+          </Byline>
+        )}
+      >
+        <GoalField label="Goal">{achieved.condition}</GoalField>
+      </Dialog>
     );
-    return null;
-  }
-
-  if (lower === 'complete') {
-    const g = completeGoal();
-    if (g) {
-      persistCurrentGoal();
-      drainGoalContinuationQueue();
-    }
-    onDone(g ? 'Goal marked complete.' : 'No active goal to complete.', {
-      display: 'system',
-    });
-    return null;
-  }
-
-  if (trimmed.length > MAX_OBJECTIVE_CHARS) {
-    onDone(
-      `Goal objective is too long (${trimmed.length} chars; limit ${MAX_OBJECTIVE_CHARS}). Save the detailed instructions to a file and reference it from a shorter objective.`,
-      { display: 'system' },
-    );
-    return null;
-  }
-
-  const existing = getGoal();
-  const needsConfirmation = existing && existing.status !== 'complete';
-
-  if (!needsConfirmation) {
-    const summary = applySetGoal(trimmed);
-    onDone(summary, {
-      display: 'system',
-      shouldQuery: true,
-      displayArgs: truncateForDisplay(trimmed),
-      metaMessages: [`<goal-objective-updated>\n${trimmed}\n</goal-objective-updated>`],
-    });
-    return null;
   }
 
   return (
-    <GoalReplaceConfirmDialog
-      currentGoal={existing}
-      newObjective={trimmed}
-      onConfirm={() => {
-        drainGoalContinuationQueue();
-        const summary = applySetGoal(trimmed);
-        onDone(summary, {
-          display: 'system',
-          shouldQuery: true,
-          displayArgs: truncateForDisplay(trimmed),
-          metaMessages: [`<goal-objective-updated>\n${trimmed}\n</goal-objective-updated>`],
-        });
-      }}
-      onCancel={() => {
-        onDone('Kept the current goal. New objective discarded.', {
-          display: 'system',
-        });
-      }}
-    />
+    <Dialog title="Goal" onCancel={onDone} inputGuide={() => <KeyboardShortcutHint shortcut="Esc" action="dismiss" />}>
+      <EmptyHint hint="/goal <condition> to set one">No goal set</EmptyHint>
+    </Dialog>
   );
 }
+
+export const call: LocalJSXCommandCall = async (onDone, context, args) => {
+  const input = args.trim();
+  if (input === '') {
+    return <GoalStatusDialog messages={context.messages} onDone={() => onDone(undefined, { display: 'skip' })} />;
+  }
+  if (isGoalClearKeyword(input)) {
+    const cleared = await applyGoalClear(context);
+    onDone(cleared === null ? 'No goal set' : `Goal cleared: ${cleared}`, {
+      display: 'system',
+    });
+    return null;
+  }
+  if (input.length > MAX_GOAL_CONDITION_LENGTH) {
+    logGoalTooLong();
+    onDone(`Goal condition is limited to ${MAX_GOAL_CONDITION_LENGTH} characters (got ${input.length})`, {
+      display: 'system',
+    });
+    return null;
+  }
+  const gate = await applyGoalSet(input, context);
+  if (gate !== null) {
+    onDone(gate, { display: 'system' });
+    return null;
+  }
+  onDone(`Goal set: ${input}`, {
+    shouldQuery: true,
+    metaMessages: [GOAL_SYSTEM_MESSAGE(input)],
+  });
+  return null;
+};

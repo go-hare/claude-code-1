@@ -66,7 +66,7 @@ export function getGoalRestoreGate(): { message: string; code: string } | null {
   ) {
     return {
       message:
-        "/goal can't run while hooks are disabled (disableAllHooks or allowManagedHooksOnly is set in settings or by policy).",
+        "/goal can't run while hooks are restricted (disableAllHooks or allowManagedHooksOnly is set in settings or by policy).",
       code: 'hooks_gate',
     }
   }

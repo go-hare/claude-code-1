@@ -1,8 +1,7 @@
 /**
  * densable 2.1.239 ProposeGoalTool — extract 1:1 (ikw / vgi).
  *
- * Independent of GoalTool (get/update only). Always in the base pool;
- * isEnabled() gates via GB + session shape + modelProposedGoals.
+ * Always in the base pool; isEnabled() gates via GB + session + modelProposedGoals.
  */
 
 import { z } from 'zod/v4'

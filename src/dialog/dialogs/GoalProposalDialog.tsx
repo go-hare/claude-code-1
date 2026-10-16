@@ -43,7 +43,7 @@ export function GoalProposalDialog({ payload, onAnswer }: Props): React.ReactNod
     : 'Claude has finished its current work — approving starts it working again, toward this goal. Esc dismisses without setting it.';
   // densable wt(nFA) — replace-line iff AppState.activeGoal exists.
   // Gold xou: `Y4t(fp(wou.condition), 200)` — first line then official truncate.
-  // Do not read the in-memory goalState store — /goal writes activeGoal.
+  // Live replace-line from AppState.activeGoal (gold /goal Stop-hook store).
   const liveGoal = useAppState(s => s.activeGoal?.condition);
   const replaceLine = liveGoal !== undefined ? truncateGoalConditionForRender(firstLineOf(liveGoal), 200) : null;
 
