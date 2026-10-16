@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import {
   buildLeanSimpleSystemPrompt,
+  getDelegationCostsFirstText,
   getLeanActionCautionSection,
+  isDelegationCostsFirst,
   isDenseDefaultSystemPromptModel,
   isVelvetCascadeModelEligible,
   shouldUseSimpleSystemPrompt,
@@ -53,6 +58,16 @@ describe('shouldUseSimpleSystemPrompt', () => {
       }),
     ).toBe(true)
   })
+  test('tengu_velvet_tide is consulted after denser-default', () => {
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../simpleSystemPrompt.ts'),
+      'utf-8',
+    )
+    expect(src).toContain(
+      "getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_tide', false)",
+    )
+  })
+
   test('velvet cascade models list (reh)', () => {
     expect(
       shouldUseSimpleSystemPrompt({
@@ -64,6 +79,55 @@ describe('shouldUseSimpleSystemPrompt', () => {
     expect(
       isVelvetCascadeModelEligible('claude-sonnet-4-6', ['opus-4-7']),
     ).toBe(false)
+  })
+})
+
+describe('isDelegationCostsFirst', () => {
+  test('undefined model is false', () => {
+    expect(isDelegationCostsFirst(undefined)).toBe(false)
+  })
+  test('CLAUDE_CODE_MODEL_CAPABILITIES env on/off (gold cQr/fy)', () => {
+    expect(
+      isDelegationCostsFirst('claude-opus-4-7', {
+        CLAUDE_CODE_MODEL_CAPABILITIES: 'lucky_cerf',
+      }),
+    ).toBe(true)
+    expect(
+      isDelegationCostsFirst('claude-opus-4-7', {
+        CLAUDE_CODE_MODEL_CAPABILITIES: '-lucky_cerf',
+      }),
+    ).toBe(false)
+    expect(
+      isDelegationCostsFirst('claude-opus-4-7', {
+        CLAUDE_CODE_MODEL_CAPABILITIES: 'claude-opus-4-7=lucky_cerf',
+      }),
+    ).toBe(true)
+    expect(
+      isDelegationCostsFirst('claude-sonnet-4-6', {
+        CLAUDE_CODE_MODEL_CAPABILITIES: 'claude-opus-4-7=lucky_cerf',
+      }),
+    ).toBe(false)
+  })
+  test('source lock Co analog: env + catalog + II GB list', () => {
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../simpleSystemPrompt.ts'),
+      'utf-8',
+    )
+    expect(src).toContain('CLAUDE_CODE_MODEL_CAPABILITIES')
+    expect(src).toContain('modelHasCatalogCapability')
+    expect(src).toContain("'lucky_cerf'")
+    expect(src).toContain("'tengu_lucky_cerf'")
+    expect(src).toContain('stripTrailingOneM')
+    expect(src).toContain('getDelegationCostsFirstText')
+    expect(src).toContain("'tengu_lucky_cerf_text'")
+  })
+})
+
+describe('getDelegationCostsFirstText', () => {
+  test('default is kyt unique English', () => {
+    expect(getDelegationCostsFirstText()).toContain(
+      'A fresh agent costs more than it looks.',
+    )
   })
 })
 

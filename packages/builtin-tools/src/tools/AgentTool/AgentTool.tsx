@@ -49,13 +49,30 @@ import {
 } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { assembleToolPool } from 'src/tools.js';
 import { asAgentId } from 'src/types/ids.js';
-import { getAgentContext, runWithAgentContext, type SubagentContext } from 'src/utils/agentContext.js';
+import {
+  getAgentContext,
+  isDelegatedObservation,
+  runWithAgentContext,
+  type SubagentContext,
+} from 'src/utils/agentContext.js';
 import { resolveEffectiveIsolation } from 'src/utils/agentIsolationRemote.js';
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
+import { SHARES_CWD_LAUNCH_NOTE, resolveSharesCwdStamp } from 'src/utils/agentSharesCwd.js';
+import {
+  applyHandbackProvenanceToCompletedContent,
+  hashHarnessSectionBlocks,
+  isHandbackProvenanceEnabled,
+} from 'src/utils/harnessTextSanitize.js';
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { resolveAgentAutoBackgroundMs } from 'src/utils/autoBackgroundTimeout.js';
-import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
+import {
+  BACKGROUND_LAUNCH_NOT_TAKEN_MESSAGE,
+  getBackgroundLaunchRule,
+  isBackgroundLaunchDisabled,
+  resolveSpawnBackgroundTasksDisabled,
+} from 'src/utils/sessionBackgroundGates.js';
+import { recordSubagentSpawn, webFetchSavedFilesForAgent } from 'src/utils/subagentSpawnLedger.js';
 import { isInterruptAbortReason } from 'src/utils/abortController.js';
 import {
   assertAndTakeConcurrencySlot,
@@ -77,8 +94,7 @@ import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
 import { asSystemPrompt } from 'src/utils/systemPromptType.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
-import { getTask, getTaskListId, getTaskOwnedFiles } from 'src/utils/tasks.js';
-import { AGENT_NAME_REGEX, MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js';
+import { AGENT_NAME_REGEX, isReservedSpawnAgentName, MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js';
 import { getParentSessionId, isTeammate } from 'src/utils/teammate.js';
 import { isInProcessTeammate } from 'src/utils/teammateContext.js';
 import { teleportToRemote } from 'src/utils/teleport.js';
@@ -104,16 +120,23 @@ import {
   sweepAndDetectLiveAgentChildren,
 } from './agentToolUtils.js';
 import { resolveAgentDefinitionModel } from './built-in/exploreAgent.js';
+import { isModelAlias } from 'src/utils/model/aliases.js';
 import { applySubagentModelForce, isSubagentModelForceEnabled, resolveForcedSpawnModel } from './subagentModelForce.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
-import { shouldSkipTeammateSpawnForWebFetch } from './built-in/webFetchAgent.js';
+import {
+  isBuiltInWebFetchAgent,
+  normalizeAgentTypeKey,
+  shouldSkipTeammateSpawnForWebFetch,
+} from './built-in/webFetchAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
+import { SubagentHandbackTool } from '../SubagentHandbackTool/SubagentHandbackTool.js';
 import {
   buildForkedMessages,
   buildWorktreeNotice,
   FORK_AGENT,
   FORK_SUBAGENT_TYPE,
   isForkSubagentEnabled,
+  isForkSubagentProductEnabled,
   isInForkChild,
 } from './forkSubagent.js';
 import {
@@ -121,7 +144,6 @@ import {
   isGeneralPurposeAvailable,
   SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
 } from './generalPurposeAvailability.js';
-import { normalizeAgentOwnedFiles, resolveAgentTaskExecutionContext, shouldExposeTaskIdInput } from './taskLinking.js';
 import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
 import { getPrompt } from './prompt.js';
@@ -138,21 +160,8 @@ import {
   userFacingNameBackgroundColor,
 } from './UI.js';
 
-/* eslint-disable @typescript-eslint/no-require-imports */
-const proactiveModule =
-  feature('PROACTIVE') || feature('KAIROS')
-    ? (require('src/proactive/index.js') as typeof import('src/proactive/index.js'))
-    : null;
-/* eslint-enable @typescript-eslint/no-require-imports */
-
 // Progress display constants (for showing background hint)
 const PROGRESS_THRESHOLD_MS = 2000; // Show background hint after 2 seconds
-
-// Check if background tasks are disabled at module load time
-// Official DISABLE_BACKGROUND_TASKS densable — captured once at module load
-// so the schema omits run_in_background for the whole process.
-// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
-const isBackgroundTasksDisabled = isBackgroundTasksDisabledEnv();
 
 // Auto-background agent tasks after this many ms (0 = disabled)
 // Enabled by env var OR GrowthBook gate (checked lazily since GB may not be ready at module load)
@@ -165,35 +174,28 @@ function getAutoBackgroundMs(): number {
 
 // Multi-agent type constants are defined inline inside gated blocks to enable dead code elimination
 
+/** densable Co model describe + Ta() coordinator addendum. */
+function agentModelParameterDescription(): string {
+  const base =
+    'Optional model override for this agent. Takes precedence over the agent definition\'s model frontmatter and the configured default subagent model. If omitted, uses the agent definition\'s model, else the default (inherits from the parent unless a default subagent model is configured). Ignored for subagent_type: "fork" — forks always inherit the parent model.';
+  if (isCoordinatorMode()) {
+    return `${base} Set this only when EXPLICITLY asked by the user for a specific model, never because the task seems small, simple, or cheap; otherwise omit it so the worker uses the default (the session model, unless a default subagent model is configured).`;
+  }
+  return base;
+}
+
 // Base input schema without multi-agent parameters
 const baseInputSchema = lazySchema(() =>
   z.object({
     description: z.string().describe('A short (3-5 word) description of the task'),
     prompt: z.string().describe('The task for the agent to perform'),
     subagent_type: z.string().optional().describe('The type of specialized agent to use for this task'),
-    model: z
-      .enum(['sonnet', 'opus', 'haiku', 'fable'])
-      .optional()
-      .describe(
-        'Optional model override for this agent. Takes precedence over the agent definition\'s model frontmatter. If omitted, uses the agent definition\'s model, or inherits from the parent. Ignored for subagent_type: "fork" — forks always inherit the parent model.',
-      ),
+    model: z.enum(['sonnet', 'opus', 'haiku', 'fable']).optional().describe(agentModelParameterDescription()),
     run_in_background: z
       .boolean()
       .optional()
       .describe(
         "Agents run in the background by default; you will be notified when one completes. Set to false only when your very next action depends on this agent's result and nothing else could usefully happen while it runs — otherwise leave it in the background so the user can hand you other work.",
-      ),
-    task_id: z
-      .string()
-      .optional()
-      .describe(
-        'Optional task-list task ID this agent is executing. Use this to link a worker run back to a tracked task.',
-      ),
-    owned_files: z
-      .array(z.string())
-      .optional()
-      .describe(
-        'Optional file paths this worker exclusively owns for writes. Use for coordinator write tasks to enforce file ownership.',
       ),
   }),
 );
@@ -210,6 +212,10 @@ const fullInputSchema = lazySchema(() => {
       })
       .refine(t => t !== MAIN_RECIPIENT_NAME, {
         message: `"${MAIN_RECIPIENT_NAME}" is reserved — SendMessage routes it to the main conversation`,
+      })
+      .refine(t => !isReservedSpawnAgentName(t), {
+        message:
+          'name must not be a reserved name ("main", "team-lead", "user" or "system", in any spelling) or have the shape of an agent id — those already address an agent directly',
       })
       .optional()
       .describe('Name for the spawned agent. Makes it addressable via SendMessage({to: name}) while running.'),
@@ -248,33 +254,46 @@ const fullInputSchema = lazySchema(() => {
 // (field type collapses to `unknown`). The ternary return produces a union
 // type, but call() destructures via the explicit AgentToolInput type below
 // which always includes all optional fields.
-export const inputSchema = lazySchema(() => {
+/**
+ * Static omit (KAIROS cwd / fork-subagent / model force) may cache.
+ * densable r_r Ier + Aut parameterDescription is live — installBackgroundLaunchRule
+ * after first schema access must still omit/extend (not frozen in lazySchema).
+ */
+const staticInputSchema = lazySchema(() => {
   const schema = feature('KAIROS') ? fullInputSchema() : fullInputSchema().omit({ cwd: true });
-  const schemaWithTaskFields = shouldExposeTaskIdInput() ? schema : schema.omit({ task_id: true });
-
-  // GrowthBook-in-lazySchema is acceptable here (unlike subagent_type, which
-  // was removed in 906da6c723): the divergence window is one-session-per-
-  // gate-flip via _CACHED_MAY_BE_STALE disk read, and worst case is either
-  // "schema shows a no-op param" (gate flips on mid-session: param ignored
-  // by forceAsync) or "schema hides a param that would've worked" (gate
-  // flips off mid-session: everything still runs async via memoized
-  // forceAsync). No Zod rejection, no crash — unlike required→optional.
-  const schemaWithBackground =
-    isBackgroundTasksDisabled || isForkSubagentEnabled()
-      ? schemaWithTaskFields.omit({ run_in_background: true })
-      : schemaWithTaskFields;
-  // densable Jtr — FORCE omits the per-call model parameter from the schema
-  return isSubagentModelForceEnabled() ? schemaWithBackground.omit({ model: true }) : schemaWithBackground;
+  // Keep run_in_background on the cached type. Fork/Ier omit + Aut describe
+  // are live (densable r_r) so a mid-session installBackgroundLaunchRule
+  // is not frozen in lazySchema.
+  return isSubagentModelForceEnabled() ? schema.omit({ model: true }) : schema;
 });
-type InputSchema = ReturnType<typeof inputSchema>;
+
+type InputSchema = ReturnType<typeof staticInputSchema>;
+
+const RUN_IN_BACKGROUND_BASE_DESCRIBE =
+  "Agents run in the background by default; you will be notified when one completes. Set to false only when your very next action depends on this agent's result and nothing else could usefully happen while it runs — otherwise leave it in the background so the user can hand you other work.";
+
+export function inputSchema(): InputSchema {
+  const base = staticInputSchema();
+  if (isForkSubagentEnabled() || isBackgroundLaunchDisabled()) {
+    return base.omit({ run_in_background: true }) as unknown as InputSchema;
+  }
+  const launchRule = getBackgroundLaunchRule();
+  if (launchRule?.parameterDescription) {
+    return base.extend({
+      run_in_background: z
+        .boolean()
+        .optional()
+        .describe(`${RUN_IN_BACKGROUND_BASE_DESCRIBE} ${launchRule.parameterDescription}`),
+    }) as unknown as InputSchema;
+  }
+  return base;
+}
 
 // Explicit type widens the schema inference to always include all optional
 // fields even when .omit() strips them for gating (cwd, run_in_background).
 // subagent_type is optional; call() defaults it to general-purpose when the
 // fork gate is off, or routes to the fork path when the gate is on.
 type AgentToolInput = z.infer<ReturnType<typeof baseInputSchema>> & {
-  task_id?: string;
-  owned_files?: string[];
   name?: string;
   team_name?: string;
   mode?: z.infer<ReturnType<typeof permissionModeSchema>>;
@@ -287,22 +306,48 @@ export const outputSchema = lazySchema(() => {
   const syncOutputSchema = agentToolResultSchema().extend({
     status: z.literal('completed'),
     prompt: z.string(),
+    worktreePath: z.string().optional(),
+    worktreeBranch: z.string().optional(),
   });
 
   const asyncOutputSchema = z.object({
     status: z.literal('async_launched'),
+    isAsync: z.literal(true).optional(),
     agentId: z.string().describe('The ID of the async agent'),
     description: z.string().describe('The description of the task'),
+    resolvedModel: z
+      .string()
+      .optional()
+      .describe('Model in use at the backgrounding transition (a pre-background swap is reflected here)'),
+    modelsUsed: z
+      .array(z.string())
+      .optional()
+      .describe('Ordered distinct models used before backgrounding (length > 1 means a mid-run swap)'),
     prompt: z.string().describe('The prompt for the agent'),
+    agentType: z.string().optional().describe('Spawned agent type (Fetch chrome)'),
     outputFile: z.string().describe('Path to the output file for checking agent progress'),
     canReadOutputFile: z
       .boolean()
       .optional()
       .describe('Whether the calling agent has Read/Bash tools to check progress'),
-    taskLinkingWarning: z.string().optional(),
+    sharesCwd: z
+      .boolean()
+      .optional()
+      .describe(
+        '@internal True when this unisolated write-capable agent was launched into a working directory where another one is already running and a worktree could have been made here (drives a model-facing note; not a stable consumer field)',
+      ),
   });
 
-  return z.union([syncOutputSchema, asyncOutputSchema]);
+  const remoteOutputSchema = z.object({
+    status: z.literal('remote_launched'),
+    taskId: z.string().describe('The ID of the remote agent task'),
+    sessionUrl: z.string().describe('The URL of the cloud session'),
+    description: z.string().describe('The description of the task'),
+    prompt: z.string().describe('The prompt for the agent'),
+    outputFile: z.string().describe('Path to the output file for checking agent progress'),
+  });
+
+  return z.union([syncOutputSchema, asyncOutputSchema, remoteOutputSchema]);
 });
 type OutputSchema = ReturnType<typeof outputSchema>;
 type Output = z.input<OutputSchema>;
@@ -338,7 +383,6 @@ export type RemoteLaunchedOutput = {
   description: string;
   prompt: string;
   outputFile: string;
-  taskLinkingWarning?: string;
 };
 
 type InternalOutput = Output | TeammateSpawnedOutput | RemoteLaunchedOutput;
@@ -349,7 +393,16 @@ import type { AgentToolProgress, ShellProgress } from 'src/types/tools.js';
 export type Progress = AgentToolProgress | ShellProgress;
 
 export const AgentTool = buildTool({
-  async prompt({ agents, tools, getToolPermissionContext, allowedAgentTypes }) {
+  async prompt({
+    agents,
+    tools,
+    getToolPermissionContext,
+    allowedAgentTypes,
+    model,
+    leanPrompt,
+    delegationCostsFirst,
+    delegationCostsFirstText,
+  }) {
     const toolPermissionContext = await getToolPermissionContext();
 
     // Get MCP servers that have tools available
@@ -376,6 +429,10 @@ export const AgentTool = buildTool({
     return await getPrompt(filteredAgents, isCoordinator, allowedAgentTypes, {
       forkAvailable: isForkSubagentEnabled(),
       generalPurposeAvailable,
+      model,
+      leanPrompt,
+      delegationCostsFirst,
+      delegationCostsFirstText,
     });
   },
   name: AGENT_TOOL_NAME,
@@ -399,8 +456,6 @@ export const AgentTool = buildTool({
       description,
       model: modelParam,
       run_in_background,
-      task_id,
-      owned_files,
       name,
       team_name,
       mode: _deprecatedSpawnMode,
@@ -472,6 +527,7 @@ export const AgentTool = buildTool({
           logForDebugging(`agent.spawn ${subagent_type}: refused by a hook (${reason})`);
           throw new Error(`Subagent spawn denied by a plugin: ${reason}`);
         }
+        const arrived = arrivedSpawn;
         // densable Eis — log field rewrites (skip Q6t + model has its own line).
         const skipRewriteLog = new Set([
           'tool_use_id',
@@ -483,45 +539,44 @@ export const AgentTool = buildTool({
           'parentAgentId',
           'provider',
         ]);
-        const rewrittenKeys = [...new Set([...Object.keys(spawn), ...Object.keys(arrivedSpawn)])].filter(
-          key => !skipRewriteLog.has(key) && key !== 'model' && spawn[key] !== arrivedSpawn[key],
+        const rewrittenKeys = [...new Set([...Object.keys(spawn), ...Object.keys(arrived)])].filter(
+          key => !skipRewriteLog.has(key) && key !== 'model' && spawn[key] !== arrived[key],
         );
         if (rewrittenKeys.length > 0) {
           logForDebugging(`agent.spawn ${subagent_type}: ${rewrittenKeys.join(', ')} rewritten by a hook`);
         }
-        if (arrivedSpawn.model !== spawn.model) {
+        if (arrived.model !== spawn.model) {
           logForDebugging(
-            `agent.spawn ${subagent_type}: model ${spawn.model ?? '(inherit)'} -> ${arrivedSpawn.model ?? '(inherit)'} by a hook`,
+            `agent.spawn ${subagent_type}: model ${spawn.model ?? '(inherit)'} -> ${arrived.model ?? '(inherit)'} by a hook`,
           );
         }
         // densable fn — unknown subagentType is a deny, not a silent pass-through.
-        if (typeof arrivedSpawn.subagentType === 'string') {
+        if (typeof arrived.subagentType === 'string') {
           const agents = toolUseContext.options.agentDefinitions.activeAgents;
           const known =
-            arrivedSpawn.subagentType === subagent_type ||
-            agents.some(agent => agent.agentType === arrivedSpawn.subagentType);
+            arrived.subagentType === subagent_type || agents.some(agent => agent.agentType === arrived.subagentType);
           if (!known) {
             const listed = agents.map(agent => agent.agentType);
-            const reason = `a hook's subagentType '${arrivedSpawn.subagentType}' names no agent this call can dispatch (${listed.length > 0 ? `available: ${listed.join(', ')}` : 'none is available'})`;
+            const reason = `a hook's subagentType '${arrived.subagentType}' names no agent this call can dispatch (${listed.length > 0 ? `available: ${listed.join(', ')}` : 'none is available'})`;
             throw new Error(`Subagent spawn denied by a plugin: ${reason}`);
           }
-          subagent_type = arrivedSpawn.subagentType;
+          subagent_type = arrived.subagentType;
         }
-        if (typeof arrivedSpawn.prompt === 'string') {
-          prompt = arrivedSpawn.prompt;
+        if (typeof arrived.prompt === 'string') {
+          prompt = arrived.prompt;
         }
-        if (typeof arrivedSpawn.description === 'string') {
-          description = arrivedSpawn.description.replace(/\s+/g, ' ').trim();
+        if (typeof arrived.description === 'string') {
+          description = arrived.description.replace(/\s+/g, ' ').trim();
         }
-        if (arrivedSpawn.cwd === undefined || typeof arrivedSpawn.cwd === 'string') {
-          cwd = arrivedSpawn.cwd as string | undefined;
+        if (arrived.cwd === undefined || typeof arrived.cwd === 'string') {
+          cwd = arrived.cwd as string | undefined;
         }
-        if (arrivedSpawn.model === undefined || typeof arrivedSpawn.model === 'string') {
-          modelParam = arrivedSpawn.model as typeof modelParam;
+        if (arrived.model === undefined || typeof arrived.model === 'string') {
+          modelParam = arrived.model as typeof modelParam;
           model = isCoordinatorMode() ? undefined : modelParam;
         }
-        if (typeof arrivedSpawn.background === 'boolean') {
-          run_in_background = arrivedSpawn.background;
+        if (typeof arrived.background === 'boolean') {
+          run_in_background = arrived.background;
         }
       }
     }
@@ -630,31 +685,21 @@ export const AgentTool = buildTool({
       return { data: spawnResult } as unknown as { data: Output };
     }
 
-    const normalizedOwnedFiles = normalizeAgentOwnedFiles(owned_files);
-    const { taskExecutionContext, taskLinkingWarning } = await resolveAgentTaskExecutionContext({
-      taskId: task_id,
-      explicitOwnedFiles: normalizedOwnedFiles,
-      getTaskListId,
-      getTask,
-      getTaskOwnedFiles,
-      logWarning: logForDebugging,
-    });
-    const workerOwnedFiles = normalizedOwnedFiles ?? taskExecutionContext?.ownedFiles;
-    const activeTaskExecutionContext =
-      taskExecutionContext && workerOwnedFiles
-        ? { ...taskExecutionContext, ownedFiles: workerOwnedFiles }
-        : taskExecutionContext;
-
-    // Fork subagent experiment routing:
-    // - subagent_type set: use it (explicit wins)
-    // - subagent_type omitted, gate on: fork path (undefined)
-    // - subagent_type omitted, gate off: default general-purpose — but only
-    //   when densable Abf says GP is available; otherwise throw AVo before
-    //   defaulting (never emit `Agent type 'general-purpose' not found`).
+    // densable: fork is explicit `subagent_type: fork` (NFKC) AND gate AND
+    // constraints. Omitting subagent_type never defaults to fork.
     const allAgents = toolUseContext.options.agentDefinitions.activeAgents;
     const { allowedAgentTypes } = toolUseContext.options.agentDefinitions;
-    const forkPathWouldBeTaken = subagent_type === undefined && isForkSubagentEnabled();
-    if (subagent_type === undefined && !forkPathWouldBeTaken) {
+    const forkConstraintsOk =
+      isolation !== 'remote' &&
+      toolUseContext.options.querySource !== `agent:builtin:${FORK_AGENT.agentType}` &&
+      !isInForkChild(toolUseContext.messages);
+    const isExplicitFork =
+      subagent_type !== undefined && normalizeAgentTypeKey(subagent_type) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE);
+    const isForkPath = isExplicitFork && isForkSubagentEnabled() && forkConstraintsOk;
+    if (isExplicitFork && !isForkPath) {
+      throw new Error('Fork is not available in this session. Complete your task directly using your tools.');
+    }
+    if (subagent_type === undefined) {
       if (!isGeneralPurposeAvailable(allAgents, allowedAgentTypes)) {
         const agents = filterDeniedAgents(
           allowedAgentTypes ? allAgents.filter(a => allowedAgentTypes.includes(a.agentType)) : allAgents,
@@ -662,18 +707,12 @@ export const AgentTool = buildTool({
           AGENT_TOOL_NAME,
         );
         const availableTypes = agents.map(a => a.agentType);
-        // densable Rr = P&&Rbf(W)===null ? [fork,...Et] : Et
-        const forkConstraintsOk =
-          isolation !== 'remote' &&
-          toolUseContext.options.querySource !== `agent:builtin:${FORK_AGENT.agentType}` &&
-          !isInForkChild(toolUseContext.messages);
         const listed =
           isForkSubagentEnabled() && forkConstraintsOk ? [FORK_SUBAGENT_TYPE, ...availableTypes] : availableTypes;
         logEvent('tengu_subagent_type_miss', {
           requestedNormalized: 'OMITTED' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           availableCount: agents.length,
         });
-        // densable pe("subagent_launch","subagent_type_missing") → tengu_feature_bad
         logEvent('tengu_feature_bad', {
           feature_name: 'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           error_code: 'subagent_type_missing' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -684,8 +723,7 @@ export const AgentTool = buildTool({
       }
     }
 
-    const effectiveType = subagent_type ?? (isForkSubagentEnabled() ? undefined : GENERAL_PURPOSE_AGENT.agentType);
-    const isForkPath = effectiveType === undefined;
+    const effectiveType = isForkPath ? undefined : (subagent_type ?? GENERAL_PURPOSE_AGENT.agentType);
 
     let selectedAgent: AgentDefinition;
     if (isForkPath) {
@@ -703,6 +741,8 @@ export const AgentTool = buildTool({
       }
       selectedAgent = FORK_AGENT;
     } else {
+      // Non-fork: omit-type → GP. TS cannot narrow `effectiveType` off isForkPath.
+      const resolvedType = subagent_type ?? GENERAL_PURPOSE_AGENT.agentType;
       // Filter agents to exclude those denied via Agent(AgentName) syntax
       const agents = filterDeniedAgents(
         // When allowedAgentTypes is set (from Agent(x,y) tool spec), restrict to those types
@@ -711,18 +751,18 @@ export const AgentTool = buildTool({
         AGENT_TOOL_NAME,
       );
 
-      const found = agents.find(agent => agent.agentType === effectiveType);
+      const found = agents.find(agent => agent.agentType === resolvedType);
       if (!found) {
         // Check if the agent exists but is denied by permission rules
-        const agentExistsButDenied = allAgents.find(agent => agent.agentType === effectiveType);
+        const agentExistsButDenied = allAgents.find(agent => agent.agentType === resolvedType);
         if (agentExistsButDenied) {
-          const denyRule = getDenyRuleForAgent(appState.toolPermissionContext, AGENT_TOOL_NAME, effectiveType);
+          const denyRule = getDenyRuleForAgent(appState.toolPermissionContext, AGENT_TOOL_NAME, resolvedType);
           throw new Error(
-            `Agent type '${effectiveType}' has been denied by permission rule '${AGENT_TOOL_NAME}(${effectiveType})' from ${denyRule?.source ?? 'settings'}.`,
+            `Agent type '${resolvedType}' has been denied by permission rule '${AGENT_TOOL_NAME}(${resolvedType})' from ${denyRule?.source ?? 'settings'}.`,
           );
         }
         throw new Error(
-          `Agent type '${effectiveType}' not found. Available agents: ${formatAvailableAgentTypes(agents.map(a => a.agentType))}`,
+          `Agent type '${resolvedType}' not found. Available agents: ${formatAvailableAgentTypes(agents.map(a => a.agentType))}`,
         );
       }
       selectedAgent = found;
@@ -848,34 +888,53 @@ export const AgentTool = buildTool({
     // interrupt-immunity applies only to local async (2.1.216 #15).
     // isCoordinatorMode densable (COORDINATOR_MODE feature + env).
     const isCoordinator = isCoordinatorMode();
-    // Fork subagent experiment: force ALL spawns async for a unified
-    // <task-notification> interaction model (not just fork spawns — all of them).
-    const forceAsync = isForkSubagentEnabled();
-    // Assistant mode: force all agents async. Synchronous subagents hold the
-    // main loop's turn open until they complete — the daemon's inputQueue
-    // backs up, and the first overdue cron catch-up on spawn becomes N
-    // serial subagent turns blocking all user input. Same gate as
-    // executeForkedSlashCommand's fire-and-forget path; the
-    // <task-notification> re-entry there is handled by the else branch
-    // below (registerAsyncAgentTask + notifyOnCompletion).
-    const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
+    // densable wo caller bag under semantic names.
+    // Gold Ht = Yne() && e.agentId!==void 0 && !Ct && !_e && Ce()
+    // Yne = _Ie && !coordinator (product fork, no Ce). Ce only belongs in Ht.
+    // (Ce ≈ getIsNonInteractiveSession; Ct = innerCall===true).
+    const callerIsInProcessTeammate = isInProcessTeammate();
+    const forkProductEnabled = isForkSubagentProductEnabled();
+    const callerIsHeadlessSubagent =
+      forkProductEnabled &&
+      toolUseContext.agentId !== undefined &&
+      !toolUseContext.innerCall &&
+      !callerIsInProcessTeammate &&
+      getIsNonInteractiveSession();
+    // densable qt: Yne() && !_e && !Ht — excludes headless-subagent callers (not Ce alone).
+    // Fork gate forces eligible spawns async for a unified
+    // <task-notification> interaction model (not just fork spawns).
+    // Gold 289 has no KAIROS/kairosEnabled "force all agents async" arm.
+    const forceAsync = forkProductEnabled && !callerIsInProcessTeammate && !callerIsHeadlessSubagent;
     // Official q resolve: Gji → Iq ignore → Tno fallback. Then U = j || (... && !G).
     const effectiveIsolation = resolveEffectiveIsolation(isolation, selectedAgent);
     const isRemoteIsolation = effectiveIsolation === 'remote';
-    // Official 208: te || (o===true || agent.background || coordinator ||
-    // forceAsync || (!inProcessTeammate && o!==false)) && !disabled
-    // Unset run_in_background → background by default (except in-process teammates).
+    // densable wo: h/b/D → shouldRunAsync. Gold 289 has no proactive gate.
+    // Unset run_in_background → background by default (except in-process/headless callers).
     // Official U=j||(...)&&!G — remote stays async even when bg tasks are disabled.
-    const shouldRunAsync =
-      isRemoteIsolation ||
-      ((run_in_background === true ||
-        selectedAgent.background === true ||
-        isCoordinator ||
-        forceAsync ||
-        assistantForceAsync ||
-        (proactiveModule?.isProactiveActive() ?? false) ||
-        (!isInProcessTeammate() && run_in_background !== false)) &&
-        !isBackgroundTasksDisabled);
+    // densable Mv for wo D only: built-in source + agentType==='web-fetch' (Iq), not name-alias h9n.
+    const isWebFetchSpawn = isBuiltInWebFetchAgent(selectedAgent);
+    const spawnGate = resolveSpawnBackgroundTasksDisabled({
+      wantsBackground: run_in_background,
+      assistant: assistantMessage,
+      toolUseId: toolUseContext.toolUseId,
+      callerAgentId: toolUseContext.agentId,
+      signal: toolUseContext.abortController.signal,
+    });
+    const spawnBackgroundTasksDisabled = spawnGate.backgroundTasksDisabled;
+    // densable `rn = ALo(...) && TRe()` — compute before Sot so this spawn is
+    // not counted as its own sibling. GB tengu_twinkling_boole defaults false.
+    const sharesCwd = resolveSharesCwdStamp({
+      tasks: appState.tasks,
+      selectedAgent,
+      effectiveIsolation,
+      cwd,
+      parentCwd: getCwd(),
+      parentAgentId: toolUseContext.agentId,
+    });
+    const h = callerIsInProcessTeammate || callerIsHeadlessSubagent;
+    const b = (isCoordinator && !callerIsInProcessTeammate) || forceAsync || (!h && run_in_background !== false);
+    const D = run_in_background === true || selectedAgent.background === true || (!isWebFetchSpawn && b);
+    const shouldRunAsync = isRemoteIsolation || (D && !spawnBackgroundTasksDisabled);
 
     // densable L(G&&!B) — count after type/permission/MCP guards, before worktree/remote/run.
     // Me = local async only: high-priority "interrupt" must not cancel bg startup.
@@ -1033,12 +1092,14 @@ export const AgentTool = buildTool({
       // Official 208: default background (run_in_background !== false) unless
       // in-process teammate; explicit true / agent.background still force async.
       isAsync: shouldRunAsync,
+      // densable W$n `Mv(s)?moe()` — built-in web-fetch saved-files bag.
+      persistedToolResultFiles: webFetchSavedFilesForAgent(selectedAgent),
     };
 
-    // shouldRunAsync / isCoordinator / forceAsync / assistantForceAsync computed
-    // earlier (before L(G&&!B) spawn-slot consume) so interrupt immunity matches
-    // densable G. Coordinator anti-injection addendum still applied here after
-    // system prompt assembly.
+    // shouldRunAsync / isCoordinator / forceAsync computed earlier (before
+    // L(G&&!B) spawn-slot consume) so interrupt immunity matches densable G.
+    // Coordinator anti-injection addendum still applied here after system
+    // prompt assembly.
     if (isCoordinator && !isForkPath && enhancedSystemPrompt) {
       enhancedSystemPrompt = [...enhancedSystemPrompt, getWorkerAntiInjectionAddendum()];
     }
@@ -1169,7 +1230,8 @@ export const AgentTool = buildTool({
       querySource:
         toolUseContext.options.querySource ??
         getQuerySourceForAgent(selectedAgent.agentType, isBuiltInAgent(selectedAgent)),
-      model: isForkPath ? undefined : applySubagentModelForce(undefined, model)[1],
+      model:
+        isForkPath || forcedToolModel === undefined || !isModelAlias(forcedToolModel) ? undefined : forcedToolModel,
       // Fork path: pass parent's system prompt AND parent's exact tool
       // array (cache-identical prefix). workerTools is rebuilt under
       // permissionMode 'bubble' which differs from the parent's mode, so
@@ -1204,6 +1266,9 @@ export const AgentTool = buildTool({
       description,
       // densable E8 name:H → sidecar for Aye registerName rehydrate
       ...(name ? { name } : {}),
+      // densable St / bt: fork (X) opts out; observers resume separately.
+      handbackOptIn: !isForkPath,
+      handbackTool: SubagentHandbackTool,
     };
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -1287,12 +1352,32 @@ export const AgentTool = buildTool({
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
-      // densable Sot: He = c.agentId (raw caller); Re = Yeo(He)??mi().
+      if (spawnGate.admitted !== undefined) {
+        const confirm = spawnGate.admitted.confirm(toolUseContext.abortController.signal);
+        if (confirm?.kind === 'aborted') {
+          throw new AbortError();
+        }
+        if (confirm?.kind === 'closed') {
+          throw new Error(confirm.message || BACKGROUND_LAUNCH_NOT_TAKEN_MESSAGE);
+        }
+      }
+      // densable bJ/Sot: He = c.agentId (raw caller); Re = Yeo(He)??mi().
       // ownerAgentId:Re (BRt/keepalive); parentAgentId:He (lineage walk).
       // Gge via registerAsyncAgent no-ops when owner is not local_agent (main).
+      // Gold bJ does NOT stamp handbackContract — densable bGo runs later in
+      // runAgent after Ut arming (KEEP that site; do not invent early Sot stamp).
       const parentAgentId = toolUseContext.agentId;
       const ownerId =
         resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
+      const canReadOutputFile = toolUseContext.options.tools.some(
+        t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
+      );
+      const spawnedSubagent = recordSubagentSpawn({
+        agentType: selectedAgent.agentType,
+        runInBackground: run_in_background,
+        runsInBackground: true,
+        depth: childSpawnDepth,
+      });
       const agentBackgroundTask = registerAsyncAgent({
         agentId: asyncAgentId,
         description,
@@ -1303,30 +1388,59 @@ export const AgentTool = buildTool({
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId,
-        activeTaskExecutionContext,
         ownerAgentId: ownerId,
         notificationTargetAgentId: asAgentId(ownerId),
         parentAgentId,
         spawnDepth: childSpawnDepth,
+        cwd: cwdOverridePath ?? getCwd(),
+        spawnedSubagent,
+        webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
+        outputFileReadable: canReadOutputFile,
+        model: resolvedAgentModel,
+        // densable YP after handover — Gge only when taken.
+        attachOwnerKeepalive: false,
       });
+      if (spawnGate.admitted !== undefined) {
+        const taken = spawnGate.admitted.handOver({
+          agentId: agentBackgroundTask.agentId,
+          abortController: agentBackgroundTask.abortController ?? new AbortController(),
+        });
+        if (!taken) {
+          // densable zA(..., {lifecycleNotStarted:!0}), ze(), lx() — never-started.
+          killAsyncAgent(agentBackgroundTask.agentId, rootSetAppState, 'system', {
+            lifecycleNotStarted: true,
+          });
+          releaseConcurrencySlot?.();
+          logEvent('tengu_feature_bad', {
+            feature_name: 'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            error_code:
+              'subagent_background_launch_not_taken' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          throw new Error(BACKGROUND_LAUNCH_NOT_TAKEN_MESSAGE);
+        }
+      }
+      if (!getIsNonInteractiveSession()) {
+        addKeepaliveReason(ownerId, agentKeepaliveReason(asyncAgentId), rootSetAppState);
+      }
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
       // so we don't leave a stale entry if spawn fails. Sync agents skipped —
       // coordinator is blocked, so SendMessage routing doesn't apply.
       // densable registerName: refuse reserved MAIN_RECIPIENT_NAME ("main").
-      if (name && name !== MAIN_RECIPIENT_NAME) {
+      if (name && !isReservedSpawnAgentName(name)) {
         rootSetAppState(prev => {
           const next = new Map(prev.agentNameRegistry);
           next.set(name, asAgentId(asyncAgentId));
           return { ...prev, agentNameRegistry: next };
         });
-      } else if (name === MAIN_RECIPIENT_NAME) {
+      } else if (name && isReservedSpawnAgentName(name)) {
         logForDebugging(
           `[registerName] refused reserved name "${name}" for ${asyncAgentId} — SendMessage routes it to the main conversation`,
         );
       }
 
       // Wrap async agent execution in agent context for analytics attribution
+      // Gold Wo @194849731: tn=Xo(e.agentContext) → ...tn&&{delegatedObservation:!0}
       const asyncAgentContext: SubagentContext = {
         agentId: asyncAgentId,
         // For subagents from teammates: use team lead's session
@@ -1338,10 +1452,10 @@ export const AgentTool = buildTool({
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
-        ownedFiles: workerOwnedFiles,
         isBackgroundAgent: true,
         // densable depth:ie
         depth: childSpawnDepth,
+        ...(isDelegatedObservation(getAgentContext()) ? { delegatedObservation: true } : {}),
       };
 
       // Workload propagation: handlePromptSubmit wraps the entire turn in
@@ -1363,7 +1477,6 @@ export const AgentTool = buildTool({
                     agentId: asAgentId(agentBackgroundTask.agentId),
                     abortController: agentBackgroundTask.abortController!,
                   },
-                  activeTaskExecutionContext,
                   onCacheSafeParams,
                 }),
               metadata,
@@ -1382,19 +1495,19 @@ export const AgentTool = buildTool({
         }),
       );
 
-      const canReadOutputFile = toolUseContext.options.tools.some(
-        t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
-      );
       return {
         data: {
           isAsync: true as const,
           status: 'async_launched' as const,
           agentId: agentBackgroundTask.agentId,
           description: description,
+          resolvedModel: resolvedAgentModel,
+          modelsUsed: [resolvedAgentModel],
           prompt: prompt,
+          agentType: selectedAgent.agentType,
           outputFile: getTaskOutputPath(agentBackgroundTask.agentId),
           canReadOutputFile,
-          taskLinkingWarning,
+          ...(sharesCwd ? { sharesCwd: true as const } : {}),
         },
       };
     } else {
@@ -1402,6 +1515,7 @@ export const AgentTool = buildTool({
       const syncAgentId = asAgentId(earlyAgentId);
 
       // Set up agent context for sync execution (for analytics attribution)
+      // Gold Wo @194850921: same tn=Xo(parent) inherit as async spawn.
       const syncAgentContext: SubagentContext = {
         agentId: syncAgentId,
         // For subagents from teammates: use team lead's session
@@ -1413,11 +1527,11 @@ export const AgentTool = buildTool({
         invokingRequestId: assistantMessage?.requestId as string | undefined,
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
-        ownedFiles: workerOwnedFiles,
         // Official He: sync only backgrounds when parent agentContext is background
         isBackgroundAgent: toolUseContext.isBackgroundAgent ?? false,
         // densable depth:ie
         depth: childSpawnDepth,
+        ...(isDelegatedObservation(getAgentContext()) ? { delegatedObservation: true } : {}),
       };
 
       // densable return pt(Ct) — concurrent release on throw; also release on
@@ -1457,12 +1571,15 @@ export const AgentTool = buildTool({
             // promise, accumulating callbacks for the lifetime of the agent.
             let backgroundPromise: Promise<{ type: 'background' }> | undefined;
             let cancelAutoBackground: (() => void) | undefined;
-            if (!isBackgroundTasksDisabled) {
+            if (!spawnBackgroundTasksDisabled) {
               // densable OSu: He = c.agentId; Re = Yeo(He)??mi().
               // ownerAgentId:Re; parentAgentId:He. No Gge until mid-bg.
               const fgParentAgentId = toolUseContext.agentId;
               const fgOwnerId =
                 resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ?? getMainThreadAgentId();
+              const fgCanRead = toolUseContext.options.tools.some(
+                t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
+              );
               const registration = registerAgentForeground({
                 agentId: syncAgentId,
                 description,
@@ -1475,6 +1592,16 @@ export const AgentTool = buildTool({
                 notificationTargetAgentId: asAgentId(fgOwnerId),
                 parentAgentId: fgParentAgentId,
                 spawnDepth: childSpawnDepth,
+                cwd: cwdOverridePath ?? getCwd(),
+                spawnedSubagent: recordSubagentSpawn({
+                  agentType: selectedAgent.agentType,
+                  runInBackground: run_in_background,
+                  runsInBackground: false,
+                  depth: childSpawnDepth,
+                }),
+                webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
+                outputFileReadable: fgCanRead,
+                model: resolvedAgentModel,
               });
               foregroundTaskId = registration.taskId;
               backgroundPromise = registration.backgroundSignal.then(() => ({
@@ -1500,7 +1627,6 @@ export const AgentTool = buildTool({
                 ...runAgentParams.override,
                 agentId: syncAgentId,
               },
-              activeTaskExecutionContext,
               onCacheSafeParams:
                 summaryTaskId && getSdkAgentProgressSummariesEnabled()
                   ? (params: CacheSafeParams) => {
@@ -1525,7 +1651,7 @@ export const AgentTool = buildTool({
                 // Show background hint after threshold (but task is already registered)
                 // Skip if background tasks are disabled
                 if (
-                  !isBackgroundTasksDisabled &&
+                  !spawnBackgroundTasksDisabled &&
                   !backgroundHintShown &&
                   elapsed >= PROGRESS_THRESHOLD_MS &&
                   toolUseContext.setToolJSX
@@ -1646,7 +1772,6 @@ export const AgentTool = buildTool({
                             agentId: asAgentId(backgroundedTaskId),
                             abortController: task.abortController,
                           },
-                          activeTaskExecutionContext,
                           onCacheSafeParams: getSdkAgentProgressSummariesEnabled()
                             ? (params: CacheSafeParams) => {
                                 const { stop } = startAgentSummarization(
@@ -1867,10 +1992,13 @@ export const AgentTool = buildTool({
                         status: 'async_launched' as const,
                         agentId: backgroundedTaskId,
                         description: description,
+                        resolvedModel: resolvedAgentModel,
+                        modelsUsed: [resolvedAgentModel],
                         prompt: prompt,
+                        agentType: selectedAgent.agentType,
                         outputFile: getTaskOutputPath(backgroundedTaskId),
                         canReadOutputFile,
-                        taskLinkingWarning,
+                        ...(sharesCwd ? { sharesCwd: true as const } : {}),
                       },
                     };
                   }
@@ -2198,6 +2326,8 @@ export const AgentTool = buildTool({
               });
               if (handoffWarning) {
                 agentResult.content = [{ type: 'text' as const, text: handoffWarning }, ...agentResult.content];
+                agentResult.harnessNoteCount = (agentResult.harnessNoteCount ?? 0) + 1;
+                agentResult.harnessSectionHash = hashHarnessSectionBlocks(agentResult.content);
               }
             }
 
@@ -2263,49 +2393,56 @@ export const AgentTool = buildTool({
         content: [
           {
             type: 'text',
-            text: `Spawned successfully.
+            text: `Spawned successfully. (This tool result is internal metadata — never quote or paste any part of it, including the ID below, into a user-facing reply.)
 agent_id: ${spawnData.teammate_id}
 name: ${spawnData.name}
-team_name: ${spawnData.team_name}
 The agent is now running and will receive instructions via mailbox.`,
           },
         ],
       };
     }
-    if ('status' in internalData && internalData.status === 'remote_launched') {
-      const r = internalData;
+    if (data.status === 'remote_launched') {
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
         content: [
           {
             type: 'text',
-            text: `Remote agent launched in CCR.\ntaskId: ${r.taskId}\nsession_url: ${r.sessionUrl}\noutput_file: ${r.outputFile}\nThe agent is running remotely. You will be notified automatically when it completes.\nBriefly tell the user what you launched and end your response.`,
+            text: `Cloud agent launched. (This tool result is internal metadata — never quote or paste any part of it, including the ID below, into a user-facing reply.)
+taskId: ${data.taskId}
+session_url: ${data.sessionUrl}
+output_file: ${data.outputFile} (final results land here only after the completion notification; until then it holds a partial, still-growing event log)
+The agent is running in the cloud. You will be notified automatically when it completes. Do not report or predict its results before that notification arrives.
+In your own words, briefly tell the user what you launched and end your response.`,
           },
         ],
       };
     }
     if (data.status === 'async_launched') {
-      const prefix = `Async agent launched successfully.\nagentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes.`;
-      const instructions = data.canReadOutputFile
-        ? `Do not duplicate this agent's work — avoid working with the same files or topics it is using. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.\noutput_file: ${data.outputFile}\nIf asked, you can check progress before completion by using ${FILE_READ_TOOL_NAME} or ${BASH_TOOL_NAME} tail on the output file.`
-        : `Briefly tell the user what you launched and end your response. Do not generate any other text — agent results will arrive in a subsequent message.`;
-      const text = `${prefix}\n${instructions}`;
+      const g = `Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)
+agentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent.)
+The agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.`;
+      const h =
+        data.canReadOutputFile && data.outputFile
+          ? `Do not duplicate this agent's work — avoid working with the same files or topics it is using.
+output_file: ${data.outputFile}
+Do NOT ${FILE_READ_TOOL_NAME} or tail this file via the shell tool — it is the full subagent JSONL transcript and reading it will overflow your context. If the user asks for progress, say the agent is still running; you'll get a completion notification.`
+          : 'In your own words, briefly tell the user what you launched — do not echo this tool result. Agent results will arrive in a subsequent message. If the user asks for progress, say the agent is still running.';
+      const sharesNote = data.sharesCwd ? `\n${SHARES_CWD_LAUNCH_NOTE}` : '';
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
         content: [
           {
             type: 'text',
-            text,
+            text: `${g}\n${h}${sharesNote}`,
           },
         ],
       };
     }
     if (data.status === 'completed') {
-      const worktreeData = data as Record<string, unknown>;
-      const worktreeInfoText = worktreeData.worktreePath
-        ? `\nworktreePath: ${worktreeData.worktreePath}\nworktreeBranch: ${worktreeData.worktreeBranch}`
+      const worktreeInfoText = data.worktreePath
+        ? `\nworktreePath: ${data.worktreePath}${data.worktreeBranch ? `\nworktreeBranch: ${data.worktreeBranch}` : ''}`
         : '';
       // If the subagent completes with no content, the tool_result is just the
       // agentId/usage trailer below — a metadata-only block at the prompt tail.
@@ -2320,6 +2457,15 @@ The agent is now running and will receive instructions via mailbox.`,
                 text: '(Subagent completed but returned no output.)',
               },
             ];
+      // densable Tbe()?C_n(h, note, tail, hash) — provenance join when gated.
+      const provenanced = isHandbackProvenanceEnabled()
+        ? applyHandbackProvenanceToCompletedContent(
+            contentOrMarker,
+            data.content.length > 0 ? (data.harnessNoteCount ?? 0) : 0,
+            data.content.length > 0 ? (data.harnessTailCount ?? 0) : 0,
+            data.harnessSectionHash,
+          )
+        : contentOrMarker;
       // One-shot built-ins (Explore, Plan) are never continued via SendMessage
       // — the agentId hint and <usage> block are dead weight (~135 chars ×
       // 34M Explore runs/week ≈ 1-2 Gtok/week). Telemetry doesn't parse this
@@ -2329,14 +2475,14 @@ The agent is now running and will receive instructions via mailbox.`,
         return {
           tool_use_id: toolUseID,
           type: 'tool_result',
-          content: contentOrMarker,
+          content: provenanced,
         };
       }
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
         content: [
-          ...contentOrMarker,
+          ...provenanced,
           {
             type: 'text',
             text: `agentId: ${data.agentId} (use SendMessage with to: '${data.agentId}' to continue this agent)${worktreeInfoText}

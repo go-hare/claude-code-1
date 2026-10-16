@@ -112,11 +112,137 @@ export function shouldUseSimpleSystemPrompt(input: {
   }
 
   // Official: !neh(model) || reh(model). reh already handled above.
-  if (input.modelEligible === false) {
-    // reh explicitly false — only !neh can enable
-    return !isDenseDefaultSystemPromptModel(model)
+  if (!isDenseDefaultSystemPromptModel(model)) return true
+  // Official Eo: k("tengu_velvet_tide", !1) after denser-default.
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_tide', false)) {
+      return true
+    }
+  } catch {
+    // growthbook optional at module-load in tests
   }
-  return !isDenseDefaultSystemPromptModel(model)
+  return false
+}
+
+/** densable Rt — strip trailing `[1m]` for lucky_cerf II equality. */
+function stripTrailingOneM(id: string): string {
+  return id.replace(/\[1m\]$/i, '')
+}
+
+/**
+ * densable cQr — CLAUDE_CODE_MODEL_CAPABILITIES `model=cap,-cap;prefix*=cap`.
+ * Segments without `=` apply to every model.
+ */
+function capabilityFromModelCapabilitiesEnv(
+  canonical: string,
+  capability: string,
+  env: NodeJS.ProcessEnv,
+): boolean | undefined {
+  const raw = env.CLAUDE_CODE_MODEL_CAPABILITIES
+  if (raw === undefined) return undefined
+  const stripped = canonical.replace(/\[1m\]/gi, '')
+  const map = new Map<string, boolean>()
+  for (const segment of raw.split(';')) {
+    const eq = segment.indexOf('=')
+    if (eq !== -1) {
+      const key = segment.slice(0, eq).trim()
+      if (key === '') continue
+      const matches = key.endsWith('*')
+        ? stripped.startsWith(key.slice(0, -1))
+        : stripped === key
+      if (!matches) continue
+    }
+    const caps = eq === -1 ? segment : segment.slice(eq + 1)
+    for (const part of caps.split(',')) {
+      const token = part.trim()
+      if (token === '') continue
+      const on = !token.startsWith('-')
+      map.set(on ? token : token.slice(1), on)
+    }
+  }
+  return map.get(capability)
+}
+
+const DELEGATION_COSTS_FIRST_DEFAULT = `A fresh agent costs more than it looks. It knows only what you put in the prompt, and you see only the summary it sends back — both handoffs drop detail, and neither of you can tell what the other missed. You can't watch it work, only wait or cancel. Its mistakes come back in the same confident register as its findings, and an agent handed your hypothesis tends to return it confirmed. Several at once spend tokens in a burst the user didn't ask for. Weigh those tokens against the accuracy they buy: the user pays for agents you did not need, and pays again for work you redo because you skipped one.
+
+Reach for this when you have independent work to run in parallel, when the user asks for a side quest that shouldn't block your main thread, or when answering would mean reading across several files — delegate that and you keep the conclusion, not the file dumps.
+
+Do the work yourself when it is a handful of tool calls or a lookup whose target you already know; don't delegate a check you could run inline. Delegate review only when you want a read that isn't anchored on yours — then give it the code, not your conclusion. Once you've delegated something, don't also run it yourself; wait for the result. When in doubt, don't spawn.
+
+When you do spawn one, brief it like the peer it is: state the goal and what you have already ruled out, point it at the files and docs worth reading instead of retyping them, and keep the scope explicit and narrow. That brief is the only context it will have, so it is your one lever on every cost above — and if you cannot write a clear one, you do not understand the task well enough to hand it off.`
+
+/**
+ * densable vte() — GB tengu_lucky_cerf_text or kyt. Never minify-export `vte`.
+ */
+export function getDelegationCostsFirstText(): string {
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    const override = getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_lucky_cerf_text',
+      null as string | null,
+    )
+    if (typeof override === 'string' && override.trim() !== '') {
+      return override.trim()
+    }
+  } catch {
+    // growthbook optional
+  }
+  return DELEGATION_COSTS_FIRST_DEFAULT
+}
+
+/**
+ * densable Co / cQn. Never minify-export `Co`.
+ * fy env (`CLAUDE_CODE_MODEL_CAPABILITIES`) → catalog `lucky_cerf` →
+ * GB `tengu_lucky_cerf` via II (strip `[1m]`, case-insensitive equality).
+ */
+export function isDelegationCostsFirst(
+  model?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!model) return false
+  try {
+    const { getCanonicalName } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/model.js') as typeof import('./model/model.js')
+    const { modelHasCatalogCapability } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/modelCatalogCapabilities.js') as typeof import('./model/modelCatalogCapabilities.js')
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    const canonical = getCanonicalName(model)
+    const envCap = capabilityFromModelCapabilitiesEnv(
+      canonical,
+      'lucky_cerf',
+      env,
+    )
+    if (envCap === false) return false
+    if (envCap === true) return true
+    if (modelHasCatalogCapability(canonical, 'lucky_cerf') === true) {
+      return true
+    }
+    if (modelHasCatalogCapability(model, 'lucky_cerf') === true) {
+      return true
+    }
+    const list = getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_lucky_cerf',
+      null as unknown,
+    )
+    if (!Array.isArray(list)) return false
+    const left = stripTrailingOneM(canonical).toLowerCase()
+    return list.some(
+      entry =>
+        typeof entry === 'string' &&
+        stripTrailingOneM(entry).toLowerCase() === left,
+    )
+  } catch {
+    return false
+  }
 }
 
 /**

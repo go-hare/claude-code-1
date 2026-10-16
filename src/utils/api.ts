@@ -29,7 +29,12 @@ import type { AgentId } from 'src/types/ids.js'
 import type { z } from 'zod/v4'
 import { CLI_SYSPROMPT_PREFIXES } from '../constants/system.js'
 import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Tool, ToolPermissionContext, Tools } from '../Tool.js'
+import {
+  toolMatchesName,
+  type Tool,
+  type ToolPermissionContext,
+  type Tools,
+} from '../Tool.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js'
@@ -61,6 +66,11 @@ import { getPlatform } from './platform.js'
 import { countFilesRoundedRg } from './ripgrep.js'
 import { jsonStringify } from './slowOperations.js'
 import type { SystemPrompt } from './systemPromptType.js'
+import {
+  getDelegationCostsFirstText,
+  isDelegationCostsFirst,
+  shouldUseSimpleSystemPrompt,
+} from './simpleSystemPrompt.js'
 import { getToolSchemaCache } from './toolSchemaCache.js'
 import { windowsPathToPosixPath } from './windowsPaths.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
@@ -179,6 +189,15 @@ export async function toolToAPISchema(
       input_schema = filterSwarmFieldsFromSchema(tool.name, input_schema)
     }
 
+    const leanPrompt = shouldUseSimpleSystemPrompt({ model: options.model })
+    const agentTool = toolMatchesName(tool, AGENT_TOOL_NAME)
+    // densable qO: Ne = K && Agent ? cQn(B) : void 0; En = Ne===true ? vte() : void 0
+    const delegationCostsFirst =
+      agentTool && leanPrompt
+        ? isDelegationCostsFirst(options.model)
+        : undefined
+    const delegationCostsFirstText =
+      delegationCostsFirst === true ? getDelegationCostsFirstText() : undefined
     base = {
       name: tool.name,
       description: await tool.prompt({
@@ -187,6 +206,13 @@ export async function toolToAPISchema(
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
         model: options.model,
+        leanPrompt,
+        ...(agentTool && {
+          delegationCostsFirst,
+          ...(delegationCostsFirstText !== undefined && {
+            delegationCostsFirstText,
+          }),
+        }),
       }),
       input_schema,
     }

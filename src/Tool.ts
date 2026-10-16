@@ -166,6 +166,11 @@ export type ToolPermissionContext = DeepImmutable<{
    * aliases (`Ier` @190949411). Key = additionalDirectory; value = `[drive, unc]`.
    */
   trustedNetworkDirectories?: Map<string, readonly string[]>
+  /**
+   * densable W — `--tools` provided, not a preset, keeps zero tools.
+   * Session takes no built-in tools and none from plugins either.
+   */
+  builtInToolsDisabled?: boolean
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =
@@ -229,6 +234,13 @@ export type ToolUseContext = {
     /** Optional callback to get the latest tools (e.g., after MCP servers connect mid-query) */
     refreshTools?: () => Tools
     /**
+     * densable 2.1.289 refreshMcpClients. query() after PostToolBatch
+     * replaces options.mcpClients so newly-connected MCP clients are
+     * visible on the next turn. Gold `ev`: refreshMcpClients?.() ??
+     * getMcp?.().clients ?? options.mcpClients.
+     */
+    refreshMcpClients?: () => MCPServerConnection[]
+    /**
      * @internal TEST-ONLY ESCAPE HATCH. MUST remain undefined in production.
      *
      * Allows non-bundled unit-test harnesses to exercise the background
@@ -253,6 +265,16 @@ export type ToolUseContext = {
      */
     isSkillPreload?: boolean
     /**
+     * densable `readOnlySkillLoad` — Skill tool passes this on coordinator
+     * main (`IQ`). Le loads the body without fork/hooks/grants/shell.
+     */
+    readOnlySkillLoad?: boolean
+    /**
+     * densable `promptShellHandOff` collector. Skill prompt shell expansion
+     * pushes `{tool, command}` here when the skill has no dedicated agent.
+     */
+    promptShellHandOff?: Array<{ tool: string; command: string }>
+    /**
      * Official toolAliases — SDK-renamed tools. leftover Ld walks this
      * map before findToolByName so resume does not miss a renamed tool.
      */
@@ -269,8 +291,26 @@ export type ToolUseContext = {
      */
     activeMcpServer?: string
     activeMcpTool?: string
+    /**
+     * densable `options.activeSkill`. Skill tool sets this before
+     * processPromptSlashCommand. Coordinator main thread with it set loads
+     * the skill body read-only; user slash leaves it unset and gets the
+     * worker delegation summary.
+     */
+    activeSkill?: string
   }
+  /**
+   * densable `promptShellHandOff` collector on the context root
+   * (`n.promptShellHandOff`). Le always passes it; sNt only when
+   * `e.agent===void 0`. nue pushes `{tool, command}` here.
+   */
+  promptShellHandOff?: Array<{ tool: string; command: string }>
   abortController: AbortController
+  /**
+   * densable `wN` — per-session slot map. Subagents share the parent's
+   * object. Design grants live at `toolState.get(DesignSessionState)`.
+   */
+  toolState?: import('./utils/toolState.js').ToolStateSlots
   /**
    * densable 2.1.283 `forRemoteExecution` — this hasPermissionsToUseTool
    * run is for a remote agent, not the local REPL. yBt skips DualInk.
@@ -293,6 +333,11 @@ export type ToolUseContext = {
   activeTaskExecutionContext?: ActiveTaskExecutionContext
   readFileState: FileStateCache
   getAppState(): AppState
+  /**
+   * densable ev fallback `e.getMcp?.().clients`. Optional; REPL uses
+   * refreshMcpClients instead.
+   */
+  getMcp?: () => { clients: MCPServerConnection[] }
   /**
    * official getProactivityLevel() — AppState.proactivityLevel.
    * Optional on leftover hosts that have not yet wired the slot.
@@ -413,6 +458,15 @@ export type ToolUseContext = {
   setRetryStatus?: (
     status: import('./utils/advisorNetworkStall.js').RetryStatus | null,
   ) => void
+  /**
+   * densable fl / Ihr.setMode(requesting, {attempt, limit}) — spinner
+   * "picking the thought back up" while max_output_tokens_recovery continues.
+   */
+  setOutputLimitRecovery?: (
+    recovery:
+      | import('./components/Spinner/statusKind.js').OutputLimitRecovery
+      | null,
+  ) => void
   onCompactProgress?: (event: CompactProgressEvent) => void
   setSDKStatus?: (status: SDKStatus) => void
   openMessageSelector?: () => void
@@ -425,6 +479,12 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
+  /**
+   * densable 2.1.289 gold `Ct` (`e.innerCall===!0`) — nested-in-tool call
+   * (e.g. skill prompt shell expansion). Not a subagent marker; `createSubagentContext`
+   * must not set this true by default. AgentTool headless formula excludes Ct.
+   */
+  innerCall?: boolean
   /**
    * densable 2.1.217 #5 `agentWorktree` — absolute path of the agent isolation
    * worktree when spawned with `isolation: "worktree"`. Consumed by write tools
@@ -814,6 +874,17 @@ export type Tool<
    */
   readonly alwaysLoad?: boolean
   /**
+   * densable `classifierOnly` — when present, auto-classifier deny can `flag`
+   * instead of hard-block (gold `fR` / `Qie` `onBlock:"flag"`). Used by
+   * SubagentHandback (`cen`).
+   */
+  classifierOnly?(): { onBlock: 'flag' | 'block' } | undefined
+  /**
+   * densable `backgrounding` — spawn/background policy hint (`never` keeps
+   * the tool foreground-only). Gold SubagentHandback sets `never`.
+   */
+  readonly backgrounding?: 'never' | 'allow' | 'prefer'
+  /**
    * For MCP tools: the server and tool names as received from the MCP server (unnormalized).
    * Present on all MCP tools regardless of whether `name` is prefixed (mcp__server__tool)
    * or unprefixed (CLAUDE_AGENT_SDK_MCP_NO_PREFIX mode).
@@ -909,6 +980,13 @@ export type Tool<
     allowedAgentTypes?: string[]
     /** Official YHp `e` — current model for lean WebFetch prompt. */
     model?: string
+    /**
+     * densable 2.1.289 kLo/HJn — Agent short prompt when Ix({model, leanPrompt}).
+     * Never minify-export `Ix`/`kLo`.
+     */
+    leanPrompt?: boolean
+    delegationCostsFirst?: boolean
+    delegationCostsFirstText?: string
   }): Promise<string>
   userFacingName(input: Partial<z.infer<Input>> | undefined): string
   userFacingNameBackgroundColor?(
@@ -1093,6 +1171,20 @@ export type Tool<
  * to track where tool sets are assembled, passed, and filtered across the codebase.
  */
 export type Tools = readonly Tool[]
+
+/**
+ * densable ev(e) — current MCP clients for a query turn.
+ * refreshMcpClients?.() ?? getMcp?.().clients ?? options.mcpClients
+ */
+export function resolveMcpClients(
+  context: ToolUseContext,
+): MCPServerConnection[] {
+  return (
+    context.options.refreshMcpClients?.() ??
+    context.getMcp?.().clients ??
+    context.options.mcpClients
+  )
+}
 
 /**
  * Methods that `buildTool` supplies a default for. A `ToolDef` may omit these;

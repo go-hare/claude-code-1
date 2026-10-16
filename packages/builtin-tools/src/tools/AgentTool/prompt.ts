@@ -1,27 +1,48 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isRemoteIsolationAvailable } from 'src/utils/agentIsolationRemote.js'
+import {
+  canStampSharesCwdNote,
+  isSharesCwdSiblingGateOn,
+} from 'src/utils/agentSharesCwd.js'
 import { getSubscriptionType } from 'src/utils/auth.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
+import { resolveAgentListInMessagesEnvOverride } from 'src/utils/residualFinalEnvGates.js'
 import {
-  isBackgroundTasksDisabled,
-  resolveAgentListInMessagesEnvOverride,
-} from 'src/utils/residualFinalEnvGates.js'
+  hasActiveBackgroundLaunchRule,
+  isBackgroundAgentLaunchBlocked,
+} from 'src/utils/sessionBackgroundGates.js'
+import {
+  getDelegationCostsFirstText,
+  isDelegationCostsFirst,
+  shouldUseSimpleSystemPrompt,
+} from 'src/utils/simpleSystemPrompt.js'
 import { isTeammate } from 'src/utils/teammate.js'
 import { isSubagentModelForceEnabled } from './subagentModelForce.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
-import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import {
   AGENT_TOOL_NAME,
   SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
 } from './constants.js'
-import { isForkSubagentEnabled } from './forkSubagent.js'
+import {
+  isForkSubagentEnabled,
+  isForkSubagentProductEnabled,
+} from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 export type AgentPromptAvailability = {
   forkAvailable?: boolean
   generalPurposeAvailable?: boolean
+  /** densable kLo `model` — Ix({model, leanPrompt}). */
+  model?: string
+  /** densable kLo `leanPrompt` — when true, short prompt. */
+  leanPrompt?: boolean
+  /** densable kLo `delegationCostsFirst` — short When to use uses kyt/vte. */
+  delegationCostsFirst?: boolean
+  /** densable kLo `delegationCostsFirstText` — GB tengu_lucky_cerf_text override. */
+  delegationCostsFirstText?: string
 }
 
 function getToolsDescription(agent: AgentDefinition): string {
@@ -75,6 +96,24 @@ export function shouldInjectAgentListInMessages(): boolean {
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_agent_list_attach', false)
 }
 
+/**
+ * densable Ix({model, leanPrompt}) — never minify-export `Ix`.
+ * `leanPrompt ?? Eo(model)` where Eo is shouldUseSimpleSystemPrompt.
+ */
+function shouldUseLeanAgentPrompt(input: {
+  model?: string
+  leanPrompt?: boolean
+}): boolean {
+  return input.leanPrompt ?? shouldUseSimpleSystemPrompt({ model: input.model })
+}
+
+/** densable jfr($e) — never minify-export `jfr`. */
+function whenToUseLookupLine(steerDefault: boolean): string {
+  return steerDefault
+    ? `Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.`
+    : `For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.`
+}
+
 export async function getPrompt(
   agentDefinitions: AgentDefinition[],
   isCoordinator?: boolean,
@@ -100,13 +139,15 @@ export async function getPrompt(
 
 ## When to fork
 
-When you need to delegate work that benefits from full conversation context (e.g., continuing a multi-file refactor where the child needs the same system prompt and history), use \`fork: true\`. For most tasks, prefer specialized agent types (Explore, Plan, general-purpose).
+Fork yourself (pass \`subagent_type: "fork"\`) when the intermediate tool output isn't worth keeping in your context. The criterion is qualitative — "will I need this output again" — not task size. Fork open-ended questions. If research can be broken into independent questions, launch parallel forks in one message. A fork beats a fresh subagent for this — it inherits context and shares your cache.
 
-**Don't peek.** The tool result includes an \`output_file\` path — do not Read or tail it unless the user explicitly asks for a progress check. You get a completion notification; trust it.
+Forks are cheap because they share your prompt cache.
 
-**Don't race.** After launching, you know nothing about what the fork found. Never fabricate or predict fork results. If the user asks a follow-up before the notification lands, tell them the fork is still running.
+**Don't peek.** The tool result includes an \`output_file\` path — do not Read or tail it. You get a completion notification; trust it. Reading the transcript mid-flight pulls the fork's tool noise into your context, which defeats the point of forking.
 
-**Writing a fork prompt.** Since the fork inherits your context, the prompt is a *directive* — what to do, not what the situation is. Be specific about scope. Don't re-explain background.
+**Don't race.** After launching, you know nothing about what the fork found. Never fabricate or predict fork results in any format — not as prose, summary, or structured output. The notification arrives as a user-role message in a later turn; it is never something you write yourself. If the user asks a follow-up before the notification lands, tell them the fork is still running — give status, not a guess.
+
+**Writing a fork prompt.** Since the fork inherits your context, the prompt is a *directive* — what to do, not what the situation is. Be specific about scope: what's in, what's out, what another agent is handling. Don't re-explain background.
 `
     : ''
 
@@ -114,15 +155,16 @@ When you need to delegate work that benefits from full conversation context (e.g
 
 ## Writing the prompt
 
-${forkEnabled ? 'When spawning an agent without `fork: true`, it starts with zero context. ' : ''}Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
-- Explain what you're trying to accomplish and why, what you've already learned or ruled out, and enough context for the agent to make judgment calls.
-- Each agent type's model, reasoning effort, and tool access are set in its definition (\`.claude/agents/*.md\` frontmatter, or the SDK \`agents\` option)${isSubagentModelForceEnabled() ? '' : '; the `model` parameter here overrides the definition for this one call'}.
+${forkEnabled ? 'Any agent other than a fork starts with zero context. ' : ''}Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
+- Explain what you're trying to accomplish and why.
+- Describe what you've already learned or ruled out.
+- Give enough context about the surrounding problem that the agent can make judgment calls rather than just following a narrow instruction.
 - If you need a short response, say so ("report in under 200 words").
 - Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead weight when the premise is wrong.
 
-${forkEnabled ? 'For non-fork agents, terse' : 'Terse'} command-style prompts produce shallow, generic work.
+${forkEnabled ? 'For fresh agents, terse' : 'Terse'} command-style prompts produce shallow, generic work.
 
-**Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
+**Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
 `
 
   // When the gate is on, the agent list lives in an agent_listing_delta
@@ -143,18 +185,29 @@ ${effectiveAgents.map(agent => formatAgentLine(agent)).join('\n')}`
         forkEnabled ? '`"fork"` or ' : ''
       }one of the listed agent types.`
 
-  // Shared core prompt used by both coordinator and non-coordinator modes
-  const shared = `Launch a new agent to handle complex, multi-step tasks autonomously.
+  // densable kLo Ge: fork is selected via subagent_type "fork" (kLo has no fork-true flag).
+  const forkSelectGuidance = forkEnabled
+    ? `When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type to select an agent: \`"fork"\` forks yourself (the fork inherits your full conversation context and always runs on your model — a \`model\` override is ignored); ${
+        generalPurposeAvailable
+          ? 'any other type — or omitting it — starts a fresh agent (general-purpose by default).'
+          : `any other type starts a fresh agent. ${omitGuidance}`
+      }`
+    : `When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type parameter to select which agent type to use. ${omitGuidance}`
 
-The ${AGENT_TOOL_NAME} tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
+  // densable Ne — Pro spawn restriction.
+  const proSpawnRestriction =
+    getSubscriptionType() === 'pro'
+      ? `
 
-${agentListSection}
-
-When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type parameter to select which agent type to use. ${omitGuidance}${
-    forkEnabled && generalPurposeAvailable
-      ? ` Set \`fork: true\` to fork from the parent conversation context, inheriting full history and model.`
+**Do not spawn agents unless the user asks.** Each spawn starts cold and re-derives context you already have — it's the expensive path on this plan. A task with "multiple angles," "thorough," or several parts is not a request to spawn; handle it inline with your own tools. Only use this tool when the user explicitly says to use a subagent, or names one of the available agent types.`
       : ''
-  }`
+
+  // densable Ge / M3o — no "autonomously" / no specialized-subprocesses paragraph.
+  const shared = `Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.
+
+${agentListSection}${proSpawnRestriction}
+
+${forkSelectGuidance}`
 
   // Coordinator mode gets the slim prompt -- the coordinator system prompt
   // already covers usage notes, examples, and when-not-to-use guidance.
@@ -162,57 +215,125 @@ When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type parameter to sel
     return shared
   }
 
-  // Ant-native builds alias find/grep to embedded bfs/ugrep and remove the
-  // dedicated Glob/Grep tools, so point at find via Bash instead.
-  const embedded = hasEmbeddedSearchTools()
-  const fileSearchHint = embedded
-    ? '`find` via the Bash tool'
-    : `the ${GLOB_TOOL_NAME} tool`
-  // The "class Foo" example is about content search. Non-embedded stays Glob
-  // (original intent: find-the-file-containing). Embedded gets grep because
-  // find -name doesn't look at file contents.
-  const contentSearchHint = embedded
+  // densable qe: ME()&&za() → grep via Bash; else Zr (Grep).
+  const contentSearchHint = hasEmbeddedSearchTools()
     ? '`grep` via the Bash tool'
-    : `the ${GLOB_TOOL_NAME} tool`
+    : `the ${GREP_TOOL_NAME} tool`
   const whenNotToUseSection = forkEnabled
     ? ''
     : `
-When NOT to use the ${AGENT_TOOL_NAME} tool:
-- If you want to read a specific file path, use the ${FILE_READ_TOOL_NAME} tool or ${fileSearchHint} instead of the ${AGENT_TOOL_NAME} tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use ${contentSearchHint} instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the ${FILE_READ_TOOL_NAME} tool instead of the ${AGENT_TOOL_NAME} tool, to find the match more quickly
-- Other tasks that are not related to the agent descriptions above
+## When not to use
+
+If the target is already known, use the direct tool: ${FILE_READ_TOOL_NAME} for a known path, ${contentSearchHint} for a specific symbol or string. Reserve this tool for open-ended questions that span the codebase, or tasks that match an available agent type.
 `
 
-  // When listing via attachment, the "launch multiple agents" note is in the
-  // attachment message (conditioned on subscription there). When inline, keep
-  // the existing per-call getSubscriptionType() check.
-  const concurrencyNote =
-    !listViaAttachment && getSubscriptionType() !== 'pro'
-      ? `
-- Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses`
+  const backgroundAvailable =
+    !isBackgroundAgentLaunchBlocked() && !isInProcessTeammate()
+  // densable w = Yne() — fork overlay product gate (not Ce / non-interactive).
+  const forkProductEnabled = isForkSubagentProductEnabled()
+  // densable ke = T4o()&&!w&&!nV() — launch-rule installed, Ier false.
+  const explicitBackgroundMayRefuse =
+    hasActiveBackgroundLaunchRule() &&
+    !forkProductEnabled &&
+    !isInProcessTeammate()
+
+  // densable kLo K = Pqe()&&TRe() — GB tengu_twinkling_boole default false.
+  const sharesCwdDispatchNote =
+    isSharesCwdSiblingGateOn() && canStampSharesCwdNote()
+      ? 'When dispatching two or more agents that will write or edit files in the same repository, give EACH `isolation: "worktree"` — parallel agents sharing a working directory overwrite each other\'s work.'
       : ''
 
-  // Non-coordinator gets the full prompt with all sections
+  const lean = shouldUseLeanAgentPrompt({
+    model: availability?.model,
+    leanPrompt: availability?.leanPrompt,
+  })
+
+  if (lean) {
+    const shortBgNote =
+      backgroundAvailable && !forkEnabled
+        ? forkProductEnabled
+          ? `
+- Subagents run in the background; you'll be notified when one completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running.`
+          : "\n- Subagents run in the background by default; you'll be notified when one completes. Pass `run_in_background: false` only when your very next action depends on the result and nothing else could usefully happen while it runs — otherwise background it so the user can interject. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running."
+        : explicitBackgroundMayRefuse
+          ? "\n- A subagent runs in the background only if you pass `run_in_background: true`; even then it may run in the foreground or be refused. When one does run in the background, you'll be notified when it completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running."
+          : ''
+    const shortNameNote = isInProcessTeammate()
+      ? '\n- `run_in_background` and `name` are unavailable here — only synchronous subagents.'
+      : isTeammate()
+        ? '\n- `name` is unavailable here — teammates cannot spawn teammates.'
+        : ''
+    const shortRemoteNote = isRemoteIsolationAvailable()
+      ? '\n- `isolation: "remote"` runs the agent in a remote CCR sandbox (always background).'
+      : ''
+    const shortForkNote = forkEnabled
+      ? `
+
+A fork runs in the background and keeps its tool output out of your context. If you are the fork, execute directly — don't re-delegate. Subagents run in the background; you'll be notified when one completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running.`
+      : ''
+    const costsFirst =
+      availability?.delegationCostsFirst ??
+      isDelegationCostsFirst(availability?.model)
+    const whenToUse =
+      proSpawnRestriction !== ''
+        ? ''
+        : `
+
+## When to use
+
+${
+  costsFirst
+    ? (availability?.delegationCostsFirstText ?? getDelegationCostsFirstText())
+    : whenToUseLookupLine(true)
+}`
+    return `${shared}${whenToUse}${shortForkNote}
+
+- ${
+      backgroundAvailable || explicitBackgroundMayRefuse
+        ? "The agent's final report is not shown to the user — relay what matters."
+        : "The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters."
+    }
+- Use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name to continue a previously spawned agent with its context intact; a new ${AGENT_TOOL_NAME} call starts fresh${forkEnabled ? ' (except subagent_type: "fork", which inherits your context)' : ''}.
+- Each agent type's model, reasoning effort, and tools come from its definition (\`.claude/agents/*.md\` frontmatter or SDK \`agents\`).
+- \`isolation: "worktree"\` gives the agent its own git worktree (auto-cleaned if unchanged).${sharesCwdDispatchNote ? ` ${sharesCwdDispatchNote} Each result comes back with a branch and worktree path to merge.` : ''}${shortRemoteNote}${shortBgNote}${shortNameNote}`
+  }
+
+  const doneLine =
+    backgroundAvailable || explicitBackgroundMayRefuse
+      ? 'When the agent is done, its final report is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.'
+      : 'When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.'
+
+  // Non-coordinator long prompt — gold kLo Usage notes.
   return `${shared}
 ${whenNotToUseSection}
+## Usage notes
 
-Usage notes:
-- Always include a short description (3-5 words) summarizing what the agent will do${concurrencyNote}
-- When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.${
-    // eslint-disable-next-line custom-rules/no-process-env-top-level
-    !isBackgroundTasksDisabled() && !isInProcessTeammate()
+- Always include a short description summarizing what the agent will do
+- ${doneLine}
+- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting the work as done.${
+    backgroundAvailable && !forkProductEnabled
       ? `
-- Subagents run in the background by default; you'll be notified when one completes. Pass \`run_in_background: false\` for a synchronous run when you need the result before continuing.
-- **Foreground vs background**: Use background (default) for independent work. Pass \`run_in_background: false\` when you need the agent's results before you can proceed — e.g., research agents whose findings inform your next steps.`
+- Agents run in the background by default. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
+- **Foreground vs background**: Pass \`run_in_background: false\` only when your very next action depends on the agent's result and nothing else could usefully happen while it runs — e.g., a research agent whose finding gates the edit you're about to make. Otherwise let it run in the background (the default) — this includes fire-and-forget work, independent investigations, and anything where the user might hand you something else in the meantime. Wanting the result "next" is not enough on its own.`
+      : ''
+  }${
+    backgroundAvailable && !forkEnabled
+      ? `
+- **Don't race**: after launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.`
+      : ''
+  }${
+    explicitBackgroundMayRefuse
+      ? '\n- **Background agents**: an agent runs in the background only if you pass `run_in_background: true`, and a call that passes it may still run in the foreground or be refused. When an agent does run in the background, the call returns at once without its report, and you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead. After launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.'
       : ''
   }
-- To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field. The agent resumes with its full context preserved. ${forkEnabled ? 'Each non-fork Agent invocation starts without context — provide a complete task description.' : 'Each Agent invocation starts fresh — provide a complete task description.'}
-- The agent's outputs should generally be trusted
-- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.)${forkEnabled ? '' : ", since it is not aware of the user's intent"}
-- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+- To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field — that resumes it with full context. A new ${AGENT_TOOL_NAME} call starts a fresh agent with no memory of prior runs${forkEnabled ? ' (except subagent_type: "fork")' : ''}, so the prompt must be self-contained.
+- Each agent type's model, reasoning effort, and tool access are set in its definition (\`.claude/agents/*.md\` frontmatter, or the SDK \`agents\` option)${isSubagentModelForceEnabled() ? '' : '; the `model` parameter here overrides the definition for this one call'}.
+- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since a fresh agent is not aware of the user's intent
+- If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first.
 - If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple ${AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.
-- You can optionally set \`isolation: "worktree"\` to run the agent in a temporary git worktree, giving it an isolated copy of the repository. The worktree is automatically cleaned up if the agent makes no changes; if changes are made, the worktree path and branch are returned in the result.${
+- With \`isolation: "worktree"\`, the worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.${
+    sharesCwdDispatchNote ? `\n- ${sharesCwdDispatchNote}` : ''
+  }${
     isRemoteIsolationAvailable()
       ? `\n- You can set \`isolation: "remote"\` to run the agent in a remote CCR environment. This is always a background task; you'll be notified when it completes. Use for long-running tasks that need a fresh sandbox.`
       : ''
@@ -224,5 +345,51 @@ Usage notes:
         ? `
 - The name parameter is not available in this context — teammates cannot spawn other teammates. Omit it to spawn a subagent.`
         : ''
-  }${whenToForkSection}${writingThePromptSection}`
+  }${whenToForkSection}${writingThePromptSection}${
+    forkEnabled
+      ? `
+
+Example usage:
+
+<example>
+user: "What's left on this branch before we can ship?"
+assistant: <thinking>Forking this — it's a survey question. I want the punch list, not the git output in my context.</thinking>
+${AGENT_TOOL_NAME}({
+  subagent_type: "fork",
+  name: "ship-audit",
+  description: "Branch ship-readiness audit",
+  prompt: "Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. Report a punch list — done vs. missing. Under 200 words."
+})
+assistant: Ship-readiness audit running.
+<commentary>
+Turn ends here. The coordinator knows nothing about the findings yet. What follows is a SEPARATE turn — the notification arrives from outside, as a user-role message. It is not something the coordinator writes.
+</commentary>
+[later turn — notification arrives as user message]
+assistant: Audit's back. Three blockers: no tests for the new prompt path, GrowthBook gate wired but not in build_flags.yaml, and one uncommitted file.
+</example>
+
+<example>
+user: "so is the gate wired up or not"
+<commentary>
+User asks mid-wait. The audit fork was launched to answer exactly this, and it hasn't returned. The coordinator does not have this answer. Give status, not a fabricated result.
+</commentary>
+assistant: Still waiting on the audit — that's one of the things it's checking. Should land shortly.
+</example>
+
+<example>
+user: "Can you get a second opinion on whether this migration is safe?"
+assistant: <thinking>I'll ask the code-reviewer agent — it won't see my analysis, so it can give an independent read.</thinking>
+<commentary>
+A non-fork subagent_type is specified, so the agent starts fresh. It needs full context in the prompt. The briefing explains what to assess and why.
+</commentary>
+${AGENT_TOOL_NAME}({
+  name: "migration-review",
+  description: "Independent migration review",
+  subagent_type: "code-reviewer",
+  prompt: "Review migration 0042_user_schema.sql for safety. Context: we're adding a NOT NULL column to a 50M-row table. Existing rows get a backfill default. I want a second opinion on whether the backfill approach is safe under concurrent writes — I've checked locking behavior but want independent verification. Report: is this safe, and if not, what specifically breaks?"
+})
+</example>
+`
+      : ''
+  }`
 }
