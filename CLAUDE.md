@@ -230,7 +230,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 **启用方式**: 环境变量 `FEATURE_<FLAG_NAME>=1`。例如 `FEATURE_BUDDY=1 bun run dev`。
 
-**Build 默认 features**：**42 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
+**Build 默认 features**：**41 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
 
 - 基础: `BUDDY`, `TRANSCRIPT_CLASSIFIER`, `BRIDGE_MODE`, `AGENT_TRIGGERS_REMOTE`, `CHICAGO_MCP`, `VOICE_MODE`
 - 统计/缓存: `SHOT_STATS`, `PROMPT_CACHE_BREAK_DETECTION`, `TOKEN_BUDGET`
@@ -246,7 +246,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - 连接器: `CONNECTOR_TEXT`, `COMMIT_ATTRIBUTION`, `DIRECT_CONNECT`
 - 实验性: `EXPERIMENTAL_SKILL_SEARCH`, `EXPERIMENTAL_SEARCH_EXTRA_TOOLS`
 - 模式: `POOR`, `SSH_REMOTE`
-- 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`, `GOAL`
+- 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`
 
 **已注释禁用（6 个）**——每条上方都有注释写明原因，**不要随手加回来**：
 
@@ -342,7 +342,7 @@ Effort 解析对齐 densable 2.1.211 的 model-driven 链路：`resolveAppliedEf
 
 - **框架**: `bun:test`（内置断言 + mock）
 - **单元测试**: 就近放置于 `src/**/__tests__/`，文件名 `<module>.test.ts`
-- **集成测试**: `tests/integration/` — 7 个文件（cli-arguments, context-build, message-pipeline, tool-chain, autonomy-lifecycle-user-flow, dependency-overrides, goal-lifecycle）
+- **集成测试**: `tests/integration/` — 6 个文件（cli-arguments, context-build, message-pipeline, tool-chain, autonomy-lifecycle-user-flow, dependency-overrides）
 - **规模**: 约 1,218 个测试文件
 - **对齐回归测试**: `*.NNN.test.ts`（`NNN` = densable 版本号，如 `hasReleasedTerminal.238.test.ts`）约 450 个。这些锁的是「官方在 2.1.NNN 的行为」，看起来测得琐碎正是它们的价值，**删不得**
 - **共享 mock/fixture**: `tests/mocks/`（api-responses, file-system, fixtures/）
@@ -432,7 +432,7 @@ bun run precheck
 ## Working with This Codebase
 
 - **precheck must pass** — `bun run precheck`（typecheck + `check:fix` + `docs:check` + test + `check:ci`）必须零错误，任何修改都不能引入新的类型/lint/格式/文档/测试错误。最后那步 `check:ci`（= `biome ci .`）是**非改写**的复核，跑在 `bun test` 之后：`check:fix` 会顺手改文件，所以它自己"通过"不代表工作树最终是干净的。有它兜底，precheck 就不可能放过一个 `biome ci` 会拒的状态。
-- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（42 个默认 ON，含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`）。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
+- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（41 个默认 ON），含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
 - **React Compiler output** — Components have decompiled memoization boilerplate (`const $ = _c(N)`). This is normal.
 - **`bun:bundle` import** — `import { feature } from 'bun:bundle'` 是 Bun 内置模块，由运行时/构建器解析。不要用自定义函数替代它。**`feature()` 只能直接用在 `if` 语句或三元表达式的条件位置**（Bun 编译器限制），不能赋值给变量、不能放在箭头函数体里、不能作为 `&&` 链的一部分。正确：`if (feature('X')) {}` 或 `feature('X') ? a : b`。
 - **`src/` path alias** — tsconfig maps `src/*` to `./src/*`. Imports like `import { ... } from 'src/utils/...'` are valid.
