@@ -57,6 +57,7 @@ import {
   mergeFileStateCaches,
   READ_FILE_STATE_CACHE_SIZE,
 } from '../utils/fileStateCache.js';
+import { ToolStateSlots } from '../utils/toolState.js';
 import { refreshActivePlugins } from '../utils/plugins/refresh.js';
 import { retireDepartedAdditionalDirectories } from '../utils/settings/applySettingsChange.js';
 import {
@@ -120,6 +121,20 @@ import {
   appendMessageToLocalAgent,
   type LocalAgentTaskState,
 } from '../tasks/LocalAgentTask/LocalAgentTask.js';
+import { isBackgroundTask, type TaskState } from '../tasks/types.js';
+
+function countPendingTurnDurationWork(tasks: Record<string, TaskState>): {
+  agents: number | undefined;
+  workflows: number | undefined;
+} {
+  const running = Object.values(tasks).filter(isBackgroundTask);
+  const agents = running.filter(t => t.type === 'local_agent' || t.type === 'remote_agent').length;
+  const workflows = running.filter(t => t.type === 'local_workflow').length;
+  return {
+    agents: agents > 0 ? agents : undefined,
+    workflows: workflows > 0 ? workflows : undefined,
+  };
+}
 import {
   registerLeaderToolUseConfirmQueue,
   unregisterLeaderToolUseConfirmQueue,
@@ -149,6 +164,9 @@ import {
   offerPlacement,
   subscribeRasterFrames,
 } from '../utils/plugins/functionHooksModules.js';
+import { ensurePluginToolRegistrarInstalled } from '../utils/plugins/pluginToolLoopbackRegistrar.js';
+import { setPluginToolSessionHost } from '../utils/plugins/pluginToolSessionHost.js';
+import { getDenyRuleForTool } from '../utils/permissions/permissions.js';
 import {
   PluginAbovePromptSite,
   PluginPaneDockHost,
@@ -311,13 +329,14 @@ const useAntOrgWarningNotification: typeof import('../hooks/notifs/useAntOrgWarn
 function getCoordinatorUserContext(
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
+  tools?: ReadonlyArray<{ name: string; searchHint?: string }>,
 ): { [k: string]: string } {
   if (!feature('COORDINATOR_MODE')) return {};
   /* eslint-disable @typescript-eslint/no-require-imports */
   const mod = require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js');
   /* eslint-enable @typescript-eslint/no-require-imports */
   if (typeof mod?.getCoordinatorUserContext !== 'function') return {};
-  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir);
+  return mod.getCoordinatorUserContext(mcpClients, scratchpadDir, tools);
 }
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import useCanUseTool from '../hooks/useCanUseTool.js';
@@ -481,7 +500,6 @@ import {
 import { isBgSession, updateSessionName, updateSessionActivity } from '../utils/concurrentSessions.js';
 import { isInProcessTeammateTask, type InProcessTeammateTaskState } from '../tasks/InProcessTeammateTask/types.js';
 import { restoreRemoteAgentTasks } from '../tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { BackgroundAgentSelector } from '../components/tasks/BackgroundAgentSelector.js';
 import { useInboxPoller } from '../hooks/useInboxPoller.js';
 // Dead code elimination: conditional import for loop mode
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -493,9 +511,6 @@ const SUGGEST_BG_PR_NOOP = (_p: string, _n: string): boolean => false;
 const useProactive =
   feature('PROACTIVE') || feature('KAIROS') ? require('../proactive/useProactive.js').useProactive : null;
 const useScheduledTasks = feature('AGENT_TRIGGERS') ? require('../hooks/useScheduledTasks.js').useScheduledTasks : null;
-const useGoalContinuation: typeof import('../hooks/useGoalContinuation.js').useGoalContinuation | null = feature('GOAL')
-  ? require('../hooks/useGoalContinuation.js').useGoalContinuation
-  : null;
 const useMasterMonitor = feature('UDS_INBOX')
   ? require('../hooks/useMasterMonitor.js').useMasterMonitor
   : () => undefined;
@@ -556,7 +571,6 @@ import {
   type LeftArrowVia,
 } from '../utils/leftArrowVia.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
-import type { TaskState } from '../tasks/types.js';
 import {
   popAllEditable,
   enqueue,
@@ -1154,7 +1168,7 @@ export function REPL({
   onQueryParamsChange,
 }: Props): React.ReactNode {
   wireClipboardAttacherCaps();
-  const { storageV5 } = useSessionServices();
+  const { storageV5, credentials } = useSessionServices();
   const isRemoteSession = !!remoteSessionConfig;
 
   // densable Jul/LHr Host engine: P??S8o + unmount close when self-owned.
@@ -1454,6 +1468,10 @@ export function REPL({
   const [dynamicMcpConfig, setDynamicMcpConfig] = useState<Record<string, ScopedMcpServerConfig> | undefined>(
     initialDynamicMcpConfig,
   );
+  // densable class field `this.dynamicMcp` — $.tool.register must not rebind
+  // the session host (and clear it in cleanup) when this map changes.
+  const dynamicMcpConfigRef = useRef(dynamicMcpConfig);
+  dynamicMcpConfigRef.current = dynamicMcpConfig;
 
   const onChangeDynamicMcpConfig = useCallback(
     (
@@ -1653,7 +1671,16 @@ export function REPL({
   useIdeLogging(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients);
   useIdeSelection(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients, setIDESelection);
 
-  const [streamMode, setStreamMode] = useState<SpinnerMode>('responding');
+  const [streamMode, setStreamModeState] = useState<SpinnerMode>('responding');
+  // densable fl / Ihr.outputLimitRecovery — "picking the thought back up"
+  const [outputLimitRecovery, setOutputLimitRecovery] = useState<
+    import('../components/Spinner/statusKind.js').OutputLimitRecovery | null
+  >(null);
+  // densable Ihr.setMode: recovery bag only lives on requesting.
+  const setStreamMode = useCallback((mode: SpinnerMode) => {
+    setStreamModeState(mode);
+    if (mode !== 'requesting') setOutputLimitRecovery(null);
+  }, []);
   // Ref mirror so onSubmit can read the latest value without adding
   // streamMode to its deps. streamMode flips between
   // requesting/responding/tool-use ~10x per turn during streaming; having it
@@ -1721,12 +1748,6 @@ export function REPL({
   // race without touching keybinding registration order.
   const LOCAL_JSX_CLOSE_CANCEL_GRACE_MS = 500;
   const localJSXClosedAtRef = useRef(0);
-
-  // Track whether the last turn was user-aborted (Ctrl+C / Escape).
-  // When true, useGoalContinuation skips the continuation enqueue so
-  // interrupted turns don't spin into an unstoppable loop. Reset to
-  // false at the start of the next user-initiated turn.
-  const [wasAborted, setWasAborted] = useState(false);
 
   // Ref for the bridge result callback — set after useReplBridge initializes,
   // read in the onQuery finally block to notify mobile clients that a turn ended.
@@ -2235,6 +2256,35 @@ export function REPL({
   useEffect(() => {
     setFunctionHooksAppStateReader(() => store.getState());
     setFunctionHooksAppStateWriter(store.setState);
+    // densable YNo + Hu session bag for $.tool.register → MCP loopback.
+    ensurePluginToolRegistrarInstalled();
+    setPluginToolSessionHost({
+      addMcpServer: (name, config) => {
+        onChangeDynamicMcpConfig(prev => ({ ...(prev ?? {}), [name]: config }));
+      },
+      removeMcpServer: name => {
+        onChangeDynamicMcpConfig(prev => {
+          if (!prev || !(name in prev)) return prev ?? {};
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+      },
+      tools: () => {
+        const state = store.getState();
+        return assembleToolPool(state.toolPermissionContext, state.mcp.tools);
+      },
+      mcpServers: () => {
+        const state = store.getState();
+        const names = new Set(state.mcp.clients.map(client => client.name));
+        for (const name of Object.keys(dynamicMcpConfigRef.current ?? {})) {
+          names.add(name);
+        }
+        return [...names];
+      },
+      builtInToolsDisabled: store.getState().toolPermissionContext.builtInToolsDisabled === true,
+      isToolWithheldByDenyRule: tool => Boolean(getDenyRuleForTool(store.getState().toolPermissionContext, tool)),
+    });
     setUiToastShowHandler(toast => {
       addNotification({
         key: `plugin-toast-${randomUUID()}`,
@@ -2244,9 +2294,7 @@ export function REPL({
         timeoutMs: toast.timeoutMs ?? 4000,
       });
       const { current, queue } = store.getState().notifications;
-      logForDebugging(
-        `$.ui.toast: shown as ${current?.key ?? 'nothing'} (${queue.length} queued)`,
-      );
+      logForDebugging(`$.ui.toast: shown as ${current?.key ?? 'nothing'} (${queue.length} queued)`);
     });
     setUiAskHostHandler(input => {
       const toolUseID = randomUUID();
@@ -2284,8 +2332,9 @@ export function REPL({
       setUiToastShowHandler(undefined);
       setFunctionHooksAppStateReader(undefined);
       setFunctionHooksAppStateWriter(undefined);
+      setPluginToolSessionHost(undefined);
     };
-  }, [store, addNotification]);
+  }, [store, addNotification, onChangeDynamicMcpConfig]);
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
@@ -3140,6 +3189,7 @@ export function REPL({
     setSpinnerColor(null);
     setSpinnerShimmerColor(null);
     setRetryStatus(null);
+    setOutputLimitRecovery(null);
     pickNewSpinnerTip();
     endInteractionSpan();
     // Speculative bash classifier checks are only valid for the current
@@ -3174,6 +3224,8 @@ export function REPL({
           // would make checkResumeConsistency report false delta<0 for
           // every turn that ran a progress-emitting tool.
           count(prev, isLoggableMessage),
+          countPendingTurnDurationWork(store.getState().tasks).agents,
+          countPendingTurnDurationWork(store.getState().tasks).workflows,
         ),
       ]);
     }
@@ -3507,15 +3559,6 @@ export function REPL({
         clearSessionMetadata();
         restoreSessionMetadata(log);
 
-        // Hydrate goal state from the resumed session's transcript
-        if (feature('GOAL') && log.goal) {
-          const { hydrateGoalFromTranscript } =
-            require('../services/goal/goalStorage.js') as typeof import('../services/goal/goalStorage.js');
-          const goalsMap = new Map<UUID, import('../types/logs.js').GoalState>();
-          goalsMap.set(sessionId as UUID, log.goal);
-          hydrateGoalFromTranscript(goalsMap, sessionId as UUID);
-        }
-
         // Resumed sessions shouldn't re-title from mid-conversation context
         // (same reasoning as the useRef seed), and the previous session's
         // Haiku title shouldn't carry over.
@@ -3706,6 +3749,8 @@ export function REPL({
   // it exactly once, then feed that stable reference into useRef.
   const [initialReadFileState] = useState(() => createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE));
   const readFileState = useRef(initialReadFileState);
+  const [initialToolState] = useState(() => new ToolStateSlots());
+  const toolStateRef = useRef(initialToolState);
   const bashTools = useRef(new Set<string>());
   const bashHosts = useRef(new Set<string>());
   const bashToolsProcessedIdx = useRef(0);
@@ -4088,24 +4133,6 @@ export function REPL({
       proactiveModule?.pauseProactive();
     }
 
-    // Ctrl+C during an active goal turn pauses the goal so the
-    // continuation loop stops. The user can /goal resume to continue later.
-    // Guard: only pause when a query is actually in flight. onCancel() is
-    // also called from the restore/edit flow (idle), and pausing then would
-    // incorrectly stop the next continuation.
-    if (feature('GOAL') && queryGuard.getSnapshot()) {
-      const { getGoal, pauseGoal } =
-        require('../services/goal/goalState.js') as typeof import('../services/goal/goalState.js');
-      const { persistCurrentGoal } =
-        require('../services/goal/goalStorage.js') as typeof import('../services/goal/goalStorage.js');
-      const currentGoal = getGoal();
-      if (currentGoal?.status === 'active') {
-        pauseGoal();
-        persistCurrentGoal();
-      }
-    }
-    setWasAborted(true);
-
     queryGuard.forceEnd();
     setMainLoopBusy(false);
 
@@ -4461,6 +4488,37 @@ export function REPL({
         if (!mainThreadAgentDefinition) return merged;
         return resolveAgentTools(mainThreadAgentDefinition, merged, false, true).resolvedTools;
       };
+      // densable computeMcpClients — gold refreshMcpClients:be.computeMcpClients
+      const computeMcpClients = () => mergeClients(initialMcpClients, store.getState().mcp.clients);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { getBootstrapSession } = require('../utils/sessionRoot.js') as typeof import('../utils/sessionRoot.js');
+        getBootstrapSession().mcpSessionWiring.registerConnections({
+          adoptServer(name, client, opts) {
+            setAppState(prev => {
+              const clients = prev.mcp.clients;
+              const idx = clients.findIndex(c => c.name === name);
+              if (idx >= 0) {
+                const next = [...clients];
+                next[idx] = client as (typeof clients)[number];
+                return { ...prev, mcp: { ...prev.mcp, clients: next } };
+              }
+              if (opts?.appendIfAbsent === true) {
+                return {
+                  ...prev,
+                  mcp: {
+                    ...prev.mcp,
+                    clients: [...clients, client as (typeof clients)[number]],
+                  },
+                };
+              }
+              return prev;
+            });
+          },
+        });
+      } catch {
+        // connections owner optional until session root is up
+      }
 
       return {
         abortController,
@@ -4503,6 +4561,7 @@ export function REPL({
           appendSystemPrompt,
           appendSubagentSystemPrompt,
           refreshTools: computeTools,
+          refreshMcpClients: computeMcpClients,
         },
         getAppState: () => store.getState(),
         getProactivityLevel: () => store.getState().proactivityLevel,
@@ -4536,6 +4595,7 @@ export function REPL({
         },
         onChangeAPIKey: reverify,
         readFileState: readFileState.current,
+        toolState: toolStateRef.current,
         setToolJSX,
         addNotification,
         appendSystemMessage: msg => setMessages(prev => [...prev, msg]),
@@ -4567,6 +4627,8 @@ export function REPL({
         setStreamMode,
         // densable 2.1.214 #39 dYd/setRetryStatus
         setRetryStatus,
+        // densable fl — spinner recovering bag on max_output_tokens_recovery
+        setOutputLimitRecovery,
         onCompactProgress: event => {
           switch (event.type) {
             case 'hooks_start':
@@ -4638,6 +4700,7 @@ export function REPL({
         requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
         // densable PBr / We() — session services Provider, not lastPinned.
         storageV5,
+        credentials,
         presentation: isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
         toggleDiffPanel: async () =>
           toggleDiffPanelForSlash(getReplDiffHost(), setAppState, () => store.getState().replTab, replDiffColumns),
@@ -4655,6 +4718,7 @@ export function REPL({
       allowedAgentTypes,
       store,
       storageV5,
+      credentials,
       setAppState,
       setSessionToolPermissionContext,
       reverify,
@@ -5064,43 +5128,6 @@ export function REPL({
               proactiveModule?.setContextBlocked(false);
             }
           }
-          // Auto-pause active /goal when the turn failed due to connectivity.
-          // Continuing immediately after network failures usually burns turns
-          // without progress and can rapidly hit max-turn guards.
-          if (
-            feature('GOAL') &&
-            newMessage.type === 'assistant' &&
-            'isApiErrorMessage' in newMessage &&
-            newMessage.isApiErrorMessage
-          ) {
-            const assistantText =
-              getContentText((newMessage.message?.content ?? '') as string | ContentBlockParam[]) ?? '';
-            const lowerText = assistantText.toLowerCase();
-            const isConnectivityFailure =
-              lowerText.includes('connection error') ||
-              lowerText.includes('fetch failed') ||
-              lowerText.includes('network error') ||
-              lowerText.includes('enotfound') ||
-              lowerText.includes('econnreset') ||
-              lowerText.includes('etimedout');
-
-            if (isConnectivityFailure) {
-              const { getGoal, pauseGoal } =
-                require('../services/goal/goalState.js') as typeof import('../services/goal/goalState.js');
-              const { persistCurrentGoal } =
-                require('../services/goal/goalStorage.js') as typeof import('../services/goal/goalStorage.js');
-              const currentGoal = getGoal();
-              if (currentGoal?.status === 'active') {
-                pauseGoal();
-                persistCurrentGoal();
-                addNotification({
-                  key: 'goal-auto-paused-connectivity-error',
-                  text: 'Detected connection error. Active goal was auto-paused. Run /goal resume after network recovers.',
-                  priority: 'immediate',
-                });
-              }
-            }
-          }
           // Relay assistant response to master when in slave mode.
           if (feature('UDS_INBOX') && newMessage.type === 'assistant') {
             // Extract text from content blocks (API format)
@@ -5235,17 +5262,8 @@ export function REPL({
             }
           },
           onActiveGoal: value => {
-            // densable yEt active_goal — clear or replace AppState.activeGoal.
-            // densable 1:1 — cancel idle check-in timer on teardown (M4).
-            if (value === undefined || value === null) {
-              try {
-                const { cancelPendingGoalIdleCheckin } =
-                  require('../services/goal/goalIdleCheckin.js') as typeof import('../services/goal/goalIdleCheckin.js');
-                cancelPendingGoalIdleCheckin();
-              } catch {
-                // optional when GOAL feature / module unavailable
-              }
-            }
+            // densable yEt / P9e: onActiveGoal?.(value) only. Idle cancel is
+            // stopHooks / restoreGoalFromTranscript — not yEt, not vJe.
             setAppState(prev => {
               if (value === undefined || value === null) {
                 if (prev.activeGoal === undefined) return prev;
@@ -5471,7 +5489,11 @@ export function REPL({
       ]);
       const userContext = {
         ...baseUserContext,
-        ...getCoordinatorUserContext(freshMcpClients, isScratchpadEnabled() ? getScratchpadDir() : undefined),
+        ...getCoordinatorUserContext(
+          freshMcpClients,
+          isScratchpadEnabled() ? getScratchpadDir() : undefined,
+          freshTools,
+        ),
         ...((feature('PROACTIVE') || feature('KAIROS')) &&
         proactiveModule?.isProactiveActive() &&
         !terminalFocusRef.current
@@ -5786,7 +5808,6 @@ export function REPL({
 
       try {
         pipeReturnHadErrorRef.current = false;
-        setWasAborted(false);
         // isLoading is derived from queryGuard — tryStart() above already
         // transitioned dispatching→running, so no setter call needed here.
         resetTimingRefs();
@@ -5849,7 +5870,6 @@ export function REPL({
         // (cancel+resubmit race where the stale finally fires as a microtask).
         if (queryGuard.end(thisGeneration)) {
           setMainLoopBusy(false);
-          setWasAborted(abortController.signal.aborted);
           setLastQueryCompletionTime(Date.now());
           // Always reset loading state in finally - this ensures cleanup even
           // if onQueryImpl throws. onTurnComplete is called separately in
@@ -5900,15 +5920,10 @@ export function REPL({
             snapshotOutputTokensForTurn(null);
           }
 
-          // Add turn duration message for turns longer than 30s or with a budget
-          // Skip if user aborted or if in loop mode (too noisy between ticks)
-          // Defer if swarm teammates are still running (show when they finish)
+          // densable 2.1.289 QueryEngine: always Spt(duration) when the guard
+          // ends (no 30s floor). Skip abort / loop ticks; defer swarm.
           const turnDurationMs = performance.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
-          if (
-            (turnDurationMs > 30000 || budgetInfo !== undefined) &&
-            !abortController.signal.aborted &&
-            !proactiveActive
-          ) {
+          if (!abortController.signal.aborted && !proactiveActive) {
             const hasRunningSwarmAgents = getAllInProcessTeammateTasks(store.getState().tasks).some(
               t => t.status === 'running',
             );
@@ -5924,7 +5939,13 @@ export function REPL({
             } else {
               setMessages(prev => [
                 ...prev,
-                createTurnDurationMessage(turnDurationMs, budgetInfo, count(prev, isLoggableMessage)),
+                createTurnDurationMessage(
+                  turnDurationMs,
+                  budgetInfo,
+                  count(prev, isLoggableMessage),
+                  countPendingTurnDurationWork(store.getState().tasks).agents,
+                  countPendingTurnDurationWork(store.getState().tasks).workflows,
+                ),
               ]);
             }
           }
@@ -6932,6 +6953,16 @@ export function REPL({
         rewindToMessageIndex: messageIndex,
       });
       setMessages(prev.slice(0, messageIndex));
+      // densable QAt @217225770 → F7e() only (not Ktn). Rewind is a
+      // conversation_reset, not a continue. Do not invent a Vtn wipe here.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { noteArtifactConversationReset } =
+          require('../services/artifactAutoReact/conversationBoundary.js') as typeof import('../services/artifactAutoReact/conversationBoundary.js');
+        noteArtifactConversationReset();
+      } catch {
+        /* product optional */
+      }
       // Careful, this has to happen after setMessages
       setConversationId(randomUUID());
       // Reset cached microcompact state so stale pinned cache edits
@@ -7375,34 +7406,6 @@ export function REPL({
     hasActiveLocalJsxUI: isShowingLocalJSXCommand,
     isInPlanMode: toolPermissionContext.mode === 'plan',
     onQueueTick: (command: QueuedCommand) => enqueue(command),
-  });
-
-  // Goal auto-continuation: enqueue a steering prompt when idle + active goal
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useGoalContinuation?.({
-    isLoading: isLoading || initialMessage !== null,
-    wasAborted,
-    queuedCommandsLength: queuedCommands.length,
-    hasActiveLocalJsxUI: isShowingLocalJSXCommand,
-    isInPlanMode: toolPermissionContext.mode === 'plan',
-    isQueryActiveNow: queryGuard.getSnapshot,
-    onContinuationEnqueued: ({ turn, objective }) => {
-      const visibleGoalTurnInput = `Goal auto-continue (${turn}/1): continue advancing "${objective}".`;
-      setMessages(oldMessages => [
-        ...oldMessages,
-        createUserMessage({
-          content: visibleGoalTurnInput,
-          isVisibleInTranscriptOnly: true,
-        }),
-      ]);
-    },
-    onMaxTurnsReached: () => {
-      addNotification({
-        key: 'goal-max-turns-reached',
-        text: 'Goal reached max continuation turns (1). Run /goal continue to reset turn counter and continue.',
-        priority: 'immediate',
-      });
-    },
   });
 
   useEffect(() => {
@@ -7902,7 +7905,6 @@ export function REPL({
         onOpenRateLimitOptions={handleOpenRateLimitOptions}
         isLoading={isLoading}
         hidePastThinking={true}
-        streamingThinking={streamingThinking}
         scrollRef={transcriptScrollRef}
         jumpRef={jumpRef}
         onSearchMatchesChange={onSearchMatchesChange}
@@ -8383,34 +8385,11 @@ export function REPL({
                 )}
                 {process.env.USER_TYPE === 'ant' && <TungstenLiveMonitor />}
                 {/* WebBrowserPanel removed — browser-lite, no panel */}
-                <Box flexGrow={1} />
-                {showSpinner && (
-                  <SpinnerWithVerb
-                    mode={streamMode}
-                    spinnerTip={spinnerTip}
-                    spinnerTipLabel={spinnerTipLabel}
-                    responseLengthRef={responseLengthRef}
-                    apiMetricsRef={apiMetricsRef}
-                    compactProgressActiveRef={compactProgressActiveRef}
-                    overrideMessage={spinnerMessage}
-                    spinnerSuffix={stopHookSpinnerSuffix}
-                    verbose={verbose}
-                    loadingStartTimeRef={loadingStartTimeRef}
-                    totalPausedMsRef={totalPausedMsRef}
-                    pauseStartTimeRef={pauseStartTimeRef}
-                    overrideColor={spinnerColor}
-                    overrideShimmerColor={spinnerShimmerColor}
-                    hasActiveTools={inProgressToolUseIDs.size > 0}
-                    leaderIsIdle={!isLoading}
-                    retryStatus={retryStatus}
-                  />
-                )}
-                {!showSpinner &&
-                  !isLoading &&
-                  !userInputOnProcessing &&
-                  !hasRunningTeammates &&
-                  isBriefOnly &&
-                  !viewedAgentTask && <BriefIdleStatus />}
+                {/* densable tot.scrollable / bJ grow is inside official Ink
+                    with hJ. Analog ScrollBox + leftover flexGrow spacer
+                    after spinner moved to tot.bottom makes stickyScroll pin
+                    to empty grow — blank transcript, PromptInput still
+                    visible. Do not keep that spacer. */}
               </>
             }
             bottom={
@@ -8423,6 +8402,38 @@ export function REPL({
                   <CompanionSprite />
                 ) : null}
                 <Box flexDirection="column" flexGrow={1}>
+                  {/* densable tot.bottom / Uxc chrome. Screen slot is still
+                      above PromptInput (gold bJ grow+hJ). Outside ScrollBox
+                      so first-token layout does not move spinner Yoga y. */}
+                  {showSpinner && (
+                    <SpinnerWithVerb
+                      mode={streamMode}
+                      spinnerTip={spinnerTip}
+                      spinnerTipLabel={spinnerTipLabel}
+                      responseLengthRef={responseLengthRef}
+                      apiMetricsRef={apiMetricsRef}
+                      compactProgressActiveRef={compactProgressActiveRef}
+                      overrideMessage={spinnerMessage}
+                      spinnerSuffix={stopHookSpinnerSuffix}
+                      verbose={verbose}
+                      loadingStartTimeRef={loadingStartTimeRef}
+                      totalPausedMsRef={totalPausedMsRef}
+                      pauseStartTimeRef={pauseStartTimeRef}
+                      overrideColor={spinnerColor}
+                      overrideShimmerColor={spinnerShimmerColor}
+                      hasActiveTools={inProgressToolUseIDs.size > 0}
+                      leaderIsIdle={!isLoading}
+                      retryStatus={retryStatus}
+                      outputLimitRecovery={outputLimitRecovery}
+                      agentId={viewingAgentTaskId ?? undefined}
+                    />
+                  )}
+                  {!showSpinner &&
+                    !isLoading &&
+                    !userInputOnProcessing &&
+                    !hasRunningTeammates &&
+                    isBriefOnly &&
+                    !viewedAgentTask && <BriefIdleStatus />}
                   {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
                   {permissionStickyFooter}
                   {/* Immediate local-jsx commands (/btw, /sandbox, /assistant,
@@ -9299,7 +9310,6 @@ export function REPL({
                           voiceInterimRange={voice.interimRange}
                         />
                         <SessionBackgroundHint onBackgroundSession={handleBackgroundSession} isLoading={isLoading} />
-                        <BackgroundAgentSelector />
                       </>
                     )}
                   {cursor && (

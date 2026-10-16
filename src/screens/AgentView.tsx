@@ -50,6 +50,7 @@ import { deleteJob, formatKeptWorktreeReason, type DeleteJobResult } from '../da
 import { killJobConfirmed } from '../daemon/xyrRespawn.js';
 import { getPlatform } from '../utils/platform.js';
 import { getImageFromClipboard } from '../utils/imagePaste.js';
+import { editPromptInEditor } from '../utils/promptEditor.js';
 import {
   deriveBand,
   deriveActivity,
@@ -145,6 +146,11 @@ import {
   fleetHomeIdx,
 } from './fleetView/helpers.js';
 import { resolveFleetCanonicalLauncherCwd, sweepExpiredFleetLauncherDrafts } from './fleetView/launcherDraft.js';
+import {
+  relaunchAgentsView,
+  serializeFleetDispatchDefaults,
+  type FleetDispatchDefaults,
+} from './fleetView/fleetDispatchDefaults.js';
 import {
   useFleetComposerDraftPersistence,
   type FleetComposerDraftRestore,
@@ -624,6 +630,7 @@ function AgentsSelectionChrome(): null {
 function AgentViewApp({
   enteredViaLeftArrow,
   dispatchExtraArgs = [],
+  dispatchDefaults,
   cwdFilter,
   currentSessionId,
   restoreSessionId,
@@ -632,6 +639,8 @@ function AgentViewApp({
 }: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
+  /** densable 2.1.289 dispatchDefaults bag from agents argv. */
+  dispatchDefaults?: FleetDispatchDefaults;
   cwdFilter?: string;
   currentSessionId?: string;
   restoreSessionId?: string;
@@ -644,6 +653,11 @@ function AgentViewApp({
       | { type: 'login' },
   ) => void;
 }): React.ReactElement {
+  // densable cVe(defaults) + restricted passthrough for every up/spawn path.
+  const fleetSpawnExtraArgs = useMemo(
+    () => [...serializeFleetDispatchDefaults(dispatchDefaults), ...fleetUpExtraArgs(dispatchExtraArgs)],
+    [dispatchDefaults, dispatchExtraArgs],
+  );
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   /** densable #t.terminalHolders — interactive peers holding a session. */
   const [terminalHolders, setTerminalHolders] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -1467,7 +1481,7 @@ function AgentViewApp({
           `Continue the previous task (session "${name}" was restarted)`,
           '--name',
           name,
-          ...fleetUpExtraArgs(dispatchExtraArgs),
+          ...fleetSpawnExtraArgs,
         ]).then(refresh);
         break; // One relaunch per cycle
       }
@@ -1479,7 +1493,7 @@ function AgentViewApp({
       if (s.pinned) newPinned.set(s.pid, s);
     }
     pinnedSessionsRef.current = newPinned;
-  }, [sessions, refresh, dispatchExtraArgs]);
+  }, [sessions, refresh, fleetSpawnExtraArgs]);
 
   // -------------------------------------------------------------------------
   // Computed values
@@ -1908,7 +1922,7 @@ function AgentViewApp({
           resumeSessionId: sessionId,
           forkSession: true,
           cwd: getCwd(),
-          extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+          extraArgs: fleetSpawnExtraArgs,
           source: 'fleet-resume',
         });
         setError(null);
@@ -1919,7 +1933,7 @@ function AgentViewApp({
         dispatchingRef.current = false;
       }
     },
-    [dispatchExtraArgs, refresh],
+    [fleetSpawnExtraArgs, refresh],
   );
 
   const handleDispatch = useCallback(
@@ -1958,23 +1972,15 @@ function AgentViewApp({
               cmd.fleetHostCall(
                 {
                   exit: () => forceExit(),
-                  // Official P("manual") — FleetView host relaunch (acceptTuiRelaunch family).
+                  // densable P("manual") → sf fleetview_update_manual with dispatchDefaults.
                   relaunch: async () => {
-                    try {
-                      const { acceptTuiRelaunch, flushStreamsBeforeRelaunchExit } = await import(
-                        '../utils/cliRelaunch.js'
-                      );
-                      const result = await acceptTuiRelaunch({ target: 'default' });
-                      if (result.mode === 'spawned' && result.spawn.ok) {
-                        flushStreamsBeforeRelaunchExit();
-                        process.exit(result.spawn.status ?? 0);
-                      }
-                      if (result.mode === 'spawned' && !result.spawn.ok) {
-                        setError(result.spawn.error);
-                      }
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : String(err));
-                    }
+                    await relaunchAgentsView({
+                      mode: 'manual',
+                      cwdFilter,
+                      defaults: dispatchDefaults,
+                      extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+                      onError: msg => setError(msg),
+                    });
                   },
                   login: () => onAction?.({ type: 'login' }),
                   setError: msg => {
@@ -2061,7 +2067,7 @@ function AgentViewApp({
             routine: expandedExec ? undefined : parsed.routine,
             exec: expandedExec,
             cwd: dispatchCwd,
-            extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+            extraArgs: fleetSpawnExtraArgs,
             source: 'fleet',
             sessionId: dispatchSessionId,
           });
@@ -2111,7 +2117,7 @@ function AgentViewApp({
       dispatchInput,
       dispatchMode,
       refresh,
-      dispatchExtraArgs,
+      fleetSpawnExtraArgs,
       sessions,
       fleetTemplates,
       fleetRoutines,
@@ -2119,6 +2125,9 @@ function AgentViewApp({
       openResumePicker,
       onAction,
       commands,
+      cwdFilter,
+      dispatchDefaults,
+      dispatchExtraArgs,
     ],
   );
 
@@ -2562,7 +2571,7 @@ function AgentViewApp({
           result = await submitDispatch({
             intent: '',
             cwd,
-            extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+            extraArgs: fleetSpawnExtraArgs,
             source: 'shell',
           });
         } catch (e) {
@@ -2625,7 +2634,7 @@ function AgentViewApp({
         }
       }
     },
-    [dispatchExtraArgs, refresh, checkAndAttach, onAction],
+    [fleetSpawnExtraArgs, refresh, checkAndAttach, onAction],
   );
 
   /**
@@ -2756,6 +2765,19 @@ function AgentViewApp({
         if (idx === null) return;
         clearPending();
         if (idx !== selectedIndex) selectRowByKeyboard(idx);
+      },
+      // densable 2.1.289 Agents CUt also accepts chat:externalEditor (Chat/Global fallback).
+      'chat:externalEditor': () => {
+        if (newSessionOpeningRef.current || attachingJobIdRef.current) return;
+        if (deleteConfirmSessionId || ungroupConfirmSessionId || viewMode === 'rename') return;
+        clearPending();
+        const result = editPromptInEditor(dispatchInput);
+        if (result.content !== null) {
+          setDispatchInput(result.content);
+          setCursorOffset(result.content.length);
+        } else if (result.error) {
+          setError(result.error);
+        }
       },
     },
     { context: 'Agents' },
@@ -4132,6 +4154,8 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
 export async function renderAgentView(options?: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
+  /** densable 2.1.289 dispatchDefaults bag from agents argv. */
+  dispatchDefaults?: FleetDispatchDefaults;
   cwdFilter?: string;
   currentSessionId?: string;
   /** Official CLAUDE_AGENTS_SELECT — pre-select this session on first mount. */
@@ -4172,6 +4196,11 @@ export async function renderAgentView(options?: {
 
   void sweepExpiredFleetLauncherDrafts();
 
+  // densable: !le().hasOpenedAgentsView → Ae stamp on first fleet open.
+  if (!getGlobalConfig().hasOpenedAgentsView) {
+    saveGlobalConfig(current => ({ ...current, hasOpenedAgentsView: true }));
+  }
+
   // Track last-selected session so we can restore position after attach.
   // Prefer explicit option, then env select (official initialJobId).
   let lastSelectedSessionId: string | undefined = options?.restoreSessionId ?? envSelect ?? undefined;
@@ -4205,6 +4234,7 @@ export async function renderAgentView(options?: {
               <AgentViewApp
                 enteredViaLeftArrow={enteredViaLeftArrow}
                 dispatchExtraArgs={options?.dispatchExtraArgs}
+                dispatchDefaults={options?.dispatchDefaults}
                 cwdFilter={options?.cwdFilter}
                 currentSessionId={options?.currentSessionId}
                 restoreSessionId={lastSelectedSessionId}

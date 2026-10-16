@@ -44,7 +44,7 @@ import {
   seedPasteIdCounter,
 } from '../../history.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
-import { type HistoryMode, useArrowKeyHistory } from '../../hooks/useArrowKeyHistory.js';
+import { formatHistoryBorderLabel, type HistoryMode, useArrowKeyHistory } from '../../hooks/useArrowKeyHistory.js';
 import { useBackgroundAgentTasks } from '../../hooks/useBackgroundAgentTasks.js';
 import { useDoublePress } from '../../hooks/useDoublePress.js';
 import { useHistorySearch } from '../../hooks/useHistorySearch.js';
@@ -1309,19 +1309,20 @@ function PromptInput({
     [trackAndSetInput, onModeChange, input, cursorOffset, pushToBuffer, pastedContents, dismissStashHint, setAppState],
   );
 
-  const { resetHistory, onHistoryUp, onHistoryDown, dismissSearchHint, historyIndex } = useArrowKeyHistory(
-    (value: string, historyMode: HistoryMode, historyPasted: Record<number, PastedContent>) => {
-      onChange(value);
-      onModeChange(historyMode);
-      setPastedContents(historyPasted);
-      // Keep dual-write in lockstep so Enter before parent re-render keeps images.
-      pastedContentsRef.current = historyPasted;
-    },
-    input,
-    pastedContents,
-    setCursorOffset,
-    mode,
-  );
+  const { resetHistory, onHistoryUp, onHistoryDown, dismissSearchHint, historyIndex, historyTotal, historyEdited } =
+    useArrowKeyHistory(
+      (value: string, historyMode: HistoryMode, historyPasted: Record<number, PastedContent>) => {
+        onChange(value);
+        onModeChange(historyMode);
+        setPastedContents(historyPasted);
+        // Keep dual-write in lockstep so Enter before parent re-render keeps images.
+        pastedContentsRef.current = historyPasted;
+      },
+      input,
+      pastedContents,
+      setCursorOffset,
+      mode,
+    );
 
   // Dismiss search hint when user starts searching
   useEffect(() => {
@@ -3162,6 +3163,16 @@ function PromptInput({
     <TextInput {...baseProps} />
   );
 
+  const historyChip = formatHistoryBorderLabel(historyIndex, historyTotal, historyEdited);
+  const promptBorderText: BorderTextOptions | undefined = historyChip
+    ? {
+        content: ` ${chalk.dim(historyChip)} `,
+        position: 'top',
+        align: 'start',
+        offset: 2,
+      }
+    : buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive);
+
   return (
     <Box flexDirection="column" marginTop={briefOwnsGap ? 0 : 1}>
       {!isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
@@ -3228,7 +3239,7 @@ function PromptInput({
           width="100%"
           tabIndex={-1}
           onClick={handleInputClick}
-          borderText={buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive)}
+          borderText={promptBorderText}
         >
           <PromptInputModeIndicator
             mode={mode}

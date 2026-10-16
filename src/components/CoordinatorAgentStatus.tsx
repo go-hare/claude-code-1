@@ -8,10 +8,9 @@
 
 import figures from 'figures';
 import * as React from 'react';
-import { BLACK_CIRCLE, PAUSE_ICON, PLAY_ICON } from '../constants/figures.js';
+import { BLACK_CIRCLE } from '../constants/figures.js';
 import { useSubagentStatusLine } from '../hooks/useSubagentStatusLine.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Ansi, Box, Text, stringWidth, wrapText } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth } from '@anthropic/ink';
 import { type AppState, useAppState, useSetAppState } from '../state/AppState.js';
 import { enterTeammateView, exitTeammateView } from '../state/teammateViewHelpers.js';
 import {
@@ -140,11 +139,23 @@ export function CoordinatorTaskPanel(): React.ReactNode {
     return null;
   }
 
+  // densable Wq Os/es: name column 4–28, status column = max `elapsed · tokens`.
+  const namedRows = visibleTasks.filter(
+    (row): row is PanelAgentTask => !isIdleSummaryRow(row) && taskDecorations[row.id]?.content === undefined,
+  );
+  const now = Date.now();
+  const labelWidth = Math.min(
+    PANEL_NAME_MAX,
+    Math.max(PANEL_NAME_MIN, ...namedRows.map(row => stringWidth(panelAgentName(row, nameByAgentId) ?? '')), 0),
+  );
+  const statusWidth = Math.max(0, ...namedRows.map(row => statusPartsWidth(getAgentStatusParts(row, now))));
+
   return (
     <Box flexDirection="column" marginTop={1}>
       <MainLine
         isSelected={selectedIndex === 0}
         isViewed={viewingAgentTaskId === undefined}
+        labelWidth={labelWidth}
         onClick={() => exitTeammateView(setAppState)}
       />
       {visibleTasks.map((row, i) =>
@@ -161,8 +172,10 @@ export function CoordinatorTaskPanel(): React.ReactNode {
           <AgentLine
             key={row.id}
             task={row}
-            name={isInProcessTeammateTask(row) ? row.identity.agentName : nameByAgentId.get(row.id)}
+            name={panelAgentName(row, nameByAgentId)}
             decoration={taskDecorations[row.id]}
+            labelWidth={labelWidth}
+            statusWidth={statusWidth}
             isSelected={selectedIndex === i + 1}
             isViewed={viewingAgentTaskId === row.id}
             onClick={() => enterTeammateView(row.id, setAppState)}
@@ -184,7 +197,7 @@ export function useCoordinatorTaskCount(): number {
   const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   return React.useMemo(() => {
-    if ((process.env.USER_TYPE as string) !== 'ant') return 0;
+    // densable MIe — no USER_TYPE ant gate.
     const count = getPanelListItems(tasks, taskDecorations, {
       idleTeammatesExpanded,
       viewingAgentTaskId,
@@ -217,61 +230,41 @@ function IdleSummaryLine({
   );
 }
 
-function MainLine({
-  isSelected,
-  isViewed,
-  onClick,
-}: {
-  isSelected?: boolean;
-  isViewed?: boolean;
-  onClick: () => void;
-}): React.ReactNode {
-  const [hover, setHover] = React.useState(false);
-  const prefix = isSelected || hover ? figures.pointer + ' ' : '  ';
-  const bullet = isViewed ? BLACK_CIRCLE : figures.circle;
-  return (
-    <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <Text dimColor={!isSelected && !isViewed && !hover} bold={isViewed}>
-        {prefix}
-        {bullet} main
-      </Text>
-    </Box>
-  );
+/** densable Tg — `  ` + bullet + space. */
+function prefixWidth(): number {
+  return 2 + Math.max(stringWidth(figures.circle), stringWidth(BLACK_CIRCLE)) + 1;
 }
 
-type AgentLineProps = {
-  task: PanelAgentTask;
-  name?: string;
-  /** densable taskDecorations[id] — custom status content replaces default row body. */
-  decoration?: { content: string };
-  isSelected?: boolean;
-  isViewed?: boolean;
-  onClick?: () => void;
+const PANEL_NAME_MIN = 4;
+const PANEL_NAME_MAX = 28;
+
+function panelAgentName(task: PanelAgentTask, nameByAgentId: Map<string, string>): string | undefined {
+  if (isInProcessTeammateTask(task)) return task.identity.agentName;
+  return nameByAgentId.get(task.id) ?? task.agentType;
+}
+
+type AgentStatusParts = {
+  elapsed: string;
+  tokenText: string;
+  queuedText: string;
+  queuedCount: number;
 };
 
-function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: AgentLineProps): React.ReactNode {
-  const { columns } = useTerminalSize();
-  const [hover, setHover] = React.useState(false);
+/** densable $Ae / yZ Pe — elapsed + tokens, no pause/play glyph. */
+function getAgentStatusParts(task: PanelAgentTask, now: number): AgentStatusParts {
   const isTeammate = isInProcessTeammateTask(task);
   const isIdleTeammate = isTeammate && task.isIdle;
-  // densable pAb: non-terminal local_agent isIdle → "waiting" (not "idle")
   const localAgent = !isTeammate && isLocalAgentTask(task) ? (task as LocalAgentTaskState) : null;
   const isAdopting = localAgent !== null && Boolean(localAgent.adoptResumePending || localAgent.resuming);
-  // densable pAb: skip waiting while adopt/Aye placeholder is in flight.
   const isIdleLocalAgent = localAgent !== null && !isAdopting && Boolean(localAgent.isIdle);
   const isIdleRow = isIdleTeammate || isIdleLocalAgent;
-  // densable wSr residual + product adopt placeholder: completed+keepalive /
-  // resuming / adoptResumePending stay "active" (not tick-done).
   const isPanelActive = localAgent !== null ? isLocalAgentPanelActive(localAgent) : !isTerminalStatus(task.status);
   const isRunning = isPanelActive && !isIdleRow;
   const pausedMs = (task as LocalAgentTaskState).totalPausedMs ?? 0;
   const elapsedMs = Math.max(
     0,
-    isRunning ? Date.now() - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
+    isRunning ? now - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
   );
-
-  // densable pAb: teammate isIdle → "idle"; local_agent isIdle → "waiting".
-  // Product: adopt PSu→Aye gap / Aye CAS window → "resuming" (not completed tick).
   const elapsed = isAdopting
     ? 'resuming'
     : isIdleTeammate
@@ -282,37 +275,79 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
           ? 'awaiting approval'
           : formatDuration(elapsedMs);
   const tokenCount = task.progress?.tokenCount;
-
-  // Derive direction arrow from activity state, same logic as Spinner
   const lastActivity = task.progress?.lastActivity;
   const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
-
   const tokenText =
-    !isIdleRow && tokenCount !== undefined && tokenCount > 0 ? ` · ${arrow} ${formatNumber(tokenCount)} tokens` : '';
-
+    !isIdleRow && tokenCount !== undefined && tokenCount > 0 ? `${arrow} ${formatNumber(tokenCount)} tokens` : '';
   const queuedCount = isTeammate
     ? task.pendingUserMessages.length
     : (task as LocalAgentTaskState).pendingMessages.length;
-  const queuedText = queuedCount > 0 ? ` · ${queuedCount} queued` : '';
+  const queuedText = queuedCount > 0 ? `${queuedCount} queued` : '';
+  return { elapsed, tokenText, queuedText, queuedCount };
+}
 
-  // Precedence: AI summary > static description (no tool-call activity noise)
+function statusPartsWidth(parts: AgentStatusParts): number {
+  return stringWidth([parts.elapsed, parts.tokenText, parts.queuedText].filter(Boolean).join(' · '));
+}
+
+function MainLine({
+  isSelected,
+  isViewed,
+  labelWidth,
+  onClick,
+}: {
+  isSelected?: boolean;
+  isViewed?: boolean;
+  labelWidth: number;
+  onClick: () => void;
+}): React.ReactNode {
+  const [hover, setHover] = React.useState(false);
+  const prefix = isSelected || hover ? figures.pointer + ' ' : '  ';
+  const bullet = isViewed ? BLACK_CIRCLE : figures.circle;
+  const dim = !isSelected && !isViewed && !hover;
+  return (
+    <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <Box width={prefixWidth() + labelWidth} flexShrink={0}>
+        <Text dimColor={dim} bold={isViewed}>
+          {prefix}
+          {bullet} main
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+type AgentLineProps = {
+  task: PanelAgentTask;
+  name?: string;
+  /** densable taskDecorations[id] — custom status content replaces default row body. */
+  decoration?: { content: string };
+  labelWidth: number;
+  statusWidth: number;
+  isSelected?: boolean;
+  isViewed?: boolean;
+  onClick?: () => void;
+};
+
+function AgentLine({
+  task,
+  name,
+  decoration,
+  labelWidth,
+  statusWidth,
+  isSelected,
+  isViewed,
+  onClick,
+}: AgentLineProps): React.ReactNode {
+  const [hover, setHover] = React.useState(false);
+  const { elapsed, tokenText, queuedText, queuedCount } = getAgentStatusParts(task, Date.now());
   const displayDescription = task.progress?.summary || task.description;
-
   const highlighted = isSelected || hover;
   const prefix = highlighted ? figures.pointer + ' ' : '  ';
   const bullet = isViewed ? BLACK_CIRCLE : figures.circle;
   const dim = !highlighted && !isViewed;
-
-  const sep = isRunning ? PLAY_ICON : PAUSE_ICON;
-  // Name is the steering handle — kept out of truncation and undimmed so it
-  // stays readable even when the row is inactive. Short by convention (the
-  // Agent tool prompt asks for "one or two words, lowercase").
-  const namePart = name ? `${name}: ` : '';
-  const hintPart = isSelected && !isViewed ? ` · x to ${isRunning ? 'stop' : 'clear'}` : '';
-  const suffixPart = ` ${sep} ${elapsed}${tokenText}${queuedText}${hintPart}`;
-  const availableForDesc =
-    columns - stringWidth(prefix) - stringWidth(`${bullet} `) - stringWidth(namePart) - stringWidth(suffixPart);
-  const truncated = wrapText(displayDescription, Math.max(0, availableForDesc), 'truncate-end');
+  const displayName = name ?? (isLocalAgentTask(task) ? task.agentType : undefined);
+  const statusText = [elapsed, tokenText].filter(Boolean).join(' · ');
 
   // densable yrf: when decoration.content is set, replace name+desc+status with Ansi content.
   if (decoration?.content !== undefined) {
@@ -343,29 +378,55 @@ function AgentLine({ task, name, decoration, isSelected, isViewed, onClick }: Ag
     );
   }
 
-  const line = (
-    <Text dimColor={dim} bold={isViewed}>
-      {prefix}
-      {bullet}{' '}
-      {name && (
-        <>
-          <Text dimColor={false} bold>
-            {name}
+  const gutter = (
+    <Box width={prefixWidth()} flexShrink={0}>
+      <Text dimColor={dim} bold={isViewed}>
+        {prefix}
+        {bullet}{' '}
+      </Text>
+    </Box>
+  );
+  const nameBox = (
+    <Box width={labelWidth} flexShrink={0}>
+      <Text bold={isViewed} dimColor={!displayName && dim} wrap="truncate">
+        {displayName ?? ''}
+      </Text>
+    </Box>
+  );
+  const descBox = (
+    <Box flexGrow={1} width={0} paddingLeft={2}>
+      <Text dimColor={dim} bold={isViewed} wrap="truncate">
+        {displayDescription}
+      </Text>
+    </Box>
+  );
+  const statusBox = (
+    <Box minWidth={statusWidth} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+      <Text dimColor={dim} bold={isViewed}>
+        {statusText}
+        {queuedCount > 0 ? (
+          <Text color="warning">
+            {statusText ? ' · ' : ''}
+            {queuedText}
           </Text>
-          {': '}
-        </>
-      )}
-      {truncated} {sep} {elapsed}
-      {tokenText}
-      {queuedCount > 0 && <Text color="warning">{queuedText}</Text>}
-      {hintPart && <Text dimColor>{hintPart}</Text>}
-    </Text>
+        ) : null}
+      </Text>
+    </Box>
   );
 
-  if (!onClick) return line;
+  const row = (
+    <Box>
+      {gutter}
+      {nameBox}
+      {descBox}
+      {statusBox}
+    </Box>
+  );
+
+  if (!onClick) return row;
   return (
     <Box onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      {line}
+      {row}
     </Box>
   );
 }

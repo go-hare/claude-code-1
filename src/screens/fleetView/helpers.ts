@@ -9,10 +9,43 @@ import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { SessionEntry } from '../../cli/bg/engine.js'
 import figures from 'figures'
+import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js'
+import { getBindingDisplayText } from '../../keybindings/resolver.js'
+import { loadKeybindingsSync } from '../../keybindings/loadUserBindings.js'
 import { formatDuration } from '../../utils/format.js'
 import { formatHostDeadAttachError } from '../../daemon/hostDeath.js'
 import { isRestrictedSession } from '../../utils/restricted.js'
 import { fleetJobChildren } from './prStatuses.js'
+
+/** densable to("agents:*") — Agents-context binding display with fallback. */
+function agentsBinding(action: string, fallback: string): string {
+  return getShortcutDisplay(action, 'Agents', fallback)
+}
+
+/**
+ * densable to("agents:setGroup") — gold Agents Go has no default chord;
+ * unbound ⇒ omit footer hint (do not invent ctrl+e into defaultBindings).
+ */
+function agentsBindingIfConfigured(action: string): string | undefined {
+  return getBindingDisplayText(action, 'Agents', loadKeybindingsSync())
+}
+
+/**
+ * densable vl jump-groups chord: share modifier prefix as `ctrl+up/down`,
+ * else join with " and ".
+ */
+function jumpGroupsChord(): string | undefined {
+  const prev = agentsBinding('agents:previousGroup', 'ctrl+up')
+  const next = agentsBinding('agents:nextGroup', 'ctrl+down')
+  if (!prev && !next) return undefined
+  if (prev && next) {
+    const plus = prev.lastIndexOf('+')
+    const se = plus >= 0 ? prev.slice(0, plus + 1) : ''
+    if (se && next.startsWith(se)) return `${prev}/${next.slice(se.length)}`
+    return `${prev} and ${next}`
+  }
+  return prev || next
+}
 
 // ---------------------------------------------------------------------------
 // Status bands
@@ -1934,21 +1967,40 @@ export function buildFleetFooterHints(input: {
    * `canDispatchAndOpen` (`cm==="local" && EHt()`).
    */
   canDispatchAndOpen?: boolean
+  /**
+   * densable vl `canSwitchViews` — when true (default), emit find / jump-groups /
+   * switch-views binding-derived hints.
+   */
+  canSwitchViews?: boolean
 }): string {
+  const canSwitchViews = input.canSwitchViews !== false
+  const renameChord = agentsBinding('agents:rename', 'ctrl+r')
+  // Gold has no default agents:setGroup chord — only emit when user-bound.
+  const setGroupChord = agentsBindingIfConfigured('agents:setGroup')
+  const findChord = agentsBinding('agents:find', 'ctrl+f')
+  const switchChord = agentsBinding('agents:switchView', 'ctrl+s')
+  const pinChord = agentsBinding('agents:togglePin', 'ctrl+t')
+  const jumpChord = jumpGroupsChord()
+
   if (input.helpOpen) {
     const parts: string[] = []
-    parts.push('shift+\u2191\u2193 to reorder')
-    if (input.canRename) parts.push('ctrl+r to rename')
-    if (input.canGroup) parts.push('ctrl+e to set group')
-    parts.push('ctrl+s to switch views')
-    // Gold Fs: if(ud){ ctrl+s, ctrl+j, $f → ctrl+enter to start and open }
-    parts.push('ctrl+j for newline')
-    if (input.canDispatchAndOpen) {
-      parts.push('ctrl+enter to start and open')
+    parts.push('shift+↑↓ to reorder')
+    if (input.canRename && renameChord) parts.push(`${renameChord} to rename`)
+    if (input.canGroup && setGroupChord) {
+      parts.push(`${setGroupChord} to set group`)
+    }
+    if (canSwitchViews) {
+      if (findChord) parts.push(`${findChord} to find`)
+      if (jumpChord) parts.push(`${jumpChord} to jump groups`)
+      if (switchChord) parts.push(`${switchChord} to switch views`)
+      parts.push('ctrl+j for newline')
+      if (input.canDispatchAndOpen) {
+        parts.push('ctrl+enter to start and open')
+      }
     }
     if (input.canMention) parts.push('@ to mention')
-    if (input.canPin) {
-      parts.push(input.pinned ? 'ctrl+t to unpin' : 'ctrl+t to pin to top')
+    if (input.canPin && pinChord) {
+      parts.push(`${pinChord} to ${input.pinned ? 'unpin' : 'pin to top'}`)
     }
     if (input.openSlots > 0) {
       parts.push(
@@ -1957,40 +2009,42 @@ export function buildFleetFooterHints(input: {
           : `alt+1-${Math.min(input.openSlots, 9)} to open`,
       )
     }
-    parts.push('esc to quit')
+    parts.push(
+      canSwitchViews ? 'esc to quit' : 'esc to close · esc again quits',
+    )
     parts.push('? to close')
-    return parts.join(' \u00b7 ')
+    return parts.join(' · ')
   }
   if (input.exitArmed) {
     // densable Mt: only Ctrl+C double-press arms exit (CJ); Esc is cascade + Tt.
     const keep =
       input.runningCount > 0
-        ? ` \u00b7 ${input.runningCount} agent${input.runningCount === 1 ? '' : 's'} will keep running`
+        ? ` · ${input.runningCount} agent${input.runningCount === 1 ? '' : 's'} will keep running`
         : ''
     return `Press Ctrl-C again to exit${keep}`
   }
   if (input.viewMode === 'rename') {
-    return 'enter to save \u00b7 esc to cancel'
+    return 'enter to save · esc to cancel'
   }
   if (input.viewMode === 'group') {
-    return 'enter to set group \u00b7 empty = ungroup \u00b7 esc to cancel'
+    return 'enter to set group · empty = ungroup · esc to cancel'
   }
   if (input.viewMode === 'reply') {
-    return 'enter to send \u00b7 esc to cancel'
+    return 'enter to send · esc to cancel'
   }
   if (input.deletePending) {
     if (input.ungroupPending) return 'ctrl+x again to ungroup'
     // densable footer: justKilled → "stopped · ctrl+x again to delete · esc to keep"
     if (input.justKilled) {
-      return 'stopped \u00b7 ctrl+x again to delete \u00b7 esc to keep'
+      return 'stopped · ctrl+x again to delete · esc to keep'
     }
-    return 'ctrl+x again to delete \u00b7 esc to keep'
+    return 'ctrl+x again to delete · esc to keep'
   }
   if (input.focusArea === 'dispatch') {
     if (input.bashMode) {
-      return 'enter run bash \u00b7 backspace exit ! \u00b7 esc clear \u00b7 ? shortcuts'
+      return 'enter run bash · backspace exit ! · esc clear · ? shortcuts'
     }
-    return 'enter dispatch \u00b7 ! bash \u00b7 @ mention \u00b7 ctrl+j for newline \u00b7 \u2191 list \u00b7 esc clear'
+    return 'enter dispatch · ! bash · @ mention · ctrl+j for newline · ↑ list · esc clear'
   }
 
   const parts: string[] = []
@@ -2000,17 +2054,23 @@ export function buildFleetFooterHints(input: {
     parts.push('enter to fold')
   } else if (input.rowKind === 'newsession') {
     // densable Wcu idle: `${arrowRight} or enter to start`
-    parts.push('\u2192 or enter to start')
+    parts.push('→ or enter to start')
   } else {
     parts.push('enter to open')
     if (input.band === 'blocked') parts.push('space to reply')
   }
-  if (input.canRename) parts.push('ctrl+r to rename')
-  if (input.canGroup) parts.push('ctrl+e to set group')
-  parts.push('ctrl+s to switch views')
+  if (input.canRename && renameChord) parts.push(`${renameChord} to rename`)
+  if (input.canGroup && setGroupChord) {
+    parts.push(`${setGroupChord} to set group`)
+  }
+  if (canSwitchViews) {
+    if (findChord) parts.push(`${findChord} to find`)
+    if (jumpChord) parts.push(`${jumpChord} to jump groups`)
+    if (switchChord) parts.push(`${switchChord} to switch views`)
+  }
   if (input.canMention) parts.push('@ to mention')
-  if (input.canPin) {
-    parts.push(input.pinned ? 'ctrl+t to unpin' : 'ctrl+t to pin to top')
+  if (input.canPin && pinChord) {
+    parts.push(`${pinChord} to ${input.pinned ? 'unpin' : 'pin to top'}`)
   }
   if (input.openSlots > 0) {
     parts.push(
@@ -2019,10 +2079,10 @@ export function buildFleetFooterHints(input: {
         : `alt+1-${Math.min(input.openSlots, 9)} to open`,
     )
   }
-  parts.push('shift+\u2191\u2193 reorder')
+  parts.push('shift+↑↓ reorder')
   parts.push('esc to quit')
   parts.push('? for shortcuts')
-  return parts.join(' \u00b7 ')
+  return parts.join(' · ')
 }
 
 // ---------------------------------------------------------------------------

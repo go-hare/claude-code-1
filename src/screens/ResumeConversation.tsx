@@ -350,14 +350,6 @@ export function ResumeConversation({
         }
       }
 
-      if (feature('GOAL') && result.goal && result.sessionId) {
-        const { hydrateGoalFromTranscript } =
-          require('src/services/goal/goalStorage.js') as typeof import('src/services/goal/goalStorage.js');
-        const goalsMap = new Map<UUID, import('src/types/logs.js').GoalState>();
-        goalsMap.set(result.sessionId, result.goal);
-        hydrateGoalFromTranscript(goalsMap, result.sessionId);
-      }
-
       if (feature('CONTEXT_COLLAPSE')) {
         /* eslint-disable @typescript-eslint/no-require-imports */
         (

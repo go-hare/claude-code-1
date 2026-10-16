@@ -202,7 +202,8 @@ function PromptInputFooter({
           <BridgeStatusIndicator bridgeSelected={bridgeSelected} />
         </Box>
       </Box>
-      {process.env.USER_TYPE === 'ant' && <CoordinatorTaskPanel />}
+      {/* densable MIe: panel count has no USER_TYPE ant gate. */}
+      <CoordinatorTaskPanel />
     </>
   );
 }

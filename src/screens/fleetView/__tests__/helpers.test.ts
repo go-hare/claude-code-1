@@ -784,46 +784,69 @@ describe('buildFleetFooterHints', () => {
       }),
     ).toContain('enter to set group')
 
-    expect(
-      buildFleetFooterHints({
-        focusArea: 'list',
-        viewMode: 'list',
-        deletePending: false,
-        ungroupPending: false,
-        rowKind: 'job',
-        band: 'blocked',
-        canPin: true,
-        canGroup: true,
-        canRename: true,
-        pinned: false,
-        openSlots: 1,
-        exitArmed: false,
-        runningCount: 1,
-        helpOpen: false,
-      }),
-    ).toMatch(/ctrl\+e to set group/)
+    const listHints = buildFleetFooterHints({
+      focusArea: 'list',
+      viewMode: 'list',
+      deletePending: false,
+      ungroupPending: false,
+      rowKind: 'job',
+      band: 'blocked',
+      canPin: true,
+      canGroup: true,
+      canRename: true,
+      pinned: false,
+      openSlots: 1,
+      exitArmed: false,
+      runningCount: 1,
+      helpOpen: false,
+    })
+    // densable: agents:setGroup has no default Go chord — omit unless user-bound.
+    expect(listHints).not.toContain('to set group')
+    // densable 2.1.289 vl — binding-derived find / jump-groups / switch
+    expect(listHints).toContain('to find')
+    expect(listHints).toContain('to jump groups')
+    expect(listHints).toContain('to switch views')
 
     expect(FLEET_STATE_GROUP_DESCRIPTIONS.blocked.length).toBeGreaterThan(0)
     expect(FLEET_STATE_GROUP_LABELS.working).toBe('Working')
   })
 
   test('help mode and mention / bash dispatch footer', () => {
-    expect(
-      buildFleetFooterHints({
-        focusArea: 'list',
-        viewMode: 'list',
-        deletePending: false,
-        ungroupPending: false,
-        canPin: true,
-        canGroup: true,
-        canRename: true,
-        canMention: true,
-        openSlots: 2,
-        exitArmed: false,
-        runningCount: 0,
-        helpOpen: true,
-      }),
-    ).toContain('@ to mention')
+    const helpHints = buildFleetFooterHints({
+      focusArea: 'list',
+      viewMode: 'list',
+      deletePending: false,
+      ungroupPending: false,
+      canPin: true,
+      canGroup: true,
+      canRename: true,
+      canMention: true,
+      openSlots: 2,
+      exitArmed: false,
+      runningCount: 0,
+      helpOpen: true,
+    })
+    expect(helpHints).toContain('@ to mention')
+    expect(helpHints).toContain('to find')
+    expect(helpHints).toContain('to jump groups')
+
+    const noSwitch = buildFleetFooterHints({
+      focusArea: 'list',
+      viewMode: 'list',
+      deletePending: false,
+      ungroupPending: false,
+      canPin: false,
+      canGroup: false,
+      canRename: false,
+      openSlots: 0,
+      exitArmed: false,
+      runningCount: 0,
+      helpOpen: false,
+      canSwitchViews: false,
+    })
+    expect(noSwitch).not.toContain('to find')
+    expect(noSwitch).not.toContain('to jump groups')
+    expect(noSwitch).not.toContain('to switch views')
 
     expect(
       buildFleetFooterHints({

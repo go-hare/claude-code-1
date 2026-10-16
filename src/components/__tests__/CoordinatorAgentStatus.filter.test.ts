@@ -40,6 +40,23 @@ describe('filterTasksByDecorationContent densable G7', () => {
   })
 })
 
+describe('densable yZ panel row has no pause/play glyph', () => {
+  test('CoordinatorAgentStatus source has no PAUSE_ICON / PLAY_ICON', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const { join } = require('node:path') as typeof import('node:path')
+    const src = readFileSync(
+      join(import.meta.dir, '../CoordinatorAgentStatus.tsx'),
+      'utf8',
+    )
+    expect(src).not.toContain('PAUSE_ICON')
+    expect(src).not.toContain('PLAY_ICON')
+    expect(src).toContain('justifyContent="flex-end"')
+    expect(src).toContain('labelWidth')
+    expect(src).toContain('statusWidth')
+    expect(src).not.toContain('export function MIe(')
+  })
+})
+
 describe('isLocalAgentPanelActive panel adopt UX', () => {
   test('PSu completed + adoptResumePending is panel-active (not tick-done)', () => {
     const t = {

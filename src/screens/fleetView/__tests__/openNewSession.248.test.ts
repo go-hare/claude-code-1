@@ -192,9 +192,13 @@ describe('densable 2.1.248 #18 openNewSession / ye(X.origin)', () => {
     )
     expect(AGENT_VIEW).toContain('fallbackOrigin: getCwd()')
     expect(AGENT_VIEW).not.toContain('void openNewSessionRow();')
+    // densable 2.1.289: spawn paths use fleetSpawnExtraArgs (cVe bag + restricted);
+    // fleetUpExtraArgs(dispatchExtraArgs) remains in the memo + relaunch host.
+    expect(AGENT_VIEW).toContain('fleetSpawnExtraArgs')
+    expect(AGENT_VIEW).toContain('serializeFleetDispatchDefaults')
     expect(
       AGENT_VIEW.match(/fleetUpExtraArgs\(dispatchExtraArgs\)/g)?.length,
-    ).toBe(4)
+    ).toBeGreaterThanOrEqual(2)
   })
 
   test('up $L first arg is Yk()?["--restricted"]:[]', () => {
