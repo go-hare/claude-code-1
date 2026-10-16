@@ -1,15 +1,36 @@
 import type { RGBColor as RGBColorString } from '@anthropic/ink'
 import type { RGBColor as RGBColorType } from './types.js'
 
+/**
+ * densable h7t index 2 is ✳ (U+2733). Analog Ink emoji-regex treats U+2733 as
+ * width 2 inside GlyphBox width={2} → whole spinner row jumps (Image 37 闪).
+ * KEEP ✱ (U+2731) width 1. Ghostty last two stay ✻✻ (no ASCII `*`).
+ */
+const GHOSTTY_SPINNER_FRAMES = ['·', '✢', '✱', '✶', '✻', '✻']
+const DEFAULT_SPINNER_FRAMES = ['·', '✢', '✱', '✶', '✻', '✽']
+
 export function getDefaultCharacters(): string[] {
   if (process.env.TERM === 'xterm-ghostty') {
-    return ['·', '✢', '✱', '✶', '✻', '*'] // ✱ replaces ✳ (emoji, renders offset in Ghostty); * replaces ✽ (same)
+    return GHOSTTY_SPINNER_FRAMES
   }
-  // ✳ (U+2733) is matched by emoji-regex in Node.js → stringWidth returns 2 instead of 1,
-  // causing layout jitter when the spinner cycles frames. ✱ (U+2731) is visually similar but not emoji.
-  return process.platform === 'darwin'
-    ? ['·', '✢', '✱', '✶', '✻', '✽']
-    : ['·', '✢', '✱', '✶', '✻', '✽']
+  return DEFAULT_SPINNER_FRAMES
+}
+
+const GHOSTTY_PING_PONG = [
+  ...GHOSTTY_SPINNER_FRAMES,
+  ...[...GHOSTTY_SPINNER_FRAMES].reverse(),
+]
+const DEFAULT_PING_PONG = [
+  ...DEFAULT_SPINNER_FRAMES,
+  ...[...DEFAULT_SPINNER_FRAMES].reverse(),
+]
+
+/** densable KCe — ping-pong of h7t. Stable arrays so 50ms paint does not alloc. */
+export function getSpinnerPingPongFrames(): string[] {
+  if (process.env.TERM === 'xterm-ghostty') {
+    return GHOSTTY_PING_PONG
+  }
+  return DEFAULT_PING_PONG
 }
 
 // Interpolate between two RGB colors

@@ -19,7 +19,7 @@ import { useTasksV2 } from '../hooks/useTasksV2.js';
 import type { Task } from '../utils/tasks.js';
 import { useAppState } from '../state/AppState.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { getDefaultCharacters, type SpinnerMode } from './Spinner/index.js';
+import { getSpinnerPingPongFrames, type SpinnerMode } from './Spinner/index.js';
 import { SpinnerAnimationRow } from './Spinner/SpinnerAnimationRow.js';
 import { useSettings } from '../hooks/useSettings.js';
 import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js';
@@ -38,8 +38,6 @@ import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
 export type { SpinnerMode } from './Spinner/index.js';
 
-const DEFAULT_CHARACTERS = getDefaultCharacters();
-
 /**
  * densable 2.1.247 `sr` Et — custom label only while showing the selected tip.
  * `Et=V===F&&C?C:"Tip"`
@@ -51,8 +49,6 @@ export function resolveSpinnerTipLabel(
 ): string {
   return displayedTip === selectedTip && label ? label : 'Tip';
 }
-
-const SPINNER_FRAMES = [...DEFAULT_CHARACTERS, ...[...DEFAULT_CHARACTERS].reverse()];
 
 type Props = {
   mode: SpinnerMode;
@@ -87,6 +83,10 @@ type Props = {
    * Msn-style stalled / retry countdown instead of the normal verb row.
    */
   retryStatus?: import('../utils/advisorNetworkStall.js').RetryStatus | null;
+  /** densable outputLimitRecovery — "picking the thought back up". */
+  outputLimitRecovery?: import('./Spinner/statusKind.js').OutputLimitRecovery | null;
+  /** densable Ye/Je agentId — stall reset when the viewed agent changes. */
+  agentId?: string;
 };
 
 // Thin wrapper: branches on isBriefOnly so the two variants have independent
@@ -136,6 +136,8 @@ function SpinnerWithVerbInner({
   hasActiveTools = false,
   leaderIsIdle = false,
   retryStatus = null,
+  outputLimitRecovery = null,
+  agentId,
 }: Props): React.ReactNode {
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
@@ -394,6 +396,9 @@ function SpinnerWithVerbInner({
         thinkingStatus={thinkingStatus}
         effortSuffix={effortSuffix}
         retryStatus={retryStatus}
+        showToolCallTimer={getFeatureValue_CACHED_MAY_BE_STALE('tengu_shining_fractals', false)}
+        outputLimitRecovery={outputLimitRecovery}
+        agentId={agentId}
       />
       {showSpinnerTree && hasRunningTeammates ? (
         <TeammateSpinnerTree
@@ -568,12 +573,12 @@ export function Spinner(): React.ReactNode {
     );
   }
 
-  // Derive frame from synced time - all spinners animate together
-  const frame = Math.floor(time / 120) % SPINNER_FRAMES.length;
+  const spinnerFrames = getSpinnerPingPongFrames();
+  const frame = Math.floor(time / 120) % spinnerFrames.length;
 
   return (
     <Box ref={ref} flexWrap="wrap" height={1} width={2}>
-      <Text color="text">{SPINNER_FRAMES[frame]}</Text>
+      <Text color="text">{spinnerFrames[frame]}</Text>
     </Box>
   );
 }

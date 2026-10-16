@@ -1,19 +1,32 @@
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useRef } from 'react';
-import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar, useTheme } from '@anthropic/ink';
 import { toInkColor } from '../../utils/ink.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
 import { remainingRetryMs, type RetryStatus } from '../../utils/advisorNetworkStall.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js';
 
-import type { Theme } from '../../utils/theme.js';
+import { getTheme, type Theme } from '../../utils/theme.js';
 
 import { GlimmerMessage } from './GlimmerMessage.js';
 import { SpinnerGlyph } from './SpinnerGlyph.js';
+import {
+  advanceSpinnerToolWindow,
+  emptySpinnerToolWindow,
+  formatSpinnerStatusText,
+  resolveSpinnerStatusKind,
+  STALL_TELEMETRY_THRESHOLDS_MS,
+  type OutputLimitRecovery,
+} from './statusKind.js';
+import { thinkingFadeIntensity } from './thinkingFade.js';
 import type { SpinnerMode } from './types.js';
 import { useStalledAnimation } from './useStalledAnimation.js';
-import { interpolateColor, toRGBColor } from './utils.js';
+import { interpolateColor, parseRGB, toRGBColor } from './utils.js';
 
 const SEP_WIDTH = stringWidth(' · ');
 const THINKING_BARE_WIDTH = stringWidth('thinking');
@@ -67,6 +80,12 @@ export type SpinnerAnimationRowProps = {
    * stalled or error retry countdown.
    */
   retryStatus?: RetryStatus | null;
+  /** densable tengu_shining_fractals — tool-running / ran-tool timer. */
+  showToolCallTimer?: boolean;
+  /** densable outputLimitRecovery — "picking the thought back up". */
+  outputLimitRecovery?: OutputLimitRecovery | null;
+  /** densable Ye/Je agentId — stall reset when the viewed agent changes. */
+  agentId?: string;
 };
 
 /**
@@ -102,7 +121,13 @@ export function SpinnerAnimationRow({
   thinkingStatus,
   effortSuffix,
   retryStatus = null,
+  showToolCallTimer = false,
+  outputLimitRecovery = null,
+  agentId,
 }: SpinnerAnimationRowProps): React.ReactNode {
+  const [themeName] = useTheme();
+  const theme = getTheme(themeName);
+
   // densable Msn always animates countdown; keep the 50ms clock when status is set.
   const [viewportRef, time] = useAnimationFrame(reducedMotion && !retryStatus ? null : 50);
 
@@ -127,17 +152,114 @@ export function SpinnerAnimationRow({
   // === Animation derivations from `time` ===
   const currentResponseLength = responseLengthRef.current;
 
-  // Suppress stall detection when leader is idle — responseLengthRef and
-  // hasActiveTools both track leader state. When viewing an active teammate
-  // while leader is idle, they'd otherwise flag a false stall after 3s.
-  // Treating leaderIsIdle like hasActiveTools resets the stall timer.
-  const { isStalled, stalledIntensity } = useStalledAnimation(
+  // densable Je It: tools || thinking || (compact && mode!==responding) || paused.
+  // KEEP leaderIsIdle — responseLengthRef/hasActiveTools track leader only.
+  const isCompacting = compactProgressActiveRef?.current === true;
+  const stallHold =
+    hasActiveTools ||
+    leaderIsIdle ||
+    mode === 'thinking' ||
+    (isCompacting && mode !== 'responding') ||
+    pauseStartTimeRef.current !== null;
+  const { isStalled, stalledIntensity, timeSinceLastToken } = useStalledAnimation(
     time,
     currentResponseLength,
-    hasActiveTools || leaderIsIdle,
+    stallHold,
     reducedMotion,
+    agentId,
   );
 
+  // densable Je stall telemetry Un=[1e4,45000,300000].
+  const stallFiredRef = useRef(new Set<number>());
+  const maxStallMsRef = useRef(0);
+  const stallAgentRef = useRef(agentId);
+  if (stallAgentRef.current !== agentId) {
+    stallAgentRef.current = agentId;
+    stallFiredRef.current = new Set();
+    maxStallMsRef.current = 0;
+  }
+  if (timeSinceLastToken === 0) {
+    if (stallFiredRef.current.size > 0) {
+      logEvent('tengu_spinner_stall_cleared', {
+        max_stall_ms: Math.round(maxStallMsRef.current),
+        mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        override_color: overrideColor != null,
+        response_length: currentResponseLength,
+        thresholds_fired: stallFiredRef.current.size,
+      });
+      stallFiredRef.current = new Set();
+      maxStallMsRef.current = 0;
+    }
+  } else {
+    if (timeSinceLastToken > maxStallMsRef.current) {
+      maxStallMsRef.current = timeSinceLastToken;
+    }
+    for (const threshold of STALL_TELEMETRY_THRESHOLDS_MS) {
+      if (timeSinceLastToken >= threshold && !stallFiredRef.current.has(threshold)) {
+        stallFiredRef.current.add(threshold);
+        logEvent('tengu_spinner_stalled_ui', {
+          threshold_ms: threshold,
+          mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          override_color: overrideColor != null,
+          time_since_last_token_ms: Math.round(timeSinceLastToken),
+          response_length: currentResponseLength,
+          render_loop_dark: timeSinceLastToken - threshold > 5000,
+        });
+      }
+    }
+  }
+
+  // densable Fe/qe/ze: wall-clock tool window + thinking burst.
+  const nowWall = Date.now();
+  const toolWindowRef = useRef(emptySpinnerToolWindow());
+  toolWindowRef.current = advanceSpinnerToolWindow(toolWindowRef.current, {
+    now: nowWall,
+    isThinking: mode === 'thinking',
+    hasActiveTools,
+    thinkingStatus,
+  });
+  const statusKind = resolveSpinnerStatusKind(toolWindowRef.current, {
+    now: nowWall,
+    hasActiveTools,
+    thinkingStatus,
+    showToolCallTimer,
+    outputLimitRecovery,
+  });
+  const thinkingTarget = thinkingFadeIntensity(
+    nowWall,
+    toolWindowRef.current.thinkingBurstStart,
+    mode === 'thinking',
+    hasActiveTools,
+  );
+  const thinkingIntensityRef = useRef(0);
+  const thinkingSmoothTimeRef = useRef(time);
+  if (mode !== 'thinking' || hasActiveTools) {
+    thinkingIntensityRef.current = 0;
+    thinkingSmoothTimeRef.current = time;
+  } else if (!reducedMotion && (thinkingTarget > 0 || thinkingIntensityRef.current > 0)) {
+    const dt = time - thinkingSmoothTimeRef.current;
+    if (dt >= 50) {
+      const steps = Math.floor(dt / 50);
+      let current = thinkingIntensityRef.current;
+      for (let i = 0; i < steps; i++) {
+        const diff = thinkingTarget - current;
+        if (Math.abs(diff) < 0.01) {
+          current = thinkingTarget;
+          break;
+        }
+        current += diff * 0.1;
+      }
+      thinkingIntensityRef.current = current;
+      thinkingSmoothTimeRef.current = time;
+    }
+  } else {
+    thinkingIntensityRef.current = thinkingTarget;
+    thinkingSmoothTimeRef.current = time;
+  }
+  const thinkingIntensity = reducedMotion ? thinkingTarget : thinkingIntensityRef.current;
+
+  // densable Je `frame:mt` is Xn cosine. Analog Ink + Xn dwells at ping-pong
+  // peaks → 闪 (Image 27/37). KEEP KCe indexed by time/120 (gold Launching `ne`).
   const frame = reducedMotion ? 0 : Math.floor(time / 120);
 
   const glimmerSpeed = mode === 'requesting' ? 50 : 200;
@@ -190,26 +312,27 @@ export function SpinnerAnimationRow({
   const tokensText = hasRunningTeammates ? `${tokenCount} tokens` : `${figures.arrowDown} ${tokenCount} tokens`;
   const tokensWidth = stringWidth(tokensText);
 
-  // === Thinking text (may shrink to fit) ===
-  let thinkingText =
-    thinkingStatus === 'thinking'
-      ? `thinking${effortSuffix}`
-      : typeof thinkingStatus === 'number'
-        ? `thought for ${Math.max(1, Math.round(thinkingStatus / 1000))}s`
-        : null;
+  // densable qe + no() + Je lt: tool-running / recovering / thinking / thought-for.
+  const { text: formattedStatus, progressiveThinkingBase } = formatSpinnerStatusText(statusKind, effortSuffix);
+  let thinkingText = formattedStatus;
   let thinkingWidthValue = thinkingText ? stringWidth(thinkingText) : 0;
 
   // === Progressive width gating ===
   const messageWidth = glimmerMessageWidth + 2;
   const sep = SEP_WIDTH;
 
-  const wantsThinking = thinkingStatus !== null;
+  const wantsThinking = thinkingText !== null;
   const wantsTimerAndTokens = verbose || hasRunningTeammates || effectiveElapsedMs > SHOW_TOKENS_AFTER_MS;
 
   const availableSpace = columns - messageWidth - 5;
 
   let showThinking = wantsThinking && availableSpace > thinkingWidthValue;
-  if (!showThinking && wantsThinking && thinkingStatus === 'thinking' && effortSuffix) {
+  if (
+    !showThinking &&
+    wantsThinking &&
+    statusKind.kind === 'thinking' &&
+    (effortSuffix || progressiveThinkingBase !== 'thinking')
+  ) {
     if (availableSpace > THINKING_BARE_WIDTH) {
       thinkingText = 'thinking';
       thinkingWidthValue = THINKING_BARE_WIDTH;
@@ -224,7 +347,7 @@ export function SpinnerAnimationRow({
   const showTokens = wantsTimerAndTokens && totalTokens > 0 && availableSpace > usedAfterTimer + tokensWidth;
 
   const thinkingOnly =
-    showThinking && thinkingStatus === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && true;
+    showThinking && statusKind.kind === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && true;
 
   // === Thinking shimmer color (formerly ThinkingShimmerText's own timer) ===
   // Same sine-wave opacity, but derived from our shared `time` instead of a
@@ -232,9 +355,16 @@ export function SpinnerAnimationRow({
   const thinkingElapsedSec = (time - THINKING_DELAY_MS) / 1000;
   const thinkingOpacity =
     time < THINKING_DELAY_MS ? 0 : (Math.sin((thinkingElapsedSec * Math.PI * 2) / THINKING_GLOW_PERIOD_S) + 1) / 2;
+  const thinkingShimmerBase = interpolateColor(THINKING_INACTIVE, THINKING_INACTIVE_SHIMMER, thinkingOpacity);
+  const warningRGB = theme.warning ? parseRGB(theme.warning) : null;
+  // densable mo: lerp the gray shimmer toward warning as thinkingIntensity rises.
   const thinkingShimmerColor = toRGBColor(
-    interpolateColor(THINKING_INACTIVE, THINKING_INACTIVE_SHIMMER, thinkingOpacity),
+    warningRGB && thinkingIntensity > 0
+      ? interpolateColor(thinkingShimmerBase, warningRGB, thinkingIntensity)
+      : thinkingShimmerBase,
   );
+  const thinkingLabelColor = !warningRGB && thinkingIntensity > 0.5 ? 'warning' : undefined;
+  const thoughtForColor = thinkingIntensity > 0 ? 'warning' : undefined;
 
   // === Build status parts ===
   const parts = [
@@ -262,12 +392,12 @@ export function SpinnerAnimationRow({
       : []),
     ...(showThinking && thinkingText
       ? [
-          thinkingStatus === 'thinking' && !reducedMotion ? (
-            <Text key="thinking" color={thinkingShimmerColor}>
+          statusKind.kind === 'thinking' && !reducedMotion ? (
+            <Text key="thinking" color={thinkingLabelColor ?? thinkingShimmerColor}>
               {thinkingOnly ? `(${thinkingText})` : thinkingText}
             </Text>
           ) : (
-            <Text dimColor key="thinking">
+            <Text dimColor={!thoughtForColor} color={thoughtForColor} key="thinking">
               {thinkingText}
             </Text>
           ),
@@ -275,29 +405,30 @@ export function SpinnerAnimationRow({
       : []),
   ];
 
-  const status =
-    foregroundedTeammate && !foregroundedTeammate.isIdle ? (
-      <>
-        <Text dimColor>(esc to interrupt </Text>
-        <Text color={toInkColor(foregroundedTeammate.identity.color)}>{foregroundedTeammate.identity.agentName}</Text>
-        <Text dimColor>)</Text>
-      </>
-    ) : !foregroundedTeammate && parts.length > 0 ? (
-      thinkingOnly ? (
-        <Byline>{parts}</Byline>
-      ) : (
-        <>
-          <Text dimColor>(</Text>
-          <Byline>{parts}</Byline>
-          <Text dimColor>)</Text>
-        </>
-      )
-    ) : null;
+  // Gold Je ht is nullable. Official Ink does not flash on null↔JSX.
+  // Analog markDirty walks ancestors — nullable status insert/remove
+  // (Image 37 thinking-with-xhigh) repaints the whole spinner row.
+  // KEEP: always mount a 3-child slot (Text, Box, Text) so the row never
+  // appendChildNode/removeChildNode the status sibling.
+  const teammateActive = Boolean(foregroundedTeammate && !foregroundedTeammate.isIdle);
+  const showStatusParens = !teammateActive && parts.length > 0 && !thinkingOnly;
+  const statusSlot = (
+    <Box flexDirection="row" flexWrap="wrap">
+      <Text dimColor>{teammateActive ? '(esc to interrupt ' : showStatusParens ? '(' : ''}</Text>
+      <Box flexDirection="row">
+        {teammateActive && foregroundedTeammate ? (
+          <Text color={toInkColor(foregroundedTeammate.identity.color)}>{foregroundedTeammate.identity.agentName}</Text>
+        ) : (
+          <Byline>{parts.length > 0 ? parts : <Text dimColor>{''}</Text>}</Byline>
+        )}
+      </Box>
+      <Text dimColor>{teammateActive || showStatusParens ? ')' : ''}</Text>
+    </Box>
+  );
 
   // Compaction progress bar. Summary length is unknown up front, so map
   // streamed tokens through an asymptotic curve (approaches but never reaches
   // 100%) so it always reads as forward progress. Bar disappears on compact_end.
-  const isCompacting = compactProgressActiveRef?.current === true;
   const compactRatio = isCompacting ? 1 - Math.exp(-leaderTokens / 1200) : 0;
   const compactBarWidth = Math.max(10, Math.min(30, columns - 20));
 
@@ -352,6 +483,7 @@ export function SpinnerAnimationRow({
         frame={frame}
         messageColor={messageColor}
         stalledIntensity={overrideColor ? 0 : stalledIntensity}
+        thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
         reducedMotion={reducedMotion}
         time={time}
       />
@@ -363,8 +495,9 @@ export function SpinnerAnimationRow({
         flashOpacity={flashOpacity}
         shimmerColor={shimmerColor}
         stalledIntensity={overrideColor ? 0 : stalledIntensity}
+        thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
       />
-      {status}
+      {statusSlot}
     </Box>
   );
 

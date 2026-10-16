@@ -1,5 +1,9 @@
 import { useRef } from 'react'
 
+/** densable Ye — stall after 10s, fade over 10s. */
+export const STALL_AFTER_MS = 10_000
+export const STALL_FADE_MS = 10_000
+
 // Hook to handle the transition to red when tokens stop flowing.
 // Driven by the parent's animation clock time instead of independent intervals,
 // so it slows down when the terminal is blurred.
@@ -8,40 +12,44 @@ export function useStalledAnimation(
   currentResponseLength: number,
   hasActiveTools = false,
   reducedMotion = false,
+  agentId?: string,
 ): {
   isStalled: boolean
   stalledIntensity: number
+  timeSinceLastToken: number
 } {
   const lastTokenTime = useRef(time)
   const lastResponseLength = useRef(currentResponseLength)
-  const mountTime = useRef(time)
   const stalledIntensityRef = useRef(0)
   const lastSmoothTime = useRef(time)
+  const agentIdRef = useRef(agentId)
 
-  // Reset timer when new tokens arrive (check actual length change)
-  if (currentResponseLength > lastResponseLength.current) {
+  // densable Ye: length up OR agentId change resets stall; length down only tracks baseline.
+  if (
+    currentResponseLength > lastResponseLength.current ||
+    agentIdRef.current !== agentId
+  ) {
+    agentIdRef.current = agentId
     lastTokenTime.current = time
     lastResponseLength.current = currentResponseLength
     stalledIntensityRef.current = 0
     lastSmoothTime.current = time
+  } else if (currentResponseLength < lastResponseLength.current) {
+    lastResponseLength.current = currentResponseLength
   }
 
-  // Derive time since last token from animation clock
+  // densable Ye: hold (tools / thinking / pause / compact-not-responding) zeros E.
   let timeSinceLastToken: number
   if (hasActiveTools) {
     timeSinceLastToken = 0
     lastTokenTime.current = time
-  } else if (currentResponseLength > 0) {
-    timeSinceLastToken = time - lastTokenTime.current
   } else {
-    timeSinceLastToken = time - mountTime.current
+    timeSinceLastToken = time - lastTokenTime.current
   }
 
-  // Calculate stalled intensity based on time since last token
-  // Start showing red after 3 seconds of no new tokens (only when no tools are active)
-  const isStalled = timeSinceLastToken > 3000 && !hasActiveTools
+  const isStalled = timeSinceLastToken > STALL_AFTER_MS && !hasActiveTools
   const intensity = isStalled
-    ? Math.min((timeSinceLastToken - 3000) / 2000, 1) // Fade over 2 seconds
+    ? Math.min((timeSinceLastToken - STALL_AFTER_MS) / STALL_FADE_MS, 1)
     : 0
 
   // Smooth intensity transition driven by animation frame ticks
@@ -66,10 +74,13 @@ export function useStalledAnimation(
     lastSmoothTime.current = time
   }
 
-  // When reducedMotion is enabled, use instant intensity change
   const effectiveIntensity = reducedMotion
     ? intensity
     : stalledIntensityRef.current
 
-  return { isStalled, stalledIntensity: effectiveIntensity }
+  return {
+    isStalled,
+    stalledIntensity: effectiveIntensity,
+    timeSinceLastToken,
+  }
 }

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text, stringWidth, useTheme } from '@anthropic/ink';
+import { type RGBColor, Text, stringWidth, useTheme } from '@anthropic/ink';
 import { getGraphemeSegmenter } from '../../utils/intl.js';
 import { getTheme, type Theme } from '../../utils/theme.js';
 import type { SpinnerMode } from './types.js';
@@ -13,9 +13,25 @@ type Props = {
   flashOpacity: number;
   shimmerColor: keyof Theme;
   stalledIntensity?: number;
+  /** densable RTt thinkingIntensity — fade verb toward theme.warning after stall hold. */
+  thinkingIntensity?: number;
 };
 
 const ERROR_RED = { r: 171, g: 43, b: 63 };
+
+/** densable RTt thinking/stall/tool-use is 2 Text. Analog Ink markDirty walks
+ *  ancestors — 4→2 removeChildNode flashes the whole spinner row (Image 37).
+ *  KEEP a stable 4-Text sibling shape on every 50ms path. */
+function stableVerbRow(color: keyof Theme | RGBColor, message: string): React.ReactNode {
+  return (
+    <>
+      <Text color={color}>{message}</Text>
+      <Text color={color}>{''}</Text>
+      <Text color={color}>{''}</Text>
+      <Text color={color}> </Text>
+    </>
+  );
+}
 
 export function GlimmerMessage({
   message,
@@ -25,6 +41,7 @@ export function GlimmerMessage({
   flashOpacity,
   shimmerColor,
   stalledIntensity = 0,
+  thinkingIntensity = 0,
 }: Props): React.ReactNode {
   const [themeName] = useTheme();
   const theme = getTheme(themeName);
@@ -49,23 +66,28 @@ export function GlimmerMessage({
 
     if (baseRGB) {
       const interpolated = interpolateColor(baseRGB, ERROR_RED, stalledIntensity);
-      const color = toRGBColor(interpolated);
-      return (
-        <>
-          <Text color={color}>{message}</Text>
-          <Text color={color}> </Text>
-        </>
-      );
+      return stableVerbRow(toRGBColor(interpolated), message);
     }
 
     // Fallback for ANSI themes: use messageColor until fully stalled, then error
     const color = stalledIntensity > 0.5 ? 'error' : messageColor;
-    return (
-      <>
-        <Text color={color}>{message}</Text>
-        <Text color={color}> </Text>
-      </>
-    );
+    return stableVerbRow(color, message);
+  }
+
+  // densable RTt: after stall, fade the verb toward theme.warning.
+  if (thinkingIntensity > 0) {
+    const baseColorStr = theme[messageColor];
+    const warningStr = theme.warning;
+    const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
+    const warningRGB = warningStr ? parseRGB(warningStr) : null;
+
+    if (baseRGB && warningRGB) {
+      const interpolated = interpolateColor(baseRGB, warningRGB, thinkingIntensity);
+      return stableVerbRow(toRGBColor(interpolated), message);
+    }
+
+    const color = thinkingIntensity > 0.5 ? 'warning' : messageColor;
+    return stableVerbRow(color, message);
   }
 
   // tool-use mode: all chars flash with the same opacity, so render as a
@@ -78,39 +100,20 @@ export function GlimmerMessage({
 
     if (baseRGB && shimmerRGB) {
       const interpolated = interpolateColor(baseRGB, shimmerRGB, flashOpacity);
-      return (
-        <>
-          <Text color={toRGBColor(interpolated)}>{message}</Text>
-          <Text color={messageColor}> </Text>
-        </>
-      );
+      return stableVerbRow(toRGBColor(interpolated), message);
     }
 
     const color = flashOpacity > 0.5 ? shimmerColor : messageColor;
-    return (
-      <>
-        <Text color={color}>{message}</Text>
-        <Text color={messageColor}> </Text>
-      </>
-    );
+    return stableVerbRow(color, message);
   }
 
-  // Shimmer mode: only chars within ±1 of glimmerIndex need the shimmer
-  // color. When glimmer is offscreen, render as a single <Text>.
+  // densable RTt offscreen is 2 Text. Analog Ink appendChildNode/removeChildNode
+  // markDirty the whole spinner row on 2↔4 (Image 37 闪, official Ink does not).
+  // KEEP a stable 4-Text sibling shape; offscreen puts the whole message in `before`.
   const shimmerStart = glimmerIndex - 1;
   const shimmerEnd = glimmerIndex + 1;
-
-  if (shimmerStart >= messageWidth || shimmerEnd < 0) {
-    return (
-      <>
-        <Text color={messageColor}>{message}</Text>
-        <Text color={messageColor}> </Text>
-      </>
-    );
-  }
-
-  // Split into at most 3 segments by visual column position
-  const clampedStart = Math.max(0, shimmerStart);
+  const glimmerOffscreen = shimmerStart >= messageWidth || shimmerEnd < 0;
+  const clampedStart = glimmerOffscreen ? messageWidth : Math.max(0, shimmerStart);
   let colPos = 0;
   let before = '';
   let shim = '';
@@ -128,9 +131,9 @@ export function GlimmerMessage({
 
   return (
     <>
-      {before && <Text color={messageColor}>{before}</Text>}
+      <Text color={messageColor}>{before}</Text>
       <Text color={shimmerColor}>{shim}</Text>
-      {after && <Text color={messageColor}>{after}</Text>}
+      <Text color={messageColor}>{after}</Text>
       <Text color={messageColor}> </Text>
     </>
   );
