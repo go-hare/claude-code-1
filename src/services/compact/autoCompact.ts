@@ -10,6 +10,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
+import { resolveColdCompactStripNonEssential } from '../../utils/coldCompact.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { tokenCountWithEstimation } from '../../utils/tokens.js'
@@ -457,6 +458,8 @@ export async function autoCompactIfNeeded(
       undefined, // No custom instructions for autocompact
       true, // isAutoCompact
       recompactionInfo,
+      // densable Z$o → Pqn stripNonEssential:M=!1
+      resolveColdCompactStripNonEssential(),
     )
 
     // Reset lastSummarizedMessageId since legacy compaction replaces all messages

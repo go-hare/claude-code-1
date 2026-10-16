@@ -37,6 +37,7 @@ import type {
 } from '../../types/message.js'
 import { getMainLoopModelFromLayers } from '../../engine/permissionLayerReaders.js'
 import {
+  buildThinkingStripPlanFromMessages,
   carryThinkingStripFromSummarized,
   resolveCompactThinkingStrip,
   thinkingStrippedAttachment,
@@ -69,6 +70,7 @@ import {
 import { logError } from '../../utils/log.js'
 import { MEMORY_TYPE_VALUES } from '../../utils/memory/types.js'
 import {
+  buildAdvisorStripPlanFromMessages,
   createCompactBoundaryMessage,
   createUserMessage,
   getAssistantMessageText,
@@ -472,6 +474,7 @@ export async function compactConversation(
   customInstructions?: string,
   isAutoCompact: boolean = false,
   recompactionInfo?: RecompactionInfo,
+  stripNonEssential: boolean = false,
 ): Promise<CompactionResult> {
   try {
     // densable 2.1.214: refuse compact when EndConversation ended the session
@@ -544,6 +547,8 @@ export async function compactConversation(
         context,
         preCompactTokenCount,
         cacheSafeParams: retryCacheSafeParams,
+        // densable Pqn/qjt: full compact does not pass thinking/advisor plans.
+        stripNonEssential,
       })
       summary = getAssistantMessageText(summaryResponse)
       if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
@@ -742,6 +747,7 @@ export async function compactConversation(
       recompactionInfo?.querySource ?? context.options.querySource ?? 'unknown'
 
     logEvent('tengu_compact', {
+      stripNonEssential,
       preCompactTokenCount,
       // Kept for continuity — semantically the compact API call's total usage
       postCompactTokenCount: compactionCallTotalTokens,
@@ -919,6 +925,17 @@ export async function partialCompactConversation(
       )
       if (carried) {
         messagesToKeep.push(createAttachmentMessage(carried))
+      }
+      if (
+        messagesToKeep.some(m => m.type === 'assistant') &&
+        messagesToSummarize.some(
+          m =>
+            m.type === 'attachment' && m.attachment.type === 'advisor_stripped',
+        )
+      ) {
+        messagesToKeep.push(
+          createAttachmentMessage({ type: 'advisor_stripped' }),
+        )
       }
     }
 
@@ -1110,6 +1127,8 @@ export async function partialCompactConversation(
         context,
         preCompactTokenCount,
         cacheSafeParams: retryCacheSafeParams,
+        thinkingStripPlan: buildThinkingStripPlanFromMessages(allMessages),
+        advisorStripPlan: buildAdvisorStripPlanFromMessages(allMessages),
       })
       summary = getAssistantMessageText(summaryResponse)
       if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
@@ -1388,6 +1407,9 @@ async function streamCompactSummary({
   context,
   preCompactTokenCount,
   cacheSafeParams,
+  stripNonEssential = false,
+  thinkingStripPlan,
+  advisorStripPlan,
 }: {
   messages: Message[]
   summaryRequest: UserMessage
@@ -1395,15 +1417,21 @@ async function streamCompactSummary({
   context: ToolUseContext
   preCompactTokenCount: number
   cacheSafeParams: CacheSafeParams
+  /** densable qjt `stripNonEssential:b=!1` — skip cache-prefix fork + strip thinking/advisor. */
+  stripNonEssential?: boolean
+  thinkingStripPlan?: import('../../utils/thinking.js').ThinkingStripPlan
+  advisorStripPlan?: import('../../utils/messages.js').AdvisorStripPlan
 }): Promise<AssistantMessage> {
   // When prompt cache sharing is enabled, use forked agent to reuse the
   // main conversation's cached prefix (system prompt, tools, context messages).
   // Falls back to regular streaming path on failure.
   // 3P default: true — see comment at the other tengu_compact_cache_prefix read above.
-  const promptCacheSharingEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_compact_cache_prefix',
-    true,
-  )
+  // densable qjt `V=!b&&k("tengu_compact_cache_prefix",!0)`
+  const promptCacheSharingEnabled =
+    !stripNonEssential &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_compact_cache_prefix', true)
+  // densable qjt: plans go to qC/Gut; do not peel summarizer input here.
+  const summarizerMessages = messages
   // Send keep-alive signals during compaction to prevent remote session
   // WebSocket idle timeouts from dropping bridge connections. Compaction
   // API calls can take 5-10+ seconds, during which no other messages
@@ -1436,6 +1464,8 @@ async function streamCompactSummary({
         const result = await runForkedAgent({
           promptMessages: [summaryRequest],
           cacheSafeParams,
+          thinkingStripPlan,
+          advisorStripPlan,
           canUseTool: createCompactCanUseTool(),
           querySource: 'compact',
           forkLabel: 'compact',
@@ -1516,39 +1546,37 @@ async function streamCompactSummary({
 
       // Check if tool search is enabled using the main loop's tools list.
       // context.options.tools includes MCP tools merged via useMergedTools.
-      const useSearchExtraTools = await isSearchExtraToolsEnabled(
-        context.options.mainLoopModel,
-        context.options.tools,
-        async () => appState.toolPermissionContext,
-        context.options.agentDefinitions.activeAgents,
-        'compact',
-      )
+      const useSearchExtraTools =
+        !stripNonEssential &&
+        (await isSearchExtraToolsEnabled(
+          context.options.mainLoopModel,
+          context.options.tools,
+          async () => appState.toolPermissionContext,
+          context.options.agentDefinitions.activeAgents,
+          'compact',
+        ))
+      const tools: Tool[] = stripNonEssential
+        ? []
+        : useSearchExtraTools
+          ? uniqBy(
+              [
+                FileReadTool,
+                SearchExtraToolsTool,
+                ...context.options.tools.filter(t => t.isMcp),
+              ],
+              'name',
+            )
+          : [FileReadTool]
 
-      // When tool search is enabled, include SearchExtraToolsTool and MCP tools. They get
-      // defer_loading: true and don't count against context - the API filters them out
-      // of system_prompt_tools before token counting (see api/token_count_api/counting.py:188
-      // and api/public_api/messages/handler.py:324).
-      // Filter MCP tools from context.options.tools (not appState.mcp.tools) so we
-      // get the permission-filtered set from useMergedTools — same source used for
-      // isSearchExtraToolsEnabled above and normalizeMessagesForAPI below.
-      // Deduplicate by name to avoid API errors when MCP tools share names with built-in tools.
-      const tools: Tool[] = useSearchExtraTools
-        ? uniqBy(
-            [
-              FileReadTool,
-              SearchExtraToolsTool,
-              ...context.options.tools.filter(t => t.isMcp),
-            ],
-            'name',
-          )
-        : [FileReadTool]
+      // densable qjt: stripNonEssential → tools []. Else SearchExtraTools + MCP
+      // when enabled (defer_loading), else FileReadTool only.
 
       const streamingGen = queryModelWithStreaming({
         // No model arg → no api_system at runtime; cast for Message[] query path
         messages: normalizeMessagesForAPI(
           stripImagesFromMessages(
             stripReinjectedAttachments([
-              ...getMessagesAfterCompactBoundary(messages),
+              ...getMessagesAfterCompactBoundary(summarizerMessages),
               summaryRequest,
             ]),
           ),
@@ -1578,6 +1606,8 @@ async function streamCompactSummary({
           mcpTools: [],
           effortValue: appState.effortValue,
           langfuseTrace: context.langfuseTrace,
+          thinkingStripPlan,
+          advisorStripPlan,
         },
       })
       const streamIter = streamingGen[Symbol.asyncIterator]()

@@ -1,41 +1,27 @@
+/**
+ * densable ePt — session recap for away_summary.
+ * Gold: deny-all tools, under-40-word prompt, 400-char cap, no memory inject.
+ */
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { logForDebugging } from '../utils/debug.js'
 import { createUserMessage, extractTextContent } from '../utils/messages.js'
-import { getSmallFastModel } from '../utils/model/model.js'
-import { getResolvedLanguage } from '../utils/language.js'
 import { getLastCacheSafeParams, runForkedAgent } from '../utils/forkedAgent.js'
-import { createAutoMemCanUseTool } from './extractMemories/extractMemories.js'
-import { getAutoMemPath } from '../memdir/paths.js'
+import { getResolvedLanguage } from '../utils/language.js'
 import { truncateAtWordBoundary } from '../utils/stringUtils.js'
-import { getSessionMemoryContent } from './SessionMemory/sessionMemoryUtils.js'
 
-// Recap only needs recent context — truncate to avoid "prompt too long" on
-// large sessions. 30 messages ≈ ~15 exchanges, plenty for "where we left off."
-const RECENT_MESSAGE_WINDOW = 30
-
-/** densable 2.1.236 `Hbm=400` — hard cap after generation (word-boundary). */
+/** densable f/Hbm=400 */
 export const AWAY_SUMMARY_RECAP_MAX_CHARS = 400
 
 const PROMPT_EN =
-  'The user stepped away and is coming back. Write exactly 1-3 short sentences. Start by stating the high-level task — what they are building or debugging, not implementation details. Next: the concrete next step. Skip status reports and commit recaps.'
+  'The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.'
 
 const PROMPT_ZH =
-  '用户离开后回来了。用中文写 1-3 句话。先说明用户在做什么（高层目标，不是实现细节），然后说明下一步具体操作。不要写状态报告或提交总结。'
+  '用户离开后回来了。用中文写 1-2 句、不超过 40 词，不要 markdown。先说总体目标和当前任务，再说下一步。不要写根因、实现细节或次要待办。'
 
-function buildAwaySummaryPrompt(memory: string | null): string {
-  const memoryBlock = memory
-    ? `Session memory (broader context):\n${memory}\n\n`
-    : ''
-  const prompt = getResolvedLanguage() === 'zh' ? PROMPT_ZH : PROMPT_EN
-  return `${memoryBlock}${prompt}`
+function recapPrompt(): string {
+  return getResolvedLanguage() === 'zh' ? PROMPT_ZH : PROMPT_EN
 }
 
-/**
- * Generates a short session recap for the "while you were away" card.
- * Uses runForkedAgent with the parent's CacheSafeParams to share prompt cache.
- * Returns null when no turn has completed yet (no CacheSafeParams saved),
- * when aborted, or on error.
- */
 export async function generateAwaySummary(
   _messages: readonly unknown[],
   signal: AbortSignal,
@@ -45,56 +31,31 @@ export async function generateAwaySummary(
     logForDebugging('[awaySummary] no CacheSafeParams saved, skipping')
     return null
   }
-
-  if (signal.aborted) {
-    return null
-  }
+  if (signal.aborted) return null
 
   try {
-    const memory = await getSessionMemoryContent()
-    const recentMessages = cacheSafeParams.forkContextMessages.slice(
-      -RECENT_MESSAGE_WINDOW,
-    )
-    const userPrompt = buildAwaySummaryPrompt(memory)
-
-    const model = getSmallFastModel()
-    const overriddenCacheSafeParams = {
-      ...cacheSafeParams,
-      forkContextMessages: recentMessages,
-      toolUseContext: {
-        ...cacheSafeParams.toolUseContext,
-        options: {
-          ...cacheSafeParams.toolUseContext.options,
-          model,
-        },
-      },
-    }
-
-    const canUseTool = createAutoMemCanUseTool(getAutoMemPath())
-
     const result = await runForkedAgent({
-      promptMessages: [createUserMessage({ content: userPrompt })],
-      cacheSafeParams: overriddenCacheSafeParams,
-      canUseTool,
+      promptMessages: [createUserMessage({ content: recapPrompt() })],
+      cacheSafeParams,
+      canUseTool: async () => ({
+        behavior: 'deny',
+        message: 'Away summary cannot use tools',
+        decisionReason: { type: 'other', reason: 'away_summary' },
+      }),
       querySource: 'away_summary',
       forkLabel: 'away_summary',
       skipTranscript: true,
       skipCacheWrite: true,
       maxTurns: 1,
     })
+    if (signal.aborted) return null
 
-    if (signal.aborted) {
-      return null
-    }
-
-    // Extract text from the last assistant message
     const lastAssistant = result.messages
       .slice()
       .reverse()
       .find(m => m.type === 'assistant')
-    if (!lastAssistant || lastAssistant.type !== 'assistant') {
-      return null
-    }
+    if (!lastAssistant || lastAssistant.type !== 'assistant') return null
+    if (lastAssistant.isApiErrorMessage) return null
     const content = lastAssistant.message?.content
     const text = Array.isArray(content)
       ? extractTextContent(content, ' ')
@@ -103,7 +64,6 @@ export async function generateAwaySummary(
         : null
     const trimmed = text?.trim() || null
     if (!trimmed) return null
-    // densable edu(s,Hbm): hard-cap runaway recap on word boundary.
     if (trimmed.length > AWAY_SUMMARY_RECAP_MAX_CHARS) {
       const capped = truncateAtWordBoundary(
         trimmed,
@@ -116,9 +76,7 @@ export async function generateAwaySummary(
     }
     return trimmed
   } catch (err) {
-    if (err instanceof APIUserAbortError || signal.aborted) {
-      return null
-    }
+    if (err instanceof APIUserAbortError || signal.aborted) return null
     logForDebugging(`[awaySummary] generation failed: ${err}`)
     return null
   }

@@ -506,9 +506,20 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   // sessions on `default` instead of auto (fork / 3P / telemetry-off parity).
   tengu_harbor_willow: true,
   tengu_moss_anchor: true,
+  // densable 2.1.289 u7e / k("tengu_lively_waffle", !0) — SubagentHandback Ut.
+  // Hollow GB must not leave parent-auto Explore without qw (Image 34 Wr).
+  tengu_lively_waffle: true,
+  // densable 2.1.289 k("tengu_purring_pine", !0) — endsTurn after a successful report.
+  tengu_purring_pine: true,
   // densable 2.1.289 k("tengu_gentle_hummingbird", !0) — linux remote
   // list_directory /proc/self/fd host. Default true matches gold.
   tengu_gentle_hummingbird: true,
+  // densable 2.1.289 k("tengu_swirling_meteor", !0) — print task-notification
+  // coalesce (hold shouldQuery for follower notifications / owed empty prompt).
+  tengu_swirling_meteor: true,
+  // densable 2.1.289 gAe / k("tengu_omelette_fouet", !1). Gold default is
+  // false; hollow GB would leave ClaudeDesign + `/design` hub off.
+  tengu_omelette_fouet: true,
 
   // densable 2.1.289 kBe / TQt / RQt child grant gates (SXn/$6r/bXn/wXn/EXn).
   // Hollow GB must not disable sdk-host lane apply or RC-child grants.

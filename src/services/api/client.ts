@@ -224,9 +224,8 @@ export async function getAnthropicClient({
   // overwritten by secure-storage — that silently swaps ANTHROPIC_BASE_URL /
   // ANTHROPIC_AUTH_TOKEN for enterprise credentials.
   const gatewayFromEnvEarly = resolveGatewayFromEnv()
-  if (gatewayFromEnvEarly.status === 'missing') {
-    logForDebugging(gatewayFromEnvEarly.message)
-  } else if (gatewayFromEnvEarly.status === 'invalid_url') {
+  // Missing-token warn is densable vl(), inside resolveGatewayFromEnv.
+  if (gatewayFromEnvEarly.status === 'invalid_url') {
     throw new Error(gatewayFromEnvEarly.message)
   }
   try {

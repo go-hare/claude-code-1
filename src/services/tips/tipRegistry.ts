@@ -1,6 +1,8 @@
+import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import { logForDebugging } from 'src/utils/debug.js'
 import { fileHistoryEnabled } from 'src/utils/fileHistory.js'
+import { isAgentViewDisabled } from 'src/utils/residualUiEnvGates.js'
 import { getPluginSuggestionMarketplaces } from '../../utils/plugins/marketplaceHelpers.js'
 import type { KnownMarketplacesConfig } from '../../utils/plugins/marketplaceManager.js'
 import {
@@ -185,6 +187,34 @@ const externalTips: Tip[] = [
       if (getCurrentSessionAgentColor()) return false
       const count = await countConcurrentSessions()
       return count >= 2
+    },
+  },
+  {
+    // densable 2.1.289 agents-view-multiclauding tip (SEA @212687003).
+    // providerAgnostic must sit immediately after id (tipProviderAgnostic.247 parser).
+    id: 'agents-view-multiclauding',
+    providerAgnostic: true,
+    priority: 3,
+    maxLifetimeShows: 5,
+    cooldownSessions: 1,
+    content: async ctx => {
+      const blue = color('suggestion', ctx?.theme ?? 'dark')
+      return `Running multiple Claude sessions? Press ${blue('←')} on an empty prompt to see them all in one place`
+    },
+    isRelevant: async () => {
+      if (!feature('BG_SESSIONS')) return false
+      if (
+        isAgentViewDisabled(
+          process.env,
+          getInitialSettings()?.disableAgentView === true,
+        )
+      ) {
+        return false
+      }
+      const config = getGlobalConfig()
+      if (config.leftArrowOpensAgents === false) return false
+      if (config.hasOpenedAgentsView || config.hasUsedAgentsFleet) return false
+      return (await countConcurrentSessions()) >= 2
     },
   },
   {

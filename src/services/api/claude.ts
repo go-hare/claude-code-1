@@ -122,7 +122,10 @@ import {
   hideUnderlyingV1Tools,
   normalizeContentFromAPI,
   normalizeMessagesForAPI,
+  mergeAdvisorStripPlans,
+  buildAdvisorStripPlanFromMessages,
   stripAdvisorBlocks,
+  stripAdvisorBlocksFromMessageIds,
   stripCallerFieldFromAssistantMessage,
   stripToolReferenceBlocksFromUserMessage,
 } from '../../utils/messages.js'
@@ -137,6 +140,11 @@ import {
   asSystemPrompt,
   type SystemPrompt,
 } from '../../utils/systemPromptType.js'
+import {
+  applyThinkingStripPlanToMessages,
+  buildThinkingStripPlanFromMessages,
+  mergeThinkingStripPlans,
+} from '../../utils/thinking.js'
 import {
   getBreakCacheMarkerPath,
   getBreakCacheAlwaysPath,
@@ -1001,6 +1009,10 @@ export type Options = {
    * densable fallbackCreditLaneArmed — visibleModel armed → rkd credit beta.
    */
   fallbackCreditLaneArmed?: boolean
+  /**
+   * densable Jn — query armed Ba; stream skips FXl so query qa can ask.
+   */
+  refusalFallbackPreferencePending?: boolean
   outputFormat?: BetaJSONOutputFormat
   fastMode?: boolean
   advisorModel?: string
@@ -1026,6 +1038,12 @@ export type Options = {
    * and the main query already recover). Official Options field.
    */
   promptTooLongIsHandled?: boolean
+  /**
+   * densable qC/Gut `thinkingStripPlan` / `advisorStripPlan` — Lv peels
+   * attachments at normalize. Compact qjt threads these through runQuery.
+   */
+  thinkingStripPlan?: import('../../utils/thinking.js').ThinkingStripPlan
+  advisorStripPlan?: import('../../utils/messages.js').AdvisorStripPlan
   /**
    * densable agentContext — official Options field. queryModel falls back
    * to getAgentContext() ALS when omitted. Title `B` passes S() explicitly.
@@ -1707,6 +1725,24 @@ async function* queryModel(
     // remote/teleport sessions. Inserts synthetic error tool_results for orphaned
     // tool_uses and strips orphaned tool_results referencing non-existent tool_uses.
     next = ensureToolResultPairing(next)
+
+    // densable Lv: $Fe(s?.thinkingStripPlan, MY(g)) then BCr.
+    const thinkingPlan = mergeThinkingStripPlans(
+      options.thinkingStripPlan,
+      buildThinkingStripPlanFromMessages(messages),
+    )
+    if (thinkingPlan.size > 0) {
+      next = applyThinkingStripPlanToMessages(next, thinkingPlan)
+    }
+
+    // densable Lv: FFe(s?.advisorStripPlan, UD(g)) then C_.
+    const advisorPlan = mergeAdvisorStripPlans(
+      options.advisorStripPlan,
+      buildAdvisorStripPlanFromMessages(messages),
+    )
+    if (advisorPlan.size > 0) {
+      next = stripAdvisorBlocksFromMessageIds(next, advisorPlan)
+    }
 
     // Strip advisor blocks — the API rejects them without the beta header.
     if (!betas.includes(ADVISOR_BETA_HEADER)) {
@@ -3806,6 +3842,33 @@ async function* queryModel(
                         } catch {
                           // densable optional
                         }
+                      } else if (
+                        options.refusalFallbackPreferencePending === true &&
+                        silentAttempt !== true
+                      ) {
+                        // densable ke=Jn — skip FXl; query.ts qa on fallback_request
+                        refusalHandledByFallback = true
+                        try {
+                          const { buildFallbackRequestEvent } =
+                            // eslint-disable-next-line @typescript-eslint/no-require-imports
+                            require('../../utils/refusalFallback.js') as typeof import('../../utils/refusalFallback.js')
+                          yield buildFallbackRequestEvent({
+                            originalModel: options.model,
+                            fallbackModel: targetModel,
+                            requestId: streamRequestId ?? null,
+                            apiRefusalCategory,
+                            apiRefusalExplanation:
+                              stopDetails?.explanation ?? null,
+                            creditCode: mintedFallbackCreditCode ?? null,
+                            silentArmAtTrigger: silentAttempt,
+                          }) as unknown as StreamEvent
+                        } catch (e) {
+                          if (e instanceof FallbackTriggeredError) throw e
+                        }
+                        throw new FallbackTriggeredError(
+                          options.model,
+                          targetModel,
+                        )
                       } else {
                         const flow = await runRefusalFallbackDialogFlow({
                           decision: {

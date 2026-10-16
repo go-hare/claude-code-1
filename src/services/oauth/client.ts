@@ -598,5 +598,14 @@ export function storeOAuthAccountInfo({
     } catch {
       // bootstrap isolation — optional
     }
+    // densable TZt → Rzo(account_switch): bump artifact accountEpoch + clear probeBoots.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { noteArtifactAccountChanged } =
+        require('../artifactAutoReact/accountBoundary.js') as typeof import('../artifactAutoReact/accountBoundary.js')
+      noteArtifactAccountChanged('account_switch')
+    } catch {
+      // artifactAutoReact optional in isolation
+    }
   }
 }

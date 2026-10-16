@@ -362,6 +362,9 @@ export function initExtractMemories(): void {
   /** Counts eligible turns since the last extraction run. Resets to 0 after each run. */
   let turnsSinceLastExtraction = 0
 
+  /** Last announced memory path set — skip a second Saved banner for the same files. */
+  let lastAnnouncedMemoryKey = ''
+
   /** When a call arrives during an in-progress run, we stash the context here
    *  and run one trailing extraction after the current one finishes. */
   let pendingContext:
@@ -574,11 +577,19 @@ export function initExtractMemories(): void {
         `[extractMemories] writtenPaths=${writtenPaths.length} memoryPaths=${memoryPaths.length} appendSystemMessage defined=${appendSystemMessage != null}`,
       )
       if (memoryPaths.length > 0) {
-        const msg = createMemorySavedMessage(memoryPaths)
-        if (feature('TEAMMEM')) {
-          msg.teamCount = teamCount
+        const announcedKey = [...memoryPaths].sort().join('\0')
+        if (announcedKey === lastAnnouncedMemoryKey) {
+          logForDebugging(
+            '[extractMemories] skipping Saved banner — same paths as last announcement',
+          )
+        } else {
+          lastAnnouncedMemoryKey = announcedKey
+          const msg = createMemorySavedMessage(memoryPaths)
+          if (feature('TEAMMEM')) {
+            msg.teamCount = teamCount
+          }
+          appendSystemMessage?.(msg)
         }
-        appendSystemMessage?.(msg)
       }
     } catch (error) {
       // Extraction is best-effort — log but don't notify on error
