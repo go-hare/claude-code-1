@@ -26,8 +26,12 @@ export const HOOK_EVENTS = [
   'PreToolUse',
   'PostToolUse',
   'PostToolUseFailure',
+  // densable 2.1.289 Acn / YH — after PostToolUseFailure
+  'PostToolBatch',
   'Notification',
   'UserPromptSubmit',
+  // densable 2.1.289 Ze / QH — after UserPromptSubmit
+  'UserPromptExpansion',
   'SessionStart',
   'SessionEnd',
   'Stop',

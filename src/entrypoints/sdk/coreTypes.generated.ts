@@ -138,6 +138,15 @@ export type HookInput =
       is_interrupt?: boolean
     })
   | (HookInputBase & {
+      hook_event_name: 'PostToolBatch'
+      tool_calls: Array<{
+        tool_name: string
+        tool_input: unknown
+        tool_use_id: string
+        tool_response?: unknown
+      }>
+    })
+  | (HookInputBase & {
       hook_event_name: 'PermissionDenied'
       tool_name: string
       tool_input: unknown
@@ -151,6 +160,14 @@ export type HookInput =
       notification_type: string
     })
   | (HookInputBase & { hook_event_name: 'UserPromptSubmit'; prompt: string })
+  | (HookInputBase & {
+      hook_event_name: 'UserPromptExpansion'
+      expansion_type: 'slash_command' | 'mcp_prompt'
+      command_name: string
+      command_args: string
+      command_source?: string
+      prompt: string
+    })
   | (HookInputBase & {
       hook_event_name: 'SessionStart'
       // densable 2.1.214 #47
@@ -350,6 +367,11 @@ export type SyncHookJSONOutput = {
       }
     | { hookEventName: 'UserPromptSubmit'; additionalContext?: string }
     | {
+        hookEventName: 'UserPromptExpansion'
+        additionalContext?: string
+        suppressOriginalPrompt?: boolean
+      }
+    | {
         hookEventName: 'SessionStart'
         additionalContext?: string
         initialUserMessage?: string
@@ -363,6 +385,7 @@ export type SyncHookJSONOutput = {
         updatedMCPToolOutput?: unknown
       }
     | { hookEventName: 'PostToolUseFailure'; additionalContext?: string }
+    | { hookEventName: 'PostToolBatch'; additionalContext?: string }
     | { hookEventName: 'PermissionDenied'; retry?: boolean }
     | { hookEventName: 'Notification'; additionalContext?: string }
     | {
@@ -401,10 +424,20 @@ export type HookJSONOutput = AsyncHookJSONOutput | SyncHookJSONOutput
 export type PreToolUseHookInput = HookInput & { tool_name: string }
 export type PostToolUseHookInput = HookInput & { tool_name: string }
 export type PostToolUseFailureHookInput = HookInput & { tool_name: string }
+/** densable 2.1.289 YH — batch of resolved tool calls */
+export type PostToolBatchHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'PostToolBatch' }
+>
 export type PermissionRequestHookInput = HookInput & { tool_name: string }
 export type PermissionDeniedHookInput = HookInput
 export type NotificationHookInput = HookInput & { message: string }
 export type UserPromptSubmitHookInput = HookInput & { prompt: string }
+/** densable 2.1.289 QH — slash / MCP prompt expansion */
+export type UserPromptExpansionHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'UserPromptExpansion' }
+>
 export type SessionStartHookInput = Extract<
   HookInput,
   { hook_event_name: 'SessionStart' }

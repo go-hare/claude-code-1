@@ -1,8 +1,8 @@
 // densable local_workflow progress → system/task_progress (jrH).
-// Official path: buffer onProgress deltas → setTimeout(flush, 16) → tm8 merge + jrH emit
-// with workflow_progress (non-log items). Desktop Tasks keeps Running local_workflow
-// rows enabled from these mid-run events; task_started + terminal task-notification alone
-// leave the row disabled.
+// Official path: buffer onProgress deltas → setTimeout(flush, 16) → tm8 merge into
+// AppState.tasks[taskId].workflowProgress, then jrH emitTaskProgress.
+// densable 2.1.289: the SDK/RC wire has no workflow_progress on task_progress
+// (official21HostSchemas). Phase tree lives on the local task only.
 //
 // Our engine emits ProgressEvent on the progress bus (not densable's progress toolUse
 // stream). This bridge is the adapter: map bus events → SdkWorkflowProgress deltas,
@@ -31,14 +31,6 @@ export const WORKFLOW_TASK_PROGRESS_FLUSH_MS = 16
  * (IGg rate-limit so bridge wire is not flooded).
  */
 export const WORKFLOW_TASK_PROGRESS_MIN_SDK_GAP_MS = 250
-
-/**
- * densable kGg=1e4 — when a batch is ONLY workflow_agent state:"progress"
- * ticks, re-emit full workflowProgress snapshot at most every 10s so Remote
- * Control clients that join mid-run can rebuild the agent grid without
- * flooding on every token tick.
- */
-export const WORKFLOW_TASK_PROGRESS_FULL_SNAPSHOT_MS = 10_000
 
 export type WorkflowTaskProgressBinding = {
   taskId: string
@@ -242,11 +234,6 @@ export function installWorkflowTaskProgressBridge(
   const buffers = new Map<string, RunBuffer>()
   /** densable IGg last SDK emit time (for xGg gap when rate-limited). */
   let lastSdkEmitAt = 0
-  /**
-   * densable j8r `x` — last time a full workflowProgress snapshot was attached
-   * for a progress-only batch (kGg throttle).
-   */
-  let lastFullSnapshotAt = 0
 
   const ensure = (runId: string): RunBuffer => {
     let b = buffers.get(runId)
@@ -307,7 +294,6 @@ export function installWorkflowTaskProgressBridge(
     // densable tm8 / Vss: always merge full batch (incl. logs) into task state first.
     let totalTokens = 0
     let toolUses = 0
-    let taskProgressSnapshot: SdkWorkflowProgress[] | undefined
     if (binding.setAppState) {
       const applied = applyWorkflowProgressDeltas(
         binding.taskId,
@@ -317,7 +303,6 @@ export function installWorkflowTaskProgressBridge(
       if (applied) {
         totalTokens = applied.totalTokens
         toolUses = applied.totalToolCalls
-        taskProgressSnapshot = applied.workflowProgress
       }
     } else {
       // Fallback: store agents (tests / no AppState).
@@ -330,7 +315,9 @@ export function installWorkflowTaskProgressBridge(
       }
     }
 
-    // densable UNu / jrH: strip workflow_log from SDK payload.
+    // densable 2.1.289 jrH: no workflow_progress on the SDK wire. Still skip
+    // a flush whose batch is only workflow_log (UNu), matching gold's empty
+    // after-strip early return. tm8 already merged the full batch above.
     const forSdk = batch.filter(item => item.type !== 'workflow_log')
     if (forSdk.length === 0) return
 
@@ -340,27 +327,7 @@ export function installWorkflowTaskProgressBridge(
       | Extract<SdkWorkflowProgress, { type: 'workflow_agent' }>
       | undefined
 
-    // densable j8r onSdkEmit: full snapshot when batch has non-progress items,
-    // or every kGg when batch is progress-only — so RC mid-join can rebuild grid.
-    const progressOnly = forSdk.every(
-      item => item.type === 'workflow_agent' && item.state === 'progress',
-    )
     const now = Date.now()
-    const includeFullSnapshot =
-      !progressOnly ||
-      force ||
-      now - lastFullSnapshotAt >= WORKFLOW_TASK_PROGRESS_FULL_SNAPSHOT_MS
-    if (includeFullSnapshot) {
-      lastFullSnapshotAt = now
-    }
-
-    // densable: workflowProgress:q ? U.workflowProgress.filter(UNu) : void 0
-    // Prefer task-state cumulative snapshot; fall back to this batch's deltas.
-    const snapshotSource =
-      taskProgressSnapshot?.filter(item => item.type !== 'workflow_log') ??
-      forSdk
-    const workflowProgress = includeFullSnapshot ? snapshotSource : undefined
-
     const description = lastAgent
       ? lastAgent.phaseTitle
         ? `${lastAgent.phaseTitle}: ${lastAgent.label ?? `agent ${lastAgent.index}`}`
@@ -377,7 +344,6 @@ export function installWorkflowTaskProgressBridge(
       toolUses,
       lastToolName: lastAgent?.lastToolName ?? lastAgent?.label,
       summary: binding.summary ?? binding.description,
-      workflowProgress,
     })
   }
 

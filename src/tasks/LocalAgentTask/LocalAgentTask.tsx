@@ -27,6 +27,11 @@ import type { AgentId } from '../../types/ids.js';
 import type { Message } from '../../types/message.js';
 import { createAbortController, createChildAbortController } from '../../utils/abortController.js';
 import type { EffortValue } from '../../utils/effort.js';
+import {
+  noteWorkerCheckin,
+  type SpawnedSubagentHandle,
+  type WebFetchSavedFiles,
+} from '../../utils/subagentSpawnLedger.js';
 import type { ActiveTaskExecutionContext } from '../../utils/tasks.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
@@ -491,6 +496,21 @@ export type LocalAgentTaskState = TaskStateBase & {
   prompt: string;
   selectedAgent?: AgentDefinition;
   agentType: string;
+  /** densable Sot cwd — spawn working directory (explicit cwd or worktree). */
+  cwd?: string;
+  /**
+   * densable spawnedSubagent — spawn-handle (completed/failed/killed).
+   * Not a public API; lifecycle only.
+   */
+  spawnedSubagent?: SpawnedSubagentHandle;
+  /**
+   * densable webFetchSavedFiles — built-in web-fetch dirs/paths bag.
+   */
+  webFetchSavedFiles?: WebFetchSavedFiles;
+  /**
+   * densable outputFileUnreadable — caller cannot Read/Bash the JSONL transcript.
+   */
+  outputFileUnreadable?: boolean;
   model?: string;
   /**
    * densable 214: effort stamped at register (from agent definition).
@@ -498,7 +518,6 @@ export type LocalAgentTaskState = TaskStateBase & {
    */
   effort?: EffortValue;
   activeTaskExecutionContext?: ActiveTaskExecutionContext;
-  ownedFiles?: string[];
   notificationTargetAgentId?: AgentId;
   abortController?: AbortController;
   unregisterCleanup?: () => void;
@@ -586,6 +605,17 @@ export type LocalAgentTaskState = TaskStateBase & {
    * background agent. Used to dedupe live forked-skill duplicates.
    */
   forkedSkillName?: string;
+  /**
+   * densable handbackContract / bGo — SubagentHandback is armed for this
+   * spawn (parent auto + lively_waffle). Image 34 Wr producer.
+   */
+  handbackContract?: true;
+  /** densable handbackRecipient — caller inbox (main or parent agentId). */
+  handbackRecipient?: string;
+  /** densable handbackBounces. */
+  handbackBounces?: number;
+  /** densable handbackReport — last delivered payload. */
+  handbackReport?: { text: string; warning?: string };
 };
 
 function initAgentTaskOutput(agentId: string): void {
@@ -1133,6 +1163,9 @@ export async function enqueueAgentNotification({
     agentId: routeAgentId,
     priority: 'next',
     taskId,
+    // densable vh/Fe: isMeta so shouldQuery:false skip-attachment path applies;
+    // do not stamp uuid (vh requires uuid===undefined).
+    isMeta: true,
   });
 
   // densable Host contract: system task_notification bookend for Jp Tasks.
@@ -1298,7 +1331,34 @@ export function killAsyncAgent(
   taskId: string,
   setAppState: SetAppState,
   killedBy: 'user' | 'parent' | 'system' = 'user',
+  opts?: { lifecycleNotStarted?: boolean },
 ): void {
+  // densable dSe — only arm stop-pending when this kill will actually proceed.
+  // No-op (missing / already terminal non-parked) must not leave Fle blocked.
+  let willKill = false;
+  setAppState(prev => {
+    const t = prev.tasks?.[taskId];
+    if (t && t.type === 'local_agent') {
+      const parked = isParkedKeepaliveAgent(t);
+      willKill = t.status === 'running' || parked;
+    }
+    return prev;
+  });
+  if (willKill) {
+    try {
+      // The run registers the loop (T8e) and settles it when that run exits.
+      // Registering here and settling before this function returns makes Fle
+      // see a settled loop while the lifecycle is still unwinding.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isAgentKillLoopSettled, markAgentStopPending } =
+        require('../../utils/agentStopBag.js') as typeof import('../../utils/agentStopBag.js');
+      if (!isAgentKillLoopSettled(taskId)) {
+        markAgentStopPending(taskId);
+      }
+    } catch {
+      // optional bag
+    }
+  }
   // densable: kill drops idle-window timer so okg cannot fire after XV clear KA
   clearIdleWindowTimer(taskId);
 
@@ -1393,6 +1453,13 @@ export function killAsyncAgent(
     }
     killed = true;
     owner = task.ownerAgentId ?? task.notificationTargetAgentId;
+    // densable zA still stamps spawnedSubagent.killed even with
+    // lifecycleNotStarted (that flag only skips task_kill_missing_loop_entry).
+    if (task.status === 'completed') {
+      task.spawnedSubagent?.cancelledAfterCompletion();
+    } else {
+      task.spawnedSubagent?.killed(killedBy);
+    }
     try {
       task.abortController?.abort();
     } catch {
@@ -1427,6 +1494,11 @@ export function killAsyncAgent(
     // Official XV: if (i) Zeo(e,t), zS(e)
     rewireOrphanedOwnerNotifications(taskId, setAppState);
     evictAgentTaskOutputIfPersistent(taskId);
+    // densable lx after zA not_taken — notified, quietlyParked false.
+    // Gold does not delete the registry row (ze is concurrency slot, not GC).
+    if (opts?.lifecycleNotStarted && !wasParked) {
+      markAgentsNotified(taskId, setAppState);
+    }
   }
 }
 
@@ -1744,6 +1816,7 @@ export function completeAgentTask(
 
     task.unregisterCleanup?.();
     completed = true;
+    task.spawnedSubagent?.completed();
     hasPendingMessages = (task.pendingMessages?.length ?? 0) > 0;
 
     // Footer reads progress.tokenCount even after completion. Sync from the
@@ -1825,6 +1898,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
 
     task.unregisterCleanup?.();
     failed = true;
+    task.spawnedSubagent?.failed();
 
     return {
       ...task,
@@ -1870,11 +1944,14 @@ export function registerAsyncAgent({
   ownerAgentId,
   parentAgentId,
   spawnDepth,
-  ownedFiles,
   isObserver,
   forkedSkillName,
   model,
   attachOwnerKeepalive = true,
+  cwd,
+  spawnedSubagent,
+  webFetchSavedFiles,
+  outputFileReadable,
 }: {
   agentId: string;
   description: string;
@@ -1889,7 +1966,6 @@ export function registerAsyncAgent({
   ownerAgentId?: string;
   parentAgentId?: string;
   spawnDepth?: number;
-  ownedFiles?: string[];
   /** Official Sot isObserver — observer-activity spawns. */
   isObserver?: boolean;
   /** densable 2.1.218 wvo forkedSkillName for live-duplicate dedupe. */
@@ -1901,6 +1977,10 @@ export function registerAsyncAgent({
    * Default true for AgentTool nested async; resume/observer pass false.
    */
   attachOwnerKeepalive?: boolean;
+  cwd?: string;
+  spawnedSubagent?: SpawnedSubagentHandle;
+  webFetchSavedFiles?: WebFetchSavedFiles;
+  outputFileReadable?: boolean;
 }): LocalAgentTaskState {
   initAgentTaskOutput(agentId);
 
@@ -1919,11 +1999,15 @@ export function registerAsyncAgent({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
-    // densable Sot: effort:a.effort from agent definition
-    ...(selectedAgent.effort !== undefined ? { effort: selectedAgent.effort } : {}),
-    ...(model !== undefined ? { model } : {}),
+    // densable Sot: always stamp effort/model (gold `effort:w.effort` / `model:b`)
+    effort: selectedAgent.effort,
+    model,
+    spawnedSubagent,
+    ...(webFetchSavedFiles !== undefined ? { webFetchSavedFiles } : {}),
+    // densable `!ve` — only explicit false stamps unreadable. Omit/undefined
+    // (resume / observer / forked-skill) must not invent outputFileUnreadable.
+    ...(outputFileReadable === false ? { outputFileUnreadable: true } : {}),
     activeTaskExecutionContext,
-    ownedFiles,
     notificationTargetAgentId,
     ownerAgentId: resolvedOwner,
     parentAgentId,
@@ -1935,6 +2019,7 @@ export function registerAsyncAgent({
     isBackgrounded: true, // registerAsyncAgent immediately backgrounds
     pendingMessages: [],
     isIdle: false, // densable Sot isIdle:!1
+    keepaliveReasons: new Set(),
     // densable Sot replaces Aye resuming CAS with status:running
     resuming: false,
     adoptResumePending: false,
@@ -1942,6 +2027,9 @@ export function registerAsyncAgent({
     diskLoaded: false,
     ...(isObserver === true ? { isObserver: true } : {}),
     ...(forkedSkillName !== undefined ? { forkedSkillName } : {}),
+    // Gold bJ/Sot does not early-stamp handback fields — densable bGo updates
+    // LocalAgentTaskState later from runAgent after Ut arming.
+    ...(cwd !== undefined ? { cwd } : {}),
   };
 
   // Register cleanup handler
@@ -1953,6 +2041,18 @@ export function registerAsyncAgent({
 
   // Register task in AppState
   registerTask(taskState, setAppState);
+  // densable $Ve — post-register worker checkin (bJ-only; non-main-session running).
+  // AppState.tasks hosts gold taskRegistry.all().
+  noteWorkerCheckin(taskState, {
+    all: () => {
+      let tasks: AppState['tasks'] = {};
+      setAppState(prev => {
+        tasks = prev.tasks ?? {};
+        return prev;
+      });
+      return tasks;
+    },
+  });
 
   // densable nested spawn: if (!pn()) Gge(Re, `agent:${st}`, registry)
   // Resume/observer stamp owner without Gge (attachOwnerKeepalive:false).
@@ -1984,6 +2084,11 @@ export function registerAgentForeground({
   ownerAgentId,
   parentAgentId,
   spawnDepth,
+  cwd,
+  spawnedSubagent,
+  webFetchSavedFiles,
+  outputFileReadable,
+  model,
 }: {
   agentId: string;
   description: string;
@@ -2001,10 +2106,17 @@ export function registerAgentForeground({
   ownerAgentId?: string;
   parentAgentId?: string;
   spawnDepth?: number;
+  cwd?: string;
+  spawnedSubagent?: SpawnedSubagentHandle;
+  webFetchSavedFiles?: WebFetchSavedFiles;
+  outputFileReadable?: boolean;
+  model?: string;
 }): {
   taskId: string;
   backgroundSignal: Promise<void>;
   cancelAutoBackground?: () => void;
+  outputFile?: string;
+  abortController: AbortController;
 } {
   initAgentTaskOutput(agentId);
 
@@ -2025,8 +2137,13 @@ export function registerAgentForeground({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
-    // densable OSu: effort:a.effort from agent definition
-    ...(selectedAgent.effort !== undefined ? { effort: selectedAgent.effort } : {}),
+    // densable vMr: always stamp effort/model
+    effort: selectedAgent.effort,
+    model,
+    spawnedSubagent,
+    ...(webFetchSavedFiles !== undefined ? { webFetchSavedFiles } : {}),
+    ...(outputFileReadable === false ? { outputFileUnreadable: true } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
     notificationTargetAgentId,
     ownerAgentId: resolvedOwner,
     parentAgentId,
@@ -2039,6 +2156,7 @@ export function registerAgentForeground({
     isBackgrounded: false, // Not yet backgrounded - running in foreground
     pendingMessages: [],
     isIdle: false, // densable OSu isIdle:!1
+    keepaliveReasons: new Set(),
     retain: false,
     diskLoaded: false,
   };
@@ -2055,49 +2173,31 @@ export function registerAgentForeground({
   // Auto-background after timeout if configured
   let cancelAutoBackground: (() => void) | undefined;
   if (autoBackgroundMs !== undefined && autoBackgroundMs > 0) {
-    const timer = setTimeout(
-      (setAppState, agentId) => {
-        // Mark task as backgrounded and resolve the signal
-        let didBackground = false;
-        setAppState(prev => {
-          const prevTask = prev.tasks[agentId];
-          if (!isLocalAgentTask(prevTask) || prevTask.isBackgrounded) {
+    const timer = setTimeout(() => {
+      // densable T$e — full promote (terminal+Rde refuse), not a raw isBackgrounded flip
+      backgroundAgentTask(
+        agentId,
+        () => {
+          let snap: AppState | undefined;
+          setAppState(prev => {
+            snap = prev;
             return prev;
-          }
-          didBackground = true;
-          return {
-            ...prev,
-            tasks: {
-              ...prev.tasks,
-              [agentId]: { ...prevTask, isBackgrounded: true },
-            },
-          };
-        });
-        // Official 2.1 task_updated (auto-bg setAppState bypasses updateTaskState)
-        if (didBackground) {
-          try {
-            const { emitTaskUpdatedSdk } =
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
-            emitTaskUpdatedSdk(agentId, { is_backgrounded: true });
-          } catch {
-            // optional
-          }
-        }
-        const resolver = backgroundSignalResolvers.get(agentId);
-        if (resolver) {
-          resolver();
-          backgroundSignalResolvers.delete(agentId);
-        }
-      },
-      autoBackgroundMs,
-      setAppState,
-      agentId,
-    );
+          });
+          return snap as AppState;
+        },
+        setAppState,
+      );
+    }, autoBackgroundMs);
     cancelAutoBackground = () => clearTimeout(timer);
   }
 
-  return { taskId: agentId, backgroundSignal, cancelAutoBackground };
+  return {
+    taskId: agentId,
+    backgroundSignal,
+    cancelAutoBackground,
+    outputFile: taskState.outputFile,
+    abortController,
+  };
 }
 
 /**
@@ -2111,8 +2211,9 @@ export function backgroundAgentTask(taskId: string, getAppState: () => AppState,
   if (!isLocalAgentTask(task) || task.isBackgrounded) {
     return false;
   }
-  // densable J5r: terminal non-parked cannot be backgrounded
-  if (isTerminalTaskStatus(task.status) && !isParkedKeepaliveAgent(task)) {
+  // densable T$e / Rde: terminal AND no live `agent:` children cannot promote.
+  // failed/killed owners that still hold agent: children CAN promote.
+  if (isTerminalTaskStatus(task.status) && !hasLiveAgentKeepaliveChildren(taskId, getAppState)) {
     return false;
   }
 

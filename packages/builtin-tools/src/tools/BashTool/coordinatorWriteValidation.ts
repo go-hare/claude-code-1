@@ -17,7 +17,7 @@ type WriteTarget = {
 }
 
 const BASH_WRITE_HINT =
-  'Use FileEdit/FileWrite or a Bash command with explicit file paths assigned via owned_files.'
+  'Use FileEdit/FileWrite or a Bash command with explicit absolute paths.'
 
 const OUTPUT_REDIRECT_OPS = new Set(['>', '>>', '>|', '&>', '&>>'])
 const DIRECTORY_CHANGE_COMMANDS = new Set(['cd', 'pushd', 'popd'])

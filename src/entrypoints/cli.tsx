@@ -383,8 +383,28 @@ async function main(): Promise<void> {
 
   // Fast-path for `--bg`/`--background` shortcut → daemon bg.
   // Official Iia/emO: loadFastPathPolicy before handleBgStart.
+  // densable 2.1.289: disableAgentView / CLAUDE_CODE_DISABLE_AGENT_VIEW also
+  // rejects --bg/--background (fleetGateRejected breadth), not only `claude agents`.
   if (feature('BG_SESSIONS') && (args.includes('--bg') || args.includes('--background'))) {
     profileCheckpoint('cli_daemon_path');
+    {
+      const { getAgentViewDisabledReason } = await import('../utils/residualUiEnvGates.js');
+      let settingsDisableAgentView = false;
+      try {
+        const { enableConfigs } = await import('../utils/config.js');
+        enableConfigs();
+        const { getInitialSettings } = await import('../utils/settings/settings.js');
+        settingsDisableAgentView = getInitialSettings().disableAgentView === true;
+      } catch {
+        // Settings optional before full init.
+      }
+      const agentViewDisabledReason = getAgentViewDisabledReason(process.env, settingsDisableAgentView);
+      if (agentViewDisabledReason) {
+        console.error(`Agent view ${agentViewDisabledReason}.`);
+        process.exitCode = 1;
+        return;
+      }
+    }
     const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
     {
       const policyErr = await loadFastPathPolicy();

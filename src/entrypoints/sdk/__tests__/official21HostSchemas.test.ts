@@ -8,6 +8,9 @@ import {
   SDKCommandLifecycleMessageSchema,
   SDKMessageSchema,
   SDKModelFallbackMessageSchema,
+  SDKTaskNotificationMessageSchema,
+  SDKTaskProgressMessageSchema,
+  SDKTaskStartedMessageSchema,
   SDKTaskSummaryMessageSchema,
   SDKTaskUpdatedMessageSchema,
   SDKThinkingTokensMessageSchema,
@@ -114,6 +117,7 @@ describe('Official 2.1 Host stream schemas', () => {
           task_id: 'a1',
           task_type: 'local_agent',
           description: 'Agent "x"',
+          ambient: true,
         },
       ],
       uuid: '00000000-0000-4000-8000-000000000006',
@@ -121,6 +125,7 @@ describe('Official 2.1 Host stream schemas', () => {
     })
     expect(msg.subtype).toBe('background_tasks_changed')
     expect(msg.tasks).toHaveLength(1)
+    expect(msg.tasks[0]?.ambient).toBe(true)
 
     const empty = SDKMessageSchema().parse({
       type: 'system',
@@ -133,6 +138,55 @@ describe('Official 2.1 Host stream schemas', () => {
       subtype: 'background_tasks_changed',
       tasks: [],
     })
+  })
+
+  test('task_started / task_notification / task_progress densable 2.1.289 fields', () => {
+    const started = SDKTaskStartedMessageSchema().parse({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 't1',
+      description: 'd',
+      subagent_type: 'Explore',
+      is_backgrounded: true,
+      spawn_depth: 1,
+      skip_transcript: true,
+      ambient: true,
+      uuid: '00000000-0000-4000-8000-000000000008',
+      session_id: 's1',
+    })
+    expect(started.subagent_type).toBe('Explore')
+    expect(started).not.toHaveProperty('timestamp')
+
+    const notif = SDKTaskNotificationMessageSchema().parse({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 't1',
+      status: 'completed',
+      reason: 'worker_restart',
+      output_file: '/tmp/o',
+      summary: 'done',
+      resource_links: [{ uri: 'file:///tmp/o' }],
+      skip_transcript: true,
+      ambient: false,
+      uuid: '00000000-0000-4000-8000-000000000009',
+      session_id: 's1',
+    })
+    expect(notif.reason).toBe('worker_restart')
+    expect(notif).not.toHaveProperty('timestamp')
+
+    const progress = SDKTaskProgressMessageSchema().parse({
+      type: 'system',
+      subtype: 'task_progress',
+      task_id: 't1',
+      description: 'd',
+      subagent_type: 'Explore',
+      usage: { total_tokens: 1, tool_uses: 0, duration_ms: 1 },
+      uuid: '00000000-0000-4000-8000-00000000000a',
+      session_id: 's1',
+    })
+    expect(progress.subagent_type).toBe('Explore')
+    expect(progress).not.toHaveProperty('workflow_progress')
+    expect(progress).not.toHaveProperty('timestamp')
   })
 })
 

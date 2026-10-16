@@ -29,6 +29,13 @@ export type MonitorMcpTaskState = TaskStateBase & {
   agentId?: AgentId
   /** Abort controller to cancel the subscription. */
   abortController?: AbortController
+  /**
+   * densable 2.1.289 — MCP tool-result resource_link blocks collected on
+   * auto-bg complete; forwarded on the task_notification bookend.
+   */
+  terminal?: {
+    resource_links?: unknown[]
+  }
 }
 
 export function isMonitorMcpTask(task: unknown): task is MonitorMcpTaskState {
@@ -85,13 +92,18 @@ function emitMonitorTerminatedSdk(
   status: 'completed' | 'failed' | 'stopped',
   summary: string,
   toolUseId?: string,
+  resourceLinks?: unknown[],
 ): void {
   // densable Host bookend — monitor has no model XML path; SDK alone closes Jp.
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { emitTaskTerminatedSdk } =
       require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js')
-    emitTaskTerminatedSdk(taskId, status, { toolUseId, summary })
+    emitTaskTerminatedSdk(taskId, status, {
+      toolUseId,
+      summary,
+      resourceLinks,
+    })
   } catch {
     // best-effort
   }
@@ -100,20 +112,33 @@ function emitMonitorTerminatedSdk(
 export function completeMonitorMcpTask(
   taskId: string,
   setAppState: SetAppState,
+  opts?: {
+    resourceLinks?: unknown[]
+  },
 ): void {
   let agentId: AgentId | undefined
   let toolUseId: string | undefined
   let description = 'Monitor'
+  let resourceLinks = opts?.resourceLinks
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
     agentId = task.agentId
     toolUseId = task.toolUseId
     description = task.description || description
+    const stored =
+      resourceLinks && resourceLinks.length > 0
+        ? resourceLinks
+        : task.terminal?.resource_links
+    resourceLinks = stored
     return {
       ...task,
       status: 'completed',
       endTime: Date.now(),
       notified: true,
       abortController: undefined,
+      terminal:
+        stored && stored.length > 0
+          ? { ...task.terminal, resource_links: stored }
+          : task.terminal,
     }
   })
   // densable: tB(c, `monitor:${taskId}`) on finish
@@ -123,6 +148,7 @@ export function completeMonitorMcpTask(
     'completed',
     `Monitor "${description}" completed`,
     toolUseId,
+    resourceLinks && resourceLinks.length > 0 ? resourceLinks : undefined,
   )
 }
 

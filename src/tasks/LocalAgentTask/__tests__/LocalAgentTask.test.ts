@@ -1029,6 +1029,25 @@ describe('killAsyncAgent', () => {
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('completed')
   })
+
+  test('lifecycleNotStarted still kills then lx-notifies (gold zA/lx, no GC)', () => {
+    const ac = new AbortController()
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          abortController: ac,
+          notified: false,
+        }),
+      },
+    })
+    killAsyncAgent('test-agent-001', setAppState as any, 'system', {
+      lifecycleNotStarted: true,
+    })
+    const task = getState().tasks['test-agent-001']
+    expect(task.status).toBe('killed')
+    expect(task.notified).toBe(true)
+    expect(ac.signal.aborted).toBe(true)
+  })
 })
 
 describe('enqueueAgentNotification', () => {

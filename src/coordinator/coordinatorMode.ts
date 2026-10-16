@@ -14,7 +14,9 @@ import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/Syn
 import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
 import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
 import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
+import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { resolveMaxSubagentSpawnDepth } from '../utils/sessionSpawnCaps.js'
 import {
   isCoordinatorModeEnvEnabled,
   syncCoordinatorModeEnvFromSession,
@@ -27,7 +29,11 @@ import {
 // getCoordinatorUserContext's scratchpadDir parameter (dependency injection
 // from QueryEngine.ts, which lives higher in the dep graph).
 function isScratchpadGateEnabled(): boolean {
-  return checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_scratch')
+  if (checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_scratch')) return true
+  const { isArtifactToolEligible } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/artifactUrl.js') as typeof import('../utils/artifactUrl.js')
+  return isArtifactToolEligible()
 }
 
 const INTERNAL_WORKER_TOOLS = new Set([
@@ -63,6 +69,12 @@ export function isCoordinatorMode(): boolean {
   return false
 }
 
+/** densable `mC() && !agentId` — coordinator session, main thread. */
+export function isCoordinatorMainThread(agentId: string | undefined): boolean {
+  if (!isCoordinatorMode()) return false
+  return agentId === undefined
+}
+
 /**
  * Checks if the current coordinator mode matches the session's stored mode.
  * If mismatched, flips the environment variable so isCoordinatorMode() returns
@@ -87,6 +99,7 @@ export function matchSessionMode(
 export function getCoordinatorUserContext(
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
+  tools?: ReadonlyArray<{ name: string; searchHint?: string }>,
 ): { [k: string]: string } {
   if (!isCoordinatorMode()) {
     return {}
@@ -102,16 +115,55 @@ export function getCoordinatorUserContext(
   } catch {
     // keep raw env fallback
   }
-  const workerTools = simpleMode
-    ? [BASH_TOOL_NAME, FILE_READ_TOOL_NAME, FILE_EDIT_TOOL_NAME]
-        .sort()
-        .join(', ')
-    : Array.from(ASYNC_AGENT_ALLOWED_TOOLS)
-        .filter(name => !INTERNAL_WORKER_TOOLS.has(name))
-        .sort()
-        .join(', ')
 
-  let content = `Workers spawned via the ${AGENT_TOOL_NAME} tool have access to these tools: ${workerTools}`
+  const { isArtifactToolEligible, isArtifactToolRegistered } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/artifactUrl.js') as typeof import('../utils/artifactUrl.js')
+  // densable OT() — Artifact stays on the worker list only when eligible.
+  const artifactOpen = isArtifactToolEligible()
+  // densable `nw()>1` — session spawn-depth cap (same helper as worker e()).
+  const includeAgent = resolveMaxSubagentSpawnDepth() > 1
+
+  let workerToolNames: string[]
+  if (simpleMode) {
+    workerToolNames = [
+      BASH_TOOL_NAME,
+      FILE_READ_TOOL_NAME,
+      FILE_EDIT_TOOL_NAME,
+      ...(includeAgent ? [AGENT_TOOL_NAME] : []),
+    ].sort()
+  } else {
+    workerToolNames = [
+      ...(includeAgent ? [AGENT_TOOL_NAME] : []),
+      ...Array.from(ASYNC_AGENT_ALLOWED_TOOLS),
+    ]
+      .filter(name => !INTERNAL_WORKER_TOOLS.has(name))
+      .filter(name => name !== ARTIFACT_TOOL_NAME || artifactOpen)
+      .sort()
+  }
+
+  const hintByName = new Map(
+    (tools ?? []).map(t => [t.name, t.searchHint] as const),
+  )
+  const workerToolsList = workerToolNames
+    .map(name => {
+      const hint = hintByName.get(name)
+      return hint ? `- ${name}: ${hint}` : `- ${name}`
+    })
+    .join('\n')
+
+  let content = `Workers spawned via the ${AGENT_TOOL_NAME} tool have access to these tools:
+${workerToolsList}`
+
+  if (workerToolNames.includes(ARTIFACT_TOOL_NAME)) {
+    content += `
+
+${ARTIFACT_TOOL_NAME} pages are HTML: when you delegate a report, write-up, or other page for the user to read or share, ask the worker to author an \`.html\` page and publish it with ${ARTIFACT_TOOL_NAME} — do not name a \`.md\` file as the deliverable, even when the source material is Markdown, unless a loaded skill explicitly instructs a Markdown page.`
+    // densable cPe() — published Artifact types catalog is available.
+    if (isArtifactToolRegistered()) {
+      content += ` ${ARTIFACT_TOOL_NAME} types: a slide deck, presentation, or visual design the user asks for — in whatever words — is not an \`.html\` page for the worker to author; name it in the worker's prompt in the user's own words and tell the worker to first list the published ${ARTIFACT_TOOL_NAME} types with ${ARTIFACT_TOOL_NAME} and start from the one that fits, writing an \`.html\` page only when none does.`
+    }
+  }
 
   if (mcpClients.length > 0) {
     const serverNames = mcpClients.map(c => c.name).join(', ')
@@ -119,7 +171,8 @@ export function getCoordinatorUserContext(
   }
 
   if (scratchpadDir && isScratchpadGateEnabled()) {
-    content += `\n\nScratchpad directory: ${scratchpadDir}\nWorkers can read and write here without permission prompts. Use this for durable cross-worker knowledge — structure files however fits the work.`
+    content += `\n\nScratchpad directory: ${scratchpadDir}
+Workers can generally read and write here without permission prompts. Use this for durable cross-worker knowledge — prefer plain data and markdown files.`
   }
 
   return { workerToolsContext: content }

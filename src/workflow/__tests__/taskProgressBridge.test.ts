@@ -7,7 +7,6 @@ import {
   mapProgressEventToSdk,
   WORKFLOW_TASK_PROGRESS_FLUSH_MS,
 } from '../taskProgressBridge.js'
-import type { SdkWorkflowProgress } from '../../types/tools.js'
 
 describe('mapProgressEventToSdk', () => {
   test('run_started seeds phaseIndex from meta.phases (B03)', () => {
@@ -161,7 +160,6 @@ describe('installWorkflowTaskProgressBridge', () => {
     const store = createProgressStoreFromBus(bus)
     const emits: Array<{
       taskId: string
-      workflowProgress?: SdkWorkflowProgress[]
       totalTokens: number
       toolUses: number
       description: string
@@ -199,7 +197,6 @@ describe('installWorkflowTaskProgressBridge', () => {
       emit: params => {
         emits.push({
           taskId: params.taskId,
-          workflowProgress: params.workflowProgress,
           totalTokens: params.totalTokens,
           toolUses: params.toolUses,
           description: params.description,
@@ -256,16 +253,21 @@ describe('installWorkflowTaskProgressBridge', () => {
     expect(frame.taskId).toBe(taskId)
     expect(frame.totalTokens).toBe(9)
     expect(frame.toolUses).toBe(2)
-    // densable strips workflow_log from jrH payload
-    expect(frame.workflowProgress?.some(p => p.type === 'workflow_log')).toBe(
-      false,
+    // densable 2.1.289: jrH wire has no workflow_progress (schema lock).
+    expect(frame).not.toHaveProperty('workflowProgress')
+    expect(frame.description).toMatch(/Review:\s*a1|a1/)
+    // task state still got logs + progress (tm8)
+    const task = appState.tasks[taskId]
+    expect(task.totalTokens).toBe(9)
+    expect(
+      task.workflowProgress.some((p: any) => p.type === 'workflow_log'),
+    ).toBe(true)
+    expect(
+      task.workflowProgress.some((p: any) => p.type === 'workflow_phase'),
+    ).toBe(true)
+    const agents = task.workflowProgress.filter(
+      (p: any) => p.type === 'workflow_agent',
     )
-    expect(frame.workflowProgress?.some(p => p.type === 'workflow_phase')).toBe(
-      true,
-    )
-    // densable j8r emits cumulative task snapshot (upsert by index) — not raw deltas
-    const agents =
-      frame.workflowProgress?.filter(p => p.type === 'workflow_agent') ?? []
     expect(agents.length).toBe(1)
     expect(agents[0]).toMatchObject({
       type: 'workflow_agent',
@@ -274,13 +276,6 @@ describe('installWorkflowTaskProgressBridge', () => {
       tokens: 9,
       toolCalls: 2,
     })
-    expect(frame.description).toMatch(/Review:\s*a1|a1/)
-    // task state got logs + progress (tm8)
-    const task = appState.tasks[taskId]
-    expect(task.totalTokens).toBe(9)
-    expect(
-      task.workflowProgress.some((p: any) => p.type === 'workflow_log'),
-    ).toBe(true)
     expect(task.progressVersion).toBeGreaterThan(0)
 
     bridge.dispose()
@@ -342,13 +337,12 @@ describe('installWorkflowTaskProgressBridge', () => {
     expect(WORKFLOW_TASK_PROGRESS_FLUSH_MS).toBe(16)
   })
 
-  test('progress-only second flush omits workflowProgress until kGg (RC mid-join snapshot)', async () => {
-    // densable j8r: batch of only state:"progress" → full snapshot at most every kGg.
-    // First flush after agent_started includes full snapshot; pure progress
-    // batch shortly after should omit workflowProgress on the wire.
+  test('progress-only second flush still upserts tm8; jrH has no workflowProgress (289)', async () => {
+    // densable 2.1.289: SDK task_progress dropped workflow_progress. Local
+    // tm8 still upserts every flush (start + later progress-only batch).
     const bus = createProgressBus()
     const store = createProgressStoreFromBus(bus)
-    const emits: Array<{ workflowProgress?: SdkWorkflowProgress[] }> = []
+    const emits: Array<{ description: string }> = []
     let appState: { tasks: Record<string, any> } = { tasks: {} }
     const setAppState = (f: (p: typeof appState) => typeof appState) => {
       appState = f(appState)
@@ -372,7 +366,7 @@ describe('installWorkflowTaskProgressBridge', () => {
         setAppState: setAppState as any,
       }),
       emit: params => {
-        emits.push({ workflowProgress: params.workflowProgress })
+        emits.push({ description: params.description })
       },
     })
 
@@ -387,10 +381,11 @@ describe('installWorkflowTaskProgressBridge', () => {
       timers.push(t)
     })
     expect(emits.length).toBe(1)
-    expect(emits[0]!.workflowProgress).toBeDefined()
+    expect(emits[0]).not.toHaveProperty('workflowProgress')
     expect(
-      emits[0]!.workflowProgress?.some(
-        p => p.type === 'workflow_agent' && p.state === 'start',
+      appState.tasks[taskId].workflowProgress.some(
+        (p: { type: string; state?: string }) =>
+          p.type === 'workflow_agent' && p.state === 'start',
       ),
     ).toBe(true)
 
@@ -407,9 +402,7 @@ describe('installWorkflowTaskProgressBridge', () => {
       timers.push(t)
     })
     expect(emits.length).toBe(2)
-    // densable: progress-only batch within kGg → workflowProgress undefined
-    expect(emits[1]!.workflowProgress).toBeUndefined()
-    // task state still upserted
+    expect(emits[1]).not.toHaveProperty('workflowProgress')
     expect(appState.tasks[taskId].totalTokens).toBe(3)
 
     bridge.dispose()

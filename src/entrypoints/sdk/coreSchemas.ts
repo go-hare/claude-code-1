@@ -405,8 +405,12 @@ export const HOOK_EVENTS = [
   'PreToolUse',
   'PostToolUse',
   'PostToolUseFailure',
+  // densable 2.1.289 Acn / YH — after PostToolUseFailure
+  'PostToolBatch',
   'Notification',
   'UserPromptSubmit',
+  // densable 2.1.289 Ze / QH — after UserPromptSubmit
+  'UserPromptExpansion',
   'SessionStart',
   'SessionEnd',
   'Stop',
@@ -513,6 +517,29 @@ export const PostToolUseFailureHookInputSchema = lazySchema(() =>
   ),
 )
 
+// densable 2.1.289 YH / FH — PostToolBatch (Acn)
+export const PostToolBatchCallSchema = lazySchema(() =>
+  z.object({
+    tool_name: z.string(),
+    tool_input: z.unknown(),
+    tool_use_id: z.string(),
+    tool_response: z.unknown().optional(),
+  }),
+)
+
+export const PostToolBatchHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema()
+    .and(
+      z.object({
+        hook_event_name: z.literal('PostToolBatch'),
+        tool_calls: z.array(PostToolBatchCallSchema()),
+      }),
+    )
+    .describe(
+      'Hook input for the PostToolBatch event. Fired once after every tool call in a batch has resolved, before the next model request. PostToolUse fires per-tool and may run concurrently for parallel tool calls; PostToolBatch fires exactly once with the full batch.',
+    ),
+)
+
 export const PermissionDeniedHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
@@ -540,6 +567,20 @@ export const UserPromptSubmitHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
       hook_event_name: z.literal('UserPromptSubmit'),
+      prompt: z.string(),
+    }),
+  ),
+)
+
+// densable 2.1.289 QH — UserPromptExpansion (Ze / AMr)
+export const UserPromptExpansionHookInputSchema = lazySchema(() =>
+  BaseHookInputSchema().and(
+    z.object({
+      hook_event_name: z.literal('UserPromptExpansion'),
+      expansion_type: z.enum(['slash_command', 'mcp_prompt']),
+      command_name: z.string(),
+      command_args: z.string(),
+      command_source: z.string().optional(),
       prompt: z.string(),
     }),
   ),
@@ -944,9 +985,11 @@ export const HookInputSchema = lazySchema(() =>
     PreToolUseHookInputSchema(),
     PostToolUseHookInputSchema(),
     PostToolUseFailureHookInputSchema(),
+    PostToolBatchHookInputSchema(),
     PermissionDeniedHookInputSchema(),
     NotificationHookInputSchema(),
     UserPromptSubmitHookInputSchema(),
+    UserPromptExpansionHookInputSchema(),
     SessionStartHookInputSchema(),
     SessionEndHookInputSchema(),
     StopHookInputSchema(),
@@ -999,6 +1042,20 @@ export const UserPromptSubmitHookSpecificOutputSchema = lazySchema(() =>
   }),
 )
 
+// densable 2.1.289 NK — additionalContext + suppressOriginalPrompt
+export const UserPromptExpansionHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('UserPromptExpansion'),
+    additionalContext: z.string().optional(),
+    suppressOriginalPrompt: z
+      .boolean()
+      .optional()
+      .describe(
+        'When decision is "block", omit the original prompt from the block message',
+      ),
+  }),
+)
+
 export const SessionStartHookSpecificOutputSchema = lazySchema(() =>
   z.object({
     hookEventName: z.literal('SessionStart'),
@@ -1033,6 +1090,14 @@ export const PostToolUseHookSpecificOutputSchema = lazySchema(() =>
 export const PostToolUseFailureHookSpecificOutputSchema = lazySchema(() =>
   z.object({
     hookEventName: z.literal('PostToolUseFailure'),
+    additionalContext: z.string().optional(),
+  }),
+)
+
+// densable 2.1.289 UK — PostToolBatch additionalContext
+export const PostToolBatchHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('PostToolBatch'),
     additionalContext: z.string().optional(),
   }),
 )
@@ -1103,11 +1168,13 @@ export const SyncHookJSONOutputSchema = lazySchema(() =>
       .union([
         PreToolUseHookSpecificOutputSchema(),
         UserPromptSubmitHookSpecificOutputSchema(),
+        UserPromptExpansionHookSpecificOutputSchema(),
         SessionStartHookSpecificOutputSchema(),
         SetupHookSpecificOutputSchema(),
         SubagentStartHookSpecificOutputSchema(),
         PostToolUseHookSpecificOutputSchema(),
         PostToolUseFailureHookSpecificOutputSchema(),
+        PostToolBatchHookSpecificOutputSchema(),
         PermissionDeniedHookSpecificOutputSchema(),
         NotificationHookSpecificOutputSchema(),
         PermissionRequestHookSpecificOutputSchema(),
@@ -2004,6 +2071,7 @@ export const SDKTaskNotificationMessageSchema = lazySchema(() =>
     task_id: z.string(),
     tool_use_id: z.string().optional(),
     status: z.enum(['completed', 'failed', 'stopped']),
+    reason: z.enum(['worker_restart']).optional(),
     output_file: z.string(),
     summary: z.string(),
     usage: z
@@ -2013,14 +2081,11 @@ export const SDKTaskNotificationMessageSchema = lazySchema(() =>
         duration_ms: z.number(),
       })
       .optional(),
+    resource_links: z.array(z.unknown()).optional(),
+    skip_transcript: z.boolean().optional(),
+    ambient: z.boolean().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
-    timestamp: z
-      .string()
-      .optional()
-      .describe(
-        'ISO timestamp when the bookend was emitted. Hosts use this for Tasks completedAt; older emitters omit it.',
-      ),
   }),
 )
 
@@ -2031,6 +2096,12 @@ export const SDKTaskStartedMessageSchema = lazySchema(() =>
     task_id: z.string(),
     tool_use_id: z.string().optional(),
     description: z.string(),
+    subagent_type: z
+      .string()
+      .optional()
+      .describe('Subagent type for Task tool subagents.'),
+    is_backgrounded: z.boolean().optional(),
+    spawn_depth: z.number().optional(),
     task_type: z.string().optional(),
     workflow_name: z
       .string()
@@ -2039,14 +2110,15 @@ export const SDKTaskStartedMessageSchema = lazySchema(() =>
         "meta.name from the workflow script (e.g. 'spec'). Only set when task_type is 'local_workflow'.",
       ),
     prompt: z.string().optional(),
-    uuid: UUIDPlaceholder(),
-    session_id: z.string(),
-    timestamp: z
-      .string()
+    skip_transcript: z
+      .boolean()
       .optional()
       .describe(
-        'ISO timestamp when the task was registered. Hosts use this for Tasks startedAt; older emitters omit it.',
+        'Ambient/housekeeping task. Consumers should hide this from the inline transcript; it may still appear in a tasks panel.',
       ),
+    ambient: z.boolean().optional(),
+    uuid: UUIDPlaceholder(),
+    session_id: z.string(),
   }),
 )
 
@@ -2214,6 +2286,7 @@ export const SDKBackgroundTasksChangedMessageSchema = lazySchema(() =>
             task_id: z.string(),
             task_type: z.string(),
             description: z.string(),
+            ambient: z.boolean().optional(),
           }),
         )
         .describe(
@@ -2224,7 +2297,7 @@ export const SDKBackgroundTasksChangedMessageSchema = lazySchema(() =>
       timestamp: z.string().optional(),
     })
     .describe(
-      "The full set of live background tasks, emitted whenever membership changes (start, completion, kill, a foreground agent being backgrounded). A level signal, unlike the task_started/task_notification edge bookends: consumers that only need 'is background work running' should replace their set with each payload rather than pairing edges. Ordering relative to bookends is unspecified; payload carries ids only — do not correlate with the edge stream.",
+      "The full set of live background tasks, emitted whenever membership changes (start, completion, kill, a foreground agent being backgrounded) or an entry's `ambient` flag flips. A level signal, unlike the task_started/task_notification edge bookends: consumers that only need 'is background work running' should replace their set with each payload rather than pairing edges. Ordering relative to bookends is unspecified; payload carries ids only — do not correlate with the edge stream.",
     ),
 )
 
@@ -2277,6 +2350,10 @@ export const SDKTaskProgressMessageSchema = lazySchema(() =>
     task_id: z.string(),
     tool_use_id: z.string().optional(),
     description: z.string(),
+    subagent_type: z
+      .string()
+      .optional()
+      .describe('Subagent type for Task tool subagents.'),
     usage: z.object({
       total_tokens: z.number(),
       tool_uses: z.number(),
@@ -2284,13 +2361,8 @@ export const SDKTaskProgressMessageSchema = lazySchema(() =>
     }),
     last_tool_name: z.string().optional(),
     summary: z.string().optional(),
-    // densable jrH: delta batch of workflow state changes for Desktop Tasks /
-    // PhaseProgress fold (`${type}:${index}` upsert). Optional; agent tasks omit.
-    // Logs are stripped from SDK payload (live on task.workflowProgress only).
-    workflow_progress: z.array(SdkWorkflowProgressSchema()).optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
-    timestamp: z.string().optional(),
   }),
 )
 

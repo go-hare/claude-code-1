@@ -307,8 +307,10 @@ export function isPlainListMatcher(matcher: string): boolean {
   return PLAIN_MATCHER.test(matcher)
 }
 
-/** leftover `SEo` without tool-alias fleet: write-tool list on PostToolUse*. */
+/** leftover `SEo` / `g1o`+`m1o`: PostToolBatch always; write-tool list on PostToolUse*. */
 export function isAfterEditHook(event: string, matcher?: string): boolean {
+  // leftover g1o @186257900 — PostToolBatch always after-edit
+  if (event === 'PostToolBatch') return true
   if (event !== 'PostToolUse' && event !== 'PostToolUseFailure') return false
   if (!matcher || matcher === '*' || !PLAIN_MATCHER.test(matcher)) return false
   const tools = matcher
@@ -343,8 +345,12 @@ export function commandIsTemplateTwin(
 ): boolean {
   if (command === undefined) return false
   const parts = command.trim().split(/ +/)
-  if (interpreter === null || interpreter === undefined) return parts.length === 1
-  return (interpreter === 'python3' || interpreter === 'python') && parts.length === 2
+  if (interpreter === null || interpreter === undefined)
+    return parts.length === 1
+  return (
+    (interpreter === 'python3' || interpreter === 'python') &&
+    parts.length === 2
+  )
 }
 
 /** leftover `pe` / `po(...,{maxCodeUnits:200})`. */
@@ -420,7 +426,9 @@ async function interpreterVoucher(
       return { path: clip200(named), why: INTERPRETER_CANNOT_BE_LOCATED }
     }
     if (
-      [named, located].some(spelling => pathCoveredByReach(spelling, extraReach))
+      [named, located].some(spelling =>
+        pathCoveredByReach(spelling, extraReach),
+      )
     ) {
       return {
         path: clip200(named),
@@ -617,7 +625,8 @@ export async function classifyCloudHookEntry(
       const digestHit = skipTemplates
         ? undefined
         : findDigest?.(pin.pinnedTarget.sha256)
-      const templateForNotice = deviceHonoured && !afterEdit ? undefined : digestHit
+      const templateForNotice =
+        deviceHonoured && !afterEdit ? undefined : digestHit
       if (
         deviceHonoured &&
         digestHit !== undefined &&
@@ -632,12 +641,14 @@ export async function classifyCloudHookEntry(
       }
       if (templateForNotice) {
         const { template, label: digestLabel } = templateForNotice
-        const refused = (ctx.opts?.refusedTemplateIds ?? []).includes(template.id)
+        const refused = (ctx.opts?.refusedTemplateIds ?? []).includes(
+          template.id,
+        )
         const enabled =
           !refused &&
-          (ctx.opts?.enabledTemplateIds ?? CLOUD_HOOK_READONLY_TEMPLATES).includes(
-            template.id,
-          )
+          (
+            ctx.opts?.enabledTemplateIds ?? CLOUD_HOOK_READONLY_TEMPLATES
+          ).includes(template.id)
         if (refused) {
           afterEditNotice = afterEdit
             ? cloudHookAfterEditNotForwardedCopy(template.filename)
@@ -821,4 +832,3 @@ export function foldCloudHookOffer(
   }
   pack.forwarded.push(result)
 }
-

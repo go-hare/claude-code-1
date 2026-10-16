@@ -18,69 +18,25 @@ export interface AgentViewAction {
   prompt?: string
 }
 
-// Flags that get forwarded to dispatched sessions
+// Flags that get forwarded to dispatched sessions.
+// densable 2.1.289: permission/model/effort/agent/allow-bypass live on the
+// dispatchDefaults bag (parseAgentsDispatchArgv) — not raw passthrough.
 const PASSTHROUGH_FLAGS = [
   '--add-dir',
   '--settings',
   '--mcp-config',
   '--plugin-dir',
-  '--permission-mode',
-  '--model',
-  '--effort',
-  '--dangerously-skip-permissions',
-  '--allow-dangerously-skip-permissions',
   '--fallback-model',
   '--strict-mcp-config',
   '--restricted',
 ]
 
-/**
- * densable YBn soft-parse for --effort on agents dispatch path.
- * agentsMain forwards raw argv (commander parse result is discarded), so we
- * re-apply the same soft-warn + drop-unknown as main CLI here.
- */
-function rewriteEffortPassthrough(flag: string, rawValue: string): string[] {
-  // Lazy require: agents entry stays light until effort is actually used.
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { parseCliEffortArg } =
-    require('../utils/effort.js') as typeof import('../utils/effort.js')
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  const { level, warning } = parseCliEffortArg(rawValue)
-  if (warning !== undefined) {
-    // densable YBn: soft-warn on stderr with trailing newline
-    process.stderr.write(`Warning: ${warning}\n`)
-  }
-  if (level === undefined) return []
-  // Normalize med → medium / keep ultracode alias for child process.
-  if (flag.includes('=')) return [`--effort=${level}`]
-  return ['--effort', level]
-}
-
 function extractPassthroughArgs(args: string[]): string[] {
   const result: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
-    if (
-      arg === '--dangerously-skip-permissions' ||
-      arg === '--allow-dangerously-skip-permissions' ||
-      arg === '--strict-mcp-config' ||
-      arg === '--restricted'
-    ) {
+    if (arg === '--strict-mcp-config' || arg === '--restricted') {
       result.push(arg)
-      continue
-    }
-
-    // densable YBn: soft-parse --effort / --effort=… before generic passthrough.
-    if (arg === '--effort' || arg.startsWith('--effort=')) {
-      let rawValue: string | undefined
-      if (arg.startsWith('--effort=')) {
-        rawValue = arg.slice('--effort='.length)
-        result.push(...rewriteEffortPassthrough(arg, rawValue))
-      } else if (i + 1 < args.length && !args[i + 1]!.startsWith('--')) {
-        rawValue = args[++i]!
-        result.push(...rewriteEffortPassthrough('--effort', rawValue))
-      }
-      // bare --effort with no value → drop
       continue
     }
 
@@ -140,15 +96,22 @@ export async function agentsMain(args: string[]): Promise<void> {
     return
   }
 
+  // densable 2.1.289: soft-parse dispatchDefaults bag (permission/model/effort/…).
+  const { parseAgentsDispatchArgv } = await import(
+    '../screens/fleetView/fleetDispatchDefaults.js'
+  )
+  const { dispatchDefaults, rest: afterDefaults } =
+    parseAgentsDispatchArgv(args)
+
   // --cwd <path>: scope session list to a directory
   let cwdFilter: string | undefined
-  const cwdIdx = args.indexOf('--cwd')
-  if (cwdIdx >= 0 && cwdIdx + 1 < args.length) {
-    cwdFilter = args[cwdIdx + 1]
+  const cwdIdx = afterDefaults.indexOf('--cwd')
+  if (cwdIdx >= 0 && cwdIdx + 1 < afterDefaults.length) {
+    cwdFilter = afterDefaults[cwdIdx + 1]
   }
 
-  // Extract passthrough args for dispatched sessions
-  const dispatchExtraArgs = extractPassthroughArgs(args)
+  // Remaining non-defaults flags still passthrough (add-dir, settings, …).
+  const dispatchExtraArgs = extractPassthroughArgs(afterDefaults)
 
   // Official KF / Wy_: ensure daemon with install prompt denser.
   let bgManager: { close(): Promise<void> } | null = null
@@ -194,6 +157,7 @@ export async function agentsMain(args: string[]): Promise<void> {
   try {
     await renderAgentView({
       dispatchExtraArgs,
+      dispatchDefaults,
       cwdFilter,
       restoreSessionId: restoreSessionId || undefined,
       enteredViaLeftArrow,

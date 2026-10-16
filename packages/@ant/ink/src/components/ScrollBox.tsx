@@ -265,6 +265,8 @@ function ScrollBox({
         return content?.yogaNode?.getComputedHeight() ?? domRef.current?.scrollHeight ?? 0;
       },
       getViewportHeight() {
+        // densable 2.1.289: `return r.current?.scrollViewportHeight??0`.
+        // Cache is written in render-node-to-output (paint), same as gold.
         return domRef.current?.scrollViewportHeight ?? 0;
       },
       getViewportTop() {
