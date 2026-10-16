@@ -182,6 +182,48 @@ export type PendingLedger = {
   slugs: Map<string, LedgerArtifactSnapshot>
 }
 
+/**
+ * densable shareStatus.noticeReadSights row (`class u` @186730680).
+ * note(toolUseId, slug, seen); take(toolUseId, slug) consumes the call.
+ */
+export class NoticeReadSights {
+  #byCall = new Map<string, Map<string, boolean>>()
+  #evicted = new Set<string>()
+
+  note(toolUseId: string, slug: string, seen: boolean): void {
+    if (this.#evicted.has(toolUseId)) return
+    const cur = this.#byCall.get(toolUseId)
+    if (cur !== undefined) {
+      if (cur.has(slug)) return
+      if (cur.size >= 4) {
+        this.#evict(toolUseId)
+        return
+      }
+      cur.set(slug, seen)
+      return
+    }
+    if (this.#byCall.size >= 256) {
+      let drop = 128
+      for (const id of this.#byCall.keys()) {
+        this.#evict(id)
+        if (--drop === 0) break
+      }
+    }
+    this.#byCall.set(toolUseId, new Map([[slug, seen]]))
+  }
+
+  take(toolUseId: string, slug: string): boolean | undefined {
+    const cur = this.#byCall.get(toolUseId)
+    this.#byCall.delete(toolUseId)
+    return cur?.get(slug)
+  }
+
+  #evict(toolUseId: string): void {
+    this.#byCall.delete(toolUseId)
+    this.#evicted.add(toolUseId)
+  }
+}
+
 /** densable o0t / M3i comment census row */
 export type CommentCensusEntry = {
   readIds: Set<string> | null
@@ -191,6 +233,27 @@ export type CommentCensusEntry = {
   plain: number
   awaiting: number
   partial: boolean
+}
+
+/** densable jAr E() opening-comment preview `by`. */
+export type CommentThreadPreviewBy = 'user' | 'claude' | 'viewer' | 'unknown'
+
+/** densable jAr E() return — ask-copy target for a comment thread. */
+export type CommentThreadPreview = {
+  display: {
+    thread_id: string
+    by: CommentThreadPreviewBy
+    excerpt: string
+    replies: number
+    resolved: boolean
+  }
+  access?: string
+}
+
+/** densable commentTargets cache row. */
+export type CommentTargetCacheEntry = {
+  target: CommentThreadPreview
+  toolUseId?: string
 }
 
 export type ArtifactAutoReactStore = {
@@ -207,6 +270,20 @@ export type ArtifactAutoReactStore = {
     mostRecentPublishSlug?: string
     disposed: boolean
     endAll?: (reason?: string) => void
+    /** densable live.heardVersions — F7e clears on a new conversation. */
+    heardVersions: Map<string, unknown>
+    /** densable live.nonEditorSlugs */
+    nonEditorSlugs: Set<string>
+    /** densable live.pendingSubagentArms */
+    pendingSubagentArms: Map<string, unknown>
+    /** densable live.finishedSubagentAdopters */
+    finishedSubagentAdopters: Set<string>
+    /** densable live.repliesConsent */
+    repliesConsent: {
+      outstanding: Map<string, unknown>
+      declined: Map<string, unknown>
+      approved: Set<string>
+    }
   }
   autoReact: {
     artifacts: Map<string, unknown>
@@ -318,12 +395,85 @@ export type ArtifactAutoReactStore = {
   /** densable accountEpoch — reply echo epoch stamp. */
   accountEpoch: number
   /**
+   * densable conversationEpoch — F7e bumps this on a new conversation
+   * (`/clear`, rewind) unless `continuesConversation`. `KBe()` keys five-class
+   * consent and OCo/D1n scopes as `${accountEpoch}:${conversationEpoch}`.
+   */
+  conversationEpoch: number
+  /** densable ownPublishedSlugs — F7e clears unless continuesConversation. */
+  ownPublishedSlugs: Map<string, unknown>
+  /** densable ownCreatedSlugs */
+  ownCreatedSlugs: Map<string, unknown>
+  /** densable strandedMints */
+  strandedMints: Map<string, unknown>
+  /** densable reservedMints */
+  reservedMints: Set<string>
+  /** densable roomJoinArming */
+  roomJoinArming: Set<string>
+  /** densable roomStoppedByUser */
+  roomStoppedByUser: Set<string>
+  /** densable roomArmAsked */
+  roomArmAsked: Map<string, unknown>
+  /** densable roomArmRefusedByUser */
+  roomArmRefusedByUser: Set<string>
+  /** densable deferredSurface */
+  deferredSurface: Map<string, unknown>
+  /** densable remoteControlSkippedSlugs */
+  remoteControlSkippedSlugs: Set<string>
+  /**
+   * densable createdFromType — F7e always clears; N9e restores from resume
+   * seed (`mNr` empty when !local / !seedEligible).
+   */
+  createdFromType: Map<string, unknown>
+  /** densable verify — F7e always drops lastPublish and clears reads. */
+  verify: {
+    lastPublish: unknown
+    reads: Map<string, unknown>
+  }
+  /** densable pathPinSeq — QXt stamps seq on restore. */
+  pathPinSeq: number
+  /** densable pathPins — F7e clears unless continuesConversation. */
+  pathPins: Map<string, Map<string, { seq?: number }>>
+  /** densable resultNotes — F7e resets unless continuesConversation. */
+  resultNotes: {
+    kindSaid: boolean
+    watchCodesSaid: Set<string>
+    previewedPaths: Set<string>
+    previewHintedPaths: Set<string>
+  }
+  /**
+   * densable commentTargets — jAr @194348914 thread-preview cache.
+   * Key `${slug}/${threadId}`.
+   */
+  commentTargets: Map<string, CommentTargetCacheEntry>
+  /**
    * densable shareStatus — ownership / share probe cache (ip / Kgl / Fee).
+   * densable 2.1.289: probeBoots reuses a non-lean boot within the same toolUseId.
    */
   shareStatus: {
     bySlug: Map<string, ArtifactShareStatus>
     filePathToSlug: Map<string, string>
     pendingNoticeSlugs: Set<string>
+    /**
+     * densable probeBoots — keyed by slug; TTL 60s (Ze).
+     * boot shape matches fetchFrameBoot ok result (not lean).
+     */
+    probeBoots: Map<
+      string,
+      {
+        toolUseId: string
+        issuedAt: number
+        boot: ProbeCachedBoot
+      }
+    >
+    /**
+     * densable k7 @199727074 — Fee-notice read sightings keyed by action.
+     */
+    noticeReadSights: {
+      comments: NoticeReadSights
+      read: NoticeReadSights
+      verify: NoticeReadSights
+    }
   }
   /**
    * densable frameRelay — ccr-gateway decline/serve windows (sEe / tgr / _zt).
@@ -357,6 +507,16 @@ export type ArtifactAutoReactStore = {
   }
   /** densable frozenReadPageDataSchemaNames — set at Artifact input-schema build. */
   frozenReadPageDataSchemaNames?: Set<string>
+  /**
+   * densable frozenArtifactTypes — Qps / bu pin. Default undefined
+   * (no typesOn assignment from ZKe/MP).
+   */
+  frozenArtifactTypes?: {
+    typesOn: boolean
+    typeCreateOn: boolean
+    typeCatalogOn: boolean
+    quickstartOn?: boolean
+  }
   workshopTelemetry: {
     startedSeen: string[]
     completedSeen: string[]
@@ -364,9 +524,19 @@ export type ArtifactAutoReactStore = {
     publishedSeen: string[]
     invokeT0: number | null
   }
+  /**
+   * densable verifiedAttachments — en() chat-attachment identity by real path.
+   */
+  verifiedAttachments: Map<string, ArtifactAttachmentIdentity>
 }
 
-export type ArtifactShareRole = 'owner' | 'writer' | 'reader' | 'unknown'
+export type ArtifactShareRole =
+  | 'owner'
+  | 'writer'
+  | 'reader'
+  | 'commenter'
+  | 'viewer'
+  | 'unknown'
 
 export type ArtifactShareStatus = {
   mode: string
@@ -381,6 +551,32 @@ export type ArtifactShareStatus = {
   lastProbeAt?: number
   lastProbeLandedAt?: number
   lastProbeIssuedAt?: number
+  /** densable Wjt — page capability snapshot from Tu readBack. */
+  capabilities?: unknown
+  capabilitiesUnknown?: boolean
+  lastCapsReadAt?: number
+  lastCapsLandedAt?: number
+  lastCapsIssuedAt?: number
+  lastCapsReadToolUseId?: string
+}
+
+/** densable en / xKe identity for a session chat-attachment pin. */
+export type ArtifactAttachmentIdentity = {
+  dev: number
+  ino: number
+}
+
+/**
+ * densable probeBoots entry boot — frame boot ok shape cached for reuse.
+ * Matches mint `FrameBootOk` (kept here to avoid store↔mint import cycle).
+ */
+export type ProbeCachedBoot = {
+  err: null
+  data: Record<string, unknown>
+  ver: string
+  assetToken: string | undefined
+  route?: 'direct' | 'relay'
+  reused?: boolean
 }
 
 export type NoticeCoalesceFamily = 'artifact-auto-react' | 'artifact-changed'
@@ -422,6 +618,15 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
       pendingRegistrations: 0,
       mostRecentPublishSlug: undefined,
       disposed: false,
+      heardVersions: new Map(),
+      nonEditorSlugs: new Set(),
+      pendingSubagentArms: new Map(),
+      finishedSubagentAdopters: new Set(),
+      repliesConsent: {
+        outstanding: new Map(),
+        declined: new Map(),
+        approved: new Set(),
+      },
     },
     autoReact: {
       artifacts: new Map(),
@@ -502,10 +707,41 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
       graceMsOverride: null,
     },
     accountEpoch: 0,
+    conversationEpoch: 0,
+    ownPublishedSlugs: new Map(),
+    ownCreatedSlugs: new Map(),
+    strandedMints: new Map(),
+    reservedMints: new Set(),
+    roomJoinArming: new Set(),
+    roomStoppedByUser: new Set(),
+    roomArmAsked: new Map(),
+    roomArmRefusedByUser: new Set(),
+    deferredSurface: new Map(),
+    remoteControlSkippedSlugs: new Set(),
+    createdFromType: new Map(),
+    verify: {
+      lastPublish: undefined,
+      reads: new Map(),
+    },
+    pathPinSeq: 0,
+    pathPins: new Map(),
+    resultNotes: {
+      kindSaid: false,
+      watchCodesSaid: new Set(),
+      previewedPaths: new Set(),
+      previewHintedPaths: new Set(),
+    },
+    commentTargets: new Map(),
     shareStatus: {
       bySlug: new Map(),
       filePathToSlug: new Map(),
       pendingNoticeSlugs: new Set(),
+      probeBoots: new Map(),
+      noticeReadSights: {
+        comments: new NoticeReadSights(),
+        read: new NoticeReadSights(),
+        verify: new NoticeReadSights(),
+      },
     },
     frameRelay: {
       declinedUntil: new Map(),
@@ -518,6 +754,7 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
       publishedSeen: [],
       invokeT0: null,
     },
+    verifiedAttachments: new Map(),
   }
 }
 
