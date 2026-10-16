@@ -22,6 +22,9 @@ import { isPlanModeInterviewPhaseEnabled } from '../../../utils/planModeV2.js';
 import { getPlanFilePath } from '../../../utils/plans.js';
 import { askUserQuestionTimeoutToMs } from '../../../utils/settings/settings.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
+import { applyEngineConfirmDisplay, normalizeAskQuestions } from '../../../dialog/permissionAsk.js';
+import { isEngineConfirmAsk } from '../../../utils/permissions/confirmWithUser.js';
+import { resolvePermissionRequestSource } from '../../../dialog/permissionRequestSource.js';
 import { AfkCountdown } from './AfkCountdown.js';
 import { QuestionView } from './QuestionView.js';
 import { SubmitQuestionsView } from './SubmitQuestionsView.js';
@@ -66,6 +69,15 @@ function AskUserQuestionPermissionRequestBody({
   // returns `behavior: 'ask'` directly and never goes through the classifier).
   const result = useMemo(() => AskUserQuestionTool.inputSchema.safeParse(toolUseConfirm.input), [toolUseConfirm.input]);
   const questions = result.success ? result.data.questions || [] : [];
+  const isEngineConfirm = isEngineConfirmAsk({
+    forcedByCaller: (toolUseConfirm.permissionResult as { forcedByCaller?: boolean }).forcedByCaller,
+    requestSource: resolvePermissionRequestSource(toolUseConfirm.toolUseContext),
+    toolUseID: toolUseConfirm.toolUseID,
+  });
+  const engineDisplay = useMemo(
+    () => applyEngineConfirmDisplay(normalizeAskQuestions(questions), isEngineConfirm),
+    [questions, isEngineConfirm],
+  );
   const { rows: terminalRows } = useTerminalSize();
   const [theme] = useTheme();
   // Official 2.1.200: default never; only auto-continue when explicitly configured
@@ -447,6 +459,8 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
         <QuestionView
           question={currentQuestion}
           questions={questions}
+          displayQuestion={engineDisplay[currentQuestionIndex]?.displayQuestion}
+          displayBody={engineDisplay[currentQuestionIndex]?.displayBody}
           currentQuestionIndex={currentQuestionIndex}
           answers={answers}
           questionStates={questionStates}

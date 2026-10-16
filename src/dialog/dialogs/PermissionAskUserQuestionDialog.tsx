@@ -6,8 +6,9 @@
  * Ofy key:question + preview kind full|withheld. DualInk analog
  * QuestionView / multiSelect / annotations / submit review / Chat about.
  * DualInk analog images + AfkCountdown + highlight.
- * Omit gold image convert. Do not wrap AskUserQuestionPermissionRequest.
- * Host answer is store.answer; do not dequeue.
+ * Gold 2.1.289 DualInk renderer is minify `Qge(h)` @209464254.
+ * Invent-ban `export function Qge`. REPL face is AskUserQuestionPermissionRequest.
+ * Omit gold image convert. Host answer is store.answer; do not dequeue.
  */
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
 import { stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
@@ -37,6 +38,7 @@ import {
   formatAskUserQuestionAnswer,
   formatAskUserQuestionChatAboutFeedback,
   formatAskUserQuestionSkipInterviewFeedback,
+  applyEngineConfirmDisplay,
   normalizeAskQuestions,
   resolveAskUserQuestionDeny,
   resolveAskUserQuestionSubmit,
@@ -80,7 +82,10 @@ function PermissionAskUserQuestionDialogBody({
   highlight,
 }: DialogRendererProps & { highlight: CliHighlight | null }): React.ReactNode {
   const p = payload as AskUserQuestionPermissionPayload;
-  const hostQuestions = useMemo(() => normalizeAskQuestions(p.questions), [p.questions]);
+  const hostQuestions = useMemo(
+    () => applyEngineConfirmDisplay(normalizeAskQuestions(p.questions), p.isEngineConfirm === true),
+    [p.questions, p.isEngineConfirm],
+  );
   const questions = useMemo(() => toDualInkQuestions(hostQuestions), [hostQuestions]);
   const { rows: terminalRows } = useTerminalSize();
   const [theme] = useTheme();
@@ -307,6 +312,8 @@ function PermissionAskUserQuestionDialogBody({
         <QuestionView
           question={currentQuestion}
           questions={questions}
+          displayQuestion={hostQuestions[currentQuestionIndex]?.displayQuestion}
+          displayBody={hostQuestions[currentQuestionIndex]?.displayBody}
           currentQuestionIndex={currentQuestionIndex}
           answers={answers}
           questionStates={questionStates}

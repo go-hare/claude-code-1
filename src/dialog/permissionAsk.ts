@@ -36,11 +36,19 @@ export type HostAskQuestionOption = {
   preview?: AskPreview
 }
 
+export type EngineConfirmDisplayBody =
+  | { kind: 'text'; text: string }
+  | { kind: 'fileLink'; label: string; url: string; path: string }
+
 export type HostAskQuestion = {
   question: string
   header?: string
   options: HostAskQuestionOption[]
   multiSelect?: boolean
+  /** densable DY displayQuestion when isEngineConfirm. */
+  displayQuestion?: string
+  /** densable DY displayBody when isEngineConfirm. */
+  displayBody?: EngineConfirmDisplayBody[]
 }
 
 export type AskUserQuestionPermissionPayload = {
@@ -54,6 +62,11 @@ export type AskUserQuestionPermissionPayload = {
   isAskCappedByOrg?: boolean
   requestSource?: PermissionRequestSource
   isMcp?: boolean
+  /**
+   * densable `_o` isEngineConfirm. DualInk Qge UI calls DY(questions,
+   * isEngineConfirm) so the question splits on the first blank line.
+   */
+  isEngineConfirm?: boolean
 }
 
 export type AskUserQuestionAnnotation = {
@@ -103,6 +116,77 @@ function optionOf(raw: unknown): HostAskQuestionOption | null {
     ...(typeof description === 'string' ? { description } : {}),
     ...(preview ? { preview } : {}),
   }
+}
+
+const ENGINE_CONFIRM_FILE_LINK = /\[([^[\]\n]*)\]\(([^()\s]*)\)/g
+
+/**
+ * densable jyo — split engine-confirm question on the first blank line.
+ * Title is the first paragraph; body parses markdown file links.
+ */
+export function splitEngineConfirmQuestion(question: string): {
+  title: string
+  body: EngineConfirmDisplayBody[]
+} {
+  const at = question.indexOf('\n\n')
+  if (at === -1) return { title: question, body: [] }
+  const rest = question.slice(at + 2).replace(/^\n+/, '')
+  return {
+    title: question.slice(0, at),
+    body: rest === '' ? [] : parseEngineConfirmBody(rest),
+  }
+}
+
+function parseEngineConfirmBody(raw: string): EngineConfirmDisplayBody[] {
+  const out: EngineConfirmDisplayBody[] = []
+  let pending = ''
+  let cursor = 0
+  for (const match of raw.matchAll(ENGINE_CONFIRM_FILE_LINK)) {
+    const [full, label = '', href = ''] = match
+    const path = fileUrlPath(href)
+    pending += raw.slice(cursor, match.index)
+    cursor = (match.index ?? 0) + full.length
+    if (path === null) {
+      pending += full
+      continue
+    }
+    if (pending !== '') {
+      out.push({ kind: 'text', text: pending })
+      pending = ''
+    }
+    out.push({ kind: 'fileLink', label, url: href, path })
+  }
+  pending += raw.slice(cursor)
+  if (pending !== '') out.push({ kind: 'text', text: pending })
+  return out
+}
+
+function fileUrlPath(href: string): string | null {
+  if (!/^file:\/\/\//i.test(href)) return null
+  try {
+    return new URL(href).pathname
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable DY(h, v=!1) — when isEngineConfirm, fill displayQuestion/body.
+ * Answer key stays `question` (gold `key: M.question`).
+ */
+export function applyEngineConfirmDisplay(
+  questions: HostAskQuestion[],
+  isEngineConfirm: boolean,
+): HostAskQuestion[] {
+  if (!isEngineConfirm) return questions
+  return questions.map(q => {
+    const split = splitEngineConfirmQuestion(q.question)
+    return {
+      ...q,
+      displayQuestion: split.title,
+      displayBody: split.body,
+    }
+  })
 }
 
 /** densable Ofy — keep questions that have a question string (`key`). */

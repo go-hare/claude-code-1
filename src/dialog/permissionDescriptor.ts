@@ -4,6 +4,7 @@
  * File Lno/X_w lives in filePermissionPreview.ts (async).
  */
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
+import { isEngineConfirmAsk } from '../utils/permissions/confirmWithUser.js'
 import { getPlan, getPlanFilePath } from '../utils/plans.js'
 import {
   computeIsAskCappedByOrg,
@@ -267,22 +268,32 @@ export function buildBrowserPermissionDescriptor(
   }
 }
 
-/** densable wum — permission_ask_user_question */
+/** densable wum / `_o` — permission_ask_user_question */
 export function buildAskUserQuestionPermissionDescriptor(
   input: BuildInput,
 ): PermissionDescriptorBase & {
   questions: unknown[]
   metadataSource?: unknown
+  isEngineConfirm: boolean
 } {
   const base = buildPermissionDescriptorBase(input)
   const parsed = input.confirm.input as {
     questions?: unknown[]
     metadata?: { source?: unknown }
   }
+  const permissionResult = input.confirm.permissionResult as {
+    forcedByCaller?: boolean
+  }
   return {
     ...base,
     questions: Array.isArray(parsed.questions) ? parsed.questions : [],
     metadataSource: parsed.metadata?.source,
+    // densable `_o` P
+    isEngineConfirm: isEngineConfirmAsk({
+      forcedByCaller: permissionResult.forcedByCaller,
+      requestSource: base.requestSource,
+      toolUseID: input.confirm.toolUseID,
+    }),
   }
 }
 

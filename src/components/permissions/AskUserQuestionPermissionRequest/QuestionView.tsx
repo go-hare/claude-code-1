@@ -6,6 +6,7 @@ import type {
   Question,
   QuestionOption,
 } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
+import type { EngineConfirmDisplayBody } from '../../../dialog/permissionAsk.js';
 import type { PastedContent } from '../../../utils/config.js';
 import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
@@ -23,6 +24,10 @@ import type { QuestionState } from './use-multiple-choice-state.js';
 type Props = {
   question: Question;
   questions: Question[];
+  /** densable DY displayQuestion — engine confirm title. */
+  displayQuestion?: string;
+  /** densable DY displayBody — engine confirm body after the blank line. */
+  displayBody?: EngineConfirmDisplayBody[];
   currentQuestionIndex: number;
   answers: Record<string, string>;
   questionStates: Record<string, QuestionState>;
@@ -53,6 +58,8 @@ type Props = {
 export function QuestionView({
   question,
   questions,
+  displayQuestion,
+  displayBody,
   currentQuestionIndex,
   answers,
   questionStates,
@@ -232,7 +239,18 @@ export function QuestionView({
           answers={answers}
           hideSubmitTab={hideSubmitTab}
         />
-        <PermissionRequestTitle title={question.question} color={'text'} />
+        <PermissionRequestTitle title={displayQuestion ?? question.question} color={'text'} />
+        {displayBody && displayBody.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            {displayBody.map((part, i) =>
+              part.kind === 'fileLink' ? (
+                <FilePathLink key={`${part.path}-${i}`} filePath={part.path} />
+              ) : (
+                <Text key={`body-${i}`}>{part.text}</Text>
+              ),
+            )}
+          </Box>
+        )}
 
         <Box flexDirection="column" minHeight={minContentHeight}>
           <Box marginTop={1}>
