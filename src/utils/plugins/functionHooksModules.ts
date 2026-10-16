@@ -61,6 +61,31 @@ import {
 import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
 import { SURFACE_LIMITS } from './functionHooksSurfaceRuntime.js'
 import { createStore } from '../../state/store.js'
+import { isBareMode } from '../envUtils.js'
+import { isBuiltinPluginId } from '../../plugins/builtinPlugins.js'
+import { sleep } from '../sleep.js'
+import { buildMcpToolName } from '../../services/mcp/mcpStringUtils.js'
+import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
+import {
+  forgetAllPluginRegisteredTools,
+  forgetPluginRegisteredTools,
+  getPluginRegisteredTool,
+  getPluginToolServerKey,
+  isPendingPluginToolServerRemoval,
+  isPluginToolServerKeyMinted,
+  ownPluginRegisteredTools,
+  pluginToolSpecsEqual,
+  setPluginRegisteredTool,
+  setPluginToolServerKey,
+  type PluginRegisteredToolSpec,
+} from './pluginToolRegistry.js'
+import {
+  ensurePluginToolRegistrarInstalled,
+  getPluginToolRegistrar,
+  PLUGIN_TOOL_REGISTER_POLL_MS,
+  PLUGIN_TOOL_REGISTER_VISIBLE_TIMEOUT_MS,
+} from './pluginToolLoopbackRegistrar.js'
+import { getPluginToolSessionHost } from './pluginToolSessionHost.js'
 
 export type FunctionHookHandler = (
   api: Record<string, unknown>,
@@ -84,6 +109,8 @@ export type LoadedFunctionHooksModule = {
   status?: 'live' | 'retiring' | 'unloaded'
   /** densable `args.surfaceModules` — Client `./board` paths from the hooks file. */
   surfaceModules?: readonly SurfaceModuleScan[]
+  /** densable _k — LoadedPlugin.source / name@builtin */
+  pluginStorageId?: string
 }
 
 let loadedModules: LoadedFunctionHooksModule[] = []
@@ -120,15 +147,40 @@ export function getLoadedFunctionHooksModules(): readonly LoadedFunctionHooksMod
   return loadedModules
 }
 
+/**
+ * Await host.removeMcpServer for Xj keys. Idempotent; used by nuclear
+ * setLoaded (fire-and-forget) and SAME_THREAD load (awaited).
+ */
+export async function awaitPluginToolSessionUnmount(
+  keys: readonly string[],
+): Promise<void> {
+  const host = getPluginToolSessionHost()
+  if (!host?.removeMcpServer || keys.length === 0) return
+  await Promise.all(
+    keys.map(async key => {
+      try {
+        await host.removeMcpServer?.(key)
+      } catch {
+        // Host may already have dropped the server.
+      }
+    }),
+  )
+}
+
 export function setLoadedFunctionHooksModules(
   modules: readonly LoadedFunctionHooksModule[],
-): void {
+): string[] {
   workerOwnsDispatch = false
   pluginAgents.clear()
   pluginAgentSpawns.clear()
   pluginSpawnCallers.clear()
   forgetPluginCommands()
-  pluginRegisteredTools.clear()
+  // densable: nuclear replace must removeMcpServer for every prior Xj key —
+  // clearPluginToolRegistryForTests alone leaves orphan MCP mounts (r_o).
+  // Fire-and-forget here (sync API); SAME_THREAD load awaits the returned keys.
+  // Pending-removal set skips densable r_o until remount.
+  const removedKeys = forgetAllPluginRegisteredTools()
+  void awaitPluginToolSessionUnmount(removedKeys)
   pluginStore.clear()
   skipFirstLog.clear()
   skipPersistOnce.clear()
@@ -171,6 +223,7 @@ export function setLoadedFunctionHooksModules(
   disposePluginClients()
   forgetPluginSurfaceModules()
   replaceLoadedFunctionHooksModules(modules)
+  return removedKeys
 }
 
 function replaceLoadedFunctionHooksModules(
@@ -184,6 +237,9 @@ function replaceLoadedFunctionHooksModules(
     status: mod.status ?? 'live',
     ...(mod.surfaceModules !== undefined && {
       surfaceModules: [...mod.surfaceModules],
+    }),
+    ...(mod.pluginStorageId !== undefined && {
+      pluginStorageId: mod.pluginStorageId,
     }),
   }))
   for (const mod of loadedModules) {
@@ -238,12 +294,17 @@ export function functionHookPatternMatches(
 }
 
 /** densable `zk` module half: some loaded hook's pattern matches the event. */
-export function hasMatchingFunctionHook(event: string): boolean {
+export function hasMatchingFunctionHook(
+  event: string,
+  payload?: Record<string, unknown>,
+): boolean {
   const needle = event.includes('.') ? event : `classic.${event}`
   return loadedModules.some(mod =>
-    (mod.hooks ?? []).some(hook =>
-      functionHookPatternMatches(hook.pattern, needle),
-    ),
+    (mod.hooks ?? []).some(hook => {
+      if (!functionHookPatternMatches(hook.pattern, needle)) return false
+      if (payload === undefined) return true
+      return matcherAllows(hook.matcher, payload, needle)
+    }),
   )
 }
 
@@ -944,14 +1005,6 @@ function forgetPluginCommands(plugin?: string): void {
     if (record.plugin === plugin) pluginCommands.delete(name)
   }
 }
-
-type PluginToolRecord = {
-  plugin: string
-  spec: Record<string, unknown>
-}
-
-/** densable n1.own(plugin) — tools registered via $.tool.register. */
-const pluginRegisteredTools = new Map<string, PluginToolRecord>()
 
 /** densable kCe — tools that have their own $ door. */
 const RESERVED_HOST_TOOLS: Record<string, string> = {
@@ -8892,13 +8945,24 @@ async function runToolCheck(
   return { behavior: 'allow' }
 }
 
-function registerPluginTool(
+/**
+ * densable m_o — `$.tool.register` → HTTP loopback MCP → model-visible tool.
+ * Returns `{ tool: "mcp__<server>__<name>" }`.
+ */
+async function registerPluginTool(
   input: Record<string, unknown>,
   plugin?: string,
-): { tool: string } {
+): Promise<{ tool: string }> {
   const nameCheck = agentRegisterNameCheck(input)
   if (nameCheck !== undefined) hostCheck('tool.register', nameCheck, plugin)
   const description = input.description
+  if (typeof description !== 'string' || description.trim() === '') {
+    hostCheck(
+      'tool.register',
+      `${String(input.name)} needs a description (what the model reads)`,
+      plugin,
+    )
+  }
   if (typeof description === 'string' && description.length > HOST_TEXT_LIMIT) {
     hostCheck(
       'tool.register',
@@ -8906,7 +8970,8 @@ function registerPluginTool(
       plugin,
     )
   }
-  if (!isEventRecord(input.inputSchema)) {
+  const schemaRaw = input.inputSchema ?? { type: 'object' }
+  if (!isEventRecord(schemaRaw)) {
     hostCheck(
       'tool.register',
       'inputSchema must be a JSON schema object',
@@ -8914,14 +8979,143 @@ function registerPluginTool(
     )
   }
   const prefix = plugin !== undefined && plugin !== '' ? plugin : ''
-  const name = String(input.name)
-  const id = `${prefix}:${name}`
-  const held = pluginRegisteredTools.get(id)
-  if (held !== undefined && jsonEqual(held.spec, input)) {
-    return { tool: name }
+  if (prefix === '') {
+    throw new Error('$.tool.register: plugin name is required')
   }
-  pluginRegisteredTools.set(id, { plugin: prefix, spec: { ...input } })
-  return { tool: name }
+  // densable o_o — plugin name cannot be a reserved MCP server id.
+  if (isReservedMcpServerName(prefix)) {
+    throw new Error(
+      `${prefix}: $.tool.register: "${prefix}" is a reserved MCP server name`,
+    )
+  }
+
+  const name = String(input.name)
+  const spec: PluginRegisteredToolSpec = {
+    name,
+    description: String(description),
+    inputSchema: { type: 'object', ...schemaRaw },
+  }
+
+  const host = getPluginToolSessionHost()
+  // densable Hu — refuse before the bag or loopback generation is touched.
+  if (!host) {
+    throw new Error(
+      `${prefix}: $.tool.register is not available in this mode: no session is bound in this process (the REPL has not mounted and no headless session is built); catch it and carry on`,
+    )
+  }
+  if (host.builtInToolsDisabled === true) {
+    throw new Error(
+      `${prefix}: $.tool.register: "${name}" refused: this session has no built-in tools (--tools ""), so it takes none from plugins`,
+    )
+  }
+  if (isBareMode() && isBuiltinPluginId(resolvePluginStorageId(prefix))) {
+    throw new Error(
+      `${prefix}: $.tool.register: "${name}" refused: this session runs with --bare, which takes tools from the plugins its command line names and from no built-in one`,
+    )
+  }
+
+  ensurePluginToolRegistrarInstalled()
+  const registrar = getPluginToolRegistrar()
+  if (!registrar) {
+    logForDebugging('plugin_function_hooks_register_tool: no_registrar', {
+      level: 'error',
+    })
+    throw new Error(
+      `${prefix}: $.tool.register: this host cannot add tools at run time (no in-process MCP server registrar installed)`,
+    )
+  }
+
+  const prior = getPluginRegisteredTool(prefix, name)
+  const serverKeyExisting = getPluginToolServerKey(prefix)
+  if (
+    prior !== undefined &&
+    pluginToolSpecsEqual(prior, spec) &&
+    serverKeyExisting !== undefined
+  ) {
+    const qualified = buildMcpToolName(serverKeyExisting, name)
+    if (host.tools().some(tool => tool.name === qualified)) {
+      logForDebugging(
+        `$.tool.register (${prefix}): ${qualified} unchanged and listed; not re-registered`,
+      )
+      return { tool: qualified }
+    }
+  }
+
+  const owned = ownPluginRegisteredTools(prefix)
+  const tools = [...new Map(owned).set(name, spec).values()]
+  const { key, config } = registrar(prefix, tools)
+
+  // densable r_o — conflict if another MCP server already uses this key;
+  // runs before the bag is touched so a refusal leaves nothing behind.
+  // Skip names we just forgot (host.mcpServers may still list them briefly).
+  if (
+    getPluginToolServerKey(prefix) === undefined &&
+    !isPluginToolServerKeyMinted(key) &&
+    !isPendingPluginToolServerRemoval(key)
+  ) {
+    const conflict = host
+      .mcpServers()
+      .find(server => normalizeNameForMCP(server) === normalizeNameForMCP(key))
+    if (conflict !== undefined && !isPendingPluginToolServerRemoval(conflict)) {
+      throw new Error(
+        `${prefix}: $.tool.register: the session already has an MCP server named "${conflict}" in its MCP config; registering would replace it`,
+      )
+    }
+  }
+
+  setPluginRegisteredTool(prefix, spec)
+  setPluginToolServerKey(prefix, key)
+  const qualified = buildMcpToolName(key, name)
+  logForDebugging(
+    `$.tool.register (${prefix}): ${qualified} (${tools.length} tool(s) on server ${key}); connecting`,
+  )
+
+  const started = Date.now()
+  const abort = new AbortController()
+  try {
+    await Promise.race([
+      Promise.resolve(host.addMcpServer(key, config)),
+      sleep(PLUGIN_TOOL_REGISTER_VISIBLE_TIMEOUT_MS).then(() => {
+        abort.abort()
+      }),
+    ])
+  } finally {
+    abort.abort()
+  }
+
+  if (
+    host.isToolWithheldByDenyRule?.({
+      name: qualified,
+      mcpInfo: { serverName: key, toolName: name },
+    })
+  ) {
+    logForDebugging(
+      `$.tool.register (${prefix}): ${qualified} registered; a deny rule withholds it from this session's tools, so not waiting for it to list`,
+    )
+    return { tool: qualified }
+  }
+
+  while (Date.now() - started < PLUGIN_TOOL_REGISTER_VISIBLE_TIMEOUT_MS) {
+    if (host.tools().some(tool => tool.name === qualified)) {
+      logForDebugging(
+        `$.tool.register (${prefix}): ${qualified} visible after ${Date.now() - started}ms`,
+      )
+      return { tool: qualified }
+    }
+    await sleep(PLUGIN_TOOL_REGISTER_POLL_MS)
+  }
+
+  logForDebugging(
+    `$.tool.register (${prefix}): ${qualified} not yet in the session's tools after ${PLUGIN_TOOL_REGISTER_VISIBLE_TIMEOUT_MS}ms; resolving anyway`,
+    { level: 'warn' },
+  )
+  return { tool: qualified }
+}
+
+function isReservedMcpServerName(name: string): boolean {
+  // densable o_o / j0e — keep narrow: empty or mcp-looking reserved tokens.
+  const n = name.trim().toLowerCase()
+  return n === '' || n === 'mcp' || n.startsWith('mcp__')
 }
 
 const PLUGIN_REGISTER_REFUSE_CAP = HOST_TEXT_LIMIT
@@ -11284,8 +11478,9 @@ function unloadModule(name: string): void {
   }
   dropPluginAgentDefinitions(name)
   forgetPluginCommands(name)
-  for (const key of [...pluginRegisteredTools.keys()]) {
-    if (key.startsWith(`${name}:`)) pluginRegisteredTools.delete(key)
+  const previousServerKey = forgetPluginRegisteredTools(name)
+  if (previousServerKey !== undefined) {
+    void awaitPluginToolSessionUnmount([previousServerKey])
   }
   for (const key of [...pluginStore.keys()]) {
     if (key.startsWith(`${name}\0`)) pluginStore.delete(key)
@@ -12120,6 +12315,13 @@ export type FunctionHookPlugin = {
   name: string
   path: string
   options?: Record<string, unknown>
+  /** densable _k — LoadedPlugin.source / name@builtin */
+  source?: string
+}
+
+function resolvePluginStorageId(pluginName: string): string {
+  const mod = loadedModules.find(m => m.name === pluginName)
+  return mod?.pluginStorageId ?? pluginName
 }
 
 /**
@@ -12171,7 +12373,13 @@ export async function loadFunctionHooksModules(
 ): Promise<void> {
   if (process.env.CLAUDE_CODE_HOOKS_SAME_THREAD) {
     await stopFunctionHooksWorker()
-    setLoadedFunctionHooksModules(await loadFunctionHooksInProcess(plugins))
+    // Nuclear clear first (removeMcpServer for prior Xj mounts), then load —
+    // loadFunctionHooksInProcess registers tools into the live host; clearing
+    // after would drop those new mounts. Await unmount so async print hosts
+    // finish before re-register; pending-removal also skips densable r_o.
+    const removedKeys = setLoadedFunctionHooksModules([])
+    await awaitPluginToolSessionUnmount(removedKeys)
+    replaceLoadedFunctionHooksModules(await loadFunctionHooksInProcess(plugins))
     return
   }
   const worker = await ensureFunctionHooksWorker()
@@ -12197,8 +12405,20 @@ export async function loadFunctionHooksModules(
             mod as unknown as { surfaceModules: SurfaceModuleScan[] }
           ).surfaceModules,
         }),
+        ...(plugin.source !== undefined && {
+          pluginStorageId: plugin.source,
+        }),
       })
     }
+  }
+  // densable reload: retire modules that disappeared so Xj.forget +
+  // removeMcpServer run (replace alone left orphan MCP mounts model-visible).
+  const nextNames = new Set(loaded.map(mod => mod.name))
+  const removed = loadedModules
+    .filter(mod => mod.status !== 'unloaded' && !nextNames.has(mod.name))
+    .map(mod => mod.name)
+  for (const name of removed) {
+    await retireFunctionHooksModule(name)
   }
   replaceLoadedFunctionHooksModules(loaded)
   workerOwnsDispatch = true
@@ -12389,6 +12609,7 @@ export function listBuiltinFunctionHookPlugins(): FunctionHookPlugin[] {
         const plugin: FunctionHookPlugin = {
           name: `builtin:${name}`,
           path: join(BUILTIN_MODS_DIR, name),
+          source: `${name}@builtin`,
         }
         if (name === 'agents-md') {
           try {
@@ -12516,5 +12737,6 @@ async function recordRegisterPatterns(
     patterns,
     hooks,
     ...(surfaceModules.length > 0 && { surfaceModules }),
+    ...(plugin.source !== undefined && { pluginStorageId: plugin.source }),
   }
 }

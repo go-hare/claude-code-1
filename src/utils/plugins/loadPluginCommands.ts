@@ -29,6 +29,7 @@ import {
 } from '../markdownConfigLoader.js'
 import { parseUserSpecifiedModel } from '../model/model.js'
 import { executeShellCommandsInPrompt } from '../promptShellExecution.js'
+import { wrapSkillAllowedToolsGetter } from '../permissions/skillAllowedToolsTrust.js'
 import { loadAllPluginsCacheOnly } from './pluginLoader.js'
 import {
   loadPluginOptions,
@@ -338,6 +339,19 @@ function createPluginCommand(
         pluginManifest,
         repository: sourceName,
       },
+      ...(allowedTools.length > 0
+        ? {
+            getAllowedTools: wrapSkillAllowedToolsGetter(
+              {
+                name: commandName,
+                source: 'plugin',
+                pluginInfo: { repository: sourceName },
+                allowedTools,
+              },
+              allowedTools,
+            ),
+          }
+        : {}),
       isHidden: !userInvocable,
       progressMessage: isSkill || config.isSkillMode ? 'loading' : 'running',
       // densable: userFacingName(){return D} where D keeps plugin prefix

@@ -19,6 +19,7 @@ import {
   listBuiltinFunctionHookPlugins,
   loadFunctionHooksModules,
 } from './functionHooksModules.js'
+import { ensurePluginToolRegistrarInstalled } from './pluginToolLoopbackRegistrar.js'
 
 // Track if hot reload subscription is set up
 let hotReloadSubscribed = false
@@ -36,9 +37,11 @@ function convertPluginHooksToMatchers(
     PreToolUse: [],
     PostToolUse: [],
     PostToolUseFailure: [],
+    PostToolBatch: [],
     PermissionDenied: [],
     Notification: [],
     UserPromptSubmit: [],
+    UserPromptExpansion: [],
     SessionStart: [],
     SessionEnd: [],
     Stop: [],
@@ -125,9 +128,11 @@ async function registerPluginHooksOnce(): Promise<void> {
     PreToolUse: [],
     PostToolUse: [],
     PostToolUseFailure: [],
+    PostToolBatch: [],
     PermissionDenied: [],
     Notification: [],
     UserPromptSubmit: [],
+    UserPromptExpansion: [],
     SessionStart: [],
     SessionEnd: [],
     Stop: [],
@@ -183,7 +188,11 @@ async function registerPluginHooksOnce(): Promise<void> {
   registerHookCallbacks(allPluginHooks)
   await loadFunctionHooksModules([
     ...listBuiltinFunctionHookPlugins(),
-    ...enabled.map(plugin => ({ name: plugin.name, path: plugin.path })),
+    ...enabled.map(plugin => ({
+      name: plugin.name,
+      path: plugin.path,
+      source: plugin.source,
+    })),
   ])
 
   const totalHooks = Object.values(allPluginHooks).reduce(
@@ -201,6 +210,8 @@ async function registerPluginHooksOnce(): Promise<void> {
  * existing registration object so Osn/Lsn can await and retry once.
  */
 export const loadPluginHooks = memoize(async (): Promise<void> => {
+  // densable YNo — install $.tool.register HTTP registrar once plugins load.
+  ensurePluginToolRegistrarInstalled()
   const reg = pluginHookRegistration
   const flight = registerPluginHooksOnce()
     .then(() => {

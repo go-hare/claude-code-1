@@ -3,20 +3,17 @@
  * stream-json trace, then URLs on matching non-error tool_results.
  */
 import {
+  EVAL_STUB_ARTIFACT_URL_PREFIX,
   OFFICIAL_ARTIFACT_TOOL_NAME,
   parseArtifactUrl,
+  parseEvalStubArtifactUrl,
 } from '../../artifactUrl.js'
 
-/** densable `XTe`. */
-export const EVAL_STUB_ARTIFACT_URL_PREFIX = 'eval-stub://artifact/'
+export { EVAL_STUB_ARTIFACT_URL_PREFIX, parseEvalStubArtifactUrl }
 
 /** densable `Bn` — stub payload directory names. */
 export const EVAL_STUB_SLUG_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-
-const STUB_URL_RE = new RegExp(
-  `^${EVAL_STUB_ARTIFACT_URL_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(${EVAL_STUB_SLUG_RE.source.slice(1, -1)})(?:[/?#]|$)`,
-)
 
 export type EvalArtifactPublish = {
   url: string
@@ -67,13 +64,6 @@ function toolResultUrl(event: unknown): string | undefined {
   if (!result || typeof result !== 'object') return undefined
   const url = (result as Record<string, unknown>).url
   return typeof url === 'string' ? url : undefined
-}
-
-/** densable `_$e` — stub slug from `eval-stub://artifact/<uuid>`. */
-export function parseEvalStubArtifactUrl(url: string): { slug: string } | null {
-  const match = url.match(STUB_URL_RE)
-  const slug = match?.[1]
-  return slug ? { slug } : null
 }
 
 /** densable `pp`. */
