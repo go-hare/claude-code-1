@@ -376,11 +376,15 @@ function TeammateDetailView({ teammate, teamName, onCancel }: TeammateDetailView
   const [teammateTasks, setTeammateTasks] = useState<Task[]>([]);
   useEffect(() => {
     let cancelled = false;
-    void listTasks(teamName).then(allTasks => {
-      if (cancelled) return;
-      // Filter tasks owned by this teammate (by agentId or name)
-      setTeammateTasks(allTasks.filter(task => task.owner === teammate.agentId || task.owner === teammate.name));
-    });
+    void listTasks(teamName)
+      .then(allTasks => {
+        if (cancelled) return;
+        // Filter tasks owned by this teammate (by agentId or name)
+        setTeammateTasks(allTasks.filter(task => task.owner === teammate.agentId || task.owner === teammate.name));
+      })
+      .catch(() => {
+        // Keep the last rendered list — same keep-previous as TasksV2 #k.
+      });
     return () => {
       cancelled = true;
     };

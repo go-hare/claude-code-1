@@ -394,6 +394,14 @@ describe('listTasks', () => {
     const subjects = tasks.map(t => t.subject).sort()
     expect(subjects).toEqual(['A', 'B'])
   })
+
+  test('throws on non-ENOENT readdir so TasksV2 can keep the previous snapshot', async () => {
+    const { writeFile } = await import('fs/promises')
+    const dir = getTasksDir('not-a-dir-list')
+    await mkdir(join(configDir, 'tasks'), { recursive: true })
+    await writeFile(dir, 'not a directory')
+    await expect(listTasks('not-a-dir-list')).rejects.toThrow()
+  })
 })
 
 // ---------------------------------------------------------------------------

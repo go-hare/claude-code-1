@@ -68,7 +68,16 @@ export function useTaskListWatcher({
       return
     }
 
-    const tasks = await listTasks(taskListId)
+    let tasks: Task[]
+    try {
+      tasks = await listTasks(taskListId)
+    } catch (e) {
+      logForDebugging(
+        `Task list read failed: ${e instanceof Error ? e.message : String(e)}`,
+        { level: 'warn' },
+      )
+      return
+    }
 
     // If we have a current task, check if it's been resolved
     if (currentTaskRef.current !== null) {

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { computeGlimmerIndex, computeShimmerSegments, SHIMMER_INTERVAL_MS } from '../bridge/bridgeStatusUtil.js';
 import { feature } from 'bun:bundle';
-import { getKairosActive, getUserMsgOptIn } from '../bootstrap/state.js';
+import { getKairosActive, getSessionId, getUserMsgOptIn } from '../bootstrap/state.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { count } from '../utils/array.js';
@@ -203,9 +203,13 @@ function SpinnerWithVerbInner({
     };
   }, [mode]);
 
+  // densable 2.1.289 Cn `st=y===void 0||y===Ve()` — Next:/todo chrome is main-session only.
+  const isMainSession = agentId === undefined || agentId === getSessionId();
   // Find the current in-progress task and next pending task
-  const currentTodo = tasksV2?.find(task => task.status !== 'pending' && task.status !== 'completed');
-  const nextTask = findNextPendingTask(tasksV2);
+  const currentTodo = isMainSession
+    ? tasksV2?.find(task => task.status !== 'pending' && task.status !== 'completed')
+    : undefined;
+  const nextTask = isMainSession ? findNextPendingTask(tasksV2) : undefined;
 
   // Use useState with initializer to pick a random verb once on mount
   const [randomVerb] = useState(() => sample(getSpinnerVerbs()));
@@ -409,7 +413,8 @@ function SpinnerWithVerbInner({
           leaderIdleText={leaderIsIdle ? 'Idle' : undefined}
           leaderTokenCount={leaderTokenCount}
         />
-      ) : showExpandedTodos && tasksV2 && tasksV2.length > 0 ? (
+      ) : null}
+      {isMainSession && showExpandedTodos && tasksV2 && tasksV2.length > 0 ? (
         <Box width="100%" flexDirection="column">
           <MessageResponse>
             <TaskListV2 tasks={tasksV2} />
@@ -419,6 +424,8 @@ function SpinnerWithVerbInner({
         // IMPORTANT: we need this width="100%" to avoid an Ink bug where the
         // tip gets duplicated over and over while the spinner is running if
         // the terminal is very small. TODO: fix this in Ink.
+        // densable 2.1.289 Cn: expanded todos XOR compacting XOR retry XOR Et.
+        // Teammate tree is a local extra and must not XOR Next: away.
         <Box width="100%" flexDirection="column">
           {budgetText && (
             <MessageResponse>
@@ -427,9 +434,9 @@ function SpinnerWithVerbInner({
           )}
           {(nextTask || effectiveTip) && (
             <MessageResponse>
-              <Text dimColor>
+              <Text dimColor wrap={nextTask ? 'truncate-end' : 'wrap'}>
                 {nextTask
-                  ? `Next: ${nextTask.subject}`
+                  ? `Next: ${nextTask.subject.replace(/\s+/g, ' ').trim()}`
                   : `${resolveSpinnerTipLabel(effectiveTip, spinnerTip, spinnerTipLabel)}: ${effectiveTip}`}
               </Text>
             </MessageResponse>

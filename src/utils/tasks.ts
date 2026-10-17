@@ -634,8 +634,13 @@ export async function listTasks(taskListId: string): Promise<Task[]> {
   let files: string[]
   try {
     files = await readdir(dir)
-  } catch {
-    return []
+  } catch (e) {
+    // Missing dir is empty. Any other IO error must throw so TasksV2 #k
+    // can keep the previous snapshot (densable 2.1.289 jMn e===null).
+    if (getErrnoCode(e) === 'ENOENT') {
+      return []
+    }
+    throw e
   }
   const taskIds = files
     .filter(f => f.endsWith('.json'))

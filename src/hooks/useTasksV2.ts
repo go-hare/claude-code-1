@@ -1,6 +1,8 @@
 import { type FSWatcher, watch } from 'fs'
 import { useEffect, useSyncExternalStore } from 'react'
 import { useAppState, useSetAppState } from '../state/AppState.js'
+import { logForDebugging } from '../utils/debug.js'
+import { errorMessage } from '../utils/errors.js'
 import { createSignal } from '../utils/signal.js'
 import type { Task } from '../utils/tasks.js'
 import {
@@ -115,12 +117,27 @@ class TasksV2Store {
     // Task list ID can change mid-session (TeamCreateTool sets
     // leaderTeamName) — point the watcher at the current dir.
     this.#rewatch(getTasksDir(taskListId))
-    const current = (await listTasks(taskListId)).filter(
-      t => !t.metadata?._internal,
-    )
-    this.#tasks = current
-
+    // densable 2.1.289 jMn #k: read throw → keep #c, log, arm poll. Do not
+    // treat failure as [] (that hides Next: until the next successful poll).
+    let listed: Task[] | null
+    try {
+      listed = await listTasks(taskListId)
+    } catch (e) {
+      logForDebugging(`Task list read failed: ${errorMessage(e)}`, {
+        level: 'warn',
+      })
+      listed = null
+    }
+    if (listed === null) {
+      if (this.#started) this.#armFallbackPoll()
+      return
+    }
+    // Unsubscribe can land while this read is in flight — keep the cache.
+    if (!this.#started) return
+    const current = listed.filter(t => !t.metadata?._internal)
     const hasIncomplete = current.some(t => t.status !== 'completed')
+    const changed = !tasksUnchanged(this.#tasks, current)
+    if (changed) this.#tasks = current
 
     if (hasIncomplete || current.length === 0) {
       // Has unresolved tasks (open/in_progress) or empty — reset hide state
@@ -135,7 +152,7 @@ class TasksV2Store {
       this.#hideTimer.unref()
     }
 
-    this.#notify()
+    if (changed) this.#notify()
 
     // Schedule fallback poll only when there are incomplete tasks that
     // need monitoring. When all tasks are completed (or there are none),
@@ -145,10 +162,16 @@ class TasksV2Store {
       clearTimeout(this.#pollTimer)
       this.#pollTimer = null
     }
-    if (hasIncomplete) {
-      this.#pollTimer = setTimeout(this.#debouncedFetch, FALLBACK_POLL_MS)
-      this.#pollTimer.unref()
+    if (hasIncomplete) this.#armFallbackPoll()
+  }
+
+  #armFallbackPoll(): void {
+    if (this.#pollTimer) {
+      clearTimeout(this.#pollTimer)
+      this.#pollTimer = null
     }
+    this.#pollTimer = setTimeout(this.#debouncedFetch, FALLBACK_POLL_MS)
+    this.#pollTimer.unref()
   }
 
   #onHideTimerFired(scheduledForTaskListId: string): void {
@@ -158,17 +181,23 @@ class TasksV2Store {
     const currentId = getTaskListId()
     if (currentId !== scheduledForTaskListId) return
     // Verify all tasks are still completed before clearing
-    void listTasks(currentId).then(async tasksToCheck => {
-      const allStillCompleted =
-        tasksToCheck.length > 0 &&
-        tasksToCheck.every(t => t.status === 'completed')
-      if (allStillCompleted) {
-        await resetTaskList(currentId)
-        this.#tasks = []
-        this.#hidden = true
-      }
-      this.#notify()
-    })
+    void listTasks(currentId)
+      .then(async tasksToCheck => {
+        const allStillCompleted =
+          tasksToCheck.length > 0 &&
+          tasksToCheck.every(t => t.status === 'completed')
+        if (allStillCompleted) {
+          await resetTaskList(currentId)
+          this.#tasks = []
+          this.#hidden = true
+        }
+        this.#notify()
+      })
+      .catch(e => {
+        logForDebugging(`Task list read failed: ${errorMessage(e)}`, {
+          level: 'warn',
+        })
+      })
   }
 
   #clearHideTimer(): void {
@@ -201,6 +230,36 @@ class TasksV2Store {
 let _store: TasksV2Store | null = null
 function getStore(): TasksV2Store {
   return (_store ??= new TasksV2Store())
+}
+
+/** densable 2.1.289 jMn `k` — skip notify when the visible fields did not change. */
+function tasksUnchanged(prev: Task[] | undefined, next: Task[]): boolean {
+  if (prev === undefined || prev.length !== next.length) return false
+  for (let i = 0; i < next.length; i++) {
+    const a = prev[i]!
+    const b = next[i]!
+    if (
+      a.id !== b.id ||
+      a.status !== b.status ||
+      a.subject !== b.subject ||
+      a.activeForm !== b.activeForm ||
+      a.owner !== b.owner ||
+      a.description !== b.description ||
+      !stringListUnchanged(a.blockedBy, b.blockedBy) ||
+      !stringListUnchanged(a.blocks, b.blocks)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function stringListUnchanged(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
 }
 
 // Stable no-ops for the disabled path so useSyncExternalStore doesn't
