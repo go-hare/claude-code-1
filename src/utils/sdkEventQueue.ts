@@ -150,6 +150,16 @@ type ModelFallbackSdkEvent = {
   content: string
 }
 
+/** densable xa / Vi — Stop-hook block-cap toast (system/notification). */
+type NotificationSdkEvent = {
+  type: 'system'
+  subtype: 'notification'
+  key: string
+  text: string
+  priority: string
+  color?: string
+}
+
 /**
  * densable 2.1.211 Zlr/BC — full live background-task set (REPLACE semantics).
  * Level signal; not an edge bookend. Host swaps its set for `tasks`.
@@ -207,6 +217,7 @@ export type SdkEvent =
   | TaskUpdatedSdkEvent
   | TaskSummarySdkEvent
   | ModelFallbackSdkEvent
+  | NotificationSdkEvent
   | BackgroundTasksChangedSdkEvent
   | SdkStatusEvent
   | ConversationResetSdkEvent

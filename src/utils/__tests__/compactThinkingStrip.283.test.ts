@@ -10,6 +10,8 @@ import {
   restoreSettingsMockWith,
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
+import type { ContentBlock } from '@anthropic-ai/sdk/resources/index.mjs'
+import type { AssistantMessage } from '../../types/message.js'
 import { createAssistantMessage } from '../messages.js'
 
 const settingsSnap = snapshotModuleExports(realSettings)
@@ -61,7 +63,14 @@ const thinkingMsg = () =>
       } as never,
       { type: 'text', text: 'hi' } as never,
     ],
-  })
+  }) as AssistantMessage & { message: { id: string; content: ContentBlock[] } }
+
+function contentBlocks(
+  msg: { message?: { content?: unknown } } | undefined,
+): ContentBlock[] {
+  const content = msg?.message?.content
+  return Array.isArray(content) ? (content as ContentBlock[]) : []
+}
 
 describe('densable 2.1.283 xPe / sdt compact thinking strip', () => {
   afterEach(() => {
@@ -196,11 +205,9 @@ describe('densable 2.1.283 xPe / sdt compact thinking strip', () => {
     ])
     expect(plan.get(a.message.id)).toBe(0)
     const stripped = applyThinkingStripPlanToMessages([a], plan)
-    expect(
-      (stripped[0] as typeof a).message.content.some(
-        b => b.type === 'thinking',
-      ),
-    ).toBe(false)
+    expect(contentBlocks(stripped[0]).some(b => b.type === 'thinking')).toBe(
+      false,
+    )
   })
 
   test('UD: advisor_stripped marks prior assistants', () => {
@@ -221,14 +228,14 @@ describe('densable 2.1.283 xPe / sdt compact thinking strip', () => {
         { type: 'text', text: 'hi' } as never,
       ],
     })
+    const advisorId = withAdvisor.message.id
+    expect(typeof advisorId).toBe('string')
     const stripped = stripAdvisorBlocksFromMessageIds(
       [withAdvisor],
-      new Set([withAdvisor.message.id]),
+      new Set([advisorId as string]),
     )
     expect(
-      (stripped[0] as typeof withAdvisor).message.content.some(
-        b => b.type === 'server_tool_use',
-      ),
+      contentBlocks(stripped[0]).some(b => b.type === 'server_tool_use'),
     ).toBe(false)
   })
 

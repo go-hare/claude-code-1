@@ -102,6 +102,7 @@ import {
   maybeResizeAndDownsampleImageBuffer,
 } from '../../utils/imageResizer.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
+import { mcpInfoSource } from '../../utils/plugins/toolDescribe.js'
 import {
   getBinaryBlobSavedMessage,
   getFormatDescription,
@@ -488,9 +489,11 @@ function wrapRemoteMcpFetch(
   // Gold: if(k) U=jZe(U,k); U=St(U,t); if(L) U=Gt(U,d).
   // Gt = Hr — per-request Ukn/Bkn/jkn on cli-owned configs (not Bt).
   fetch = wrapFetchWithTimeout(fetch)
-  if (firstPartyBag) fetch = wrapFirstPartyAutoAuthFetch(fetch, firstPartyBag)
+  if (firstPartyBag) {
+    fetch = wrapFirstPartyAutoAuthFetch(fetch, firstPartyBag) as FetchLike
+  }
   if (serverRef && isCliOwnedConfig(serverRef)) {
-    fetch = wrapCliOwnedFetch(fetch, serverRef)
+    fetch = wrapCliOwnedFetch(fetch as never, serverRef) as FetchLike
   }
   return fetch
 }
@@ -2832,6 +2835,8 @@ export const fetchToolsForClient = memoizeWithLRU(
             mcpInfo: {
               serverName: client.name,
               toolName: tool.name,
+              scope: client.config.scope,
+              source: mcpInfoSource(client.name, client.config),
               // Official org/admin ceiling from server config toolPermissions.
               // hasOwn: plain maps + prototype-key tool names must not leak
               // Object.prototype.constructor (Function) as a permission value.

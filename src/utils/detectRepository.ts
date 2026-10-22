@@ -86,6 +86,11 @@ export function getCachedRepository(): string | null {
   return `${parsed.owner}/${parsed.name}`
 }
 
+/** densable `Iar` — cached origin host for cwd, or null if unresolved. */
+export function getCachedRepositoryHost(): string | null {
+  return repositoryWithHostCache.get(getCwd())?.host ?? null
+}
+
 /** densable SEA `f8y` / `fTt` — owner/repo path segment. */
 const REPO_SLUG_SEGMENT_RE = /^[A-Za-z0-9._-]+$/
 

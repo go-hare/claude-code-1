@@ -480,10 +480,10 @@ export function buildThinkingStripPlanFromMessages(
   }
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
-    if (
-      msg?.type !== 'attachment' ||
-      msg.attachment.type !== 'thinking_stripped'
-    ) {
+    if (msg?.type !== 'attachment' || msg.attachment === undefined) {
+      continue
+    }
+    if (msg.attachment.type !== 'thinking_stripped') {
       continue
     }
     const from = thinkingStripPartialFrom(msg.attachment)
@@ -496,7 +496,8 @@ export function buildThinkingStripPlanFromMessages(
     for (let j = 0; j < start; j++) {
       const prior = messages[j]
       if (prior?.type === 'assistant') {
-        const id = prior.message.id
+        const id = prior.message?.id
+        if (typeof id !== 'string') continue
         countsBefore.set(
           id,
           (countsBefore.get(id) ?? 0) + thinkingBlockCount(prior),
@@ -506,7 +507,8 @@ export function buildThinkingStripPlanFromMessages(
     for (let j = start; j < i; j++) {
       const prior = messages[j]
       if (prior?.type !== 'assistant') continue
-      const id = prior.message.id
+      const id = prior.message?.id
+      if (typeof id !== 'string') continue
       keepMin(
         id,
         at !== undefined && id === from?.messageId
@@ -530,11 +532,13 @@ export function applyThinkingStripPlanToMessages<T extends Message>(
   let changed = false
   const next = messages.map(msg => {
     if (msg.type !== 'assistant') return msg
-    const index = plan.get(msg.message.id)
+    const id = msg.message?.id
+    if (typeof id !== 'string') return msg
+    const index = plan.get(id)
     if (index === undefined) return msg
-    const already = seen.get(msg.message.id) ?? 0
+    const already = seen.get(id) ?? 0
     const count = thinkingBlockCount(msg)
-    seen.set(msg.message.id, already + count)
+    seen.set(id, already + count)
     const stripped = stripThinkingBlocksFromAssistant(
       msg,
       Math.max(0, index - already),
@@ -547,10 +551,27 @@ export function applyThinkingStripPlanToMessages<T extends Message>(
 
 /** densable `jNn` @186789045 — `e.scope==="all"?void 0:e.from`. */
 function thinkingStripPartialFrom(att: {
-  scope?: string
-  from?: { messageId: string; thinkingIndex: number }
+  type?: string
+  [key: string]: unknown
 }): { messageId: string; thinkingIndex: number } | undefined {
-  return att.scope === 'all' ? undefined : att.from
+  if (att.scope === 'all') return undefined
+  const from = att.from
+  if (
+    typeof from !== 'object' ||
+    from === null ||
+    !('messageId' in from) ||
+    !('thinkingIndex' in from)
+  ) {
+    return undefined
+  }
+  const { messageId, thinkingIndex } = from as {
+    messageId: unknown
+    thinkingIndex: unknown
+  }
+  if (typeof messageId !== 'string' || typeof thinkingIndex !== 'number') {
+    return undefined
+  }
+  return { messageId, thinkingIndex }
 }
 
 /**
@@ -565,7 +586,7 @@ function findAssistantIndexForThinkingFrom(
   let seen = 0
   for (let i = 0; i < before; i++) {
     const msg = messages[i]
-    if (msg?.type === 'assistant' && msg.message.id === from.messageId) {
+    if (msg?.type === 'assistant' && msg.message?.id === from.messageId) {
       seen += thinkingBlockCount(msg)
       if (seen > from.thinkingIndex) return i
     }
@@ -592,7 +613,10 @@ export function carryThinkingStripFromSummarized(
     | undefined
   for (let g = 0; g < summarized.length; g++) {
     const h = summarized[g]
-    if (h?.type !== 'attachment' || h.attachment.type !== 'thinking_stripped') {
+    if (h?.type !== 'attachment' || h.attachment === undefined) {
+      continue
+    }
+    if (h.attachment.type !== 'thinking_stripped') {
       continue
     }
     const from = thinkingStripPartialFrom(h.attachment)
@@ -1544,7 +1568,13 @@ function densableLoCanonical(model: string): string {
  */
 function densableUnknownModelCapabilityDefault(): boolean {
   const provider = getAPIProvider()
-  return provider === 'firstParty' || provider === 'foundry'
+  return (
+    provider === 'firstParty' ||
+    provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
+    provider === 'foundry' ||
+    provider === 'mantle'
+  )
 }
 
 // TODO(inigo): add support for probing unknown models via API error detection

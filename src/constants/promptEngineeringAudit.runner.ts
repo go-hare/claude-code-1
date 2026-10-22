@@ -142,7 +142,10 @@ mock.module('@claude-code/builtin-tools/tools/AgentTool/constants.js', () => ({
 }))
 mock.module(
   '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js',
-  () => ({ isForkSubagentEnabled: () => false }),
+  () => ({
+    isForkSubagentProductEnabled: () => false,
+    isForkSubagentScriptCallEnabled: () => false,
+  }),
 )
 mock.module(
   '@claude-code/builtin-tools/tools/AgentTool/builtInAgents.js',

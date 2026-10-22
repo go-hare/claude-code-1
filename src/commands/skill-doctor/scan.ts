@@ -7,6 +7,7 @@
  */
 
 import { uniq } from '../../utils/array.js'
+import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { re } from '../../utils/plugins/escapeSafeText.js'
@@ -79,13 +80,19 @@ const DISUSE_STARTUPS = 10
 
 /**
  * densable `B`/`qbt` @194898866.
- * Product-cut: policy limits always allow transcript scan.
  */
 export function skillDoctorTranscriptScanAllowed(): {
   allowed: boolean
   reason?: string
 } {
-  return { allowed: true }
+  if (isPolicyAllowed('allow_skill_doctor_transcript_scan')) {
+    return { allowed: true }
+  }
+  return {
+    allowed: false,
+    reason:
+      'Not shown for HIPAA-regulated organizations: measured by scanning the session transcripts saved on this machine.',
+  }
 }
 
 /** densable `wrt` slice used when SkillTool budget did not emit a line. */
@@ -221,7 +228,7 @@ export async function scanSkillDoctor(
   // densable `xMn` → `included` then `RMn(included)` listing tokens
   const { mergeSkillToolCommands } = await import('../../commands.js')
   const mcpCommands = commands.filter(
-    cmd => cmd.source === 'mcp' && cmd.loadedFrom === 'mcp',
+    cmd => 'source' in cmd && cmd.source === 'mcp' && cmd.loadedFrom === 'mcp',
   )
   const { included: skillSet } = await mergeSkillToolCommands(
     mcpCommands,

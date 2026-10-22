@@ -48,7 +48,9 @@ describe('densable 2.1.289 REMOTE --mcp-config rewrite (mpn/NSn/nf?OEe)', () => 
     const ar = rewriteRemoteDynamicMcpConfig(HEARTHBOT_MCP_SERVER_NAME, source)
     expect(ar.scope).toBe('dynamic')
     expect(isCcrInjectedConfig(ar)).toBe(true)
-    expect(ar.bareElicitationCapability).toBe(true)
+    expect(
+      'bareElicitationCapability' in ar && ar.bareElicitationCapability,
+    ).toBe(true)
     expect(isCliOwnedConfig(ar)).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { SelectionState } from '@anthropic/ink/src/core/selection.js'
+import type { SelectionState } from '@anthropic/ink'
 import {
   messageHasUuid,
   messageSelectionRequestId,
@@ -88,9 +88,7 @@ describe('densable 2.1.289 ui.selection rowHolding helpers', () => {
       { requestId: 'b', first: 3, last: 5 },
     ]
     expect(requestIdContainingSpan({ first: 3, last: 4 }, rows)).toBe('b')
-    expect(
-      requestIdContainingSpan({ first: 2, last: 4 }, rows),
-    ).toBeUndefined()
+    expect(requestIdContainingSpan({ first: 2, last: 4 }, rows)).toBeUndefined()
   })
 
   test('requestIdHoldingSelection needs viewport containment', () => {

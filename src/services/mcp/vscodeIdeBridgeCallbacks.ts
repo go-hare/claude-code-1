@@ -23,6 +23,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { isFeedbackSurveyEnvDisabled } from 'src/utils/residualFinalEnvGates.js'
+import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 
 /** densable B8E — 60s debounce for survey appeared → lastShownTime. */
 const FEEDBACK_SURVEY_APPEARED_DEBOUNCE_MS = 60_000
@@ -152,7 +153,7 @@ export function isClaudeVscodeHostSession(
 function canAcceptProductFeedbackSurvey(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  // Product-cut: policy limits always allow product feedback.
+  if (!isPolicyAllowed('allow_product_feedback')) return false
   if (isFeedbackSurveyDisabled()) return false
   if (isFeedbackSurveyEnvDisabled(env)) return false
   return true

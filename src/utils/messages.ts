@@ -435,23 +435,128 @@ export function formatClassifierUnavailableDetail(
   return ''
 }
 
+/** densable DX — header value is milliseconds. */
+export function formatClassifierWaitDuration(ms: number): string {
+  if (ms < 120_000) {
+    const seconds = Math.max(1, Math.round(ms / 1000))
+    return `about ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`
+  }
+  const minutes = Math.round(ms / 60_000)
+  if (minutes < 60) return `about ${minutes} minutes`
+  if (minutes > 1440) return 'more than a day'
+  const hours = Math.round(minutes / 6) / 10
+  return `about ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+}
+
+/** densable V5 — parenthetical on the wait sentence only. */
+export function formatClassifierWaitDetail(
+  httpStatus?: number,
+  errorKind?: string,
+): string {
+  if (httpStatus === 429) return ' (rate-limited)'
+  if (httpStatus === 529) return ' (overloaded)'
+  if (httpStatus !== undefined && httpStatus >= 500 && httpStatus < 600) {
+    return ' (server error)'
+  }
+  if (
+    errorKind === 'wall_clock_timeout' ||
+    errorKind === 'connection_timeout' ||
+    errorKind === 'server_call_unavailable_timeout'
+  ) {
+    return ' (timed out)'
+  }
+  if (errorKind === 'connection_error') return ' (connection failed)'
+  if (errorKind === 'server_call_skipped') return ' (it skipped this action)'
+  if (errorKind === 'server_unsupported') {
+    return ' (this request is not covered)'
+  }
+  if (errorKind === 'server_thread_unsupported') {
+    return ' (the request was sent on a message thread, which it does not cover; the next one will not be)'
+  }
+  if (errorKind === 'server_stream_ended') {
+    return ' (the response ended before its verdict arrived)'
+  }
+  if (errorKind === 'server_call_unavailable_refused') {
+    return ' (a safeguard refused to let the check read this conversation)'
+  }
+  if (errorKind === 'server_call_unavailable_input_too_long') {
+    return ' (the conversation is too long for the check)'
+  }
+  for (const prefix of ['server_unavailable_', 'server_call_unavailable_']) {
+    if (errorKind?.startsWith(prefix)) {
+      const rest = errorKind.slice(prefix.length)
+      return rest === 'other' ? '' : ` (${rest.replaceAll('_', ' ')})`
+    }
+  }
+  if (errorKind === 'server_no_result') {
+    return ' (the server returned none for this action)'
+  }
+  if (errorKind === 'server_context_stale') {
+    return ' (the artifact changed while it was reviewed)'
+  }
+  if (errorKind === 'server_unrecognized_result') {
+    return ' (the server returned none)'
+  }
+  return ''
+}
+
+const CLASSIFIER_WAIT_NOTE =
+  'Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.'
+
+/** densable qdn when the API supplied a wait. kRr is 120000ms. */
+function buildClassifierToldToWaitMessage(
+  toolName: string,
+  classifierModel: string,
+  retryAfterMs: number,
+  httpStatus?: number,
+  errorKind?: string,
+): string {
+  const duration = formatClassifierWaitDuration(retryAfterMs)
+  const detail = formatClassifierWaitDetail(httpStatus, errorKind)
+  const lead =
+    `The API told auto mode's safety classifier (${classifierModel}) to wait ${duration} from now${detail}, so auto mode cannot determine the safety of ${toolName} until then. ` +
+    `This is not a judgment that the action is unsafe, so don't rework the action to get around it. `
+  if (retryAfterMs >= 120_000) {
+    return (
+      lead +
+      `You cannot wait this out inside the turn. Do not retry the action before then, and do not try any other action that needs auto mode's review: while the API still says to wait, each one is denied the same way, without being reviewed. Continue with work that needs no review. If there is none, stop and tell the user that auto mode has to wait ${duration} for the API and that they can try again after that. When the user next asks, you may try again. ` +
+      CLASSIFIER_WAIT_NOTE
+    )
+  }
+  return (
+    lead +
+    `Do not retry the action before then, and do not try any other action that needs auto mode's review: while the API still says to wait, each one is denied the same way, without being reviewed. Continue with work that needs no review, and try this action again once the wait is over. ` +
+    CLASSIFIER_WAIT_NOTE
+  )
+}
+
 /**
  * densable hUd — auto mode classifier temporarily unavailable (main path).
  * Tells the agent to wait and retry, and suggests working on other tasks.
- * Signature: (toolName, model, httpStatus?, errorKind?) — f6d detail empty in 216.
+ * A retryAfterMs from the API switches this to qdn's wait sentence.
  */
 export function buildClassifierUnavailableMessage(
   toolName: string,
   classifierModel: string,
   httpStatus?: number,
   errorKind?: string,
+  retryAfterMs?: number,
 ): string {
+  if (retryAfterMs !== undefined) {
+    return buildClassifierToldToWaitMessage(
+      toolName,
+      classifierModel,
+      retryAfterMs,
+      httpStatus,
+      errorKind,
+    )
+  }
   const detail = formatClassifierUnavailableDetail(httpStatus, errorKind)
   return (
     `${classifierModel} is temporarily unavailable${detail}, so auto mode cannot determine the safety of ${toolName} right now. ` +
     `Wait briefly and then try this action again. ` +
     `If it keeps failing, continue with other tasks that don't require this action and come back to it later. ` +
-    `Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.`
+    CLASSIFIER_WAIT_NOTE
   )
 }
 
@@ -7749,13 +7854,13 @@ export function buildAdvisorStripPlanFromMessages(
 ): AdvisorStripPlan {
   const marker = messages.findLastIndex(
     msg =>
-      msg.type === 'attachment' && msg.attachment.type === 'advisor_stripped',
+      msg.type === 'attachment' && msg.attachment?.type === 'advisor_stripped',
   )
   if (marker === -1) return new Set()
   const ids: AdvisorStripPlan = new Set()
   for (let i = 0; i < marker; i++) {
     const msg = messages[i]
-    if (msg?.type === 'assistant' && typeof msg.message.id === 'string') {
+    if (msg?.type === 'assistant' && typeof msg.message?.id === 'string') {
       ids.add(msg.message.id)
     }
   }
@@ -7772,7 +7877,8 @@ export function stripAdvisorBlocksFromMessageIds<
   let changed = false
   const result = messages.map(msg => {
     if (msg.type === 'api_system' || msg.type !== 'assistant') return msg
-    if (!ids.has(msg.message.id)) return msg
+    const id = msg.message?.id
+    if (typeof id !== 'string' || !ids.has(id)) return msg
     const content = Array.isArray(msg.message.content)
       ? msg.message.content
       : []
@@ -8360,7 +8466,9 @@ export function applyTurnStartOriginFraming(
       wrapPeerOriginText(raw, {
         midTurn: false,
         activityObservation: origin.activityObservation,
-        ...(origin.hostInjected && { hostInjected: true }),
+        ...(origin.hostInjected === true
+          ? { hostInjected: true as const }
+          : {}),
         lineage,
       })
   } else if (origin.kind === 'observer') {
@@ -8515,7 +8623,9 @@ export function wrapResumePromptOrigin(
       return wrapPeerOriginText(raw, {
         midTurn: true,
         activityObservation: origin.activityObservation,
-        ...(origin.hostInjected && { hostInjected: true }),
+        ...(origin.hostInjected === true
+          ? { hostInjected: true as const }
+          : {}),
         lineage,
       })
     }

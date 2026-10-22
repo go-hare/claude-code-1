@@ -156,7 +156,9 @@ export async function applyGoalClear(
   // densable vJe: SIe empty → null. Idle cancel is not in vJe (Wsv no-ops
   // once activeGoal is gone). Analog cancel-on-clear was extra.
   if (hooks.length === 0) return null
-  const condition = hooks[0]!.prompt
+  const first = hooks[0]!
+  const condition = 'prompt' in first ? first.prompt : null
+  if (condition === null) return null
   for (const hook of hooks) {
     removeSessionHook(context.setAppState, sessionId, 'Stop', hook)
   }

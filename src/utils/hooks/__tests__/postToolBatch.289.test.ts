@@ -78,6 +78,10 @@ describe('densable 2.1.289 PostToolBatch registry', () => {
     expect(query).toContain(
       '[end-turn] PostToolBatch block discarded (turn ended by',
     )
+    expect(query).toContain(
+      'densable command Stop / goal / TeammateIdle still run',
+    )
+    expect(query).toContain("return { reason: 'hook_stopped' }")
     expect(query).toContain('refreshMcpClients')
     expect(query).toContain('tengu_mcp_tools_refreshed_mid_turn')
 

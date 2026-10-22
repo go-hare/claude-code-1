@@ -37,7 +37,7 @@ export type RetryStatusStalled = {
 export type RetryStatus =
   | RetryStatusStalled
   | {
-      kind: 'error'
+      kind: 'error' | 'retrying'
       deadline: number
       attempt: number
       maxRetries: number

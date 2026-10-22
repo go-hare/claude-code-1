@@ -21,7 +21,7 @@ import { expandPath } from './path.js'
 import { mergePendingNestedMemoryTriggers } from './propagateNestedMemory.js'
 import { asStringArray, countCharInString } from './stringUtils.js'
 import { uniq } from './array.js'
-import { getFsImplementation } from './fsOperations.js'
+import { getFsImplementation, walkPermissionPaths } from './fsOperations.js'
 import { readdir, stat } from 'fs/promises'
 import type { IDESelection } from '../hooks/useIdeSelection.js'
 import { TODO_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TodoWriteTool/constants.js'
@@ -139,7 +139,10 @@ import {
   formatAgentLine,
   shouldInjectAgentListInMessages,
 } from '@claude-code/builtin-tools/tools/AgentTool/prompt.js'
-import { filterDeniedAgents } from './permissions/permissions.js'
+import {
+  filterDeniedAgents,
+  getRuleByContentsForToolName,
+} from './permissions/permissions.js'
 import { getSubscriptionType } from './auth.js'
 import { mcpInfoFromString } from '../services/mcp/mcpStringUtils.js'
 import {
@@ -1787,7 +1790,7 @@ export function getWorkflowKeywordAttachments(
     const { getInitialSettings } =
       require('./settings/settings.js') as typeof import('./settings/settings.js')
     const { hasUltracodeKeyword } =
-      require('./ultraplan/keyword.js') as typeof import('./ultraplan/keyword.js')
+      require('./workflowKeyword.js') as typeof import('./workflowKeyword.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     const settings = getInitialSettings()
@@ -4662,24 +4665,51 @@ export function getContextEfficiencyAttachment(
   return [{ type: 'context_efficiency' }]
 }
 
+function hasReadDenyRules(
+  toolPermissionContext: ToolPermissionContext,
+): boolean {
+  return (
+    getRuleByContentsForToolName(
+      toolPermissionContext,
+      FILE_READ_TOOL_NAME,
+      'deny',
+    ).size > 0
+  )
+}
+
 function isFileReadDenied(
   filePath: string,
   toolPermissionContext: ToolPermissionContext,
 ): boolean {
-  // densable IG: Vbe(e,n,[e]) — raw spelling only (FileRead walks via Ro/pathsToCheck).
-  const denyRule = matchingRuleForInput(
-    filePath,
-    toolPermissionContext,
-    'read',
-    'deny',
-  )
-  if (denyRule !== null) return true
-  // official isFileReadDenied restricted cwd lock @186213591
+  // densable IG raw spelling, then gold vge/wge: when any Read deny exists,
+  // walk symlink landings (bge) so IDE/open/@/changed-file attachments
+  // cannot leak a denied target through a link.
+  if (
+    matchingRuleForInput(filePath, toolPermissionContext, 'read', 'deny') !==
+    null
+  ) {
+    return true
+  }
   if (
     toolPermissionContext.restricted &&
     !pathInAllowedWorkingPath(filePath, toolPermissionContext)
   ) {
     return true
   }
-  return false
+  if (!hasReadDenyRules(toolPermissionContext)) {
+    return false
+  }
+  // densable vge: a failed symlink walk (bge → undefined) drops the
+  // attachment. An unresolved hop must not fall open to the raw spelling.
+  const walked = walkPermissionPaths(filePath)
+  if (walked.unresolved) return true
+  return walked.paths.some(
+    pathToCheck =>
+      matchingRuleForInput(
+        pathToCheck,
+        toolPermissionContext,
+        'read',
+        'deny',
+      ) !== null,
+  )
 }

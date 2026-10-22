@@ -50,7 +50,7 @@ describe('densable Pte source contract #32', () => {
     expect(src).toContain('parkMcpSettingsNeedsInput')
     expect(src).toContain('bgCommandNeedsPark')
     // enable/disable path before the gate
-    const enableIdx = src.indexOf("parts[0] === 'enable'")
+    const enableIdx = src.indexOf("action === 'enable' || action === 'disable'")
     const gateIdx = src.indexOf('isBgSessionWithoutTerminal()')
     expect(enableIdx).toBeGreaterThan(-1)
     expect(gateIdx).toBeGreaterThan(enableIdx)

@@ -193,6 +193,24 @@ export function resolveAutoCompactWindow(
   }
 }
 
+/**
+ * densable tBo — spinner slot while compacting.
+ * Null unless the resolved window source is experiment or clientdata and
+ * the configured window is below the model context window. QPe (the
+ * experiment table) is what makes those sources exist; this resolver
+ * returns neither today, so the hint stays empty and Next still shows.
+ */
+export function compactSpinnerHintText(model: string): string | null {
+  const resolved = resolveAutoCompactWindow(model)
+  if (resolved.source !== 'experiment' && resolved.source !== 'clientdata') {
+    return null
+  }
+  const contextWindow = getContextWindowForModel(model, getSdkBetas())
+  if (resolved.configured >= contextWindow) return null
+  const tokens = formatTokens(resolved.configured)
+  return `Compacting at auto window (${tokens} tokens) · /autocompact to configure`
+}
+
 export function describeAutoCompactWindowSource(
   resolved: ResolvedAutoCompactWindow,
 ): string {

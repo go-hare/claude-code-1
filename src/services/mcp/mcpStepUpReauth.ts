@@ -271,7 +271,7 @@ async function runMcpStepUpReauth(input: {
               ? `${prefix} If it doesn't open, use this link to the server's sign-in page: ${url}`
               : `${prefix} If it doesn't open, run /mcp to sign back in; its sign-in screen shows the link.`,
             'suggestion',
-          ),
+          ) as never,
         )
       },
       input.signal,
@@ -299,14 +299,15 @@ async function runMcpStepUpReauth(input: {
   }
 
   try {
-    await clearServerCache(input.serverName, input.config)
+    const scoped = input.config as unknown as ScopedMcpServerConfig
+    await clearServerCache(input.serverName, scoped)
     const reconnected = (await connectToServer(
       input.serverName,
-      input.config,
+      scoped,
     )) as MCPServerConnection
     const owner = wiring.connections()
     if (!stillHere() || owner === undefined) {
-      await clearServerCache(input.serverName, input.config).catch(
+      await clearServerCache(input.serverName, scoped).catch(
         (error: unknown) => {
           logMCPDebug(
             input.serverName,

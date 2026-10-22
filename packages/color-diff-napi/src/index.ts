@@ -20,6 +20,14 @@
 import { diffArrays } from 'diff'
 import hljs from 'highlight.js'
 import { basename, extname } from 'path'
+import { bindDefaultHighlightBudget, resolveHljsApi } from './highlightBound.js'
+
+export {
+  bindDefaultHighlightBudget,
+  bindHighlightBudget,
+  HighlightBoundError,
+  resolveHljsApi,
+} from './highlightBound.js'
 
 // Static import — createRequire(import.meta.url) fails in Bun --compile mode
 // because the resolved path points to the internal bunfs binary path where
@@ -33,6 +41,7 @@ function hljsApi(): HLJSApi {
   // in .default; under node CJS the module IS the API. Check at runtime.
   const mod = hljs as HLJSApi & { default?: HLJSApi }
   cachedHljs = 'default' in mod && mod.default ? mod.default : mod
+  bindDefaultHighlightBudget(resolveHljsApi(cachedHljs))
   return cachedHljs!
 }
 
@@ -629,16 +638,10 @@ function cachedHljsAst(lang: string, code: string): HljsNode | null {
   const key = lang + '\0' + code
   const hit = hlLineCache.get(key)
   if (hit !== undefined) return hit
-  let result
-  try {
-    result = hljsApi().highlight(code, {
-      language: lang,
-      ignoreIllegals: true,
-    })
-  } catch {
-    hlLineCache.set(key, null)
-    return null
-  }
+  const result = hljsApi().highlight(code, {
+    language: lang,
+    ignoreIllegals: true,
+  })
   const emitter = result._emitter || {}
   if (!hasRootNode(emitter)) {
     if (!loggedEmitterShapeError) {
@@ -671,7 +674,13 @@ function highlightLine(
   if (!state.lang) {
     return [[defaultStyle(theme), code]]
   }
-  const rootNode = cachedHljsAst(state.lang, code)
+  let rootNode: HljsNode | null
+  try {
+    rootNode = cachedHljsAst(state.lang, code)
+  } catch {
+    state.lang = null
+    return [[defaultStyle(theme), code]]
+  }
   if (!rootNode) {
     return [[defaultStyle(theme), code]]
   }

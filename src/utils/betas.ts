@@ -192,8 +192,7 @@ function isStructuredOutputsDeniedByModelFamily(canonical: string): boolean {
 }
 
 /**
- * densable y$ — firstParty || h$(anthropicAws) || foundry || mantle.
- * Local has no anthropicGoogleCloud enum; anthropicAws covers the live h$ arm.
+ * densable y$ — firstParty || h$(anthropicAws|anthropicGoogleCloud) || foundry || mantle.
  */
 export function providerSupportsStructuredOutputsCapability(
   provider: APIProvider = getAPIProvider(),
@@ -201,6 +200,7 @@ export function providerSupportsStructuredOutputsCapability(
   return (
     provider === 'firstParty' ||
     provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
     provider === 'foundry' ||
     provider === 'mantle'
   )
@@ -212,9 +212,7 @@ export function providerSupportsStructuredOutputsCapability(
  * y$ admits (client `G(e)` still routes anthropic.* foundation ids).
  * Bare getAPIProvider() ranks bedrock above mantle and falsely denies.
  */
-export function getStructuredOutputsAPIProvider(
-  _model?: string,
-): APIProvider {
+export function getStructuredOutputsAPIProvider(_model?: string): APIProvider {
   return getBedrockMantleOverrideProvider() ?? getAPIProvider()
 }
 

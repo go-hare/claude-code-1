@@ -61,10 +61,7 @@ export function isCommandImmediate(
     | {
         immediate?:
           | boolean
-          | ((
-              args: string,
-              presentation?: 'fullscreen' | 'inline',
-            ) => boolean)
+          | ((args: string, presentation?: 'fullscreen' | 'inline') => boolean)
       }
     | null
     | undefined,

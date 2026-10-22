@@ -150,7 +150,9 @@ describe('deniedModels densable 2.1.283', () => {
   test('Gu + ZO: no substitute when every family is denied', () => {
     policy = { deniedModels: ['opus', 'sonnet', 'haiku', 'fable'] }
     merged = {}
-    expect(stepDownBlockedDefaultModel('claude-opus-5-5', () => false)).toBeNull()
+    expect(
+      stepDownBlockedDefaultModel('claude-opus-5-5', () => false),
+    ).toBeNull()
     expect(
       formatDeniedModelsBlockMessage('claude-opus-5-5', 'start'),
     ).toContain("Claude Code can't start")

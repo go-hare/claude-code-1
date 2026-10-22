@@ -21,7 +21,8 @@ const providerEnv = [
 const savedProvider: Record<string, string | undefined> = {}
 
 afterEach(() => {
-  if (savedDisable === undefined) delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT
+  if (savedDisable === undefined)
+    delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT
   else process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT = savedDisable
   for (const key of providerEnv) {
     if (savedProvider[key] === undefined) delete process.env[key]

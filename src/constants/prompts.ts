@@ -52,7 +52,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/grow
 import { getEffectiveContextWindowSize } from '../services/compact/autoCompact.js'
 import { buildTotalTokensSystemPromptSection } from '../utils/totalTokensReminder.js'
 import { shouldUseGlobalCacheScope } from '../utils/betas.js'
-import { isForkSubagentEnabled } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
+import { isForkSubagentProductEnabled } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
 import {
   getActDontRederiveSection,
   getInvestigateFirstSection,
@@ -317,7 +317,7 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
 
 function getAgentToolSection(): string {
   // densable fgo
-  if (isForkSubagentEnabled()) {
+  if (isForkSubagentProductEnabled()) {
     return `Calling ${AGENT_TOOL_NAME} with subagent_type: "fork" creates a fork — it inherits your full conversation context, runs in the background, and keeps its tool output out of your context — so you can keep chatting with the user while it works. Reach for it when research or multi-step implementation work would otherwise fill your context with raw output you won't need again. Other subagent_type values start fresh agents with no context. **If you ARE the fork** — execute directly; do not re-delegate.`
   }
   return `Use the ${AGENT_TOOL_NAME} tool with specialized agents when the task at hand matches the agent's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but they should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing - if you delegate research to a subagent, do not also perform the same searches yourself.`
@@ -368,12 +368,12 @@ function getSessionSpecificGuidanceSection(
     getIsNonInteractiveSession()
       ? null
       : `If you need the user to run a shell command themselves (e.g., an interactive login like \`gcloud auth login\`), suggest they type \`! <command>\` in the prompt — the \`!\` prefix runs the command in this session so its output lands directly in the conversation.`,
-    // isForkSubagentEnabled() reads getIsNonInteractiveSession() — must be
-    // post-boundary or it fragments the static prefix on session type.
+    // Yne (Imo folds Ce unless env forces fork on). Kept post-boundary so
+    // a coordinator flip does not fragment the static prefix.
     hasAgentTool ? getAgentToolSection() : null,
     ...(hasAgentTool &&
     areExplorePlanAgentsEnabled() &&
-    !isForkSubagentEnabled()
+    !isForkSubagentProductEnabled()
       ? [
           `For broad codebase exploration or research that'll take more than ${EXPLORE_AGENT_MIN_QUERIES} queries, spawn ${AGENT_TOOL_NAME} with subagent_type=${EXPLORE_AGENT.agentType}. Otherwise use ${searchTools} directly.`,
         ]

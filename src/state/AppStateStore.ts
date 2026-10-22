@@ -42,9 +42,10 @@ import type { PipeIpcState } from '../utils/pipeTransport.js'
 import type { Store } from './store.js'
 
 /**
- * densable 2.1.289 AppState.liveReplicas. DualInk se/also never assign
+ * densable 2.1.289 AppState.liveReplicas. Official default state sets
  * workingCopyPath / settleFileChange / liveFileEnded / pushHeldSaves /
- * heldSavesExitCleanup (gold void 0). Structure is 1:1; do not invent hosts.
+ * heldSavesExitCleanup to void 0, and the 2.1.289 binary never reads them.
+ * Structure is 1:1; do not assign hosts.
  */
 export type LiveReplicasState = {
   replicas: Map<string, unknown>
@@ -133,7 +134,6 @@ export type FooterItem =
   | 'teams'
   | 'bridge'
   | 'companion'
-  | 'bg_agent'
 
 export type AppState = DeepImmutable<{
   settings: SettingsJson
@@ -167,9 +167,6 @@ export type AppState = DeepImmutable<{
   // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
   showTeammateMessagePreview?: boolean
   selectedIPAgentIndex: number
-  // Selection index for the bottom BackgroundAgentSelector.
-  // -1 = main, 0..N-1 = index into useBackgroundAgentTasks().
-  selectedBgAgentIndex: number
   // CoordinatorTaskPanel selection: -1 = pill, 0 = main, 1..N = agent rows.
   // AppState (not local) so the panel can read it directly without prop-drilling
   // through PromptInput → PromptInputFooter.
@@ -717,7 +714,6 @@ export function getDefaultAppState(): AppState {
     isBriefOnly: false,
     showTeammateMessagePreview: false,
     selectedIPAgentIndex: -1,
-    selectedBgAgentIndex: -1,
     coordinatorTaskIndex: -1,
     idleTeammatesExpanded: false,
     // densable J7t seed via isFocusViewActive.

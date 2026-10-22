@@ -32,6 +32,11 @@ export type PromptCommand = {
   progressMessage: string
   contentLength: number // Length of command content in characters (used for token estimation)
   /**
+   * densable createdBy — "dream-proposal" when frontmatter created_by or
+   * improved_by is that token. Feeds skill_created_by telemetry (sit/roe).
+   */
+  createdBy?: 'dream-proposal'
+  /**
    * densable contentHash — fingerprint of skill/command body for skill-watcher
    * change detection (JoS). Optional; missing treated as "".
    */

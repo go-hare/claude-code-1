@@ -16,12 +16,19 @@ export function validateUuid(maybeUuid: unknown): UUID | null {
   return uuidRegex.test(maybeUuid) ? (maybeUuid as UUID) : null
 }
 
+/** densable `r` / `o` — label already `[\w-]{1,63}`. */
+const AGENT_ID_LABEL_OK = /^[\w-]{1,63}$/
+
 /**
- * Generate a new agent ID with prefix for consistency with task IDs.
- * Format: a{label-}{16 hex chars}
- * Example: aa3f2c1b4d5e6f7a8, acompact-a3f2c1b4d5e6f7a8
+ * densable `Lg` — `a{label-}{16 hex}` or `a{16 hex}`.
+ * If the label fails `[\w-]{1,63}`, strip non-word/hyphen then slice 63.
+ * Hyphens stay (`fix-the-flaky` is already ok). Empty label → unlabeled.
  */
 export function createAgentId(label?: string): AgentId {
+  let tag = label
+  if (tag && !AGENT_ID_LABEL_OK.test(tag)) {
+    tag = tag.replace(/[^\w-]/g, '').slice(0, 63)
+  }
   const suffix = randomBytes(8).toString('hex')
-  return (label ? `a${label}-${suffix}` : `a${suffix}`) as AgentId
+  return (tag ? `a${tag}-${suffix}` : `a${suffix}`) as AgentId
 }

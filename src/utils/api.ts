@@ -72,6 +72,10 @@ import {
   shouldUseSimpleSystemPrompt,
 } from './simpleSystemPrompt.js'
 import { getToolSchemaCache } from './toolSchemaCache.js'
+import {
+  recordDeferral,
+  resolveToolDescription,
+} from './plugins/toolDescribe.js'
 import { windowsPathToPosixPath } from './windowsPaths.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
 
@@ -149,6 +153,12 @@ export async function toolToAPISchema(
     model?: string
     /** When true, mark this tool with defer_loading for tool search */
     deferLoading?: boolean
+    /** densable `enginePlacement` — `nls` `isDeferred` when `"deferred"`. */
+    enginePlacement?: string
+    /** densable `withoutToolDescribeHooks` — skip `nls` / `lFn`. */
+    withoutToolDescribeHooks?: boolean
+    /** densable `byValueListing` — skip `b8o` when set. */
+    byValueListing?: unknown
     cacheControl?: {
       type: 'ephemeral'
       scope?: 'global' | 'org'
@@ -168,9 +178,9 @@ export async function toolToAPISchema(
   // PR#25424). MCP tools also set inputJSONSchema but each has a stable schema,
   // so including it preserves their GB-flip cache stability.
   const cacheKey =
-    'inputJSONSchema' in tool && tool.inputJSONSchema
+    ('inputJSONSchema' in tool && tool.inputJSONSchema
       ? `${tool.name}:${jsonStringify(tool.inputJSONSchema)}`
-      : tool.name
+      : tool.name) + (process.env.CLAUDE_CODE_SIMPLE ? ':simple' : '')
   const cache = getToolSchemaCache()
   let base = cache.get(cacheKey)
   if (!base) {
@@ -198,22 +208,54 @@ export async function toolToAPISchema(
         : undefined
     const delegationCostsFirstText =
       delegationCostsFirst === true ? getDelegationCostsFirstText() : undefined
-    base = {
-      name: tool.name,
-      description: await tool.prompt({
-        getToolPermissionContext: options.getToolPermissionContext,
-        tools: options.tools,
-        agents: options.agents,
-        allowedAgentTypes: options.allowedAgentTypes,
-        model: options.model,
-        leanPrompt,
-        ...(agentTool && {
-          delegationCostsFirst,
-          ...(delegationCostsFirstText !== undefined && {
-            delegationCostsFirstText,
-          }),
+    const promptOpts = {
+      getToolPermissionContext: options.getToolPermissionContext,
+      tools: options.tools,
+      agents: options.agents,
+      allowedAgentTypes: options.allowedAgentTypes,
+      model: options.model,
+      leanPrompt,
+      ...(agentTool && {
+        delegationCostsFirst,
+        ...(delegationCostsFirstText !== undefined && {
+          delegationCostsFirstText,
         }),
       }),
+    }
+    // densable HJn / pIe — CLAUDE_CODE_SIMPLE is raw env, not isEnvTruthy.
+    // searchHint wins; otherwise the first trimmed line of the prompt.
+    let description: string
+    if (process.env.CLAUDE_CODE_SIMPLE) {
+      if (tool.searchHint) {
+        description = tool.searchHint
+      } else {
+        const full = await tool.prompt(promptOpts)
+        const first = full.split('\n', 1)[0]?.trim() ?? ''
+        description = first !== '' ? first : full
+      }
+    } else {
+      description = await tool.prompt(promptOpts)
+    }
+    // densable HJn → nls: `ao=withoutToolDescribeHooks?{description:On,
+    // isDeferred:fo}:await nls(e,On,fo)` then `b8o` when listing is live.
+    const fo =
+      options.enginePlacement === 'deferred' || Boolean(options.deferLoading)
+    const ao = options.withoutToolDescribeHooks
+      ? { description, isDeferred: fo }
+      : await resolveToolDescription(tool, description, fo)
+    if (
+      !options.withoutToolDescribeHooks &&
+      options.byValueListing === undefined
+    ) {
+      recordDeferral(
+        tool.name,
+        ao.isDeferred !== fo ? ao.isDeferred : undefined,
+      )
+    }
+    description = ao.description
+    base = {
+      name: tool.name,
+      description,
       input_schema,
     }
 

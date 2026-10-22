@@ -580,6 +580,7 @@ export function providerDefaultsEffortSupport(
   return (
     provider === 'firstParty' ||
     provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
     provider === 'foundry' ||
     provider === 'mantle'
   )

@@ -157,24 +157,33 @@ export const JETBRAINS_IDES = [
   'androidstudio',
 ]
 
-// Detect terminal type with fallbacks for all platforms
+/** densable `Tno` — Windsurf / Devin under VSCODE_GIT_ASKPASS_MAIN. */
+function isWindsurfAskpassPath(path: string): boolean {
+  const lower = path.toLowerCase()
+  return (
+    lower.includes('windsurf') ||
+    lower.includes('devin.app') ||
+    lower.includes('devin desktop') ||
+    lower.includes('devin-desktop') ||
+    /appdata[\\/]local[\\/](programs[\\/])?devin[\\/]/.test(lower)
+  )
+}
+
+/**
+ * densable `xo()` — terminal name for `a.terminal` / `d()`.
+ */
 function detectTerminal(): string | null {
   if (process.env.CURSOR_TRACE_ID) return 'cursor'
-  // Cursor and Windsurf under WSL have TERM_PROGRAM=vscode
-  if (process.env.VSCODE_GIT_ASKPASS_MAIN?.includes('cursor')) {
-    return 'cursor'
-  }
-  if (process.env.VSCODE_GIT_ASKPASS_MAIN?.includes('windsurf')) {
-    return 'windsurf'
-  }
-  if (process.env.VSCODE_GIT_ASKPASS_MAIN?.includes('antigravity')) {
-    return 'antigravity'
-  }
+  const askpass = process.env.VSCODE_GIT_ASKPASS_MAIN?.toLowerCase() ?? ''
+  if (askpass.includes('cursor')) return 'cursor'
+  if (isWindsurfAskpassPath(askpass)) return 'windsurf'
+  if (askpass.includes('antigravity')) return 'antigravity'
   const bundleId = process.env.__CFBundleIdentifier?.toLowerCase()
   if (bundleId?.includes('vscodium')) return 'codium'
-  if (bundleId?.includes('windsurf')) return 'windsurf'
+  if (bundleId?.includes('windsurf') || bundleId?.includes('devin')) {
+    return 'windsurf'
+  }
   if (bundleId?.includes('com.google.android.studio')) return 'androidstudio'
-  // Check for JetBrains IDEs in bundle ID
   if (bundleId) {
     for (const ide of JETBRAINS_IDES) {
       if (bundleId.includes(ide)) return ide
@@ -182,21 +191,13 @@ function detectTerminal(): string | null {
   }
 
   if (process.env.VisualStudioVersion) {
-    // This is desktop Visual Studio, not VS Code
     return 'visualstudio'
   }
 
-  // Check for JetBrains terminal on Linux/Windows
   if (process.env.TERMINAL_EMULATOR === 'JetBrains-JediTerm') {
-    // For macOS, bundle ID detection above already handles JetBrains IDEs
-    if (process.platform === 'darwin') return 'pycharm'
-
-    // For finegrained detection on Linux/Windows use envDynamic.getTerminalWithJetBrainsDetection()
     return 'pycharm'
   }
 
-  // Check for specific terminals by TERM before TERM_PROGRAM
-  // This handles cases where TERM and TERM_PROGRAM might be inconsistent
   if (process.env.TERM === 'xterm-ghostty') {
     return 'ghostty'
   }
@@ -205,6 +206,9 @@ function detectTerminal(): string | null {
   }
 
   if (process.env.TERM_PROGRAM) {
+    if (/^devin([ -]desktop)?$/i.test(process.env.TERM_PROGRAM)) {
+      return 'windsurf'
+    }
     return process.env.TERM_PROGRAM
   }
 

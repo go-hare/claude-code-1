@@ -456,6 +456,11 @@ export type YoloClassifierResult = {
    */
   errorKind?: string
   /**
+   * densable b1 — milliseconds from `x-cc-retry-after-too-long` on HTTP 429
+   * or 529. Absent when the API did not name a wait.
+   */
+  retryAfterMs?: number
+  /**
    * Official CLAUDE_CODE_AUTO_MODE_OUTCOME_CODES — machine-readable outcome
    * when outcomeVisibility is enabled.
    */

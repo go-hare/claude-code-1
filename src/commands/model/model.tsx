@@ -36,10 +36,7 @@ import {
   parseUserSpecifiedModel,
   renderDefaultModelSetting,
 } from '../../utils/model/model.js';
-import {
-  formatDeniedModelsBlockMessage,
-  isModelAllowed,
-} from '../../utils/model/modelAllowlist.js';
+import { formatDeniedModelsBlockMessage, isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { validateModel } from '../../utils/model/validateModel.js';
 

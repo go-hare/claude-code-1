@@ -12,6 +12,7 @@
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isPolicyAllowed } from '../services/policyLimits/index.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 export type WorkflowsAvailability = {
@@ -70,14 +71,18 @@ export function isWorkflowKeywordTriggerEnabled(
 
 /**
  * densable zBn — Wi("allow_workflows") via policy limits (fail open).
- * Product-cut: policy limits always allow workflows. Injectable via
- * input.policyAllow for tests.
+ * Injectable via input.policyAllow for tests.
  */
 function resolveWorkflowsPolicyAllow(
   policyAllow: boolean | null | undefined,
 ): boolean {
   if (policyAllow === false) return false
-  return true
+  if (policyAllow === true) return true
+  try {
+    return isPolicyAllowed('allow_workflows')
+  } catch {
+    return true
+  }
 }
 
 /**

@@ -1,14 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import type { Command, PromptCommand } from '../../../types/command.js'
+import type { CommandBase, PromptCommand } from '../../../types/command.js'
 import {
   parseStackedSlashCommands,
   shouldParseStackedSlash,
   STACKED_SLASH_LIMIT,
 } from '../stackedSlashExpansion.js'
 
-function prompt(name: string, extra?: Partial<PromptCommand>): Command {
+function prompt(
+  name: string,
+  extra?: Partial<PromptCommand> & Partial<CommandBase>,
+): CommandBase & PromptCommand {
   return {
     type: 'prompt',
     name,

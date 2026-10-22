@@ -17,6 +17,7 @@ type APIProvider =
   | 'vertex'
   | 'foundry'
   | 'anthropicAws'
+  | 'anthropicGoogleCloud'
   | 'mantle'
   | 'gateway'
   | 'openai'
@@ -51,6 +52,11 @@ function getAPIProviderTest(
     process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS === 'true'
   )
     return 'anthropicAws'
+  if (
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD === '1' ||
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD === 'true'
+  )
+    return 'anthropicGoogleCloud'
   if (
     process.env.CLAUDE_CODE_USE_MANTLE === '1' ||
     process.env.CLAUDE_CODE_USE_MANTLE === 'true'
@@ -124,6 +130,7 @@ describe('getAPIProvider', () => {
     'CLAUDE_CODE_USE_VERTEX',
     'CLAUDE_CODE_USE_FOUNDRY',
     'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+    'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
     'CLAUDE_CODE_USE_MANTLE',
     'CLAUDE_CODE_USE_OPENAI',
     'CLAUDE_CODE_USE_GROK',
@@ -199,6 +206,24 @@ describe('getAPIProvider', () => {
   test('returns "foundry" when CLAUDE_CODE_USE_FOUNDRY is set', () => {
     process.env.CLAUDE_CODE_USE_FOUNDRY = '1'
     expect(getAPIProviderTest({})).toBe('foundry')
+  })
+
+  test('returns "anthropicGoogleCloud" when CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD is set', () => {
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD = '1'
+    expect(getAPIProviderTest({})).toBe('anthropicGoogleCloud')
+  })
+
+  test('anthropicAws ranks above anthropicGoogleCloud', () => {
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_AWS = '1'
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD = '1'
+    expect(getAPIProviderTest({})).toBe('anthropicAws')
+  })
+
+  test('anthropicGoogleCloud ranks above mantle and vertex', () => {
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD = '1'
+    process.env.CLAUDE_CODE_USE_MANTLE = '1'
+    process.env.CLAUDE_CODE_USE_VERTEX = '1'
+    expect(getAPIProviderTest({})).toBe('anthropicGoogleCloud')
   })
 
   test('returns "openai" when CLAUDE_CODE_USE_OPENAI is set', () => {

@@ -203,25 +203,17 @@ function isAgentViewOffForFork(): boolean {
 const sessionForkCmd = (
   require('./commands/fork/index.js') as typeof import('./commands/fork/index.js')
 ).default
-// densable gwd — in-session xZr /fork (always available when agent view off;
-// runtime gate inside call for FORK_SUBAGENT, matching densable isEnabled:!fb only)
+// densable gwd — in-session xZr /fork. isEnabled is coordinator-only.
+// call() does not re-check Yne or headless.
 const inSessionForkCmd = (
   require('./commands/fork/inSessionIndex.js') as typeof import('./commands/fork/inSessionIndex.js')
 ).default
-// densable vwd — /subtask when agent view on
-// feature() only in ternary condition position (bun:bundle constraint)
-const forkSubagentPortable = (
-  require('./utils/forkSubagentGate.js') as typeof import('./utils/forkSubagentGate.js')
-).isForkSubagentEnabled()
+// densable vwd — /subtask is registered whenever the process loads commands.
+// isEnabled is coordinator-only (`!Ta`). Imo no longer consults USER_TYPE,
+// so the 2.1.232 ant gate must not hide the command.
 const subtaskCmdModule = (
-  feature('FORK_SUBAGENT')
-    ? true
-    : forkSubagentPortable
-)
-  ? (
-      require('./commands/subtask/index.js') as typeof import('./commands/subtask/index.js')
-    ).default
-  : null
+  require('./commands/subtask/index.js') as typeof import('./commands/subtask/index.js')
+).default
 const buddy = isBuddyEnabled()
   ? (
       require('./commands/buddy/index.js') as typeof import('./commands/buddy/index.js')

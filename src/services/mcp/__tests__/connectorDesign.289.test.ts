@@ -4,7 +4,7 @@ import {
   connectorDesignOmitsPersistentAllow,
   connectorDesignTokenlessWriteDeny,
   isFirstPartyDesignMcpServer,
-} from '../connectorDesign.ts'
+} from '../connectorDesign.js'
 
 const DESIGN_URL = 'https://api.anthropic.com/v1/design/mcp'
 const TOKENLESS_MESSAGE =

@@ -420,7 +420,10 @@ export function designGrantAskReachesUser(
 function permissionRequestHookPresent(context: DesignGrantContext): boolean {
   let snapshot: ReturnType<NonNullable<DesignGrantContext['getAppState']>>
   try {
-    snapshot = context.getAppState?.()
+    snapshot = context.getAppState?.() ?? {
+      toolPermissionContext: undefined,
+      sessionHooks: undefined,
+    }
   } catch {
     return true
   }

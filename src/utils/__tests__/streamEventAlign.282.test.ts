@@ -19,9 +19,9 @@ function call(
     hooks.onMessage ?? (() => {}),
     hooks.onUpdateLength ?? (() => {}),
     hooks.onSetStreamMode ?? (() => {}),
-    hooks.onStreamingToolUses ?? (() => {}),
+    (hooks.onStreamingToolUses ?? (() => {})) as never,
     undefined,
-    hooks.onStreamingThinking,
+    hooks.onStreamingThinking as never,
   )
 }
 

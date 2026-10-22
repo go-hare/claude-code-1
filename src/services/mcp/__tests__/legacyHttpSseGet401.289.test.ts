@@ -52,7 +52,7 @@ describe('densable 2.1.289 legacy HTTP+SSE GET 401', () => {
       })
     const orig = fetchImpl
     const wrapped = wrapLegacyHttpSseGet401Guard(async (url, init) => {
-      const res = await orig(url, init)
+      const res = await orig()
       Object.defineProperty(res, 'body', {
         value: {
           cancel: async () => {

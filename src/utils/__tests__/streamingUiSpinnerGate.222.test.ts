@@ -99,12 +99,13 @@ describe('densable zm streaming spinner gate', () => {
     )
     expect(reassert).not.toBeNull()
     const reassertBody = reassert![1]!
+    expect(reassertBody).toContain('this.isHandedOff || this.isUnmounted')
+    expect(reassertBody).toContain("this.modes.reassert('mouse')")
     expect(reassertBody).toContain(
-      'if (includeAltScreen) {\n      this.reenterAltScreen();\n      return;\n    }',
+      'if (includeAltScreen && this.altScreenActive)',
     )
-    const soft = reassertBody.split('if (includeAltScreen)')[1] ?? ''
-    const afterHard = soft.split('return;')[1] ?? ''
-    expect(afterHard).toContain('this.repaintAfterFocus()')
+    expect(reassertBody).toContain('this.reenterAltScreen()')
+    expect(reassertBody).not.toContain('this.repaintAfterFocus()')
   })
 
   test('clearStreamingText is densable cX-shaped (no setSalvage in clear body)', () => {

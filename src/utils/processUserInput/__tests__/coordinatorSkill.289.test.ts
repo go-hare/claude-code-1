@@ -50,7 +50,7 @@ describe('densable 2.1.289 Skill call / Le structure', () => {
 
   test('Le is IQ && !I; I loads body with empty allowedTools and no hooks', () => {
     expect(slashSource).toContain(
-      "resolveSkillExecutionContext(command, argsForDispatch, context) === 'fork'",
+      "resolveSkillExecutionContext(command, trailingArgs, context) === 'fork'",
     )
     expect(slashSource).toContain('!isCoordinatorMainThread(context.agentId)')
     expect(slashSource).toContain(
@@ -67,7 +67,7 @@ describe('densable 2.1.289 Skill call / Le structure', () => {
     expect(slashSource).toContain('resolveSkillEffort(command, args, context)')
     expect(slashSource).toContain('promptShellHandOff,')
     expect(slashSource).toContain(
-      'command.getEffort?.(argsForDispatch, context) === undefined',
+      'command.getEffort?.(trailingArgs, context) === undefined',
     )
     expect(slashSource).toContain('shouldSkipSkillAttachments(command)')
   })

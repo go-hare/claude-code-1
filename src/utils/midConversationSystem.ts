@@ -269,8 +269,7 @@ export function isApiSystemCacheControlEligible(
   provider: APIProvider = getAPIProvider(),
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  // FF() = Dzo() && !dje(); dje checked by caller. Dzo = firstParty|anthropicAws|foundry
-  // (SEA also VJ anthropicGoogleCloud — tip has no such provider; invent-ban).
+  // FF() = Dzo() && !dje(); dje checked by caller. Dzo = firstParty|h$|foundry.
   if (
     isExperimentalApiSystemCacheProvider(provider) &&
     isApiSystemCacheBaseUrlEligibleRxt(provider, env) &&
@@ -281,7 +280,8 @@ export function isApiSystemCacheControlEligible(
   if (
     (provider === 'bedrock' ||
       provider === 'vertex' ||
-      provider === 'mantle') &&
+      provider === 'mantle' ||
+      provider === 'anthropicGoogleCloud') &&
     isCloudProviderDefaultBaseUrlUnset(provider, env)
   ) {
     return true
@@ -333,7 +333,7 @@ function isApiSystemCacheHostEligibleH2m(
 
 /** SEA rzi */
 function isCloudProviderDefaultBaseUrlUnset(
-  provider: 'bedrock' | 'vertex' | 'mantle',
+  provider: 'bedrock' | 'vertex' | 'mantle' | 'anthropicGoogleCloud',
   env: NodeJS.ProcessEnv,
 ): boolean {
   switch (provider) {
@@ -343,6 +343,8 @@ function isCloudProviderDefaultBaseUrlUnset(
       return env.ANTHROPIC_VERTEX_BASE_URL === undefined
     case 'mantle':
       return env.ANTHROPIC_BEDROCK_MANTLE_BASE_URL === undefined
+    case 'anthropicGoogleCloud':
+      return env.ANTHROPIC_GOOGLE_CLOUD_BASE_URL === undefined
   }
 }
 

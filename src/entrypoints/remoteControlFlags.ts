@@ -153,7 +153,15 @@ export async function refuseRemoteControlIneligible(
   if (versionError) {
     exitWithError(versionError)
   }
-  // Product-cut: policy limits always allow remote control.
+  const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import(
+    '../services/policyLimits/index.js'
+  )
+  await waitForPolicyLimitsToLoad()
+  if (!isRemotePolicyAllowed('allow_remote_control')) {
+    exitWithError(
+      "Error: Remote Control is disabled by your organization's policy.",
+    )
+  }
   return p
 }
 

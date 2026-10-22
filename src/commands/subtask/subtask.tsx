@@ -1,4 +1,4 @@
-import { isForkSubagentEnabled, isInForkChild } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js';
+import { isInForkChild } from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js';
 import { FORK_GLYPH } from '../../constants/figures.js';
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js';
 import { logForDebugging } from '../../utils/debug.js';
@@ -13,21 +13,13 @@ import { launchInSessionForkAgent } from '../fork/launchInSessionForkAgent.js';
  * densable:
  *   o = await xZr(...); if (!o) error; else toast `${KW} forked ${o.name} (${o.agentId.slice(-4)})`
  *
- * AgentTool fork path: omit subagent_type while isForkSubagentEnabled().
+ * AgentTool fork path: `subagent_type: fork` (gold aIt B1). Call does not re-check Yne.
  */
 export async function call(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,
   args: string,
 ): Promise<null> {
-  if (!isForkSubagentEnabled()) {
-    onDone(
-      'Subtask (fork worker) is not available. Enable with FEATURE_FORK_SUBAGENT=1 or CLAUDE_CODE_FORK_SUBAGENT=1 (interactive session, not coordinator mode).',
-      { display: 'system' },
-    );
-    return null;
-  }
-
   // densable s$y / xZr: coordinator → branch hint
   if (isCoordinatorMode()) {
     onDone('Subtasks are not available in coordinator sessions. Use /branch instead.', {

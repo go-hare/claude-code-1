@@ -299,15 +299,16 @@ describe('goalIdleCheckin densable 2.1.236 (#25)', () => {
       activeGoal: goal({ condition: 'ship tests' }),
       sessionHooks: new Map(),
     }
+    const setAppState = (updater: (prev: AppState) => AppState): void => {
+      state = updater(state as unknown as AppState) as typeof state
+    }
     const context = {
       getAppState: () => state as unknown as AppState,
-      setAppState: (updater: (prev: AppState) => AppState): void => {
-        state = updater(state as unknown as AppState) as typeof state
-      },
+      setAppState,
       setMessages: () => {},
       agentId: 'goal-clear-test-session',
     } as never
-    addSessionHook(context.setAppState, getSessionId(), 'Stop', '', {
+    addSessionHook(setAppState, getSessionId(), 'Stop', '', {
       type: 'prompt',
       prompt: 'ship tests',
     })

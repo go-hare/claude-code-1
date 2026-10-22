@@ -8,6 +8,10 @@ import type { AttributedCounter } from '../bootstrap/state.js'
 import { getSessionCounter, setMeter } from '../bootstrap/state.js'
 import { shutdownLspServerManager } from '../services/lsp/manager.js'
 import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.js'
+import {
+  initializePolicyLimitsLoadingPromise,
+  isPolicyLimitsEligible,
+} from '../services/policyLimits/index.js'
 import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
@@ -49,7 +53,19 @@ import { setShellIfWindows } from '../utils/windowsPaths.js'
 import { initSentry } from '../utils/sentry.js'
 import { initUser } from '../utils/user.js'
 import { initLangfuse, shutdownLangfuse } from '../services/langfuse/index.js'
-import { setAppCallbacks, setThemeConfigCallbacks } from '@anthropic/ink'
+import {
+  setAppCallbacks,
+  setThemeConfigCallbacks,
+  subscribeSystemTheme,
+} from '@anthropic/ink'
+import { setCachedSystemTheme } from '../utils/systemTheme.js'
+
+// densable Ns()=Ht.of(U().host) and gbo k("tengu_event_loop_stall",!1) live
+// inside Ink. Do not bind host or GB after load.
+
+// Ink owns the OSC 11 cache. Mirror it into src so resolveThemeSetting('auto')
+// sees the same value ThemeProvider paints.
+subscribeSystemTheme(setCachedSystemTheme)
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 
@@ -184,6 +200,10 @@ export const init = memoize(async (): Promise<void> => {
 
     // Detect GitHub repository asynchronously (populates cache for gitDiff PR linking)
     void detectCurrentRepository()
+
+    if (isPolicyLimitsEligible()) {
+      initializePolicyLimitsLoadingPromise()
+    }
 
     // Record the first start time
     recordFirstStartTime()

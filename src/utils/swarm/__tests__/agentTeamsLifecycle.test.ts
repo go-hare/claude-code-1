@@ -240,10 +240,14 @@ describe('Agent Teams lifecycle', () => {
       const task = await TaskCreateTool.call(
         { subject: 'Check lifecycle', description: 'Verify team task flow' },
         context,
+        undefined as never,
+        undefined as never,
       )
       await TaskUpdateTool.call(
         { taskId: task.data.task.id, owner: 'worker' },
         context,
+        undefined as never,
+        undefined as never,
       )
 
       const message = await SendMessageTool.call(

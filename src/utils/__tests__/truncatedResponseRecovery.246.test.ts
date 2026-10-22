@@ -33,6 +33,8 @@ describe('#55 GJn truncated recovery (2.1.246)', () => {
     expect(query).toContain('tengu_truncated_response_recovery')
     expect(query).toContain('truncated_response_recovery')
     expect(query).toContain('cut off mid-stream')
+    expect(query).toContain('Write the complete response again from the start')
+    expect(query).toContain("family === 'subagent'")
     expect(query).toContain('MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3')
     expect(transitions).toContain('truncated_response_recovery')
     expect(messages).toContain('truncatedAfterOutput')
@@ -54,6 +56,16 @@ describe('#55 GJn truncated recovery (2.1.246)', () => {
     // densable fl — spinner recovering bag on max_output_tokens_recovery continue
     expect(query).toContain('announceOutputLimitRecovery')
     expect(query).toContain('setOutputLimitRecovery')
+    // densable ap(): stream withhold + exhausted yield h.
+    expect(query).toContain('truncatedAfterOutput:')
+    expect(query).toContain('isTruncatedAfterOutputRecovery(')
+    const truncIdx = query.indexOf("reason: 'truncated_response_recovery'")
+    const exhaustedSlice = query.slice(
+      truncIdx,
+      query.indexOf('const rawStopReason', truncIdx),
+    )
+    expect(exhaustedSlice).toContain('yield lastMessage')
+    expect(query).not.toContain('No yield here, unlike the max_output_tokens')
   })
 
   test('ae / replacesSpan / Ze pairing are official #55', () => {

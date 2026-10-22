@@ -45,6 +45,30 @@ describe('parseSkillFrontmatterFields background (densable 2.1.218 #34)', () => 
     ).toBe(false)
   })
 
+  test('created_by and improved_by dream-proposal set createdBy', () => {
+    expect(
+      parseSkillFrontmatterFields(
+        { description: 'd', created_by: 'dream-proposal' },
+        'body',
+        'dream',
+      ).createdBy,
+    ).toBe('dream-proposal')
+    expect(
+      parseSkillFrontmatterFields(
+        { description: 'd', improved_by: 'dream-proposal' },
+        'body',
+        'dream',
+      ).createdBy,
+    ).toBe('dream-proposal')
+    expect(
+      parseSkillFrontmatterFields(
+        { description: 'd', created_by: 'user' },
+        'body',
+        'other',
+      ).createdBy,
+    ).toBeUndefined()
+  })
+
   test('inline context leaves background undefined when omitted', () => {
     const parsed = parseSkillFrontmatterFields(
       { description: 'd' },

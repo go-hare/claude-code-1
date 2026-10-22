@@ -48,40 +48,36 @@ describe('/skill-doctor densable 2.1.283 (q0e / Nae / JP / fqt / DZr / a0e)', ()
   })
 
   test('HIPAA week-token policy key is allow_skill_doctor_transcript_scan', () => {
-    expect(skillDoctorTranscriptScanAllowed()).toEqual({ allowed: true })
-    expect(
-      existsSync(join(ROOT, 'src/services/policyLimits/index.ts')),
-    ).toBe(false)
-  })
-
-  test('qbt: product-cut always allows transcript scan', () => {
+    expect(existsSync(join(ROOT, 'src/services/policyLimits/index.ts'))).toBe(
+      true,
+    )
     const src = readFileSync(
       join(ROOT, 'src/commands/skill-doctor/scan.ts'),
       'utf8',
     )
-    expect(src).toContain('Product-cut: policy limits always allow transcript scan')
-    expect(src).toContain('return { allowed: true }')
-    expect(src).not.toContain('services/policyLimits')
-    expect(src).not.toContain('getPolicyDenyKind(')
-    expect(src).not.toContain('isPolicyAllowed(')
+    expect(src).toContain(
+      "isPolicyAllowed('allow_skill_doctor_transcript_scan')",
+    )
   })
 
-  test('qbt: leftover host mutations cannot deny transcript scan after product-cut', () => {
+  test('qbt: denied restriction blocks transcript scan', () => {
     const host = leftoverPolicyLimitsHost()
     const prevCache = host.sessionCache
     const prevTaints = host.complianceTaints
     const prevHinted = host.hintedTaints
+    const prevEligible = host.sessionAttributed
     try {
-      host.complianceTaints = ['hipaa']
+      host.complianceTaints = []
       host.hintedTaints = []
       host.sessionCache = {
         allow_skill_doctor_transcript_scan: { allowed: false },
       }
-      expect(skillDoctorTranscriptScanAllowed()).toEqual({ allowed: true })
+      expect(skillDoctorTranscriptScanAllowed().allowed).toBe(false)
     } finally {
       host.sessionCache = prevCache
       host.complianceTaints = prevTaints
       host.hintedTaints = prevHinted
+      host.sessionAttributed = prevEligible
     }
   })
 
@@ -140,7 +136,7 @@ describe('/skill-doctor densable 2.1.283 (q0e / Nae / JP / fqt / DZr / a0e)', ()
       join(ROOT, 'src/commands/skill-doctor/scan.ts'),
       'utf8',
     )
-    expect(src).toContain("gated by HIPAA `qbt`")
+    expect(src).toContain('gated by HIPAA `qbt`')
     expect(src).toContain('weekGate.allowed')
     expect(src).toContain('scanSkillWeekTokens(context.storageV5)')
     expect(src).toContain("SkillDoctorStageError('scan_failed'")

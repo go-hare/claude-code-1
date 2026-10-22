@@ -336,4 +336,5 @@ export async function deleteDesignConsent(
   if (state) {
     await writeFetchedConsentBit(state, DESIGN_CONSENT_BIT, false)
   }
+  seedDesignConsentCache(false)
 }

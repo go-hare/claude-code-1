@@ -18,7 +18,6 @@ function key(partial: Partial<ParsedKey> & { sequence: string }): ParsedKey {
     option: false,
     super: false,
     raw: partial.sequence,
-    isPasted: false,
     ...partial,
   }
 }

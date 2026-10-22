@@ -419,6 +419,7 @@ export function buildAPIProviderProperties(): Property[] {
       vertex: 'Google Vertex AI',
       foundry: 'Microsoft Foundry',
       anthropicAws: 'Anthropic on AWS',
+      anthropicGoogleCloud: 'Claude Platform on Google Cloud',
       mantle: 'Amazon Bedrock Mantle',
       gateway: 'Cloud gateway',
       gemini: 'Gemini API',
@@ -553,6 +554,37 @@ export function buildAPIProviderProperties(): Property[] {
     if (shouldSkipAnthropicAwsAuth()) {
       properties.push({
         value: 'Claude Platform on AWS auth skipped',
+      });
+    }
+  } else if (apiProvider === 'anthropicGoogleCloud') {
+    const agcBase = process.env.ANTHROPIC_GOOGLE_CLOUD_BASE_URL;
+    if (agcBase) {
+      properties.push({
+        label: 'Claude Platform on Google Cloud base URL',
+        value: agcBase,
+      });
+    }
+    const agcWorkspace = process.env.ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID;
+    if (agcWorkspace) {
+      properties.push({
+        label: 'Workspace ID',
+        value: agcWorkspace,
+      });
+    }
+    const agcProject = process.env.ANTHROPIC_GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+    if (agcProject) {
+      properties.push({
+        label: 'GCP project',
+        value: agcProject,
+      });
+    }
+    properties.push({
+      label: 'GCP location',
+      value: process.env.ANTHROPIC_GOOGLE_CLOUD_LOCATION || 'global',
+    });
+    if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH)) {
+      properties.push({
+        value: 'Claude Platform on Google Cloud auth skipped',
       });
     }
   } else if (apiProvider === 'gateway') {

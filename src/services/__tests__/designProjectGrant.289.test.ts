@@ -61,10 +61,10 @@ const {
   seedDesignGrantProbe,
   noteDesignProjectMembershipChange,
   writeDesignConsentBit,
-} = await import('../designProjectGrant.ts')
-const { ToolStateSlots } = await import('../../utils/toolState.ts')
+} = await import('../designProjectGrant.js')
+const { ToolStateSlots } = await import('../../utils/toolState.js')
 const { applyConnectorDesignMembership, connectorDesignTokenlessWriteDeny } =
-  await import('../mcp/connectorDesign.ts')
+  await import('../mcp/connectorDesign.js')
 
 let sessionSlots: InstanceType<typeof ToolStateSlots> | undefined
 
@@ -73,12 +73,12 @@ function session() {
   return designSessionState({ toolState: sessionSlots })
 }
 const { deleteDesignConsent, postDesignConsent, seedDesignConsentCache } =
-  await import('../designConsent.ts')
+  await import('../designConsent.js')
 const { callDesignConsent } = await import(
-  '../../commands/design-consent/call.ts'
+  '../../commands/design-consent/call.js'
 )
 const { ClaudeDesignTool } = await import(
-  '../../../packages/builtin-tools/src/tools/ClaudeDesignTool/ClaudeDesignTool.ts'
+  '../../../packages/builtin-tools/src/tools/ClaudeDesignTool/ClaudeDesignTool.js'
 )
 
 function mainContext() {
@@ -174,7 +174,7 @@ describe('gold 2.1.289 design project grant', () => {
     seedDesignGrantProbe('unavailable')
     const other = new ToolStateSlots()
     const decision = await ClaudeDesignTool.checkPermissions!(writeInput, {
-      ...mainContext(),
+      ...(mainContext() as object),
       toolState: other,
     } as never)
     expect(decision.behavior).toBe('deny')

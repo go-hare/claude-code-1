@@ -13,6 +13,7 @@ const CATALOG_PROVIDER_KEY: Partial<Record<APIProvider, string>> = {
   vertex: 'vertex',
   foundry: 'foundry',
   anthropicAws: 'anthropic_aws',
+  anthropicGoogleCloud: 'anthropic_google_cloud',
   mantle: 'mantle',
   gateway: 'gateway',
 }

@@ -8,6 +8,11 @@ import { extname } from 'path'
 // Static import — dynamic import('highlight.js') fails in Bun --compile mode
 // because module resolution points to the internal bunfs binary path.
 import hljs from 'highlight.js'
+import {
+  bindDefaultHighlightBudget,
+  HighlightBoundError,
+  resolveHljsApi,
+} from 'color-diff-napi'
 
 export type CliHighlight = {
   highlight: typeof import('cli-highlight').highlight
@@ -55,6 +60,8 @@ export function stripDensableRemovedHljsLanguages(engine: HljsLike): void {
 
 // Match SEA at import time so getLanguageName / direct hljs readers agree.
 stripDensableRemovedHljsLanguages(hljs as HljsLike)
+// densable 2.1.289 `Se` — same hljs singleton ColorFile binds.
+bindDefaultHighlightBudget(resolveHljsApi(hljs))
 
 // One promise shared by Fallback.tsx, markdown.ts, events.ts, getLanguageName.
 let cliHighlightPromise: Promise<CliHighlight | null> | undefined
@@ -74,6 +81,7 @@ async function loadCliHighlight(): Promise<CliHighlight | null> {
     // Re-strip in case another import re-registered (or cli-highlight
     // resolved a separate hljs copy that we cannot see — still lock ours).
     stripDensableRemovedHljsLanguages(hljsMod)
+    bindDefaultHighlightBudget(resolveHljsApi(hljsMod))
     loadedGetLanguage = hljsMod.getLanguage ?? hljsMod.default?.getLanguage
     const supportsLanguage = (name: string): boolean => {
       const id = name.toLowerCase()
@@ -90,17 +98,24 @@ async function loadCliHighlight(): Promise<CliHighlight | null> {
                 (options as { language?: string }).language ?? '',
               ).toLowerCase()
             : ''
-        if (
-          lang &&
-          (DENSABLE_REMOVED_HLJS_LANGUAGES as readonly string[]).includes(lang)
-        ) {
-          // densable: no grammar → plain text (cli-highlight without language)
-          return cliHighlight.highlight(code, {
-            ...options,
-            language: undefined,
-          })
+        try {
+          if (
+            lang &&
+            (DENSABLE_REMOVED_HLJS_LANGUAGES as readonly string[]).includes(
+              lang,
+            )
+          ) {
+            // densable: no grammar → plain text (cli-highlight without language)
+            return cliHighlight.highlight(code, {
+              ...options,
+              language: undefined,
+            })
+          }
+          return cliHighlight.highlight(code, options)
+        } catch (err) {
+          if (err instanceof HighlightBoundError) return code
+          throw err
         }
-        return cliHighlight.highlight(code, options)
       },
       supportsLanguage,
     }

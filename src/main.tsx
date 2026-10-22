@@ -74,6 +74,7 @@ import {
 } from './services/api/filesApi.js';
 import { prefetchPassesEligibility } from './services/api/referral.js';
 import type { McpSdkServerConfig, McpServerConfig, ScopedMcpServerConfig } from './services/mcp/types.js';
+import { isRemotePolicyAllowed, loadPolicyLimits, waitForPolicyLimitsToLoad } from './services/policyLimits/index.js';
 import type { ToolInputJSONSchema } from './Tool.js';
 import {
   createSyntheticOutputTool,
@@ -1420,6 +1421,8 @@ async function run(): Promise<CommanderCommand> {
 
     runMigrations();
     profileCheckpoint('preAction_after_migrations');
+
+    void loadPolicyLimits();
 
     profileCheckpoint('preAction_after_remote_settings');
 
@@ -4554,7 +4557,6 @@ async function run(): Promise<CommanderCommand> {
         paneHoldsToasts: false,
         showTeammateMessagePreview: isAgentSwarmsEnabled() ? false : undefined,
         selectedIPAgentIndex: -1,
-        selectedBgAgentIndex: -1,
         coordinatorTaskIndex: -1,
         // densable idleTeammatesExpanded — G7 idle_summary collapse (cIa=3).
         idleTeammatesExpanded: false,
@@ -5189,7 +5191,14 @@ async function run(): Promise<CommanderCommand> {
 
         // --remote and --teleport both create/resume Claude Code Web (CCR) sessions.
         // Remote Control (--rc) is a separate feature gated in initReplBridge.ts.
-        // Product-cut: policy limits always allow remote sessions.
+        if (remote !== null || teleport) {
+          await waitForPolicyLimitsToLoad();
+          if (!isRemotePolicyAllowed('allow_remote_sessions')) {
+            return await exitWithError(root, "Error: Remote sessions are disabled by your organization's policy.", () =>
+              gracefulShutdown(1),
+            );
+          }
+        }
 
         if (remote !== null) {
           // densable interactive `--cloud` / `--remote` @192151632

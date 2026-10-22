@@ -10,7 +10,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 describe('densable 2.1.289 wrapable unique-English 1–2', () => {
   test('worker Scope fan-out bullet sits between commit-hash and Limit changes', () => {
-    const prompt = getCoordinatorAgents()[0]!.getSystemPrompt!()
+    const prompt = getCoordinatorAgents()[0]!.getSystemPrompt!({
+      toolUseContext: { options: {} as never },
+    })
     const commit = 'Report the commit hash in your summary.'
     const fan =
       "you may use it to fan out (e.g. `/simplify`, `/code-review`, or your own parallel research/verification) — workers at the depth cap don't receive it"

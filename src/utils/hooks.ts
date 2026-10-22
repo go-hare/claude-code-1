@@ -2159,7 +2159,7 @@ export function remapHookInputForOwnTool(
       ...hookInput,
       tool_name: mapped.name,
       mcp_server: undefined,
-    } as HookInput,
+    } as unknown as HookInput,
     tools: [mapped],
   }
 }
@@ -2749,6 +2749,8 @@ async function* executeHooks({
   toolInputSummary,
   storageV5,
   credentials,
+  skipSessionFunctionHooks,
+  sessionFunctionHooksOnly,
 }: {
   hookInput: HookInput
   toolUseID: string
@@ -2773,6 +2775,16 @@ async function* executeHooks({
   /** densable PBr persist — `a?.storageV5 ?? m` / `a?.credentials ?? g`. */
   storageV5?: unknown
   credentials?: unknown
+  /**
+   * densable skipSessionFunctionHooks — turn_end and blockable_turn_end drop
+   * session function hooks (Ot / turn_end_reactions is function-only).
+   */
+  skipSessionFunctionHooks?: boolean
+  /**
+   * densable sessionFunctionHooksOnly — turn_end_reactions keeps function
+   * hooks only (gold Ot).
+   */
+  sessionFunctionHooksOnly?: boolean
 }): AsyncGenerator<AggregatedHookResult> {
   const persistStorageV5 = toolUseContext?.storageV5 ?? storageV5
   const persistCredentials = toolUseContext?.credentials ?? credentials
@@ -2795,7 +2807,11 @@ async function* executeHooks({
   // @185182837 is the PreToolUse host and runs uwn then QLn. Local Rze is
   // executePreToolHooks → executeHooks, so PreToolUse must enter this chain.
   // A chain member must not enter again.
-  if (!classicChainMember && hasMatchingFunctionHook(hookEvent)) {
+  if (
+    !classicChainMember &&
+    !sessionFunctionHooksOnly &&
+    hasMatchingFunctionHook(hookEvent)
+  ) {
     const eventRecord = hookInput as unknown as Record<string, unknown>
     const chained = await runFunctionHookChain(
       hookEvent,
@@ -2817,6 +2833,8 @@ async function* executeHooks({
           toolInputSummary,
           storageV5,
           credentials,
+          skipSessionFunctionHooks,
+          sessionFunctionHooksOnly,
         })) {
           results.push(result)
         }
@@ -2962,13 +2980,19 @@ async function* executeHooks({
   const appState = toolUseContext ? toolUseContext.getAppState() : undefined
   // Use the agent's session ID if available, otherwise fall back to main session
   const sessionId = toolUseContext?.agentId ?? getSessionId()
-  const matchingHooks = await getMatchingHooks(
+  let matchingHooks = await getMatchingHooks(
     appState,
     sessionId,
     hookEvent,
     hookInput,
     toolUseContext?.options?.tools,
   )
+  // densable AKo Gn: ke → function only; ye → drop function.
+  if (sessionFunctionHooksOnly) {
+    matchingHooks = matchingHooks.filter(h => h.hook.type === 'function')
+  } else if (skipSessionFunctionHooks) {
+    matchingHooks = matchingHooks.filter(h => h.hook.type !== 'function')
+  }
   if (matchingHooks.length === 0) {
     return
   }
@@ -4805,15 +4829,14 @@ export async function executeStopFailureHooks(
 }
 
 /**
- * Execute stop hooks if configured
- * @param toolUseContext ToolUseContext for prompt-based hooks
- * @param permissionMode permission mode from toolPermissionContext
- * @param signal AbortSignal to cancel hook execution
- * @param stopHookActive Whether this call is happening within another stop hook
- * @param isSubagent Whether the current execution context is a subagent
- * @param messages Optional conversation history for prompt/function hooks
- * @returns Async generator that yields progress messages and blocking errors
+ * Execute stop hooks if configured.
+ * densable `are` last arg `M` — default turn_end.
  */
+export type StopHookPass =
+  | 'turn_end'
+  | 'turn_end_reactions'
+  | 'blockable_turn_end'
+
 export async function* executeStopHooks(
   permissionMode?: string,
   signal?: AbortSignal,
@@ -4827,12 +4850,22 @@ export async function* executeStopHooks(
     sourceName: string,
     toolInputSummary?: string | null,
   ) => (request: PromptRequest) => Promise<PromptResponse>,
+  stopPass: StopHookPass = 'turn_end',
 ): AsyncGenerator<AggregatedHookResult> {
   const hookEvent = subagentId ? 'SubagentStop' : 'Stop'
   const appState = toolUseContext?.getAppState()
   const sessionId = toolUseContext?.agentId ?? getSessionId()
   if (!hasHookForEvent(hookEvent, appState, sessionId)) {
     return
+  }
+  // densable: turn_end_reactions no-ops when this session has no function Stop hooks.
+  if (stopPass === 'turn_end_reactions') {
+    const functionHooks = appState
+      ? getSessionFunctionHooks(appState, sessionId, hookEvent).get(hookEvent)
+      : undefined
+    if (!functionHooks?.length) {
+      return
+    }
   }
 
   // Extract text content from the last assistant message so hooks can
@@ -4878,6 +4911,8 @@ export async function* executeStopHooks(
     toolUseContext,
     messages,
     requestPrompt,
+    skipSessionFunctionHooks: stopPass !== 'turn_end_reactions',
+    sessionFunctionHooksOnly: stopPass === 'turn_end_reactions',
   })
 }
 

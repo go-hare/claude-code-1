@@ -1116,3 +1116,26 @@ const qcEnvelopes = once((): RegExp[] => [
 export function qcEnvelopePatterns(): readonly RegExp[] {
   return qcEnvelopes()
 }
+
+/** densable `te().page` — artifact envelope tags plus the lead bracket. */
+const pageEnvelopePatterns = once((): RegExp[] => [
+  cmPattern(ARTIFACT_ENVELOPE_TAGS),
+  leadEnvelope(),
+])
+
+/**
+ * densable Qc — backslash the opening character of each envelope.
+ * `page` is the writer scope; `all` is the full envelope set.
+ */
+export function scrubPublishedFileText(
+  text: string,
+  scope: 'page' | 'all' = 'all',
+): string {
+  const patterns = scope === 'page' ? pageEnvelopePatterns() : qcEnvelopes()
+  let out = text
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0
+    out = out.replace(pattern, match => `${match}\\`)
+  }
+  return out
+}

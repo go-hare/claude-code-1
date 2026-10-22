@@ -704,11 +704,7 @@ export function firstAllowedPolicyListedModel(
     }
     if (parsed.kind === 'ignored') continue
     const stripped = n.replace(/^claude-/, '')
-    if (
-      exact &&
-      parsed.kind === 'literal' &&
-      isPolicyFamilyAlias(stripped)
-    ) {
+    if (exact && parsed.kind === 'literal' && isPolicyFamilyAlias(stripped)) {
       const newest = newestAllowedModelInFamily(stripped, isAllowed)
       if (newest !== null) return newest
       continue

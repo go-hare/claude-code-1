@@ -190,7 +190,7 @@ export async function getConfigSettingsCatalog(
     storageV5: context.storageV5,
     ...(getIsRemoteMode() ? { refusal: PLUGIN_CONFIG_REMOTE_REFUSAL } : {}),
   })
-  return rows.map(asConfigSettingRow)
+  return rows.map(row => asConfigSettingRow(row as never))
 }
 
 /** densable uo */

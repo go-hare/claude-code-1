@@ -32,7 +32,8 @@ export function asAgentId(id: string): AgentId {
   return id as AgentId
 }
 
-const AGENT_ID_PATTERN = /^a(?:.+-)?[0-9a-f]{16}$/
+/** densable `OA` — `a` + optional `[\w-]{1,63}-` + 16 hex. */
+const AGENT_ID_PATTERN = /^a(?:[\w-]{1,63}-)?[0-9a-f]{16}$/
 
 /**
  * Validate and brand a string as AgentId.

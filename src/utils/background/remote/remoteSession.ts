@@ -1,5 +1,6 @@
 import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js'
 import { checkGate_CACHED_OR_BLOCKING } from '../../../services/analytics/growthbook.js'
+import { isRemotePolicyAllowed } from '../../../services/policyLimits/index.js'
 import { detectCurrentRepositoryWithHost } from '../../detectRepository.js'
 import { isEnvTruthy } from '../../envUtils.js'
 import type { TodoList } from '../../todo/types.js'
@@ -48,7 +49,10 @@ export async function checkBackgroundRemoteSessionEligibility({
 } = {}): Promise<BackgroundRemoteSessionPrecondition[]> {
   const errors: BackgroundRemoteSessionPrecondition[] = []
 
-  // Product-cut: policy limits always allow remote sessions.
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
+    errors.push({ type: 'policy_blocked' })
+    return errors
+  }
 
   const [needsLogin, hasRemoteEnv, repository] = await Promise.all([
     checkNeedsClaudeAiLogin(),

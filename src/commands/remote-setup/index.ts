@@ -1,5 +1,6 @@
 import type { Command } from '../../commands.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isRemotePolicyAllowed } from '../../services/policyLimits/index.js'
 
 const web = {
   type: 'local-jsx',
@@ -8,8 +9,11 @@ const web = {
     'Setup Claude Code on the web (requires connecting your GitHub account)',
   availability: ['claude-ai'],
   isEnabled: () =>
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_lantern', false),
-  isHidden: false,
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_lantern', false) &&
+    isRemotePolicyAllowed('allow_remote_sessions'),
+  get isHidden() {
+    return !isRemotePolicyAllowed('allow_remote_sessions')
+  },
   load: () => import('./remote-setup.js'),
 } satisfies Command
 

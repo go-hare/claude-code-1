@@ -2,6 +2,7 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import { ensureGatewayAuthApplied, getGatewayAuth } from '../gatewayEnv.js'
 import {
   isAnthropicAwsProviderEnabled,
+  isAnthropicGoogleCloudProviderEnabled,
   isMantleProviderEnabled,
   isUseBedrockEnvEnabled,
   isUseFoundryEnvEnabled,
@@ -19,6 +20,7 @@ export type APIProvider =
   | 'vertex'
   | 'foundry'
   | 'anthropicAws'
+  | 'anthropicGoogleCloud'
   | 'mantle'
   | 'gateway'
   | 'openai'
@@ -42,12 +44,15 @@ export function getAPIProvider(
   // Still above modelType=anthropic so OAuth+gateway users keep gateway routing.
   if (getGatewayAuth()) return 'gateway'
 
-  // Official xn() order: bedrock → foundry → anthropicAws → mantle → vertex → firstParty
-  // Official USE_* densables for provider env selection.
+  // Official He(): bedrock → foundry → anthropicAws → anthropicGoogleCloud
+  // → mantle → vertex → firstParty
   if (isUseBedrockEnvEnabled()) return 'bedrock'
   if (isUseFoundryEnvEnabled()) return 'foundry'
   if (isAnthropicAwsProviderEnabled()) {
     return 'anthropicAws'
+  }
+  if (isAnthropicGoogleCloudProviderEnabled()) {
+    return 'anthropicGoogleCloud'
   }
   if (isMantleProviderEnabled()) return 'mantle'
   if (isUseVertexEnvEnabled()) return 'vertex'
@@ -67,7 +72,8 @@ export function getAPIProvider(
 }
 
 /**
- * Official rm densable — firstParty / anthropicAws / gateway share Anthropic-style API.
+ * Official ad / h$ — firstParty / anthropicAws / anthropicGoogleCloud / gateway
+ * share Anthropic-style API.
  */
 export function isAnthropicStyleApiProvider(
   provider: APIProvider = getAPIProvider(),
@@ -75,6 +81,7 @@ export function isAnthropicStyleApiProvider(
   return (
     provider === 'firstParty' ||
     provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
     provider === 'gateway'
   )
 }

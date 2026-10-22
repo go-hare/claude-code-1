@@ -90,10 +90,6 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
       onDone(formatUnrecognizedMcpAction(action), { display: 'system' });
       return null;
     }
-    if (isBgSessionWithoutTerminal()) {
-      onDone(MCP_INLINE_SESSION_UNAVAILABLE, { display: 'system' });
-      return null;
-    }
     if (!getIsInteractive()) {
       onDone(MCP_INLINE_VIEW_UNAVAILABLE, { display: 'system' });
       return null;

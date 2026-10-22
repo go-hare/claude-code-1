@@ -213,6 +213,8 @@ export function parseSkillFrontmatterFields(
   agent: string | undefined
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
+  /** densable createdBy — dream-proposal only. */
+  createdBy: 'dream-proposal' | undefined
 } {
   const validatedDescription = coerceDescriptionToString(
     frontmatter.description,
@@ -282,6 +284,11 @@ export function parseSkillFrontmatterFields(
     agent: frontmatter.agent as string | undefined,
     effort,
     shell: parseShellFrontmatter(frontmatter.shell, resolvedName),
+    createdBy:
+      frontmatter.created_by === 'dream-proposal' ||
+      frontmatter.improved_by === 'dream-proposal'
+        ? 'dream-proposal'
+        : undefined,
   }
 }
 
@@ -313,6 +320,7 @@ export function createSkillCommand({
   paths,
   effort,
   shell,
+  createdBy,
 }: {
   skillName: string
   displayName: string | undefined
@@ -339,6 +347,7 @@ export function createSkillCommand({
   paths: string[] | undefined
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
+  createdBy?: 'dream-proposal'
 }): Command {
   // densable 2.1.228 #12 — $vr/$Phn label+sanitize for claude.ai synced skills;
   // bDo capability wipe when xTt says body is untrusted (syncedSkills on local
@@ -431,6 +440,7 @@ export function createSkillCommand({
     },
     source,
     loadedFrom,
+    ...(createdBy !== undefined ? { createdBy } : {}),
     hooks: finalHooks,
     skillRoot: baseDir,
     ...(finalAllowedTools.length > 0

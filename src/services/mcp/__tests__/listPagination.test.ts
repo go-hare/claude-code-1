@@ -243,8 +243,9 @@ describe('listMcpToolsAggregated densable ai', () => {
   })
 
   test('An does not retry CLAUDEAI_BEARER_REJECTED or IssuerMismatchError', () => {
-    const bearer = new Error('rejected')
-    ;(bearer as { code: string }).code = 'CLAUDEAI_BEARER_REJECTED'
+    const bearer = Object.assign(new Error('rejected'), {
+      code: 'CLAUDEAI_BEARER_REJECTED',
+    })
     expect(isMcpListRetryable(bearer)).toBe(false)
     expect(
       isMcpListRetryable(new IssuerMismatchError('metadata', 'a', 'b')),

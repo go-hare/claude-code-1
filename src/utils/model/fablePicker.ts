@@ -118,7 +118,7 @@ export function pickerFamilyOf(
 
 /**
  * Official Rci — custom family-env rows (3P, anthropicAws, or non-1P base).
- * Local has no anthropicGoogleCloud; BZ is anthropicAws only.
+ * densable h$ — anthropicAws || anthropicGoogleCloud (or non-1P base).
  */
 export function isCustomFamilyModelEnv(
   provider: APIProvider = getAPIProvider(),
@@ -126,15 +126,16 @@ export function isCustomFamilyModelEnv(
   return (
     !isAnthropicStyleApiProvider(provider) ||
     provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
     !isFirstPartyAnthropicBaseUrl()
   )
 }
 
-/** Official BZ — local catalog has no anthropicGoogleCloud. */
+/** Official h$ / BZ — Claude Platform on AWS or Google Cloud. */
 export function isAnthropicAwsFamilyProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  return provider === 'anthropicAws'
+  return provider === 'anthropicAws' || provider === 'anthropicGoogleCloud'
 }
 
 /** Official A1e("fable5"). */

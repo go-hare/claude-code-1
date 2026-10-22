@@ -11,6 +11,7 @@
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isRemotePolicyAllowed } from '../../services/policyLimits/index.js'
 import { getOrganizationUUID } from '../../services/oauth/client.js'
 import { getOauthAccountInfo, isClaudeAISubscriber } from '../auth.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -46,7 +47,7 @@ function hasOrgUuidHint(): boolean {
 export function hasCloudPeerAccess(): boolean {
   if (!isHarborKiteEnabled()) return false
   if (getAPIProvider() !== 'firstParty') return false
-  // Product-cut: policy limits always allow remote sessions.
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) return false
   if (!isClaudeAISubscriber()) return false
   if (!hasOrgUuidHint()) return false
   return (
@@ -59,7 +60,7 @@ export function hasCloudPeerAccess(): boolean {
 export async function hasCloudPeerAccessAsync(): Promise<boolean> {
   if (!isHarborKiteEnabled()) return false
   if (getAPIProvider() !== 'firstParty') return false
-  // Product-cut: policy limits always allow remote sessions.
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) return false
   if (!isClaudeAISubscriber()) return false
   const org = await getOrganizationUUID()
   if (!org && !hasOrgUuidHint()) return false

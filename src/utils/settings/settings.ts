@@ -745,8 +745,10 @@ function writeSettingsFile(
 export function updateSettingsForSource(
   source: EditableSettingSource,
   settings: SettingsJson,
+  _unused?: unknown,
   _storageV5?: unknown,
 ): { error: Error | null } {
+  void _unused
   void _storageV5
   if (
     (source as unknown) === 'policySettings' ||

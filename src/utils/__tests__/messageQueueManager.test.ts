@@ -466,7 +466,7 @@ describe('enqueueReportingAdmission densable ds (2.1.289)', () => {
     expect(tok).toHaveLength(HOP_TOKEN_HEX_LEN)
     expect(tok).toMatch(/^[0-9a-f]{24}$/)
     expect(getOwnHopTokens().has(tok!)).toBe(true)
-    expect(hashAddressToHopToken('uds:/tmp/own.sock')).toBe(tok)
+    expect(hashAddressToHopToken('uds:/tmp/own.sock')).toBe(tok as string)
     const result = enqueueReportingAdmission({
       value: 'looped',
       mode: 'prompt',

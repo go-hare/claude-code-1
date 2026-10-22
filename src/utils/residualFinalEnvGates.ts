@@ -374,6 +374,20 @@ export function isAnthropicAwsProviderEnabled(
   return isEnvTruthy(env.CLAUDE_CODE_USE_ANTHROPIC_AWS)
 }
 
+/** Official He() densable — CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD. */
+export function isAnthropicGoogleCloudProviderEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD)
+}
+
+/** Official CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH densable. */
+export function shouldSkipAnthropicGoogleCloudAuth(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH)
+}
+
 export function isMantleProviderEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

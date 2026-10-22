@@ -980,6 +980,51 @@ export const ADOPT_FRAME_LIVE_SPAWN_FAILED_MESSAGE =
   "The background session didn't start, so automatic replies to Artifact comments stopped. Publish the Artifact again to turn them back on."
 
 /**
+ * densable `rM` — spawn-fail copy when N comment monitors did not move.
+ * Gold: `Couldn't move ${n} Artifact comment monitor(s) to the background
+ * session, so automatic replies stopped. Publish the Artifact / each Artifact
+ * again to turn them back on.`
+ */
+export function formatFrameLiveLostCopy(frameLiveLost: number): string {
+  if (frameLiveLost <= 0) return ''
+  const noun =
+    frameLiveLost === 1
+      ? 'Artifact comment monitor'
+      : 'Artifact comment monitors'
+  const publish = frameLiveLost === 1 ? 'the Artifact' : 'each Artifact'
+  return `Couldn't move ${frameLiveLost} ${noun} to the background session, so automatic replies stopped. Publish ${publish} again to turn them back on.`
+}
+
+/**
+ * densable `tM` — success half of session-level rM (same copy as
+ * formatMonitorParkSubtitle). Kept here so rM does not import leftArrowConfirm.
+ */
+export function formatFrameLiveAdoptedCopy(adoptedFrameLive: number): string {
+  if (adoptedFrameLive <= 0) return ''
+  if (adoptedFrameLive === 1) {
+    return "Automatic replies to Artifact comments continue in the background session. You'll see a summary of the replies when you return."
+  }
+  return `Automatic replies to comments on ${adoptedFrameLive} Artifacts continue in the background session. You'll see a summary of the replies when you return.`
+}
+
+/**
+ * densable `rM(h)` — session-level concat onto BackgroundAndExit finalMessage.
+ * Lost-half when frameLiveLost>0; success tM when ok && adopted_frame_live>0.
+ */
+export function formatSessionFrameLiveCopy(h: {
+  ok: boolean
+  frameLiveLost?: number
+  adopted_frame_live?: number
+}): string {
+  const lost = formatFrameLiveLostCopy(h.frameLiveLost ?? 0)
+  const success =
+    h.ok && (h.adopted_frame_live ?? 0) > 0
+      ? formatFrameLiveAdoptedCopy(h.adopted_frame_live ?? 0)
+      : ''
+  return (lost ? `\n${lost}` : '') + (success ? `\n${success}` : '')
+}
+
+/**
  * densable H_e — per-task-id handoff eligibility map.
  *
  * A root (parent-less agent / unowned shell / workflow) is eligible only if the

@@ -146,9 +146,7 @@ describe('densable 2.1.283 Obe leftover', () => {
   })
 
   test('Obe T() latch imports useEffect (resume mounts ReplDiffPanel)', () => {
-    expect(panel).toMatch(
-      /import \{[^}]*\buseEffect\b[^}]*\} from 'react'/,
-    )
+    expect(panel).toMatch(/import \{[^}]*\buseEffect\b[^}]*\} from 'react'/)
     expect(panel).toContain('useEffect(() => {')
     expect(panel).toContain('setAppState(showDiffPanelLatch)')
   })

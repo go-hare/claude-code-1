@@ -3,6 +3,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { getAuthHeaders } from '../http.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { getAPIProvider } from '../model/providers.js'
@@ -133,7 +134,9 @@ export function getFeedbackCommandDisabledReason(
   if (isEssentialTrafficOnly()) {
     return `${command} has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable`
   }
-  // Product-cut: policy limits always allow product feedback.
+  if (!isPolicyAllowed('allow_product_feedback')) {
+    return `${command} has been disabled by your organization's policy`
+  }
   return null
 }
 

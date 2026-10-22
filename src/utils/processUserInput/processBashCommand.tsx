@@ -106,7 +106,7 @@ export async function processBashCommand(
           bashModeContext,
           undefined,
           undefined,
-          onProgress,
+          onProgress as never,
         )
       : await BashTool.call(
           {
@@ -116,7 +116,7 @@ export async function processBashCommand(
           bashModeContext,
           undefined,
           undefined,
-          onProgress,
+          onProgress as never,
         );
     const data = response.data;
 

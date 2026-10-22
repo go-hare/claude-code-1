@@ -7,10 +7,20 @@
  * registry so denser producers can register and SkillTool can await.
  */
 
+import { refreshAccountSkillsSyncVeto } from './accountSkillsSyncVeto.js'
 import {
   isSyncSkillsEnabled,
   resolveSyncSkillsWaitTimeoutMs,
 } from './residualFinalEnvGates.js'
+
+/**
+ * Gold dTe / Tan: a latched account-skills veto turns materialization off.
+ * Otherwise CLAUDE_CODE_SYNC_SKILLS still decides.
+ */
+function syncSkillMaterializationAllowed(env?: NodeJS.ProcessEnv): boolean {
+  if (refreshAccountSkillsSyncVeto()) return false
+  return isSyncSkillsEnabled(env)
+}
 
 export type SyncSkillMaterializationResult =
   | { ok: true }
@@ -51,7 +61,7 @@ export async function runSyncSkillMaterialization(
     | SyncSkillMaterializationResult,
   input?: { env?: NodeJS.ProcessEnv },
 ): Promise<SyncSkillMaterializationResult> {
-  if (!isSyncSkillsEnabled(input?.env)) {
+  if (!syncSkillMaterializationAllowed(input?.env)) {
     try {
       return await work()
     } catch (error) {
@@ -85,7 +95,7 @@ export async function waitForSyncSkillMaterialization(
   skillName: string,
   input?: { env?: NodeJS.ProcessEnv; timeoutMs?: number },
 ): Promise<SyncSkillMaterializationResult> {
-  if (!isSyncSkillsEnabled(input?.env)) {
+  if (!syncSkillMaterializationAllowed(input?.env)) {
     return { ok: true }
   }
   const pending = pendingBySkill.get(skillName)

@@ -13,6 +13,7 @@ import {
 } from '../../utils/detectRepository.js'
 import { isBareMode, isEnvDefinedFalsy } from '../../utils/envUtils.js'
 import { isPolicyLimitsAllowed } from '../../cli/leftoverTulip.js'
+import { isRemotePolicyAllowed } from '../../services/policyLimits/index.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { getRemoteUrl } from '../../utils/git.js'
 import { isClaudeAiConnectorsDisabledBySources } from '../../utils/residualFinalEnvGates.js'
@@ -429,6 +430,7 @@ export function registerScheduleRemoteAgentsSkill(): void {
       getAPIProvider() === 'firstParty' &&
       Boolean(getClaudeAIOAuthTokens()?.accessToken) &&
       !process.env.CLAUDE_CODE_REMOTE &&
+      isRemotePolicyAllowed('allow_remote_sessions') &&
       isPolicyLimitsAllowed('allow_routines'),
     allowedTools: [
       REMOTE_TRIGGER_TOOL_NAME,

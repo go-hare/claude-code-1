@@ -228,12 +228,8 @@ export function isMcpCcrProxyServerConfig(
   if (serverConfig !== undefined && isCliOwnedConfig(serverConfig)) {
     return true
   }
-  if (
-    serverConfig !== undefined &&
-    'url' in serverConfig &&
-    typeof serverConfig.url === 'string' &&
-    isMcpCcrProxyUrl(serverConfig.url)
-  ) {
+  const rec = serverConfig as { url?: unknown } | undefined
+  if (typeof rec?.url === 'string' && isMcpCcrProxyUrl(rec.url)) {
     return true
   }
   return false
@@ -262,9 +258,10 @@ export function shouldApplyLegacyHttpSseGet401Guard(opts: {
  * densable `St` inside `ce` — wrap fetch so the first GET 401 (before a 405
  * initialize POST) throws LEGACY_HTTP_SSE_GET_401_MESSAGE and cancels the body.
  */
-export function wrapLegacyHttpSseGet401Guard<
-  F extends (url: string | URL, init?: RequestInit) => Promise<Response>,
->(fetchImpl: F, enabled: boolean): F {
+export function wrapLegacyHttpSseGet401Guard(
+  fetchImpl: (url: string | URL, init?: RequestInit) => Promise<Response>,
+  enabled: boolean,
+): (url: string | URL, init?: RequestInit) => Promise<Response> {
   if (!enabled) return fetchImpl
   let initializePostWas405 = false
   let firstGetOk = false
@@ -287,7 +284,7 @@ export function wrapLegacyHttpSseGet401Guard<
     }
     return res
   }
-  return wrapped as F
+  return wrapped
 }
 
 /**

@@ -30,7 +30,11 @@ describe('gold 2.1.289 design-consent / design-revoke / design-login', () => {
     expect(designLogin.type).toBe('local-jsx')
     expect(designLogin.name).toBe('design-login')
     expect(designLogin.description).toContain('design-sync')
-    expect(designLogin.supportsNonInteractive).toBeUndefined()
+    expect(
+      'supportsNonInteractive' in designLogin
+        ? designLogin.supportsNonInteractive
+        : undefined,
+    ).toBeUndefined()
     const ui = readFileSync(
       new URL('../../design-login/designLogin.tsx', import.meta.url),
       'utf8',

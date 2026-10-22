@@ -216,14 +216,11 @@ export const CONSOLE_PROFILE_CLIENT_ID = '41077d10-94b8-4194-be48-d251e9eb21b4'
 const PROFILE_NAME_RE = /^[A-Za-z0-9_.-]+$/
 
 /** densable fE — labels used in kxt third_party_provider copy. */
-const CONSOLE_PROVIDER_LABELS: Partial<
-  Record<APIProvider | 'anthropicGoogleCloud', string>
-> = {
+const CONSOLE_PROVIDER_LABELS: Partial<Record<APIProvider, string>> = {
   bedrock: 'Amazon Bedrock',
   vertex: 'Google Vertex AI',
   foundry: 'Microsoft Foundry',
   anthropicAws: 'Claude Platform on AWS',
-  // densable AGC label; leftover APIProvider has no AGC slot — keep for copy only.
   anthropicGoogleCloud: 'Claude Platform on Google Cloud',
   mantle: 'Amazon Bedrock (Mantle)',
   gateway: 'Cloud gateway',

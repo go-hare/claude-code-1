@@ -13,6 +13,7 @@ import {
   isQHeFrameLiveTask,
   type PortableCronLike,
   type PortableTaskLike,
+  formatFrameLiveAdoptedCopy,
 } from './bgCheckpoint.js'
 import { summarizeAbandonableWork } from './exitBackgroundItems.js'
 import { plural } from './stringUtils.js'
@@ -122,13 +123,9 @@ export function formatWorkflowAgentsConfirmLabel(
   return 'Background'
 }
 
-/** densable Tgn — Artifact comment monitor subtitle. */
+/** densable Tgn / tM — Artifact comment monitor subtitle. */
 export function formatMonitorParkSubtitle(monitorParkCount: number): string {
-  if (monitorParkCount === 0) return ''
-  if (monitorParkCount === 1) {
-    return "Automatic replies to Artifact comments continue in the background session. You'll see a summary of the replies when you return."
-  }
-  return `Automatic replies to comments on ${monitorParkCount} Artifacts continue in the background session. You'll see a summary of the replies when you return.`
+  return formatFrameLiveAdoptedCopy(monitorParkCount)
 }
 
 function asPortableTasks(

@@ -19,7 +19,9 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { Command } from '../types/command.js'
 import type { ToolUseContext } from '../Tool.js'
+import { getPrintOutputFormat } from '../bootstrap/state.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
+import { getCachedRepositoryHost } from '../utils/detectRepository.js'
 import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -94,7 +96,7 @@ Summarize what was fixed and what was skipped.`
  */
 export function parseCodeReviewFlagArgs(
   args: string,
-  flagNames: readonly string[] = ['comment', 'fix'],
+  flagNames: readonly string[] = ['comment', 'fix', 'post', 'no-post'],
 ): {
   rawFirstToken: string
   flags: Set<string>
@@ -161,16 +163,24 @@ export function parseCodeReviewArgs(
   maxFindings?: CodeReviewMaxFindings
   /** densable 2.1.289 — flag present but value not valid. */
   maxFindingsIgnored: boolean
+  /** densable He — `--post` stripped so it is not a review target. */
+  post: boolean
+  /** densable He — `--no-post` stripped so it is not a review target. */
+  noPost: boolean
 } {
   const maxFlag = parseCodeReviewMaxFindingsFlag(args)
   const { rawFirstToken, flags, rest } = parseCodeReviewFlagArgs(maxFlag.rest)
   const comment = flags.has('comment')
   const fix = flags.has('fix')
+  const post = flags.has('post')
+  const noPost = flags.has('no-post')
   const tokens = rest.split(/\s+/).filter(Boolean)
   const first = tokens[0] ?? ''
   const maxFields = {
     maxFindings: maxFlag.maxFindings,
     maxFindingsIgnored: maxFlag.maxFindingsIgnored,
+    post,
+    noPost,
   }
 
   // densable: ultra is detected on raw first token (before flag strip)
@@ -240,47 +250,160 @@ export function rememberCodeReviewMaxFindings(
 }
 
 /**
+ * densable `Et` — ReportFindings path is on only for a truthy env, a loaded
+ * tool, and a print format other than text/json. Skill preload never uses it.
+ */
+function codeReviewUsesReportFindings(context: ToolUseContext): boolean {
+  if (context.options.isSkillPreload) return false
+  const format = getPrintOutputFormat()
+  if (format === 'text' || format === 'json') return false
+  if (!process.env.CLAUDE_CODE_REPORT_FINDINGS) return false
+  return context.options.tools.some(tool => tool.name === 'ReportFindings')
+}
+
+/** densable `We` — ReportFindings / o5-bmin ceiling. */
+export const CODE_REVIEW_FINDINGS_CAP = 32
+
+type CodeReviewModelFamily =
+  | 'default'
+  | 'claude-sonnet-5'
+  | 'claude-opus-4-8'
+  | 'claude-opus-5'
+
+/**
+ * densable `me` cell names. Only the names that change the findings ceiling
+ * matter here: `low-sonnet5` has no maximum; `o5-bmin` clamps all / >32 to 32.
+ */
+const CODE_REVIEW_CELLS: Record<
+  CodeReviewModelFamily,
+  Record<EffortLevel, string>
+> = {
+  default: {
+    low: 'low',
+    medium: 'o5-bmin',
+    high: 'o48-high-v1',
+    xhigh: 'o48-xhigh-v1',
+    max: 'max',
+  },
+  'claude-sonnet-5': {
+    low: 'low-sonnet5',
+    medium: 'medium',
+    high: 'high',
+    xhigh: 'xhigh',
+    max: 'max',
+  },
+  'claude-opus-4-8': {
+    low: 'o48-low-v1',
+    medium: 'o48-med-v1',
+    high: 'o48-high-v1',
+    xhigh: 'o48-xhigh-v1',
+    max: 'max',
+  },
+  'claude-opus-5': {
+    low: 'low',
+    medium: 'o5-bmin',
+    high: 'o5-bmin',
+    xhigh: 'o48-xhigh-v1',
+    max: 'max',
+  },
+}
+
+/** densable `Ge` — family key in `me`, else `default`. */
+export function codeReviewModelFamily(
+  model: string | undefined,
+): CodeReviewModelFamily {
+  if (!model) return 'default'
+  const lower = model.toLowerCase()
+  if (lower.includes('claude-opus-4-8')) return 'claude-opus-4-8'
+  if (/claude-sonnet-5(?![-.0-9])/.test(lower)) return 'claude-sonnet-5'
+  if (/claude-opus-5(?![-.0-9])/.test(lower)) return 'claude-opus-5'
+  return 'default'
+}
+
+export function codeReviewEffortCell(
+  model: string | undefined,
+  level: EffortLevel,
+): string {
+  return CODE_REVIEW_CELLS[codeReviewModelFamily(model)][level]
+}
+
+/**
  * densable `on` — resolve asked/stated/reused max-findings for this review.
- * Reuses stored last when the flag was omitted.
+ * Reuses stored last when the flag was omitted (not on low-sonnet5 or skill preload).
+ * ReportFindings or cell `o5-bmin` clamps `all` and values above 32 to 32.
+ * `low-sonnet5` leaves stated unset.
  */
 export function resolveCodeReviewMaxFindings(options: {
   maxFindings?: CodeReviewMaxFindings
   maxFindingsIgnored: boolean
   lastMaxFindings?: number | 'all'
+  cell?: string
+  isSkillPreload?: boolean
+  usesReportFindings?: boolean
 }): {
   asked?: number | 'all'
   stated?: number | 'all'
   reused: boolean
   ignored: boolean
 } {
-  const { maxFindings, maxFindingsIgnored, lastMaxFindings } = options
+  const {
+    maxFindings,
+    maxFindingsIgnored,
+    lastMaxFindings,
+    cell = 'low',
+    isSkillPreload = false,
+    usesReportFindings = false,
+  } = options
+  const lastValid =
+    lastMaxFindings === 'all' ||
+    (typeof lastMaxFindings === 'number' &&
+      Number.isSafeInteger(lastMaxFindings) &&
+      lastMaxFindings > 0)
   const canReuse =
     maxFindings === undefined &&
-    !maxFindingsIgnored &&
-    (lastMaxFindings === 'all' ||
-      (typeof lastMaxFindings === 'number' &&
-        Number.isSafeInteger(lastMaxFindings) &&
-        lastMaxFindings > 0))
+    cell !== 'low-sonnet5' &&
+    !isSkillPreload &&
+    lastValid
   const asked = canReuse
     ? lastMaxFindings
     : maxFindings === 'default'
       ? undefined
       : maxFindings
+  const stated =
+    cell === 'low-sonnet5'
+      ? undefined
+      : (usesReportFindings || cell === 'o5-bmin') &&
+          (asked === 'all' ||
+            (typeof asked === 'number' && asked > CODE_REVIEW_FINDINGS_CAP))
+        ? CODE_REVIEW_FINDINGS_CAP
+        : asked
   return {
     asked,
-    stated: asked,
+    stated,
     reused: canReuse,
     ignored: maxFindingsIgnored,
   }
 }
 
-/** densable `nn` — user-visible max-findings notice for the prompt. */
+/** densable `nn` plus the fork/local wrapper around a non-empty notice. */
 export function formatCodeReviewMaxFindingsNotice(options: {
   asked?: number | 'all'
+  stated?: number | 'all'
   reused: boolean
   ignored: boolean
+  /** densable `D` — local fork report, not the ReportFindings path. */
+  willRunAsFork?: boolean
+  /** densable `r` — prompt copy says "the user". */
+  voice?: 'the user' | 'you'
 }): string {
-  const { asked, reused, ignored } = options
+  const {
+    asked,
+    stated,
+    reused,
+    ignored,
+    willRunAsFork = true,
+    voice = 'the user',
+  } = options
   const parts: string[] = []
   if (ignored) {
     parts.push(
@@ -289,20 +412,37 @@ export function formatCodeReviewMaxFindingsNotice(options: {
       }`,
     )
   }
-  if (reused && asked !== undefined) {
+  const capSentence = `This review reports at most ${CODE_REVIEW_FINDINGS_CAP} findings, so the limit is ${CODE_REVIEW_FINDINGS_CAP} here.`
+  if (asked !== undefined && stated === undefined) {
     parts.push(
-      asked === 'all'
-        ? 'Reporting every finding, as you chose last time with `--max-findings all`. Pass `--max-findings default` to go back to the usual limit.'
-        : `Reporting up to ${asked} finding${asked === 1 ? '' : 's'}, the limit you set last time with \`--max-findings ${asked}\`. Pass \`--max-findings default\` to go back to the usual limit.`,
+      '`--max-findings` does not change this review: low effort here has no maximum.',
     )
-  } else if (!reused && asked !== undefined && !ignored) {
+  } else if (stated !== asked) {
+    parts.push(
+      reused
+        ? `${voice === 'you' ? 'You' : 'The user'} set \`--max-findings ${asked}\` last time. ${capSentence}`
+        : capSentence,
+    )
+  } else if (reused && asked !== undefined) {
     parts.push(
       asked === 'all'
-        ? 'Reporting every finding (`--max-findings all`). The choice stays until you pass `--max-findings default`.'
-        : `Reporting up to ${asked} finding${asked === 1 ? '' : 's'} (\`--max-findings ${asked}\`). The choice stays until you pass \`--max-findings default\`.`,
+        ? `Reporting every finding, as ${voice} chose last time with \`--max-findings all\`.`
+        : `Reporting up to ${asked} ${asked === 1 ? 'finding' : 'findings'}, the limit ${voice} set last time with \`--max-findings\`.`,
     )
   }
-  return parts.length ? `(${parts.join(' ')})\n` : ''
+  const notice = parts.join(' ')
+  if (!notice) return ''
+  const reuseHint = reused
+    ? 'passing `--max-findings default` goes back to the usual limit'
+    : undefined
+  if (willRunAsFork) {
+    return `(${notice} Open your report with one short line telling the user this${
+      reuseHint ? `, and that ${reuseHint}` : ''
+    }; that opening line reaches them with the findings.)\n`
+  }
+  return `(${notice} Tell the user this in one short line as you begin${
+    reuseHint ? `, including that ${reuseHint}` : ''
+  }.)\n`
 }
 
 /**
@@ -343,6 +483,7 @@ function buildPrompt(
   unrecognizedNote = '',
   maxFindingsNote = '',
   maxFindingsCap?: number | 'all',
+  cell?: string,
 ): string {
   const header = `You are performing a thorough code review at **${level}** effort level.`
 
@@ -353,7 +494,11 @@ function buildPrompt(
   const cap =
     maxFindingsCap === 'all'
       ? 'every confirmed finding (no cap)'
-      : String(maxFindingsCap ?? defaultMaxFindingsForLevel(level))
+      : typeof maxFindingsCap === 'number'
+        ? String(maxFindingsCap)
+        : cell === 'low-sonnet5'
+          ? 'no maximum'
+          : String(defaultMaxFindingsForLevel(level))
 
   const phases = `
 ## Review Process
@@ -414,6 +559,65 @@ If no issues found, say so clearly.`
 }
 
 /**
+ * densable `hve` + `yGe` + `hR` — port stripped, www-stripped, then
+ * github.com / gitlab.com / bitbucket.org plus ssh aliases. No self-hosted
+ * hostname table (gold `n` is only `ssh.github.com` / `altssh.gitlab.com` /
+ * `altssh.bitbucket.org`).
+ */
+function gitRemoteHostKind(
+  host: string,
+): 'github' | 'gitlab' | 'bitbucket' | 'other' {
+  let h = host
+    .replace(/:\d+$/, '')
+    .replace(/[\t\n\r]/g, '')
+    .toLowerCase()
+  while (h.endsWith('.')) h = h.slice(0, -1)
+  while (h.startsWith('www.')) h = h.slice(4)
+  if (h === 'github.com' || h === 'ssh.github.com') return 'github'
+  if (h === 'gitlab.com' || h === 'altssh.gitlab.com') return 'gitlab'
+  if (h === 'bitbucket.org' || h === 'altssh.bitbucket.org') return 'bitbucket'
+  return 'other'
+}
+
+/**
+ * densable `oto` / `Tee` — GitLab MR target (`/-/merge_requests/N`, `!N`, or
+ * a non-URL target while the cached origin host is GitLab).
+ */
+export function isGitLabCodeReviewTarget(target: string): boolean {
+  if (/\/-\/merge_requests\/\d/.test(target) || /^!\d+$/.test(target)) {
+    return true
+  }
+  if (/^https?:\/\//i.test(target)) return false
+  const host = getCachedRepositoryHost()
+  return host !== null && gitRemoteHostKind(host) === 'gitlab'
+}
+
+/**
+ * densable `Oa` / `x(T)` — `--post` is ultra-only. Local review strips it from
+ * the target; only `post===true` prefixes the ignored sentence onto the local
+ * notice. `--no-post` strips with no sentence. `gitlabTarget` is gold `oto`.
+ */
+export function wrapCodeReviewPostIgnored(
+  note: string,
+  options: {
+    post: boolean
+    comment: boolean
+    gitlabTarget?: boolean
+  },
+): string {
+  if (!options.post) return note
+  const gitlab = options.gitlabTarget === true
+  const clause = options.comment
+    ? gitlab
+      ? 'when the target is a GitLab merge request, your `--comment` is what posts the findings as one general MR note via glab'
+      : 'when the target is a GitHub PR, your `--comment` is what posts the findings as inline PR comments'
+    : gitlab
+      ? 'this local review will not post to GitLab; `--comment` is the flag that posts local findings as a general MR note'
+      : 'this local review will not post to GitHub; `--comment` is the flag that posts local findings as inline PR comments'
+  return `${note}(The typed \`--post\` applies only to the \`/code-review ultra\` cloud review and was ignored — ${clause}. Tell the user this in one short line.)\n`
+}
+
+/**
  * densable FBT — ultraFallback note when cloud path is not available or not
  * launched via subcommand redirect (e.g. model-invoked path / ultraFallback).
  *
@@ -456,16 +660,34 @@ export function formatCodeReviewUltraFallbackNote(options: {
     : `(Claude can't launch the cloud review directly — the user can run \`claude ultrareview\` from a terminal to start it. Falling back to a local ${level}-effort review for now.)\n`
 }
 
+/** densable `Ea` — effort bands, remembered --max-findings, ultra --post. */
+function codeReviewCommandDescription(): string {
+  const ultra = isUltrareviewEnabled()
+  const effortTail = ultra
+    ? '; ultra: deep multi-agent review in the cloud (requires claude.ai account access)'
+    : ''
+  const postTail = ultra
+    ? ' For ultra on a GitHub.com PR target, --post asks to post the finished review’s findings to the PR as a single comment from the user’s GitHub account (not a review; the launch dialog still confirms in interactive sessions, while non-interactive mode posts on the flag alone) and --no-post hides that option.'
+    : ''
+  return `Review the current diff, or a PR number/branch/path target, for correctness bugs (plus reuse/simplification/efficiency cleanups where the model's review recipe covers them) at the given effort level (low/medium: fewer, high-confidence findings; high→max: broader coverage, may include uncertain findings${effortTail}); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply the findings to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.${postTail}`
+}
+
+/** densable `Ra`. */
+function codeReviewArgumentHint(): string {
+  const levels = isUltrareviewEnabled()
+    ? `${EFFORT_LEVELS.join('|')}|ultra`
+    : EFFORT_LEVELS.join('|')
+  return `[${levels}] [--fix] [--comment] [<pr#>|<branch>|<path>] [--max-findings <n>|all]`
+}
+
 const codeReview = {
   type: 'prompt',
   name: 'code-review',
   // densable 2.1.223: /review is an alias of /code-review
   aliases: ['review'],
-  // densable WJf menuDescription / OBT description
-  description:
-    'Review the current diff for bugs and cleanups; use ultra for multi-agent cloud review',
-  argumentHint:
-    '[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<pr#>|<branch>|<path>] [--max-findings <n>|all]',
+  // densable WJf menuDescription / Ea description
+  description: codeReviewCommandDescription(),
+  argumentHint: codeReviewArgumentHint(),
   userInvocable: true,
   // densable 2.1.218: fork by default → background subagent + task-notification
   context: 'fork' as const,
@@ -496,6 +718,7 @@ const codeReview = {
       reusedLastEffort,
       maxFindings,
       maxFindingsIgnored,
+      post,
     } = parseCodeReviewArgs(args, lastEffort)
     // densable onUserTypedArgs / uYT — only persist when user named a valid level
     if (explicit !== undefined) {
@@ -505,12 +728,20 @@ const codeReview = {
     if (maxFindings !== undefined) {
       rememberCodeReviewMaxFindings(maxFindings)
     }
+    const cell = codeReviewEffortCell(context.options.mainLoopModel, level)
+    const usesReportFindings = codeReviewUsesReportFindings(context)
     const maxResolved = resolveCodeReviewMaxFindings({
       maxFindings,
       maxFindingsIgnored,
       lastMaxFindings: getGlobalConfig().codeReviewLastMaxFindings,
+      cell,
+      isSkillPreload: context.options.isSkillPreload === true,
+      usesReportFindings,
     })
-    const maxFindingsNote = formatCodeReviewMaxFindingsNotice(maxResolved)
+    const maxFindingsNote = formatCodeReviewMaxFindingsNotice({
+      ...maxResolved,
+      willRunAsFork: !usesReportFindings,
+    })
     const ultraEnabled = isUltrareviewEnabled()
     const ultraCommandAvailable =
       context.options?.commands?.some(
@@ -538,10 +769,15 @@ const codeReview = {
       target,
       comment,
       fix,
-      ultraNote,
-      effortNote,
+      wrapCodeReviewPostIgnored(ultraNote || effortNote, {
+        post,
+        comment,
+        gitlabTarget: isGitLabCodeReviewTarget(target),
+      }),
+      '',
       maxFindingsNote,
-      maxResolved.asked,
+      maxResolved.stated,
+      cell,
     )
     return [{ type: 'text', text: prompt }]
   },

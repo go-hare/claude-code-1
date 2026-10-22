@@ -11,6 +11,10 @@ import { getOauthConfig } from '../../constants/oauth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { getOrganizationUUID } from '../../services/oauth/client.js'
 import {
+  isPolicyAllowed,
+  isRemotePolicyAllowed,
+} from '../../services/policyLimits/index.js'
+import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
   hasProfileScope,
@@ -146,8 +150,12 @@ export function linkedGithubOnboardingUrl(): string {
  * `!_d()&&!Tt()&&Rt("allow_remote_sessions")&&Rt("allow_quick_web_setup")`
  */
 export function webSetupReuseHint(invocation: string): string {
-  // Product-cut: policy limits always allow remote sessions / quick web setup.
-  if (!isDesktopLikeEntrypointGold() && !isEssentialTrafficOnly()) {
+  if (
+    !isDesktopLikeEntrypointGold() &&
+    !isEssentialTrafficOnly() &&
+    isRemotePolicyAllowed('allow_remote_sessions') &&
+    isPolicyAllowed('allow_quick_web_setup')
+  ) {
     return `run /web-setup${invocation.startsWith('/') ? '' : ' in Claude Code'} to reuse your GitHub CLI login`
   }
   return ''

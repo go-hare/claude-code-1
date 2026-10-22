@@ -92,6 +92,7 @@ export function resolvedModelHasNative1mWindow(model: string): boolean {
   if (
     (provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()) ||
     provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
     provider === 'mantle'
   ) {
     return true
