@@ -137,3 +137,17 @@ describe('getNonDeferrableBuiltins densable eGu + EL_', () => {
     expect(getNonDeferrableBuiltins()).toEqual([])
   })
 })
+
+describe('isDeferredTool Agent fork gate densable 2.1.289 Yne', () => {
+  test('prompt.ts lazy-requires isForkSubagentProductEnabled, not 232 Drb', async () => {
+    const { readFileSync } = await import('fs')
+    const { dirname, join } = await import('path')
+    const { fileURLToPath } = await import('url')
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../prompt.ts'),
+      'utf8',
+    )
+    expect(src).toContain('isForkSubagentProductEnabled')
+    expect(src).not.toContain("from 'src/utils/forkSubagentGate.js'")
+  })
+})

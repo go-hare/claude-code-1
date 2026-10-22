@@ -11,6 +11,7 @@ import { AskUserQuestionTool } from '@claude-code/builtin-tools/tools/AskUserQue
 import {
   getAllowedChannels,
   getIsNonInteractiveSession,
+  getPermissionPromptToolName,
 } from '../../bootstrap/state.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
@@ -56,14 +57,17 @@ export function isEngineConfirmAsk(input: {
 
 /**
  * densable qOt — someone can answer an engine confirm.
- * Gold: cJ() && shouldAvoidPermissionPrompts!==!0 && mode!=="dontAsk".
- * cJ: channels+interactive → false. Local also refuses headless.
+ * Gold cJ: channels while headless → false; headless without a permission
+ * prompt tool (missing or "none") → false; otherwise true.
+ * qOt: cJ() && shouldAvoidPermissionPrompts!==true && mode!=="dontAsk".
  */
 export function canConfirmWithUser(toolUseContext: ToolUseContext): boolean {
-  if (getAllowedChannels().length > 0 && !getIsNonInteractiveSession()) {
+  const headless = getIsNonInteractiveSession()
+  if (getAllowedChannels().length > 0 && headless) return false
+  const promptTool = getPermissionPromptToolName()
+  if (headless && !(promptTool !== undefined && promptTool !== 'none')) {
     return false
   }
-  if (getIsNonInteractiveSession()) return false
   const perms = toolUseContext.getAppState().toolPermissionContext
   return perms.shouldAvoidPermissionPrompts !== true && perms.mode !== 'dontAsk'
 }

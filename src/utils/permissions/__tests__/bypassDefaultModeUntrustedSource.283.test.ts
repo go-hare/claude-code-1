@@ -30,7 +30,7 @@ const settingsMock = createSettingsMock(settingsSnap, {
   getInitialSettings: () => ({}),
   hasAutoModeOptIn: () => true,
   updateSettingsForSource:
-    updateSettingsForSourceMock as typeof realSettings.updateSettingsForSource,
+    updateSettingsForSourceMock as unknown as typeof realSettings.updateSettingsForSource,
 })
 mock.module('src/utils/settings/settings.ts', settingsMock)
 mock.module('src/utils/settings/settings.js', settingsMock)

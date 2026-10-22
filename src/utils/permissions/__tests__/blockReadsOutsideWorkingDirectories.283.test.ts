@@ -938,7 +938,11 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
     )
     expect(result.behavior).toBe('deny')
     expect(result.decisionReason).toEqual({ type: 'mode', mode: 'dontAsk' })
-    expect(result.offersBlockOutsideReads).toBeUndefined()
+    expect(
+      'offersBlockOutsideReads' in result
+        ? result.offersBlockOutsideReads
+        : undefined,
+    ).toBeUndefined()
   })
 })
 

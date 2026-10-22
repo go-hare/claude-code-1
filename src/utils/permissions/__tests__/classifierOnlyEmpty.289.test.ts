@@ -40,14 +40,35 @@ describe('densable 2.1.289 classifierOnly empty-action deny', () => {
     expect(flagAllow).toBeGreaterThan(record)
   })
 
-  test('classifierOnly fail-open unavailable stashes when yOt missed', () => {
+  test('unavailable always denies; classifierOnly transcript overflow denies', () => {
     const src = readFileSync(join(__dirname, '../permissions.ts'), 'utf-8')
-    expect(src).toContain("classifierOnly?.onBlock === 'flag'")
-    expect(src).toContain('flagNoVerdict === undefined')
-    expect(src).toContain("kind: 'unavailable'")
-    expect(src).toContain('stashHandbackClassifierResult(toolUseID')
     expect(src).toContain(
+      'Auto mode classifier unavailable, denying with retry guidance (fail closed)',
+    )
+    expect(src).not.toContain('tengu_iron_gate_closed')
+    expect(src).not.toContain(
       'falling back to normal permission handling (fail open)',
     )
+    expect(src).toContain('denying (classifierOnly: no prompt fallback)')
+    expect(src).toContain('try /compact to reduce conversation size')
+  })
+
+  test('Agent (ht) allows on transcriptTooLong before headless abort', () => {
+    const src = readFileSync(join(__dirname, '../permissions.ts'), 'utf-8')
+    const overflow = src.indexOf('if (classifierResult.transcriptTooLong)')
+    const agentAllow = src.indexOf(
+      'if (tool.name === AGENT_TOOL_NAME)',
+      overflow,
+    )
+    const abort = src.indexOf(
+      'Agent aborted: auto mode classifier transcript exceeded context window in headless mode',
+      overflow,
+    )
+    expect(overflow).toBeGreaterThan(0)
+    expect(agentAllow).toBeGreaterThan(overflow)
+    expect(abort).toBeGreaterThan(agentAllow)
+    const slice = src.slice(agentAllow, abort)
+    expect(slice).toContain("behavior: 'allow'")
+    expect(slice).toContain("decisionReason: { type: 'mode', mode: 'auto' }")
   })
 })

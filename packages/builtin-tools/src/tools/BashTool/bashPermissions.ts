@@ -677,6 +677,42 @@ function skipTimeoutFlags(a: readonly string[]): number {
  * KEEP IN SYNC with SAFE_WRAPPER_PATTERNS above — if you add a wrapper
  * there, add it here too.
  */
+/**
+ * densable `pu` analog — string tokens for deny-rule argv peel.
+ */
+function argvTokensForDeny(command: string): string[] {
+  const parsed = tryParseShellCommand(command)
+  if (!parsed.success) return []
+  return parsed.tokens.filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+}
+
+/**
+ * densable `eut` leading-assign peel used by T4 deny/ask matching.
+ * `TZ="$HOME" rm` stays one argv token; Eue's `$`-excluding regex will not
+ * strip it, but this does.
+ */
+export function eutPeelArgv(argv: string[]): string[] {
+  let tokens = argv.slice()
+  while (tokens.length > 0 && ENV_VAR_ASSIGN_RE.test(tokens[0]!)) {
+    tokens = tokens.slice(1)
+  }
+  for (let round = 0; round < 8; round++) {
+    const peeled = peelPrivilegePrefixes(tokens)
+    const wrapperStripped = stripWrappersFromArgv(peeled)
+    if (
+      wrapperStripped.length === tokens.length &&
+      wrapperStripped.every((t, i) => t === tokens[i])
+    ) {
+      tokens = wrapperStripped
+      break
+    }
+    tokens = wrapperStripped
+  }
+  return tokens
+}
+
 export function stripWrappersFromArgv(argv: string[]): string[] {
   // SECURITY: Consume optional `--` after wrapper options, matching what the
   // wrapper does. Otherwise `['nohup','--','rm','--','-/../foo']` yields `--`
@@ -833,6 +869,20 @@ function filterRulesByContentsMatchingInput(
   // Without iteration, single-pass compositions miss multi-layer interleaving.
   if (stripAllEnvVars) {
     const seen = new Set(commandsToTry)
+    // densable T4 `eut(h?.argv??pu(B))` — argv peel of TZ="$HOME" / TZ=$HOME
+    // that Eue's string regex will not strip (raw `$` in the value).
+    const argv = argvTokensForDeny(commandWithoutRedirections)
+    const peeled = eutPeelArgv(argv)
+    if (
+      peeled.length > 0 &&
+      (peeled[0] !== argv[0] || argv.some(t => ENV_VAR_ASSIGN_RE.test(t)))
+    ) {
+      const joined = peeled.join(' ')
+      if (!seen.has(joined)) {
+        commandsToTry.push(joined)
+        seen.add(joined)
+      }
+    }
     let startIdx = 0
 
     // Iterate until no new candidates are produced (fixed-point)

@@ -904,11 +904,7 @@ describe('Mhy Y$A E$A', () => {
       'allow',
     )
     expect(
-      resolveFilePermissionAnswer(
-        'allow-outside-read-once',
-        payload,
-        null,
-      ),
+      resolveFilePermissionAnswer('allow-outside-read-once', payload, null),
     ).toEqual({
       behavior: 'allow',
       updatedInput: payload.input,

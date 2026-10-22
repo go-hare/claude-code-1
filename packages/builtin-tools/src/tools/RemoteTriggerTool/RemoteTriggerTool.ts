@@ -9,9 +9,9 @@ import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
 } from 'src/utils/auth.js'
-import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { isPolicyLimitsAllowed } from 'src/cli/leftoverTulip.js'
+import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { appendRemoteTriggerAuditRecord } from 'src/utils/remoteTriggerAudit.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
@@ -189,12 +189,20 @@ export const RemoteTriggerTool = buildTool({
   },
   isEnabled() {
     // Gold @212009160: Jn()&&ft()&&!CLAUDE_CODE_REMOTE&&sn("allow_remote_sessions")&&sn(s7)
+    // ft: token present and scopes include user:inference.
+    // !CLAUDE_CODE_REMOTE is raw truthiness ("0" / "false" still hide the tool).
     // s7 @193556804 = "allow_routines". sn = isPolicyLimitsAllowed.
+    const tokens = getClaudeAIOAuthTokens()
+    const scopes = tokens?.scopes
+    const inference =
+      Boolean(tokens?.accessToken) &&
+      Array.isArray(scopes) &&
+      scopes.includes('user:inference')
     return (
       getAPIProvider() === 'firstParty' &&
-      Boolean(getClaudeAIOAuthTokens()?.accessToken) &&
-      !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-      isPolicyLimitsAllowed('allow_remote_sessions') &&
+      inference &&
+      !process.env.CLAUDE_CODE_REMOTE &&
+      isRemotePolicyAllowed('allow_remote_sessions') &&
       isPolicyLimitsAllowed('allow_routines')
     )
   },
@@ -210,7 +218,8 @@ export const RemoteTriggerTool = buildTool({
     )
   },
   toAutoClassifierInput(input: Input) {
-    return `RemoteTrigger ${input.action}${input.trigger_id ? ` ${input.trigger_id}` : ''}`
+    // densable toAutoClassifierInput(e){return e}
+    return input
   },
   async description() {
     return DESCRIPTION

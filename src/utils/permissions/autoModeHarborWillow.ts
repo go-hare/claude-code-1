@@ -53,8 +53,7 @@ export function planHarborWillowAutoFallback(
     return { mode: 'default', fromAutoFallback: false }
   }
   const harborPath =
-    input.harborWillow &&
-    (!input.isNonInteractiveSession || input.mossAnchor)
+    input.harborWillow && (!input.isNonInteractiveSession || input.mossAnchor)
   if (harborPath || input.bridgeChildAutoDefault === true) {
     return { mode: 'auto', fromAutoFallback: true }
   }

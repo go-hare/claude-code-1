@@ -26,6 +26,7 @@ import {
 import { workflowNeedsUsageConsentPrompt } from './workflowUsageConsent.js'
 import { isSessionBypassClass } from './planBypass.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
+import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
@@ -97,7 +98,6 @@ import {
   getTotalOutputTokens,
 } from '../../bootstrap/state.js'
 import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
-import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -139,7 +139,9 @@ import {
   stashHandbackClassifierResult,
 } from '../handbackClassifierResult.js'
 
-const CLASSIFIER_FAIL_CLOSED_REFRESH_MS = 30 * 60 * 1000 // 30 minutes
+/** densable Qet — transcript overflow manual-approval reason (Xr stays false). */
+const TRANSCRIPT_TOO_LONG_REASON =
+  'Auto mode classifier transcript exceeded context window — falling back to manual approval (try /compact to reduce conversation size)'
 
 const PERMISSION_RULE_SOURCES = [
   ...SETTING_SOURCES,
@@ -1320,13 +1322,36 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       }
 
       if (classifierResult.shouldBlock) {
-        // Transcript exceeded the classifier's context window — deterministic
-        // error, won't recover on retry. Skip iron_gate and fall back to
-        // normal prompting so the user can approve/deny manually.
+        // densable transcriptTooLong. Xr (merry_popcorn + canCompact) is
+        // absent here, so the compacting message stays off. Agent (ht) allows.
         if (classifierResult.transcriptTooLong) {
+          const classifierOnlyInteractive =
+            classifierOnly !== undefined &&
+            !layeredPermissionContext.shouldAvoidPermissionPrompts
+          if (classifierOnlyInteractive) {
+            logForDebugging(
+              `Auto mode classifier transcript too long for ${tool.name}, denying (classifierOnly: no prompt fallback)`,
+              { level: 'warn' },
+            )
+            return {
+              behavior: 'deny',
+              decisionReason: {
+                type: 'classifier',
+                classifier: 'auto-mode',
+                reason: TRANSCRIPT_TOO_LONG_REASON,
+                noVerdict: true,
+              },
+              message: `${tool.name} was not reviewed: the auto mode classifier transcript exceeded its context window, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe; the same call will hit the same limit until the conversation is shorter.`,
+            }
+          }
+          if (tool.name === AGENT_TOOL_NAME) {
+            return {
+              behavior: 'allow',
+              updatedInput: result.updatedInput ?? input,
+              decisionReason: { type: 'mode', mode: 'auto' },
+            }
+          }
           if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
-            // Permanent condition (transcript only grows) — deny-retry-deny
-            // wastes tokens without ever hitting the denial-limit abort.
             throw new AbortError(
               'Agent aborted: auto mode classifier transcript exceeded context window in headless mode',
             )
@@ -1335,89 +1360,44 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             'Auto mode classifier transcript too long, falling back to normal permission handling',
             { level: 'warn' },
           )
+          if (effectiveModeForAuto === 'dontAsk') {
+            return {
+              behavior: 'deny',
+              decisionReason: { type: 'mode', mode: 'dontAsk' },
+              message: DONT_ASK_REJECT_MESSAGE(tool.name),
+            }
+          }
           return {
             ...result,
             decisionReason: {
               type: 'other',
-              reason:
-                'Auto mode classifier transcript exceeded context window — falling back to manual approval',
+              reason: TRANSCRIPT_TOO_LONG_REASON,
             },
           }
         }
-        // When classifier is unavailable (API error), behavior depends on
-        // the tengu_iron_gate_closed gate.
+        // densable: unavailable always denies. The iron-gate refresh is absent.
         if (classifierResult.unavailable) {
-          if (
-            getFeatureValue_CACHED_WITH_REFRESH(
-              'tengu_iron_gate_closed',
-              true,
-              CLASSIFIER_FAIL_CLOSED_REFRESH_MS,
-            )
-          ) {
-            if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
-              logForDebugging(
-                'Auto mode classifier unavailable, denying with retry guidance (fail closed)',
-                { level: 'warn' },
-              )
-              return {
-                behavior: 'deny',
-                decisionReason: {
-                  type: 'classifier',
-                  classifier: 'auto-mode',
-                  reason: 'Classifier unavailable',
-                },
-                message: buildClassifierUnavailableMessage(
-                  tool.name,
-                  classifierResult.model,
-                  classifierResult.httpStatus,
-                  classifierResult.errorKind,
-                ),
-              }
-            }
-            logForDebugging(
-              'Auto mode classifier unavailable, falling back to prompting with retry guidance (fail closed)',
-              { level: 'warn' },
-            )
-            return {
-              behavior: 'ask',
-              decisionReason: {
-                type: 'classifier',
-                classifier: 'auto-mode',
-                reason: 'Classifier unavailable',
-              },
-              message: buildClassifierUnavailableMessage(
-                tool.name,
-                classifierResult.model,
-                classifierResult.httpStatus,
-                classifierResult.errorKind,
-              ),
-            }
-          }
-          // Fail open: fall back to normal permission handling.
-          // Gold Fr/yOt already ran above; if classifierOnly onBlock:flag and
-          // yOt missed (shouldBlock false), still stash unavailable.
-          if (
-            classifierOnly?.onBlock === 'flag' &&
-            flagNoVerdict === undefined
-          ) {
-            stashHandbackClassifierResult(toolUseID, {
-              kind: 'unavailable',
-              ...(classifierResult.model !== undefined
-                ? { model: classifierResult.model }
-                : {}),
-              ...(classifierResult.httpStatus !== undefined
-                ? { httpStatus: classifierResult.httpStatus }
-                : {}),
-              ...(classifierResult.errorKind !== undefined
-                ? { errorKind: classifierResult.errorKind }
-                : {}),
-            })
-          }
           logForDebugging(
-            'Auto mode classifier unavailable, falling back to normal permission handling (fail open)',
+            classifierResult.retryAfterMs === undefined
+              ? 'Auto mode classifier unavailable, denying with retry guidance (fail closed)'
+              : 'Auto mode classifier told to wait by the API, denying (fail closed)',
             { level: 'warn' },
           )
-          return result
+          return {
+            behavior: 'deny',
+            decisionReason: {
+              type: 'classifier',
+              classifier: 'auto-mode',
+              reason: 'Classifier unavailable',
+            },
+            message: buildClassifierUnavailableMessage(
+              tool.name,
+              classifierResult.model,
+              classifierResult.httpStatus,
+              classifierResult.errorKind,
+              classifierResult.retryAfterMs,
+            ),
+          }
         }
 
         // densable 2.1.225: stop_reason==="refusal" → refuse without denial counter.

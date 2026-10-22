@@ -13,6 +13,7 @@ import figures from 'figures';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
+import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
 import {
   PermissionExplainerContent,
   usePermissionExplainerUI,
@@ -179,17 +180,21 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
       subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
       requestSource={p.requestSource}
     >
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
-        <Box flexDirection={preview.kind === 'withheld' || preview.needsGutter ? 'column' : 'row'}>
-          {explainerState.visible ? (
-            <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
-          ) : (
-            previewNode(preview)
-          )}
+      {description !== '' ? (
+        <Box flexDirection="column" paddingX={1}>
+          <Text dimColor wrap="wrap">
+            {description}
+          </Text>
         </Box>
-        {!explainerState.visible && description !== '' ? <Text dimColor>{description}</Text> : null}
-        <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
-      </Box>
+      ) : null}
+      <PermissionOverflowBox paddingX={1}>
+        {explainerState.visible ? (
+          <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
+        ) : (
+          previewNode(preview)
+        )}
+      </PermissionOverflowBox>
+      <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       <Box flexDirection="column">
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="command" />
         {destructiveWarning ? (

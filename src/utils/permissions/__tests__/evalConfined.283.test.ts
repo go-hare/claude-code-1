@@ -21,11 +21,12 @@ describe('densable QLn confined hook allow strip', () => {
   test('voids allow grants when EVAL_CONFINED', () => {
     process.env.CLAUDE_CODE_EVAL_CONFINED = '1'
     expect(isEvalConfined()).toBe(true)
-    const result = {
-      permissionBehavior: 'allow' as const | undefined,
-      permissionRequestResult: { behavior: 'allow' as const } as
-        | { behavior: 'allow' }
-        | undefined,
+    const result: {
+      permissionBehavior: 'allow' | undefined
+      permissionRequestResult: { behavior: 'allow' } | undefined
+    } = {
+      permissionBehavior: 'allow',
+      permissionRequestResult: { behavior: 'allow' },
     }
     stripEvalConfinedHookAllow(result, 'Hook PreToolUse (plugin)')
     expect(result.permissionBehavior).toBeUndefined()
@@ -60,9 +61,9 @@ describe('densable QLn confined hook allow strip', () => {
   test('gold Rze: PreToolUse function-hooks enter executeHooks chain', () => {
     const hooks = readFileSync(join(import.meta.dir, '../../hooks.ts'), 'utf8')
     expect(hooks).toContain("hasMatchingFunctionHook('PreToolUse')")
-    expect(hooks).toContain(
-      'if (!classicChainMember && hasMatchingFunctionHook(hookEvent))',
-    )
+    expect(hooks).toContain('!classicChainMember &&')
+    expect(hooks).toContain('!sessionFunctionHooksOnly &&')
+    expect(hooks).toContain('hasMatchingFunctionHook(hookEvent)')
     expect(hooks).not.toContain("hookEvent !== 'PreToolUse' &&")
   })
 })

@@ -37,7 +37,9 @@ describe('densable 2.1.289 shell -c dangerous rm', () => {
       circuitBreaker: 'dangerousRemoval',
       classifierApprovable: false,
     })
-    expect(String(r?.message ?? '')).toMatch(/shell -c|critical/i)
+    expect(String(r && 'message' in r ? r.message : '')).toMatch(
+      /shell -c|critical/i,
+    )
   })
 
   test('checkDangerousRmInShellDashC asks for possibly-empty var rm inside sh -c', () => {
@@ -45,7 +47,7 @@ describe('densable 2.1.289 shell -c dangerous rm', () => {
     // (shell-quote otherwise expands empty env to `/*` before we see `$VAR`).
     const r = checkDangerousRmInShellDashC('bash -c "rm -rf \\$UNSET/*"')
     expect(r?.behavior).toBe('ask')
-    expect(String(r?.message ?? '')).toMatch(
+    expect(String(r && 'message' in r ? r.message : '')).toMatch(
       /variable|known only when it runs|critical|shell -c/i,
     )
   })

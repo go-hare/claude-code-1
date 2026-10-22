@@ -27,7 +27,10 @@ import type {
 import { isDebugMode, logForDebugging } from '../debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { errorMessage, isAbortError } from '../errors.js'
-import { extractTextContent } from '../messages.js'
+import {
+  extractTextContent,
+  formatClassifierWaitDuration,
+} from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
 import { getDefaultSonnetModel, getMainLoopModel } from '../model/model.js'
 import { isPoorModeActive } from '../../commands/poor/poorMode.js'
@@ -142,6 +145,19 @@ function extractHttpStatus(error: unknown): number | undefined {
     return error.status
   }
   return undefined
+}
+
+/**
+ * densable b1 — only 429/529 with `x-cc-retry-after-too-long` (milliseconds).
+ */
+export function classifierRetryAfterMs(error: unknown): number | undefined {
+  if (!(error instanceof APIError)) return undefined
+  if (error.status !== 429 && error.status !== 529) return undefined
+  if (!(error.headers instanceof Headers)) return undefined
+  const parsed = Number.parseFloat(
+    error.headers.get('x-cc-retry-after-too-long') ?? '',
+  )
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 function isUsingExternalPermissions(): boolean {
@@ -1303,6 +1319,7 @@ async function classifyYoloActionXml(
     // densable: skip fO_ when prompt-too-long (errorKind only on true API errors)
     const errorKind = tooLong ? undefined : classifyClassifierErrorKind(error)
     const httpStatus = extractHttpStatus(error)
+    const retryAfterMs = tooLong ? undefined : classifierRetryAfterMs(error)
     logAutoModeOutcome(tooLong ? 'transcript_too_long' : 'error', model, {
       classifierType,
       ...(tooLong && {
@@ -1317,12 +1334,15 @@ async function classifyYoloActionXml(
       reason: tooLong
         ? 'Classifier transcript exceeded context window'
         : stage1Usage
-          ? 'Stage 2 classifier error - blocking based on stage 1 assessment (usually transient — retrying often succeeds)'
+          ? retryAfterMs !== undefined
+            ? `Stage 2 classifier error - blocking based on stage 1 assessment (the API told the classifier to wait ${formatClassifierWaitDuration(retryAfterMs)} from now, so do not retry before then)`
+            : 'Stage 2 classifier error - blocking based on stage 1 assessment (usually transient — retrying often succeeds)'
           : 'Classifier unavailable - blocking for safety',
       model,
       unavailable: stage1Usage === undefined,
       httpStatus,
       errorKind,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
       transcriptTooLong: Boolean(tooLong),
       stage: stage1Usage ? 'thinking' : undefined,
       durationMs: Date.now() - overallStart,

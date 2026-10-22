@@ -32,10 +32,10 @@ describe('densable 2.1.289 SuggestBackgroundPR d_e cut', () => {
   })
 
   test('call stub returns SuggestOutput only (no undeclared error)', async () => {
-    const result = await SuggestBackgroundPRTool.call(
-      { title: 't', description: 'd' },
-      {} as never,
-    )
+    const result = await SuggestBackgroundPRTool.call({
+      title: 't',
+      description: 'd',
+    })
     expect(result.data).toEqual({ suggested: false, suggestion_id: '' })
     expect(result.data).not.toHaveProperty('error')
   })

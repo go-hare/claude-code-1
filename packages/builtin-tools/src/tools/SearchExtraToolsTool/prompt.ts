@@ -8,7 +8,6 @@ import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import { ENTER_WORKTREE_TOOL_NAME } from '../EnterWorktreeTool/constants.js'
 import { SEND_USER_FILE_TOOL_NAME } from '../SendUserFileTool/prompt.js'
-import { isForkSubagentEnabled } from 'src/utils/forkSubagentGate.js'
 import { isKairosLoopDynamicEnabled } from 'src/utils/loopDynamic.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 
@@ -152,9 +151,15 @@ export function isDeferredTool(tool: Tool): boolean {
   // densable: if(e.name===dw)return!1 — ToolSearch itself is never deferred
   if (tool.name === SEARCH_EXTRA_TOOLS_TOOL_NAME) return false
 
-  // densable: if(e.name===Qo){if(isForkSubagentEnabled())return!1}
+  // densable: if(e.name===Qo){if(t.isForkSubagentEnabled())return!0} then
+  // isDeferredTool inverts alwaysLoad — Agent stays undeferred when Yne.
+  // Gold lazy-requires the Yne chunk (289), not 232 Drb/FDd.
   if (tool.name === AGENT_TOOL_NAME) {
-    if (isForkSubagentEnabled()) return false
+    // Gold lazy-requires the Yne chunk (289). Keep require so ToolSearch
+    // prompt does not import AgentTool at module load.
+    const { isForkSubagentProductEnabled } =
+      require('../AgentTool/forkSubagent.js') as typeof import('../AgentTool/forkSubagent.js')
+    if (isForkSubagentProductEnabled()) return false
   }
 
   // densable: if(e.name===b3_)return!1 — Brief / SendUserMessage

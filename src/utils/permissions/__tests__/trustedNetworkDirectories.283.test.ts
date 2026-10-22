@@ -7,7 +7,7 @@
  *   `Ier` @190949411
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { getEmptyToolPermissionContext } from '../../../Tool.js'
 import { setFlagSettingsInline } from '../../../bootstrap/state.js'
 import {
@@ -26,6 +26,8 @@ import {
 } from '../trustedNetworkDirectories.js'
 
 const GOLD = '/tmp/official-283/package/claude'
+const HAS_GOLD = existsSync(GOLD)
+const goldTest = HAS_GOLD ? test : test.skip
 
 function goldHas(s: string): boolean {
   return readFileSync(GOLD).includes(Buffer.from(s))
@@ -52,12 +54,12 @@ afterEach(() => {
 })
 
 describe('densable 2.1.283 trustedNetworkDirectories gold lock', () => {
-  test('unique string count 40 @72811096', () => {
+  goldTest('unique string count 40 @72811096', () => {
     expect(goldCount('trustedNetworkDirectories')).toBe(40)
     expect(goldHas('trustedNetworkDirectories')).toBe(true)
   })
 
-  test('g1/h1 path-screen body (not ReflectMessage g1 @180171152)', () => {
+  goldTest('g1/h1 path-screen body (not ReflectMessage g1 @180171152)', () => {
     expect(goldHas('function g1(n,e,t){let i=n.trim()')).toBe(true)
     expect(goldHas('function h1(n,e){return r(n,e)?.reason}')).toBe(true)
     expect(goldHas('reason:"nt_namespace"')).toBe(true)
@@ -67,7 +69,7 @@ describe('densable 2.1.283 trustedNetworkDirectories gold lock', () => {
     expect(goldHas('reason:"suspicious_windows_spelling"')).toBe(true)
   })
 
-  test('Ier flagSettings rewrite body', () => {
+  goldTest('Ier flagSettings rewrite body', () => {
     expect(
       goldHas('if(o==="flagSettings"){let A=new Set((he("flagSettings")'),
     ).toBe(true)

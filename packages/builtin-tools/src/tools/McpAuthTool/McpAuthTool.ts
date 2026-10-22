@@ -18,6 +18,7 @@ import type { Tool } from 'src/Tool.js'
 import { errorMessage } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logMCPDebug, logMCPError } from 'src/utils/log.js'
+import { mcpInfoSource } from 'src/utils/plugins/toolDescribe.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 
 const inputSchema = lazySchema(() => z.object({}))
@@ -62,7 +63,12 @@ export function createMcpAuthTool(
   return {
     name: buildMcpToolName(serverName, 'authenticate'),
     isMcp: true,
-    mcpInfo: { serverName, toolName: 'authenticate' },
+    mcpInfo: {
+      serverName,
+      toolName: 'authenticate',
+      // densable auth stub: `source:Tj(e,r)` (scope??source → hQ).
+      source: mcpInfoSource(serverName, config),
+    },
     isEnabled: () => true,
     isConcurrencySafe: () => false,
     isReadOnly: () => false,
