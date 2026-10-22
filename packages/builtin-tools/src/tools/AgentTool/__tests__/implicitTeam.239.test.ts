@@ -61,13 +61,16 @@ describe('densable 2.1.239 implicit session team leftover', () => {
     )
     expect(agentToolSource).toContain('if (isTeammate() && name)')
     expect(agentToolSource).toContain(
-      'if (isInProcessTeammate() && run_in_background === true)',
+      'if (isInProcessTeammate() && run_in_background === true && !hookChangedBackground)',
     )
     expect(agentToolSource).toContain(
       '!shouldSkipTeammateSpawnForWebFetch(subagent_type, toolUseContext.options.agentDefinitions.activeAgents)',
     )
     expect(agentToolSource).toContain('teamContext &&')
     expect(agentToolSource).toContain('!isForkType &&')
+    expect(agentToolSource).toContain(
+      'normalizeAgentTypeKey(subagent_type) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE)',
+    )
     expect(agentToolSource).toContain('!isolation &&')
     expect(agentToolSource).toContain('!cwd')
     expect(agentToolSource).not.toContain('team_name: teamName')

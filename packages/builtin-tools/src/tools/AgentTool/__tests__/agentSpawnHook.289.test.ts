@@ -23,12 +23,22 @@ describe('densable 2.1.289 agent.spawn hook', () => {
     expect(src).toContain(
       'let arrivedSpawn: Record<string, unknown> | undefined',
     )
-    expect(src).toContain('prompt = arrivedSpawn.prompt')
+    expect(src).toContain('prompt = arrived.prompt')
     expect(src).toContain(
-      "description = arrivedSpawn.description.replace(/\\s+/g, ' ').trim()",
+      "description = arrived.description.replace(/\\s+/g, ' ').trim()",
     )
-    expect(src).toContain('cwd = arrivedSpawn.cwd as string | undefined')
-    expect(src).toContain('run_in_background = arrivedSpawn.background')
+    expect(src).toContain('cwd = arrived.cwd as string | undefined')
+    expect(src).toContain('run_in_background = arrived.background')
+    expect(src).toContain(
+      "A plugin's agent.spawn hook rewrote this spawn into one a permission rule",
+    )
+    expect(src).toContain(
+      'named another agent for a web-fetch dispatch admitted without classifier review',
+    )
+    expect(src).toContain(
+      'set cwd on a spawn isolated in a worktree; cwd and isolation: "worktree" are mutually exclusive.',
+    )
+    expect(src).toContain("a plugin's agent.spawn hook backgrounded this one.")
     expect(src).toContain('rewritten by a hook')
     expect(src).toContain('names no agent this call can dispatch')
     expect(src).toContain('!isInsideAgentSpawnLaunch()')

@@ -1,7 +1,7 @@
-import { feature } from 'bun:bundle'
 import type { BetaToolUseBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { randomUUID } from 'crypto'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import {
   FORK_BOILERPLATE_TAG,
   FORK_DIRECTIVE_PREFIX,
@@ -26,38 +26,53 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
  *   `<task-notification>` interaction model
  * - `/fork <directive>` slash command is available
  *
- * Enable paths (densable-aligned OR):
- * 1. Compile-time `feature('FORK_SUBAGENT')` (FEATURE_FORK_SUBAGENT=1 / build list)
- * 2. Portable env/GB: CLAUDE_CODE_FORK_SUBAGENT / tengu_fork_subagent
- *    (`src/utils/forkSubagentGate.ts`) — same resolver `/fork` used to call alone
- *
- * Session constraints:
- * - Mutually exclusive with coordinator mode (gold FDd / Ige, folded into Yne)
- * - Explicit `subagent_type: fork` / `/fork` also disabled in non-interactive
- *   sessions (Ce). densable Ht / qt use Yne **without** Ce — see
- *   `isForkSubagentProductEnabled`.
+ * Session constraints (densable 2.1.289 Omo / Imo / cHr):
+ * - Coordinator (`ePe`) and `CLAUDE_CODE_FORK_SUBAGENT=false` disable Yne
+ *   before the session sticky is read.
+ * - Imo does not consult USER_TYPE or the 2.1.232 ant gate. Explicit env
+ *   true is "env" even when non-interactive; otherwise Ce (`!isInteractive`)
+ *   returns "disabled" (not written), and the default source is "default".
+ * - A non-disabled Imo result sticks on the session (`forkSubagentEnabledSource`)
+ *   and later env clears do not re-run Ce. Env false and coordinator still win.
+ * - `/fork` and `/subtask` follow gold `isEnabled: () => !coordinator`.
+ *   Their call bodies do not re-check Yne or headless.
+ * - Schema, Ht/qt, and the fork prompt use Yne. An inner call can still
+ *   fork when Yne is off via cHr (`isForkSubagentScriptCallEnabled`).
+ * - There is no compile `FORK_SUBAGENT` gate. Official Yne does not read it.
  */
+type ForkProductSource = 'env' | 'default'
+
+/** densable Oo().forkSubagentEnabledSource — session sticky for Omo. */
+let forkProductSource: ForkProductSource | undefined
+
+/** Test helper — a new official session drops the sticky. */
+export function resetForkSubagentProductSource(): void {
+  forkProductSource = undefined
+}
+
 export function isForkSubagentProductEnabled(): boolean {
-  // Compile feature first (bun:bundle — only valid in if/ternary condition).
-  let enabled = false
-  if (feature('FORK_SUBAGENT')) {
-    enabled = true
-  } else if (
-    (
-      require('src/utils/forkSubagentGate.js') as typeof import('src/utils/forkSubagentGate.js')
-    ).isForkSubagentEnabled()
-  ) {
-    // Portable densable path when compile flag is off (default build).
-    enabled = true
-  }
-  if (!enabled) return false
+  // Omo: coordinator and env false win before the sticky read.
   if (isCoordinatorMode()) return false
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_FORK_SUBAGENT)) return false
+  if (forkProductSource !== undefined) return true
+  // Imo: env true → env; Ce() headless → disabled (not stored); else default.
+  let source: ForkProductSource | 'disabled'
+  if (isEnvTruthy(process.env.CLAUDE_CODE_FORK_SUBAGENT)) source = 'env'
+  else if (getIsNonInteractiveSession()) source = 'disabled'
+  else source = 'default'
+  if (source === 'disabled') return false
+  forkProductSource = source
   return true
 }
 
-export function isForkSubagentEnabled(): boolean {
-  if (!isForkSubagentProductEnabled()) return false
-  if (getIsNonInteractiveSession()) return false
+/**
+ * densable cHr — `!ePe() && CLAUDE_CODE_FORK_SUBAGENT !== false`.
+ * Cn treats an inner/script call as fork-capable when this is on, even if
+ * Yne is off because the session is non-interactive.
+ */
+export function isForkSubagentScriptCallEnabled(): boolean {
+  if (isCoordinatorMode()) return false
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_FORK_SUBAGENT)) return false
   return true
 }
 

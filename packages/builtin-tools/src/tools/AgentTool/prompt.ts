@@ -26,10 +26,7 @@ import {
   AGENT_TOOL_NAME,
   SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
 } from './constants.js'
-import {
-  isForkSubagentEnabled,
-  isForkSubagentProductEnabled,
-} from './forkSubagent.js'
+import { isForkSubagentProductEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 export type AgentPromptAvailability = {
@@ -107,6 +104,26 @@ function shouldUseLeanAgentPrompt(input: {
   return input.leanPrompt ?? shouldUseSimpleSystemPrompt({ model: input.model })
 }
 
+type SubagentSteer = 'default' | 'no_nudges' | 'counter_steer'
+
+/**
+ * densable dL — env CLAUDE_CODE_THISTLE_GREBE, else tengu_thistle_grebe.
+ * Unset and unknown values are `default` (proactive / parallel nudges on).
+ */
+function readSubagentSteer(): SubagentSteer {
+  const env = process.env.CLAUDE_CODE_THISTLE_GREBE?.trim().toLowerCase()
+  if (env === 'default' || env === 'no_nudges' || env === 'counter_steer') {
+    return env
+  }
+  const gb = String(
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_thistle_grebe', 'default'),
+  )
+  if (gb === 'no_nudges' || gb === 'counter_steer' || gb === 'default') {
+    return gb
+  }
+  return 'default'
+}
+
 /** densable jfr($e) — never minify-export `jfr`. */
 function whenToUseLookupLine(steerDefault: boolean): string {
   return steerDefault
@@ -129,7 +146,9 @@ export async function getPrompt(
   // (fork semantics, directive-style prompts) and swap in fork-aware examples.
   // densable Thf receives forkAvailable from the caller (kbf); when omitted,
   // fall back to the local session gate.
-  const forkEnabled = availability?.forkAvailable ?? isForkSubagentEnabled()
+  const forkEnabled =
+    availability?.forkAvailable ?? isForkSubagentProductEnabled()
+  const steerDefault = readSubagentSteer() === 'default'
   // densable n = generalPurposeAvailable (Abf); default true when unspecified
   // so existing callers keep prior omit-defaults-to-GP copy.
   const generalPurposeAvailable = availability?.generalPurposeAvailable ?? true
@@ -284,7 +303,7 @@ A fork runs in the background and keeps its tool output out of your context. If 
 ${
   costsFirst
     ? (availability?.delegationCostsFirstText ?? getDelegationCostsFirstText())
-    : whenToUseLookupLine(true)
+    : whenToUseLookupLine(steerDefault)
 }`
     return `${shared}${whenToUse}${shortForkNote}
 
@@ -328,9 +347,13 @@ ${whenNotToUseSection}
   }
 - To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field — that resumes it with full context. A new ${AGENT_TOOL_NAME} call starts a fresh agent with no memory of prior runs${forkEnabled ? ' (except subagent_type: "fork")' : ''}, so the prompt must be self-contained.
 - Each agent type's model, reasoning effort, and tool access are set in its definition (\`.claude/agents/*.md\` frontmatter, or the SDK \`agents\` option)${isSubagentModelForceEnabled() ? '' : '; the `model` parameter here overrides the definition for this one call'}.
-- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since a fresh agent is not aware of the user's intent
+- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since a fresh agent is not aware of the user's intent${
+    steerDefault
+      ? `
 - If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first.
-- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple ${AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.
+- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple ${AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.`
+      : ''
+  }
 - With \`isolation: "worktree"\`, the worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.${
     sharesCwdDispatchNote ? `\n- ${sharesCwdDispatchNote}` : ''
   }${
@@ -390,6 +413,56 @@ ${AGENT_TOOL_NAME}({
 })
 </example>
 `
-      : ''
+      : `
+
+Example usage:
+
+${
+  generalPurposeAvailable
+    ? backgroundAvailable
+      ? `<example>
+user: "What's left on this branch before we can ship?"
+assistant: <thinking>A survey question across git state, tests, and config. I'll delegate it and ask for a short report so the raw command output stays out of my context.</thinking>
+${AGENT_TOOL_NAME}({
+  description: "Branch ship-readiness audit",
+  prompt: "Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. Report a punch list — done vs. missing. Under 200 words."
+})
+assistant: Ship-readiness audit running in the background.
+<commentary>
+The prompt is self-contained: it states the goal, lists what to check, and caps the response length. The agent runs in the background (the default), so the turn ends here — nothing about its findings is known yet. The report arrives in a SEPARATE turn, as a completion notification from outside; it is never something you write yourself.
+</commentary>
+[later turn — notification arrives as user message]
+assistant: Audit's back. Three blockers: no tests for the new prompt path, GrowthBook gate wired but not in build_flags.yaml, and one uncommitted file.
+</example>
+
+`
+      : `<example>
+user: "What's left on this branch before we can ship?"
+assistant: <thinking>A survey question across git state, tests, and config. I'll delegate it and ask for a short report so the raw command output stays out of my context.</thinking>
+${AGENT_TOOL_NAME}({
+  description: "Branch ship-readiness audit",
+  prompt: "Audit what's left before this branch can ship. Check: uncommitted changes, commits ahead of main, whether tests exist, whether the GrowthBook gate is wired up, whether CI-relevant files changed. Report a punch list — done vs. missing. Under 200 words."
+})
+<commentary>
+The prompt is self-contained: it states the goal, lists what to check, and caps the response length. The agent's report comes back as the tool result; relay the findings to the user.
+</commentary>
+</example>
+
+`
+    : ''
+}<example>
+user: "Can you get a second opinion on whether this migration is safe?"
+assistant: <thinking>I'll ask the code-reviewer agent — it won't see my analysis, so it can give an independent read.</thinking>
+<commentary>
+A non-fork subagent_type is specified, so the agent starts fresh. It needs full context in the prompt. The briefing explains what to assess and why.
+</commentary>
+${AGENT_TOOL_NAME}({
+  name: "migration-review",
+  description: "Independent migration review",
+  subagent_type: "code-reviewer",
+  prompt: "Review migration 0042_user_schema.sql for safety. Context: we're adding a NOT NULL column to a 50M-row table. Existing rows get a backfill default. I want a second opinion on whether the backfill approach is safe under concurrent writes — I've checked locking behavior but want independent verification. Report: is this safe, and if not, what specifically breaks?"
+})
+</example>
+`
   }`
 }

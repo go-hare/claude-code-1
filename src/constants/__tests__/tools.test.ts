@@ -16,11 +16,11 @@ import {
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
 import * as realSettings from 'src/utils/settings/settings.js'
-import * as realForkSubagentGate from '../../utils/forkSubagentGate.js'
+import * as realForkProduct from '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js'
 
 // Snapshot BEFORE mock.module — live namespace rebinds under Bun.
 const settingsSnap = snapshotModuleExports(realSettings)
-const forkGateSnap = snapshotModuleExports(realForkSubagentGate)
+const forkProductSnap = snapshotModuleExports(realForkProduct)
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -47,13 +47,18 @@ mock.module(
 )
 
 let forkEnabled = false
-mock.module('src/utils/forkSubagentGate.js', () => ({
-  ...forkGateSnap,
-  isForkSubagentEnabled: () => forkEnabled,
-  resolveForkSubagentSource: () => (forkEnabled ? 'env' : 'disabled'),
-}))
+mock.module(
+  '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js',
+  () => ({
+    ...forkProductSnap,
+    isForkSubagentProductEnabled: () => forkEnabled,
+  }),
+)
 afterAll(() => {
-  mock.module('src/utils/forkSubagentGate.js', () => ({ ...forkGateSnap }))
+  mock.module(
+    '@claude-code/builtin-tools/tools/AgentTool/forkSubagent.js',
+    () => ({ ...forkProductSnap }),
+  )
   restoreSettingsMockWith(mock.module, settingsSnap)
 })
 
@@ -209,7 +214,7 @@ describe('isDeferredTool (densable TX)', () => {
     ).toBe(false)
   })
 
-  test('Agent defers only when shouldDefer and fork off; never when fork on', () => {
+  test('Agent defers only when shouldDefer and Yne off; never when Yne on', () => {
     // Agent has no shouldDefer in product → not deferred by default
     expect(isDeferredTool(makeTool({ name: 'Agent' }) as never)).toBe(false)
     expect(

@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import {
   deriveInSessionForkDescription,
   deriveInSessionForkName,
   extractAgentIdFromToolResult,
 } from '../launchInSessionForkAgent.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 describe('deriveInSessionForkName (densable pwd)', () => {
   test('first 3 tokens lowercased joined with dash', () => {
@@ -69,5 +74,29 @@ describe('extractAgentIdFromToolResult', () => {
     expect(extractAgentIdFromToolResult({ data: { taskId: 'task-1' } })).toBe(
       undefined,
     )
+  })
+})
+
+describe('densable 2.1.289 aIt slash spawn', () => {
+  const src = readFileSync(
+    join(__dirname, '..', 'launchInSessionForkAgent.ts'),
+    'utf8',
+  )
+
+  test('never AgentTool.call — allocateName + FORK_AGENT + N5', () => {
+    expect(src).not.toContain('AgentTool.call(')
+    expect(src).not.toContain(
+      "from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js'",
+    )
+    expect(src).toContain('registerAsyncAgent')
+    expect(src).toContain('selectedAgent: FORK_AGENT')
+    expect(src).toContain('runAsyncAgentLifecycle')
+    expect(src).toContain('runAgent')
+    expect(src).toContain('agentDefinition: FORK_AGENT')
+    expect(src).toContain('useExactTools: true')
+    expect(src).toContain('forkContextMessages: context.messages')
+    expect(src).toContain('buildChildMessage(directive)')
+    expect(src).toContain('createAgentId(name)')
+    expect(src).toContain('handbackOptIn: false')
   })
 })

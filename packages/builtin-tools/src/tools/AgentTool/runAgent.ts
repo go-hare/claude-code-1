@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
+import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
@@ -9,7 +10,13 @@ import {
   getProjectRoot,
   getSessionId,
 } from 'src/bootstrap/state.js'
-import { getCommand, getSkillToolCommands, hasCommand } from 'src/commands.js'
+import {
+  builtInCommandNames,
+  getCommand,
+  getSkillToolCommands,
+  hasCommand,
+  isCommandEnabled,
+} from 'src/commands.js'
 import {
   DEFAULT_AGENT_PROMPT,
   enhanceSystemPromptWithEnvDetails,
@@ -20,6 +27,7 @@ import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { query } from 'src/query.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getDumpPromptsPath } from 'src/services/api/dumpPrompts.js'
@@ -41,7 +49,7 @@ import {
   type ToolUseContext,
 } from 'src/Tool.js'
 import { killShellTasksForAgent } from 'src/tasks/LocalShellTask/killShellTasks.js'
-import type { Command } from 'src/types/command.js'
+import type { Command, CommandBase, PromptCommand } from 'src/types/command.js'
 import type { AgentId } from 'src/types/ids.js'
 import type {
   AssistantMessage,
@@ -77,6 +85,16 @@ import {
 import { registerFrontmatterHooks } from 'src/utils/hooks/registerFrontmatterHooks.js'
 import { clearSessionHooks } from 'src/utils/hooks/sessionHooks.js'
 import { executeSubagentStartHooks } from 'src/utils/hooks.js'
+import {
+  isOfficialMarketplaceName,
+  parsePluginIdentifier,
+} from 'src/utils/plugins/pluginIdentifier.js'
+import { refreshAccountSkillsSyncVeto } from 'src/utils/accountSkillsSyncVeto.js'
+import {
+  buildPluginCommandTelemetryFields,
+  sanitizeSkillNameForTelemetry,
+} from 'src/utils/telemetry/pluginTelemetry.js'
+import { getSkillPromptBlocks } from 'src/utils/skills/skillPromptHook.js'
 import {
   createProgressMessage,
   createUserMessage,
@@ -286,6 +304,80 @@ type QueryMessage =
   | ToolUseSummaryMessage
   | TombstoneMessage
 
+/** densable Hs/Ha — tengu_skill_tool_invocation for agent skill preload. */
+function logAgentSkillPreload(
+  skill: CommandBase & PromptCommand,
+  agentId: AgentId,
+): void {
+  try {
+    const isBuiltIn = builtInCommandNames().has(skill.name)
+    const isBundled = skill.source === 'bundled'
+    const pluginRepo = skill.pluginInfo?.repository
+    const isOfficial =
+      skill.source === 'plugin' &&
+      pluginRepo !== undefined &&
+      isOfficialMarketplaceName(parsePluginIdentifier(pluginRepo).marketplace)
+    const { sanitizedName, skillNameHash } = sanitizeSkillNameForTelemetry({
+      rawName: skill.name,
+      canonicalName: skill.name,
+      isMcp: skill.loadedFrom === 'mcp',
+      isBuiltIn,
+      isBundled,
+      isOfficial,
+    })
+    const pluginMarketplace = skill.pluginInfo
+      ? parsePluginIdentifier(skill.pluginInfo.repository).marketplace
+      : undefined
+    logEvent('tengu_skill_tool_invocation', {
+      command_name:
+        sanitizedName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...skillNameHash,
+      _PROTO_skill_name:
+        skill.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+      execution_context:
+        'preload' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      invocation_trigger:
+        'agent-preload' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      parent_agent_id:
+        agentId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      skill_name:
+        skill.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      skill_source:
+        skill.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ...(skill.loadedFrom && {
+        skill_loaded_from:
+          skill.loadedFrom as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(skill.kind && {
+        skill_kind:
+          skill.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      ...(skill.createdBy && {
+        skill_created_by:
+          skill.createdBy as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+      skill_content_chars: skill.contentLength,
+      ...(skill.pluginInfo && {
+        _PROTO_plugin_name: skill.pluginInfo.pluginManifest
+          .name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+        ...(pluginMarketplace && {
+          _PROTO_marketplace_name:
+            pluginMarketplace as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+        }),
+        plugin_name: (isOfficial
+          ? skill.pluginInfo.pluginManifest.name
+          : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        plugin_repository: (isOfficial
+          ? skill.pluginInfo.repository
+          : 'third-party') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        ...buildPluginCommandTelemetryFields(skill.pluginInfo),
+      }),
+    })
+  } catch {
+    // densable Hs: telemetry must not fail skill preload
+  }
+}
+
 /** densable 2.1.247 `[s.options.fallbackModel].flat()` — do not invent a chain. */
 function firstFallbackModel(
   value: string | string[] | undefined,
@@ -354,6 +446,7 @@ export async function* runAgent({
   handbackOptIn,
   handbackTool,
   forkedSkillName,
+  sameCwdWriteCapableSibling,
 }: {
   agentDefinition: AgentDefinition
   promptMessages: Message[]
@@ -460,6 +553,8 @@ export async function* runAgent({
   handbackTool?: Tool
   /** densable Ywo — persist forked-skill witness on the sidecar. */
   forkedSkillName?: string
+  /** densable ALo — inject CLo before the TRe sharesCwd stamp. */
+  sameCwdWriteCapableSibling?: boolean
 }): AsyncGenerator<Message, void> {
   // Track subagent usage for feature discovery
 
@@ -509,6 +604,13 @@ export async function* runAgent({
     ? filterIncompleteToolCalls(forkContextMessages)
     : []
   const initialMessages: Message[] = [...contextMessages, ...promptMessages]
+  if (sameCwdWriteCapableSibling) {
+    initialMessages.push(
+      createUserMessage({
+        content: SAME_CWD_CHILD_NOTE,
+      }),
+    )
+  }
 
   const agentReadFileState =
     override?.readFileState !== undefined
@@ -817,6 +919,25 @@ export async function* runAgent({
         )
         continue
       }
+      // densable kd — isEnabled + policyGate (gate absent → enabled).
+      if (!isCommandEnabled(skill)) {
+        logForDebugging(
+          `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' is disabled by policy`,
+          { level: 'warn' },
+        )
+        continue
+      }
+      // densable Z7 — account-synced skill while sync is off / denied.
+      if (
+        skill.loadedFrom === 'syncedSkills' &&
+        refreshAccountSkillsSyncVeto()
+      ) {
+        logForDebugging(
+          `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' is an account-synced skill and skills sync is currently disabled (turned off or denied by policy)`,
+          { level: 'warn' },
+        )
+        continue
+      }
       validSkills.push({ skillName, skill })
     }
 
@@ -825,16 +946,28 @@ export async function* runAgent({
       'src/utils/processUserInput/processSlashCommand.js'
     )
     const loaded = await Promise.all(
-      validSkills.map(async ({ skillName, skill }) => ({
-        skillName,
-        skill,
-        content: await skill.getPromptForCommand('', toolUseContext),
-      })),
+      validSkills.map(async ({ skillName, skill }) => {
+        // densable KVn + isSkillPreload + promptShellHandOff collector.
+        const promptShellHandOff: Array<{ tool: string; command: string }> = []
+        const content = await getSkillPromptBlocks(skill, '', {
+          ...toolUseContext,
+          promptShellHandOff,
+          options: {
+            ...toolUseContext.options,
+            isSkillPreload: true,
+            tools: resolvedTools,
+          },
+        })
+        return { skillName, skill, content, promptShellHandOff }
+      }),
     )
-    for (const { skillName, skill, content } of loaded) {
+    for (const { skillName, skill, content, promptShellHandOff } of loaded) {
       logForDebugging(
         `[Agent: ${agentDefinition.agentType}] Preloaded skill '${skillName}'`,
       )
+      if (skill.type === 'prompt') {
+        logAgentSkillPreload(skill, agentId)
+      }
 
       // Add command-message metadata so the UI shows which skill is loading
       const metadata = formatSkillLoadingMetadata(
@@ -846,6 +979,12 @@ export async function* runAgent({
         createUserMessage({
           content: [{ type: 'text', text: metadata }, ...content],
           isMeta: true,
+          ...(promptShellHandOff.length > 0 && {
+            promptShellHandOff: {
+              agentId,
+              commands: promptShellHandOff,
+            },
+          }),
         }),
       )
     }

@@ -211,4 +211,23 @@ describe('sharesCwd stamp (densable ALo/Stn/TRe)', () => {
       'getFeatureValue_CACHED_MAY_BE_STALE(TWINKLING_BOOLE_GATE, false)',
     )
   })
+
+  test('CLo is pushed onto the child transcript when ALo is true', () => {
+    const runSrc = readFileSync(
+      join(
+        __dirname,
+        '../../../packages/builtin-tools/src/tools/AgentTool/runAgent.ts',
+      ),
+      'utf-8',
+    )
+    expect(runSrc).toContain('if (sameCwdWriteCapableSibling)')
+    expect(runSrc).toContain('content: SAME_CWD_CHILD_NOTE')
+    const cwdSrc = readFileSync(
+      join(__dirname, '../agentSharesCwd.ts'),
+      'utf-8',
+    )
+    expect(cwdSrc).toContain(
+      'Edit only the files your task requires, re-read a file right before changing it',
+    )
+  })
 })

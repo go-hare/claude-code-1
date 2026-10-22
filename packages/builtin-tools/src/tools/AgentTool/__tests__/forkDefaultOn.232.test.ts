@@ -3,6 +3,10 @@ import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import {
+  isForkSubagentProductEnabled,
+  resetForkSubagentProductSource,
+} from '../forkSubagent.js'
+import {
   isForkSubagentEnabled,
   resetForkSubagentSessionSource,
   resolveForkSubagentSource,
@@ -20,6 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 describe('fork default ON densable 232 #1', () => {
   afterEach(() => {
     resetForkSubagentSessionSource()
+    resetForkSubagentProductSource()
   })
 
   test('FDd session sticky pins first live Drb (env flip later ignored)', () => {
@@ -57,14 +62,45 @@ describe('fork default ON densable 232 #1', () => {
     expect(isForkSubagentEnabled({ env: {}, isAnt: false })).toBe(true)
   })
 
-  test('AgentTool isForkSubagentEnabled ORs portable gate (not compile-only)', () => {
+  test('289 Imo ignores the 232 ant gate', () => {
     const src = readFileSync(join(__dirname, '..', 'forkSubagent.ts'), 'utf8')
-    expect(src).toContain("require('src/utils/forkSubagentGate.js')")
-    expect(src).toContain('isForkSubagentEnabled()')
-    // Yne folds coordinator; Ce (non-interactive) is only on isForkSubagentEnabled
-    expect(src).toContain('isForkSubagentProductEnabled')
-    expect(src).toContain('isCoordinatorMode()')
-    expect(src).toContain('getIsNonInteractiveSession()')
+    const start = src.indexOf('export function isForkSubagentProductEnabled')
+    const end = src.indexOf('export function isForkSubagentScriptCallEnabled')
+    const body = src.slice(start, end)
+    expect(body).not.toContain('forkSubagentGate')
+    expect(body).not.toContain('process.env.USER_TYPE')
+    expect(body).not.toContain('isAnt')
+    expect(body).toContain('isCoordinatorMode()')
+    expect(body).toContain('getIsNonInteractiveSession()')
+    expect(body).toContain('isEnvTruthy(process.env.CLAUDE_CODE_FORK_SUBAGENT)')
+  })
+
+  test('Omo sticky keeps env enable after the env is cleared; env false still wins', () => {
+    const saved = process.env.CLAUDE_CODE_FORK_SUBAGENT
+    resetForkSubagentProductSource()
+    process.env.CLAUDE_CODE_FORK_SUBAGENT = '1'
+    expect(isForkSubagentProductEnabled()).toBe(true)
+    delete process.env.CLAUDE_CODE_FORK_SUBAGENT
+    expect(isForkSubagentProductEnabled()).toBe(true)
+    process.env.CLAUDE_CODE_FORK_SUBAGENT = '0'
+    expect(isForkSubagentProductEnabled()).toBe(false)
+    if (saved === undefined) delete process.env.CLAUDE_CODE_FORK_SUBAGENT
+    else process.env.CLAUDE_CODE_FORK_SUBAGENT = saved
+    resetForkSubagentProductSource()
+  })
+
+  test('explicit env true enables Yne for ant in a headless session', () => {
+    const savedFork = process.env.CLAUDE_CODE_FORK_SUBAGENT
+    const savedUser = process.env.USER_TYPE
+    process.env.USER_TYPE = 'ant'
+    delete process.env.CLAUDE_CODE_FORK_SUBAGENT
+    expect(isForkSubagentProductEnabled()).toBe(false)
+    process.env.CLAUDE_CODE_FORK_SUBAGENT = '1'
+    expect(isForkSubagentProductEnabled()).toBe(true)
+    if (savedFork === undefined) delete process.env.CLAUDE_CODE_FORK_SUBAGENT
+    else process.env.CLAUDE_CODE_FORK_SUBAGENT = savedFork
+    if (savedUser === undefined) delete process.env.USER_TYPE
+    else process.env.USER_TYPE = savedUser
   })
 
   test('bg-by-default still present (changelog half of #1)', () => {

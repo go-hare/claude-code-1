@@ -121,7 +121,7 @@ describe('densable 2.1.289 SubagentHandback (qw / cen)', () => {
     expect(src).toContain('wrapAgentMessageEnvelope(from, bodyText)')
     expect(src).toContain('body: escapeAgentMessageBody(bodyText)')
     expect(src).toContain('flagHandbackSession')
-    // densable 2.1.289 GAP: main path admits via enqueueReportingAdmission
+    // densable 2.1.289 ds: main path admits via enqueueReportingAdmission
     expect(src).toContain('enqueueReportingAdmission')
     expect(src).toContain(
       'Nothing was sent: the main conversation did not accept the message.',

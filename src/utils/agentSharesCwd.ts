@@ -21,6 +21,10 @@ import { isDisklessLaunch } from './sessionHost.js'
 
 export const TWINKLING_BOOLE_GATE = 'tengu_twinkling_boole'
 
+/** densable `CLo` — child prompt when ALo is true (before the TRe stamp). */
+export const SAME_CWD_CHILD_NOTE =
+  "Note: another write-capable agent is already running in this same working directory, and parallel agents sharing a checkout can overwrite each other's work. Edit only the files your task requires, re-read a file right before changing it, and do not revert or overwrite changes you did not make."
+
 /** densable `vLo` — model-facing async_launched note (mapToolResult). */
 export const SHARES_CWD_LAUNCH_NOTE =
   'Note: another write-capable agent is already running in this same working directory, and parallel agents sharing a checkout can overwrite each other\'s work. For parallel code-writing agents, dispatch each with isolation: "worktree".'

@@ -18,9 +18,9 @@
  *   function _Ie(){ return FDd() !== "disabled"; }
  *
  * Local: env force/disable + ant disable + default ON + session sticky
- * (`forkSubagentEnabledSource`). Coordinator is folded into AgentTool
- * `isForkSubagentProductEnabled` (Yne). Non-interactive (Ce) is only on
- * `isForkSubagentEnabled` (explicit fork / `/fork`), not Yne/Ht/qt.
+ * (`forkSubagentEnabledSource`). This stays the 2.1.232 Drb resolver.
+ * 2.1.289 Yne (`isForkSubagentProductEnabled`) does not consult it:
+ * Imo ignores USER_TYPE, and Ce lives on Yne.
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'

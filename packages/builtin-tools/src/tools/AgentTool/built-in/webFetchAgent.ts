@@ -1,6 +1,7 @@
 import { sep as pathSep } from 'node:path'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { TOOL_RESULTS_SUBDIR } from 'src/constants/toolResults.js'
 import { FILE_READ_TOOL_NAME } from '../../FileReadTool/constants.js'
@@ -214,8 +215,9 @@ export function isWebFetchAgentEnabled(): boolean {
     cachedWebFetchAgentEnabled = false
     return false
   }
-  // Product-cut: policy limits always allow web fetch.
-  const enabled = webFetchAgentRosterKind() === 'default'
+  const enabled =
+    isPolicyAllowed(ALLOW_WEB_FETCH_POLICY) &&
+    webFetchAgentRosterKind() === 'default'
   cachedWebFetchAgentEnabled = enabled
   return enabled
 }

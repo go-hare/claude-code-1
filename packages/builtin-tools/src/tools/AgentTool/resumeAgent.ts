@@ -72,7 +72,7 @@ import {
   readForkedSkillScoping,
 } from 'src/utils/forkedSkillScoping.js'
 import { webFetchSavedFilesForAgent } from 'src/utils/subagentSpawnLedger.js'
-import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
+import { FORK_AGENT, isForkSubagentProductEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
 import { runAgent } from './runAgent.js'
@@ -1281,7 +1281,7 @@ async function resumeAgentBackgroundAfterClaim({
         agentIdForCleanup: agentId,
         enableSummarization:
           isCoordinatorMode() ||
-          isForkSubagentEnabled() ||
+          isForkSubagentProductEnabled() ||
           getSdkAgentProgressSummariesEnabled(),
         getWorktreeResult: async () =>
           resumedWorktreePath ? { worktreePath: resumedWorktreePath } : {},

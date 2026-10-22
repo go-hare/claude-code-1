@@ -212,13 +212,14 @@ export const SubagentHandbackTool = buildTool({
     const envelope = wrapAgentMessageEnvelope(from, bodyText)
     const flagged =
       g || getHandbackSessionContract(senderTaskId)?.flagged === true
+    // densable T: peer origin has no lineage field. Framing still treats
+    // senderTaskId as the descendant lane.
     const origin = {
       kind: 'peer' as const,
       from,
       senderTaskId,
       ...(displayName ? { name: displayName } : {}),
       body: escapeAgentMessageBody(bodyText),
-      lineage: 'descendant' as const,
       handback: true as const,
       ...(flagged ? { flagged: true as const } : {}),
     }
@@ -237,6 +238,27 @@ export const SubagentHandbackTool = buildTool({
       !isHandbackInboxReadable(recipient, getTask, mainId)
         ? mainId
         : recipient
+    const setAppState = context.setAppStateForTasks ?? context.setAppState
+    // densable: c !== contract recipient → stamp handbackRecipient before
+    // the second v_n(r, c) check.
+    if (deliverTo !== recipient) {
+      try {
+        updateTaskState(senderTaskId, setAppState, t => {
+          if (!isLocalAgentTask(t)) return t
+          return { ...t, handbackRecipient: deliverTo }
+        })
+      } catch {
+        // tests may omit setAppState
+      }
+    }
+    if (getHandbackDelivery(senderTaskId, deliverTo) !== undefined) {
+      return {
+        data: {
+          success: false,
+          message: `Nothing was sent: your report was already delivered (${SUBAGENT_HANDBACK_TOOL_NAME} delivers one report). Use SendMessage for anything further, then stop.`,
+        } satisfies Output,
+      }
+    }
     if (deliverTo === mainId) {
       // densable: enqueueReportingAdmission; refuse when main does not admit.
       if (
@@ -284,7 +306,6 @@ export const SubagentHandbackTool = buildTool({
     // must not let a second call miss the lock. (Main admit path may also
     // stamp via enqueueReportingAdmission with agentId=main — overwrite here.)
     recordHandbackDelivery(senderTaskId, recipient, { flagged })
-    const setAppState = context.setAppStateForTasks ?? context.setAppState
     try {
       // densable handbackReport.text = tet(Ax(message, {prependMarker:false}).sanitized)
       // — raw sanitized message, NOT the framed C_n envelope body.

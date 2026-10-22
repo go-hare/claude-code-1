@@ -33,7 +33,7 @@ import type { CommandBase, PromptCommand } from '../types/command.js'
 import { overlayForkedCommandAppState } from './forkedAgent.js'
 import { parseToolListFromCLI } from './permissions/permissionSetup.js'
 import { resolveTrustedSkillAllowedTools } from './permissions/skillAllowedToolsTrust.js'
-import { isSyncSkillsEnabled } from './residualFinalEnvGates.js'
+import { refreshAccountSkillsSyncVeto } from './accountSkillsSyncVeto.js'
 import { isForkCapableSkill } from './skills/skillExecutionContext.js'
 import type { AgentId } from '../types/ids.js'
 import { asAgentId } from '../types/ids.js'
@@ -150,7 +150,7 @@ export async function assertForkedSkillResumeAllowed(input: {
     )
   }
   // Gold Z7() — skills sync currently off / denied by policy.
-  if (skill.loadedFrom === 'syncedSkills' && !isSyncSkillsEnabled()) {
+  if (skill.loadedFrom === 'syncedSkills' && refreshAccountSkillsSyncVeto()) {
     throw new ForkedSkillResumeRefusedError(
       'forked_skill_resume_sync_vetoed',
       `Agent ${input.agentId} ran as forked skill ${skillName}, an account-synced skill that is currently disabled (skills sync turned off or denied by policy); refusing to resume it.`,

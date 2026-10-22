@@ -57,7 +57,11 @@ import {
 } from 'src/utils/agentContext.js';
 import { resolveEffectiveIsolation } from 'src/utils/agentIsolationRemote.js';
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
-import { SHARES_CWD_LAUNCH_NOTE, resolveSharesCwdStamp } from 'src/utils/agentSharesCwd.js';
+import {
+  hasSameCwdWriteCapableSibling,
+  SHARES_CWD_LAUNCH_NOTE,
+  resolveSharesCwdStamp,
+} from 'src/utils/agentSharesCwd.js';
 import {
   applyHandbackProvenanceToCompletedContent,
   hashHarnessSectionBlocks,
@@ -129,14 +133,20 @@ import {
   shouldSkipTeammateSpawnForWebFetch,
 } from './built-in/webFetchAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
+import {
+  consumeUnreviewedWebFetch,
+  maybeStampUnreviewedWebFetch,
+  spawnRewriteRuling,
+  type SpawnPermissionSnap,
+} from './spawnHookRewrite.js';
 import { SubagentHandbackTool } from '../SubagentHandbackTool/SubagentHandbackTool.js';
 import {
   buildForkedMessages,
   buildWorktreeNotice,
   FORK_AGENT,
   FORK_SUBAGENT_TYPE,
-  isForkSubagentEnabled,
   isForkSubagentProductEnabled,
+  isForkSubagentScriptCallEnabled,
   isInForkChild,
 } from './forkSubagent.js';
 import {
@@ -269,21 +279,16 @@ const staticInputSchema = lazySchema(() => {
 
 type InputSchema = ReturnType<typeof staticInputSchema>;
 
-const RUN_IN_BACKGROUND_BASE_DESCRIBE =
-  "Agents run in the background by default; you will be notified when one completes. Set to false only when your very next action depends on this agent's result and nothing else could usefully happen while it runs — otherwise leave it in the background so the user can hand you other work.";
-
 export function inputSchema(): InputSchema {
   const base = staticInputSchema();
-  if (isForkSubagentEnabled() || isBackgroundLaunchDisabled()) {
+  // densable r_r: omit when Ier() || Yne(). Yne does not look at Ce.
+  if (isForkSubagentProductEnabled() || isBackgroundLaunchDisabled()) {
     return base.omit({ run_in_background: true }) as unknown as InputSchema;
   }
   const launchRule = getBackgroundLaunchRule();
   if (launchRule?.parameterDescription) {
     return base.extend({
-      run_in_background: z
-        .boolean()
-        .optional()
-        .describe(`${RUN_IN_BACKGROUND_BASE_DESCRIBE} ${launchRule.parameterDescription}`),
+      run_in_background: z.boolean().optional().describe(launchRule.parameterDescription),
     }) as unknown as InputSchema;
   }
   return base;
@@ -291,8 +296,9 @@ export function inputSchema(): InputSchema {
 
 // Explicit type widens the schema inference to always include all optional
 // fields even when .omit() strips them for gating (cwd, run_in_background).
-// subagent_type is optional; call() defaults it to general-purpose when the
-// fork gate is off, or routes to the fork path when the gate is on.
+// subagent_type is optional. Omitting it never selects fork (289). call()
+// uses general-purpose when that agent is available. Fork is explicit
+// subagent_type "fork" plus isForkSubagentProductEnabled().
 type AgentToolInput = z.infer<ReturnType<typeof baseInputSchema>> & {
   name?: string;
   team_name?: string;
@@ -426,8 +432,17 @@ export const AgentTool = buildTool({
     // densable Thf({forkAvailable, generalPurposeAvailable}) — Abf over
     // activeAgents∩allowlist; forkAvailable is the local fork session gate.
     const generalPurposeAvailable = isGeneralPurposeAvailable(agents, allowedAgentTypes);
+    const forkDenied = getDenyRuleForAgent(toolPermissionContext, AGENT_TOOL_NAME, FORK_SUBAGENT_TYPE);
+    const forkTypeAlreadyListed = agents.some(
+      agent => normalizeAgentTypeKey(agent.agentType) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE),
+    );
     return await getPrompt(filteredAgents, isCoordinator, allowedAgentTypes, {
-      forkAvailable: isForkSubagentEnabled(),
+      // densable Cn.available: Yne, not already listed, allowlist includes fork, no deny rule.
+      forkAvailable:
+        isForkSubagentProductEnabled() &&
+        !forkDenied &&
+        !forkTypeAlreadyListed &&
+        (allowedAgentTypes?.includes(FORK_SUBAGENT_TYPE) ?? true),
       generalPurposeAvailable,
       model,
       leanPrompt,
@@ -491,11 +506,31 @@ export const AgentTool = buildTool({
     // Tail pass-on is `arrived` (rewritten spawn). Hook without next → Rat.
     // Gold then applies `D.arrived` onto prompt/description/cwd/model/background
     // and remaps `subagentType` via `fn` (unknown type → deny).
+    const originalSpawnCwd = cwd;
+    let hookRan = false;
+    let hookChangedBackground = false;
+    let hookChangedType = false;
     {
       const { hasMatchingFunctionHook, isInsideAgentSpawnLaunch, runFunctionHookChain } = await import(
         'src/utils/plugins/functionHooksModules.js'
       );
       if (hasMatchingFunctionHook('agent.spawn') && !isInsideAgentSpawnLaunch()) {
+        hookRan = true;
+        await maybeStampUnreviewedWebFetch({
+          toolUseId: toolUseContext.toolUseId,
+          prompt,
+          subagentType: subagent_type,
+          activeAgents: toolUseContext.options.agentDefinitions.activeAgents,
+          context: toolUseContext,
+        });
+        const raisedSnap: SpawnPermissionSnap = {
+          prompt,
+          description,
+          subagentType: subagent_type,
+          model,
+          background: run_in_background,
+          cwd,
+        };
         const spawn: Record<string, unknown> = {
           prompt,
           description,
@@ -576,7 +611,29 @@ export const AgentTool = buildTool({
           model = isCoordinatorMode() ? undefined : modelParam;
         }
         if (typeof arrived.background === 'boolean') {
+          hookChangedBackground = arrived.background !== run_in_background;
           run_in_background = arrived.background;
+        }
+        hookChangedType = subagent_type !== raisedSnap.subagentType;
+        const rewrittenSnap: SpawnPermissionSnap = {
+          prompt,
+          description,
+          subagentType: subagent_type,
+          model,
+          background: run_in_background,
+          cwd,
+        };
+        const ruling = await spawnRewriteRuling(AgentTool, input, raisedSnap, rewrittenSnap, toolUseContext);
+        if (ruling) {
+          const verb = ruling.behavior === 'deny' ? 'denies' : 'asks about';
+          throw new Error(
+            `A plugin's agent.spawn hook rewrote this spawn into one a permission rule ${verb}: ${ruling.message} Dispatch it directly.`,
+          );
+        }
+        if (hookChangedType && consumeUnreviewedWebFetch(toolUseContext.toolUseId)) {
+          throw new Error(
+            "A plugin's agent.spawn hook named another agent for a web-fetch dispatch admitted without classifier review; it cannot run unconfined. Dispatch that agent directly.",
+          );
         }
       }
     }
@@ -594,7 +651,8 @@ export const AgentTool = buildTool({
       );
     }
     // densable: w && run_in_background === true (teammateContext only).
-    if (isInProcessTeammate() && run_in_background === true) {
+    // A hook that flipped background uses the hook sentence after shouldRunAsync.
+    if (isInProcessTeammate() && run_in_background === true && !hookChangedBackground) {
       throw new Error(
         'In-process teammates cannot spawn background agents. Use run_in_background=false for synchronous subagents.',
       );
@@ -639,7 +697,11 @@ export const AgentTool = buildTool({
     };
 
     // densable: S && name && !fork && !WIe && !isolation && !cwd
-    const isForkType = subagent_type !== undefined && subagent_type === FORK_SUBAGENT_TYPE && isForkSubagentEnabled();
+    // Same NFKC fold as isExplicitFork so `Fork` / dashed forms skip teammate spawn.
+    const isForkType =
+      subagent_type !== undefined &&
+      normalizeAgentTypeKey(subagent_type) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE) &&
+      isForkSubagentProductEnabled();
     if (
       teamContext &&
       name &&
@@ -689,15 +751,36 @@ export const AgentTool = buildTool({
     // constraints. Omitting subagent_type never defaults to fork.
     const allAgents = toolUseContext.options.agentDefinitions.activeAgents;
     const { allowedAgentTypes } = toolUseContext.options.agentDefinitions;
-    const forkConstraintsOk =
-      isolation !== 'remote' &&
-      toolUseContext.options.querySource !== `agent:builtin:${FORK_AGENT.agentType}` &&
-      !isInForkChild(toolUseContext.messages);
+    // densable Nn — remote isolation and recursive fork each have their own sentence.
+    const forkConstraintMessage =
+      isolation === 'remote'
+        ? 'Fork cannot use isolation: "remote" — a remote session cannot inherit the conversation context. Omit isolation (or use "worktree"), or spawn a named agent type for remote work.'
+        : toolUseContext.options.querySource === `agent:builtin:${FORK_AGENT.agentType}` ||
+            isInForkChild(toolUseContext.messages)
+          ? 'Fork is not available inside a forked worker. Complete your task directly using your tools.'
+          : null;
     const isExplicitFork =
       subagent_type !== undefined && normalizeAgentTypeKey(subagent_type) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE);
-    const isForkPath = isExplicitFork && isForkSubagentEnabled() && forkConstraintsOk;
-    if (isExplicitFork && !isForkPath) {
-      throw new Error('Fork is not available in this session. Complete your task directly using your tools.');
+    const forkTypeAlreadyListed = allAgents.some(
+      agent => normalizeAgentTypeKey(agent.agentType) === normalizeAgentTypeKey(FORK_SUBAGENT_TYPE),
+    );
+    // densable Cn: Yne() || (innerCall && cHr()), fork not already listed, allowlist.
+    const forkPredicate =
+      (isForkSubagentProductEnabled() || (toolUseContext.innerCall === true && isForkSubagentScriptCallEnabled())) &&
+      !forkTypeAlreadyListed &&
+      (allowedAgentTypes?.includes(FORK_SUBAGENT_TYPE) ?? true);
+    const forkDeniedRule = forkPredicate
+      ? getDenyRuleForAgent(appState.toolPermissionContext, AGENT_TOOL_NAME, FORK_SUBAGENT_TYPE)
+      : null;
+    const forkAvailable = forkPredicate && !forkDeniedRule;
+    if (isExplicitFork && forkDeniedRule) {
+      throw new Error(
+        `Agent type '${FORK_SUBAGENT_TYPE}' has been denied by permission rule '${AGENT_TOOL_NAME}(${FORK_SUBAGENT_TYPE})' from ${forkDeniedRule.source ?? 'settings'}.`,
+      );
+    }
+    const isForkPath = isExplicitFork && forkAvailable;
+    if (isForkPath && forkConstraintMessage) {
+      throw new Error(forkConstraintMessage);
     }
     if (subagent_type === undefined) {
       if (!isGeneralPurposeAvailable(allAgents, allowedAgentTypes)) {
@@ -708,7 +791,7 @@ export const AgentTool = buildTool({
         );
         const availableTypes = agents.map(a => a.agentType);
         const listed =
-          isForkSubagentEnabled() && forkConstraintsOk ? [FORK_SUBAGENT_TYPE, ...availableTypes] : availableTypes;
+          forkAvailable && forkConstraintMessage === null ? [FORK_SUBAGENT_TYPE, ...availableTypes] : availableTypes;
         logEvent('tengu_subagent_type_miss', {
           requestedNormalized: 'OMITTED' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           availableCount: agents.length,
@@ -727,18 +810,7 @@ export const AgentTool = buildTool({
 
     let selectedAgent: AgentDefinition;
     if (isForkPath) {
-      // Recursive fork guard: fork children keep the Agent tool in their
-      // pool for cache-identical tool defs, so reject fork attempts at call
-      // time. Primary check is querySource (compaction-resistant — set on
-      // context.options at spawn time, survives autocompact's message
-      // rewrite). Message-scan fallback catches any path where querySource
-      // wasn't threaded.
-      if (
-        toolUseContext.options.querySource === `agent:builtin:${FORK_AGENT.agentType}` ||
-        isInForkChild(toolUseContext.messages)
-      ) {
-        throw new Error('Fork is not available inside a forked worker. Complete your task directly using your tools.');
-      }
+      // Nn already rejected remote isolation and recursive forks above.
       selectedAgent = FORK_AGENT;
     } else {
       // Non-fork: omit-type → GP. TS cannot narrow `effectiveType` off isForkPath.
@@ -923,18 +995,30 @@ export const AgentTool = buildTool({
     const spawnBackgroundTasksDisabled = spawnGate.backgroundTasksDisabled;
     // densable `rn = ALo(...) && TRe()` — compute before Sot so this spawn is
     // not counted as its own sibling. GB tengu_twinkling_boole defaults false.
-    const sharesCwd = resolveSharesCwdStamp({
+    const sharesCwdSiblingInput = {
       tasks: appState.tasks,
       selectedAgent,
       effectiveIsolation,
       cwd,
       parentCwd: getCwd(),
       parentAgentId: toolUseContext.agentId,
-    });
+    };
+    const sameCwdWriteCapableSibling = hasSameCwdWriteCapableSibling(sharesCwdSiblingInput);
+    const sharesCwd = resolveSharesCwdStamp(sharesCwdSiblingInput);
     const h = callerIsInProcessTeammate || callerIsHeadlessSubagent;
     const b = (isCoordinator && !callerIsInProcessTeammate) || forceAsync || (!h && run_in_background !== false);
     const D = run_in_background === true || selectedAgent.background === true || (!isWebFetchSpawn && b);
     const shouldRunAsync = isRemoteIsolation || (D && !spawnBackgroundTasksDisabled);
+    if (hookRan && cwd !== undefined && cwd !== originalSpawnCwd && effectiveIsolation === 'worktree') {
+      throw new Error(
+        'A plugin\'s agent.spawn hook set cwd on a spawn isolated in a worktree; cwd and isolation: "worktree" are mutually exclusive.',
+      );
+    }
+    if (hookChangedBackground && isInProcessTeammate() && shouldRunAsync && !isRemoteIsolation) {
+      throw new Error(
+        "In-process teammates cannot spawn background agents; a plugin's agent.spawn hook backgrounded this one.",
+      );
+    }
 
     // densable L(G&&!B) — count after type/permission/MCP guards, before worktree/remote/run.
     // Me = local async only: high-priority "interrupt" must not cancel bg startup.
@@ -1269,6 +1353,7 @@ export const AgentTool = buildTool({
       // densable St / bt: fork (X) opts out; observers resume separately.
       handbackOptIn: !isForkPath,
       handbackTool: SubagentHandbackTool,
+      sameCwdWriteCapableSibling,
     };
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -1484,7 +1569,8 @@ export const AgentTool = buildTool({
               toolUseContext,
               rootSetAppState,
               agentIdForCleanup: asyncAgentId,
-              enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
+              enableSummarization:
+                isCoordinator || isForkSubagentProductEnabled() || getSdkAgentProgressSummariesEnabled(),
               getWorktreeResult: cleanupWorktreeIfNeeded,
               // densable Oze finally p?.() — release concurrent slot on settle
               onRunSettled: releaseConcurrencySlot,

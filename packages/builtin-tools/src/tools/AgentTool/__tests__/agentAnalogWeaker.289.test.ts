@@ -86,13 +86,8 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
       '...(!outputFileReadable ? { outputFileUnreadable: true } : {})',
     )
     const query = readFileSync(join(repoRoot, 'src', 'query.ts'), 'utf-8')
-    expect(query).toContain('toolNamesChanged')
-    expect(query).toContain('getSystemPrompt(')
-    expect(query).toContain('buildEffectiveSystemPrompt({')
-    expect(query).toContain('if (updatedToolUseContext.agentId)')
-    expect(query).toContain('enhanceSystemPromptWithEnvDetails')
-    expect(query).toContain("querySource === 'agent:builtin:fork'")
-    expect(query).toContain('useExactTools:')
+    expect(query).not.toContain('toolNamesChanged')
+    expect(query).toContain('runTurnEndReactions')
     expect(query).toContain('function* maybeHandbackBounce')
     expect(query).toContain("reason: 'max_turns'")
     expect(query).toContain('sweepStaleKeepaliveReasons(agentId, setAppState)')
@@ -107,7 +102,10 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
     const bounceAfterPrevent = query.indexOf('maybeHandbackBounce', prevent)
     expect(prevent).toBeGreaterThan(0)
     expect(hookStopped).toBeGreaterThan(prevent)
-    expect(bounceAfterPrevent).toBeGreaterThan(hookStopped)
+    expect(bounceAfterPrevent).toBe(-1)
+    expect(
+      query.slice(prevent, hookStopped).includes('runTurnEndReactions'),
+    ).toBe(true)
     const skillInlineInPrevent = query
       .slice(prevent, hookStopped)
       .includes('maybeSkillInlineCommandHandoffNotRun')
@@ -135,18 +133,20 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
       'if (maxTurns && nextTurnCount > maxTurns)',
     )
     expect(maxTurnsIdx).toBeGreaterThan(0)
-    expect(
-      query
-        .slice(maxTurnsIdx, maxTurnsIdx + 900)
-        .includes('maybeSkillInlineCommandHandoffNotRun'),
-    ).toBe(false)
+    const maxTurnsSlice = query.slice(maxTurnsIdx, maxTurnsIdx + 900)
+    expect(maxTurnsSlice.includes('maybeSkillInlineCommandHandoffNotRun')).toBe(
+      false,
+    )
+    expect(maxTurnsSlice.includes('maybeHandbackBounce')).toBe(false)
+    expect(maxTurnsSlice.includes('runTurnEndReactions')).toBe(true)
     const endTurnIdx = query.indexOf('if (toolRequestedEndTurn)')
     expect(endTurnIdx).toBeGreaterThan(0)
-    expect(
-      query
-        .slice(endTurnIdx, endTurnIdx + 900)
-        .includes('maybeSkillInlineCommandHandoffNotRun'),
-    ).toBe(false)
+    const endTurnSlice = query.slice(endTurnIdx, endTurnIdx + 4000)
+    expect(endTurnSlice.includes('maybeSkillInlineCommandHandoffNotRun')).toBe(
+      false,
+    )
+    expect(endTurnSlice.includes('maybeHandbackBounce')).toBe(false)
+    expect(endTurnSlice.includes('handleStopHooks')).toBe(true)
     const resume = readFileSync(
       join(__dirname, '..', 'resumeAgent.ts'),
       'utf-8',
@@ -154,6 +154,64 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
     expect(resume).toContain('liveForkedSkillName ?? meta?.forkedSkillName')
     const runAgent = readFileSync(join(__dirname, '..', 'runAgent.ts'), 'utf-8')
     expect(runAgent).toContain('...(forkedSkillName && { forkedSkillName })')
+    expect(runAgent).toContain('getSkillPromptBlocks')
+    expect(runAgent).toContain('isSkillPreload: true')
+    expect(runAgent).toContain('promptShellHandOff')
+    expect(runAgent).toContain("loadedFrom === 'syncedSkills'")
+    expect(runAgent).toContain('is disabled by policy')
+    expect(runAgent).toContain('tengu_skill_tool_invocation')
+    expect(runAgent).toContain("'preload'")
+    expect(runAgent).toContain('agent-preload')
+    expect(runAgent).toContain('sanitizeSkillNameForTelemetry')
+    expect(runAgent).toContain('skill_created_by')
+    expect(query).toContain('flushSessionStorage')
+    const stopHooks = readFileSync(
+      join(repoRoot, 'src', 'query', 'stopHooks.ts'),
+      'utf-8',
+    )
+    const preventOt = stopHooks.indexOf('if (preventedContinuation)')
+    expect(preventOt).toBeGreaterThan(0)
+    expect(
+      stopHooks
+        .slice(preventOt, preventOt + 400)
+        .includes('runTurnEndReactions'),
+    ).toBe(true)
+    const successOt = stopHooks.lastIndexOf('if (!endTurnSource)')
+    expect(successOt).toBeGreaterThan(preventOt)
+    expect(
+      stopHooks
+        .slice(successOt, successOt + 350)
+        .includes('runTurnEndReactions'),
+    ).toBe(true)
+    const hooksSrc = readFileSync(
+      join(repoRoot, 'src', 'utils', 'hooks.ts'),
+      'utf-8',
+    )
+    expect(hooksSrc).toContain(
+      "skipSessionFunctionHooks: stopPass !== 'turn_end_reactions'",
+    )
+    expect(query).toContain('stop-hook-block-cap')
+    expect(query).toContain('enqueueSdkEvent')
+    expect(query).toContain("subtype: 'notification'")
+    expect(query).toContain(
+      'A hook blocked the turn from ending ${nextBlockCount} consecutive times',
+    )
+    expect(query).toContain("return { reason: 'completed' }")
+    expect(query).toContain('nextTurnCountOnBlock')
+    expect(query).toContain('hit_max_turns: true')
+    const capIdx = query.indexOf('cap > 0 && nextBlockCount > cap')
+    expect(capIdx).toBeGreaterThan(0)
+    const capSlice = query.slice(
+      capIdx,
+      query.indexOf("reason: 'stop_hook_blocking'", capIdx),
+    )
+    expect(capSlice.includes('runTurnEndReactions')).toBe(true)
+    expect(capSlice.includes("reason: 'completed'")).toBe(true)
+    const blockIdx = query.indexOf(
+      'if (maxTurns && nextTurnCountOnBlock > maxTurns)',
+    )
+    expect(blockIdx).toBeGreaterThan(0)
+    expect(blockIdx).toBeLessThan(capIdx)
     const handback = readFileSync(
       join(
         __dirname,
