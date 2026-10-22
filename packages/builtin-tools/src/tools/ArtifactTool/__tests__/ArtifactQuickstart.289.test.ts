@@ -53,6 +53,7 @@ afterEach(() => {
   setFrameDlDepsForTests(null)
   delete process.env.CLAUDE_CODE_ARTIFACT_START_KIT
   delete process.env.CLAUDE_CODE_ARTIFACT_QUICKSTART
+  delete process.env.CLAUDE_CODE_ARTIFACT_MULTI_FILE
 })
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -593,9 +594,14 @@ describe('gold 2.1.289 Artifact quickstart analog', () => {
     expect(bag.design_system.store).toBe(true)
     expect(bag.design_system.docs?.[0]?.text).toContain('store readme')
     expect(formatQuickstartResult(result.data)).toContain('action "read_db"')
+    expect(formatQuickstartResult(result.data)).toContain(
+      '`doc_id`: "tokens.md"',
+    )
   })
 
   test('project/README.md files path does not set store', async () => {
+    // Gold Zhe/MP: published files are read only when multi-file is on.
+    process.env.CLAUDE_CODE_ARTIFACT_MULTI_FILE = '1'
     installDlFetch(async (url: string) => {
       if (url.includes('/db/agent')) {
         return jsonResponse({
@@ -718,6 +724,7 @@ describe('gold 2.1.289 Artifact quickstart analog', () => {
   })
 
   test('deny Artifact(read_db) skips store GET but still reads files README', async () => {
+    process.env.CLAUDE_CODE_ARTIFACT_MULTI_FILE = '1'
     const urls = installDlFetch(async (url: string) => {
       if (url.includes('/instances')) {
         return jsonResponse({
@@ -788,6 +795,79 @@ describe('gold 2.1.289 Artifact quickstart analog', () => {
     expect(urls.some(u => u.includes('/db/agent'))).toBe(false)
     expect(bag.design_system.store).toBeUndefined()
     expect(bag.design_system.docs?.[0]?.path).toBe('project/README.md')
+    // Gold j: a project/README.md doc suppresses the store-ruled note.
+    expect(bag.design_system.unavailable).toBeUndefined()
+  })
+
+  test('root README plus deny read_db keeps the store-ruled note', async () => {
+    process.env.CLAUDE_CODE_ARTIFACT_MULTI_FILE = '1'
+    const urls = installDlFetch(async (url: string) => {
+      if (url.includes('/instances')) {
+        return jsonResponse({
+          instances: [
+            {
+              slug: 'sys-root-ruled',
+              title: 'Acme Root',
+              rel: 'mine',
+              default: 'user',
+            },
+          ],
+        })
+      }
+      if (url.includes('project/README.md')) {
+        return jsonResponse({ error: 'missing' }, 404)
+      }
+      if (url.includes('/README.md')) {
+        return jsonResponse({
+          path: 'README.md',
+          text: '# published root',
+        })
+      }
+      if (/\/api\/frame\/sys-root-ruled(\?|$)/.test(url)) {
+        return jsonResponse({
+          ver: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          assetToken: 'tok',
+          mode: 'org',
+          perm: { role: 'owner' },
+          fileCount: 1,
+        })
+      }
+      return jsonResponse({
+        types: [
+          {
+            slug: 'design-core',
+            title: 'Design',
+            listings: [{ scope: 'anthropic', tier: 'core' }],
+          },
+          {
+            slug: 'ds-type',
+            title: 'Design System',
+            listings: [{ scope: 'anthropic', tier: 'core' }],
+          },
+        ],
+      })
+    })
+    const result = await callQuickstart(
+      { action: 'quickstart', intent: 'design' },
+      {
+        getAppState: () => ({
+          toolPermissionContext: {
+            alwaysDenyRules: { user: ['Artifact(read_db)'] },
+            alwaysAskRules: {},
+          },
+        }),
+      } as never,
+    )
+    const bag = result.data.quickstart as {
+      design_system: {
+        store?: true
+        docs?: Array<{ path: string }>
+        unavailable?: string
+      }
+    }
+    expect(urls.some(u => u.includes('/db/agent'))).toBe(false)
+    expect(bag.design_system.store).toBeUndefined()
+    expect(bag.design_system.docs?.[0]?.path).toBe('README.md')
     expect(bag.design_system.unavailable).toContain(
       'a permission rule governs reading its store',
     )

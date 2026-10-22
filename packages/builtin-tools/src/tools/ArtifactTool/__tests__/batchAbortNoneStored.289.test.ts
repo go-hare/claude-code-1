@@ -211,7 +211,7 @@ describe.serial('uploadAssetBatch abort (densable Kf / Ye)', () => {
     installFetch((async () => {
       posts += 1
       return okUpload()
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
     const abortController = new AbortController()
     abortController.abort()
     await expectUserAbort(uploadBatch([first, second], abortController))
@@ -232,7 +232,7 @@ describe.serial('uploadAssetBatch abort (densable Kf / Ye)', () => {
         return okUpload()
       }
       throw new Error('the paced file should not be uploaded')
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
     const started = Date.now()
     await expectUserAbort(uploadBatch([first, second], abortController))
     expect(posts).toBe(2)
@@ -247,7 +247,7 @@ describe.serial('uploadAssetBatch abort (densable Kf / Ye)', () => {
       posts += 1
       if (posts >= 2) abortController.abort()
       return okUpload()
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
     await expectUserAbort(uploadBatch([first, second], abortController))
     expect(posts).toBe(2)
   })
@@ -258,7 +258,7 @@ describe.serial('uploadAssetBatch abort (densable Kf / Ye)', () => {
     installFetch((async () => {
       abortController.abort()
       throw new Error('transit')
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
     await expectUserAbort(uploadBatch([first, second], abortController))
   })
 
@@ -266,7 +266,7 @@ describe.serial('uploadAssetBatch abort (densable Kf / Ye)', () => {
     const [first, second] = writePngs()
     installFetch((async () => {
       throw new Error('transit')
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
     const result = await uploadBatch([first, second], new AbortController())
     expect(result.data.asset_uploads).toBeUndefined()
     expect(result.data.error).toContain('No file is confirmed stored.')

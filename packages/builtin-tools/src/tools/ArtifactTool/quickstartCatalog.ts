@@ -110,6 +110,48 @@ function isArtifactQuickstartEnvOn(): boolean {
   )
 }
 
+/**
+ * Gold `Zhe` / `MP` — published-file channel for the design-system guide.
+ * `CLAUDE_CODE_ARTIFACT_MULTI_FILE`, else GB `tengu_cobalt_plinth_bracken`
+ * (default false).
+ */
+export function isArtifactMultiFileOn(): boolean {
+  return artifactGateEnvOrGb(
+    process.env.CLAUDE_CODE_ARTIFACT_MULTI_FILE,
+    'tengu_cobalt_plinth_bracken',
+  )
+}
+
+/** Gold Kp session latch. First read wins until tests reset it. */
+let artifactToolsetLatch: boolean | null = null
+
+export function resetArtifactToolsetLatchForTests(): void {
+  artifactToolsetLatch = null
+}
+
+/**
+ * Gold Kp — `CLAUDE_CODE_ARTIFACT_TOOLSET`, else GB
+ * `tengu_cobalt_plinth_damson` (default false).
+ */
+export function isArtifactDamsonToolset(): boolean {
+  if (artifactToolsetLatch !== null) return artifactToolsetLatch
+  // Gold Kp: defined env wins, including an explicit false. Unset falls
+  // through to tengu_cobalt_plinth_damson === true. Latch once per process.
+  artifactToolsetLatch = artifactGateEnvOrGb(
+    process.env.CLAUDE_CODE_ARTIFACT_TOOLSET,
+    'tengu_cobalt_plinth_damson',
+  )
+  try {
+    const { logEvent } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+    logEvent('tengu_artifact_toolset', { on: artifactToolsetLatch })
+  } catch {
+    /* telemetry must not change the latch */
+  }
+  return artifactToolsetLatch
+}
+
 /** Gold `yjn` / Qps / bu analog (frozen pin then env/GB). */
 export function isArtifactQuickstartOn(): boolean {
   try {

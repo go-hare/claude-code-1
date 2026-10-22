@@ -8,6 +8,7 @@ import {
   clearedArtifactConversationAppState,
   emptyResumedArtifactFrameSeed,
   noteArtifactConversationReset,
+  otherCommentsRow,
   resetArtifactAutoReactStoreForTests,
   restoreResumedArtifactFrameState,
   un,
@@ -129,6 +130,21 @@ describe('noteArtifactConversationReset (densable F7e subset)', () => {
     expect(store.resultNotes.watchCodesSaid.size).toBe(0)
     expect(store.resultNotes.previewedPaths.size).toBe(0)
     expect(store.resultNotes.previewHintedPaths.size).toBe(0)
+  })
+
+  test('gold m(r) @186744402 wipes judged/judgedSends; sightings stay', () => {
+    const row = otherCommentsRow('a')
+    row.sightings.push({ seq: 1, kind: 'gap' })
+    row.judged.set('x', true)
+    row.judgedSends.set('y', true)
+    noteArtifactConversationReset({ continuesConversation: true })
+    expect(row.judged.size).toBe(1)
+    expect(row.judgedSends.size).toBe(1)
+    expect(row.sightings).toHaveLength(1)
+    noteArtifactConversationReset()
+    expect(row.judged.size).toBe(0)
+    expect(row.judgedSends.size).toBe(0)
+    expect(row.sightings).toHaveLength(1)
   })
 })
 

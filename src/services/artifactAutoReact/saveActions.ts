@@ -34,6 +34,11 @@ import {
   resolveFileOutDests,
   saveArtifactBytes,
 } from './outDirPaths.js'
+import {
+  ARTIFACT_INLINE_BATCH_BUDGET,
+  inlineArtifactFileText,
+  takeInlineBatchBudget,
+} from './inlineFileContent.js'
 import { fetchArtifactAssetBytes, fetchArtifactFileBytes } from './restApis.js'
 
 export type ReadFileSaveResult = {
@@ -45,6 +50,12 @@ export type ReadFileSaveResult = {
     size_bytes: number
     content_type: string
     sha256: string
+    content?: string
+    content_scrubbed?: true
+    source?: true
+    foreign?: true
+    outside_writer?: true
+    public_read?: true
   }
 }
 
@@ -55,6 +66,9 @@ export type ReadFileBatchEntry =
       size_bytes: number
       content_type: string
       sha256: string
+      content?: string
+      content_scrubbed?: true
+      source?: true
     }
   | { path: string; error: string }
 
@@ -64,6 +78,9 @@ export type ReadFilesSaveResult = {
     ver: string
     saved_dir: string
     files: ReadFileBatchEntry[]
+    foreign?: true
+    outside_writer?: true
+    public_read?: true
   }
 }
 
@@ -74,10 +91,58 @@ export type ReadAssetSaveResult = {
     size_bytes: number
     content_type: string
     sha256: string
+    foreign?: true
+    outside_writer?: true
+    public_read?: true
   }
 }
 
 export type ArtifactSaveCallError = { error: string; reason?: string }
+
+function treatAsDataFromFetch(fetched: {
+  foreign?: boolean
+  outside_writer?: boolean
+  public_read?: boolean
+  publicRead?: boolean
+}): {
+  foreign?: true
+  outside_writer?: true
+  public_read?: true
+} {
+  return {
+    ...(fetched.foreign ? { foreign: true as const } : {}),
+    ...(fetched.outside_writer ? { outside_writer: true as const } : {}),
+    ...(fetched.public_read === true || fetched.publicRead === true
+      ? { public_read: true as const }
+      : {}),
+  }
+}
+
+function inlineFileFields(
+  fetched: {
+    bytes: Buffer
+    contentType: string
+    publicRead?: boolean
+    public_read?: boolean
+    writerClass?: boolean
+  },
+  budget?: { left: number },
+): { content?: string; content_scrubbed?: true } {
+  if (fetched.publicRead === true || fetched.public_read === true) return {}
+  const inline = inlineArtifactFileText({
+    bytes: fetched.bytes,
+    contentType: fetched.contentType,
+    scope: fetched.writerClass ? 'page' : 'all',
+  })
+  if (inline === undefined) return {}
+  if (budget !== undefined && !takeInlineBatchBudget(inline.content, budget)) {
+    return {}
+  }
+  return {
+    content: inline.content,
+    ...(inline.scrubbed ? { content_scrubbed: true as const } : {}),
+  }
+}
 
 /**
  * Session permission-layer hooks gold reads off `n.session` / the permission
@@ -305,6 +370,9 @@ export async function callArtifactReadFile(
         size_bytes: fetched.bytes.length,
         content_type: fetched.contentType,
         sha256: fetched.sha256,
+        ...(fetched.source ? { source: true as const } : {}),
+        ...inlineFileFields(fetched),
+        ...treatAsDataFromFetch(fetched),
       },
     },
   }
@@ -487,6 +555,7 @@ export async function callArtifactReadFiles(
     )
   }
   const byPath = new Map<string, ReadFileBatchEntry>()
+  const inlineBudget = { left: ARTIFACT_INLINE_BATCH_BUDGET }
   let ver: string | undefined
   for (const [i, f] of fetched.entries()) {
     const dest = kept[i]?.dest as string
@@ -515,6 +584,8 @@ export async function callArtifactReadFiles(
       size_bytes: f.bytes.length,
       content_type: f.contentType,
       sha256: f.sha256,
+      ...(f.source ? { source: true as const } : {}),
+      ...inlineFileFields(f, inlineBudget),
     })
   }
   const files = batch.files.map(
@@ -524,6 +595,7 @@ export async function callArtifactReadFiles(
         error: hooks?.setAsideReason?.(f.dest) ?? DEFAULT_SET_ASIDE_REASON,
       },
   )
+  const stampSrc = fetched.find(f => f.kind === 'ok')
   return {
     data: {
       files_read: {
@@ -531,6 +603,7 @@ export async function callArtifactReadFiles(
         ver: ver ?? '',
         saved_dir: base,
         files,
+        ...(stampSrc ? treatAsDataFromFetch(stampSrc) : {}),
       },
     },
   }
@@ -685,6 +758,7 @@ export async function callArtifactReadAsset(
         size_bytes: fetched.bytes.length,
         content_type: fetched.contentType,
         sha256,
+        ...treatAsDataFromFetch(fetched),
       },
     },
   }

@@ -42,6 +42,14 @@ function fakeContext(mode = 'default') {
   return {
     abortController: new AbortController(),
     toolUseId: 'tu-1',
+    messages: [
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { content: 'go' },
+      },
+    ],
+    options: { isNonInteractiveSession: false },
     getAppState: () => ({
       toolPermissionContext: { mode },
     }),

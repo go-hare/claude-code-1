@@ -198,6 +198,14 @@ describe('densable 2.1.289 page read consent (NCo)', () => {
     )
   })
 
+  test('acceptEdits and bypassPermissions still ask (gold has no quiet mode)', async () => {
+    for (const mode of ['acceptEdits', 'bypassPermissions'] as const) {
+      const s = session(mode)
+      const result = await check(s, `tu-${mode}`)
+      expect(result.behavior).toBe('ask')
+    }
+  })
+
   test('auto mode without consent still asks (gold, not quiet shortcut)', async () => {
     const s = session('auto')
     const first = await check(s, 'tu-auto')

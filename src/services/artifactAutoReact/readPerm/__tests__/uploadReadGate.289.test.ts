@@ -1,3 +1,7 @@
+;(globalThis as unknown as { MACRO: { VERSION: string } }).MACRO = {
+  VERSION: 'test',
+}
+
 /**
  * densable 2.1.289 Gqe / hn / xKe — upload Read trial + attachment carve-out.
  */
@@ -21,7 +25,9 @@ import {
   readAdmittedUploadBytes,
   readPinnedUploadBytes,
   resolveUploadSource,
+  uploadOwnApprovalReason,
   xKe,
+  type GqeOk,
 } from '../uploadReadGate.js'
 
 afterEach(() => {
@@ -33,6 +39,52 @@ afterEach(() => {
 })
 
 describe('Gqe / hn (densable 2.1.289)', () => {
+  test('whole-tool Read deny (Ms) refuses after a path allow', () => {
+    const file = join(process.cwd(), 'package.json')
+    const perms = {
+      ...getEmptyToolPermissionContext(),
+      alwaysDenyRules: { userSettings: ['Read'] },
+    }
+    const source = resolveUploadSource(file)
+    const gate = Gqe(
+      FileReadTool,
+      { file_path: file },
+      file,
+      source,
+      perms,
+      undefined,
+      'Uploading an asset reads file contents',
+    )
+    expect(gate.refused?.behavior).toBe('deny')
+    expect(
+      gate.refused && 'message' in gate.refused ? gate.refused.message : '',
+    ).toContain(
+      'Uploading an asset reads file contents, and the Read deny rule from user settings forbids reading files',
+    )
+    expect(gate.refused?.decisionReason).toMatchObject({ type: 'rule' })
+  })
+
+  test('whole-tool Read ask (zd) folds into readAsks', () => {
+    const file = join(process.cwd(), 'package.json')
+    const perms = {
+      ...getEmptyToolPermissionContext(),
+      alwaysAskRules: { userSettings: ['Read'] },
+    }
+    const source = resolveUploadSource(file)
+    const gate = Gqe(
+      FileReadTool,
+      { file_path: file },
+      file,
+      source,
+      perms,
+      undefined,
+      'Uploading an asset reads file contents',
+    )
+    expect(gate.refused).toBeUndefined()
+    if (gate.refused !== undefined) throw new Error('expected GqeOk')
+    expect(gate.readAsks).toBe(true)
+  })
+
   test('Read deny is the refused result', () => {
     const file = join(process.cwd(), 'package.json')
     const perms = {
@@ -47,9 +99,12 @@ describe('Gqe / hn (densable 2.1.289)', () => {
       source,
       perms,
       undefined,
+      'Uploading an asset reads file contents',
     )
     expect(gate.refused?.behavior).toBe('deny')
-    expect(gate.refused?.message).toContain('Permission to read')
+    expect(
+      gate.refused && 'message' in gate.refused ? gate.refused.message : '',
+    ).toContain('Permission to read')
   })
 
   test('hn upgrades a workingDir ask when the file is a stage attachment', () => {
@@ -198,6 +253,90 @@ describe('Gqe / hn (densable 2.1.289)', () => {
     if (ok.kind === 'ok') expect(ok.bytes.toString()).toBe('approved-bytes')
     expect(readAdmittedUploadBytes(file, 'ab'.repeat(32)).kind).toBe(
       'unverified',
+    )
+  })
+})
+
+describe('C_ uploadOwnApprovalReason', () => {
+  const perms = getEmptyToolPermissionContext()
+  const gate = {
+    mode: 'default',
+    read: {
+      behavior: 'allow' as const,
+      updatedInput: {},
+      decisionReason: { type: 'other' as const, reason: 'ok' },
+    },
+    sourcePin: undefined,
+    readAsks: false,
+    hardLinked: true,
+    flaggedOutside: false,
+    stagedUpload: false,
+    resolvesElsewhere: false,
+    pinRead: undefined,
+  } satisfies GqeOk
+
+  test('a hard link that is not a read-ask uses the hard-link note', () => {
+    expect(uploadOwnApprovalReason('/tmp/a.bin', gate, false, perms)).toBe(
+      'a hard link: the same file may also live elsewhere on this machine',
+    )
+  })
+
+  test('a read-ask inside the working directory stays the always-own phrase', () => {
+    expect(
+      uploadOwnApprovalReason(
+        join(process.cwd(), 'package.json'),
+        { ...gate, readAsks: true },
+        false,
+        perms,
+      ),
+    ).toBe('a file that is always approved on its own')
+  })
+
+  test('a working-dir ask suppresses the hard-link note', () => {
+    expect(
+      uploadOwnApprovalReason(
+        '/tmp/a.bin',
+        {
+          ...gate,
+          read: {
+            behavior: 'ask',
+            message: 'ask',
+            decisionReason: { type: 'workingDir', reason: 'outside' },
+          },
+        },
+        false,
+        perms,
+      ),
+    ).toBe('a file that is always approved on its own')
+  })
+
+  test('flaggedOutside suppresses the hard-link note (gold Zst K=l&&!k&&!h)', () => {
+    expect(
+      uploadOwnApprovalReason(
+        '/tmp/a.bin',
+        { ...gate, flaggedOutside: true },
+        false,
+        perms,
+      ),
+    ).toBe('a file that is always approved on its own')
+  })
+})
+
+describe('Gqe flaggedOutside (densable ae / an)', () => {
+  test('source: Gqe stamps ae; Zst linkNote is l&&!k&&!h', async () => {
+    const src = await Bun.file(
+      join(import.meta.dir, '../uploadReadGate.ts'),
+    ).text()
+    expect(src).toContain('flaggedOutside: boolean')
+    expect(src).toContain('function an(')
+    expect(src).toContain('FLAGGED_PATH_MAX = 4096')
+    expect(src).toContain('FLAGGED_WALK_MAX = 32')
+    expect(src).toContain(
+      'isTrustedNetworkPath(parent, perms.trustedNetworkDirectories)',
+    )
+    expect(src).toContain('const flaggedOutside =')
+    expect(src).toContain(
+      'if (gate.hardLinked && !outsideAsk && !gate.flaggedOutside)',
     )
   })
 })

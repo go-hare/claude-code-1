@@ -28,7 +28,7 @@ import {
 } from './commentRead.js'
 import { Ttn } from './nzt.js'
 import { mI, SN } from './gates.js'
-import { un } from './store.js'
+import { recordOtherCommentSighting, un } from './store.js'
 import {
   consumeVisibleHandoffClaims,
   isDesktopEntrypoint,
@@ -470,7 +470,16 @@ export async function zPw(input: {
     if (!c.sentToClaudeAt.has(comment.id)) {
       c.sentToClaudeAt.set(comment.id, comment.toClaudeAt ?? null)
     }
-    if (commentLane(comment) === 'human') newHuman.push(comment)
+    if (commentLane(comment) === 'human') {
+      newHuman.push(comment)
+      if (!comment.postedByArtifact) {
+        recordOtherCommentSighting(t, {
+          kind: 'row',
+          key: `${comment.id}@${comment.toClaudeAt ?? ''}`,
+          authorship: 'user',
+        })
+      }
+    }
     if (comment.postedByArtifact) c.ownReplyIds.add(comment.id)
   }
 

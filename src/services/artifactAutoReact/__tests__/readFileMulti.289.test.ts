@@ -301,6 +301,7 @@ describe('read_file paths call (289)', () => {
       saved_to: join(out, 'a.md'),
       size_bytes: 1,
       content_type: 'text/plain',
+      content: 'A',
     })
     expect('error' in fr.files[1]! && fr.files[1].error).toBeTruthy()
     expect(fr.files[2]).toEqual({

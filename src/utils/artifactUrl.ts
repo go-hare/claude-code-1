@@ -24,15 +24,52 @@ const ARTIFACT_SLUG_SENSITIVE =
   '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const ARTIFACT_SLUG_INSENSITIVE =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+const BASE58 = 58n
+const UUID_MAX = (1n << 128n) - 1n
+const SHORT_ID_LENGTH = 22
+const SHORT_ID = '[1-9A-HJ-NP-Za-km-z]{22}'
+const SHORT_ID_RE = new RegExp(`^${SHORT_ID}$`)
 
 /** Official `K2r` / densable stub prefix for `hWe`. */
 export const EVAL_STUB_ARTIFACT_URL_PREFIX = 'eval-stub://artifact/'
 
+/** densable `u$` — 22-char base58 short id back to a UUID slug. */
+function slugForShortId(id: string): string | null {
+  if (!SHORT_ID_RE.test(id)) return null
+  let n = 0n
+  for (const ch of id) n = n * BASE58 + BigInt(BASE58_ALPHABET.indexOf(ch))
+  if (n > UUID_MAX) return null
+  const hex = n.toString(16).padStart(32, '0')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/**
+ * densable `h` — length 22 is a short id. Case-insensitive parse (`n=true`)
+ * rejects short ids; a longer capture is the slug as written.
+ */
+function artifactSlugFromCapture(
+  raw: string | undefined,
+  caseInsensitive: boolean,
+): string | null {
+  if (raw === undefined) return null
+  if (raw.length === SHORT_ID_LENGTH) {
+    return caseInsensitive ? null : slugForShortId(raw)
+  }
+  return caseInsensitive ? raw.toLowerCase() : raw
+}
+
+/**
+ * densable `gWe` — `/artifact/` and `/code/artifact|frame/`, optional vanity
+ * prefix, UUID or (strict only) 22-char short id.
+ */
 function artifactPathPattern(caseInsensitive: boolean): string {
-  const slug = caseInsensitive
+  const uuid = caseInsensitive
     ? ARTIFACT_SLUG_INSENSITIVE
     : ARTIFACT_SLUG_SENSITIVE
-  return `/code/(?:artifact|frame)/(?:[A-Za-z0-9_-]*-)?(${slug})(?:[/?#]|$)`
+  const slug = caseInsensitive ? uuid : `(?:${uuid}|${SHORT_ID})`
+  return `/(?:artifact|code/(?:artifact|frame))/(?:[A-Za-z0-9_-]*-)?(?<slug>${slug})(?:[/?#]|$)`
 }
 
 export type ParsedArtifactUrl = {
@@ -265,26 +302,13 @@ export function parseArtifactUrlLoose(
   const slugClass = caseInsensitive
     ? ARTIFACT_SLUG_INSENSITIVE
     : ARTIFACT_SLUG_SENSITIVE
+  // densable `O()` is null — claude-ai.staging.ant.dev is not an artifact host.
   const prod = url.match(
     new RegExp(`^https://(?:[a-z0-9-]+\\.)?claude\\.ai${path}`, flags),
   )
-  if (prod?.[1]) {
-    return {
-      slug: caseInsensitive ? prod[1].toLowerCase() : prod[1],
-      env: 'prod',
-    }
-  }
-  const staging = url.match(
-    new RegExp(
-      `^https://(?:preview\\.)?claude-ai\\.staging\\.ant\\.dev${path}`,
-      flags,
-    ),
-  )
-  if (staging?.[1]) {
-    return {
-      slug: caseInsensitive ? staging[1].toLowerCase() : staging[1],
-      env: 'staging',
-    }
+  const prodSlug = artifactSlugFromCapture(prod?.groups?.slug, caseInsensitive)
+  if (prodSlug !== null) {
+    return { slug: prodSlug, env: 'prod' }
   }
   const frame = url.match(
     new RegExp(
@@ -301,11 +325,12 @@ export function parseArtifactUrlLoose(
   const custom = artifactCustomHost()
   if (custom) {
     const match = url.match(new RegExp(`^https?://([^/?#]+)${path}`, flags))
-    if (match?.[2] && match[1] === new URL(custom).host) {
-      return {
-        slug: caseInsensitive ? match[2].toLowerCase() : match[2],
-        env: 'prod',
-      }
+    const customSlug = artifactSlugFromCapture(
+      match?.groups?.slug,
+      caseInsensitive,
+    )
+    if (customSlug !== null && match?.[1] === new URL(custom).host) {
+      return { slug: customSlug, env: 'prod' }
     }
   }
   return null

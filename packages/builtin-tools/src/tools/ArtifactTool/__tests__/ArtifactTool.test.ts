@@ -164,13 +164,16 @@ describe('ArtifactTool.call', () => {
 })
 
 describe('ArtifactTool.mapToolResultToToolResultBlockParam', () => {
-  test('page_data is JSON, not the upload fallback', () => {
+  test('page_data without islandPresent is the unreadable sentence', () => {
     const mapped = ArtifactTool.mapToolResultToToolResultBlockParam(
       { id: '', url: '', expiresAt: '', page_data: { k: 1 } },
       'tu-1',
     )
-    expect(mapped.content).toContain('page_data')
+    expect(mapped.content).toContain(
+      'This record of a page-data read is unreadable',
+    )
     expect(String(mapped.content)).not.toContain('Artifact uploaded')
+    expect(String(mapped.content)).not.toContain('"k"')
   })
 
   test('thread_resolved false is JSON, not the upload fallback', () => {
@@ -186,5 +189,53 @@ describe('ArtifactTool.mapToolResultToToolResultBlockParam', () => {
     )
     expect(mapped.content).toContain('not_authorized')
     expect(String(mapped.content)).not.toContain('Artifact uploaded')
+  })
+
+  test('page read is raw result without Hg envelope', () => {
+    const mapped = ArtifactTool.mapToolResultToToolResultBlockParam(
+      {
+        id: '',
+        url: '',
+        expiresAt: '',
+        read: {
+          url: 'https://example.test/page',
+          bytes: 18,
+          code: 200,
+          codeText: 'OK',
+          result: '<html>page</html>',
+          durationMs: 1,
+          foreign: true,
+          outside_writer: true,
+        },
+      },
+      'tu-read',
+    )
+    expect(mapped.content).toBe('<html>page</html>')
+    expect(String(mapped.content)).not.toContain(
+      'artifact-content-authored-by-others',
+    )
+  })
+
+  test('incomplete file_read is the unreadable sentence, not JSON', () => {
+    const mapped = ArtifactTool.mapToolResultToToolResultBlockParam(
+      {
+        id: '',
+        url: '',
+        expiresAt: '',
+        file_read: {
+          path: 'api/tokens.md',
+          foreign: true,
+          public_read: true,
+        },
+      },
+      'tu-file',
+    )
+    expect(String(mapped.content)).toContain(
+      'This record of a file read is unreadable',
+    )
+    expect(String(mapped.content)).not.toContain(
+      '<artifact-content-authored-by-others/>',
+    )
+    expect(String(mapped.content)).not.toContain('"file_read"')
   })
 })

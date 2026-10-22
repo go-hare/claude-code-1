@@ -17,7 +17,7 @@ import {
   isDelegatedObservation,
 } from 'src/utils/agentContext.js'
 import { parseArtifactUrlAnyCase } from 'src/utils/artifactUrl.js'
-import { un } from '../store.js'
+import { forgetOtherCommentSightings, un } from '../store.js'
 import {
   allowedWithoutUser,
   answeredByUser,
@@ -320,19 +320,21 @@ export function hasArtifactAssetUploadConsent(
 
 /**
  * Gold qIt @199722114 — after an approved upload_asset, remember the slug on
- * `artifactAssetUploadConsentSlugs` (+ Human when iKe). Gold also calls
- * `Bzr(t,s)` (otherComments sightings) — KEEP, tip has no that map.
+ * `artifactAssetUploadConsentSlugs` (+ Human when iKe). Gold `qIt(e,n,t,s)`
+ * calls `Bzr(t,s)` then writes ConsentSlugs.
  * Semantic export only (invent-ban `export function qIt`).
  */
 export function recordArtifactAssetUploadGrant(
   input: Record<string, unknown>,
   context: ReadGrantContext,
   slug: string,
+  afterSeq?: number,
 ): void {
   // Gold Xo(n.agentContext) @199722136 — ALS via getAgentContext().
   if (isDelegatedObservation(getAgentContext())) return
   if (!U5(input, context) || getToolPermissionContext(context).mode === 'auto')
     return
+  forgetOtherCommentSightings(slug, afterSeq)
   context.setAppState(prev =>
     x(prev, context, uploadConsentKeys(iKe(input, context)), slug),
   )

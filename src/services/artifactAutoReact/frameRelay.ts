@@ -194,7 +194,7 @@ export type FrameRelayFetchResult =
       bytes: Buffer
       contentType: string | undefined
     }
-  | { ok: false; reason: string; status?: number }
+  | { ok: false; reason: string; status?: number; bytes?: Buffer }
 
 export type ArtifactFrameRelayHost = {
   fetchArtifactMount: (input: {
@@ -292,10 +292,14 @@ export function createCcrGatewayArtifactFrameRelayHost(
           res.headers.get('content-type') ??
           undefined
         if (res.status < 200 || res.status >= 300) {
+          // densable frameNotFound — keep a small 404 body (Pq, ≤256 bytes).
           return {
             ok: false,
             reason: `http_${res.status}`,
             status: res.status,
+            ...(res.status === 404 && buf.byteLength <= 256
+              ? { bytes: buf }
+              : {}),
           }
         }
         return {

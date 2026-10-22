@@ -96,6 +96,11 @@ export function noteArtifactConversationReset(
     current.live.repliesConsent.approved.clear()
     current.deferredSurface.clear()
     current.remoteControlSkippedSlugs.clear()
+    // gold m(r) @186744402 — judged / judgedSends wipe; sightings stay
+    for (const row of current.shareStatus.otherComments.values()) {
+      row.judged.clear()
+      row.judgedSends.clear()
+    }
   }
   current.createdFromType.clear()
   current.verify.lastPublish = undefined

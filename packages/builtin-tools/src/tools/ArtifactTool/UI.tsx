@@ -3,7 +3,13 @@ import { Box, Link, Text } from '@anthropic/ink';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js';
-import { formatArtifactDeleteResult, formatAssetDeleteResult, type ArtifactOutput } from './ArtifactTool.js';
+import {
+  formatArtifactDeleteResult,
+  formatAssetDeleteResult,
+  formatAssetListResult,
+  type ArtifactOutput,
+} from './ArtifactTool.js';
+import { formatFileListResult, formatFileReadResult, formatFilesReadResult } from './mapToolResultSentences.js';
 
 export function renderToolResultMessage(
   content: ArtifactOutput,
@@ -106,12 +112,36 @@ export function renderToolResultMessage(
       </Box>
     );
   }
+  if (content.asset_list) {
+    return (
+      <Box>
+        <Text>{formatAssetListResult(content.asset_list)}</Text>
+      </Box>
+    );
+  }
+  if (content.file_list) {
+    return (
+      <Box>
+        <Text>{formatFileListResult(content.file_list)}</Text>
+      </Box>
+    );
+  }
+  if (content.file_read) {
+    return (
+      <Box>
+        <Text>{formatFileReadResult(content.file_read)}</Text>
+      </Box>
+    );
+  }
+  if (content.files_read) {
+    return (
+      <Box>
+        <Text>{formatFilesReadResult(content.files_read)}</Text>
+      </Box>
+    );
+  }
   if (
-    content.asset_list ||
     content.asset_upload ||
-    content.file_list ||
-    content.file_read ||
-    content.files_read ||
     content.asset_read ||
     content.verify ||
     content.page_data ||

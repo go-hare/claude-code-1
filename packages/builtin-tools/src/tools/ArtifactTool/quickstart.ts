@@ -12,6 +12,7 @@ import { isOfficialClaudeAiConnector } from 'src/services/mcp/officialClaudeAiCo
 import type { MCPServerConnection } from 'src/services/mcp/types.js'
 import {
   fetchTypeCatalog,
+  isArtifactMultiFileOn,
   isArtifactQuickstartOn,
   type QuickstartTypeRow,
 } from './quickstartCatalog.js'
@@ -500,14 +501,12 @@ const STORE_DB_AGENT = '/api/frame/db/agent'
 /** Gold `dAe` deny unique English. */
 const README_RULED =
   'a permission rule governs reading it — read it with its own call and that rule decides'
-/** Gold `dAe` ask unique English (files). */
-const README_ASK = 'reading it would ask first'
 /** Gold `dAe` ask unique English (store). */
 const STORE_ASK = 'its store needs approval to read here'
 const STORE_OLDER =
   'so this is its published README, which may be older than the one in its store'
 const STORE_RULED_OLDER = `a permission rule governs reading its store, ${STORE_OLDER}`
-const STORE_ASK_OLDER = `its store needs approval to read here, ${STORE_OLDER}`
+const STORE_ASK_OLDER = `${STORE_ASK}, ${STORE_OLDER}`
 
 function permissionBagStrings(
   bag: Record<string, unknown> | undefined,
@@ -742,47 +741,90 @@ async function fetchStoreReadmeDoc(opts: {
   }
 }
 
-async function readFilesReadmeDoc(opts: {
+const GUIDE_READ_OWN = 'read it with its own call, which may ask the user'
+const GUIDE_HOST_REFUSED = 'the content host refused or failed'
+/** Gold `K` — published guide HTML cap. */
+const GUIDE_HTML_MAX = 12_000
+const NEEDS_APPROVAL = `reading it here first needs the user's approval, which this call does not ask for — ${GUIDE_READ_OWN}`
+
+type GuideFileRead = {
+  doc?: { path: string; text: string }
+  why?: string
+  failed?: string
+}
+
+const GUIDE_EMPTY: GuideFileRead = {}
+
+/**
+ * Gold `W` / `I4e` — one published path on the content host.
+ * 404 is absence (`missingFile`), not a failure. Other misses record `failed`.
+ */
+async function readGuidePublishedFile(opts: {
   slug: string
   path: string
-  origin: string
-  token?: string
   signal?: AbortSignal
-}): Promise<{ doc?: { path: string; text: string }; why?: string }> {
-  const file = await fetchTypeFile({
+}): Promise<GuideFileRead> {
+  const { fetchArtifactFileBytes } = await import(
+    'src/services/artifactAutoReact/restApis.js'
+  )
+  const read = await fetchArtifactFileBytes({
     slug: opts.slug,
     path: opts.path,
-    origin: opts.origin,
-    token: opts.token,
     signal: opts.signal,
+    admitPublicRead: () => true,
   })
-  if (file.kind === 'read') {
-    return { doc: { path: opts.path, text: file.text } }
+  if (read.kind === 'ok') {
+    const html = read.bytes.toString('utf8')
+    if (html.trim() === '') return GUIDE_EMPTY
+    const text =
+      html.length > GUIDE_HTML_MAX ? html.slice(0, GUIDE_HTML_MAX) : html
+    return { doc: { path: opts.path, text } }
   }
-  try {
-    const url = `${opts.origin}/api/frame/files/${encodeURIComponent(opts.slug)}/${opts.path
-      .split('/')
-      .map(s => encodeURIComponent(s))
-      .join('/')}`
-    const res = await fetchJson(url, opts.token, opts.signal)
-    if (res.ok) {
-      let raw = res.text
-      if (typeof res.data === 'object' && res.data !== null) {
-        const rec = res.data as { text?: unknown; content?: unknown }
-        if (typeof rec.text === 'string') raw = rec.text
-        else if (typeof rec.content === 'string') raw = rec.content
-      }
-      if (raw.trim()) return { doc: { path: opts.path, text: raw } }
-    }
-  } catch {
-    /* fall through */
-  }
+  if (read.reason === 'http_404') return GUIDE_EMPTY
   return {
-    why:
-      file.kind === 'unavailable'
-        ? file.why
-        : 'its README could not be read here',
+    why: `its ${opts.path} could not be fetched (${GUIDE_HOST_REFUSED}) — ${GUIDE_READ_OWN}`,
+    failed: GUIDE_HOST_REFUSED,
   }
+}
+
+/** Gold `ne` — README.md and project/README.md together. */
+async function readGuidePublishedPair(opts: {
+  slug: string
+  signal?: AbortSignal
+}): Promise<{ root: GuideFileRead; project: GuideFileRead }> {
+  const [root, project] = await Promise.all([
+    readGuidePublishedFile({
+      slug: opts.slug,
+      path: FILES_README,
+      signal: opts.signal,
+    }),
+    readGuidePublishedFile({
+      slug: opts.slug,
+      path: PROJECT_README,
+      signal: opts.signal,
+    }),
+  ])
+  return { root, project }
+}
+
+/** Gold `oe` — project doc wins, else root; both failures combine. */
+function pickGuidePublished(pair: {
+  root: GuideFileRead
+  project: GuideFileRead
+}): GuideFileRead {
+  const project = pair.project
+  const root = pair.root
+  if (project.doc !== undefined || root.doc !== undefined) {
+    return project.doc !== undefined ? project : root
+  }
+  if (project.failed !== undefined && root.failed !== undefined) {
+    const why =
+      project.failed === root.failed
+        ? `its ${PROJECT_README} and ${FILES_README} could not be fetched (${root.failed}) — read the design system with its own call, which may ask the user`
+        : `its ${PROJECT_README} (${project.failed}) and ${FILES_README} (${root.failed}) could not be fetched — read the design system with its own call, which may ask the user`
+    return { why }
+  }
+  return project.why !== undefined ? project : root
 }
 
 async function attachDefaultReadme(opts: {
@@ -796,96 +838,60 @@ async function attachDefaultReadme(opts: {
   unavailable?: string
   store?: true
 }> {
-  const filesSkip = readmePermissionSkip(
-    opts.context,
-    artifactRuleCoversFilesReadme,
-  )
+  const filesOn = isArtifactMultiFileOn()
+  const filesSkip = filesOn
+    ? readmePermissionSkip(opts.context, artifactRuleCoversFilesReadme)
+    : undefined
   const storeSkip = readmePermissionSkip(
     opts.context,
     artifactRuleCoversStoreReadme,
   )
   const slug = slugFromArtifactUrl(opts.url)
   if (!slug) return { unavailable: 'it is not an Artifact URL of this session' }
-  const { listArtifactFiles } = await import(
-    'src/services/artifactAutoReact/restApis.js'
-  )
-  const storePromise: ReturnType<typeof fetchStoreReadmeDoc> =
-    storeSkip === undefined
-      ? fetchStoreReadmeDoc({
-          slug,
-          origin: opts.origin,
-          token: opts.token,
-          signal: opts.signal,
-          context: opts.context,
-        })
-      : Promise.resolve({
-          why: storeSkip === 'deny' ? STORE_RULED_OLDER : STORE_ASK_OLDER,
-        })
-  // Gold list_files bag when context exists: admitPublicRead via mKe kind
-  // 'files' + probeToolUseId. Permission-skip still omits the list call.
-  let listedPromise: ReturnType<typeof listArtifactFiles>
-  if (filesSkip === undefined) {
-    const { artifactAdmitPublicRead } = await import('./readSaveHooks.js')
-    listedPromise = listArtifactFiles({
-      slug,
-      signal: opts.signal,
-      admitPublicRead: await artifactAdmitPublicRead(
-        { url: opts.url },
-        opts.context,
-        'files',
-      ),
-      ...(opts.context?.toolUseId !== undefined
-        ? { probeToolUseId: opts.context.toolUseId }
-        : {}),
-    })
-  } else {
-    listedPromise = Promise.resolve({
-      kind: 'error' as const,
-      message: '',
-      reason: 'permission_skip',
-    })
+  // Gold filesOk / storeOk: a ruled or ask channel is not read.
+  const filesOk = filesOn && filesSkip === undefined
+  const storeOk = storeSkip === undefined
+  if (!filesOk && !storeOk) {
+    const ask = filesSkip === 'ask' || storeSkip === 'ask'
+    return { unavailable: ask ? NEEDS_APPROVAL : README_RULED }
   }
-  const [listed, store] = await Promise.all([listedPromise, storePromise])
-  let filesDoc: { path: string; text: string } | undefined
-  let filesWhy: string | undefined
-  if (filesSkip === 'deny') {
-    filesWhy = README_RULED
-  } else if (filesSkip === 'ask') {
-    filesWhy = README_ASK
-  } else if (listed.kind === 'error') {
-    filesWhy = listed.message
-  } else {
-    const readme = listed.files.find(
-      f => f.path === FILES_README || f.path === PROJECT_README,
-    )
-    if (!readme) {
-      filesWhy = 'it has no README to read'
-    } else {
-      const files = await readFilesReadmeDoc({
+  const storePromise: ReturnType<typeof fetchStoreReadmeDoc> = storeOk
+    ? fetchStoreReadmeDoc({
         slug,
-        path: readme.path,
         origin: opts.origin,
         token: opts.token,
         signal: opts.signal,
+        context: opts.context,
       })
-      filesDoc = files.doc
-      filesWhy = files.why
-    }
-  }
+    : Promise.resolve({})
+  const filesPromise = filesOk
+    ? readGuidePublishedPair({ slug, signal: opts.signal })
+    : Promise.resolve({
+        root: GUIDE_EMPTY,
+        project: GUIDE_EMPTY,
+      })
+  const [pair, store] = await Promise.all([filesPromise, storePromise])
+  const files = pickGuidePublished(pair)
   // Gold kyo: v = files path is project/README.md; F = !v && store doc.
-  const filesIsProject = filesDoc?.path === PROJECT_README
+  const filesIsProject = files.doc?.path === PROJECT_README
   const storeWins = !filesIsProject && store.doc !== undefined
-  const picked = filesIsProject ? filesDoc : (store.doc ?? filesDoc)
+  const picked = filesIsProject ? files.doc : (store.doc ?? files.doc)
   if (picked === undefined) {
     return {
-      unavailable:
-        filesWhy === README_RULED || filesWhy === README_ASK
-          ? filesWhy
-          : (store.why ?? filesWhy ?? 'it has no README to read'),
+      unavailable: store.why ?? files.why ?? 'it has no README to read',
     }
   }
+  // Gold j: project path or a store doc suppresses the store-ruled note.
+  const storeRuled = storeSkip === 'deny'
+  const storeAsk = storeSkip === 'ask'
   const storeNote =
-    !storeWins && store.why !== undefined ? store.why : undefined
+    storeWins || filesIsProject
+      ? undefined
+      : storeRuled
+        ? STORE_RULED_OLDER
+        : storeAsk
+          ? STORE_ASK_OLDER
+          : undefined
   return {
     docs: [picked],
     ...(storeWins ? { store: true as const } : {}),

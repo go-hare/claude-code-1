@@ -5,6 +5,12 @@
  * Gold `ct` (`renderQuickstartStartKit`) is uSo REPL routing; this analog
  * only mentions on-disk kit dirs. Do not invent uSo.
  */
+import {
+  artifactViewerUrlFor,
+  parseArtifactUrl,
+} from 'src/utils/artifactUrl.js'
+import { isArtifactDamsonToolset } from './quickstartCatalog.js'
+
 const OTHER_TYPE_CAP = 50
 /** Gold `cl` analog — oa budget. */
 const QUICKSTART_RESULT_BUDGET = 60_000
@@ -121,14 +127,52 @@ function designGuidance(bag: Record<string, unknown>): string {
   return `\n\nFor a plain page, the page-design guidance follows. It is the \`artifact-design\` skill's own text, so do not load that skill as well. Write the page to a file and publish it in the same message: the two calls run in order.\n\n${text}`
 }
 
+/** Gold `S(Ti(url, "(unrecognized address)"))`. */
+function quotedArtifactAddress(url: string): string {
+  const parsed = parseArtifactUrl(url)
+  const shown = parsed ? artifactViewerUrlFor(parsed) : '(unrecognized address)'
+  return JSON.stringify(shown)
+}
+
+/**
+ * Gold `ue` — other token cards, after an attached design-system README.
+ * Store uses `and`, not the `with` in `ay`.
+ */
+function otherTokenCards(
+  url: string,
+  store: boolean,
+  projectReadme: boolean,
+): string {
+  const shown = quotedArtifactAddress(url)
+  if (projectReadme) {
+    const action = isArtifactDamsonToolset()
+      ? 'action "read"'
+      : 'action "read_file"'
+    return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`path\`: "project/api/tokens.md" (palette, type, fonts); "project/tokens.json" (exact token values); or, where the README's index is shown, a card it names, at "project/" followed by the path the index gives.`
+  }
+  if (store) {
+    const action = isArtifactDamsonToolset()
+      ? 'the ArtifactData tool, action "get"'
+      : 'action "read_db" and `db_op`: "get"'
+    return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`collection\` and \`doc_id\`: "api" and "tokens.md" (palette, type, fonts); "ds" and "tokens" (exact token values); "ds" and "meta" (the system's record). Where the README's index is shown, read a card it names by the collection and doc id the index gives.`
+  }
+  const action = isArtifactDamsonToolset()
+    ? 'action "read"'
+    : 'action "read_file"'
+  return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`path\`: "api/tokens.md" (palette, type, fonts); "tokens.json" (exact token values); or, where the README's index is shown, a card it names, by its path there.`
+}
+
 /** Gold `ay` analog — token cards; store uses read_db collection api/ds. */
 function tokenCards(bag: Record<string, unknown>): string {
   const system = asRecord(bag.design_system)
   if (system === undefined || typeof system.url !== 'string') return ''
   if (!hasDefaultReadme(bag)) return ''
-  const url = system.url
+  const url = quotedArtifactAddress(system.url)
   if (system.store === true) {
-    return ` In the same message, read that design system's token cards — action "read_db" with \`db_op\`: "get", \`url\`: ${url}, once with \`collection\`: "api", \`doc_id\`: "tokens.md" and once with \`collection\`: "ds", \`doc_id\`: "tokens" — since the type's instructions will ask for them.`
+    const action = isArtifactDamsonToolset()
+      ? 'the ArtifactData tool, action "get"'
+      : 'action "read_db" with `db_op`: "get"'
+    return ` In the same message, read that design system's token cards — ${action}, \`url\`: ${url}, once with \`collection\`: "api", \`doc_id\`: "tokens.md" and once with \`collection\`: "ds", \`doc_id\`: "tokens" — since the type's instructions will ask for them.`
   }
   const docs = Array.isArray(system.docs) ? system.docs : []
   const projectPrefix = docs.some(
@@ -136,7 +180,10 @@ function tokenCards(bag: Record<string, unknown>): string {
   )
     ? 'project/'
     : ''
-  return ` In the same message, read that design system's token cards — action "read", \`url\`: ${url}, once with \`path\`: "${projectPrefix}api/tokens.md" and once with \`path\`: "${projectPrefix}tokens.json" — since the type's instructions will ask for them.`
+  const action = isArtifactDamsonToolset()
+    ? 'action "read"'
+    : 'action "read_file"'
+  return ` In the same message, read that design system's token cards — ${action}, \`url\`: ${url}, once with \`path\`: "${projectPrefix}api/tokens.md" and once with \`path\`: "${projectPrefix}tokens.json" — since the type's instructions will ask for them.`
 }
 
 function designSystemsNotListedNote(note: string): string {
@@ -232,7 +279,14 @@ function defaultReadmeAttachment(bag: Record<string, unknown>): {
     if (typeof rec?.text === 'string' && rec.text !== '') parts.push(rec.text)
   }
   if (parts.length === 0) return { attached: false, text: '' }
-  return { attached: true, text: `\n\n${parts.join('\n\n')}` }
+  const projectReadme = system.docs.some(
+    doc => asRecord(doc)?.path === 'project/README.md',
+  )
+  const cards =
+    typeof system.url === 'string'
+      ? `${otherTokenCards(system.url, system.store === true, projectReadme)}\n\n`
+      : ''
+  return { attached: true, text: `\n\n${cards}${parts.join('\n\n')}` }
 }
 
 /**
@@ -335,6 +389,11 @@ function matchOfNote(bag: Record<string, unknown>, titled: string): string {
     : ''
 }
 
+/** densable py — document types are filled through the connector, not a page. */
+function documentFromType(typeUrl: string): string {
+  return `The document still goes to that connector, but start it from this type rather than with the connector's own create: publish with \`type_url\`: ${typeUrl}, a \`title\` (what the user called it, or a short descriptive name), no files and no \`auto_open\` (no write to the Artifact follows, so "after_first_write" would never open it). The create result carries the type's instructions and says how to fill the document through the connector, not by publishing a page.`
+}
+
 function publishFromType(
   typeUrl: string,
   bag: Record<string, unknown>,
@@ -397,8 +456,12 @@ export function formatQuickstartResult(output: {
       return `Quickstart for ${label}: this account lists no ${titled} type to start from${off}, so make it as a plain page.${guidance}`
     }
     const row = quoteTypeLine(match)
+    const start =
+      intent === 'document'
+        ? documentFromType(typeUrl)
+        : `${publishFromType(typeUrl, bag)}${startKitDirSentences(bag)}`
     return withDesignSystemsAppendix(
-      `Quickstart for ${label}. ${standsInFor(bag)}\n\nThe Artifact type to start from:\n${row}${matchOfNote(bag, titled)}\n\n${publishFromType(typeUrl, bag)}${startKitDirSentences(bag)}`,
+      `Quickstart for ${label}. ${standsInFor(bag)}\n\nThe Artifact type to start from:\n${row}${matchOfNote(bag, titled)}\n\n${start}`,
       bag,
     )
   }

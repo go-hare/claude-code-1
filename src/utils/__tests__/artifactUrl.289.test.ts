@@ -38,6 +38,38 @@ describe('densable 2.1.289 artifact URL AnyCase / eval-stub', () => {
     })
   })
 
+  test('strict parse accepts /artifact/ and a 22-char short id', () => {
+    expect(parseArtifactUrl(`https://claude.ai/artifact/${SLUG}`)).toEqual({
+      slug: SLUG,
+      env: 'prod',
+    })
+    expect(
+      parseArtifactUrl('https://claude.ai/artifact/N5L7eAvjq89DfJmGvn2Erh'),
+    ).toEqual({ slug: SLUG, env: 'prod' })
+  })
+
+  test('staging host is not an artifact; frame staging still is', () => {
+    expect(
+      parseArtifactUrl(`https://claude-ai.staging.ant.dev/artifact/${SLUG}`),
+    ).toBeNull()
+    expect(
+      parseArtifactUrl(`https://${SLUG}.frame.staging.claudeusercontent.com/`),
+    ).toEqual({ slug: SLUG, env: 'staging' })
+  })
+
+  test('case-insensitive fallback does not decode a short id', () => {
+    expect(
+      parseArtifactUrlAnyCase(
+        'https://claude.ai/ARTIFACT/N5L7eAvjq89DfJmGvn2Erh',
+      ),
+    ).toBeNull()
+    expect(
+      parseArtifactUrlAnyCase(
+        'https://CLAUDE.AI/artifact/N5L7eAvjq89DfJmGvn2Erh',
+      ),
+    ).toEqual({ slug: SLUG, env: 'prod' })
+  })
+
   test('AnyCase still upgrades http and strips trailing-dot host', () => {
     expect(
       parseArtifactUrlAnyCase(`http://claude.ai./code/artifact/${SLUG}`),

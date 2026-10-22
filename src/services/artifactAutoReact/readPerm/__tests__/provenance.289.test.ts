@@ -31,9 +31,12 @@ const {
   hat,
   ine,
   jD,
+  Kjt,
+  LPe,
   md,
   Pbe,
   provenanceState,
+  qjt,
   resetProvenanceStateForTests,
   setProvenanceDepsForTests,
   Sh,
@@ -523,5 +526,39 @@ describe('densable 2.1.289 hat', () => {
     const calls = installFrameFetch(() => jsonResponse(200, {}))
     await hat(PARSED, { signal: new AbortController().signal })
     expect(calls.length).toBe(0)
+  })
+})
+
+describe('densable 2.1.289 qjt / Bht / LPe / Kjt', () => {
+  test('qjt persists cowritten true and ignores other values', () => {
+    qjt(SLUG, true)
+    expect(yt(SLUG)?.cowritten).toBe(true)
+    expect(yt(SLUG)?.mode).toBe('owner')
+    qjt(SLUG, false)
+    expect(yt(SLUG)?.cowritten).toBe(true)
+  })
+
+  test('LPe is response true, stored true, or owned with the field omitted', () => {
+    expect(LPe(true, undefined, false)).toBe(true)
+    expect(LPe(true, false, false)).toBe(false)
+    expect(LPe(false, undefined, undefined)).toBe(false)
+    expect(LPe(false, true, false)).toBe(true)
+    expect(LPe(false, false, true)).toBe(true)
+  })
+
+  test('Kjt stamps outside_writer for an owned artifact when the reply omits it', () => {
+    setStatus({ role: 'owner' })
+    expect(Kjt(SLUG, undefined)).toBe(true)
+    expect(yt(SLUG)?.outsideWriter).toBeUndefined()
+  })
+
+  test('Kjt persists a false reply and does not downgrade a stored true', () => {
+    setStatus({ role: 'owner' })
+    expect(Kjt(SLUG, false)).toBe(false)
+    expect(yt(SLUG)?.outsideWriter).toBe(false)
+    expect(Kjt(SLUG, true)).toBe(true)
+    expect(yt(SLUG)?.outsideWriter).toBe(true)
+    expect(Kjt(SLUG, false)).toBe(true)
+    expect(yt(SLUG)?.outsideWriter).toBe(true)
   })
 })

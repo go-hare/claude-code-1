@@ -4,7 +4,15 @@
  */
 import type { ToolUseContext } from 'src/Tool.js'
 import type { PermissionResult } from 'src/types/permissions.js'
-import { beginArtifactConsentCheck } from 'src/services/artifactAutoReact/readPerm/consent.js'
+import {
+  beginArtifactConsentCheck,
+  Loe,
+} from 'src/services/artifactAutoReact/readPerm/consent.js'
+import { yt } from 'src/services/artifactAutoReact/readPerm/provenance.js'
+import { getClientType } from 'src/bootstrap/state.js'
+import { isBgSession } from 'src/utils/concurrentSessions.js'
+import { isTeammate } from 'src/utils/teammate.js'
+import { isUserDrivenTurn } from 'src/utils/turnTail.js'
 import {
   checkArtifactReadPermissions,
   isArtifactReadAction,
@@ -46,8 +54,94 @@ export const ARTIFACT_DELETE_PIN = '__artifactDeletePin'
 /** Gold `Rat` @199726181 — delete ask/dD target pin. */
 export const Rat = '__artifactDeleteTarget'
 
-function previewText(text: string, max = 120): string {
-  return text.length > max ? `${text.slice(0, max - 3)}…` : text
+/**
+ * densable upload-ask cover clause (gNe / Wf).
+ * `copyFrom` is gold `Q6()`; `untilComments` is gold `Ght && Xqe` (`ar` / `Ee`).
+ */
+function uploadAskCoverClause(
+  coversSession: boolean,
+  copyFrom: boolean,
+  untilComments: boolean,
+): string {
+  if (!coversSession) return '; each such upload asks again.'
+  const into = copyFrom
+    ? "to (and copies of other artifacts' assets into) "
+    : 'to '
+  const until = untilComments
+    ? 'until someone else comments on it again'
+    : 'for the rest of this session'
+  return `; approving covers further uploads ${into}this artifact ${until}.`
+}
+
+/** densable `kce` — reply body cap, in Unicode code points. */
+const REPLY_PREVIEW_CODE_POINTS = 4096
+const THREAD_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** densable `njn` — stop-latch asks that are not a user-started turn. */
+const WATCH_NOT_USER_TURN =
+  'this request did not come in a turn this session can verify the user started (a task notification, a wakeup, or a stop receipt started it — or a typed /command, whose origin is not recorded)'
+
+/** densable `e0t` + `wst` — fold whitespace and quotes, then cap code points. */
+function replyPreview(text: string): string {
+  if (text === '') return ''
+  const folded = text
+    .replace(/[\n\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/"/g, "'")
+    .trim()
+  if (Array.from(text).length <= REPLY_PREVIEW_CODE_POINTS) return folded
+  return `${Array.from(folded).slice(0, REPLY_PREVIEW_CODE_POINTS).join('')}\u2026`
+}
+
+function replyThreadId(threadId: string): string {
+  return THREAD_ID_RE.test(threadId) ? threadId : '(invalid)'
+}
+
+/** densable `BCo` / `EF` — audience follows the artifact share status. */
+function replyAudience(parsed: ParsedArtifactUrl | null): string {
+  if (parsed === null) {
+    return 'viewers of this artifact (share status could not be confirmed)'
+  }
+  const status = yt(parsed.slug)
+  if (status === undefined || status.probeFailed === true) {
+    return 'viewers of this artifact (share status could not be confirmed)'
+  }
+  if (status.mode === 'owner') {
+    return 'viewers of this artifact (not currently shared)'
+  }
+  const who =
+    status.external === true && status.mode === 'users'
+      ? 'specific users in another organization'
+      : Loe(status.mode)
+  return `${who} (the artifact is shared)`
+}
+
+/**
+ * densable `Pat` / `q6` — remote, or a publish context that can hold the
+ * live socket (interactive, sdk, bg_session). Sub-agent, teammate, and print
+ * cannot re-arm a stopped watch.
+ */
+function watchSessionCanRearm(context: ToolUseContext): boolean {
+  if (process.env.CLAUDE_CODE_REMOTE) return true
+  const agent = getAgentContext()
+  const client = getClientType()
+  const interactive =
+    context.options.isNonInteractiveSession !== true ||
+    client === 'claude-vscode'
+  const kind =
+    agent?.agentType === 'teammate' || isTeammate()
+      ? 'teammate'
+      : context.agentId !== undefined
+        ? 'subagent'
+        : isBgSession()
+          ? 'bg_session'
+          : client === 'sdk-ts' || client === 'sdk-py'
+            ? 'sdk'
+            : interactive
+              ? 'interactive'
+              : 'print'
+  return kind === 'interactive' || kind === 'sdk' || kind === 'bg_session'
 }
 
 function viewerLabel(url: string | undefined): {
@@ -62,6 +156,135 @@ function viewerLabel(url: string | undefined): {
     return { parsed: null, label: 'an artifact (unrecognized address)' }
   }
   return { parsed, label: artifactViewerUrlFor(parsed) }
+}
+
+const WATCH_REPLIES_AGAIN =
+  '. If you can edit it and gave its link, approving also lets comments sent to Claude reach this session again, where Claude may answer them unattended — unless its auto-replies were stopped (those stay stopped until you ask to resume them; auto-replies only paused by an interrupt — Ctrl+C or Stop — do resume)'
+const WATCH_REPLIES_CLOUD =
+  ' and, if you can edit it and gave its link, lets comments sent to Claude reach this session again, where Claude may answer them unattended — unless its auto-replies were stopped (those stay stopped until you ask to resume them; auto-replies only paused by an interrupt — Ctrl+C or Stop — do resume)'
+const WATCH_FIRST_REPLIES =
+  '. If you can edit it and gave its link, comments on it sent to Claude reach this session and Claude may answer them unattended'
+const WATCH_FIRST_COVERS =
+  '. Approving covers watching artifacts for the rest of this session'
+const WATCH_FIRST_COVERS_AGAIN =
+  ' (turning on auto-replies for another artifact asks again)'
+const WATCH_DECISION_REPLIES =
+  ', and will automatically reply to comments on it that are sent to Claude'
+const WATCH_DECISION_COMMENT_WAKE =
+  ', and when a comment on any watched artifact is sent to Claude'
+const WATCH_DECISION_COVERS_SESSION =
+  " Claude won't ask again to watch other artifacts for the rest of this session."
+const WATCH_ALREADY_REPLIES =
+  'Claude wants this session to also answer comments sent to Claude on this artifact (only if you can edit it; Claude may answer them unattended, for the rest of this session). Watching it is already approved.'
+
+/**
+ * densable `JBn(commentsOn, repliesCanResume, isLive)` — stopped-watch ask
+ * copy after the em dash. Not the viewer URL.
+ */
+export function JBn(
+  commentsOn: boolean,
+  repliesCanResume: boolean,
+  isLive: boolean,
+): string {
+  if (isLive) {
+    return `approving resumes keeping track of new versions of it published elsewhere for the rest of this session; a new version starts no turn and sends no notification${repliesCanResume ? WATCH_REPLIES_AGAIN : ''}`
+  }
+  return `approving resumes republish notifications${
+    commentsOn
+      ? ' (and, in a cloud session, the wake when a comment on it is sent to Claude, which Claude may then read and answer)'
+      : ''
+  } for the rest of this session${repliesCanResume ? WATCH_REPLIES_CLOUD : ''}; republish notifications carry no content`
+}
+
+/**
+ * densable `YBn(commentsOn, repliesCanResume, isLive)` — first watch ask copy
+ * after the em dash.
+ */
+export function YBn(
+  commentsOn: boolean,
+  repliesCanResume: boolean,
+  isLive: boolean,
+): string {
+  if (isLive) {
+    return `this session keeps track of new versions of it published elsewhere (another session, or someone saving from the page) over a live background connection; a new version starts no turn and sends no notification${repliesCanResume ? WATCH_FIRST_REPLIES : ''}${WATCH_FIRST_COVERS}${repliesCanResume ? WATCH_FIRST_COVERS_AGAIN : ''}`
+  }
+  return `this session is notified when it is republished elsewhere (another session, or someone saving from the page)${repliesCanResume ? ` and, if you can edit it and gave its link, comments on it sent to Claude reach this session and Claude may answer them unattended` : ''}. A local session holds a live background connection; a cloud session is woken with a new turn${
+    commentsOn
+      ? ', also when a comment on any watched artifact is sent to Claude, which Claude may then read and answer'
+      : ''
+  }${WATCH_FIRST_COVERS}${repliesCanResume ? WATCH_FIRST_COVERS_AGAIN : ''}; republish notifications carry no content`
+}
+
+function watchDecisionCopy(
+  head: string,
+  opts: {
+    replies: boolean
+    commentWake: boolean
+    coversSession: boolean
+  },
+): string {
+  return `${head}${opts.replies ? WATCH_DECISION_REPLIES : ''}${opts.commentWake ? WATCH_DECISION_COMMENT_WAKE : ''}.${opts.coversSession ? WATCH_DECISION_COVERS_SESSION : ''}`
+}
+
+/** densable `sxr` — stopped-watch decisionReason. */
+export function sxr(opts: {
+  live: boolean
+  replies: boolean
+  commentWake: boolean
+  coversSession: boolean
+}): string {
+  return watchDecisionCopy(
+    opts.live
+      ? 'Watching this artifact was stopped earlier this session. Claude will again keep track of new versions of it published elsewhere'
+      : "Watching this artifact was stopped earlier this session. Claude will be notified again when it's republished",
+    opts,
+  )
+}
+
+/** densable `XBn` — first-watch decisionReason. */
+export function XBn(opts: {
+  live: boolean
+  replies: boolean
+  commentWake: boolean
+  coversSession: boolean
+}): string {
+  return watchDecisionCopy(
+    opts.live
+      ? 'Claude will keep track of new versions of this artifact published elsewhere'
+      : 'Claude will be notified when this artifact is republished',
+    opts,
+  )
+}
+
+/** densable `oxr` — first-watch replies-on-already-approved. */
+export function oxr(coversSession: boolean): string {
+  return `Claude will also automatically reply to comments on this artifact that are sent to Claude.${coversSession ? WATCH_DECISION_COVERS_SESSION : ''}`
+}
+
+function gbCached(name: string, fallback: boolean): boolean {
+  // Lazy: permissions ↔ growthbook cycle at module init.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getFeatureValue_CACHED_MAY_BE_STALE } =
+    require('src/services/analytics/growthbook.js') as typeof import('src/services/analytics/growthbook.js')
+  return getFeatureValue_CACHED_MAY_BE_STALE(name, fallback) === true
+}
+
+/** densable `Sne` / `JR` — `CLAUDE_CODE_ARTIFACT_COMMENTS ?? tengu_teal_corbel`. */
+export function JR(): boolean {
+  const raw = process.env.CLAUDE_CODE_ARTIFACT_COMMENTS
+  if (raw !== undefined) return Boolean(raw)
+  return gbCached('tengu_teal_corbel', false)
+}
+
+/** densable `Pne` — `k("tengu_slate_lantern", false)`. */
+function Pne(): boolean {
+  return gbCached('tengu_slate_lantern', false)
+}
+
+/** densable `z5` — REMOTE durable; lantern live; else none. */
+export function z5(): 'durable' | 'live' | 'none' {
+  if (process.env.CLAUDE_CODE_REMOTE) return 'durable'
+  return Pne() ? 'live' : 'none'
 }
 
 /** Gold `Tu` then `AE` — other-org deny after a hosted ownership probe. */
@@ -182,7 +405,9 @@ export async function checkArtifactActionPermissions(
         action: 'write',
       })
     }
-    const preview = previewText(String(input.text ?? ''))
+    const preview = replyPreview(String(input.text ?? ''))
+    const audience = replyAudience(parsed)
+    const tid = replyThreadId(threadId)
     // Gold jAr @194348914 / eAo / WAr — thread opening preview when hosted.
     const target =
       parsed !== null && threadId !== ''
@@ -196,18 +421,18 @@ export async function checkArtifactActionPermissions(
     const threadNoun =
       target !== undefined
         ? formatCommentThreadAsk(target)
-        : `comment thread ${threadId}`
+        : `comment thread ${tid}`
     return {
       behavior: 'ask',
-      message: `Claude wants to reply to ${threadNoun} on ${label} — visible to viewers: "${preview}"`,
+      message: `Claude wants to reply to ${threadNoun} on ${label} — visible to ${audience}: "${preview}"`,
       updatedInput: input,
       suppressAlwaysAllowRule: true,
       decisionReason: {
         type: 'other',
         reason:
           target !== undefined
-            ? `Posting a reply, visible to viewers, to ${formatCommentTargetAsk(target)} requires confirmation`
-            : `Posting a reply to comment thread ${threadId}, visible to viewers, requires confirmation`,
+            ? `Posting a reply, visible to ${audience}, to ${formatCommentTargetAsk(target)} requires confirmation`
+            : `Posting a reply to comment thread ${tid}, visible to ${audience}, requires confirmation`,
       },
     }
   }
@@ -426,16 +651,14 @@ export async function checkArtifactActionPermissions(
   }
 
   if (action === 'watch') {
-    const { label, parsed } = viewerLabel(input.url)
+    const { parsed } = viewerLabel(input.url)
     const { un } = await import('src/services/artifactAutoReact/store.js')
-    const { hasAskClassArtifactRemembered, md } = await import(
+    const { hasAskClassArtifactRemembered, md, _U } = await import(
       'src/services/artifactAutoReact/readPerm/consent.js'
     )
+    const { mI } = await import('src/services/artifactAutoReact/gates.js')
     const latches = un().durable.stopLatches
     const stopped = parsed !== null && latches.isStopped(parsed.slug)
-    if (stopped && context.toolUseId) {
-      latches.noteRelatchAsk(context.toolUseId, parsed!.slug)
-    }
     const already =
       parsed !== null &&
       [...un().live.supervisors.values()].some(
@@ -446,37 +669,129 @@ export async function checkArtifactActionPermissions(
       parsed !== null &&
       md() &&
       hasAskClassArtifactRemembered(context, 'standing_job', parsed.slug)
-    if ((already && !stopped) || standingRemembered) {
+    if (stopped && !watchSessionCanRearm(context)) {
+      return {
+        behavior: 'deny',
+        message:
+          'Not watching: watching this artifact was stopped earlier in this session, and re-arming it needs the session that holds the live watch — this session type (a sub-agent, teammate or print session) cannot hold one. Nothing here needs approval; the user can ask for it from the main conversation. Do not reply to its comments yourself in this turn either — list them for the user.',
+        decisionReason: {
+          type: 'other',
+          reason:
+            'This session shape cannot hold the live socket a re-watch re-arms — clearing the stop here would arm nothing',
+        },
+      }
+    }
+    if (stopped && !isUserDrivenTurn(context.messages)) {
+      return {
+        behavior: 'deny',
+        message: `Not watching: watching this artifact was stopped earlier in this session, and ${WATCH_NOT_USER_TURN}. Raise it with the user; if they want it watched again, their own next message can ask for it. Do not reply to its comments yourself in this turn either — list them for the user.`,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason:
+            'Re-watching an artifact whose watch was stopped this session — only a request made in a turn the user started may ask for it',
+          classifierApprovable: false,
+        },
+      }
+    }
+    // densable `z5` / `Pne` / `Sne`/`JR`: REMOTE → durable; tengu_slate_lantern
+    // → live; else none. commentsOn = CLAUDE_CODE_ARTIFACT_COMMENTS ?? teal_corbel.
+    const watchRail = z5()
+    const commentsOn = JR()
+    const replyDeclined =
+      parsed !== null && un().live.repliesConsent.declined.has(parsed.slug)
+    // densable third deny: durable && JR() && declined && !_U("standing_job").
+    if (
+      watchRail === 'durable' &&
+      commentsOn &&
+      parsed !== null &&
+      replyDeclined &&
+      !_U('standing_job', parsed.slug)
+    ) {
+      return {
+        behavior: 'deny',
+        message:
+          "Not starting a watch: an earlier ask in this session, to let Claude reply to this artifact's comments, wasn't approved. If the user wants it watched, their own next message with its link can ask again.",
+        decisionReason: {
+          type: 'safetyCheck',
+          reason:
+            "Watching an artifact whose comment-replies ask went unapproved this session — only the user's own new message with its link may ask again",
+          classifierApprovable: false,
+        },
+      }
+    }
+    if (stopped && context.toolUseId) {
+      latches.noteRelatchAsk(context.toolUseId, parsed!.slug)
+    }
+    if (standingRemembered) {
       return {
         behavior: 'allow',
         updatedInput: input,
         decisionReason: {
           type: 'other',
-          reason: standingRemembered
-            ? 'Standing-job consent for this artifact was already remembered'
-            : 'Already watching this artifact in this session',
+          reason:
+            'Standing-job consent for this artifact was already remembered',
         },
       }
     }
+    // densable `(w||h)&&!F&&(!Z||U.approved)` — already-watching allow only
+    // when this call is not also arming replies (Z / `_a()&&!declined`).
+    const isLive = watchRail === 'live'
+    const repliesCanResume = isLive && commentsOn && mI() && !replyDeclined
+    if (already && !stopped && !repliesCanResume) {
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionReason: {
+          type: 'other',
+          reason: 'Already watching this artifact in this session',
+        },
+      }
+    }
+    // densable `V=!h` — `h` is AppState.artifactWatchApproved===true (KEEP, not
+    // hosted). Unset → coversSession true.
+    const coversSession = true
+    const commentWake = watchRail === 'durable' && commentsOn
+    const decisionOpts = {
+      live: isLive,
+      replies: repliesCanResume,
+      commentWake,
+      coversSession,
+    }
+    // densable `le=Z&&(w||h)` — replies ask while already watching.
+    const repliesOnAlready = repliesCanResume && already && !stopped
     return {
       behavior: 'ask',
       message: stopped
-        ? `Claude wants to watch an artifact whose watch was deliberately stopped earlier — ${label}. Approve to clear the stop and re-arm the live socket.`
-        : `Claude wants to watch ${label} for new comments (opens a live connection for this session)`,
+        ? `Claude wants to watch an artifact whose watch was deliberately stopped earlier this session — ${JBn(commentsOn, repliesCanResume, isLive)}`
+        : repliesOnAlready
+          ? WATCH_ALREADY_REPLIES
+          : `Claude wants to watch an artifact — ${YBn(commentsOn, repliesCanResume, isLive)}`,
       updatedInput: input,
       suppressAlwaysAllowRule: true,
       localDisplayOnly: true,
       decisionReason: stopped
         ? {
             type: 'safetyCheck',
-            reason:
-              'Re-watching a stop-latched artifact requires explicit user approval',
-            classifierApprovable: false,
+            reason: sxr(decisionOpts),
+            classifierApprovable: true,
           }
-        : {
-            type: 'other',
-            reason: 'Watching an artifact opens a live comment subscription',
-          },
+        : repliesCanResume
+          ? {
+              type: 'safetyCheck',
+              reason: repliesOnAlready
+                ? oxr(coversSession)
+                : XBn({
+                    live: isLive,
+                    replies: true,
+                    commentWake,
+                    coversSession,
+                  }),
+              classifierApprovable: true,
+            }
+          : {
+              type: 'other',
+              reason: XBn(decisionOpts),
+            },
     }
   }
 
@@ -1146,7 +1461,13 @@ export async function checkArtifactActionPermissions(
     }
     const { expandPath } = await import('src/utils/path.js')
     const { FileReadTool } = await import('../FileReadTool/FileReadTool.js')
-    const { Gqe, resolveUploadSource } = await import(
+    const {
+      Gqe,
+      resolveUploadSource,
+      uploadArn,
+      uploadNeedsOwnApproval,
+      uploadOwnApprovalReason,
+    } = await import(
       'src/services/artifactAutoReact/readPerm/uploadReadGate.js'
     )
     const { gNe, Wu, qm, arePermissionPromptsUnavailable } = await import(
@@ -1161,8 +1482,15 @@ export async function checkArtifactActionPermissions(
       identity: string | null
       linked?: boolean
     }> = []
-    const readDenied = (filePath: string): PermissionResult | null => {
-      const source = resolveUploadSource(filePath)
+    const judged: Array<{
+      written: string
+      spelled: string
+      arn: boolean
+      gate: Exclude<ReturnType<typeof Gqe>, { refused: PermissionResult }>
+    }> = []
+    const readDenied = (written: string): PermissionResult | null => {
+      const spelled = expandPath(written)
+      const source = resolveUploadSource(spelled)
       if (source.kind === 'network') {
         return {
           behavior: 'deny',
@@ -1175,14 +1503,21 @@ export async function checkArtifactActionPermissions(
       }
       const gate = Gqe(
         FileReadTool,
-        { file_path: filePath },
-        filePath,
+        { file_path: spelled },
+        spelled,
         source,
         perms,
         undefined,
+        'Uploading an asset reads file contents',
       )
       if (gate.refused !== undefined) return gate.refused
-      uploadPins.push(gate.sourcePin ?? { real: filePath, identity: null })
+      uploadPins.push(gate.sourcePin ?? { real: spelled, identity: null })
+      judged.push({
+        written,
+        spelled,
+        arn: uploadArn(spelled, source),
+        gate,
+      })
       return null
     }
     if (batchPaths !== undefined) {
@@ -1198,11 +1533,11 @@ export async function checkArtifactActionPermissions(
         }
       }
       for (const path of batchPaths) {
-        const blocked = readDenied(expandPath(path))
+        const blocked = readDenied(path)
         if (blocked !== null) return blocked
       }
     } else if (input.file_path !== undefined) {
-      const blocked = readDenied(expandPath(input.file_path))
+      const blocked = readDenied(input.file_path)
       if (blocked !== null) return blocked
     }
     // Gold @211226481 — Tu + AE before Xqe/ask.
@@ -1216,15 +1551,27 @@ export async function checkArtifactActionPermissions(
     const { hasArtifactAssetUploadConsent } = await import(
       'src/services/artifactAutoReact/readPerm/grants.js'
     )
+    const { hasOtherCommentSightings, latestOtherCommentSeq } = await import(
+      'src/services/artifactAutoReact/store.js'
+    )
+    const { md } = await import(
+      'src/services/artifactAutoReact/readPerm/consent.js'
+    )
+    const { isStrictHumanTurnTail } = await import('src/utils/turnTail.js')
     const { ip, YBe } = await import(
       'src/services/artifactAutoReact/ownership.js'
     )
-    const uploadPin =
+    const { isArtifactCopyFromOn } = await import(
+      'src/services/artifactAutoReact/readPerm/surfaces.js'
+    )
+    // densable gt(ln,wn) — ask stamps zht; session allow omits seq.
+    const gNePin = (seq?: number) =>
       batchPaths !== undefined
         ? {
             [gNe]: {
               slug: parsed.slug,
               batch: uploadPins,
+              ...(seq !== undefined ? { otherCommentSeq: seq } : {}),
             },
           }
         : {
@@ -1234,10 +1581,53 @@ export async function checkArtifactActionPermissions(
                 real: expandPath(input.file_path ?? ''),
                 identity: null,
               }),
+              ...(seq !== undefined ? { otherCommentSeq: seq } : {}),
             },
           }
-    // Gold Xqe @210614011 / @211226914 — already approved this session.
-    if (hasArtifactAssetUploadConsent(context, parsed.slug)) {
+    const uploadPin = gNePin()
+    const askPin = gNePin(latestOtherCommentSeq(parsed.slug))
+    const mode = perms.mode
+    // densable cNn / coversSession — auto never covers; own-approval files don't.
+    const coversSession =
+      mode !== 'auto' &&
+      judged.every(row => !uploadNeedsOwnApproval(row.gate, row.arn))
+    // densable Wf — a file_paths list is all-or-nothing before any ask.
+    if (batchPaths !== undefined) {
+      const own = judged.flatMap((row, index) => {
+        const reason = uploadOwnApprovalReason(
+          row.spelled,
+          row.gate,
+          row.arn,
+          perms,
+        )
+        if (reason === undefined) return []
+        const base = row.written.split(/[/\\]/).pop()
+        const label = base !== undefined && base.length > 0 ? base : row.written
+        return [`file_paths[${index}] ${label} (${reason})`]
+      })
+      if (own.length > 0) {
+        const one = own.length === 1
+        return {
+          behavior: 'deny',
+          message: `${one ? 'One file' : `${own.length} files`} in \`file_paths\` ${one ? 'needs' : 'need'} an approval of ${one ? 'its' : 'their'} own, so nothing was uploaded: ${own.join('; ')}. Upload ${one ? 'it' : 'each of those'} in its own call with \`file_path\`; the other files can go together in one \`file_paths\` call.`,
+          decisionReason: {
+            type: 'other',
+            reason:
+              'An upload list carries only files that need no approval of their own',
+          },
+        }
+      }
+    }
+    // Gold session allow: coversSession && !Ght && (!md || !oO || plan) && Xqe.
+    // nke is true in this build, so the plan disjunct is mode === 'plan'.
+    const fiveClassHuman =
+      md() && isStrictHumanTurnTail(context.messages) && mode !== 'plan'
+    if (
+      coversSession &&
+      !hasOtherCommentSightings(parsed.slug) &&
+      !fiveClassHuman &&
+      hasArtifactAssetUploadConsent(context, parsed.slug)
+    ) {
       return {
         behavior: 'allow',
         updatedInput: { ...input, ...uploadPin, [Wu]: false, [qm]: false },
@@ -1248,7 +1638,6 @@ export async function checkArtifactActionPermissions(
         },
       }
     }
-    const mode = perms.mode
     // Gold b_(n) @211228000 — plan with no consent surface.
     if (mode === 'plan' && arePermissionPromptsUnavailable(context)) {
       return {
@@ -1272,7 +1661,6 @@ export async function checkArtifactActionPermissions(
           .isBypassPermissionsModeAvailable === true &&
         getIsInteractive()
       )
-    const coversSession = mode !== 'auto'
     const ownership = YBe(ip(parsed.slug), 'their artifact')
     const listed =
       batchPaths !== undefined
@@ -1283,17 +1671,23 @@ export async function checkArtifactActionPermissions(
         ? `Claude wants to upload ${batchPaths!.length} local ${
             batchPaths!.length === 1 ? 'file' : 'files'
           } into the asset store of ${label}: ${listed} — everyone who can open the artifact can load them`
-        : `Claude wants to upload an asset to ${label} — everyone who can open the artifact can load it`
+        : `Claude wants to upload the local file "${
+            uploadPins[0]?.real ??
+            (input.file_path !== undefined ? expandPath(input.file_path) : '')
+          }" into the asset store of ${label} — everyone who can open the artifact can load it`
+    const untilComments =
+      hasOtherCommentSightings(parsed.slug) &&
+      hasArtifactAssetUploadConsent(context, parsed.slug)
     return {
       behavior: 'ask',
-      message: `${askLead}${
-        coversSession
-          ? '; approving covers further uploads to this artifact for the rest of this session.'
-          : '; each such upload asks again.'
-      }${ownership}`,
+      message: `${askLead}${uploadAskCoverClause(
+        coversSession,
+        isArtifactCopyFromOn(),
+        untilComments,
+      )}${ownership}`,
       updatedInput: {
         ...input,
-        ...uploadPin,
+        ...askPin,
         [Wu]: coversSession && canReachUser,
         [qm]: mode === 'plan',
       },

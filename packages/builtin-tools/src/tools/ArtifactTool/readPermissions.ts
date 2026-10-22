@@ -1,7 +1,10 @@
 /**
  * densable Artifact.checkPermissions — list_assets / read_asset / list_files /
- * read_file branch (2.1.289). The optional working-copy host (`se`) is absent
- * in this build, so its refusals, live-copy pins and notes never apply.
+ * read_file branch (2.1.289). Official `liveReplicas.workingCopyPath` and the
+ * sibling hosts (`settleFileChange`, `liveFileEnded`, `pushHeldSaves`,
+ * `heldSavesExitCleanup`) are `void 0` in the default state and have no
+ * readers in the 2.1.289 binary, so refusals, live-copy pins and notes do
+ * not apply. Do not assign those hosts.
  */
 import { dirname } from 'path'
 import {

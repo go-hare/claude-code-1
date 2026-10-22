@@ -389,7 +389,7 @@ function wholeToolRuleMatches(name: string, rule: PermissionRule): boolean {
 }
 
 /** densable Ms */
-function wholeToolDenyRule(
+export function wholeToolDenyRule(
   context: ToolPermissionContext,
   tool: RuleTool,
 ): PermissionRule | null {
@@ -400,7 +400,7 @@ function wholeToolDenyRule(
 }
 
 /** densable zd */
-function wholeToolAskRule(
+export function wholeToolAskRule(
   context: ToolPermissionContext,
   tool: RuleTool,
 ): PermissionRule | null {

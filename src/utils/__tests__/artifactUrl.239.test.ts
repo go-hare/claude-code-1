@@ -22,14 +22,12 @@ describe('densable 2.1.239 artifact URL leftover', () => {
       slug: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       env: 'prod',
     })
+    // densable 2.1.289 O() is null — staging.ant.dev is not an artifact host.
     expect(
       parseArtifactUrl(
         'https://preview.claude-ai.staging.ant.dev/code/artifact/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       ),
-    ).toEqual({
-      slug: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      env: 'staging',
-    })
+    ).toBeNull()
     expect(
       parseArtifactUrl(
         'https://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.frame.claudeusercontent.com/',

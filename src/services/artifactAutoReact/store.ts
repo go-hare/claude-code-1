@@ -224,6 +224,114 @@ export class NoticeReadSights {
   }
 }
 
+/**
+ * densable P() row @186941645 — other-comments sightings for one slug.
+ * Gold: `{sightings, judged, judgedSends, lastText, textsForgotten}`.
+ */
+export type OtherCommentSighting =
+  | { seq: number; kind: 'row'; key: string; authorship: string }
+  | { seq: number; kind: 'gap' }
+  | { seq: number; kind: 'handIn'; threadId: string; gestureAt: number }
+
+export type OtherCommentsRow = {
+  sightings: OtherCommentSighting[]
+  judged: Map<string, unknown>
+  judgedSends: Map<string, unknown>
+  lastText: Map<string, string>
+  textsForgotten: boolean
+}
+
+function emptyOtherCommentsRow(): OtherCommentsRow {
+  return {
+    sightings: [],
+    judged: new Map(),
+    judgedSends: new Map(),
+    lastText: new Map(),
+    textsForgotten: false,
+  }
+}
+
+/** densable P(e) — get-or-create otherComments row for slug. */
+export function otherCommentsRow(slug: string): OtherCommentsRow {
+  const rows = un().shareStatus.otherComments
+  let row = rows.get(slug)
+  if (row === undefined) {
+    row = emptyOtherCommentsRow()
+    rows.set(slug, row)
+  }
+  return row
+}
+
+/** densable T() — bump otherCommentSeq. */
+export function nextOtherCommentSeq(): number {
+  const status = un().shareStatus
+  status.otherCommentSeq += 1
+  return status.otherCommentSeq
+}
+
+/** densable zht(e) — last sighting seq, or undefined. */
+export function latestOtherCommentSeq(slug: string): number | undefined {
+  return un().shareStatus.otherComments.get(slug)?.sightings.at(-1)?.seq
+}
+
+/**
+ * densable Ght(e) — true when the slug has at least one sighting.
+ */
+export function hasOtherCommentSightings(slug: string): boolean {
+  const row = un().shareStatus.otherComments.get(slug)
+  return row !== undefined && row.sightings.length > 0
+}
+
+/**
+ * densable Bzr(e,n) — drop sightings with seq ≤ n. No-op if the row
+ * is missing or n is undefined (gold `r===void 0||n===void 0`).
+ */
+export function forgetOtherCommentSightings(
+  slug: string,
+  afterSeq?: number,
+): void {
+  const row = un().shareStatus.otherComments.get(slug)
+  if (row === undefined || afterSeq === undefined) return
+  row.sightings = row.sightings.filter(s => s.seq > afterSeq)
+}
+
+/** densable `z` @186941645 — sightings ring cap. */
+const OTHER_COMMENT_SIGHTINGS_CAP = 64
+
+/**
+ * densable D(e,n) — push a sighting, then splice down to the last 64.
+ */
+function D(row: OtherCommentsRow, sighting: OtherCommentSighting): void {
+  row.sightings.push(sighting)
+  if (row.sightings.length > OTHER_COMMENT_SIGHTINGS_CAP) {
+    row.sightings.splice(0, row.sightings.length - OTHER_COMMENT_SIGHTINGS_CAP)
+  }
+}
+
+/**
+ * densable D(P(e), {seq:T(), ...}) — production sightings.push.
+ */
+export type OtherCommentDraft = OtherCommentSighting extends infer T
+  ? T extends OtherCommentSighting
+    ? Omit<T, 'seq'>
+    : never
+  : never
+
+export function recordOtherCommentSighting(
+  slug: string,
+  sighting: OtherCommentDraft,
+): void {
+  D(otherCommentsRow(slug), {
+    ...sighting,
+    seq: nextOtherCommentSeq(),
+  } as OtherCommentSighting)
+}
+
+/** densable XBe(e) — record a gap sighting. */
+export function noteOtherCommentGap(slug: string): void {
+  D(otherCommentsRow(slug), { seq: nextOtherCommentSeq(), kind: 'gap' })
+}
+
 /** densable o0t / M3i comment census row */
 export type CommentCensusEntry = {
   readIds: Set<string> | null
@@ -474,6 +582,13 @@ export type ArtifactAutoReactStore = {
       read: NoticeReadSights
       verify: NoticeReadSights
     }
+    /**
+     * densable shareStatus.otherComments — Ght / Bzr / P() @186941645.
+     * Keyed by artifact slug. qIt calls Bzr after an approved upload.
+     */
+    otherComments: Map<string, OtherCommentsRow>
+    /** densable otherCommentSeq — P()/T() sighting sequence. */
+    otherCommentSeq: number
   }
   /**
    * densable frameRelay — ccr-gateway decline/serve windows (sEe / tgr / _zt).
@@ -742,6 +857,8 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
         read: new NoticeReadSights(),
         verify: new NoticeReadSights(),
       },
+      otherComments: new Map(),
+      otherCommentSeq: 0,
     },
     frameRelay: {
       declinedUntil: new Map(),

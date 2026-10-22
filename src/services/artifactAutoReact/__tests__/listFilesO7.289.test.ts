@@ -16,6 +16,10 @@ import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import * as realGrowthbook from '../../../services/analytics/growthbook.js'
 import { getClaudeAIOAuthTokens } from '../../../utils/auth.js'
 import { setFrameDlDepsForTests } from '../frameDl.js'
+import {
+  resetArtifactFrameRelayHostForTests,
+  setArtifactFrameRelayHost,
+} from '../frameRelay.js'
 import { listArtifactFiles } from '../restApis.js'
 
 const growthbookSnap = snapshotModuleExports(realGrowthbook)
@@ -34,6 +38,23 @@ mock.module('src/services/analytics/growthbook.js', growthbookMock)
 const SLUG = '11111111-1111-1111-1111-111111111111'
 const prevToken = process.env.CLAUDE_CODE_OAUTH_TOKEN
 const prevFetch = globalThis.fetch
+const prevRemote = process.env.CLAUDE_CODE_REMOTE
+const prevEnvKind = process.env.CLAUDE_CODE_ENVIRONMENT_KIND
+const prevIngress = process.env.SESSION_INGRESS_URL
+const prevSessionToken = process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN
+const prevRelay = process.env.CLAUDE_CODE_ARTIFACT_FRAME_RELAY
+
+function restoreRelayEnv(): void {
+  const put = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  put('CLAUDE_CODE_REMOTE', prevRemote)
+  put('CLAUDE_CODE_ENVIRONMENT_KIND', prevEnvKind)
+  put('SESSION_INGRESS_URL', prevIngress)
+  put('CLAUDE_CODE_SESSION_ACCESS_TOKEN', prevSessionToken)
+  put('CLAUDE_CODE_ARTIFACT_FRAME_RELAY', prevRelay)
+}
 
 function clearTokenMemo(): void {
   ;(
@@ -50,6 +71,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 function installFrameFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  opts?: { relayOpen?: boolean },
 ): string[] {
   const calls: string[] = []
   setFrameDlDepsForTests({
@@ -60,7 +82,7 @@ function installFrameFetch(
     }) as typeof globalThis.fetch,
     oauthBearer: () => 'test-oauth',
     claudeAiOrigin: () => 'https://claude.ai',
-    isRelayOpen: () => false,
+    isRelayOpen: () => opts?.relayOpen === true,
   })
   // Content-host HEAD for densable te() uses global fetch, not FrameDl deps.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -96,7 +118,9 @@ beforeEach(() => {
 
 afterEach(() => {
   setFrameDlDepsForTests(null)
+  resetArtifactFrameRelayHostForTests()
   globalThis.fetch = prevFetch
+  restoreRelayEnv()
 })
 
 describe('listArtifactFiles O7 @195904654', () => {
@@ -109,7 +133,7 @@ describe('listArtifactFiles O7 @195904654', () => {
           perm: { role: 'owner' },
         })
       }
-      if (url.includes(`/api/frame/files/${SLUG}`)) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(404, { error: 'not_found' })
       }
       return new Response('miss', { status: 404 })
@@ -125,6 +149,52 @@ describe('listArtifactFiles O7 @195904654', () => {
     }
   })
 
+  test('relay-open 404 is single_page only when the body is "not found"', async () => {
+    process.env.CLAUDE_CODE_REMOTE = '1'
+    process.env.SESSION_INGRESS_URL = 'http://127.0.0.1:9'
+    process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = 'test-session'
+    process.env.CLAUDE_CODE_ARTIFACT_FRAME_RELAY = '1'
+    installFrameFetch(
+      url => {
+        if (
+          url.includes(`/api/frame/${SLUG}`) ||
+          url.includes(`/frame/${SLUG}`)
+        ) {
+          return jsonResponse(200, {
+            ver: 'v7',
+            assetToken: 'atok',
+            perm: { role: 'owner' },
+          })
+        }
+        return new Response('miss', { status: 404 })
+      },
+      { relayOpen: true },
+    )
+    setArtifactFrameRelayHost({
+      fetchArtifactMount: async () => ({
+        ok: false,
+        reason: 'http_404',
+        status: 404,
+        bytes: Buffer.from('not found'),
+      }),
+    })
+    const found = await listArtifactFiles({ slug: SLUG })
+    expect(found.kind).toBe('error')
+    if (found.kind === 'error') expect(found.reason).toBe('single_page')
+
+    setArtifactFrameRelayHost({
+      fetchArtifactMount: async () => ({
+        ok: false,
+        reason: 'http_404',
+        status: 404,
+        bytes: Buffer.from('{"error":"not_found"}'),
+      }),
+    })
+    const jsonBody = await listArtifactFiles({ slug: SLUG })
+    expect(jsonBody.kind).toBe('error')
+    if (jsonBody.kind === 'error') expect(jsonBody.reason).toBe('http_404')
+  })
+
   test('HTTP 404 with filesCounted stays http_404 (not single_page)', async () => {
     installFrameFetch(url => {
       if (url.includes(`/api/frame/${SLUG}?`)) {
@@ -135,7 +205,7 @@ describe('listArtifactFiles O7 @195904654', () => {
           perm: { role: 'owner' },
         })
       }
-      if (url.includes(`/api/frame/files/${SLUG}`)) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(404, { error: 'not_found' })
       }
       return new Response('miss', { status: 404 })
@@ -158,7 +228,7 @@ describe('listArtifactFiles O7 @195904654', () => {
           perm: { role: 'reader' },
         })
       }
-      if (url.includes(`/api/frame/files/${SLUG}`)) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(403, { error: 'forbidden' })
       }
       if (
@@ -184,17 +254,16 @@ describe('listArtifactFiles O7 @195904654', () => {
 
   test('ok bag carries writerClass/orgRelation/title from member boot', async () => {
     installFrameFetch(url => {
-      if (url.includes('/api/frame/files/')) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(200, {
           ver: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          files: [
-            {
-              path: 'a.txt',
-              content_type: 'text/plain',
-              size_bytes: 1,
+          files: {
+            'a.txt': {
+              contentType: 'text/plain',
+              size: 1,
               sha256: 'b'.repeat(64),
             },
-          ],
+          },
         })
       }
       if (url.includes('/api/frame/')) {
@@ -219,8 +288,9 @@ describe('listArtifactFiles O7 @195904654', () => {
       // densable aIr: mode defined → unproven (before owner role check).
       expect(r.orgRelation).toBe('unproven')
       expect(r.title).toBe('Bag List')
-      // foreign only stamped when true (omit on false).
-      expect(r.foreign).toBeUndefined()
+      // densable LPe: owner + omitted outsideWriter is outside_writer.
+      expect(r.outside_writer).toBe(true)
+      expect(r.foreign).toBe(true)
       expect(r.publicRead).toBeUndefined()
     }
   })
@@ -251,7 +321,7 @@ describe('listArtifactFiles O7 @195904654', () => {
           perm: { role: 'reader' },
         })
       }
-      if (url.includes(`/api/frame/files/${SLUG}`)) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(403, { error: 'forbidden' })
       }
       if (
@@ -287,23 +357,21 @@ describe('listArtifactFiles O7 @195904654', () => {
           perm: { role: 'reader' },
         })
       }
-      if (url.includes(`/api/frame/files/${SLUG}`)) {
+      if (url.includes('/_files.json')) {
         return jsonResponse(200, {
           ver: 'v9',
-          files: [
-            {
-              path: 'live.md',
-              content_type: 'text/markdown',
-              size_bytes: 3,
+          files: {
+            'live.md': {
+              contentType: 'text/markdown',
+              size: 3,
               sha256: 'a'.repeat(64),
             },
-            {
-              path: 'static.txt',
-              content_type: 'text/plain',
-              size_bytes: 1,
+            'static.txt': {
+              contentType: 'text/plain',
+              size: 1,
               sha256: 'b'.repeat(64),
             },
-          ],
+          },
         })
       }
       return new Response('miss', { status: 404 })

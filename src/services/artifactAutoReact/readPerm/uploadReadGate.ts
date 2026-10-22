@@ -13,20 +13,27 @@ import {
   realpathSync,
   type BigIntStats,
 } from 'fs'
-import { relative, sep } from 'path'
+import { dirname, extname, relative, sep } from 'path'
 import type { Tool, ToolPermissionContext } from '../../../Tool.js'
 import type {
   PermissionDecision,
   PermissionResult,
+  PermissionRule,
 } from '../../../types/permissions.js'
 import { isNetworkUncPath } from '../../../utils/path.js'
 import { getErrnoCode } from '../../../utils/errors.js'
 import { walkPermissionPaths } from '../../../utils/fsOperations.js'
 import { isEvalConfined } from '../../../utils/permissions/evalConfined.js'
-import { checkReadPermissionForTool } from '../../../utils/permissions/filesystem.js'
+import {
+  checkReadPermissionForTool,
+  pathInAllowedWorkingPath,
+} from '../../../utils/permissions/filesystem.js'
+import { isTrustedNetworkPath } from '../../../utils/permissions/trustedNetworkDirectories.js'
+import { ARTIFACT_ASSET_CONTENT_TYPES } from '../outDirPaths.js'
 import { DEFAULT_STAGE_FILE_ROOT } from '../../../utils/syncedFileSyncer.js'
 import { isAnthropicHostedRemoteSession } from '../frameRelay.js'
 import { un } from '../store.js'
+import { denyRulePhrase, wholeToolAskRule, wholeToolDenyRule } from './rules.js'
 
 export type UploadPathSource =
   | { kind: 'network' }
@@ -47,6 +54,8 @@ export type GqeOk = {
   sourcePin: UploadSourcePin | undefined
   readAsks: boolean
   hardLinked: boolean
+  /** densable Gqe `ae` — unverified `other` ask spelling (or pin). */
+  flaggedOutside: boolean
   stagedUpload: boolean
   resolvesElsewhere: boolean
   pinRead: PermissionDecision | undefined
@@ -214,7 +223,51 @@ function qv(
 }
 
 /**
+ * densable `pn(e,n,r="")` @210663592 — path-deny copy plus the whole-tool
+ * Read deny rule that forbids reading files.
+ */
+export function pn(
+  pathDenied: string,
+  rule: PermissionRule,
+  suffix = '',
+): string {
+  return `${pathDenied}, and ${denyRulePhrase(rule)} forbids reading files${suffix}.`
+}
+
+/** densable `lr` / `ur` — unverified-spelling walk caps. */
+const FLAGGED_PATH_MAX = 4096
+const FLAGGED_WALK_MAX = 32
+
+/**
+ * densable `an` @210671538 — true when the spelling (or an ancestor) is an
+ * unverified `other` ask. Paths longer than 4096 flag immediately. Trusted
+ * network directories skip. A non-ask ancestor, or an ask that is not
+ * `other`/`workingDir`, stops the walk as not-flagged.
+ */
+function an(path: string, tool: Tool, perms: ToolPermissionContext): boolean {
+  if (path.length > FLAGGED_PATH_MAX) return true
+  let steps = 0
+  for (
+    let current = path, parent = dirname(path);
+    parent !== current && steps < FLAGGED_WALK_MAX;
+    current = parent, parent = dirname(parent), steps += 1
+  ) {
+    if (isTrustedNetworkPath(parent, perms.trustedNetworkDirectories)) {
+      continue
+    }
+    const decision = qv(parent, tool, perms)
+    if (decision.behavior !== 'ask') return false
+    if (decision.decisionReason?.type !== 'other') {
+      return decision.decisionReason?.type === 'workingDir'
+    }
+  }
+  return true
+}
+
+/**
  * densable Gqe @210672229 — Read trial + attachment carve-out + real-path pin.
+ * 7th arg `l` is caller copy (`Uploading an asset reads file contents`);
+ * Ms refuse is `pn(l,v,h)`.
  */
 export function Gqe(
   tool: Tool,
@@ -223,6 +276,8 @@ export function Gqe(
   source: UploadPathSource,
   perms: ToolPermissionContext,
   existingPin: UploadSourcePin | undefined,
+  pathDeniedCopy: string,
+  suffix = '',
 ): GqeOk | GqeRefused {
   const { read, pin, stagedByDirectory } = hn(
     checkReadPermissionForTool(tool, input, perms),
@@ -232,6 +287,17 @@ export function Gqe(
     existingPin,
   )
   if (read.behavior === 'deny') return { refused: read }
+  const wholeDeny = wholeToolDenyRule(perms, { name: tool.name })
+  if (wholeDeny) {
+    return {
+      refused: {
+        behavior: 'deny',
+        message: pn(pathDeniedCopy, wholeDeny, suffix),
+        decisionReason: { type: 'rule', rule: wholeDeny },
+      },
+    }
+  }
+  const bareReadAsk = wholeToolAskRule(perms, { name: tool.name })
   const pinRead =
     source.kind === 'resolved' && source.real !== spelled
       ? qv(source.real, tool, perms)
@@ -246,7 +312,11 @@ export function Gqe(
   }
   const sourcePin =
     pin ?? (source.kind === 'resolved' ? xKe(source.real) : undefined)
-  const readAsks = read.behavior === 'ask' || pinRead?.behavior === 'ask'
+  // densable A = path ask || pin ask || zd (whole-tool Read ask).
+  const readAsks =
+    read.behavior === 'ask' ||
+    pinRead?.behavior === 'ask' ||
+    bareReadAsk !== null
   const hardLinked = sourcePin?.linked === true
   if ((readAsks || hardLinked) && isEvalConfined()) {
     return {
@@ -260,16 +330,114 @@ export function Gqe(
       },
     }
   }
+  // densable Gqe `k`/`ce`/`ae`/`D`. `sS(path, perms, [path])` is
+  // pathInAllowedWorkingPath with the spelled path as the only check.
+  const spelledInside = pathInAllowedWorkingPath(spelled, perms, [spelled])
+  const flaggedResolvesOutside =
+    source.kind === 'resolved' &&
+    pinRead?.behavior === 'ask' &&
+    pinRead.decisionReason?.type === 'other' &&
+    !pathInAllowedWorkingPath(source.real, perms, [source.real]) &&
+    an(source.real, tool, perms)
+  const flaggedOutside =
+    (read.behavior === 'ask' &&
+      read.decisionReason?.type === 'other' &&
+      !spelledInside &&
+      an(spelled, tool, perms)) ||
+    flaggedResolvesOutside
   return {
     mode: perms.mode,
     read,
     sourcePin,
     readAsks,
     hardLinked,
+    flaggedOutside,
     stagedUpload: stagedByDirectory === true,
     resolvesElsewhere: source.kind === 'resolved' && source.real !== spelled,
     pinRead,
   }
+}
+
+/** densable flt — CSV / Markdown / JSON / plain text is its own approval. */
+const SOLO_TEXT_TYPES = new Set([
+  'text/csv',
+  'text/markdown',
+  'application/json',
+  'text/plain',
+])
+
+function soloTextPath(path: string): boolean {
+  const contentType = ARTIFACT_ASSET_CONTENT_TYPES.get(
+    extname(path).toLowerCase(),
+  )
+  return contentType !== undefined && SOLO_TEXT_TYPES.has(contentType)
+}
+
+/**
+ * densable arn — text mime, or a symlink (lstat failure counts as a link).
+ * Passed as cNn's second argument. Not resolvesElsewhere.
+ */
+export function uploadArn(spelled: string, source: UploadPathSource): boolean {
+  if (soloTextPath(spelled)) return true
+  if (source.kind === 'resolved' && soloTextPath(source.real)) return true
+  if (source.kind === 'network') return false
+  try {
+    return lstatSync(spelled).isSymbolicLink()
+  } catch {
+    return true
+  }
+}
+
+/** densable cNn — readAsks || hardLinked || stagedUpload || arn. */
+export function uploadNeedsOwnApproval(gate: GqeOk, arn: boolean): boolean {
+  return gate.readAsks || gate.hardLinked || gate.stagedUpload || arn
+}
+
+const HARD_LINK_NOTE =
+  'a hard link: the same file may also live elsewhere on this machine'
+const ALWAYS_OWN = 'a file that is always approved on its own'
+
+function decisionType(
+  decision: PermissionDecision | undefined,
+): string | undefined {
+  return decision?.behavior === 'ask'
+    ? decision.decisionReason?.type
+    : undefined
+}
+
+/**
+ * densable Zst `linkNote` — hard link, and neither side is a working-dir ask
+ * or a flagged-outside spelling. Parens stripped, matching C_.
+ */
+function uploadLinkNote(gate: GqeOk): string {
+  const outsideAsk =
+    decisionType(gate.read) === 'workingDir' ||
+    decisionType(gate.pinRead) === 'workingDir'
+  // densable Zst `K=l&&!k&&!h`
+  if (gate.hardLinked && !outsideAsk && !gate.flaggedOutside) {
+    return HARD_LINK_NOTE
+  }
+  return ''
+}
+
+/**
+ * densable C_ — why a file_paths entry cannot share the batch approval.
+ * readAsks stays on the always-own phrase. Otherwise the hard-link note,
+ * then that same phrase when the note is empty (symlink, text, staged).
+ */
+export function uploadOwnApprovalReason(
+  spelled: string,
+  gate: GqeOk,
+  arn: boolean,
+  perms: ToolPermissionContext,
+): string | undefined {
+  if (!uploadNeedsOwnApproval(gate, arn)) return undefined
+  if (!pathInAllowedWorkingPath(spelled, perms) && gate.readAsks) {
+    return 'outside this session\u2019s allowed read paths'
+  }
+  if (gate.readAsks) return ALWAYS_OWN
+  const note = uploadLinkNote(gate)
+  return note !== '' ? note : ALWAYS_OWN
 }
 
 const PIN_CHANGED =

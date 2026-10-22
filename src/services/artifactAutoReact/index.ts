@@ -23,6 +23,15 @@ export {
   type Supervisor,
   type NoticeCoalesceEntry,
   type NoticeCoalesceFamily,
+  otherCommentsRow,
+  nextOtherCommentSeq,
+  latestOtherCommentSeq,
+  hasOtherCommentSightings,
+  forgetOtherCommentSightings,
+  recordOtherCommentSighting,
+  noteOtherCommentGap,
+  type OtherCommentsRow,
+  type OtherCommentSighting,
 } from './store.js'
 
 export {

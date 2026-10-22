@@ -740,6 +740,69 @@ function Obe(value: unknown): boolean | undefined {
   return value === true ? true : value === false ? false : undefined
 }
 
+/** densable A — rewrite the share row, keeping fields the patch omits. */
+function landSharePatch(
+  slug: string,
+  next: Partial<ArtifactProvenanceStatus> &
+    Pick<ArtifactProvenanceStatus, 'mode' | 'isSharedLive'>,
+): void {
+  const prev = yt(slug)
+  un().shareStatus.bySlug.set(slug, {
+    ...prev,
+    ...next,
+  })
+}
+
+/** densable qjt — persist cowritten only when the reply says true. */
+export function qjt(slug: string, cowritten: unknown): void {
+  if (cowritten !== true) return
+  const prev = yt(slug)
+  if (prev?.cowritten === true) return
+  landSharePatch(slug, {
+    mode: prev?.mode ?? 'owner',
+    isSharedLive: prev?.isSharedLive ?? false,
+    ...(prev?.probeFailed ? { probeFailed: true } : {}),
+    cowritten: true,
+  })
+}
+
+/** densable Bht — persist outsideWriter; true sticks. */
+export function Bht(slug: string, outsideWriter: unknown): void {
+  const next = Obe(outsideWriter)
+  const prev = yt(slug)
+  if (next === undefined || prev?.outsideWriter === true) return
+  if (prev?.outsideWriter === next) return
+  landSharePatch(slug, {
+    mode: prev?.mode ?? 'owner',
+    isSharedLive: prev?.isSharedLive ?? false,
+    ...(prev?.probeFailed ? { probeFailed: true } : {}),
+    outsideWriter: next,
+  })
+}
+
+/**
+ * densable LPe — response true, stored true, or an owned artifact whose
+ * reply omitted outside_writer.
+ */
+export function LPe(
+  owned: boolean,
+  responseOutsideWriter: unknown,
+  storedOutsideWriter: boolean | undefined,
+): boolean {
+  return (
+    responseOutsideWriter === true ||
+    storedOutsideWriter === true ||
+    (owned && responseOutsideWriter === undefined)
+  )
+}
+
+/** densable Kjt — Bht, then LPe against the row just written. */
+export function Kjt(slug: string, outsideWriter: unknown): boolean {
+  Bht(slug, outsideWriter)
+  const prev = yt(slug)
+  return LPe(zl(prev), outsideWriter, prev?.outsideWriter)
+}
+
 /** densable Rt — boot `typeFacts`. */
 type BootTypeFacts = {
   firstPartyType?: boolean

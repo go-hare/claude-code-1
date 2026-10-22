@@ -1,8 +1,14 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 
+import { resetArtifactToolsetLatchForTests } from '../quickstartCatalog.js'
 import { formatQuickstartResult, quoteTypeLine } from '../quickstartResult.js'
 
 describe('gold 2.1.289 Artifact gy analog', () => {
+  afterEach(() => {
+    delete process.env.CLAUDE_CODE_ARTIFACT_TOOLSET
+    resetArtifactToolsetLatchForTests()
+  })
+
   test('unreadable when the bag is missing or intent is unknown', () => {
     const copy =
       'This record of the quickstart result is unreadable — run action "quickstart" again for the real one.'
@@ -185,7 +191,37 @@ describe('gold 2.1.289 Artifact gy analog', () => {
     expect(text).toContain(`System files saved under \`${systemDir}\``)
   })
 
-  test('design_system.store uses read_db collection api/ds', () => {
+  test('design_system.store tells the model to read_db token cards', () => {
+    const text = formatQuickstartResult({
+      quickstart: {
+        intent: 'design',
+        match: {
+          title: 'Design',
+          type_url: 'https://claude.ai/code/artifact/design-core',
+        },
+        design_system: {
+          url: 'https://claude.ai/code/artifact/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          store: true,
+          docs: [{ path: 'README.md', text: '# ds' }],
+        },
+      },
+    })
+    expect(text).toContain('action "read_db"')
+    expect(text).toContain('`db_op`: "get"')
+    expect(text).toContain(
+      '`url`: "https://claude.ai/code/artifact/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"',
+    )
+    expect(text).toContain('`collection`: "api"')
+    expect(text).toContain('`doc_id`: "tokens.md"')
+    expect(text).toContain('`collection`: "ds"')
+    expect(text).toContain('`doc_id`: "tokens"')
+    expect(text).not.toContain('action "read_file"')
+    expect(text).not.toContain('`path`: "api/tokens.md"')
+  })
+
+  test('damson toolset swaps store cards to ArtifactData get', () => {
+    process.env.CLAUDE_CODE_ARTIFACT_TOOLSET = '1'
+    resetArtifactToolsetLatchForTests()
     const text = formatQuickstartResult({
       quickstart: {
         intent: 'design',
@@ -200,11 +236,30 @@ describe('gold 2.1.289 Artifact gy analog', () => {
         },
       },
     })
-    expect(text).toContain('action "read_db"')
+    expect(text).toContain('the ArtifactData tool, action "get"')
+    expect(text).not.toContain('action "read_db"')
     expect(text).toContain('`collection`: "api"')
-    expect(text).toContain('`collection`: "ds"')
-    expect(text).toContain('`doc_id`: "tokens.md"')
-    expect(text).toContain('`doc_id`: "tokens"')
+  })
+
+  test('damson toolset swaps file cards to action read', () => {
+    process.env.CLAUDE_CODE_ARTIFACT_TOOLSET = '1'
+    resetArtifactToolsetLatchForTests()
+    const text = formatQuickstartResult({
+      quickstart: {
+        intent: 'design',
+        match: {
+          title: 'Design',
+          type_url: 'https://claude.ai/code/artifact/design-core',
+        },
+        design_system: {
+          url: 'https://claude.ai/code/artifact/sys-1',
+          docs: [{ path: 'README.md', text: '# ds' }],
+        },
+      },
+    })
+    expect(text).toContain('action "read"')
+    expect(text).not.toContain('action "read_file"')
+    expect(text).toContain('`path`: "api/tokens.md"')
   })
 
   test('design_systems_off true on slides match leaves systems out', () => {
@@ -292,6 +347,9 @@ describe('gold 2.1.289 Artifact gy analog', () => {
     expect(text).toContain("(the user's default, mine)")
     expect(text).toContain('https://claude.ai/code/artifact/acme')
     expect(text).toContain('# tokens')
+    expect(text).toContain('Its other cards are not attached')
+    expect(text).toContain('action "read_file"')
+    expect(text).toContain('`path`: "api/tokens.md"')
     expect(text).toContain(
       "This one result stands in for listing the Artifact types, listing the design systems and reading the default design system's README",
     )

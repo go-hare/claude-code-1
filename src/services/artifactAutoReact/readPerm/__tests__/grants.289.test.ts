@@ -36,6 +36,7 @@ const {
   recordArtifactReadGrant,
 } = await import('../grants.js')
 const { eH } = await import('../consent.js')
+const { otherCommentsRow } = await import('../../store.js')
 
 afterAll(() => {
   mock.module('src/services/analytics/growthbook.ts', () => ({
@@ -190,5 +191,32 @@ describe('gold qIt @199722114 / Xqe @210614011', () => {
     recordArtifactAssetUploadGrant({ [Wu]: true, [OP]: true }, ctx, SLUG)
     expect(s.appState().artifactAssetUploadConsentSlugs).toBeUndefined()
     expect(hasArtifactAssetUploadConsent(ctx, SLUG)).toBe(false)
+  })
+
+  test('qIt Bzr drops sightings with seq <= afterSeq', () => {
+    const row = otherCommentsRow(SLUG)
+    row.sightings.push(
+      { seq: 1, kind: 'gap' },
+      { seq: 2, kind: 'gap' },
+      { seq: 3, kind: 'gap' },
+    )
+    const s = session()
+    const ctx = s.context('tu-bzr')
+    beginArtifactConsentCheck(ctx)
+    recordArtifactAssetUploadGrant({ [Wu]: true }, ctx, SLUG, 2)
+    expect(row.sightings.map(x => x.seq)).toEqual([3])
+    expect(s.appState().artifactAssetUploadConsentSlugs).toEqual({
+      [SLUG]: true,
+    })
+  })
+
+  test('qIt without afterSeq does not drop sightings', () => {
+    const row = otherCommentsRow(SLUG)
+    row.sightings.push({ seq: 1, kind: 'gap' })
+    const s = session()
+    const ctx = s.context('tu-bzr-void')
+    beginArtifactConsentCheck(ctx)
+    recordArtifactAssetUploadGrant({ [Wu]: true }, ctx, SLUG)
+    expect(row.sightings).toHaveLength(1)
   })
 })
