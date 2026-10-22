@@ -302,7 +302,7 @@ describe('leftoverHeadlessClient 283 leftover tn remaining BODY', () => {
       opened: openedSession(),
     }
     markWorkerReady(client, 'preflight')
-    expect(client.phase).toBe('live')
+    expect(client.phase as string).toBe('live')
     expect(live).toBe(1)
     const ready = events.find(
       e => e.name === 'tengu_remote_headless_client_worker_ready',
@@ -508,15 +508,9 @@ describe('leftoverHeadlessClient 283 leftover tn remaining BODY', () => {
     const started = events.find(
       e => e.name === 'tengu_remote_headless_client_started',
     )
-    expect(started?.props.not_applied_lost).toEqual([
-      { kind: 'lost', name: 'a' },
-    ])
-    expect(started?.props.not_applied_kept).toEqual([
-      { kind: 'kept', name: 'b' },
-    ])
-    expect(started?.props.not_applied_preference).toEqual([
-      { kind: 'preference', name: 'c' },
-    ])
+    expect(started?.props.not_applied_lost).toBe(1)
+    expect(started?.props.not_applied_kept).toBe(1)
+    expect(started?.props.not_applied_preference).toBe(1)
     expect(client.frames?.stampedSessionId).toBe('cse_1')
     expect(client.liveness?.armStallWarning).toBeTypeOf('function')
     expect(client.features?.handles?.()).toEqual([])

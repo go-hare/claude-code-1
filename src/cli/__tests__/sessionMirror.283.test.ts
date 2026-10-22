@@ -134,7 +134,7 @@ describe('densable 2.1.283 session-mirror', () => {
 
     const entry = {
       type: 'custom-title' as const,
-      sessionId: getSessionId(),
+      sessionId: getSessionId() as never,
       customTitle: 'mirror-test',
     }
     await getProject().appendEntry(entry)
@@ -159,9 +159,13 @@ describe('densable 2.1.283 session-mirror', () => {
     expect(print).toContain("type: 'transcript_mirror'")
     expect(print).toContain('filePath,')
     expect(print).toContain('entries,')
-    const lastPin = print.indexOf("message.type !== 'keep_alive'")
-    const mirrorPin = print.indexOf("message.type !== 'transcript_mirror'")
-    expect(lastPin).toBeGreaterThan(0)
-    expect(mirrorPin).toBeGreaterThan(lastPin)
+    expect(print).toContain("'keep_alive'")
+    expect(print).toContain("'transcript_mirror'")
+    const skipSet = print.indexOf('HEADLESS_LAST_MESSAGE_SKIP_TYPES')
+    const keepAlive = print.indexOf("'keep_alive'", skipSet)
+    const mirror = print.indexOf("'transcript_mirror'", skipSet)
+    expect(skipSet).toBeGreaterThan(0)
+    expect(keepAlive).toBeGreaterThan(skipSet)
+    expect(mirror).toBeGreaterThan(keepAlive)
   })
 })

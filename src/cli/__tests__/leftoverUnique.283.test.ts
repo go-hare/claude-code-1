@@ -385,9 +385,9 @@ describe('leftover unique 283 source-lock', () => {
         entries: [{ kind: 'preference', name: 'initialize.cwd' }],
       },
     )
-    expect(stamped.session.cloudSession().not_applied).toEqual([
-      { name: 'initialize.cwd', kind: 'preference' },
-    ])
+    expect(
+      (stamped.session.cloudSession() as { not_applied?: unknown }).not_applied,
+    ).toEqual([{ name: 'initialize.cwd', kind: 'preference' }])
     expect(await envAccountUuidIfHostAuth(async () => 'stored')).toBeUndefined()
     const prev = process.env.CLAUDE_CODE_ACCOUNT_UUID
     process.env.CLAUDE_CODE_ACCOUNT_UUID = 'AAAA-BBBB'

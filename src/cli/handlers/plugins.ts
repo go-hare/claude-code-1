@@ -4,7 +4,7 @@
  */
 /* eslint-disable custom-rules/no-process-exit -- CLI subcommand handlers intentionally exit */
 import figures from 'figures'
-import { basename, dirname } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import { setUseCoworkPlugins } from '../../bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -37,6 +37,7 @@ import {
 import {
   addMarketplaceSource,
   loadKnownMarketplacesConfig,
+  loadKnownMarketplacesConfigSafe,
   refreshAllMarketplaces,
   refreshMarketplace,
   removeMarketplaceSource,
@@ -58,6 +59,7 @@ import {
   pluginValidationOutcome,
   validateManifest,
   validatePluginContents,
+  validatePluginManifest,
 } from '../../utils/plugins/validatePlugin.js'
 import { Io, re } from '../../utils/plugins/escapeSafeText.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
@@ -131,14 +133,31 @@ export async function pluginValidateHandler(
   try {
     const result = await validateManifest(manifestPath)
     let contentResults: ValidationResult[] = []
-    if (result.fileType === 'plugin') {
-      const manifestDir = dirname(result.filePath)
-      if (basename(manifestDir) === '.claude-plugin') {
-        contentResults = await validatePluginContents(dirname(manifestDir))
-      } else if (result.errors[0]?.code === 'NO_MANIFEST') {
-        printCli(`Validating components in: ${result.filePath}\n`)
-        contentResults = await validatePluginContents(result.filePath)
+    const manifestDir = dirname(result.filePath)
+    const marketplaceRoot = dirname(manifestDir)
+    if (basename(manifestDir) === '.claude-plugin') {
+      if (result.fileType === 'plugin') {
+        contentResults = await validatePluginContents(marketplaceRoot)
+      } else if (resolve(manifestPath) === marketplaceRoot) {
+        // densable dkt: marketplace-primary directory still validates
+        // sibling plugin.json; a clean plugin.json is omitted from extras.
+        const sibling = await validatePluginManifest(
+          join(manifestDir, 'plugin.json'),
+        )
+        if (sibling.errors[0]?.code !== 'ENOENT') {
+          const dirty =
+            sibling.errors.length > 0 ||
+            sibling.warnings.length > 0 ||
+            (sibling.notes?.length ?? 0) > 0
+          contentResults = [
+            ...(dirty ? [sibling] : []),
+            ...(await validatePluginContents(marketplaceRoot)),
+          ]
+        }
       }
+    } else if (result.errors[0]?.code === 'NO_MANIFEST') {
+      printCli(`Validating components in: ${result.filePath}\n`)
+      contentResults = await validatePluginContents(result.filePath)
     }
 
     const results = [result, ...contentResults]
@@ -439,6 +458,8 @@ export async function pluginListHandler(options: {
     }
   }
 
+  const knownMarketplaces = await loadKnownMarketplacesConfigSafe()
+
   if (pluginIds.length > 0) {
     printCli('Installed plugins:\n')
   }
@@ -461,11 +482,44 @@ export async function pluginListHandler(options: {
           : isEnabled
             ? `${figures.tick} enabled`
             : `${figures.cross} disabled`
-      const version = installation.version || 'unknown'
       const scope = installation.scope
 
       printCli(`  ${figures.pointer} ${pluginId}`)
+      const marketplaceName = parsePluginIdentifier(pluginId).marketplace
+      const marketplace =
+        marketplaceName !== undefined
+          ? knownMarketplaces[marketplaceName]
+          : undefined
+      const loaded = allLoadedPlugins.find(p => p.source === pluginId)
+      const source = marketplace?.source
+      const folderRoot =
+        source?.source === 'directory'
+          ? resolve(source.path)
+          : source?.source === 'file'
+            ? resolve(dirname(source.path))
+            : undefined
+      const underFolder = (candidate: string | undefined): boolean => {
+        if (candidate === undefined || folderRoot === undefined) return false
+        const path = resolve(candidate)
+        return path === folderRoot || path.startsWith(`${folderRoot}${sep}`)
+      }
+      // densable Xe: loaded live-folder plugins print their path; an unloaded
+      // file/directory install still prints the folder. A cache copy does not.
+      const readFrom = loaded
+        ? underFolder(loaded.path)
+          ? loaded.path
+          : undefined
+        : underFolder(installation.installPath)
+          ? installation.installPath
+          : undefined
+      const version =
+        (readFrom === undefined
+          ? installation.version
+          : (loaded?.manifest.version ?? installation.version)) || 'unknown'
       printCli(`    Version: ${version}`)
+      if (readFrom !== undefined) {
+        printCli(`    Read from: ${readFrom}`)
+      }
       printCli(`    Scope: ${scope}`)
       printCli(`    Status: ${status}`)
       for (const error of pluginErrors) {

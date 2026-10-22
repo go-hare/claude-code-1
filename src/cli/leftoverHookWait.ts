@@ -61,8 +61,7 @@ export type ForwardedHookWaitHost = {
       hook: { requestId: string; callbackId?: unknown },
       state: unknown,
     ) => Promise<
-      | { kind: 'silent'; reason?: string }
-      | { kind: string; answer?: unknown }
+      { kind: 'silent'; reason?: string } | { kind: 'answer'; answer?: unknown }
     >
     cancel: (requestId: string, reason: string) => boolean
     cancelAll: () => void
@@ -166,10 +165,7 @@ export function isShownHostInput(e: unknown): boolean {
  * gold leftover `_s` XG seam — identity unless a filter is injected.
  * Do not invent Yit permission-input engine.
  */
-export function shownInputForTool(
-  _toolName: string,
-  input: unknown,
-): unknown {
+export function shownInputForTool(_toolName: string, input: unknown): unknown {
   return input
 }
 
@@ -243,9 +239,7 @@ export const HEADLESS_CLOUD_FRAME_KEEP = {
  * gold `Os` @202334745
  * `function Os(e){return Object.hasOwn($t,e)?$t[e]:void 0}`
  */
-export function lookupHeadlessCloudFrameKeep(
-  e: string,
-): boolean | undefined {
+export function lookupHeadlessCloudFrameKeep(e: string): boolean | undefined {
   return Object.hasOwn(HEADLESS_CLOUD_FRAME_KEEP, e)
     ? HEADLESS_CLOUD_FRAME_KEEP[e as keyof typeof HEADLESS_CLOUD_FRAME_KEEP]
     : undefined

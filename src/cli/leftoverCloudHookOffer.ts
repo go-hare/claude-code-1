@@ -182,7 +182,6 @@ export type CloudHookPinResult =
       loadsFromReach?: string
     }
   | { kind: 'opaque'; reason: string }
-  | { kind: string; [k: string]: unknown }
 
 export type CloudHookTemplateHit = {
   template: {

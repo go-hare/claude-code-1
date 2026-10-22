@@ -16,6 +16,7 @@ import {
 } from 'src/services/analytics/index.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import type { QueuedCommand } from 'src/types/textInputTypes.js'
+import { isPolicyLimitsAllowed } from './leftoverTulip.js'
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
   `${subtype} is not available on this connection`
@@ -2618,6 +2619,17 @@ export function dispatchPrintControlExtra(
     if (!parsed.ok) {
       deps.sendError(parsed.error)
       return true
+    }
+    if (isPolicyLimitsAllowed('allow_product_feedback')) {
+      logEvent('tengu_message_rated', {
+        message_uuid:
+          parsed.messageUuid as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        sentiment:
+          parsed.sentiment as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        surface:
+          parsed.surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        cleared: parsed.cleared,
+      })
     }
     deps.sendSuccess({})
     return true

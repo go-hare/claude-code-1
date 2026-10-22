@@ -197,17 +197,18 @@ export function asLinkDeviceHttpResult(
   if (posted.ok) {
     return { ok: true, status: 200, data: {}, response: { headers: {} } }
   }
-  if (posted.status !== undefined) {
+  const fail = posted as { ok: false; error?: string; status?: number }
+  if (fail.status !== undefined) {
     return {
       ok: true,
-      status: posted.status,
+      status: fail.status,
       data: {},
       response: { headers: {} },
     }
   }
   return {
     ok: false,
-    reason: posted.error === 'no-auth' ? 'no-auth' : 'egress',
+    reason: fail.error === 'no-auth' ? 'no-auth' : 'egress',
   }
 }
 

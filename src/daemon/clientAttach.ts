@@ -43,6 +43,7 @@ const CHAR_D = 100
  * Not a FOCUS_IN identifier (gold count 0).
  */
 const ATTACH_CSI_ONLY_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: gold Wt CSI-only class
   /\x1b\[(?:<\d+;\d+;\d+[Mm]|M[\s\S]{3}|I|O|\??\d+;\d+(?:;\d+)*R|[?>]\d+(?:;\d+)*c|\?\d+(?:;\d+)*\$y|\?997;[12]n|\?\d+u)|\x1bP[^\x1b]*\x1b\\|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
 
 /** gold `Wr` @188315353 */
@@ -50,6 +51,7 @@ const ATTACH_CSI_HOLD_CAP = 64
 
 /** gold `Vr` @188315353 */
 const ATTACH_CSI_INCOMPLETE_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: gold Vr incomplete CSI
   /^\x1b(?:$|\[(?:[<?>]?\d*(?:;\d*)*\$?|M[\s\S]{0,2})$|P(?:$|[>01][^\x1b]*\x1b?$)|\](?:$|\d[^\x07\x1b]*\x1b?$))/
 
 /** gold `y8r` @188315741 — true iff chunk (plus hold) is CSI-only. */
@@ -543,7 +545,7 @@ export async function attachToSession(
       }
       lastSentCols = newCols
       lastSentRows = newRows
-      socket.write(
+      socket?.write(
         jsonStringify({
           proto: PROTO_VERSION,
           op: 'resize',

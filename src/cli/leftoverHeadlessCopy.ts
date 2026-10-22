@@ -149,9 +149,12 @@ export function logHeadlessAgentReusesFinishedRequestId(
   subtype: string,
   requestId: unknown,
 ): void {
-  logForDebugging(headlessAgentReusesFinishedRequestIdCopy(subtype, requestId), {
-    level: 'warn',
-  })
+  logForDebugging(
+    headlessAgentReusesFinishedRequestIdCopy(subtype, requestId),
+    {
+      level: 'warn',
+    },
+  )
 }
 
 /**
@@ -311,9 +314,7 @@ export function logHeadlessDroppedFrameAfterStdoutClosed(type: string): void {
 }
 
 export function logHeadlessIgnoringFrameWhileClosing(type: string): void {
-  logForDebugging(
-    `[headlessCloudClient] ignoring ${type} frame while closing`,
-  )
+  logForDebugging(`[headlessCloudClient] ignoring ${type} frame while closing`)
 }
 
 export function logHeadlessIgnoringHostFrame(type: string): void {

@@ -60,14 +60,12 @@ describe('reachEnvBag 283 leftover gold SSn/_Sn wrap', () => {
         real: '/tmp/legacy.json',
         env: { FROM_LEGACY: '1', SHARED: 'legacy' },
       },
-      scope =>
-        scope === 'userSettings'
-          ? { FROM_USER: '1' }
-          : scope === 'policySettings'
-            ? { FROM_POLICY: '1' }
-            : scope === 'flagSettings'
-              ? { FROM_FLAG: '1' }
-              : { FROM_PROJECT: '1' },
+      (scope): Record<string, string> => {
+        if (scope === 'userSettings') return { FROM_USER: '1' }
+        if (scope === 'policySettings') return { FROM_POLICY: '1' }
+        if (scope === 'flagSettings') return { FROM_FLAG: '1' }
+        return { FROM_PROJECT: '1' }
+      },
     )
     expect(merged.FROM_LEGACY).toBe('1')
     expect(merged.FROM_USER).toBeUndefined()

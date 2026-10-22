@@ -174,7 +174,8 @@ export const HOST_AGENT_REQUEST_OUTCOMES = [
   'answer_failed',
 ] as const
 
-export type HostAgentRequestOutcome = (typeof HOST_AGENT_REQUEST_OUTCOMES)[number]
+export type HostAgentRequestOutcome =
+  (typeof HOST_AGENT_REQUEST_OUTCOMES)[number]
 
 export type DeviceHookServedTelemetry = {
   event?: string
@@ -206,8 +207,7 @@ export function logDeviceHookServed(served: DeviceHookServedTelemetry): void {
         served.event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }),
     ...(served.kind !== undefined && {
-      kind:
-        served.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      kind: served.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }),
     ...(served.outcome !== undefined && {
       outcome:
@@ -227,12 +227,12 @@ export function logDeviceHookServed(served: DeviceHookServedTelemetry): void {
     ...(served.repinned !== undefined && { repinned: served.repinned }),
     ...(served.waitedMs !== undefined && { waited_ms: served.waitedMs }),
     ...(served.attestation !== undefined && {
-      attestation_mode:
-        served.attestation.mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      request_attestation:
-        served.attestation.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      attestation_verdict:
-        served.attestation.verdict as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      attestation_mode: served.attestation
+        .mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      request_attestation: served.attestation
+        .status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      attestation_verdict: served.attestation
+        .verdict as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }),
   })
 }
@@ -247,9 +247,9 @@ export function isFailedHostError(outcome: string): boolean {
 /**
  * gold leftover `bXn` @202348264 — strip `[ede_diagnostic]` result errors.
  */
-export function stripEdeDiagnosticErrors<T extends { type?: string; errors?: unknown }>(
-  e: T,
-): T {
+export function stripEdeDiagnosticErrors<
+  T extends { type?: string; errors?: unknown },
+>(e: T): T {
   if (e.type !== 'result' || !('errors' in e)) return e
   const n = e.errors
   if (!Array.isArray(n)) return e

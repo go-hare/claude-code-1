@@ -5,7 +5,7 @@
  * GOLD SEA /tmp/official-283/package/claude
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { readFileSync } from 'fs'
@@ -39,11 +39,14 @@ import {
 import type { ToolPermissionContext } from '../../Tool.js'
 
 const GOLD = '/tmp/official-283/package/claude'
+const HAS_GOLD = existsSync(GOLD)
 const gold = (): Buffer => readFileSync(GOLD)
 
 function goldHas(s: string): boolean {
   return gold().includes(Buffer.from(s))
 }
+
+const goldTest = HAS_GOLD ? test : test.skip
 
 const emptyCtx = {
   mode: 'default',
@@ -80,31 +83,34 @@ describe('densable 2.1.283 claim_session ofn / ne', () => {
     getBootstrapSessionHost().launchOptions.reset()
   })
 
-  test('gold source-lock: not_claimed / not_a_spare / env / cwd / project strings', () => {
-    const needles = [
-      'not_claimed: this process was started with --await-claim and has not been claimed; send claim_session before the first message',
-      'not_claimed: the claim of this spare failed; discard it and start the session normally',
-      'not_claimed: this process is a spare waiting for claim_session; send this request after the claim',
-      'not_claimed: the claim of this spare failed; discard the process and start the session cold',
-      'not_a_spare: claim_session is only accepted by a process started with --await-claim that has not been claimed yet',
-      'env_key_not_claimable:',
-      'cwd_not_a_directory: the claim cwd is not a directory',
-      'cwd_not_found: the claim cwd does not exist or is not accessible',
-      'unsafe_path: the claim cwd is a network path or an obfuscated spelling',
-      'permission_mode_not_claimable:',
-      'project_settings_not_claimable:',
-      'claim_session: SessionStart hooks failed (continuing without their output):',
-      'busy: a turn is in progress',
-      'turn_started: the spare already ran a turn and cannot be claimed',
-    ]
-    for (const n of needles) {
-      expect(goldHas(n)).toBe(true)
-    }
-    expect(NOT_CLAIMED_BEFORE_FIRST_MESSAGE).toBe(needles[0]!)
-    expect(NOT_CLAIMED_FAILED).toBe(needles[1]!)
-    expect(NOT_CLAIMED_CONTROL_PARKED).toBe(needles[2]!)
-    expect(NOT_CLAIMED_CONTROL_FAILED).toBe(needles[3]!)
-  })
+  goldTest(
+    'gold source-lock: not_claimed / not_a_spare / env / cwd / project strings',
+    () => {
+      const needles = [
+        'not_claimed: this process was started with --await-claim and has not been claimed; send claim_session before the first message',
+        'not_claimed: the claim of this spare failed; discard it and start the session normally',
+        'not_claimed: this process is a spare waiting for claim_session; send this request after the claim',
+        'not_claimed: the claim of this spare failed; discard the process and start the session cold',
+        'not_a_spare: claim_session is only accepted by a process started with --await-claim that has not been claimed yet',
+        'env_key_not_claimable:',
+        'cwd_not_a_directory: the claim cwd is not a directory',
+        'cwd_not_found: the claim cwd does not exist or is not accessible',
+        'unsafe_path: the claim cwd is a network path or an obfuscated spelling',
+        'permission_mode_not_claimable:',
+        'project_settings_not_claimable:',
+        'claim_session: SessionStart hooks failed (continuing without their output):',
+        'busy: a turn is in progress',
+        'turn_started: the spare already ran a turn and cannot be claimed',
+      ]
+      for (const n of needles) {
+        expect(goldHas(n)).toBe(true)
+      }
+      expect(NOT_CLAIMED_BEFORE_FIRST_MESSAGE).toBe(needles[0]!)
+      expect(NOT_CLAIMED_FAILED).toBe(needles[1]!)
+      expect(NOT_CLAIMED_CONTROL_PARKED).toBe(needles[2]!)
+      expect(NOT_CLAIMED_CONTROL_FAILED).toBe(needles[3]!)
+    },
+  )
 
   test('ofn schema: cwd required; extra keys fail', () => {
     const ok = claimSessionRequestSchema().safeParse({
@@ -304,51 +310,59 @@ describe('densable 2.1.283 claim_session ofn / ne', () => {
     }
   })
 
-  test('gold source-lock: DNt / qhe / Mcn / freshSession / deferred-MCP / prepend wait', () => {
-    const needles = [
-      'function DNt(){',
-      'function qhe(){Fc().emit()}',
-      'function Mcn(){n().markWarmSpareClaimed()}',
-      'directory move: re-deriving start-of-session state for the new directory failed (continuing):',
-      'claim_session: starting the held-back MCP servers failed (continuing):',
-      "claim_session: the session's own first-turn messages will not run ahead of the host's messages",
-      'not queued after',
-      'cannotQueue',
-      'refused, the claim failed',
-      'the input ended first',
-    ]
-    for (const n of needles) {
-      expect(goldHas(n)).toBe(true)
-    }
-    const claimSrc = readFileSync(
-      join(import.meta.dir, '../claimSession.ts'),
-      'utf8',
-    )
-    expect(claimSrc).toContain('resetCredentialCachesAfterClaimEnv')
-    expect(claimSrc).toContain('emitProcessEnvChange')
-    expect(claimSrc).toContain('markWarmSpareClaimed')
-    expect(claimSrc).toContain("profileCheckpointOnce('claim_received')")
-    expect(claimSrc).toContain("profileCheckpointOnce('claim_validated')")
-    expect(claimSrc).toContain("profileCheckpointOnce('spare_claimed')")
-    expect(claimSrc).toContain("headlessProfilerCheckpoint('claim_relocated')")
-    expect(claimSrc).toContain('assignStartupContext')
-    expect(claimSrc).toContain('spare_parked_ms')
-    expect(claimSrc).toContain('spare_claim_ms')
-    const cdSrc = readFileSync(
-      join(import.meta.dir, '../../commands/cd/cdCommand.tsx'),
-      'utf8',
-    )
-    expect(cdSrc).toContain(
-      'directory move: re-deriving start-of-session state for the new directory failed (continuing):',
-    )
-    const printSrc = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
-    expect(printSrc).toContain('takeHeldBackMcpConfigs')
-    expect(printSrc).toContain(
-      "claim_session: the session's own first-turn messages will not run ahead of the host's messages",
-    )
-    expect(printSrc).toContain('not queued after')
-    expect(printSrc).toContain('cannotQueue')
-  })
+  goldTest(
+    'gold source-lock: DNt / qhe / Mcn / freshSession / deferred-MCP / prepend wait',
+    () => {
+      const needles = [
+        'function DNt(){',
+        'function qhe(){Fc().emit()}',
+        'function Mcn(){n().markWarmSpareClaimed()}',
+        'directory move: re-deriving start-of-session state for the new directory failed (continuing):',
+        'claim_session: starting the held-back MCP servers failed (continuing):',
+        "claim_session: the session's own first-turn messages will not run ahead of the host's messages",
+        'not queued after',
+        'cannotQueue',
+        'refused, the claim failed',
+        'the input ended first',
+      ]
+      for (const n of needles) {
+        expect(goldHas(n)).toBe(true)
+      }
+      const claimSrc = readFileSync(
+        join(import.meta.dir, '../claimSession.ts'),
+        'utf8',
+      )
+      expect(claimSrc).toContain('resetCredentialCachesAfterClaimEnv')
+      expect(claimSrc).toContain('emitProcessEnvChange')
+      expect(claimSrc).toContain('markWarmSpareClaimed')
+      expect(claimSrc).toContain("profileCheckpointOnce('claim_received')")
+      expect(claimSrc).toContain("profileCheckpointOnce('claim_validated')")
+      expect(claimSrc).toContain("profileCheckpointOnce('spare_claimed')")
+      expect(claimSrc).toContain(
+        "headlessProfilerCheckpoint('claim_relocated')",
+      )
+      expect(claimSrc).toContain('assignStartupContext')
+      expect(claimSrc).toContain('spare_parked_ms')
+      expect(claimSrc).toContain('spare_claim_ms')
+      const cdSrc = readFileSync(
+        join(import.meta.dir, '../../commands/cd/cdCommand.tsx'),
+        'utf8',
+      )
+      expect(cdSrc).toContain(
+        'directory move: re-deriving start-of-session state for the new directory failed (continuing):',
+      )
+      const printSrc = readFileSync(
+        join(import.meta.dir, '../print.ts'),
+        'utf8',
+      )
+      expect(printSrc).toContain('takeHeldBackMcpConfigs')
+      expect(printSrc).toContain(
+        "claim_session: the session's own first-turn messages will not run ahead of the host's messages",
+      )
+      expect(printSrc).toContain('not queued after')
+      expect(printSrc).toContain('cannotQueue')
+    },
+  )
 
   test('OAUTH/SESSION env applies DNt + qhe + Mcn', async () => {
     markSpareParked()

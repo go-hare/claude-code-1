@@ -16,8 +16,11 @@ mock.module('../../utils/debug.ts', () => ({
   },
 }))
 
-const { attachHeadlessFeatures, HEADLESS_FEATURE_KEYS, noteHeadlessFeatureHookError } =
-  await import('../headlessFeatureAttach.js')
+const {
+  attachHeadlessFeatures,
+  HEADLESS_FEATURE_KEYS,
+  noteHeadlessFeatureHookError,
+} = await import('../headlessFeatureAttach.js')
 
 afterEach(() => {
   debugLogs.length = 0
@@ -25,7 +28,12 @@ afterEach(() => {
 
 describe('HEADLESS_FEATURE_KEYS (gold Me)', () => {
   test('is settings, hooks, plugins, tools', () => {
-    expect(HEADLESS_FEATURE_KEYS).toEqual(['settings', 'hooks', 'plugins', 'tools'])
+    expect(HEADLESS_FEATURE_KEYS).toEqual([
+      'settings',
+      'hooks',
+      'plugins',
+      'tools',
+    ])
   })
 })
 

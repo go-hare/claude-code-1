@@ -23,7 +23,7 @@ const SRC = readFileSync(
 
 const recorded: Array<{
   eventName: string
-  metadata: Record<string, boolean | number | undefined>
+  metadata: Record<string, boolean | number | string | undefined>
 }> = []
 
 function installSink(): void {

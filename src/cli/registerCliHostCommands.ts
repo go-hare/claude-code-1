@@ -506,21 +506,20 @@ export function registerCliHostCommands(
     .option('--publish-report', 'Publish the HTML report')
     .option('--no-publish', 'Do not publish the HTML report')
     .action(async (target, commandOptions) => {
-        const { ensurePluginEvalAvailable, pluginEvalHandler } = await import(
-          '../cli/handlers/pluginEval.js'
-        )
-        await ensurePluginEvalAvailable()
-        if (
-          commandOptions.ablation !== undefined &&
-          commandOptions.ablation !== 'none' &&
-          commandOptions.ablation !== 'with-without'
-        ) {
-          console.error('--ablation must be "none" or "with-without"')
-          process.exit(1)
-        }
-        await pluginEvalHandler(target, commandOptions)
-      },
-    )
+      const { ensurePluginEvalAvailable, pluginEvalHandler } = await import(
+        '../cli/handlers/pluginEval.js'
+      )
+      await ensurePluginEvalAvailable()
+      if (
+        commandOptions.ablation !== undefined &&
+        commandOptions.ablation !== 'none' &&
+        commandOptions.ablation !== 'with-without'
+      ) {
+        console.error('--ablation must be "none" or "with-without"')
+        process.exit(1)
+      }
+      await pluginEvalHandler(target, commandOptions)
+    })
 
   pluginEvalCmd
     .command('init [name]')
@@ -1087,13 +1086,9 @@ export function registerCliHostCommands(
       await doctorHandler(root)
     })
 
-
   // densable 2.1.289: `claude purge` (+ hidden `claude project purge` alias)
   {
-    const registerPurge = (
-      parent: CommanderCommand,
-      alias: boolean,
-    ): void => {
+    const registerPurge = (parent: CommanderCommand, alias: boolean): void => {
       parent
         .command('purge [path]', { hidden: alias })
         .description(
@@ -1105,10 +1100,7 @@ export function registerCliHostCommands(
           'List what would be deleted without deleting anything',
         )
         .option('-y, --yes', 'Skip confirmation prompt')
-        .option(
-          '-i, --interactive',
-          'Prompt for each item before deleting',
-        )
+        .option('-i, --interactive', 'Prompt for each item before deleting')
         .option(
           '--all',
           'Purge state for every project (mutually exclusive with [path])',
@@ -1136,7 +1128,6 @@ export function registerCliHostCommands(
       .description(describe(['project']))
     registerPurge(project, true)
   }
-
 
   if (process.env.USER_TYPE === 'ant') {
     program

@@ -265,7 +265,10 @@ export type CloudSessionStreamController = {
 }
 
 export type CloudEventsStreamSeams = {
-  fetch?: typeof fetch
+  fetch?: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>
   getAccessToken?: () => string | Promise<string>
   onAuth401?: (token: string) => Promise<boolean>
   onConnected?: () => void
@@ -1190,7 +1193,10 @@ export async function readCloudSessionEventsStream(
     timedOut = true
     controller.abort()
   }, timeoutMs)
-  const requestHeaders = { ...headers, Accept: 'text/event-stream' }
+  const requestHeaders: Record<string, string> = {
+    ...headers,
+    Accept: 'text/event-stream',
+  }
   let response: Response
   try {
     response = await doFetch(href, {

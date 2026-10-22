@@ -520,7 +520,10 @@ describe('linkDeviceRetry 283 leftover wrap', () => {
 
   test('as: proof_invalid drops v2 capabilities and retries v1', async () => {
     const posts: Array<Record<string, unknown>> = []
-    const proofSent = { form: undefined, retriedAsV1: false }
+    const proofSent: {
+      form?: 'session_only' | 'v1' | 'v2'
+      retriedAsV1: boolean
+    } = { retriedAsV1: false }
     const got = await linkSessionDeviceWithRetry({
       sessionId: 'cse_1',
       orgUuid: UUID,

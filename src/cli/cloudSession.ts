@@ -35,6 +35,7 @@ import { getOriginalCwd } from 'src/bootstrap/state.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { isEssentialTrafficOnly } from 'src/utils/privacyLevel.js'
+import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js'
 import { toCompatSessionId } from 'src/bridge/sessionIdCompat.js'
 import { findGitRoot, getBranch } from 'src/utils/git.js'
 import {
@@ -123,6 +124,7 @@ import {
   notePeerFrameBeforeInit,
 } from './headlessFramesDrop.js'
 import { attachHeadlessFeatures } from './headlessFeatureAttach.js'
+import { startAttachSync as beginAttachSync } from './attachDirSync.js'
 import { createCloudHooksPack } from './cloudHooksPack.js'
 import { createCloudToolsPack } from './cloudToolsPack.js'
 import { createSettingsToCloudPack } from './settingsToCloudPack.js'
@@ -3237,8 +3239,7 @@ export async function askHostDeviceMcpConsent(opts: {
       !(opts.seams?.servingOn ?? (() => true))() ||
       (
         opts.seams?.egressDenied ??
-        (() =>
-          isEssentialTrafficOnly() || getAPIProvider() !== 'firstParty')
+        (() => isEssentialTrafficOnly() || getAPIProvider() !== 'firstParty')
       )()
     ) {
       return mapOutcome()
@@ -4751,7 +4752,9 @@ export function cloudEgressDenyReason(): 'egress' | 'policy_org' | undefined {
   if (isEssentialTrafficOnly() || getAPIProvider() !== 'firstParty') {
     return 'egress'
   }
-  // Product-cut: policy limits always allow remote sessions.
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
+    return 'policy_org'
+  }
   return undefined
 }
 
@@ -5507,7 +5510,17 @@ export async function refuseHeadlessCloudLaunch(
   if (!org.valid) {
     return { kind: 'refused', code: 'org_pin', message: org.message }
   }
-  // Product-cut: policy limits always allow remote sessions.
+  const { waitForPolicyLimitsToLoad } = await import(
+    'src/services/policyLimits/index.js'
+  )
+  await waitForPolicyLimitsToLoad()
+  if (!isRemotePolicyAllowed('allow_remote_sessions')) {
+    return {
+      kind: 'refused',
+      code: 'policy_org',
+      message: "Remote sessions are disabled by your organization's policy.",
+    }
+  }
   const argvReject = classifyHeadlessCloudArgvPolicy(
     args.argvPolicyReject,
     args.argvPolicyMessage,
@@ -6508,7 +6521,7 @@ async function openHeadlessCloudAttach(
       dirSync.handle === undefined &&
       dirSync.why === 'not_armed_here'
     ) {
-      startAttachSync({
+      beginAttachSync({
         sessionId,
         boundToThisMachine: bound,
         sessionHost: args.storageV5,
@@ -6634,7 +6647,7 @@ export async function runHeadlessCloudHost(
     real: homedir(),
   })
   void legacyConfigFileCache({}, { path: homedir() })
-  const packs = await attachHeadlessFeatures(
+  const packs = await attachHeadlessFeatures<HeadlessCloudFeaturePack>(
     [
       c =>
         createSettingsToCloudPack({

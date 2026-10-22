@@ -12,8 +12,7 @@ import {
   unattendedServingConsentCopy,
 } from '../unattendedServingCopy.js'
 
-const TITLE =
-  'Let cloud sessions run commands on this computer without asking?'
+const TITLE = 'Let cloud sessions run commands on this computer without asking?'
 const BODY_HOST =
   'This computer is serving tools to your cloud session. In auto mode, the cloud session decides which commands to run here without asking you each time — the same way auto mode works locally. Your deny rules and hooks on this computer still apply. Answer once per computer; change it later in Settings › Claude Code.'
 const DETAIL =

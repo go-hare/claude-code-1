@@ -9,6 +9,7 @@ import { errorMessage } from '../../utils/errors.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { env } from '../../utils/env.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
+import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { OAuthService } from '../../services/oauth/index.js'
 import { getSecureStorage } from '../../utils/secureStorage/index.js'
 import {
@@ -56,12 +57,12 @@ export function isDesignLoginRemote(): boolean {
 
 /**
  * densable `BO()` @182628406
- * Product-cut: policy limits always allow design sync.
- * `Gn` = firstParty. `It` = HIPAA.
+ * `Gn` = firstParty. `It` = HIPAA. `Wi("allow_design_sync")`.
  */
 export function isDesignLoginAvailable(): boolean {
   if (isHipaaPolicy()) return false
-  return getAPIProvider() === 'firstParty'
+  if (getAPIProvider() !== 'firstParty') return false
+  return isPolicyAllowed('allow_design_sync')
 }
 
 function isDesignOauthSlot(value: unknown): value is DesignOauthSlot {

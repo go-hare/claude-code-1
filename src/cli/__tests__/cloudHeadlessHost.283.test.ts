@@ -831,7 +831,11 @@ describe('cloudHeadlessHost 283 In/EVo/vVo source-lock', () => {
       startRepositoryTrustPoll({ sessionId: 'cse_1', enabled: false }),
     ).toBeUndefined()
     const merged = mergeOpenedCloudSessionNotices(
-      { kind: 'opened', sessionId: 'cse_1', notices: [] },
+      {
+        kind: 'opened' as const,
+        sessionId: 'cse_1',
+        notices: [] as Array<{ level: 'warning' | 'notice'; text: string }>,
+      },
       {
         notices: [{ level: 'notice', text: 'n' }],
         entries: [{ kind: 'preference', name: 'x' }],

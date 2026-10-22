@@ -69,7 +69,7 @@ export function createLegacyConfigLocator(
       )
     },
   }
-  cache.locate()
+  cache.locate?.()
   return cache
 }
 

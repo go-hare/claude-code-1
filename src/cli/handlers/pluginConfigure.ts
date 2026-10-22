@@ -13,7 +13,10 @@ import {
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
-import { clearPluginCache, loadAllPluginsCacheOnly } from '../../utils/plugins/pluginLoader.js'
+import {
+  clearPluginCache,
+  loadAllPluginsCacheOnly,
+} from '../../utils/plugins/pluginLoader.js'
 import {
   getPluginStorageId,
   getUnconfiguredOptions,
@@ -199,11 +202,8 @@ export async function pluginConfigureHandler(
       field.sensitive ? 'sensitive' : undefined,
       configured.includes(key) ? 'set' : 'not set',
     ].filter(Boolean)
-    const title =
-      field.title && field.title !== key ? ` — ${field.title}` : ''
-    lines.push(
-      `  ${figures.pointer} ${key}${title} (${flags.join(', ')})`,
-    )
+    const title = field.title && field.title !== key ? ` — ${field.title}` : ''
+    lines.push(`  ${figures.pointer} ${key}${title} (${flags.join(', ')})`)
   }
   lines.push(
     '',

@@ -7,7 +7,7 @@
 
 import { spawnSync } from 'child_process'
 import { mkdir, stat, writeFile } from 'fs/promises'
-import { join, relative, resolve, sep } from 'path'
+import { dirname, join, relative, resolve, sep } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -48,6 +48,10 @@ import {
 } from '../../utils/plugins/pluginEval/report.js'
 import { resolveEvalNoScaffold } from '../../utils/plugins/pluginEval/evalScaffold.js'
 import { runPluginEvalSuite } from '../../utils/plugins/pluginEval/runSuite.js'
+import {
+  formatSkillTriggerReport,
+  runSkillTriggerEval,
+} from '../../utils/plugins/pluginEval/skillTriggerEval.js'
 import {
   evalDirOverlapArgs,
   screenEvalTarget,
@@ -478,6 +482,49 @@ export async function pluginEvalHandler(
       !report.partial &&
       !abort.signal.aborted
     ) {
+      // densable `yl` — evals/*.md query/should_trigger ring when no case.yaml suite.
+      const trigger = await runSkillTriggerEval(
+        pluginRoot ?? targetDir,
+        abort.signal,
+      )
+      if (trigger.queries.length > 0 || trigger.warnings.length > 0) {
+        const body = formatSkillTriggerReport(trigger)
+        if (options.json) {
+          const jsonBody = `${JSON.stringify(trigger, null, 2)}\n`
+          try {
+            if (options.json === true) {
+              await new Promise<void>((resolveWrite, reject) => {
+                process.stdout.write(jsonBody, error =>
+                  error ? reject(error) : resolveWrite(),
+                )
+              })
+            } else {
+              const path = resolve(process.cwd(), options.json)
+              await mkdir(dirname(path), { recursive: true })
+              await writeFile(path, jsonBody)
+              process.stderr.write(`Wrote ${options.json}\n`)
+            }
+          } catch (error) {
+            stderrLine(
+              `warning: could not write --json result: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            process.exit(1)
+            return
+          }
+        } else {
+          process.stderr.write(`${body}\n`)
+        }
+        process.exitCode = trigger.failCount > 0 ? 1 : 0
+        logEvent('cli_plugin_eval', {
+          outcome: (trigger.failCount > 0
+            ? 'trigger_fail'
+            : trigger.skippedCount === trigger.queries.length
+              ? 'trigger_pending'
+              : 'trigger_pass') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        process.exit(process.exitCode ?? 0)
+        return
+      }
       const gt = emptyCaseFilterText(options.case, options.tag)
       stderrLine(`No eval cases found${gt} under ${targetDir}.`)
       if (!options.json) {

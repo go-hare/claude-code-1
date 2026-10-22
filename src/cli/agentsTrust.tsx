@@ -85,9 +85,7 @@ export function agentsTrustDecision(): AgentsTrustDecision {
 async function primeAfterTrust(): Promise<void> {
   // densable primePlanSlugCollisions + capturePolicySnapshot — optional best-effort.
   try {
-    const { capturePolicySnapshot } = await import(
-      '../utils/gatewayLoginRelaunch.js'
-    );
+    const { capturePolicySnapshot } = await import('../utils/gatewayLoginRelaunch.js');
     capturePolicySnapshot();
   } catch {
     // optional

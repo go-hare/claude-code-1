@@ -86,7 +86,10 @@ async function signedSidecar(
   const subtle = webcrypto.subtle
   const key = await subtle.importKey(
     'pkcs8',
-    privateKey.export({ type: 'pkcs8', format: 'der' }) as unknown as ArrayBuffer,
+    privateKey.export({
+      type: 'pkcs8',
+      format: 'der',
+    }) as unknown as ArrayBuffer,
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-512' },
     false,
     ['sign'],

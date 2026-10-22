@@ -15,7 +15,9 @@ describe('densable 2.1.289 claude purge registration', () => {
     const src = readFileSync(REGISTER, 'utf8')
     expect(src).toContain("command('purge [path]'")
     expect(src).toContain('--dry-run')
-    expect(src).toContain('List what would be deleted without deleting anything')
+    expect(src).toContain(
+      'List what would be deleted without deleting anything',
+    )
     expect(src).toContain('-y, --yes')
     expect(src).toContain('-i, --interactive')
     expect(src).toContain('--all')
@@ -46,7 +48,9 @@ describe('densable 2.1.289 claude purge registration', () => {
   })
 
   test('buildPurgePlanForProject returns warnings for shell-snapshots and backups', async () => {
-    const plan = await buildPurgePlanForProject('/tmp/claude-purge-no-such-project')
+    const plan = await buildPurgePlanForProject(
+      '/tmp/claude-purge-no-such-project',
+    )
     expect(plan.warnings.some(w => w.includes('shell-snapshots/'))).toBe(true)
     expect(plan.warnings.some(w => w.includes('backups/'))).toBe(true)
   })

@@ -59,9 +59,7 @@ describe('dirSync lookup leftover 283 gold strings', () => {
     expect(body).toContain('gold `fn` @202412770')
     expect(body).toContain('takeDirSync')
     expect(body).toContain('releaseDirSync')
-    expect(body).toContain(
-      '[headlessCloud] directory-sync handle unavailable:',
-    )
+    expect(body).toContain('[headlessCloud] directory-sync handle unavailable:')
     expect(body).toContain(
       '[headlessCloud] directory-sync handle not released:',
     )

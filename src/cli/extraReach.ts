@@ -926,13 +926,10 @@ export async function composeExtraReachForCloudHooks(opts: {
     if (site.hook === undefined) return true
     const key = cloudHookIdentityKey(site, site.hook, defaultShell)
     if (identity.has(key)) {
-      if (site.templateId !== undefined)
-        note(duplicateHookConfiguredOnceCopy(site.templateId))
-      else if (
-        site.hook.command !== undefined &&
-        site.templateId !== undefined
-      ) {
+      if (site.templateId !== undefined && site.hook.command !== undefined) {
         note(duplicateCloudScriptCopy(site.hook.command, site.templateId))
+      } else if (site.templateId !== undefined) {
+        note(duplicateHookConfiguredOnceCopy(site.templateId))
       } else if (site.hook.command !== undefined) {
         note(duplicateHookConfiguredOnceCopy(site.hook.command))
       }

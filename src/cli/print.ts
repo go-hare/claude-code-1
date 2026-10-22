@@ -674,6 +674,76 @@ function trackReceivedMessageUuid(uuid: UUID): boolean {
   return true // new UUID
 }
 
+/** densable PD — system subtypes and message types that must not pin lastMessage. */
+const HEADLESS_LAST_MESSAGE_SKIP_TYPES: ReadonlySet<string> = new Set([
+  'control_response',
+  'control_request',
+  'control_cancel_request',
+  'command_lifecycle',
+  'conversation_reset',
+  'active_goal',
+  'autocompact_state',
+  'stream_event',
+  'keep_alive',
+  'transcript_mirror',
+  'streamlined_text',
+  'streamlined_tool_use_summary',
+  'prompt_suggestion',
+])
+
+const HEADLESS_LAST_MESSAGE_SKIP_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set(
+  [
+    'session_state_changed',
+    'permission_denied',
+    'task_notification',
+    'task_started',
+    'task_updated',
+    'task_progress',
+    'background_tasks_changed',
+    'feedback_draft_queued',
+    'control_request_progress',
+    'notification',
+    'post_turn_summary',
+    'task_summary',
+    'session_metadata',
+    'hook_started',
+    'hook_progress',
+    'hook_response',
+    'commands_changed',
+    'elicitation_complete',
+    'files_persisted',
+    'mirror_error',
+    'code_change_published',
+    'tool_host_result',
+    'peer_message_hold',
+    'ui_invalidate',
+    'ui_log',
+    'ui_toast',
+    'ui_status',
+    'ui_panes',
+    'ui_scroll',
+    'ui_focus',
+    'vcs_state_changed',
+    'dev_intent',
+    'session_title_changed',
+    'turn_preempted',
+    'per_turn_effort_changed',
+    'instruction_size_warning',
+  ],
+)
+
+function countsAsHeadlessLastMessage(message: {
+  type: string
+  subtype?: unknown
+}): boolean {
+  if (HEADLESS_LAST_MESSAGE_SKIP_TYPES.has(message.type)) return false
+  return !(
+    message.type === 'system' &&
+    typeof message.subtype === 'string' &&
+    HEADLESS_LAST_MESSAGE_SKIP_SYSTEM_SUBTYPES.has(message.subtype)
+  )
+}
+
 export async function runHeadless(
   inputPrompt: string | AsyncIterable<string>,
   getAppState: () => AppState,
@@ -1493,34 +1563,9 @@ export async function runHeadless(
     // (session_state_changed(idle) and any late task_notification drain after
     // result in the finally block). command_lifecycle is Official 2.1 ack
     // frames — not result content (densable oWK non-transcript).
-    // Official 2.1 also excludes task_updated / task_summary / model_fallback /
-    // background_tasks_changed from lastMessage so Host progress bookends
-    // never pin json output.
-    if (
-      message.type !== 'control_response' &&
-      message.type !== 'control_request' &&
-      message.type !== 'control_cancel_request' &&
-      !(
-        message.type === 'system' &&
-        (message.subtype === 'session_state_changed' ||
-          message.subtype === 'task_notification' ||
-          message.subtype === 'task_started' ||
-          message.subtype === 'task_progress' ||
-          message.subtype === 'task_updated' ||
-          message.subtype === 'task_summary' ||
-          message.subtype === 'thinking_tokens' ||
-          message.subtype === 'model_fallback' ||
-          message.subtype === 'background_tasks_changed' ||
-          message.subtype === 'post_turn_summary')
-      ) &&
-      message.type !== 'command_lifecycle' &&
-      message.type !== 'stream_event' &&
-      message.type !== 'keep_alive' &&
-      message.type !== 'transcript_mirror' &&
-      message.type !== 'streamlined_text' &&
-      message.type !== 'streamlined_tool_use_summary' &&
-      message.type !== 'prompt_suggestion'
-    ) {
+    // Official PD skips these system subtypes and message types so lastMessage
+    // stays on the result. thinking_tokens and model_fallback stay eligible.
+    if (countsAsHeadlessLastMessage(message)) {
       if (needsFullArray) {
         messages.push(message)
       }
@@ -3575,9 +3620,7 @@ function runHeadlessStreaming(
                 command.mode === 'prompt'
                   ? mergeQueuedPromptCommands(batch)
                   : batch[0]!
-              batchUuids = batch
-                .map(c => c.uuid)
-                .filter((u): u is string => u !== undefined)
+              batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
             }
           }
 
@@ -9619,6 +9662,16 @@ async function loadInitialMessages(
   // Handle teleport in print mode
   if (options.teleport) {
     try {
+      const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import(
+        'src/services/policyLimits/index.js'
+      )
+      await waitForPolicyLimitsToLoad()
+      if (!isRemotePolicyAllowed('allow_remote_sessions')) {
+        throw new Error(
+          "Remote sessions are disabled by your organization's policy.",
+        )
+      }
+
       logEvent('tengu_teleport_print', {})
 
       if (typeof options.teleport !== 'string') {

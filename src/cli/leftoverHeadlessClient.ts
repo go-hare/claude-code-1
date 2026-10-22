@@ -1557,11 +1557,15 @@ export function attachHeadlessCloudClientSession(
     onAuth401: session.onAuth401,
     orgUuid: session.orgUuid,
     dirSync: session.dirSync,
-    ...(session.eventSigner && { eventSigner: session.eventSigner }),
-    ...(homeSeed && {
-      homeSeed,
-      homeSeedHoldsFirstSend: session.entry === 'create',
-    }),
+    ...(session.eventSigner !== undefined && session.eventSigner !== null
+      ? { eventSigner: session.eventSigner }
+      : {}),
+    ...(homeSeed !== undefined && homeSeed !== null
+      ? {
+          homeSeed,
+          homeSeedHoldsFirstSend: session.entry === 'create',
+        }
+      : {}),
     ...(session.controlOnly === true && { controlOnly: true }),
     trackSendsInFlight: true,
     keepUndeliveredResponses: true,
@@ -1727,17 +1731,29 @@ export function attachHeadlessCloudClientSession(
     sync_state: analyticsText(cloud.directory_sync?.state),
     sync_reason: analyticsText(cloud.directory_sync?.reason),
     ignored_count: (client.config.ignoredOptions ?? []).length,
-    ...groupNotApplied(
-      (cloud.not_applied ?? []).filter(
-        (row): row is { kind: 'lost' | 'kept' | 'preference'; name: string } =>
-          row !== null &&
-          typeof row === 'object' &&
-          (row.kind === 'lost' ||
-            row.kind === 'kept' ||
-            row.kind === 'preference') &&
-          typeof row.name === 'string',
-      ),
-    ),
+    ...(() => {
+      const grouped = groupNotApplied(
+        (cloud.not_applied ?? []).filter(
+          (
+            row,
+          ): row is { kind: 'lost' | 'kept' | 'preference'; name: string } => {
+            if (row === null || typeof row !== 'object') return false
+            const rec = row as { kind?: unknown; name?: unknown }
+            return (
+              (rec.kind === 'lost' ||
+                rec.kind === 'kept' ||
+                rec.kind === 'preference') &&
+              typeof rec.name === 'string'
+            )
+          },
+        ),
+      )
+      return {
+        not_applied_lost: grouped.not_applied_lost.length,
+        not_applied_kept: grouped.not_applied_kept.length,
+        not_applied_preference: grouped.not_applied_preference.length,
+      }
+    })(),
     replay_user_messages: Boolean(client.config.replayUserMessages),
     include_partial_messages: Boolean(client.config.includePartialMessages),
     initialize_policy: analyticsText(

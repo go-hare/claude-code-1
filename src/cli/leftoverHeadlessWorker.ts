@@ -58,12 +58,12 @@ export type HeadlessWorkerClock = {
 
 export type HeadlessWorkerManager = {
   postControlRequest: (
-    request: { subtype: 'initialize'; supportedDialogKinds?: string[] },
-    opts: {
-      answerExpected: false
-      background: true
-      timeoutMs: number
-      signal: AbortSignal
+    request: { subtype: string; [key: string]: unknown },
+    opts?: {
+      answerExpected?: boolean
+      background?: boolean
+      timeoutMs?: number
+      signal?: AbortSignal
     },
   ) => {
     posted: Promise<HeadlessWorkerInitializePosted>
@@ -99,7 +99,8 @@ export function headlessWorkerInitializeReason(
   supportedDialogKinds: readonly string[],
 ): HeadlessWorkerInitializeReason | null {
   if (session.entry === 'create') {
-    return session.initialPrompt === undefined && supportedDialogKinds.length > 0
+    return session.initialPrompt === undefined &&
+      supportedDialogKinds.length > 0
       ? 'declare_dialog_kinds'
       : null
   }

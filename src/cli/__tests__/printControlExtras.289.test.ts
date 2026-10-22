@@ -126,6 +126,12 @@ describe('densable 2.1.289 print extras unique English', () => {
       surface: 'tool_use',
       cleared: false,
     })
+    const extras = readFileSync(
+      join(import.meta.dir, '../printControlExtras.ts'),
+      'utf8',
+    )
+    expect(extras).toContain("isPolicyLimitsAllowed('allow_product_feedback')")
+    expect(extras).toContain("logEvent('tengu_message_rated'")
   })
 
   test('poll_event parse copy EXACT gold', () => {

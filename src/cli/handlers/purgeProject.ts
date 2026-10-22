@@ -10,10 +10,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
-import {
-  getGlobalConfig,
-  saveGlobalConfig,
-} from '../../utils/config.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { getProjectsDir, getProjectDir } from '../../utils/sessionPaths.js'
 import { getTasksDir } from '../../utils/tasks.js'
@@ -318,7 +315,9 @@ export async function purgeProjectHandler(
       `${PURGE_RENAME_NOTICE}. The old name still works for now.\n`,
     )
     logEvent('tengu_dead_probe_project_purge_alias', {
-      yes: Boolean(options.yes) as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      yes: Boolean(
+        options.yes,
+      ) as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
   }
 
@@ -339,7 +338,9 @@ export async function purgeProjectHandler(
 
   if (plan.items.length === 0) {
     if (options.all) {
-      process.stderr.write('No Claude Code project state found under all projects.\n')
+      process.stderr.write(
+        'No Claude Code project state found under all projects.\n',
+      )
     } else {
       process.stderr.write(
         `No Claude Code project state found for ${plan.projectPath}.\n`,
@@ -359,7 +360,8 @@ export async function purgeProjectHandler(
       `Dry run: ${plan.items.length} item(s) would be deleted.\n`,
     )
     logEvent('cli_purge_project_dry_run', {
-      count: plan.items.length as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      count: plan.items
+        .length as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return
   }
@@ -381,7 +383,8 @@ export async function purgeProjectHandler(
     }
     process.stdout.write(`${deleted} item(s) deleted.\n`)
     logEvent('cli_purge_project', {
-      count: deleted as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      count:
+        deleted as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return
   }
@@ -407,6 +410,7 @@ export async function purgeProjectHandler(
       : `${plan.items.length} item(s) deleted.\n`,
   )
   logEvent('cli_purge_project', {
-    count: plan.items.length as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    count: plan.items
+      .length as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 }

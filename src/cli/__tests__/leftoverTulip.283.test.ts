@@ -474,7 +474,7 @@ describe('leftoverTulip 283 leftover _o BODY', () => {
           taint === 'hipaa' && policy === 'allow_memory_sync',
       ),
     ).toBe(true)
-    expect(Object.keys(POLICY_LIMITS_CATALOG)).toHaveLength(29)
+    expect(Object.keys(POLICY_LIMITS_CATALOG)).toHaveLength(32)
 
     expect(isServerPopulatedPolicyKey('allow_web_fetch')).toBe(true)
     expect(isTranscriptScanPolicyKey('allow_usage_transcript_scan')).toBe(true)

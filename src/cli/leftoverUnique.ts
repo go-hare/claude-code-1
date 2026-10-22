@@ -383,12 +383,12 @@ export type PermissionModePostResult = {
 export function pushCreatePermissionMode(opts: {
   manager: {
     postControlRequest: (
-      req: { subtype: 'set_permission_mode'; mode: string },
-      extra: {
-        answerExpected: boolean
-        background: boolean
-        timeoutMs: number
-        signal: AbortSignal
+      req: { subtype: string; [key: string]: unknown },
+      extra?: {
+        answerExpected?: boolean
+        background?: boolean
+        timeoutMs?: number
+        signal?: AbortSignal
       },
     ) => {
       posted: Promise<PermissionModePostResult>
@@ -945,18 +945,24 @@ export function stripUnsupportedPeerContent(e: unknown): {
       omittedToolUse: s,
     }
   }
-  const r = n.flatMap(g => {
+  type PeerBlock =
+    | { type: 'text'; text: string }
+    | {
+        type: 'image'
+        source: { type: 'base64'; media_type: string; data: string }
+      }
+  const r: PeerBlock[] = n.flatMap((g): PeerBlock[] => {
     if (typeof g !== 'object' || g === null || !('type' in g)) return []
     if (
       (g as { type?: unknown }).type === 'text' &&
       'text' in g &&
       typeof (g as { text?: unknown }).text === 'string'
     ) {
-      return [{ type: 'text' as const, text: (g as { text: string }).text }]
+      return [{ type: 'text', text: (g as { text: string }).text }]
     }
     const v =
       (g as { type?: unknown }).type === 'image' ? peerImageSource(g) : null
-    return v === null ? [] : [{ type: 'image' as const, source: v }]
+    return v === null ? [] : [{ type: 'image', source: v }]
   })
   const h = n.length - r.length
   return {
@@ -1480,12 +1486,14 @@ const HEADLESS_CLOUD_EXIT_MESSAGE_CAP = 2048
 const HEADLESS_CLOUD_SCRUB_CAP = 512
 const HEADLESS_CLOUD_ZWJ_KEEP = 8
 /** gold `V` @191133048 */
-const HEADLESS_CLOUD_ZWJ_RE = /[\u200C\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu
+const HEADLESS_CLOUD_ZWJ_RE =
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: gold V ZWJ class
+  /[\u200C\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu
 /** gold `W` @191133048 */
 const HEADLESS_CLOUD_CONTROL_RE =
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: gold W control class
   /(?:(?![\u200C\u200D\uFE00-\uFE0F\u{E0100}-\u{E01EF}])[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029])+/gu
 /** gold `wo` path scrub @202403574 */
-// biome-ignore lint/suspicious/noMisleadingCharacterClass: gold wo @202403574
 const HEADLESS_CLOUD_PATH_SCRUB_RE =
   /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\s]+/gu
 const HEADLESS_CLOUD_LS_TREE_RE =
@@ -2068,6 +2076,7 @@ export {
   notifyServedCallsUnattested,
   parseBridgeAttestationEnforceConfig,
   readToolHostAttestationPolicy,
+  isPolicyEnforced,
   isPolicyEnforcedOrHintedByRefusedCache,
   leftoverPolicyLimitsHost,
   dropLeftoverPolicyHints,
@@ -2075,6 +2084,7 @@ export {
   isEnforceOrRequirePolicyKey,
   isKnownPolicyLimitsKey,
   isPolicyLimitsAllowed,
+  isPolicyLimitsEligible,
   leftoverAnonymousHipaaStampBody,
   leftoverBuildHipaaStamp,
   leftoverHashPrincipalDescriptor,

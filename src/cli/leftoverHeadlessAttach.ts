@@ -291,7 +291,12 @@ export async function attachHeadlessCloudSession(
     | undefined
   if (serveOnly) {
     const linked = await (
-      seams.linkForServing ?? (async () => ({ ok: true as const }))
+      seams.linkForServing ??
+      (async () => ({
+        ok: true as const,
+        deviceId: undefined,
+        heldKey: undefined,
+      }))
     )({
       sessionId,
       ...(localOk && { localIdentity: localOk }),
@@ -333,7 +338,10 @@ export async function attachHeadlessCloudSession(
   })
   const dirSync = await (
     seams.attachDirSync ??
-    (async () => ({ handle: undefined, why: 'not_looked' }))
+    (async (): Promise<HeadlessAttachDirSyncLookup> => ({
+      handle: undefined,
+      why: 'not_looked',
+    }))
   )(
     sessionId,
     binding.then(b => b.status === 'bound'),

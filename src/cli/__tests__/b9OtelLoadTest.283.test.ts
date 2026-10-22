@@ -19,7 +19,7 @@ describe('densable 2.1.283 B9 OTEL / load_test / mantle CLI source-lock', () => 
     const main = src('src/main.tsx')
     const host = src('src/cli/registerCliHostCommands.ts')
     for (const body of [main, host]) {
-      expect(body).not.toContain("--otel")
+      expect(body).not.toContain('--otel')
       expect(body).not.toContain('--load-test')
       expect(body).not.toContain('--mantle')
       expect(body).not.toContain('load_test_mode')
@@ -41,7 +41,9 @@ describe('densable 2.1.283 B9 OTEL / load_test / mantle CLI source-lock', () => 
 
     const auth = src('src/utils/auth.ts')
     expect(auth).toContain('export function prefetchOtelHeadersFromHelper')
-    expect(auth).toContain('export async function getOtelHeadersFromHelperAsync')
+    expect(auth).toContain(
+      'export async function getOtelHeadersFromHelperAsync',
+    )
     expect(auth).toContain('tengu_otel_headers_helper_failed')
     expect(auth).toContain('otelHeadersHelper did not return a valid value')
     expect(auth).toContain('otelHeadersHelper did not return valid JSON')
@@ -61,7 +63,9 @@ describe('densable 2.1.283 B9 OTEL / load_test / mantle CLI source-lock', () => 
     expect(auth).toContain('non_string_value')
     expect(auth).toContain('spawn_failed')
     expect(auth).toContain('const DEFAULT_OTEL_HEADERS_DEBOUNCE_MS = 1_740_000')
-    expect(auth).toContain("getSettingsForSource('policySettings')?.otelHeadersHelper")
+    expect(auth).toContain(
+      "getSettingsForSource('policySettings')?.otelHeadersHelper",
+    )
   })
 
   test('OTEL_ bg inherit strip and managed apply already land', () => {
@@ -69,7 +73,9 @@ describe('densable 2.1.283 B9 OTEL / load_test / mantle CLI source-lock', () => 
     expect(bg).toContain("key.startsWith('OTEL_')")
 
     const managed = src('src/utils/managedEnv.ts')
-    expect(managed).toContain('export function applyManagedOtelEndpointSupremacy')
+    expect(managed).toContain(
+      'export function applyManagedOtelEndpointSupremacy',
+    )
     expect(managed).toContain('otelHeadersHelper')
   })
 

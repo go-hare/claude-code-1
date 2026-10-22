@@ -14,7 +14,7 @@
  * leftover `jtr` (`tengu_breezy_fairy` → `tengu_vast_tulip`) and leftover `Yle`
  * (`tengu_bridge_attestation_enforce` / elevated-auth / enforce_config).
  * leftover `s` CALLs leftover `aMr` + leftover `gzn` ladder. leftover `E()`
- * `fLt` wraps existing `isPolicyEnforced` / `isPolicyLimitsEligible`. leftover
+ * `fLt` wraps leftover `eya` / leftover `C_()`. leftover
  * `h()` @179070612 is a module cache (`hintedEnforcedKeys` / `sessionAttributed`);
  * leftover `hintFromRefusedBody` @179069478. leftover `VDr`/`ldt`/`qDr` catalog
  * wrap. leftover `Jt`/`pLt` catalog lookup wrap. leftover `oe`/`WDr`/`UX`
@@ -54,15 +54,43 @@ import { jsonStringify } from '../utils/slowOperations.js'
 export const REQUIRE_TRUSTED_DEVICES = 'require_trusted_devices'
 
 /**
- * Local stand-ins for deleted `services/policyLimits` product-cut stubs.
- * Org policy never enforces; eligibility stays false (fail-open).
+ * leftover `eya` — `restrictions[policy].allowed === true` on leftover `h()`.
  */
-function isPolicyEnforced(_policy: string): boolean {
-  return false
+export function isPolicyEnforced(policy: string): boolean {
+  return leftoverPolicyLimitsHost().sessionCache?.[policy]?.allowed === true
 }
 
-function isPolicyLimitsEligible(): boolean {
-  return false
+/**
+ * leftover `C_()` / `bK()` @183094 — firstParty + first-party base URL, then
+ * Console API key OR Team/Enterprise OAuth with inference scope.
+ */
+export function isPolicyLimitsEligible(): boolean {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { CLAUDE_AI_INFERENCE_SCOPE } =
+    require('../constants/oauth.js') as typeof import('../constants/oauth.js')
+  const { getAnthropicApiKeyWithSource, getClaudeAIOAuthTokens } =
+    require('../utils/auth.js') as typeof import('../utils/auth.js')
+  const { getAPIProvider, isFirstPartyAnthropicBaseUrl } =
+    require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  if (getAPIProvider() !== 'firstParty') return false
+  if (!isFirstPartyAnthropicBaseUrl()) return false
+  try {
+    const { key: apiKey } = getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    })
+    if (apiKey) return true
+  } catch {
+    // No API key — continue to OAuth.
+  }
+  const tokens = getClaudeAIOAuthTokens()
+  if (!tokens?.accessToken) return false
+  if (!tokens.scopes?.includes(CLAUDE_AI_INFERENCE_SCOPE)) return false
+  if (tokens.subscriptionType == null) return true
+  return (
+    tokens.subscriptionType === 'enterprise' ||
+    tokens.subscriptionType === 'team'
+  )
 }
 
 /** leftover `jtr` @202143707 — `x("tengu_breezy_fairy", false)` else tulip. */
@@ -228,6 +256,27 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
     label: 'Design sync',
     verb: 'is',
     requirementId: 'HIPAA-R9',
+  },
+  allow_workflows: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'allow',
+    label: 'Workflows',
+    verb: 'are',
+    requirementId: 'HIPAA-R59',
+  },
+  allow_quick_web_setup: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'allow',
+    label: 'Quick web setup',
+    verb: 'is',
+    requirementId: 'HIPAA-R60',
+  },
+  allow_routines: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'deny',
+    label: 'Routines',
+    verb: 'are',
+    requirementId: 'HIPAA-R61',
   },
   allow_projects_tool: {
     deniedUnder: ['hipaa'],
@@ -820,7 +869,7 @@ export function leftoverHipaaEvidence(
 /**
  * leftover `te` @179078543 — `{kind:"org",descriptor:"org:"+lower}`.
  */
-function leftoverOrgPrincipal(e: string): PolicyLimitsPrincipal {
+function leftoverOrgPrincipal(e: string): Exclude<PolicyLimitsPrincipal, null> {
   return { kind: 'org', descriptor: `org:${e.toLowerCase()}` }
 }
 
@@ -878,7 +927,14 @@ function leftoverOauthBearerPrincipal(e: string): PolicyLimitsPrincipal {
     }
     case 'env':
     case 'fd':
-      if (r) g = { ...leftoverOrgPrincipal(r), bearerDigest: s }
+      if (r) {
+        const org = leftoverOrgPrincipal(r)
+        g = {
+          kind: org.kind,
+          descriptor: org.descriptor,
+          bearerDigest: s,
+        }
+      }
       break
     case 'none':
       g = { kind: 'token', descriptor: `token:${s}`, unclassified: true }
@@ -1353,7 +1409,7 @@ export type PolicyLimitsHostCache = {
   hintedDeniedKeys: string[]
   hintedTaints: string[]
   sessionAttributed: boolean
-  sessionCache: Record<string, { allowed?: boolean }> | null
+  sessionCache: Record<string, { allowed: boolean }> | null
   complianceTaints: string[]
   sessionFromServerFetch: boolean
   hipaaEvidenceLoaded: boolean

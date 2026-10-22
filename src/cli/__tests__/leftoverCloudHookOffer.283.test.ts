@@ -46,7 +46,7 @@ const src = readFileSync(
 )
 
 function entry(
-  partial: Partial<CloudHookOfferEntry> & {
+  partial: Omit<Partial<CloudHookOfferEntry>, 'hook'> & {
     hook?: Partial<CloudHookOfferHook>
   } = {},
 ): CloudHookOfferEntry {

@@ -1069,7 +1069,7 @@ export function F2o(): BundleRuleFns {
     throw new Error('D0e')
   } catch (e) {
     logForDebugging(errorMessage(e))
-    const n = async () => async () => true
+    const n = async () => () => true
     return {
       withholdFor: n,
       neverReadFor: n,

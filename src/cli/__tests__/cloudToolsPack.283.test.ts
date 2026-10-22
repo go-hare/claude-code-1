@@ -25,11 +25,8 @@ afterAll(() => {
   mock.module('src/utils/debug.js', () => ({ ...debugSnap }))
 })
 
-const {
-  announceServingState,
-  createCloudToolsPack,
-  toolsFeatureOff,
-} = await import('../cloudToolsPack.js')
+const { announceServingState, createCloudToolsPack, toolsFeatureOff } =
+  await import('../cloudToolsPack.js')
 
 const GOLD_LOG_PREFIX = '[servedTools] not served over the session channel:'
 
@@ -47,7 +44,7 @@ describe('densable 2.1.283 Pt / Nn / Ne cloud tools pack', () => {
     expect(src).toContain('not_announced')
     expect(src).toContain('toolsAnnounceOffReason')
     expect(src).toContain(
-      '`[servedTools] not served over the session channel: ${reason ?? \'not_served\'}`',
+      "`[servedTools] not served over the session channel: ${reason ?? 'not_served'}`",
     )
     expect(src).not.toContain('function uit(')
     expect(src).not.toContain('function nI(')
@@ -114,7 +111,9 @@ describe('densable 2.1.283 Pt / Nn / Ne cloud tools pack', () => {
   })
 
   test('Nn pending / on / withdrawn (no reason) / refused / unverified / revoked', () => {
-    expect(announceServingState({ at: 'pending' })).toEqual({ state: 'pending' })
+    expect(announceServingState({ at: 'pending' })).toEqual({
+      state: 'pending',
+    })
     expect(announceServingState({ at: 'on' })).toEqual({ state: 'on' })
     expect(announceServingState({ at: 'withdrawn' })).toEqual({ state: 'off' })
     expect(announceServingState({ at: 'withdrawn' })).not.toHaveProperty(

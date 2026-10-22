@@ -756,7 +756,7 @@ export function takeDirectorySyncHandle(
         logForDebugging(
           `[headlessCloud] directory-sync handle unavailable: ${errorMessage(r)}`,
         )
-        return
+        return undefined
       })
 }
 

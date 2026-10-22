@@ -68,7 +68,7 @@ describe('densable 2.1.289 print Ph / $c / Uf', () => {
     const merged = mergeQueuedPromptCommands([
       prompt({
         value: 'a',
-        uuid: 'u1' as QueuedCommand['uuid'],
+        uuid: '00000000-0000-4000-8000-000000000001' as QueuedCommand['uuid'],
         fileAttachments: ['x'],
         traceContext: {
           traceparent:
@@ -78,7 +78,7 @@ describe('densable 2.1.289 print Ph / $c / Uf', () => {
       }),
       prompt({
         value: 'b',
-        uuid: 'u2' as QueuedCommand['uuid'],
+        uuid: '00000000-0000-4000-8000-000000000002' as QueuedCommand['uuid'],
         fileAttachments: ['y'],
         traceContext: {
           traceparent:
@@ -89,7 +89,7 @@ describe('densable 2.1.289 print Ph / $c / Uf', () => {
       }),
     ])
     expect(merged.value).toBe('a\nb')
-    expect(merged.uuid).toBe('u2')
+    expect(merged.uuid).toBe('00000000-0000-4000-8000-000000000002')
     expect(merged.fileAttachments).toEqual(['x', 'y'])
     expect(merged.ccrTurnId).toBe('t1')
     expect(merged.stampThreadState).toBe(true)
