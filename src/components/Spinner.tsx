@@ -28,6 +28,7 @@ import { isBackgroundTask } from '../tasks/types.js';
 import { getAllInProcessTeammateTasks } from '../tasks/InProcessTeammateTask/InProcessTeammateTask.js';
 import { getEffortSuffix, resolveSpinnerEffortSource } from '../utils/effort.js';
 import { getMainLoopModel } from '../utils/model/model.js';
+import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from '../utils/model/providers.js';
 import { getViewedTeammateTask } from '../state/selectors.js';
 import { TEARDROP_ASTERISK } from '../constants/figures.js';
 import figures from 'figures';
@@ -37,6 +38,57 @@ import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js';
 import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
 export type { SpinnerMode } from './Spinner/index.js';
+
+const STATUS_CLAUDE = 'https://status.claude.com';
+
+/** densable jGn — shown once a 529/overload retry has reached min(3, maxRetries). */
+function persistServiceHint(): string {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD)) {
+    return `If it persists, check ${STATUS_CLAUDE} and Google Cloud's status page.`;
+  }
+  const provider = getAPIProvider();
+  if (provider === 'firstParty') {
+    if (isFirstPartyAnthropicBaseUrl()) {
+      return `If it persists, check ${STATUS_CLAUDE}.`;
+    }
+    const raw = process.env.ANTHROPIC_BASE_URL ?? '';
+    let host = raw;
+    try {
+      host = new URL(raw).host || raw;
+    } catch {
+      host = raw;
+    }
+    return `If it persists, check your inference gateway (${host}).`;
+  }
+  if (provider === 'anthropicAws') {
+    return `If it persists, check ${STATUS_CLAUDE}.`;
+  }
+  const labels: Record<string, string> = {
+    bedrock: 'Amazon Bedrock',
+    vertex: 'Vertex AI',
+    foundry: 'Microsoft Foundry',
+    mantle: 'Amazon Bedrock (Mantle)',
+    gateway: 'an API gateway',
+    openai: 'OpenAI',
+    gemini: 'Google Gemini',
+    grok: 'xAI Grok',
+  };
+  return `If it persists, check your ${labels[provider] ?? provider} service status.`;
+}
+
+function overloadPersistLine(status: import('../utils/advisorNetworkStall.js').RetryStatus): string | null {
+  // densable Cn: only a retrying 529/overload at attempt >= min(3, maxRetries).
+  if (status.kind !== 'retrying') return null;
+  const err =
+    status.error !== null && typeof status.error === 'object'
+      ? (status.error as { status?: unknown; formatted?: unknown })
+      : undefined;
+  const formatted = typeof err?.formatted === 'string' ? err.formatted : '';
+  const overloaded = err?.status === 529 || formatted.toLowerCase().includes('overload');
+  if (!overloaded) return null;
+  if (status.attempt < Math.min(3, status.maxRetries)) return null;
+  return persistServiceHint();
+}
 
 /**
  * densable 2.1.247 `sr` Et — custom label only while showing the selected tip.
@@ -48,6 +100,37 @@ export function resolveSpinnerTipLabel(
   label: string | undefined,
 ): string {
   return displayedTip === selectedTip && label ? label : 'Tip';
+}
+
+const SPINNER_VERB_HAS_ELLIPSIS = /(?:…|\.\.\.)$/;
+
+/** densable H$ — grapheme clip. rt appends … only when the verb was cut. */
+function clipSpinnerVerb(verb: string, width: number): string {
+  if (width <= 0) return '';
+  let out = '';
+  let used = 0;
+  for (const { segment } of new Intl.Segmenter(undefined, {
+    granularity: 'grapheme',
+  }).segment(verb)) {
+    const w = stringWidth(segment);
+    if (used + w > width) break;
+    out += segment;
+    used += w;
+  }
+  return out;
+}
+
+/** densable Ytt → rt(verb, max(40, columns-8)). Fits as-is; otherwise clip to budget-1 and add …. */
+function truncateSpinnerVerb(verb: string, columns: number): string {
+  const budget = Math.max(40, columns - 8);
+  if (stringWidth(verb) <= budget) return verb;
+  if (budget <= 1) return '…';
+  return `${clipSpinnerVerb(verb, budget - 1)}…`;
+}
+
+/** densable Cn `vt`: default suffix is …, skipped when the verb already ends in … or .... */
+function withSpinnerEllipsis(verb: string): string {
+  return SPINNER_VERB_HAS_ELLIPSIS.test(verb) ? verb : `${verb}…`;
 }
 
 type Props = {
@@ -75,6 +158,13 @@ type Props = {
   verbose: boolean;
   /** True while a compaction summary is streaming — shows a token progress bar. */
   compactProgressActiveRef?: React.RefObject<boolean>;
+  /**
+   * densable compactingHintText. The Next/Tip slot shows this only when
+   * compacting and the hint is non-null. A null hint leaves Next visible.
+   */
+  compactingHint?: string | null;
+  /** densable compactingStartTime — Je elapsed is max(0, now - start). */
+  compactingStartTime?: number | null;
   hasActiveTools?: boolean;
   /** Leader's turn has completed (no active query). Used to suppress stall-red spinner when only teammates are running. */
   leaderIsIdle?: boolean;
@@ -133,6 +223,8 @@ function SpinnerWithVerbInner({
   spinnerSuffix,
   verbose,
   compactProgressActiveRef,
+  compactingHint = null,
+  compactingStartTime = null,
   hasActiveTools = false,
   leaderIsIdle = false,
   retryStatus = null,
@@ -214,14 +306,21 @@ function SpinnerWithVerbInner({
   // Use useState with initializer to pick a random verb once on mount
   const [randomVerb] = useState(() => sample(getSpinnerVerbs()));
 
+  // densable pt: current todo activeForm, else subject, whitespace collapsed.
+  // Ytt truncates only that todo verb. Override and the random verb are not clipped.
+  const todoVerb = [currentTodo?.activeForm, currentTodo?.subject]
+    .map(text => text?.replace(/\s+/g, ' ').trim())
+    .find((text): text is string => Boolean(text));
+  const truncatedTodo = todoVerb !== undefined ? truncateSpinnerVerb(todoVerb, columns) : undefined;
+
   // Leader's own verb (always the leader's, regardless of who is foregrounded)
   const leaderVerb = overrideMessage ?? currentTodo?.activeForm ?? currentTodo?.subject ?? randomVerb;
 
   const effectiveVerb =
     foregroundedTeammate && !foregroundedTeammate.isIdle
       ? (foregroundedTeammate.spinnerVerb ?? randomVerb)
-      : leaderVerb;
-  const message = effectiveVerb + '…';
+      : (overrideMessage ?? truncatedTodo ?? randomVerb);
+  const message = withSpinnerEllipsis(effectiveVerb ?? 'Working');
 
   // Track CLI activity when spinner is active
   useEffect(() => {
@@ -292,31 +391,6 @@ function SpinnerWithVerbInner({
   // props during a refactor, so skip this until it's re-threaded.
   const _ttftText: string | null = null;
 
-  // When leader is idle but teammates are running (and we're viewing the leader),
-  // show a static dim idle display instead of the animated spinner — otherwise
-  // useStalledAnimation detects no new tokens after 3s and turns the spinner red.
-  if (leaderIsIdle && hasRunningTeammates && !foregroundedTeammate) {
-    return (
-      <Box flexDirection="column" width="100%" alignItems="flex-start">
-        <Box flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
-          <Text dimColor>
-            {TEARDROP_ASTERISK} Idle
-            {!allIdle && ' · teammates running'}
-          </Text>
-        </Box>
-        {showSpinnerTree && (
-          <TeammateSpinnerTree
-            selectedIndex={selectedIPAgentIndex}
-            isInSelectionMode={viewSelectionMode === 'selecting-agent'}
-            allIdle={allIdle}
-            leaderTokenCount={leaderTokenCount}
-            leaderIdleText="Idle"
-          />
-        )}
-      </Box>
-    );
-  }
-
   // When viewing an idle teammate, show static idle display instead of animated spinner
   if (foregroundedTeammate?.isIdle) {
     const idleText = allIdle
@@ -344,13 +418,16 @@ function SpinnerWithVerbInner({
   // Time-based tip overrides: coarse thresholds so a stale ref read (we're
   // off the 50ms clock) is fine. Other triggers (mode change, setMessages)
   // cause re-renders that refresh this in practice.
-  let contextTipsActive = false;
+  // densable ohe: excludeDefault plus a tips file or tips list keeps the custom tip.
+  const tipsOverride = settings.spinnerTipsOverride;
+  const customTipsActive =
+    tipsOverride?.excludeDefault === true && (Boolean(tipsOverride.tipsFile) || (tipsOverride.tips?.length ?? 0) > 0);
   const tipsEnabled = settings.spinnerTipsEnabled !== false;
   const showClearTip = tipsEnabled && elapsedSnapshot > 1_800_000;
   const showBtwTip = tipsEnabled && elapsedSnapshot > 30_000 && !getGlobalConfig().btwUseCount;
 
-  const effectiveTip = contextTipsActive
-    ? undefined
+  const effectiveTip = customTipsActive
+    ? spinnerTip
     : showClearTip && !nextTask
       ? 'Use /clear to start fresh when switching topics and free up context'
       : showBtwTip && !nextTask
@@ -375,6 +452,8 @@ function SpinnerWithVerbInner({
     }
   }
 
+  const persistLine = retryStatus ? overloadPersistLine(retryStatus) : null;
+
   return (
     <Box flexDirection="column" width="100%" alignItems="flex-start">
       <SpinnerAnimationRow
@@ -393,6 +472,7 @@ function SpinnerWithVerbInner({
         verbose={verbose}
         columns={columns}
         compactProgressActiveRef={compactProgressActiveRef}
+        compactingStartTime={compactingStartTime}
         hasRunningTeammates={hasRunningTeammates}
         teammateTokens={teammateTokens}
         foregroundedTeammate={foregroundedTeammate}
@@ -420,12 +500,26 @@ function SpinnerWithVerbInner({
             <TaskListV2 tasks={tasksV2} />
           </MessageResponse>
         </Box>
+      ) : compactingHint && compactProgressActiveRef?.current ? (
+        <Box width="100%" flexDirection="column">
+          <MessageResponse>
+            <Text dimColor>{compactingHint}</Text>
+          </MessageResponse>
+        </Box>
+      ) : retryStatus ? (
+        persistLine ? (
+          <Box width="100%" flexDirection="column">
+            <MessageResponse>
+              <Text dimColor>{persistLine}</Text>
+            </MessageResponse>
+          </Box>
+        ) : null
       ) : nextTask || effectiveTip || budgetText ? (
         // IMPORTANT: we need this width="100%" to avoid an Ink bug where the
         // tip gets duplicated over and over while the spinner is running if
         // the terminal is very small. TODO: fix this in Ink.
-        // densable 2.1.289 Cn: expanded todos XOR compacting XOR retry XOR Et.
-        // Teammate tree is a local extra and must not XOR Next: away.
+        // densable 2.1.289 Cn: todos XOR (isCompacting && hint) XOR retry XOR Et.
+        // A compact with no hint still shows Next.
         <Box width="100%" flexDirection="column">
           {budgetText && (
             <MessageResponse>

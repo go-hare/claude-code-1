@@ -630,9 +630,9 @@ export function VirtualMessageList({
       if (!yoga || yoga.getComputedWidth() === 0) return;
       const height = yoga.getComputedHeight();
       const top = yoga.getComputedTop();
-      // height===0: wait for layout — do NOT scrollToElement (clears sticky
-      // without a real land). Next paint tick will retry.
+      // Height 0: still scrollToElement, then wait for a real height (official Bt===0).
       if (height === 0) {
+        scroll.scrollToElement(el, 0, { block: pending.block });
         return;
       }
       const viewport = scroll.getViewportHeight();

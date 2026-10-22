@@ -405,8 +405,6 @@ function AssistantMessageBlock({
   isTranscriptMode,
   lookups,
   onOpenRateLimitOptions,
-  thinkingBlockId,
-  lastThinkingBlockId,
   advisorModel,
   apiMessageId,
   isFirstTextBlock,
@@ -510,21 +508,16 @@ function AssistantMessageBlock({
       return <AssistantRedactedThinkingMessage addMargin={addMargin} />;
     case 'thinking': {
       // densable: if (!U && !R) return null — hide unless transcript or verbose.
+      // Every thinking block paints; there is no last-block-only transcript filter.
       if (!isTranscriptMode && !verbose) {
         return null;
       }
-      const isLastThinking =
-        !lastThinkingBlockId ||
-        (typeof lastThinkingBlockId === 'string'
-          ? thinkingBlockId === lastThinkingBlockId
-          : lastThinkingBlockId.has(thinkingBlockId));
       return (
         <AssistantThinkingMessage
           addMargin={addMargin}
           param={param as ThinkingBlockParam | { type: 'thinking'; thinking: string }}
           isTranscriptMode={isTranscriptMode}
           verbose={verbose}
-          hideInTranscript={isTranscriptMode && !isLastThinking}
         />
       );
     }

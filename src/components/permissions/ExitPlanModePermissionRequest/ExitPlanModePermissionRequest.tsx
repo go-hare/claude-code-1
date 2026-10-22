@@ -17,7 +17,18 @@ import {
   setNeedsPlanModeExitAttachment,
 } from '../../../bootstrap/state.js';
 import { generateSessionName } from '../../../commands/rename/generateSessionName.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import {
+  type KeyboardEvent,
+  Box,
+  type DOMElement,
+  ScrollBox,
+  type ScrollBoxHandle,
+  Text,
+  useModalClaimScrollBox,
+  useModalOrTerminalSize,
+  useModalScrollRef,
+  useTerminalSize,
+} from '@anthropic/ink';
 import type { AppState } from '../../../state/AppStateStore.js';
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js';
@@ -59,6 +70,7 @@ import { type OptionWithDescription, Select } from '../../CustomSelect/index.js'
 import { Markdown } from '../../Markdown.js';
 import { KeyboardShortcutHint } from '../../design-system/KeyboardShortcutHint.js';
 import { PermissionDialog } from '../PermissionDialog.js';
+import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
 
@@ -616,14 +628,6 @@ export function ExitPlanModePermissionRequest({
   const editor = getExternalEditor();
   const editorName = editor ? toIDEDisplayName(editor) : null;
 
-  // Sticky footer: when setStickyFooter is provided (fullscreen mode), the
-  // Select options render in FullscreenLayout's `bottom` slot so they stay
-  // visible while the user scrolls through a long plan. handleResponse is
-  // wrapped in a ref so the JSX (set once per options/images change) can call
-  // the latest closure without re-registering on every keystroke. React
-  // reconciles the sticky-footer Select by type, preserving focus/input state.
-  const handleResponseRef = useRef(handleResponse);
-  handleResponseRef.current = handleResponse;
   const handleCancelRef = useRef<() => void>(undefined);
   handleCancelRef.current = () => {
     logEvent('tengu_plan_exit', {
@@ -636,52 +640,46 @@ export function ExitPlanModePermissionRequest({
     onReject();
     toolUseConfirm.onReject();
   };
-  const useStickyFooter = !isEmpty && !!setStickyFooter;
+
+  // densable teu: Qae()+tqe() — Select is a flexShrink:0 sibling of the plan
+  // ScrollBox. tot.bottom sticky was analog; modal hides bottom so options
+  // vanished and Enter was the only remaining key.
+  const modalScrollRef = useModalScrollRef();
+  const claimScrollBox = useModalClaimScrollBox();
+  const terminalSize = useTerminalSize();
+  const { rows: modalRows } = useModalOrTerminalSize(terminalSize);
+  const selectRef = useRef<DOMElement | null>(null);
+  const planScrollRef = useRef<ScrollBoxHandle | null>(null);
+  const [selectHeight, setSelectHeight] = useState(0);
   useLayoutEffect(() => {
-    if (!useStickyFooter) return;
-    setStickyFooter(
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor="planMode"
-        borderLeft={false}
-        borderRight={false}
-        borderBottom={false}
-        paddingX={1}
-      >
-        <Text dimColor>Would you like to proceed?</Text>
-        <Box marginTop={1}>
-          <Select
-            options={options}
-            onChange={v => void handleResponseRef.current(v)}
-            onCancel={() => handleCancelRef.current?.()}
-            onImagePaste={onImagePaste}
-            pastedContents={pastedContents}
-            onRemoveImage={onRemoveImage}
-          />
-        </Box>
-        {editorName && (
-          // densable 2.1.212 #27: single Fe chord+action Text so long path cannot
-          // split "ctrl+g to edit in <editor>" mid-phrase.
-          <Box flexDirection="row" gap={1} marginTop={1}>
-            <Text dimColor>
-              <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
-              {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
-            </Text>
-            {showSaveMessage && (
-              <>
-                <Text dimColor>{' · '}</Text>
-                <Text color="success">{figures.tick}Plan saved!</Text>
-              </>
-            )}
-          </Box>
-        )}
-      </Box>,
-    );
-    return () => setStickyFooter(null);
-    // onImagePaste/onRemoveImage are stable (useCallback/useRef-backed above)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useStickyFooter, setStickyFooter, options, pastedContents, editorName, isV2, planFilePath, showSaveMessage]);
+    const height = selectRef.current?.yogaNode?.getComputedHeight() ?? 0;
+    if (height !== selectHeight) setSelectHeight(height);
+  });
+  useLayoutEffect(() => {
+    if (!claimScrollBox) return;
+    claimScrollBox(selectHeight);
+    return () => claimScrollBox(null);
+  }, [claimScrollBox, selectHeight]);
+  // densable kn?.attach — after tqe claims, lRc skips its inner ScrollBox
+  // and this DA owns vJ. Do not assign the shared ref until claimed.
+  const claimed = claimScrollBox != null && modalScrollRef != null;
+  useLayoutEffect(() => {
+    if (!claimed || !modalScrollRef) return;
+    modalScrollRef.current = planScrollRef.current;
+    return () => {
+      if (modalScrollRef.current === planScrollRef.current) {
+        modalScrollRef.current = null;
+      }
+    };
+  }, [claimed, modalScrollRef]);
+  // leftover tot.bottom sticky — gold 0; clear if a prior session parked JSX.
+  useLayoutEffect(() => {
+    setStickyFooter?.(null);
+    return () => setStickyFooter?.(null);
+  }, [setStickyFooter]);
+  const planScrollHeight = claimed
+    ? Math.max(1, modalRows - selectHeight)
+    : Math.max(1, terminalSize.rows - selectHeight - 4);
 
   // Simplified UI for empty plans
   if (isEmpty) {
@@ -755,70 +753,73 @@ export function ExitPlanModePermissionRequest({
 
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
-      <PermissionDialog color="planMode" title="Ready to code?" innerPaddingX={0} workerBadge={workerBadge}>
-        <Box flexDirection="column" marginTop={1}>
-          <Box paddingX={1} flexDirection="column">
-            <Text>Here is Claude&apos;s plan:</Text>
-          </Box>
-          <Box
-            borderColor="subtle"
-            borderStyle="dashed"
-            flexDirection="column"
-            borderLeft={false}
-            borderRight={false}
-            paddingX={1}
-            marginBottom={1}
-            // Necessary for Windows Terminal to render properly
-            overflow="hidden"
-          >
-            <Markdown>{currentPlan}</Markdown>
-          </Box>
-          <Box flexDirection="column" paddingX={1}>
-            <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="tool" />
-            {isClassifierPermissionsEnabled() && allowedPrompts && allowedPrompts.length > 0 && (
-              <Box flexDirection="column" marginBottom={1}>
-                <Text bold>Requested permissions:</Text>
-                {allowedPrompts.map((p, i) => (
-                  <Text key={i} dimColor>
-                    {'  '}· {p.tool}({PROMPT_PREFIX} {p.prompt})
-                  </Text>
-                ))}
-              </Box>
-            )}
-            {!useStickyFooter && (
-              <>
-                <Text dimColor>Claude has written up a plan and is ready to execute. Would you like to proceed?</Text>
-                <Box marginTop={1}>
-                  <Select
-                    options={options}
-                    onChange={handleResponse}
-                    onCancel={() => handleCancelRef.current?.()}
-                    onImagePaste={onImagePaste}
-                    pastedContents={pastedContents}
-                    onRemoveImage={onRemoveImage}
-                  />
+      <ScrollBox
+        ref={planScrollRef}
+        flexDirection="column"
+        height={claimed ? planScrollHeight : undefined}
+        stickyScroll={false}
+      >
+        <PermissionDialog color="planMode" title="Ready to code?" innerPaddingX={0} workerBadge={workerBadge}>
+          <Box flexDirection="column" marginTop={1}>
+            <Box paddingX={1} flexDirection="column">
+              <Text>Here is Claude&apos;s plan:</Text>
+            </Box>
+            <PermissionOverflowBox marginBottom={1}>
+              <Markdown>{currentPlan}</Markdown>
+            </PermissionOverflowBox>
+            <Box flexDirection="column" paddingX={1}>
+              <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="tool" />
+              {isClassifierPermissionsEnabled() && allowedPrompts && allowedPrompts.length > 0 && (
+                <Box flexDirection="column" marginBottom={1}>
+                  <Text bold>Requested permissions:</Text>
+                  {allowedPrompts.map((p, i) => (
+                    <Text key={i} dimColor>
+                      {'  '}· {p.tool}({PROMPT_PREFIX} {p.prompt})
+                    </Text>
+                  ))}
                 </Box>
+              )}
+            </Box>
+          </Box>
+        </PermissionDialog>
+      </ScrollBox>
+      <Box
+        ref={selectRef}
+        flexDirection="column"
+        borderStyle="round"
+        borderColor="planMode"
+        borderLeft={false}
+        borderRight={false}
+        borderBottom={false}
+        paddingX={1}
+        flexShrink={0}
+      >
+        <Text dimColor>Claude has written up a plan and is ready to execute. Would you like to proceed?</Text>
+        <Box marginTop={1}>
+          <Select
+            options={options}
+            onChange={handleResponse}
+            onCancel={() => handleCancelRef.current?.()}
+            onImagePaste={onImagePaste}
+            pastedContents={pastedContents}
+            onRemoveImage={onRemoveImage}
+          />
+        </Box>
+        {editorName && (
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            <Text dimColor>
+              <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+              {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
+            </Text>
+            {showSaveMessage && (
+              <>
+                <Text dimColor>{' · '}</Text>
+                <Text color="success">{figures.tick}Plan saved!</Text>
               </>
             )}
           </Box>
-        </Box>
-      </PermissionDialog>
-      {!useStickyFooter && editorName && (
-        // densable 2.1.212 #27: Fe({chord:"ctrl+g", action:`edit in ${editor}`})
-        // + path in the same dimColor Text (non-sticky footer path).
-        <Box flexDirection="row" gap={1} paddingX={1} marginTop={1}>
-          <Text dimColor>
-            <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
-            {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
-          </Text>
-          {showSaveMessage && (
-            <Box>
-              <Text dimColor>{' · '}</Text>
-              <Text color="success">{figures.tick}Plan saved!</Text>
-            </Box>
-          )}
-        </Box>
-      )}
+        )}
+      </Box>
     </Box>
   );
 }

@@ -128,7 +128,7 @@ describe('densable 2.1.218 #5 paste Ctrl+J → newline expansion', () => {
     )
     expect(src).toContain('handlePaste')
     expect(src).toContain('isPasting')
-    expect(src).toContain('isPasted')
+    expect(src).toContain("kind: 'key'")
     // large non-bracketed key payloads route as paste (densable pkt)
     expect(src).toMatch(/PASTE_THRESHOLD|pkt|length\s*>/)
   })

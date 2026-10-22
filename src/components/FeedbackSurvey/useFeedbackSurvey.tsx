@@ -5,6 +5,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
+import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import type { Message } from '../../types/message.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { isFeedbackSurveyEnvDisabled } from '../../utils/residualFinalEnvGates.js';
@@ -161,7 +162,9 @@ export function useFeedbackSurvey(
         return false;
       }
 
-      // Product-cut: policy limits always allow product feedback.
+      if (!isPolicyAllowed('allow_product_feedback')) {
+        return false;
+      }
 
       // Probability gate from GrowthBook config (separate per rating)
       const probability = selected === 'bad' ? badTranscriptAskConfig.probability : goodTranscriptAskConfig.probability;
@@ -284,7 +287,9 @@ export function useFeedbackSurvey(
       return false;
     }
 
-    // Product-cut: policy limits always allow product feedback.
+    if (!isPolicyAllowed('allow_product_feedback')) {
+      return false;
+    }
 
     // Check session-local pacing
     if (feedbackSurvey.timeLastShown) {

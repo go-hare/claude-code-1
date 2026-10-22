@@ -4,8 +4,6 @@ import {
   noteJediTermArrowFlood,
   rewriteJediTermInput,
   createJediTermInputState,
-  trackArrowBurst,
-  createArrowBurstWindow,
   isJediTermArrowFloodActive,
   consumeJediTermArrowBurstCount,
 } from '@anthropic/ink'
@@ -24,7 +22,6 @@ function key(
     ctrl: boolean
     meta: boolean
     shift: boolean
-    isPasted: boolean
   }> = {},
 ): ParsedInput {
   return {
@@ -38,7 +35,6 @@ function key(
     super: false,
     sequence: name,
     raw: name,
-    isPasted: opts.isPasted ?? false,
   }
 }
 
@@ -178,17 +174,70 @@ describe('rewriteJediTermInput / RJc', () => {
   })
 })
 
-describe('trackArrowBurst / eag', () => {
+/**
+ * Gold `M1` lives on App (`arrowWindow` / `arrowWindowDir`), not jediTerm.
+ * Local helper matches official-289 SEA @193285427.
+ */
+function trackAppArrowBurst(
+  app: {
+    arrowWindow: Array<{ t: number; n: number }>
+    arrowWindowDir: string
+  },
+  items: ParsedInput[],
+  now: number,
+): { direction: string; count: number } | null {
+  const first = items[0]
+  if (
+    first?.kind !== 'key' ||
+    (first.name !== 'up' && first.name !== 'down') ||
+    first.ctrl ||
+    first.meta ||
+    first.shift ||
+    !items.every(
+      item =>
+        item.kind === 'key' &&
+        item.name === first.name &&
+        !item.ctrl &&
+        !item.meta &&
+        !item.shift,
+    )
+  ) {
+    app.arrowWindow.length = 0
+    return null
+  }
+  if (app.arrowWindowDir !== first.name) {
+    app.arrowWindow.length = 0
+    app.arrowWindowDir = first.name ?? ''
+  }
+  const window = app.arrowWindow
+  window.push({ t: now, n: items.length })
+  while (window.length > 0 && now - window[0]!.t > 100) window.shift()
+  let count = 0
+  for (const entry of window) count += entry.n
+  if (count >= 8) {
+    window.length = 0
+    return { direction: first.name ?? '', count }
+  }
+  return null
+}
+
+describe('trackAppArrowBurst / M1', () => {
   test('emits when ≥8 same-dir bare arrows within 100ms', () => {
-    const w = createArrowBurstWindow()
+    const app = {
+      arrowWindow: [] as Array<{ t: number; n: number }>,
+      arrowWindowDir: '',
+    }
     const batch = Array.from({ length: 8 }, () => key('up'))
-    const payload = trackArrowBurst(w, batch, 1000)
+    const payload = trackAppArrowBurst(app, batch, 1000)
     expect(payload).toEqual({ direction: 'up', count: 8 })
   })
 
   test('does not emit for mixed directions', () => {
-    const w = createArrowBurstWindow()
-    expect(trackArrowBurst(w, [key('up'), key('down')], 1000)).toBeNull()
+    const app = {
+      arrowWindow: [] as Array<{ t: number; n: number }>,
+      arrowWindowDir: '',
+    }
+    expect(trackAppArrowBurst(app, [key('up'), key('down')], 1000)).toBeNull()
   })
 })
 

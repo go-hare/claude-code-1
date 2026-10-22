@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isDeepStrictEqual } from 'util'
+import {
+  leftoverLineWindowSlice,
+  leftoverMarkerLines,
+  leftoverPnWindow,
+  leftoverWindowStartLine,
+} from '../FullscreenLayout.js'
 import OptionMap from './option-map.js'
 import type { OptionWithDescription } from './select.js'
 
@@ -53,7 +59,20 @@ type Action<T> =
   | FocusNextPageAction
   | FocusPreviousPageAction
   | SetFocusAction<T>
+  | ScrollToEdgeAction
+  | ScrollToAction
   | ResetAction<T>
+
+type ScrollToEdgeAction = {
+  type: 'scroll-to-edge'
+  direction: number
+  force?: boolean
+}
+
+type ScrollToAction = {
+  type: 'scroll-to'
+  offset: number
+}
 
 type SetFocusAction<T> = {
   type: 'set-focus'
@@ -285,6 +304,78 @@ const reducer = <T>(state: State<T>, action: Action<T>): State<T> => {
       return action.state
     }
 
+    case 'scroll-to': {
+      const size = state.optionMap.size
+      const visibleFromIndex = Math.min(
+        Math.max(0, action.offset),
+        Math.max(0, size - state.visibleOptionCount),
+      )
+      const visibleToIndex = Math.min(
+        size,
+        visibleFromIndex + state.visibleOptionCount,
+      )
+      const focusedItem =
+        state.focusedValue === undefined
+          ? undefined
+          : state.optionMap.get(state.focusedValue)
+      let focusedValue = state.focusedValue
+      if (
+        focusedItem &&
+        (focusedItem.index < visibleFromIndex ||
+          focusedItem.index >= visibleToIndex)
+      ) {
+        const clamped = Math.min(
+          Math.max(focusedItem.index, visibleFromIndex),
+          Math.max(visibleFromIndex, visibleToIndex - 1),
+        )
+        let item = state.optionMap.first
+        while (item && item.index < clamped) {
+          item = item.next
+        }
+        focusedValue = item?.value ?? focusedValue
+      }
+      return {
+        ...state,
+        focusedValue,
+        visibleFromIndex,
+        visibleToIndex,
+      }
+    }
+
+    case 'scroll-to-edge': {
+      const size = state.optionMap.size
+      const visibleFromIndex =
+        action.direction < 0 ? 0 : Math.max(0, size - state.visibleOptionCount)
+      const visibleToIndex =
+        action.direction < 0 ? Math.min(size, state.visibleOptionCount) : size
+      const focusedItem =
+        state.focusedValue === undefined
+          ? undefined
+          : state.optionMap.get(state.focusedValue)
+      let focusedValue = state.focusedValue
+      if (
+        focusedItem &&
+        (focusedItem.index < visibleFromIndex ||
+          focusedItem.index >= visibleToIndex)
+      ) {
+        const clamped = Math.min(
+          Math.max(focusedItem.index, visibleFromIndex),
+          Math.max(visibleFromIndex, visibleToIndex - 1),
+        )
+        let item = state.optionMap.first
+        while (item && item.index < clamped) {
+          item = item.next
+        }
+        focusedValue = item?.value ?? focusedValue
+      }
+      return {
+        ...state,
+        focusedValue,
+        visibleFromIndex,
+        visibleToIndex,
+      }
+    }
+
     case 'set-focus': {
       // Early return if already focused on this value
       if (state.focusedValue === action.value) {
@@ -366,6 +457,12 @@ export type UseSelectNavigationProps<T> = {
    * Value to focus
    */
   focusValue?: T
+
+  /**
+   * densable inner oo `moreRowLines` / bn `markerLines`.
+   * Local window is already ee=B-2; this only marks je rows in the window math.
+   */
+  moreRowLines?: boolean
 }
 
 export type SelectNavigation<T> = {
@@ -434,6 +531,27 @@ export type SelectNavigation<T> = {
    * Focus a specific option by value.
    */
   focusOption: (value: T | undefined) => void
+
+  /**
+   * densable inner oo `scrollToEdge` — je onPress Ae(±1).
+   * Second arg is gold `He(c,O=!1)` force when disabled+onDisabledRowClick.
+   */
+  scrollToEdge: (direction: number, force?: boolean) => void
+
+  /**
+   * densable inner `$e` `onScrollTo`.
+   */
+  scrollTo: (offset: number) => void
+
+  /**
+   * densable inner `$e` `onScrollBy`.
+   */
+  scrollBy: (delta: number) => void
+
+  /**
+   * densable inner oo `moreRowLines` / bn `markerLines`.
+   */
+  moreRowLines: boolean
 }
 
 const createDefaultState = <T>({
@@ -523,6 +641,7 @@ export function useSelectNavigation<T>({
   initialFocusValue,
   onFocus,
   focusValue,
+  moreRowLines = false,
 }: UseSelectNavigationProps<T>): SelectNavigation<T> {
   // densable C4i: stable mutable bag + mirrored React state.
   // Dispatch mutates bag.state synchronously so getFocusedValue() sees the
@@ -608,14 +727,47 @@ export function useSelectNavigation<T>({
     [dispatch],
   )
 
+  const scrollToEdge = useCallback(
+    (direction: number, force?: boolean) => {
+      dispatch({
+        type: 'scroll-to-edge',
+        direction,
+        force,
+      })
+    },
+    [dispatch],
+  )
+
+  const scrollTo = useCallback(
+    (offset: number) => {
+      dispatch({
+        type: 'scroll-to',
+        offset,
+      })
+    },
+    [dispatch],
+  )
+
+  const scrollBy = useCallback(
+    (delta: number) => {
+      dispatch({
+        type: 'scroll-to',
+        offset: bag.state.visibleFromIndex + delta,
+      })
+    },
+    [dispatch, bag],
+  )
+
   const visibleOptions = useMemo(() => {
-    return options
-      .map((option, index) => ({
-        ...option,
-        index,
-      }))
-      .slice(state.visibleFromIndex, state.visibleToIndex)
-  }, [options, state.visibleFromIndex, state.visibleToIndex])
+    const lineStart = leftoverWindowStartLine(options, state.visibleFromIndex)
+    const lineEnd =
+      lineStart +
+      leftoverPnWindow(
+        state.visibleOptionCount,
+        leftoverMarkerLines(moreRowLines),
+      )
+    return leftoverLineWindowSlice(options, lineStart, lineEnd)
+  }, [options, state.visibleFromIndex, state.visibleOptionCount, moreRowLines])
 
   // densable PFm on React snapshot — for render / onFocus
   const validatedFocusedValue = useMemo(
@@ -677,6 +829,10 @@ export function useSelectNavigation<T>({
     focusNextPage,
     focusPreviousPage,
     focusOption,
+    scrollToEdge,
+    scrollTo,
+    scrollBy,
+    moreRowLines,
     options,
   }
 }

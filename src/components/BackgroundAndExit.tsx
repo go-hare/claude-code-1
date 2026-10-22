@@ -33,6 +33,7 @@ import { isEnvTruthy } from '../utils/envUtils.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { isRestrictedSession, restrictedSpawnEnv } from '../utils/restricted.js';
 import { shouldSkipPromptHistory } from '../utils/residualFinalEnvGates.js';
+import { formatSessionFrameLiveCopy } from '../utils/bgCheckpoint.js';
 
 type Props = {
   messages: readonly BackgroundSeedMessage[];
@@ -79,8 +80,22 @@ export function buildBackgroundExitArgs(
 }
 
 export type ExitBackgroundHandoffResult =
-  | { ok: true; short: string; sessionId: string; adopted: boolean }
-  | { ok: false; error: string };
+  | {
+      ok: true;
+      short: string;
+      sessionId: string;
+      adopted: boolean;
+      /** densable rM — monitors not moved when adopt write failed. */
+      frameLiveLost: number;
+      /** densable rM / jXt adopted_frame_live when adopt write kept M. */
+      adopted_frame_live: number;
+    }
+  | {
+      ok: false;
+      error: string;
+      /** densable rM — exitsAfterward always true on this host. */
+      frameLiveLost: number;
+    };
 
 /**
  * densable hNo portable body (without process exit):
@@ -110,13 +125,13 @@ export async function runExitBackgroundHandoff(input: {
     return {
       ok: false,
       error: `Failed to background session: ${daemon.reason ?? 'daemon unavailable'}`,
+      frameLiveLost: 0,
     };
   }
 
   const { getJobDirPath } = await import('../daemon/jobState.js');
-  const { collectPortableCheckpoint, writeAdoptJson, abandonCheckpointShells, reapNonHandoffTasks } = await import(
-    '../utils/bgCheckpoint.js'
-  );
+  const { collectPortableCheckpoint, writeAdoptJson, abandonCheckpointShells, reapNonHandoffTasks, adoptTelemetry } =
+    await import('../utils/bgCheckpoint.js');
 
   const typedTasks = (input.tasks ?? null) as Parameters<typeof collectPortableCheckpoint>[0]['tasks'] | null;
 
@@ -236,11 +251,16 @@ export async function runExitBackgroundHandoff(input: {
       }
     }
 
+    const frameLiveCount = collected?.payload.frameLive?.length ?? 0;
     return {
       ok: true,
       short: dispatch.short,
       sessionId: dispatch.sessionId,
       adopted: adoptWriteOk,
+      // densable: frameLiveLost: M===void 0 ? v?.payload.frameLive?.length??0 : 0
+      frameLiveLost: providedSessionId === undefined ? frameLiveCount : 0,
+      // densable jXt(M?v?.payload:null).adopted_frame_live
+      adopted_frame_live: providedSessionId ? adoptTelemetry(collected?.payload).adopted_frame_live : 0,
     };
   } catch (e) {
     // densable: if (r) t?.abandon() — only when adopt write succeeded
@@ -252,9 +272,12 @@ export async function runExitBackgroundHandoff(input: {
         /* best-effort */
       }
     }
+    const Pe = collected?.payload.frameLive?.length ?? 0;
     return {
       ok: false,
       error: e instanceof Error ? e.message : String(e),
+      // densable: frameLiveLost: h.exitsAfterward ? Pe : 0 — this host always exits
+      frameLiveLost: Pe,
     };
   }
 }
@@ -321,19 +344,33 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
           } catch {
             /* best-effort */
           }
-          onDone(result.error);
+          const failCopy =
+            result.error +
+            formatSessionFrameLiveCopy({
+              ok: false,
+              frameLiveLost: result.frameLiveLost,
+            });
+          onDone(failCopy);
           await gracefulShutdown(0, 'prompt_input_exit', {
-            finalMessage: result.error,
+            finalMessage: failCopy,
           });
           return;
         }
 
         const hint = formatBgHints(result.short, undefined, seed.name ?? seed.intent);
-        onDone(hint);
+        // densable rM(Kt) concat onto hDe(...) finalMessage
+        const successCopy =
+          hint +
+          formatSessionFrameLiveCopy({
+            ok: true,
+            frameLiveLost: result.frameLiveLost,
+            adopted_frame_live: result.adopted_frame_live,
+          });
+        onDone(successCopy);
         // Official Cs(..., {suppressResumeHint:true, finalMessage})
         await gracefulShutdown(0, 'prompt_input_exit', {
           suppressResumeHint: true,
-          finalMessage: hint,
+          finalMessage: successCopy,
         });
       } catch (e) {
         await cancelBgHandoffQuota();

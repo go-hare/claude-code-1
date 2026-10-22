@@ -7,6 +7,7 @@ const src = readFileSync(join(import.meta.dir, '../useTasksV2.ts'), 'utf8')
 describe('densable 2.1.289 jMn #k keep-previous', () => {
   test('read throw keeps the snapshot and logs Task list read failed', () => {
     expect(src).toContain('Task list read failed:')
+    expect(src).toContain('generation < this.#appliedFetch')
     expect(src).toContain('listed === null')
     expect(src).toContain('if (this.#started) this.#armFallbackPoll()')
     expect(src).toContain('if (changed) this.#tasks = current')

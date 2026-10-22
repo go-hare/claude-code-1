@@ -118,9 +118,7 @@ export function MessageTimestamp({
   if (Number.isNaN(date.getTime())) {
     return null;
   }
-  const formattedTimestamp = showMessageTimestamps
-    ? formatSettingMessageTimestamp(raw)
-    : formatClockTime(date);
+  const formattedTimestamp = showMessageTimestamps ? formatSettingMessageTimestamp(raw) : formatClockTime(date);
 
   if (!formattedTimestamp) {
     return null;

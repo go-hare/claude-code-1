@@ -71,10 +71,7 @@ export function ShowInIDEPrompt<A>({
                   return;
                 }
                 // For accept-once options, pass accept feedback if present
-                if (
-                  selected.option.type === 'accept-once' ||
-                  selected.option.type === 'allow-outside-read-once'
-                ) {
+                if (selected.option.type === 'accept-once' || selected.option.type === 'allow-outside-read-once') {
                   const trimmedFeedback = acceptFeedback.trim();
                   onChange(selected.option, input, trimmedFeedback || undefined);
                   return;

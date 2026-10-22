@@ -213,7 +213,10 @@ export function CompanionSprite(): React.ReactNode {
   }
 
   const body = renderSprite(companion, spriteFrame).map(line => (blink ? line.replaceAll(companion.eye, '-') : line));
-  const sprite = heartFrame ? [heartFrame, ...body] : body;
+  // Overlay hearts on the hat slot (line 0 is blank in idle frames). Do not
+  // prepend — an extra row grows the flex-end companion/prompt sibling and
+  // jumps PromptInput's round top border.
+  const sprite = heartFrame ? [heartFrame, ...body.slice(1)] : body;
 
   // Name row doubles as hint row — unfocused shows dim name + ↓ discovery,
   // focused shows inverse name. The enter-to-open hint lives in

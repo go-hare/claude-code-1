@@ -209,7 +209,7 @@ function handleBlockOutsideReads(
     saveError: persisted.error?.message,
     sandboxRefreshed: persisted.sandboxRefreshed,
   })
-  markSeenAutoModeOutsideReadPrompt()
+  // densable TOo: hasSeen is stamped on Allow, not on Block.
   onDone()
   onReject()
   toolUseConfirm.onReject(message)

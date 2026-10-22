@@ -96,6 +96,7 @@ import {
 import { hasPendingLoopWakeups } from '../utils/loopDynamic.js';
 import { isQuotaAutoResumeArmed } from '../services/quotaAutoResume.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
+import { clearHeldClearedDraft } from '../utils/clearedDraftHold.js';
 import {
   claimConsumableQueuedAutonomyCommands,
   finalizeAutonomyCommandsForTurn,
@@ -183,6 +184,7 @@ import {
   pluginPaneDockColumns,
   pluginPaneInlineRows,
   subscribeDockRoom,
+  DOCK_GRIP_COLUMNS,
   DOCK_KEY_COLUMNS,
   INLINE_KEY_ROWS,
 } from '../components/PluginRasterPanes.js';
@@ -2370,6 +2372,35 @@ export function REPL({
     rawSetMessages(next);
   }, []);
 
+  // densable useUiLog — $.ui.log lines become notice-level system messages.
+  useEffect(() => {
+    let stop = () => {};
+    let cancelled = false;
+    void import('../utils/plugins/pluginUiLog.js').then(({ subscribePluginUiLog }) => {
+      if (cancelled) return;
+      stop = subscribePluginUiLog((entry, delivery) => {
+        const content = `${entry.plugin}: ${entry.text}`;
+        setMessages(prev => {
+          const last = prev.at(-1);
+          if (
+            delivery === 'once' &&
+            last?.type === 'system' &&
+            last.subtype === 'informational' &&
+            last.level === 'notice' &&
+            last.content === content
+          ) {
+            return prev;
+          }
+          return [...prev, createSystemMessage(content, 'notice')];
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [setMessages]);
+
   // Official e4d on bg mount — claim adopt.json once, rehydrate agents (r4d/PSu)
   // then shells (k$a/Lvu) + cron (s4d) + workflows (i4d/o4d/ess) + t4d/BSe + prefill.
   // Orphan auto-resume (ese) after claim prefill — scan → classify → deferred Aye.
@@ -2787,9 +2818,8 @@ export function REPL({
     (value: string) => {
       if (trySuggestBgPRIntercept(inputValueRef.current, value)) return;
       // densable typedIntoEmpty: empty→non-empty while still sticky
-      // (`!Hi.current`). Reading-up + typing must NOT yank. Sticky first
-      // keystroke does not remount-from-scrolled-range because scrollToBottom
-      // is a no-op when already at bottom / sticky follow is live.
+      // (`!Hi.current`). Reading-up + typing must NOT yank. Gold
+      // scrollToBottom is stickyScroll=!0 + jR + notify + forceRender.
       if (inputValueRef.current === '' && value !== '' && !scrolledAwayRef.current) {
         repinScroll(false, 'typedIntoEmpty');
       }
@@ -2883,6 +2913,8 @@ export function REPL({
   // streaming text_delta. The spinner reads this via its animation timer.
   const responseLengthRef = useRef(0);
   const compactProgressActiveRef = useRef(false);
+  const [compactingHint, setCompactingHint] = useState<string | null>(null);
+  const [compactingStartTime, setCompactingStartTime] = useState<number | null>(null);
   // API performance metrics ref for ant-only spinner display (TTFT/OTPS).
   // Accumulates metrics from all API requests in a turn for P50 aggregation.
   const apiMetricsRef = useRef<
@@ -3641,6 +3673,7 @@ export function REPL({
         if (entrypoint !== 'fork') {
           setInputValue('');
           setPastedContents({});
+          clearHeldClearedDraft();
         }
         // densable 2.1.224 #30 — !fork && log.bridgeSessionId && !already full RC
         // → force RC on. User-off wrote clearBridgeSession tombstone so
@@ -4645,12 +4678,16 @@ export function REPL({
             case 'compact_start':
               setSpinnerMessage('Compacting conversation');
               compactProgressActiveRef.current = true;
+              setCompactingHint(event.hintText ?? null);
+              setCompactingStartTime(performance.now());
               break;
             case 'compact_end':
               setSpinnerMessage(null);
               setSpinnerColor(null);
               setSpinnerShimmerColor(null);
               compactProgressActiveRef.current = false;
+              setCompactingHint(null);
+              setCompactingStartTime(null);
               break;
           }
         },
@@ -6290,6 +6327,7 @@ export function REPL({
         setPastedContents({});
         setInputMode('prompt');
         setIDESelection(undefined);
+        clearHeldClearedDraft();
         return;
       }
 
@@ -6342,6 +6380,7 @@ export function REPL({
             helpers.setCursorOffset(0);
             helpers.clearBuffer();
             setPastedContents({});
+            clearHeldClearedDraft();
           }
 
           const pastedTextRefs = parseReferences(input).filter(r => effectivePastedContents[r.id]?.type === 'text');
@@ -6414,6 +6453,13 @@ export function REPL({
                 helpers.setCursorOffset(stashedPrompt.cursorOffset);
                 setPastedContents(stashedPrompt.pastedContents);
                 setStashedPrompt(undefined);
+                addNotification({
+                  key: 'stash-restored',
+                  kind: 'feedback',
+                  text: 'Draft restored',
+                  priority: 'high',
+                  timeoutMs: 5000,
+                });
               }
             };
 
@@ -6500,12 +6546,21 @@ export function REPL({
         helpers.setCursorOffset(stashedPrompt.cursorOffset);
         setPastedContents(stashedPrompt.pastedContents);
         setStashedPrompt(undefined);
+        addNotification({
+          key: 'stash-restored',
+          kind: 'feedback',
+          text: 'Draft restored',
+          priority: 'high',
+          timeoutMs: 5000,
+        });
       } else if (submitsNow) {
         if (!options?.fromKeybinding) {
           // Clear input when not loading or accepting speculation.
           // Preserve input for keybinding-triggered commands.
           setInputValue('');
           helpers.setCursorOffset(0);
+          // densable #y outside-empty: drop Ctrl+C held draft
+          clearHeldClearedDraft();
         }
         setPastedContents({});
       }
@@ -6688,6 +6743,13 @@ export function REPL({
         helpers.setCursorOffset(stashedPrompt.cursorOffset);
         setPastedContents(stashedPrompt.pastedContents);
         setStashedPrompt(undefined);
+        addNotification({
+          key: 'stash-restored',
+          kind: 'feedback',
+          text: 'Draft restored',
+          priority: 'high',
+          timeoutMs: 5000,
+        });
       }
     },
     [
@@ -6769,6 +6831,7 @@ export function REPL({
       setInputValue('');
       helpers.setCursorOffset(0);
       helpers.clearBuffer();
+      clearHeldClearedDraft();
     },
     [setAppState, setInputValue, getToolUseContext, canUseTool, mainLoopModel, addNotification],
   );
@@ -8139,9 +8202,11 @@ export function REPL({
   useSyncExternalStore(subscribeRasterFrames, getRasterFrameVersion, getRasterFrameVersion);
   const chosenDock = useSyncExternalStore(subscribeDockRoom, getDockRoomColumns, getDockRoomColumns);
   const chosenInline = useSyncExternalStore(subscribeDockRoom, getInlineRoomRows, getInlineRoomRows);
-  const pluginDockColumns = pluginPaneDockColumns(transcriptCols, chosenDock);
-  const pluginDockOffered = isFullscreenEnvEnabled() && replDiffSidebarWidth === 0 ? pluginDockColumns : 0;
   const shownPluginPane = getShownPluginPane();
+  const requestedDock =
+    typeof shownPluginPane?.columns === 'number' ? shownPluginPane.columns + DOCK_GRIP_COLUMNS : undefined;
+  const pluginDockColumns = pluginPaneDockColumns(transcriptCols, chosenDock, requestedDock);
+  const pluginDockOffered = isFullscreenEnvEnabled() && replDiffSidebarWidth === 0 ? pluginDockColumns : 0;
   // densable kf=Tb?jP:0 — dock *width* only when a pane is shown.
   const pluginDockWidth = shownPluginPane !== undefined ? pluginDockOffered : 0;
   const panesDocked = isFullscreenEnvEnabled() && pluginDockColumns > 0;
@@ -8331,6 +8396,42 @@ export function REPL({
                   setCursor={setCursor}
                   cursorNavRef={cursorNavRef}
                 />
+                {/* densable bJ `hJ`/`xMn` — spinner is scrollable, after Messages.
+                    tot.abovePrompt is vh (title/todos/panes), not Cn. Putting
+                    spinner in $e clipped the last collapsed WVn row
+                    (`Searched for N patterns, read N files`). Do not add a
+                    flexGrow spacer after the spinner (stickyScroll pins to it). */}
+                {showSpinner && (
+                  <SpinnerWithVerb
+                    mode={streamMode}
+                    spinnerTip={spinnerTip}
+                    spinnerTipLabel={spinnerTipLabel}
+                    responseLengthRef={responseLengthRef}
+                    apiMetricsRef={apiMetricsRef}
+                    compactProgressActiveRef={compactProgressActiveRef}
+                    compactingHint={compactingHint}
+                    compactingStartTime={compactingStartTime}
+                    overrideMessage={spinnerMessage}
+                    spinnerSuffix={stopHookSpinnerSuffix}
+                    verbose={verbose}
+                    loadingStartTimeRef={loadingStartTimeRef}
+                    totalPausedMsRef={totalPausedMsRef}
+                    pauseStartTimeRef={pauseStartTimeRef}
+                    overrideColor={spinnerColor}
+                    overrideShimmerColor={spinnerShimmerColor}
+                    hasActiveTools={inProgressToolUseIDs.size > 0}
+                    leaderIsIdle={!isLoading}
+                    retryStatus={retryStatus}
+                    outputLimitRecovery={outputLimitRecovery}
+                    agentId={viewingAgentTaskId ?? undefined}
+                  />
+                )}
+                {!showSpinner &&
+                  !isLoading &&
+                  !userInputOnProcessing &&
+                  !hasRunningTeammates &&
+                  isBriefOnly &&
+                  !viewedAgentTask && <BriefIdleStatus />}
                 {panesDocked ? null : (
                   <Box
                     flexDirection="column"
@@ -8387,9 +8488,31 @@ export function REPL({
                 {/* WebBrowserPanel removed — browser-lite, no panel */}
                 {/* densable tot.scrollable / bJ grow is inside official Ink
                     with hJ. Analog ScrollBox + leftover flexGrow spacer
-                    after spinner moved to tot.bottom makes stickyScroll pin
-                    to empty grow — blank transcript, PromptInput still
-                    visible. Do not keep that spacer. */}
+                    after spinner makes stickyScroll pin to empty grow —
+                    blank transcript, PromptInput still visible. Do not
+                    keep that spacer. */}
+              </>
+            }
+            abovePrompt={
+              // densable tot `vh` — title/todos/panes. Gold Az = InlinePanes
+              // (PluginAbovePromptSite). Band is measured as pt; prompt gets
+              // max(0, Ne - pt). Do not park the band in tot.bottom / Qv.
+              <>
+                {!showSpinner && !toolJSX?.isLocalJSXCommand && showExpandedTodos && tasksV2 && tasksV2.length > 0 && (
+                  <Box width="100%" flexDirection="column">
+                    <TaskListV2 tasks={tasksV2} isStandalone={true} />
+                  </Box>
+                )}
+                <PluginAbovePromptSite
+                  isWorking={isLoading}
+                  promptEmpty={inputValue === ''}
+                  hasSurvey={
+                    postCompactSurvey.state !== 'closed' ||
+                    memorySurvey.state !== 'closed' ||
+                    feedbackSurvey.state !== 'closed' ||
+                    frustrationDetection.state !== 'closed'
+                  }
+                />
               </>
             }
             bottom={
@@ -8402,38 +8525,6 @@ export function REPL({
                   <CompanionSprite />
                 ) : null}
                 <Box flexDirection="column" flexGrow={1}>
-                  {/* densable tot.bottom / Uxc chrome. Screen slot is still
-                      above PromptInput (gold bJ grow+hJ). Outside ScrollBox
-                      so first-token layout does not move spinner Yoga y. */}
-                  {showSpinner && (
-                    <SpinnerWithVerb
-                      mode={streamMode}
-                      spinnerTip={spinnerTip}
-                      spinnerTipLabel={spinnerTipLabel}
-                      responseLengthRef={responseLengthRef}
-                      apiMetricsRef={apiMetricsRef}
-                      compactProgressActiveRef={compactProgressActiveRef}
-                      overrideMessage={spinnerMessage}
-                      spinnerSuffix={stopHookSpinnerSuffix}
-                      verbose={verbose}
-                      loadingStartTimeRef={loadingStartTimeRef}
-                      totalPausedMsRef={totalPausedMsRef}
-                      pauseStartTimeRef={pauseStartTimeRef}
-                      overrideColor={spinnerColor}
-                      overrideShimmerColor={spinnerShimmerColor}
-                      hasActiveTools={inProgressToolUseIDs.size > 0}
-                      leaderIsIdle={!isLoading}
-                      retryStatus={retryStatus}
-                      outputLimitRecovery={outputLimitRecovery}
-                      agentId={viewingAgentTaskId ?? undefined}
-                    />
-                  )}
-                  {!showSpinner &&
-                    !isLoading &&
-                    !userInputOnProcessing &&
-                    !hasRunningTeammates &&
-                    isBriefOnly &&
-                    !viewedAgentTask && <BriefIdleStatus />}
                   {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
                   {permissionStickyFooter}
                   {/* Immediate local-jsx commands (/btw, /sandbox, /assistant,
@@ -8450,15 +8541,6 @@ export function REPL({
                       {toolJSX.jsx}
                     </Box>
                   )}
-                  {!showSpinner &&
-                    !toolJSX?.isLocalJSXCommand &&
-                    showExpandedTodos &&
-                    tasksV2 &&
-                    tasksV2.length > 0 && (
-                      <Box width="100%" flexDirection="column">
-                        <TaskListV2 tasks={tasksV2} isStandalone={true} />
-                      </Box>
-                    )}
                   {/* densable NMs inline — GSn + bEt (permission_prompt); tip sandbox is FRr */}
                   <DialogHost variant="inline" suppressReason={dialogSuppressReason} />
                   {tipOverlay === 'prompt' && (
@@ -8796,16 +8878,6 @@ export function REPL({
                           inputValue={inputValue}
                           setInputValue={setInputValue}
                           onOpenFeedback={handleSurveyRequestFeedback}
-                        />
-                        <PluginAbovePromptSite
-                          isWorking={isLoading}
-                          promptEmpty={inputValue === ''}
-                          hasSurvey={
-                            postCompactSurvey.state !== 'closed' ||
-                            memorySurvey.state !== 'closed' ||
-                            feedbackSurvey.state !== 'closed' ||
-                            frustrationDetection.state !== 'closed'
-                          }
                         />
                         <PromptInput
                           debug={debug}

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, type DOMElement, measureElement, NoSelect, Text, useTheme } from '@anthropic/ink';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
@@ -21,8 +21,6 @@ type Props = {
   dim?: boolean;
 };
 
-const DEFAULT_WIDTH = 80;
-
 export const HighlightedCode = memo(function HighlightedCode({
   code,
   filePath,
@@ -30,7 +28,7 @@ export const HighlightedCode = memo(function HighlightedCode({
   dim = false,
 }: Props): React.ReactElement {
   const ref = useRef<DOMElement>(null);
-  const [measuredWidth, setMeasuredWidth] = useState(width || DEFAULT_WIDTH);
+  const [measuredWidth, setMeasuredWidth] = useState(width ?? 0);
   const [theme] = useTheme();
   const settings = useSettings();
   const syntaxHighlightingDisabled = settings.syntaxHighlightingDisabled ?? false;
@@ -61,8 +59,12 @@ export const HighlightedCode = memo(function HighlightedCode({
     return instance;
   }, [code, filePath, syntaxHighlightingDisabled]);
 
-  useEffect(() => {
-    if (!width && ref.current) {
+  useLayoutEffect(() => {
+    if (width) {
+      setMeasuredWidth(width);
+      return;
+    }
+    if (ref.current) {
       const { width: elementWidth } = measureElement(ref.current);
       if (elementWidth > 0) {
         setMeasuredWidth(elementWidth - 2);
@@ -71,7 +73,7 @@ export const HighlightedCode = memo(function HighlightedCode({
   }, [width]);
 
   const lines = useMemo(() => {
-    if (colorFile === null) {
+    if (colorFile === null || measuredWidth <= 0) {
       return null;
     }
     return colorFile.render(theme, measuredWidth, dim);

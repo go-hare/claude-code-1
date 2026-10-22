@@ -47,6 +47,10 @@ class TasksV2Store {
   #changed = createSignal()
   #subscriberCount = 0
   #started = false
+  /** densable `#R` — generation issued by the latest #fetch start. */
+  #issuedFetch = 0
+  /** densable `#S` — generation of the fetch that last landed. */
+  #appliedFetch = 0
 
   /**
    * useSyncExternalStore snapshot. Returns the same Task[] reference between
@@ -113,6 +117,7 @@ class TasksV2Store {
   }
 
   #fetch = async (): Promise<void> => {
+    const generation = ++this.#issuedFetch
     const taskListId = getTaskListId()
     // Task list ID can change mid-session (TeamCreateTool sets
     // leaderTeamName) — point the watcher at the current dir.
@@ -128,6 +133,9 @@ class TasksV2Store {
       })
       listed = null
     }
+    // densable #k: a newer fetch already landed — drop this older read.
+    if (this.#started && generation < this.#appliedFetch) return
+    this.#appliedFetch = generation
     if (listed === null) {
       if (this.#started) this.#armFallbackPoll()
       return

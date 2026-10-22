@@ -18,25 +18,38 @@ import { recordStickyState } from '../utils/scrollTelemetry.js'
  * viewport bottom shows empty spacer), while underestimating just mounts
  * a few extra items into overscan. The asymmetry means we'd rather err low.
  */
+/**
+ * densable `$a` — true when this node or a non-text descendant is still drawing.
+ * A height of 0 in that state is not an empty row.
+ */
+function subtreeDrawPending(node: DOMElement): boolean {
+  if (node.attributes.drawPending === true) return true
+  for (const child of node.childNodes) {
+    if (child.nodeName === '#text') continue
+    if (subtreeDrawPending(child)) return true
+  }
+  return false
+}
+
 const DEFAULT_ESTIMATE = 3
 /**
- * Extra rows rendered above and below the viewport. Generous because real
- * heights can be 10x the estimate for long tool results.
+ * densable `Sb` — scrollTop snapshot bin. Independent of `l0` overscan.
  */
-const OVERSCAN_ROWS = 40
+const SCROLL_QUANTUM = 40
+/**
+ * densable `l0` @207922107: `max(round(Sb*1.5), min(round(vh*1.5), 80))`.
+ * Overscan grows with the viewport (60–80), not a fixed 40.
+ */
+const OVERSCAN_MIN = Math.round(SCROLL_QUANTUM * 1.5)
+const OVERSCAN_MAX = 80
+function overscanRows(viewportH: number): number {
+  return Math.max(
+    OVERSCAN_MIN,
+    Math.min(Math.round(viewportH * 1.5), OVERSCAN_MAX),
+  )
+}
 /** Items rendered before the ScrollBox has laid out (viewportHeight=0). */
 const COLD_START_COUNT = 30
-/**
- * scrollTop quantization for the useSyncExternalStore snapshot. Without
- * this, every wheel tick (3-5 per notch) triggers a full React commit +
- * Yoga calculateLayout() + Ink diff cycle — the CPU spike. Visual scroll
- * stays smooth regardless: ScrollBox.forceRender fires on every scrollBy
- * and Ink reads the REAL scrollTop from the DOM node, independent of what
- * React thinks. React only needs to re-render when the mounted range must
- * shift; half of OVERSCAN_ROWS is the tightest safe bin (guarantees ≥40
- * rows of overscan remain before the new range is needed).
- */
-const SCROLL_QUANTUM = OVERSCAN_ROWS >> 1
 /**
  * Worst-case height assumed for unmeasured items when computing coverage.
  * A MessageRow can be as small as 1 row (single-line tool call). Using 1
@@ -45,20 +58,12 @@ const SCROLL_QUANTUM = OVERSCAN_ROWS >> 1
  * when items are larger (which is fine, overscan absorbs it).
  */
 const PESSIMISTIC_HEIGHT = 1
-/** Cap on mounted items to bound fiber allocation even in degenerate cases. */
-const MAX_MOUNTED_ITEMS = 200
+/** densable `ja` — mounted-item cap. */
+const MAX_MOUNTED_ITEMS = 300
 /**
- * Max NEW items to mount in a single commit. Scrolling into a fresh range
- * with PESSIMISTIC_HEIGHT=1 would mount 194 items at once (OVERSCAN_ROWS*2+
- * viewportH = 194); each fresh MessageRow render costs ~1.5ms (marked lexer
- * + formatToken + ~11 createInstance) = ~290ms sync block. Sliding the range
- * toward the target over multiple commits keeps per-commit mount cost
- * bounded. The render-time clamp (scrollClampMin/Max) holds the viewport at
- * the edge of mounted content so there's no blank during catch-up.
+ * densable `As` — max NEW items to mount in a single commit.
  */
 const SLIDE_STEP = 25
-
-const NOOP_UNSUB = () => {}
 
 export type VirtualScrollResult = {
   /** [startIndex, endIndex) half-open slice of items to render. */
@@ -305,42 +310,11 @@ export function useVirtualScroll(
     prevRangeRef.current = null
   }
 
-  // useSyncExternalStore ties re-renders to imperative scroll. Snapshot is
-  // scrollTop QUANTIZED to SCROLL_QUANTUM bins — Object.is sees no change
-  // for small scrolls (most wheel ticks), so React skips the commit + Yoga
-  // + Ink cycle entirely until the accumulated delta crosses a bin.
-  // Sticky is folded into the snapshot (sign bit) so sticky→broken also
-  // triggers: scrollToBottom sets sticky=true without moving scrollTop
-  // (Ink moves it later), and the first scrollBy after may land in the
-  // same bin. NaN sentinel = ref not attached.
-  //
-  // Ref may not be attached on first subscribe (ScrollBox mounts same commit
-  // as VirtualMessageList). Retry a few microtasks so we do not permanently
-  // NOOP-unsub and miss all scroll notify until remount.
+  // densable `Pt(l.subscribe, …)`. Gold one subscribe. NaN when the
+  // ScrollBox handle is not attached yet — layoutStale / next notify remounts.
   const subscribe = useCallback(
-    (listener: () => void) => {
-      const attached = scrollRef.current?.subscribe(listener)
-      if (attached) return attached
-      let active = true
-      let realUnsub = NOOP_UNSUB
-      let attempts = 0
-      const tryAttach = (): void => {
-        if (!active) return
-        const unsub = scrollRef.current?.subscribe(listener)
-        if (unsub) {
-          realUnsub = unsub
-          // Snapshot was NaN while unattached — nudge once ref is live.
-          listener()
-          return
-        }
-        if (++attempts < 32) queueMicrotask(tryAttach)
-      }
-      queueMicrotask(tryAttach)
-      return () => {
-        active = false
-        realUnsub()
-      }
-    },
+    (listener: () => void) =>
+      scrollRef.current?.subscribe(listener) ?? (() => {}),
     [scrollRef],
   )
   useSyncExternalStore(subscribe, () => {
@@ -470,7 +444,8 @@ export function useVirtualScroll(
       // Sticky-scroll fallback. render-node-to-output may have moved scrollTop
       // without notifying us, so trust "at bottom" over the stale snapshot.
       // Walk back from the tail until we've covered viewport + overscan.
-      const budget = viewportH + OVERSCAN_ROWS
+      const overscan = overscanRows(viewportH)
+      const budget = viewportH + overscan
       start = n
       while (start > 0 && totalHeight - offsets[start - 1]! < budget) {
         start--
@@ -510,7 +485,7 @@ export function useVirtualScroll(
       // list-local coords before comparing against offsets[]. Without
       // this, pre-list siblings (Logo+notices in Messages.tsx) inflate
       // scrollTop by their height and start over-advances — eats overscan
-      // first, then visible rows once the inflation exceeds OVERSCAN_ROWS.
+      // first, then visible rows once the inflation exceeds l0 overscan.
       const listOrigin = listOriginRef.current
       // Cap the [committed..target] span. When input outpaces render,
       // pendingDelta grows unbounded → effLo..effHi covers hundreds of
@@ -533,7 +508,8 @@ export function useVirtualScroll(
       const clampedHi = clampedLo + Math.min(span, MAX_SPAN_ROWS)
       const effLo = Math.max(0, clampedLo - listOrigin)
       const effHi = clampedHi - listOrigin
-      const lo = effLo - OVERSCAN_ROWS
+      const overscan = overscanRows(viewportH)
+      const lo = effLo - overscan
       // Binary search for start — offsets is monotone-increasing. The
       // linear while(start++) scan iterated ~27k times per render for the
       // 27k-msg session (scrolling from bottom, start≈27200). O(log n).
@@ -565,13 +541,13 @@ export function useVirtualScroll(
         }
       }
 
-      const needed = viewportH + 2 * OVERSCAN_ROWS
+      const needed = viewportH + 2 * overscan
       const maxEnd = Math.min(n, start + MAX_MOUNTED_ITEMS)
       let coverage = 0
       end = start
       while (
         end < maxEnd &&
-        (coverage < needed || offsets[end]! < effHi + viewportH + OVERSCAN_ROWS)
+        (coverage < needed || offsets[end]! < effHi + viewportH + overscan)
       ) {
         coverage +=
           heightCache.current.get(itemKeys[end]!) ?? PESSIMISTIC_HEIGHT
@@ -580,7 +556,7 @@ export function useVirtualScroll(
     }
     // Same coverage guarantee for the atBottom path (it walked start back
     // by estimated offsets, which can undershoot if items are small).
-    const needed = viewportH + 2 * OVERSCAN_ROWS
+    const needed = viewportH + 2 * overscanRows(viewportH)
     const minStart = Math.max(0, end - MAX_MOUNTED_ITEMS)
     let coverage = 0
     for (let i = start; i < end; i++) {
@@ -679,8 +655,8 @@ export function useVirtualScroll(
   if (effEnd - effStart > MAX_MOUNTED_ITEMS) {
     // Sticky must keep the TAIL. Zero-height cached rows let the sticky
     // walk-back reach 0; first-paint scrollTop is still 0 before Ink pins
-    // maxScroll. Position-based trim then cuts the tail (effEnd = start+200)
-    // → first 200 messages mount, sticky follow pins to THAT content, the
+    // maxScroll. Position-based trim then cuts the tail (effEnd = start+ja)
+    // → first ja messages mount, sticky follow pins to THAT content, the
     // transcript sits at the top of a long session, and isSticky() hides
     // Jump-to-bottom. Gold ScrollBox sticky pin + tail walk require the
     // live end to stay mounted.
@@ -857,13 +833,11 @@ export function useVirtualScroll(
       if (!yoga) continue
       const h = yoga.getComputedHeight()
       const prevH = heightCache.current.get(key)
-      if (h > 0) {
-        if (prevH !== h) {
-          heightCache.current.set(key, h)
-          anyChanged = true
-        }
-      } else if (yoga.getComputedWidth() > 0 && prevH !== 0) {
-        heightCache.current.set(key, 0)
+      // densable $a: a drawPending node (or non-text child) is not an empty row.
+      const cacheable =
+        h > 0 || (yoga.getComputedWidth() > 0 && !subtreeDrawPending(el))
+      if (cacheable && prevH !== h) {
+        heightCache.current.set(key, h)
         anyChanged = true
       }
     }

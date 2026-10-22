@@ -353,7 +353,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
         }
       });
       if (rowLines.length === 0) return;
-      if (rowIndex > 0 || lines.length > 0) {
+      if (lines.length > 0) {
         lines.push(separator);
       }
       lines.push(...rowLines);

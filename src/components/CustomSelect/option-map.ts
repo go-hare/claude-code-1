@@ -22,6 +22,7 @@ export default class OptionMap<T> extends Map<T, OptionMapItem<T>> {
     let index = 0
 
     for (const option of options) {
+      if (option.heading === true) continue
       const item = {
         label: option.label,
         value: option.value,

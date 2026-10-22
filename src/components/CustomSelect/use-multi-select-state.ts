@@ -1,7 +1,30 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useContext, useRef, useState } from 'react'
 import { isDeepStrictEqual } from 'util'
 import { useRegisterOverlay } from '../../context/overlayContext.js'
-import { type InputEvent, useInput } from '@anthropic/ink'
+import {
+  leftoverG5Disabled,
+  leftoverG5Dze,
+  leftoverG5EmptyInput,
+  leftoverG5Refuse,
+  leftoverScreenReaderRadio,
+  leftoverVmnCursorOn,
+  leftoverVmnHa,
+  leftoverVmnInputPrompt,
+  leftoverVmnNormalize,
+  leftoverVmnParseOptions,
+  leftoverVmnPrompt,
+  leftoverVmnRace,
+  leftoverVmnSpaceToggle,
+  leftoverVmnToken,
+  leftoverVmnToggleSet,
+  leftoverVmnEscapeTyped,
+} from '../FullscreenLayout.js'
+import {
+  AccessibilityContext,
+  type InputEvent,
+  type KeyboardEvent,
+  useInput,
+} from '@anthropic/ink'
 import {
   normalizeFullWidthDigits,
   normalizeFullWidthSpace,
@@ -89,6 +112,16 @@ export type UseMultiSelectStateProps<T> = {
    * pressing a number shouldn't silently toggle an invisible mapping.
    */
   hideIndexes?: boolean
+
+  /**
+   * densable VMn `refuseInput`.
+   */
+  refuseInput?: () => boolean
+
+  /**
+   * densable VMn `DZe` analog — SR radio arrow nav (default false).
+   */
+  arrowNav?: boolean
 }
 
 export type MultiSelectState<T> = {
@@ -161,6 +194,16 @@ export type MultiSelectState<T> = {
    * densable `toggleValue` — click a text option toggles membership.
    */
   toggleValue: (value: T) => void
+
+  /** densable VMn `Xe` radio. */
+  leftoverSrRadio: boolean
+  leftoverVmnPrompt?: string
+  leftoverVmnError: string | null
+  leftoverVmnCursorOn: boolean
+  leftoverVmnArrowIndex: number | null
+  leftoverVmnToggle: ReadonlySet<number> | null
+  leftoverVmnRaw: string
+  leftoverBindKeyDown: (event: KeyboardEvent) => void
 }
 
 export function useMultiSelectState<T>({
@@ -178,7 +221,29 @@ export function useMultiSelectState<T>({
   onUpFromFirstItem,
   initialFocusLast,
   hideIndexes = false,
+  refuseInput,
+  arrowNav = false,
 }: UseMultiSelectStateProps<T>): MultiSelectState<T> {
+  const leftoverScreenReader = useContext(AccessibilityContext)
+  const leftoverSrRadio = leftoverScreenReaderRadio(
+    leftoverScreenReader,
+    onChange !== undefined || onSubmit !== undefined,
+  )
+  const leftoverArrowNav = leftoverG5Dze(arrowNav)
+  const leftoverRaceRef = useRef(false)
+  const leftoverStashRef = useRef<T[] | null>(null)
+  const leftoverInputIndexRef = useRef<number | null>(null)
+  const leftoverVmnRawRef = useRef('')
+  const [leftoverVmnTyped, setLeftoverVmnTyped] = useState('')
+  const [leftoverVmnError, setLeftoverVmnError] = useState<string | null>(null)
+  const [leftoverVmnArrowIndex, setLeftoverVmnArrowIndex] = useState<
+    number | null
+  >(null)
+  const [leftoverVmnToggle, setLeftoverVmnToggle] =
+    useState<Set<number> | null>(null)
+  const leftoverDefaults = options.flatMap((option, index) =>
+    !option.disabled && defaultValue.includes(option.value) ? [index] : [],
+  )
   const [selectedValues, setSelectedValues] = useState<T[]>(defaultValue)
   const [isSubmitFocused, setIsSubmitFocused] = useState(false)
 
@@ -225,7 +290,7 @@ export function useMultiSelectState<T>({
 
   // Automatically register as an overlay.
   // This ensures CancelRequestHandler won't intercept Escape when the multi-select is active.
-  useRegisterOverlay('multi-select', undefined)
+  useRegisterOverlay('multi-select', leftoverVmnHa(true, isDisabled))
 
   const toggleValue = useCallback(
     (value: T) => {
@@ -265,10 +330,233 @@ export function useMultiSelectState<T>({
     [options, updateSelectedValues],
   )
 
+  const leftoverLabel = (option: OptionWithDescription<T> | undefined) =>
+    typeof option?.label === 'string' || typeof option?.label === 'number'
+      ? String(option.label)
+      : ''
+
+  const leftoverVmnCommit = useCallback(
+    (typed: string) => {
+      leftoverRaceRef.current = false
+      const inputIndex = leftoverInputIndexRef.current
+      if (inputIndex !== null) {
+        const option = options[inputIndex]
+        if (typed === '') {
+          setLeftoverVmnError(leftoverG5EmptyInput())
+          return
+        }
+        if (option?.type === 'input') {
+          option.onChange(typed)
+          const next = [...(leftoverStashRef.current ?? []), option.value]
+          leftoverStashRef.current = null
+          leftoverInputIndexRef.current = null
+          updateSelectedValues(next)
+          onSubmit?.(next)
+        }
+        setLeftoverVmnTyped('')
+        setLeftoverVmnError(null)
+        return
+      }
+      if (typed.trim() === '') {
+        updateSelectedValues(defaultValue)
+        onSubmit?.(defaultValue)
+        setLeftoverVmnTyped('')
+        setLeftoverVmnError(null)
+        return
+      }
+      const parsed = leftoverVmnParseOptions(typed, options)
+      if ('error' in parsed) {
+        setLeftoverVmnError(parsed.error)
+        return
+      }
+      if (parsed.inputIndex !== undefined) {
+        leftoverStashRef.current = parsed.indexes.map(i => options[i]!.value)
+        leftoverInputIndexRef.current = parsed.inputIndex
+        leftoverVmnRawRef.current = typed
+        const option = options[parsed.inputIndex]
+        const initial =
+          option?.type === 'input' ? (option.initialValue ?? '') : ''
+        setLeftoverVmnTyped(initial)
+        if (option?.type === 'input') option.onChange(initial)
+        if (option) onFocus?.(option.value)
+        setLeftoverVmnError(null)
+        return
+      }
+      const values = parsed.indexes.map(i => options[i]!.value)
+      updateSelectedValues(values)
+      onSubmit?.(values)
+      setLeftoverVmnTyped('')
+      setLeftoverVmnError(null)
+    },
+    [defaultValue, onFocus, onSubmit, options, updateSelectedValues],
+  )
+
+  const leftoverBindKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (isDisabled) return
+      if (event.ctrl || event.meta) return
+      if (event.key === 'escape' && event.name === 'escape') {
+        event.preventDefault()
+        if (leftoverInputIndexRef.current !== null) {
+          leftoverInputIndexRef.current = null
+          leftoverStashRef.current = null
+          setLeftoverVmnTyped(
+            leftoverVmnEscapeTyped(true, leftoverVmnRawRef.current),
+          )
+          leftoverVmnRawRef.current = ''
+          return
+        }
+        onCancel()
+        return
+      }
+      if (event.key === 'return' && event.name === 'return') {
+        event.preventDefault()
+        if (leftoverRaceRef.current) {
+          leftoverG5Refuse(refuseInput)
+          leftoverRaceRef.current = false
+          setLeftoverVmnTyped('')
+          setLeftoverVmnError(leftoverVmnRace())
+          return
+        }
+        if (leftoverG5Refuse(refuseInput)) return
+        if (
+          leftoverVmnTyped.length > 0 ||
+          leftoverInputIndexRef.current !== null
+        ) {
+          leftoverVmnCommit(leftoverVmnTyped)
+          return
+        }
+        if (leftoverVmnToggle !== null) {
+          leftoverVmnCommit(
+            [...leftoverVmnToggle]
+              .sort((a, b) => a - b)
+              .map(i => String(i + 1))
+              .join(' '),
+          )
+          return
+        }
+        leftoverVmnCommit('')
+        return
+      }
+      if (event.key === 'backspace' || event.key === 'delete') {
+        event.preventDefault()
+        setLeftoverVmnTyped(prev => prev.slice(0, -1))
+        setLeftoverVmnError(null)
+        return
+      }
+      if (
+        leftoverArrowNav &&
+        leftoverInputIndexRef.current === null &&
+        (event.name === 'up' || event.name === 'down')
+      ) {
+        event.preventDefault()
+        if (leftoverG5Refuse(refuseInput)) return
+        setLeftoverVmnError(null)
+        setLeftoverVmnTyped('')
+        leftoverRaceRef.current = false
+        const n = options.length
+        if (n === 0) return
+        setLeftoverVmnArrowIndex(prev => {
+          const next =
+            prev === null
+              ? event.name === 'down'
+                ? 0
+                : n - 1
+              : (prev + (event.name === 'down' ? 1 : -1) + n) % n
+          const option = options[next]
+          if (option) onFocus?.(option.value)
+          return next
+        })
+        return
+      }
+      if (
+        leftoverVmnSpaceToggle(
+          leftoverArrowNav,
+          leftoverVmnArrowIndex !== null,
+          leftoverVmnNormalize(event.key),
+        ) &&
+        leftoverVmnTyped === '' &&
+        leftoverInputIndexRef.current === null
+      ) {
+        event.preventDefault()
+        if (leftoverG5Refuse(refuseInput)) return
+        const i = leftoverVmnArrowIndex
+        if (i === null) return
+        const option = options[i]
+        if (!option) return
+        if (option.disabled === true) {
+          setLeftoverVmnError(leftoverG5Disabled(i + 1))
+          return
+        }
+        setLeftoverVmnToggle(prev =>
+          leftoverVmnToggleSet(prev, leftoverDefaults, i),
+        )
+        return
+      }
+      if (leftoverInputIndexRef.current !== null) {
+        if (event.key.length === 1 && !event.ctrl && !event.meta) {
+          event.preventDefault()
+          setLeftoverVmnTyped(prev => prev + event.key)
+        }
+        return
+      }
+      const gn = leftoverVmnNormalize(event.key)
+      if (leftoverVmnToken(gn)) {
+        event.preventDefault()
+        if (leftoverRaceRef.current) {
+          leftoverG5Refuse(refuseInput)
+          return
+        }
+        if (leftoverG5Refuse(refuseInput)) {
+          leftoverRaceRef.current = true
+          return
+        }
+        setLeftoverVmnError(null)
+        setLeftoverVmnTyped(prev => prev + gn)
+        setLeftoverVmnArrowIndex(null)
+      }
+    },
+    [
+      isDisabled,
+      leftoverArrowNav,
+      leftoverVmnArrowIndex,
+      leftoverVmnCommit,
+      leftoverVmnToggle,
+      leftoverVmnTyped,
+      leftoverDefaults,
+      onCancel,
+      onFocus,
+      options,
+      refuseInput,
+      toggleValue,
+    ],
+  )
+
+  const leftoverInputIndex = leftoverInputIndexRef.current
+  const leftoverVmnPromptText = leftoverSrRadio
+    ? leftoverInputIndex !== null
+      ? leftoverVmnInputPrompt(
+          leftoverInputIndex + 1,
+          leftoverLabel(options[leftoverInputIndex]),
+          leftoverVmnTyped,
+        )
+      : leftoverVmnPrompt(
+          options.length,
+          true,
+          leftoverArrowNav,
+          submitButtonText,
+          leftoverVmnTyped,
+          defaultValue.length > 0 && leftoverVmnArrowIndex === null,
+          leftoverArrowNav,
+        )
+    : undefined
+
   // Handle all keyboard input
   useInput(
     (input, key, event: InputEvent) => {
-      const normalizedInput = normalizeFullWidthDigits(input)
+      const normalizedInput = leftoverVmnNormalize(
+        normalizeFullWidthDigits(input),
+      )
       // densable #16: live-read focus for toggle/edge (same tick after arrow)
       const liveFocused = navigation.getFocusedValue()
       const focusedOption = options.find(opt => opt.value === liveFocused)
@@ -320,6 +608,7 @@ export function useMultiSelectState<T>({
         (key.ctrl && input === 'n') ||
         (!key.ctrl && !key.shift && input === 'j')
       ) {
+        if (leftoverG5Refuse(refuseInput)) return
         if (isSubmitFocused && onDownFromLastItem) {
           onDownFromLastItem()
         } else if (
@@ -348,6 +637,7 @@ export function useMultiSelectState<T>({
         (key.ctrl && input === 'p') ||
         (!key.ctrl && !key.shift && input === 'k')
       ) {
+        if (leftoverG5Refuse(refuseInput)) return
         if (submitButtonText && onSubmit && isSubmitFocused) {
           setIsSubmitFocused(false)
           navigation.focusOption(lastOptionValue)
@@ -373,8 +663,23 @@ export function useMultiSelectState<T>({
         return
       }
 
+      // densable VMn typed buffer — Enter submits leftoverVmnParseOptions.
+      if (key.return && leftoverVmnTyped.length > 0) {
+        if (leftoverRaceRef.current) {
+          leftoverG5Refuse(refuseInput)
+          leftoverRaceRef.current = false
+          setLeftoverVmnTyped('')
+          setLeftoverVmnError(leftoverVmnRace())
+          return
+        }
+        if (leftoverG5Refuse(refuseInput)) return
+        leftoverVmnCommit(leftoverVmnTyped)
+        return
+      }
+
       // Handle Enter or Space for selection/submit
       if (key.return || normalizeFullWidthSpace(input) === ' ') {
+        if (leftoverG5Refuse(refuseInput)) return
         // Ctrl+Enter from input field submits
         if (key.ctrl && key.return && isInInput && onSubmit) {
           onSubmit(selectedValues)
@@ -401,12 +706,18 @@ export function useMultiSelectState<T>({
         return
       }
 
-      // Handle numeric keys (1-9) for direct selection
-      if (!hideIndexes && /^[0-9]+$/.test(normalizedInput)) {
-        const index = parseInt(normalizedInput, 10) - 1
-        if (index >= 0 && index < options.length) {
-          toggleValue(options[index]!.value)
+      // densable VMn `^[0-9, ]$` buffer (visual Space still toggles above).
+      if (!hideIndexes && leftoverVmnToken(normalizedInput)) {
+        if (leftoverRaceRef.current) {
+          leftoverG5Refuse(refuseInput)
+          return
         }
+        if (leftoverG5Refuse(refuseInput)) {
+          leftoverRaceRef.current = true
+          return
+        }
+        setLeftoverVmnError(null)
+        setLeftoverVmnTyped(prev => prev + normalizedInput)
         return
       }
 
@@ -416,7 +727,7 @@ export function useMultiSelectState<T>({
         event.stopImmediatePropagation()
       }
     },
-    { isActive: !isDisabled },
+    { isActive: !isDisabled && !leftoverSrRadio },
   )
 
   return {
@@ -427,5 +738,16 @@ export function useMultiSelectState<T>({
     updateInputValue,
     onCancel,
     toggleValue,
+    leftoverSrRadio,
+    leftoverVmnPrompt: leftoverVmnPromptText,
+    leftoverVmnError,
+    leftoverVmnCursorOn: leftoverVmnCursorOn(
+      isDisabled,
+      leftoverVmnArrowIndex !== null,
+    ),
+    leftoverVmnArrowIndex,
+    leftoverVmnToggle,
+    leftoverVmnRaw: leftoverVmnRawRef.current,
+    leftoverBindKeyDown,
   }
 }

@@ -23,7 +23,8 @@ describe('gold thinking Ss paint', () => {
     const slice = src.slice(idx, idx + 800)
     expect(slice).toContain('!isTranscriptMode && !verbose')
     expect(slice).toContain('return null')
-    expect(slice).toContain('lastThinkingBlockId.has')
+    expect(slice).not.toContain('hideInTranscript')
+    expect(slice).not.toContain('lastThinkingBlockId.has')
   })
 
   test('Messages does not paint live Ss from streamingThinking', async () => {

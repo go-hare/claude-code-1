@@ -238,9 +238,29 @@ function prefixWidth(): number {
 const PANEL_NAME_MIN = 4;
 const PANEL_NAME_MAX = 28;
 
+/**
+ * densable `Tr` — strip C0/C1 (`qee=/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g`) then
+ * collapse whitespace (`/\s+/g` → `" "` + trim). yZ description is
+ * `Tr(progress.summary??"")||Tr(description)` so a multiline agent
+ * summary (`**PASS**\nGold …`) stays one truncated row, not a wrap
+ * that hangs past the name column. Walk char codes instead of a
+ * control-char regex literal (biome `noControlCharactersInRegex`).
+ */
+function panelOneLine(text: string | undefined): string {
+  if (!text) return '';
+  let stripped = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c <= 8 || (c >= 14 && c <= 31) || (c >= 127 && c <= 159)) continue;
+    stripped += text[i]!;
+  }
+  return stripped.replace(/\s+/g, ' ').trim();
+}
+
 function panelAgentName(task: PanelAgentTask, nameByAgentId: Map<string, string>): string | undefined {
-  if (isInProcessTeammateTask(task)) return task.identity.agentName;
-  return nameByAgentId.get(task.id) ?? task.agentType;
+  // densable Fq = Tr(in_process_teammate ? identity.agentName : agentType)
+  if (isInProcessTeammateTask(task)) return panelOneLine(task.identity.agentName) || undefined;
+  return panelOneLine(nameByAgentId.get(task.id) ?? task.agentType) || undefined;
 }
 
 type AgentStatusParts = {
@@ -341,12 +361,13 @@ function AgentLine({
 }: AgentLineProps): React.ReactNode {
   const [hover, setHover] = React.useState(false);
   const { elapsed, tokenText, queuedText, queuedCount } = getAgentStatusParts(task, Date.now());
-  const displayDescription = task.progress?.summary || task.description;
+  // densable yZ: Tr(v.progress?.summary??"")||Tr(v.description)
+  const displayDescription = panelOneLine(task.progress?.summary ?? '') || panelOneLine(task.description);
   const highlighted = isSelected || hover;
   const prefix = highlighted ? figures.pointer + ' ' : '  ';
   const bullet = isViewed ? BLACK_CIRCLE : figures.circle;
   const dim = !highlighted && !isViewed;
-  const displayName = name ?? (isLocalAgentTask(task) ? task.agentType : undefined);
+  const displayName = name ?? (isLocalAgentTask(task) ? panelOneLine(task.agentType) : undefined);
   const statusText = [elapsed, tokenText].filter(Boolean).join(' · ');
 
   // densable yrf: when decoration.content is set, replace name+desc+status with Ansi content.

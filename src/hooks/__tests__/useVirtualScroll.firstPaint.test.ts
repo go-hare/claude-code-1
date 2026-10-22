@@ -45,14 +45,25 @@ describe('useVirtualScroll densable 2.1.289 onLayout (wb/Ab)', () => {
     )
   })
 
-  test('source: subscribe retries when ScrollBox ref not yet attached', async () => {
+  test('source: gold Pt(l.subscribe) once — no 32× tryAttach', async () => {
     const src = await Bun.file(HOOK).text()
-    const idx = src.indexOf('Ref may not be attached on first subscribe')
-    expect(idx).toBeGreaterThan(0)
-    const slice = src.slice(idx, idx + 1200)
-    expect(slice).toMatch(/queueMicrotask\(tryAttach\)/)
-    expect(slice).toMatch(/listener\(\)/)
-    expect(slice).toMatch(/attempts\s*<\s*32/)
+    expect(src).toContain('Pt(l.subscribe')
+    expect(src).toMatch(
+      /scrollRef\.current\?\.subscribe\(listener\) \?\? \(\(\) => \{\}\)/,
+    )
+    expect(src).not.toMatch(/queueMicrotask\(tryAttach\)/)
+    expect(src).not.toMatch(/attempts\s*<\s*32/)
+  })
+
+  test('source: gold l0 overscan and ja=300 mount cap', async () => {
+    const src = await Bun.file(HOOK).text()
+    expect(src).toContain('const MAX_MOUNTED_ITEMS = 300')
+    expect(src).toContain('function overscanRows(viewportH: number): number {')
+    expect(src).toContain('Math.round(viewportH * 1.5)')
+    expect(src).toContain('OVERSCAN_MIN')
+    expect(src).toContain('const OVERSCAN_MAX = 80')
+    expect(src).not.toContain('const OVERSCAN_ROWS = 40')
+    expect(src).not.toContain('const MAX_MOUNTED_ITEMS = 200')
   })
 
   test('source: origin jump >1 row after first land forces a commit (gold Xt be)', async () => {

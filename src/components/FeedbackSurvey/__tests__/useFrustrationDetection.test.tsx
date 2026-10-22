@@ -6,13 +6,17 @@ import * as realConfig from '../../../utils/config.js';
 import { renderToString } from '../../../utils/staticRender.js';
 import type { Message } from '../../../types/message.js';
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js';
+import * as realPolicy from '../../../services/policyLimits/index.js';
 import * as realSubmitTranscriptShare from '../submitTranscriptShare.js';
 
 let transcriptShareDismissed = false;
+let productFeedbackAllowed = true;
+const policyKeys: string[] = [];
 const mockSubmitTranscriptShare = mock(async () => ({ success: true }));
 
 // Snapshot BEFORE mock — thin config mock no-ops saveGlobalConfig for co-suites.
 const configSnap = snapshotModuleExports(realConfig);
+const policySnap = snapshotModuleExports(realPolicy);
 const submitTranscriptShareSnap = snapshotModuleExports(realSubmitTranscriptShare);
 const realGetGlobalConfig = configSnap.getGlobalConfig as typeof realConfig.getGlobalConfig;
 
@@ -41,7 +45,17 @@ afterAll(() => {
   mock.module('../submitTranscriptShare.js', () => ({
     ...submitTranscriptShareSnap,
   }));
+  mock.module('../../../services/policyLimits/index.js', () => ({
+    ...policySnap,
+  }));
 });
+mock.module('../../../services/policyLimits/index.js', () => ({
+  ...policySnap,
+  isPolicyAllowed: (policy: string) => {
+    policyKeys.push(policy);
+    return productFeedbackAllowed;
+  },
+}));
 mock.module('../submitTranscriptShare.js', () => ({
   ...submitTranscriptShareSnap,
   submitTranscriptShare: mockSubmitTranscriptShare,
@@ -129,6 +143,8 @@ async function waitForState(api: () => LiveApi, expected: string, timeoutMs = 10
 
 afterEach(() => {
   transcriptShareDismissed = false;
+  productFeedbackAllowed = true;
+  policyKeys.length = 0;
   mockSubmitTranscriptShare.mockClear();
   mockSubmitTranscriptShare.mockImplementation(async () => ({ success: true }));
 });
@@ -154,12 +170,14 @@ describe('useFrustrationDetection', () => {
     expect(result.state).toBe('transcript_prompt');
   });
 
-  test('product-cut no longer gates on policyLimits allow_product_feedback', async () => {
-    const src = await Bun.file(
-      new URL('../useFrustrationDetection.ts', import.meta.url),
-    ).text();
-    expect(src).not.toContain('services/policyLimits');
-    expect(src).toContain('Product-cut: policy limits always allow product feedback');
+  test('skips prompt when allow_product_feedback is denied', async () => {
+    productFeedbackAllowed = false;
+    const result = await renderDetection({
+      messages: [apiError('a'), apiError('b')],
+    });
+    expect(result.state).toBe('closed');
+    expect(policyKeys).toContain('allow_product_feedback');
+    productFeedbackAllowed = true;
   });
 
   test('does not prompt while loading, prompting, blocked by another survey, or dismissed', async () => {

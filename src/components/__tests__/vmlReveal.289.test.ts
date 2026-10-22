@@ -15,8 +15,12 @@ describe('densable 2.1.289 VML reveal host', () => {
     expect(src).toContain('releaseReveal()')
     expect(src).toContain('setRevealEpoch')
     expect(src).toContain('requestAnimationFrame(loop)')
-    expect(src).toContain('// height===0: wait for layout')
-    expect(src).not.toMatch(/if \(height === 0\) \{\s*scroll\.scrollToElement/)
+    expect(src).toContain(
+      'scroll.scrollToElement(el, 0, { block: pending.block })',
+    )
+    expect(src).toMatch(
+      /if \(height === 0\) \{\s*scroll\.scrollToElement\(el, 0, \{ block: pending\.block \}\);\s*return;\s*\}/,
+    )
     // Must not keep bare useEffect(() => { tickReveal }) with no deps.
     expect(src).not.toMatch(
       /useEffect\(\(\) => \{\s*if \(revealPendingRef\.current\) tickReveal\(true\);\s*\}\);/,

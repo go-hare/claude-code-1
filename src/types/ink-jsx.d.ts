@@ -34,9 +34,6 @@ declare module 'react' {
         /** densable 2.1.218 accessibility bag (preserveWhitespace etc.) */
         accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
-        onMouseDown?: (event: MouseActionEvent) => void
-        onMouseUp?: (event: MouseActionEvent) => void
-        onMouseDrag?: (event: MouseActionEvent) => void
         onPointer?: (event: MouseActionEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -54,6 +51,8 @@ declare module 'react' {
         onWheelCapture?: (event: WheelEvent) => void
         elementKey?: string
         elementPlugin?: string
+        drawPending?: boolean
+        hotkey?: string
         style?: Styles
         stickyScroll?: boolean
         /** Official 2.1.207: default true; false disables non-sticky growth follow. */

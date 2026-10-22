@@ -21,6 +21,7 @@ import {
   getAutoUpdaterDisabledReason,
   formatAutoUpdaterDisabledReason,
   getRemoteControlAtStartup,
+  type AutoUpdaterDisabledReason,
 } from '../../utils/config.js';
 import chalk from 'chalk';
 import {
@@ -74,6 +75,7 @@ import {
 } from '../../utils/settings/settings.js';
 import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
+import type { ThemeSetting } from '../../utils/theme.js';
 import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
@@ -428,9 +430,9 @@ export type ConfigHkeBag = {
   settingsData: SettingsJson;
   setSettingsData: React.Dispatch<React.SetStateAction<SettingsJson>>;
   verbose: boolean;
-  thinkingEnabled: boolean;
-  isFastMode: boolean;
-  promptSuggestionEnabled: boolean;
+  thinkingEnabled: boolean | undefined;
+  isFastMode: boolean | undefined;
+  promptSuggestionEnabled: boolean | undefined;
   mainLoopModel: string | null;
   currentOutputStyle: OutputStyle;
   currentLanguage: string | undefined;
@@ -439,13 +441,14 @@ export type ConfigHkeBag = {
   isConnectedToIde: boolean;
   isFileCheckpointingAvailable: boolean;
   shouldShowExternalIncludesToggle: boolean;
-  autoUpdaterDisabledReason: string | false | undefined;
+  autoUpdaterDisabledReason: AutoUpdaterDisabledReason | null;
   showDefaultViewPicker: boolean;
   showAutoInDefaultModePicker: boolean;
   currentDefaultPermissionMode: PermissionMode;
   mapleSundial: boolean;
-  F: (patch: SettingsJson) => unknown;
-  B: <K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) => unknown;
+  setTheme: (setting: ThemeSetting) => void;
+  F: (patch: SettingsJson) => { error: Error | null };
+  B: <K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) => { error: Error | null };
   W: (updater: (current: GlobalConfig) => GlobalConfig) => void;
   setAppState: ReturnType<typeof useSetAppState>;
   setChanges: React.Dispatch<React.SetStateAction<{ [key: string]: unknown }>>;
@@ -480,6 +483,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     showAutoInDefaultModePicker,
     currentDefaultPermissionMode,
     mapleSundial,
+    setTheme,
     F,
     B,
     W,
@@ -1862,7 +1866,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             },
           ]
         : []),
-    ]),
+    ]) as Setting[],
   };
 }
 
@@ -1919,6 +1923,7 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
       : false,
     currentDefaultPermissionMode: permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default'),
     mapleSundial: getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false),
+    setTheme: () => {},
     F,
     B,
     W,
@@ -2208,6 +2213,7 @@ export function Config({
     showAutoInDefaultModePicker,
     currentDefaultPermissionMode,
     mapleSundial,
+    setTheme,
     F,
     B,
     W,

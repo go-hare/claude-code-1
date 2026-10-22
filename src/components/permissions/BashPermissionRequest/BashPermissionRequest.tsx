@@ -34,6 +34,7 @@ import { useShimmerAnimation } from '../../Spinner/useShimmerAnimation.js';
 import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDecisionDebugInfo } from '../PermissionDecisionDebugInfo.js';
 import { PermissionDialog } from '../PermissionDialog.js';
+import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 import { PermissionExplainerContent, usePermissionExplainerUI } from '../PermissionExplanation.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
@@ -508,16 +509,19 @@ function BashPermissionRequestInner({
       title={sandboxingEnabled && !isSandboxed ? 'Bash command (unsandboxed)' : 'Bash command'}
       subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
     >
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
-        <Text dimColor={explainerState.visible}>
-          {BashTool.renderToolUseMessage(
-            { command, description },
-            { theme, verbose: true }, // always show the full command
-          )}
+      {toolUseConfirm.description ? (
+        <Box flexDirection="column" paddingX={1}>
+          <Text dimColor wrap="wrap">
+            {toolUseConfirm.description}
+          </Text>
+        </Box>
+      ) : null}
+      <PermissionOverflowBox paddingX={1}>
+        <Text dimColor={explainerState.visible} wrap="wrap">
+          {BashTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
         </Text>
-        {!explainerState.visible && <Text dimColor>{toolUseConfirm.description}</Text>}
-        <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
-      </Box>
+      </PermissionOverflowBox>
+      <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       {showPermissionDebug ? (
         <>
           <PermissionDecisionDebugInfo permissionResult={toolUseConfirm.permissionResult} toolName="Bash" />

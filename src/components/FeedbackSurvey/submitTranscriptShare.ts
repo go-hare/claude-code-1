@@ -8,6 +8,7 @@ import { classifyAxiosError, errorMessage } from '../../utils/errors.js'
 import { getHead } from '../../utils/git.js'
 import { getAuthHeaders, getUserAgent } from '../../utils/http.js'
 import { normalizeMessagesForAPI } from '../../utils/messages.js'
+import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import {
   extractAgentIdsFromMessages,
@@ -222,7 +223,9 @@ export async function submitTranscriptShare(
     if (isEssentialTrafficOnly()) {
       return { success: false, errorCode: 'essential_traffic_only' }
     }
-    // Product-cut: policy limits always allow product feedback.
+    if (!isPolicyAllowed('allow_product_feedback')) {
+      return { success: false, errorCode: 'policy_blocked' }
+    }
 
     logForDebugging('Collecting transcript for sharing', { level: 'info' })
 

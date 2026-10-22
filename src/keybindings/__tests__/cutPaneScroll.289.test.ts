@@ -90,7 +90,9 @@ describe('densable 2.1.289 CUt Pane / PaneField / Scroll', () => {
       'Scroll',
       'Agents',
     ]
-    expect(KEYBINDING_CONTEXTS.slice(0, goldCut.length)).toEqual(goldCut)
+    expect(KEYBINDING_CONTEXTS.slice(0, goldCut.length).join(',')).toBe(
+      goldCut.join(','),
+    )
     expect(DEFAULT_BINDINGS.some(b => b.context === 'EffortSlider')).toBe(true)
     expect(DEFAULT_BINDINGS.some(b => b.context === 'Agents')).toBe(true)
     const agents = DEFAULT_BINDINGS.find(b => b.context === 'Agents')

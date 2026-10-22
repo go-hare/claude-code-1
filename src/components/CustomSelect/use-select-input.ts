@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useRegisterOverlay } from '../../context/overlayContext.js'
+import { leftoverG5HaSelect } from '../FullscreenLayout.js'
 import { type InputEvent, useInput } from '@anthropic/ink'
 import { useKeybindings } from '../../keybindings/useKeybinding.js'
 import {
@@ -97,7 +98,7 @@ export const useSelectInput = <T>({
 }: UseSelectProps<T>) => {
   // Automatically register as an overlay when onCancel is provided.
   // This ensures CancelRequestHandler won't intercept Escape when the select is active.
-  useRegisterOverlay('select', !!state.onCancel)
+  useRegisterOverlay('select', leftoverG5HaSelect(!!state.onCancel, isDisabled))
 
   // Determine if the focused option is an input type
   const isInInput = useMemo(() => {

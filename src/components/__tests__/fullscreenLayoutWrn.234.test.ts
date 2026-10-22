@@ -39,13 +39,23 @@ describe('FullscreenLayout Wrn 2.1.234 (empty-transcript chrome)', () => {
     expect(src).toMatch(/stickyScroll/)
   })
 
-  test('source: bottom maxHeight is rows-zrn not 50%, inner flexShrink 0', async () => {
+  test('source: bottom maxHeight is tot Ne — half screen idle, rows-VCe on overlay', async () => {
     const src = await Bun.file(LAYOUT).text()
     expect(src).toMatch(/const FULLSCREEN_BOTTOM_CHROME_ROWS = 2/)
+    expect(src).toMatch(/Math\.floor\(terminalRows \/ 2\)/)
     expect(src).toMatch(
-      /maxHeight=\{Math\.max\(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS\)\}/,
+      /Math\.max\(1, terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS\)/,
     )
-    expect(src).toMatch(/flexGrow=\{1\} flexShrink=\{0\} overflowY="hidden"/)
+    expect(src).toMatch(/maxHeight=\{bottomMaxHeight\}/)
+    expect(src).toMatch(/maxHeight=\{promptMaxHeight\}/)
+    expect(src).not.toMatch(
+      /maxHeight=\{abovePrompt != null \? promptMaxHeight : bottomMaxHeight\}/,
+    )
+    expect(src).toMatch(/flexGrow=\{1\}/)
+    expect(src).toMatch(/flexShrink=\{0\}/)
+    expect(src).toMatch(/overflowY="hidden"/)
     expect(src).not.toMatch(/maxHeight=["']50%["']/)
+    expect(src).toContain('id === HISTORY_SEARCH_OVERLAY')
+    expect(src).toContain('elicitation-url')
   })
 })

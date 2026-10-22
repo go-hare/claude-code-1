@@ -1,6 +1,17 @@
 import figures from 'figures';
-import React from 'react';
-import { Box, Text, type ClickEvent } from '@anthropic/ink';
+import React, { useRef } from 'react';
+import { Box, Text, useDeclaredCursor, useTerminalSize, type ClickEvent, type DOMElement } from '@anthropic/ink';
+import {
+  leftoverG5PromptColumn,
+  leftoverNnDtWidth,
+  leftoverNnFacts,
+  leftoverNnFromOptions,
+  leftoverNnIconWidth,
+  leftoverNnLiveWidth,
+  leftoverVmnPaintSelected,
+  leftoverVmnRn,
+  LeftoverNnDtContext,
+} from '../FullscreenLayout.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import type { OptionWithDescription } from './select.js';
@@ -32,6 +43,14 @@ export type SelectMultiProps<T> = {
    * When true, hides the numeric indexes next to each option.
    */
   readonly hideIndexes?: boolean;
+  /**
+   * densable VMn `refuseInput`.
+   */
+  readonly refuseInput?: () => boolean;
+  /**
+   * densable VMn `DZe` analog — SR radio arrow nav (default false).
+   */
+  readonly arrowNav?: boolean;
   /**
    * Callback when user presses down from the last item (submit button).
    * If provided, navigation will not wrap to the first item.
@@ -79,6 +98,8 @@ export function SelectMulti<T>({
   initialFocusLast,
   onOpenEditor,
   hideIndexes = false,
+  refuseInput,
+  arrowNav = false,
   onImagePaste,
   pastedContents,
   onRemoveImage,
@@ -98,9 +119,31 @@ export function SelectMulti<T>({
     onUpFromFirstItem,
     initialFocusLast,
     hideIndexes,
+    refuseInput,
+    arrowNav,
   });
 
+  const leftoverHostRef = useRef<DOMElement | null>(null);
+  const leftoverNnDt = useRef(new Set<DOMElement>()).current;
+  const leftoverColumns = useTerminalSize().columns;
+  const leftoverNn = leftoverNnFromOptions(
+    leftoverNnLiveWidth(
+      leftoverHostRef.current?.yogaNode?.getComputedWidth() ?? 0,
+      leftoverColumns,
+      leftoverNnDtWidth(leftoverNnDt),
+    ),
+    options.map(option => ({
+      iconWidth: leftoverNnIconWidth(option.icon),
+      name: typeof option.label === 'string' ? option.label : '',
+      facts: leftoverNnFacts(option.meta),
+    })),
+  );
   const maxIndexWidth = options.length.toString().length;
+  const leftoverCursorRef = useDeclaredCursor({
+    line: 0,
+    column: leftoverG5PromptColumn(state.leftoverVmnPrompt ?? ''),
+    active: Boolean(state.leftoverSrRadio && state.leftoverVmnPrompt && state.leftoverVmnCursorOn),
+  });
   const isStrayClick = useStrayClickGuard();
   const optionOnClick = (option: OptionWithDescription<T>) => {
     if (isDisabled || option.disabled === true) {
@@ -118,82 +161,116 @@ export function SelectMulti<T>({
     };
   };
 
+  if (state.leftoverSrRadio) {
+    return (
+      <Box ref={leftoverHostRef} flexDirection="column" tabIndex={0} onKeyDown={state.leftoverBindKeyDown}>
+        {options.map((option, index) => {
+          const selected = leftoverVmnPaintSelected(
+            state.leftoverVmnToggle,
+            index,
+            state.selectedValues.includes(option.value),
+          );
+          const focused = state.leftoverVmnArrowIndex === index && !isDisabled;
+          const label = typeof option.label === 'string' ? option.label : String(index + 1);
+          return (
+            <Text key={String(option.value)} color={focused ? 'suggestion' : undefined}>
+              {leftoverVmnRn(index + 1, label, option.description, selected, option.disabled === true)}
+            </Text>
+          );
+        })}
+        {state.leftoverVmnError ? <Text>{state.leftoverVmnError}</Text> : null}
+        {state.leftoverVmnPrompt ? (
+          <Box ref={leftoverCursorRef}>
+            <Text dimColor>{state.leftoverVmnPrompt}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  }
+
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column">
-        {state.visibleOptions.map((option, index) => {
-          const isOptionFocused = !isDisabled && state.focusedValue === option.value && !state.isSubmitFocused;
-          const isSelected = state.selectedValues.includes(option.value);
+    <LeftoverNnDtContext value={leftoverNnDt}>
+      <Box ref={leftoverHostRef} flexDirection="column">
+        <Box flexDirection="column">
+          {state.visibleOptions.map((option, index) => {
+            const isOptionFocused = !isDisabled && state.focusedValue === option.value && !state.isSubmitFocused;
+            const isSelected = state.selectedValues.includes(option.value);
 
-          const isFirstVisibleOption = option.index === state.visibleFromIndex;
-          const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-          const areMoreOptionsBelow = state.visibleToIndex < options.length;
-          const areMoreOptionsAbove = state.visibleFromIndex > 0;
+            const isFirstVisibleOption = option.index === state.visibleFromIndex;
+            const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+            const areMoreOptionsBelow = state.visibleToIndex < options.length;
+            const areMoreOptionsAbove = state.visibleFromIndex > 0;
 
-          const i = state.visibleFromIndex + index + 1;
+            const i = state.visibleFromIndex + index + 1;
 
-          if (option.type === 'input') {
-            const inputValue = state.inputValues.get(option.value) || '';
+            if (option.type === 'input') {
+              const inputValue = state.inputValues.get(option.value) || '';
+
+              return (
+                <Box key={String(option.value)} gap={1}>
+                  <SelectInputOption
+                    option={option}
+                    isFocused={isOptionFocused}
+                    isSelected={false /* We show selection state differently for multi-select */}
+                    shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
+                    shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
+                    maxIndexWidth={maxIndexWidth}
+                    index={i}
+                    inputValue={inputValue}
+                    onInputChange={value => {
+                      state.updateInputValue(option.value, value);
+                    }}
+                    onSubmit={() => {}} /* We handle submit higher up */
+                    onExit={() => {
+                      onCancel();
+                    }}
+                    layout="compact"
+                    onOpenEditor={onOpenEditor}
+                    onImagePaste={onImagePaste}
+                    pastedContents={pastedContents}
+                    onRemoveImage={onRemoveImage}
+                    onClick={optionOnClick(option)}
+                  >
+                    <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}] </Text>
+                  </SelectInputOption>
+                </Box>
+              );
+            }
 
             return (
               <Box key={String(option.value)} gap={1}>
-                <SelectInputOption
-                  option={option}
+                <SelectOption
                   isFocused={isOptionFocused}
                   isSelected={false /* We show selection state differently for multi-select */}
                   shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
                   shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
-                  maxIndexWidth={maxIndexWidth}
-                  index={i}
-                  inputValue={inputValue}
-                  onInputChange={value => {
-                    state.updateInputValue(option.value, value);
-                  }}
-                  onSubmit={() => {}} /* We handle submit higher up */
-                  onExit={() => {
-                    onCancel();
-                  }}
-                  layout="compact"
-                  onOpenEditor={onOpenEditor}
-                  onImagePaste={onImagePaste}
-                  pastedContents={pastedContents}
-                  onRemoveImage={onRemoveImage}
+                  description={option.description}
                   onClick={optionOnClick(option)}
+                  icon={leftoverNn ? option.icon : undefined}
+                  meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+                  iconWidth={leftoverNn?.iconWidth}
+                  nameWidth={leftoverNn?.nameWidth}
+                  factsWidth={leftoverNn?.factsWidth}
                 >
-                  <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}] </Text>
-                </SelectInputOption>
+                  {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth)}</Text>}
+                  <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}]</Text>
+                  <Text color={isOptionFocused ? 'suggestion' : undefined}>{option.label}</Text>
+                </SelectOption>
               </Box>
             );
-          }
-
-          return (
-            <Box key={String(option.value)} gap={1}>
-              <SelectOption
-                isFocused={isOptionFocused}
-                isSelected={false /* We show selection state differently for multi-select */}
-                shouldShowDownArrow={areMoreOptionsBelow && isLastVisibleOption}
-                shouldShowUpArrow={areMoreOptionsAbove && isFirstVisibleOption}
-                description={option.description}
-                onClick={optionOnClick(option)}
-              >
-                {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth)}</Text>}
-                <Text color={isSelected ? 'success' : undefined}>[{isSelected ? figures.tick : ' '}]</Text>
-                <Text color={isOptionFocused ? 'suggestion' : undefined}>{option.label}</Text>
-              </SelectOption>
-            </Box>
-          );
-        })}
-      </Box>
-      {submitButtonText && onSubmit && (
-        <Box marginTop={0} gap={1}>
-          {state.isSubmitFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
-          <Box marginLeft={3}>
-            <Text color={state.isSubmitFocused ? 'suggestion' : undefined} bold={true}>
-              {submitButtonText}
-            </Text>
-          </Box>
+          })}
         </Box>
-      )}
-    </Box>
+        {submitButtonText && onSubmit && (
+          <Box marginTop={0} gap={1}>
+            {state.isSubmitFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
+            <Box marginLeft={3}>
+              <Text color={state.isSubmitFocused ? 'suggestion' : undefined} bold={true}>
+                {submitButtonText}
+              </Text>
+            </Box>
+          </Box>
+        )}
+      </Box>
+    </LeftoverNnDtContext>
   );
 }

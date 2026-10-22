@@ -210,24 +210,54 @@ describe('densable 2.1.289 Je extras', () => {
     )
     expect(repl).not.toContain('BackgroundAgentSelector')
     expect(repl).not.toContain('shift+↓ to manage background agents')
+    const prompt = readFileSync(
+      join(import.meta.dir, '../../PromptInput/PromptInput.tsx'),
+      'utf8',
+    )
+    expect(prompt).not.toContain("'bg_agent'")
+    expect(prompt).not.toContain('BackgroundAgentSelector')
+    expect(prompt).not.toContain('selectedBgAgentIndex')
   })
 
-  test('REPL SpinnerWithVerb is tot.bottom / Uxc; scrollable has no flexGrow spacer', () => {
+  test('REPL SpinnerWithVerb is scrollable after Messages; tot.abovePrompt is not Cn', () => {
     const repl = readFileSync(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
       'utf8',
     )
     const spinner = repl.indexOf('<SpinnerWithVerb')
-    const bottom = repl.lastIndexOf('bottom={', spinner)
+    const messages = repl.lastIndexOf('<Messages', spinner)
     const scrollable = repl.lastIndexOf('scrollable={', spinner)
+    const bottom = repl.indexOf('bottom={', spinner)
     expect(spinner).toBeGreaterThan(0)
-    expect(bottom).toBeGreaterThan(0)
+    expect(messages).toBeGreaterThan(0)
     expect(scrollable).toBeGreaterThan(0)
-    expect(bottom).toBeGreaterThan(scrollable)
-    expect(spinner).toBeGreaterThan(bottom)
-    const scrollChunk = repl.slice(scrollable, bottom)
-    expect(scrollChunk).not.toContain('<SpinnerWithVerb')
-    expect(scrollChunk).not.toContain('<BriefIdleStatus')
+    expect(bottom).toBeGreaterThan(spinner)
+    expect(spinner).toBeGreaterThan(messages)
+    expect(spinner).toBeGreaterThan(scrollable)
+    expect(repl.lastIndexOf('abovePrompt={', spinner)).toBe(-1)
+    const above = repl.indexOf('abovePrompt={', spinner)
+    const scrollEnd = above > spinner ? above : bottom
+    const scrollChunk = repl.slice(scrollable, scrollEnd)
+    expect(scrollChunk).toContain('<SpinnerWithVerb')
+    expect(scrollChunk).toContain('<BriefIdleStatus')
     expect(scrollChunk).not.toContain('<Box flexGrow={1} />')
+    expect(scrollChunk).not.toContain('<PluginAbovePromptSite')
+  })
+
+  test('Spinner Cn has no Idle teammates-running early return; footer XOR compacting/retry', () => {
+    const spinner = readFileSync(
+      join(import.meta.dir, '../../Spinner.tsx'),
+      'utf8',
+    )
+    expect(spinner).not.toContain('teammates running')
+    expect(spinner).toContain(
+      'compactingHint && compactProgressActiveRef?.current',
+    )
+    expect(spinner).not.toContain('compactProgressActiveRef?.current ? null')
+    expect(spinner).toContain('retryStatus ? (')
+    expect(spinner).toContain("status.kind !== 'retrying'")
+    expect(spinner).toContain('Math.min(3, status.maxRetries)')
+    expect(spinner).toContain("includes('overload')")
+    expect(spinner).not.toContain('Compacting conversation')
   })
 })

@@ -441,8 +441,8 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           ? 'Goal achieved'
           : 'Goal not yet met… continuing';
       const iconStatus = failed ? 'error' : attachment.met ? 'success' : 'pending';
-      // densable Ul verbose:h; ctrl+o transcript also expands (screenshot 6).
-      const expanded = verbose || Boolean(isTranscriptMode);
+      // densable Ul: Goal/Reason expand only when verbose. Transcript keeps the hint.
+      const expanded = verbose;
       return (
         <Box flexDirection="column" marginTop={1}>
           <Text>

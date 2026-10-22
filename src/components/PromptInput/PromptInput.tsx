@@ -2,7 +2,17 @@ import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import * as path from 'path';
 import * as React from 'react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { PromptChromeBudgetContext } from '../FullscreenLayout.js';
 import { useNotifications } from 'src/context/notifications.js';
 import { useCommandQueue } from 'src/hooks/useCommandQueue.js';
 import { type IDEAtMentioned, useIdeAtMentioned } from 'src/hooks/useIdeAtMentioned.js';
@@ -45,7 +55,6 @@ import {
 } from '../../history.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import { formatHistoryBorderLabel, type HistoryMode, useArrowKeyHistory } from '../../hooks/useArrowKeyHistory.js';
-import { useBackgroundAgentTasks } from '../../hooks/useBackgroundAgentTasks.js';
 import { useDoublePress } from '../../hooks/useDoublePress.js';
 import { useHistorySearch } from '../../hooks/useHistorySearch.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
@@ -304,9 +313,9 @@ type Props = {
   voiceInterimRange?: { start: number; end: number } | null;
 };
 
-// Bottom slot has maxHeight="50%"; reserve lines for footer, border, status.
+// densable HWe: wUe=5. Fullscreen text viewport is leftover chrome
+// minus footer (can be 0). The tot box itself stays Ne.
 const PROMPT_FOOTER_LINES = 5;
-const MIN_INPUT_VIEWPORT_LINES = 3;
 
 // densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
 
@@ -670,16 +679,6 @@ function PromptInput({
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
   const taskDecorations = useAppState(s => s.taskDecorations ?? {});
   const idleTeammatesExpanded = useAppState(s => s.idleTeammatesExpanded ?? false);
-  const selectedBgAgentIndex = useAppState(s => s.selectedBgAgentIndex);
-  const setSelectedBgAgentIndex = useCallback(
-    (v: number | ((prev: number) => number)) =>
-      setAppState(prev => {
-        const next = typeof v === 'function' ? v(prev.selectedBgAgentIndex) : v;
-        if (next === prev.selectedBgAgentIndex) return prev;
-        return { ...prev, selectedBgAgentIndex: next };
-      }),
-    [setAppState],
-  );
   const setCoordinatorTaskIndex = useCallback(
     (v: number | ((prev: number) => number)) =>
       setAppState(prev => {
@@ -788,16 +787,12 @@ function PromptInput({
   // pill must stay navigable whenever the panel has rows — not just when
   // something is running.
   const tasksFooterVisible =
-    (runningTaskCount > 0 || (process.env.USER_TYPE === 'ant' && coordinatorTaskCount > 0)) &&
-    !shouldHideTasksFooter(tasks, showSpinnerTree);
+    (runningTaskCount > 0 || coordinatorTaskCount > 0) && !shouldHideTasksFooter(tasks, showSpinnerTree);
   const teamsFooterVisible = cachedTeams.length > 0;
-  const bgAgentList = useBackgroundAgentTasks();
-  const bgAgentFooterVisible = bgAgentList.length > 0;
 
   const footerItems = useMemo(
     () =>
       [
-        bgAgentFooterVisible && 'bg_agent',
         tasksFooterVisible && 'tasks',
         tmuxFooterVisible && 'tmux',
         bagelFooterVisible && 'bagel',
@@ -806,7 +801,6 @@ function PromptInput({
         companionFooterVisible && 'companion',
       ].filter(Boolean) as FooterItem[],
     [
-      bgAgentFooterVisible,
       tasksFooterVisible,
       tmuxFooterVisible,
       bagelFooterVisible,
@@ -843,7 +837,6 @@ function PromptInput({
   const _bagelSelected = footerItemSelected === 'bagel';
   const teamsSelected = footerItemSelected === 'teams';
   const bridgeSelected = footerItemSelected === 'bridge';
-  const bgAgentSelected = footerItemSelected === 'bg_agent';
 
   function selectFooterItem(item: FooterItem | null): void {
     // densable: leaving tasks collapses idle_summary.
@@ -859,9 +852,6 @@ function PromptInput({
       setTeammateFooterIndex(0);
       setCoordinatorTaskIndex(minCoordinatorIndex);
     }
-    if (item === 'bg_agent') {
-      setSelectedBgAgentIndex(-1);
-    }
   }
 
   // delta: +1 = down/right, -1 = up/left. Returns true if nav happened
@@ -871,6 +861,11 @@ function PromptInput({
     const next = footerItems[idx + delta];
     if (next) {
       selectFooterItem(next);
+      // densable rh: entering from below (delta < 0, not brief) lands on the last row.
+      const fromBelow = delta < 0 && !briefOwnsGap;
+      if (fromBelow && next === 'tasks' && coordinatorTaskCount > 0) {
+        setCoordinatorTaskIndex(coordinatorTaskCount - 1);
+      }
       return true;
     }
     if (delta < 0 && exitAtStart) {
@@ -1346,6 +1341,17 @@ function PromptInput({
       return;
     }
 
+    // densable Ey: restoreCleared before queue / history when prompt empty.
+    const restored = restoreCleared(liveInputRef.current);
+    if (restored) {
+      trackAndSetInput(restored.text);
+      setCursorOffset(restored.text.length);
+      setPastedContents(restored.pastedContents);
+      pastedContentsRef.current = restored.pastedContents;
+      if (restored.mode !== mode) onModeChange(restored.mode);
+      return;
+    }
+
     // densable LI: lte() walks queueEditIndex; else Phe() popAll or block via cu()
     const editableCount = queuedCommands.filter(isQueuedCommandEditable).length;
     if (isKbCohesionFixesEnabled()) {
@@ -1359,23 +1365,6 @@ function PromptInput({
       ) {
         return;
       }
-    }
-
-    // densable 2.1.289: restoreCleared before history when prompt empty
-    const restored = restoreCleared(liveInputRef.current);
-    if (restored) {
-      trackAndSetInput(restored.text);
-      setCursorOffset(restored.text.length);
-      setPastedContents(restored.pastedContents);
-      pastedContentsRef.current = restored.pastedContents;
-      if (restored.mode !== mode) onModeChange(restored.mode);
-      addNotification({
-        key: 'stash-restored',
-        text: 'Draft restored',
-        priority: 'high',
-        timeoutMs: 5000,
-      });
-      return;
     }
 
     onHistoryUp();
@@ -2019,7 +2008,9 @@ function PromptInput({
       pastedContentsRef.current = stashedPrompt.pastedContents;
       setStashedPrompt(undefined);
     } else if (input.trim() !== '') {
-      // Push to stash (save text, cursor position, and pasted contents)
+      // Push to stash (save text, cursor position, and pasted contents).
+      // Drop the Ctrl+C hold so empty ↑ restores this stash, not that draft.
+      clearHeldClearedDraft();
       setStashedPrompt({ text: input, cursorOffset, pastedContents });
       trackAndSetInput('');
       setCursorOffset(0);
@@ -2325,45 +2316,44 @@ function PromptInput({
   useKeybindings(
     {
       'footer:up': () => {
-        // ↑ in bg_agent pill: move selection up (-1 = main). At -1, leave pill.
-        if (bgAgentSelected) {
-          if (selectedBgAgentIndex > -1) {
-            setSelectedBgAgentIndex(prev => prev - 1);
-          } else {
-            selectFooterItem(null);
-          }
+        // densable pg: brief (Ma) deselects before task-row scrolling.
+        if (briefOwnsGap) {
+          selectFooterItem(null);
           return;
         }
         // ↑ scrolls within the coordinator task list before leaving the pill
-        if (
-          tasksSelected &&
-          process.env.USER_TYPE === 'ant' &&
-          coordinatorTaskCount > 0 &&
-          coordinatorTaskIndex > minCoordinatorIndex
-        ) {
+        if (tasksSelected && coordinatorTaskCount > 0 && coordinatorTaskIndex > minCoordinatorIndex) {
           setCoordinatorTaskIndex(prev => prev - 1);
           return;
         }
         navigateFooter(-1, true);
       },
       'footer:down': () => {
-        // ↓ in bg_agent pill: move selection down through agents. Clamp at last.
-        if (bgAgentSelected) {
-          if (selectedBgAgentIndex < bgAgentList.length - 1) {
-            setSelectedBgAgentIndex(prev => prev + 1);
+        // densable Sh: brief moves onto the task list at the first row.
+        if (briefOwnsGap) {
+          if (coordinatorTaskCount > 0 && footerItems.includes('tasks')) {
+            selectFooterItem('tasks');
+            setCoordinatorTaskIndex(0);
+            return;
           }
+          navigateFooter(1);
           return;
         }
-        // ↓ scrolls within the coordinator task list, never leaves the pill
-        if (tasksSelected && process.env.USER_TYPE === 'ant' && coordinatorTaskCount > 0) {
+        // Last task row moves to the next pill. It does not stay or open bash.
+        if (tasksSelected && coordinatorTaskCount > 0) {
           if (coordinatorTaskIndex < coordinatorTaskCount - 1) {
             setCoordinatorTaskIndex(prev => prev + 1);
+            return;
           }
+          navigateFooter(1);
           return;
         }
-        if (tasksSelected && !isTeammateMode) {
-          setShowBashesDialog(true);
-          selectFooterItem(null);
+        // Zero task rows: bash only when there is no next pill.
+        if (tasksSelected) {
+          if (!navigateFooter(1) && !isTeammateMode) {
+            setShowBashesDialog(true);
+            selectFooterItem(null);
+          }
           return;
         }
         navigateFooter(1);
@@ -2409,9 +2399,30 @@ function PromptInput({
               void onSubmit('/buddy');
             }
             break;
-          case 'tasks':
-            if (isTeammateMode) {
-              // Enter switches to the selected agent's view
+          case 'tasks': {
+            // densable footer:openSelected tasks — panel ↑↓ is coordinatorTaskIndex
+            // (Main at 0, rows at i+1). In-process teammates still draw that
+            // panel; teammateFooterIndex is the pill ←/→ cursor and must not
+            // steal Enter when the panel has a highlighted row.
+            const selectedRow = coordinatorTaskIndex >= 1 ? panelListItems[coordinatorTaskIndex - 1] : undefined;
+            if (selectedRow && isIdleSummaryRow(selectedRow)) {
+              const expandedRows = getPanelListItems(tasks, taskDecorations, {
+                idleTeammatesExpanded: true,
+                viewingAgentTaskId,
+              });
+              const firstCollapsed = selectedRow.taskIds[0];
+              const landAt = firstCollapsed ? expandedRows.findIndex(r => r.id === firstCollapsed) : -1;
+              panelListIdsRef.current = expandedRows.map(r => r.id);
+              setAppState(prev => ({
+                ...prev,
+                idleTeammatesExpanded: true,
+                coordinatorTaskIndex: landAt >= 0 ? landAt + 1 : prev.coordinatorTaskIndex,
+              }));
+            } else if (selectedRow) {
+              enterTeammateView(selectedRow.id, setAppState);
+            } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
+              exitTeammateView(setAppState);
+            } else if (isTeammateMode) {
               if (teammateFooterIndex === 0) {
                 exitTeammateView(setAppState);
               } else {
@@ -2419,32 +2430,11 @@ function PromptInput({
                 if (teammate) enterTeammateView(teammate.id, setAppState);
               }
             } else {
-              // densable footer:openSelected tasks branch — G7 list + idle_summary.
-              const selectedRow = coordinatorTaskIndex >= 1 ? panelListItems[coordinatorTaskIndex - 1] : undefined;
-              if (selectedRow && isIdleSummaryRow(selectedRow)) {
-                // Expand collapse and land selection on first collapsed idle id.
-                const expandedRows = getPanelListItems(tasks, taskDecorations, {
-                  idleTeammatesExpanded: true,
-                  viewingAgentTaskId,
-                });
-                const firstCollapsed = selectedRow.taskIds[0];
-                const landAt = firstCollapsed ? expandedRows.findIndex(r => r.id === firstCollapsed) : -1;
-                panelListIdsRef.current = expandedRows.map(r => r.id);
-                setAppState(prev => ({
-                  ...prev,
-                  idleTeammatesExpanded: true,
-                  coordinatorTaskIndex: landAt >= 0 ? landAt + 1 : prev.coordinatorTaskIndex,
-                }));
-              } else if (selectedRow) {
-                enterTeammateView(selectedRow.id, setAppState);
-              } else if (coordinatorTaskIndex === 0 && coordinatorTaskCount > 0) {
-                exitTeammateView(setAppState);
-              } else {
-                setShowBashesDialog(true);
-                selectFooterItem(null);
-              }
+              setShowBashesDialog(true);
+              selectFooterItem(null);
             }
             break;
+          }
           case 'tmux':
             if (process.env.USER_TYPE === 'ant') {
               setAppState(prev =>
@@ -2466,15 +2456,6 @@ function PromptInput({
           case 'bridge':
             setShowBridgeDialog(true);
             selectFooterItem(null);
-            break;
-          case 'bg_agent':
-            if (selectedBgAgentIndex === -1) {
-              exitTeammateView(setAppState);
-            } else {
-              const picked = bgAgentList[selectedBgAgentIndex];
-              if (picked) enterTeammateView(picked.id, setAppState);
-            }
-            // Keep the pill focused so ↑/↓ continue to work after Enter.
             break;
         }
       },
@@ -2692,8 +2673,10 @@ function PromptInput({
   // tightly wraps the text input so they map directly to (column, line)
   // in the Cursor wrap model. MeasuredText.getOffsetFromPosition handles
   // wide chars, wrapped lines, and clamps past-end clicks to line end.
+  // densable prompt box leftover: Ne minus measured above-prompt, then footer lines.
+  const promptChromeBudget = useContext(PromptChromeBudgetContext);
   const maxVisibleLines = isFullscreenEnvEnabled()
-    ? Math.max(MIN_INPUT_VIEWPORT_LINES, Math.floor(rows / 2) - PROMPT_FOOTER_LINES)
+    ? Math.max(0, (promptChromeBudget ?? Math.floor(rows / 2)) - PROMPT_FOOTER_LINES)
     : undefined;
 
   const handleInputClick = useCallback(
@@ -2987,6 +2970,8 @@ function PromptInput({
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
     onHoldCleared: () => {
+      // densable: hold only the live line (index 0) or a history row the user edited.
+      if (historyIndex !== 0 && !historyEdited) return;
       holdCleared({
         text: liveInputRef.current,
         mode,

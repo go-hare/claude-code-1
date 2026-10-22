@@ -39,6 +39,11 @@ export type UseSelectStateProps<T> = {
    * Value to focus
    */
   focusValue?: T
+
+  /**
+   * densable inner oo `moreRowLines` / bn `markerLines`.
+   */
+  moreRowLines?: boolean
 }
 
 export type SelectState<T> = {
@@ -114,6 +119,21 @@ export type SelectState<T> = {
   focusOption: (value: T | undefined) => void
 
   /**
+   * densable inner oo `scrollToEdge` — je onPress Ae(±1).
+   */
+  scrollToEdge: (direction: number, force?: boolean) => void
+
+  /**
+   * densable inner `$e` `onScrollTo`.
+   */
+  scrollTo: (offset: number) => void
+
+  /**
+   * densable inner `$e` `onScrollBy`.
+   */
+  scrollBy: (delta: number) => void
+
+  /**
    * Select currently focused option.
    */
   selectFocusedOption: () => void
@@ -137,6 +157,7 @@ export function useSelectState<T>({
   onCancel,
   onFocus,
   focusValue,
+  moreRowLines,
 }: UseSelectStateProps<T>): SelectState<T> {
   const [value, setValue] = useState<T | undefined>(defaultValue)
 
@@ -146,6 +167,7 @@ export function useSelectState<T>({
     initialFocusValue: undefined,
     onFocus,
     focusValue,
+    moreRowLines,
   })
 
   // densable Ovl: setValue(getFocusedValue()) — not closed-over focusedValue

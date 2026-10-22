@@ -875,9 +875,6 @@ export function useReplBridge(
                   wasConnected: handleRef.current !== null,
                 });
                 break;
-              case 'policy_disabled':
-                // densable: handled above (np latch). Keep union exhaustive.
-                return;
             }
           }
 

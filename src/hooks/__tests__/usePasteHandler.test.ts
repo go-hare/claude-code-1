@@ -51,7 +51,6 @@ function parsed(partial: Partial<ParsedKey> & { sequence: string }): ParsedKey {
     option: false,
     super: false,
     raw: partial.sequence,
-    isPasted: false,
     ...partial,
   }
 }
@@ -123,8 +122,7 @@ describe('d7r handleKeyDown gates (official densable 2.1.210)', () => {
 })
 
 describe('d7r deliverText fallback (no onPaste)', () => {
-  test('synthesizes isPasted KeyboardEvent with sequence as key text', () => {
-    // Official: t(new kKt({kind:"key", name:void 0, sequence:w, raw:w, isPasted:!0}))
+  test('synthesizes KeyboardEvent with sequence as key text', () => {
     const text = 'pasted-without-handler'
     const synthetic = new KeyboardEvent({
       kind: 'key',
@@ -137,7 +135,6 @@ describe('d7r deliverText fallback (no onPaste)', () => {
       option: false,
       super: false,
       fn: false,
-      isPasted: true,
     })
     expect(synthetic.key).toBe(text)
     expect(synthetic.name).toBe('')

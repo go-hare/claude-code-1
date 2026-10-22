@@ -95,7 +95,16 @@ mock.module('../Feedback.js', () => ({
   redactSensitiveInfo: (s: string) => redactImpl(s),
 }))
 
-// densable early gates — product-cut: policyLimits gone; essential-traffic still mocked
+let policyAllowed = true
+const realPolicy = await import('../../../services/policyLimits/index.js')
+const policySnap = snapshotModuleExports(realPolicy)
+const policyOverlay = () => ({
+  ...policySnap,
+  isPolicyAllowed: () => policyAllowed,
+})
+mock.module('src/services/policyLimits/index.ts', policyOverlay)
+mock.module('src/services/policyLimits/index.js', policyOverlay)
+mock.module('../../../services/policyLimits/index.js', policyOverlay)
 
 // Prefer setupAxiosMock (hygiene) over bare mock.module('axios')
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
@@ -141,6 +150,11 @@ afterAll(() => {
   mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
   mock.module('src/utils/model/providers.ts', () => ({ ...providersSnap }))
   mock.module('src/utils/model/providers.js', () => ({ ...providersSnap }))
+  mock.module('src/services/policyLimits/index.ts', () => ({ ...policySnap }))
+  mock.module('src/services/policyLimits/index.js', () => ({ ...policySnap }))
+  mock.module('../../../services/policyLimits/index.js', () => ({
+    ...policySnap,
+  }))
 })
 
 ;(globalThis as { MACRO?: { VERSION: string } }).MACRO = {
@@ -269,6 +283,7 @@ describe('densable 2.1.224 #16/#25 submitTranscriptShare ladder', () => {
   })
 
   afterEach(() => {
+    policyAllowed = true
     setIsRemoteMode(false)
     if (prevEssential === undefined) {
       delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
@@ -405,20 +420,15 @@ describe('densable 2.1.224 #16/#25 submitTranscriptShare ladder', () => {
     }
   })
 
-  test('product-cut: policyLimits gone so allow_product_feedback cannot block', async () => {
-    const src = await Bun.file(
-      new URL('../submitTranscriptShare.ts', import.meta.url),
-    ).text()
-    expect(src).not.toContain('services/policyLimits')
-    expect(src).toContain('Product-cut: policy limits always allow product feedback')
+  test('policy allow_product_feedback false → policy_blocked before post', async () => {
+    policyAllowed = false
     const result = await submitTranscriptShare(
       [],
       'good_feedback_survey',
       'app-pol',
     )
-    expect(result.success === true || result.errorCode !== 'policy_blocked').toBe(
-      true,
-    )
+    expect(result).toEqual({ success: false, errorCode: 'policy_blocked' })
+    expect(axiosPost).not.toHaveBeenCalled()
   })
 
   test('MAX_SHARE_PAYLOAD_BYTES is densable S1r 8MiB', () => {

@@ -15,21 +15,14 @@ const src = readFileSync(
 )
 
 describe('densable 2.1.228 #15 SpinnerAnimationRow retry vs compact', () => {
-  test('retryStatus early-return appears before compact ProgressBar branch', () => {
+  test('retryStatus early-return replaces the row; compact has no ProgressBar', () => {
     const retryIf = src.indexOf('if (retryStatus)')
-    const compactIf = src.indexOf('if (!isCompacting)')
-    const progressBar = src.indexOf('<ProgressBar')
     const retryingIn = src.indexOf('Retrying in')
 
     expect(retryIf).toBeGreaterThan(-1)
-    expect(compactIf).toBeGreaterThan(-1)
-    expect(progressBar).toBeGreaterThan(-1)
     expect(retryingIn).toBeGreaterThan(-1)
-
-    // densable Msn: retry replaces whole row (return) before compact bar path
-    expect(retryIf).toBeLessThan(compactIf)
-    expect(retryIf).toBeLessThan(progressBar)
-    expect(retryingIn).toBeLessThan(progressBar)
+    expect(src).not.toContain('<ProgressBar')
+    expect(src).toContain('compactingStartTime')
   })
 
   test('stalled retry copy and error retry copy both present', () => {
@@ -42,10 +35,10 @@ describe('densable 2.1.228 #15 SpinnerAnimationRow retry vs compact', () => {
     )
   })
 
-  test('compactProgressActiveRef still drives ProgressBar when no retry', () => {
+  test('compact elapsed uses compactingStartTime and does not draw a bar', () => {
     expect(src).toContain('compactProgressActiveRef')
     expect(src).toContain('isCompacting')
-    // only render bar when compacting
-    expect(src).toMatch(/if\s*\(\s*!isCompacting\s*\)\s*return\s+spinnerRow/)
+    expect(src).toContain('compactingStartTime')
+    expect(src).not.toContain('ProgressBar')
   })
 })

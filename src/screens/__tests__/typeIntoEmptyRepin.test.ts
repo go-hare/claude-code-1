@@ -52,27 +52,25 @@ describe('REPL type-into-empty Hi latch (SEA typedIntoEmpty)', () => {
     expect(src).toMatch(/repinScroll\(true,\s*'submit'\)/)
   })
 
-  test('source: ScrollBox.scrollToBottom alreadySticky short-circuit remains', async () => {
+  test('source: ScrollBox.scrollToBottom is gold stickyScroll+jR+notify+forceRender', async () => {
     const src = await Bun.file(SCROLL_BOX).text()
 
     const idx = src.indexOf('scrollToBottom()')
     expect(idx).toBeGreaterThan(0)
-    const slice = src.slice(idx, idx + 2800)
-    expect(slice).toMatch(/alreadySticky/)
-    expect(slice).toMatch(/stickyScroll/)
-    const stickyEarlyReturn = slice.indexOf('if (alreadySticky)')
-    expect(stickyEarlyReturn).toBeGreaterThan(0)
-    const remountComment = slice.indexOf(
-      'Drop virtual-scroll clamp + HWM BEFORE the sticky remount paints',
-    )
-    expect(remountComment).toBeGreaterThan(stickyEarlyReturn)
-    const alreadyBlock = slice.slice(stickyEarlyReturn, remountComment)
-    expect(alreadyBlock).toMatch(/hadClamp/)
-    expect(alreadyBlock).toMatch(/scrollClampMin = undefined/)
-    expect(alreadyBlock).toMatch(/scrollClampMax = undefined/)
-    expect(alreadyBlock).toMatch(/markDirty/)
-    expect(alreadyBlock).toMatch(/scheduleRenderFrom/)
-    // forceRender remount is the white-flash path — must stay after this return
-    expect(alreadyBlock).not.toMatch(/forceRender\(/)
+    const end = src.indexOf('getScrollTop()', idx)
+    expect(end).toBeGreaterThan(idx)
+    const slice = src.slice(idx, end)
+    expect(slice).not.toMatch(/\balreadySticky\b/)
+    expect(slice).toMatch(/pendingScrollDelta = undefined/)
+    expect(slice).toMatch(/stickyScroll === false/)
+    expect(slice).toMatch(/scrollMutated\(el\)/)
+    const stickyAssign = slice.indexOf('el.stickyScroll = true')
+    expect(stickyAssign).toBeGreaterThan(0)
+    const stickyPath = slice.slice(stickyAssign)
+    expect(stickyPath).toMatch(/markDirty\(el\)/)
+    expect(stickyPath).toMatch(/notify\(\)/)
+    expect(stickyPath).toMatch(/forceRender\(/)
+    expect(stickyPath).not.toMatch(/scrollTop/)
+    expect(stickyPath).not.toMatch(/scheduleRenderFrom/)
   })
 })

@@ -162,7 +162,7 @@ export function usePasteHandler({
   /**
    * Official d7r `g(w)`:
    *   if (onPaste) onPaste(w)
-   *   else innerHandleKeyDown(new KeyboardEvent({ sequence:w, isPasted:true, name:undefined }))
+   *   else innerHandleKeyDown(new KeyboardEvent({ sequence:w, name:undefined }))
    */
   const deliverText = React.useCallback(
     (text: string) => {
@@ -170,7 +170,6 @@ export function usePasteHandler({
         onPaste(text)
         return
       }
-      // No onPaste → synthesize paste-as-key for inner handleKeyDown (insert path).
       const pasteKey: ParsedKey = {
         kind: 'key',
         name: undefined,
@@ -182,7 +181,6 @@ export function usePasteHandler({
         option: false,
         super: false,
         fn: false,
-        isPasted: true,
       }
       innerKeyDownRef.current(new KeyboardEvent(pasteKey))
     },
@@ -220,7 +218,6 @@ export function usePasteHandler({
         option: false,
         super: false,
         fn: false,
-        isPasted: false,
       }
       innerKeyDownRef.current(new KeyboardEvent(returnKey))
     }, 0)

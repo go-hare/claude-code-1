@@ -1,7 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useRef } from 'react';
-import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar, useTheme } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame, stringWidth, Byline, useTheme } from '@anthropic/ink';
 import { toInkColor } from '../../utils/ink.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
 import { remainingRetryMs, type RetryStatus } from '../../utils/advisorNetworkStall.js';
@@ -62,8 +62,10 @@ export type SpinnerAnimationRowProps = {
   spinnerSuffix?: string | null;
   verbose: boolean;
   columns: number;
-  /** True while a compaction summary is streaming — renders a token progress bar. */
+  /** True while a compaction summary is streaming. */
   compactProgressActiveRef?: React.RefObject<boolean>;
+  /** densable compactingStartTime. Elapsed during compact is max(0, now - start). */
+  compactingStartTime?: number | null;
 
   // Teammate-derived (computed by parent from tasks)
   hasRunningTeammates: boolean;
@@ -114,6 +116,7 @@ export function SpinnerAnimationRow({
   verbose,
   columns,
   compactProgressActiveRef,
+  compactingStartTime = null,
   hasRunningTeammates,
   teammateTokens,
   foregroundedTeammate,
@@ -133,10 +136,14 @@ export function SpinnerAnimationRow({
 
   // densable #18: monotonic elapsed (performance.now) matching loadingStartTimeRef
   const now = performance.now();
-  const elapsedTimeMs =
+  const loadingElapsedMs =
     pauseStartTimeRef.current !== null
       ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current
       : now - loadingStartTimeRef.current - totalPausedMsRef.current;
+  const isCompactingForElapsed = compactProgressActiveRef?.current === true;
+  // densable Je: O && u !== null ? max(0, N - u) : loading elapsed.
+  const elapsedTimeMs =
+    isCompactingForElapsed && compactingStartTime != null ? Math.max(0, now - compactingStartTime) : loadingElapsedMs;
 
   // Track wall-clock turn start for teammates. While a swarm is running the
   // leader's elapsedTimeMs may jump around (new API calls reset
@@ -426,12 +433,6 @@ export function SpinnerAnimationRow({
     </Box>
   );
 
-  // Compaction progress bar. Summary length is unknown up front, so map
-  // streamed tokens through an asymptotic curve (approaches but never reaches
-  // 100%) so it always reads as forward progress. Bar disappears on compact_end.
-  const compactRatio = isCompacting ? 1 - Math.exp(-leaderTokens / 1200) : 0;
-  const compactBarWidth = Math.max(10, Math.min(30, columns - 20));
-
   // densable Msn(status) — replaces verb/glimmer row when retryStatus is set.
   // void time keeps the 50ms clock subscribed so the countdown ticks live.
   if (retryStatus) {
@@ -501,17 +502,7 @@ export function SpinnerAnimationRow({
     </Box>
   );
 
-  if (!isCompacting) return spinnerRow;
-
-  return (
-    <Box flexDirection="column" width="100%">
-      {spinnerRow}
-      <Box flexDirection="row">
-        <ProgressBar ratio={compactRatio} width={compactBarWidth} fillColor={messageColor} />
-        <Text dimColor> {Math.round(compactRatio * 100)}%</Text>
-      </Box>
-    </Box>
-  );
+  return spinnerRow;
 }
 
 function SpinnerModeGlyph({ mode }: { mode: SpinnerMode }): React.ReactNode {
