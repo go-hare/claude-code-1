@@ -1,3 +1,7 @@
 [test]
 root = "."
 timeout = 10000
+# `.claude/worktrees` is gitignored but still on disk (~200k test files).
+# Scanning it OOMs / loads worktree tests as modules ("describe outside
+# of the test runner"). `node_modules` can also leak package tests.
+pathIgnorePatterns = [".claude/", "node_modules/"]

@@ -30,27 +30,23 @@ afterEach(() => {
 })
 
 describe('telemetry official switches', () => {
-  test('unset DISABLE_TELEMETRY is off by default (fork)', async () => {
+  test('unset DISABLE_TELEMETRY is default-on (densable Ivt)', async () => {
     clearPrivacyEnv()
-    const { isTelemetryDisabled, getPrivacyLevel } = await import(
-      '../../src/utils/privacyLevel.ts'
-    )
-    expect(getPrivacyLevel()).toBe('no-telemetry')
-    expect(isTelemetryDisabled()).toBe(true)
-    const { is1PEventLoggingEnabled } = await import(
-      '../../src/services/analytics/firstPartyEventLogger.ts'
-    )
-    expect(is1PEventLoggingEnabled()).toBe(false)
-  })
-
-  test('DISABLE_TELEMETRY=0 opts telemetry send back on', async () => {
-    clearPrivacyEnv()
-    process.env.DISABLE_TELEMETRY = '0'
     const { isTelemetryDisabled, getPrivacyLevel } = await import(
       '../../src/utils/privacyLevel.ts'
     )
     expect(getPrivacyLevel()).toBe('default')
     expect(isTelemetryDisabled()).toBe(false)
+  })
+
+  test('DISABLE_TELEMETRY=0 is set, so telemetry stays off', async () => {
+    clearPrivacyEnv()
+    process.env.DISABLE_TELEMETRY = '0'
+    const { isTelemetryDisabled, getPrivacyLevel } = await import(
+      '../../src/utils/privacyLevel.ts'
+    )
+    expect(getPrivacyLevel()).toBe('no-telemetry')
+    expect(isTelemetryDisabled()).toBe(true)
   })
 
   test('DISABLE_TELEMETRY turns off 1P event logging', async () => {

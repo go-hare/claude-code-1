@@ -18,10 +18,7 @@ describe('scripts/dev.ts spawn cwd vs SDK originalCwd (densable 2.1.283)', () =>
   })
 
   test('cli.tsx restores PWD from CLAUDE_CODE_CALLER_CWD without chdir', () => {
-    const src = readFileSync(
-      join(ROOT, 'src/entrypoints/cli.tsx'),
-      'utf8',
-    )
+    const src = readFileSync(join(ROOT, 'src/entrypoints/cli.tsx'), 'utf8')
     expect(src).toContain('process.env.CLAUDE_CODE_CALLER_CWD')
     expect(src).toContain('process.env.PWD = callerCwd')
     expect(src).not.toContain('process.chdir(callerCwd)')

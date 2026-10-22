@@ -109,10 +109,9 @@ export const DEFAULT_BUILD_FEATURES = [
   // 'HISTORY_SNIP', // 已禁用：snip 功能暂时关闭
   // 'CONTEXT_COLLAPSE', // 已禁用：实现是空壳 stub，启用后会抑制 auto compact 导致上下文管理完全失效
   'MONITOR_TOOL', // Monitor 工具，流式监控后台进程输出
-  // densable 2.1.232 #1: product fork default is runtime Drb "default" ON
-  // (forkSubagentGate), not compile feature. Keep compile flag optional —
-  // AgentTool ORs feature('FORK_SUBAGENT') || gate. FEATURE_FORK_SUBAGENT=1
-  // still force-enables compile path.
+  // densable 2.1.289 Yne is runtime Omo/Imo (interactive default ON,
+  // headless default OFF, coordinator off). Official has no compile
+  // FORK_SUBAGENT gate, and AgentTool does not read feature('FORK_SUBAGENT').
   // 'FORK_SUBAGENT',
   'KAIROS', // Kairos 定时任务系统核心
   // KAIROS 外围（densable SEA 有 SendUserFile/PushNotification/channel 产品串；
@@ -162,4 +161,7 @@ export const DEFAULT_BUILD_FEATURES = [
   'AUTOFIX_PR', // /autofix-pr 命令（fork 引入；docs/jira/AUTOFIX-PR-001.md 承诺默认开启）
   // Native clipboard
   'NATIVE_CLIPBOARD_IMAGE', // macOS FFI 直读 NSPasteboard，替代 osascript（~5ms vs ~600ms）
+  // 自动主题：官方 theme:'auto' + watchSystemTheme（OSC 11 / DEC 2031）。
+  // 不编进默认 feature 时 ThemeProvider 的 watcher effect 会被 DCE 掉。
+  'AUTO_THEME',
 ] as const

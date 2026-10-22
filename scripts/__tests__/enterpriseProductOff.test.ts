@@ -10,14 +10,15 @@ import { describe, expect, test } from 'bun:test'
 const srcRoot = join(import.meta.dir, '../../src')
 
 describe('enterprise product cut', () => {
-  test('policyLimits module is gone', () => {
+  test('policyLimits leftover fetch is back; Team/Enterprise control plane is not', () => {
+    // densable leftover `Jt` — fetch + eligibility. Not the deleted org
+    // control plane (remoteManagedSettings / MDM / org tips / CRI).
     expect(existsSync(join(srcRoot, 'services/policyLimits/index.ts'))).toBe(
-      false,
+      true,
     )
     expect(existsSync(join(srcRoot, 'services/policyLimits/types.ts'))).toBe(
-      false,
+      true,
     )
-    expect(existsSync(join(srcRoot, 'services/policyLimits'))).toBe(false)
   })
 
   test('enterprise modules are deleted', () => {
