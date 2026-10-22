@@ -39,10 +39,7 @@ export type Props = Except<Styles, 'textWrap'> & {
    * ancestors; call `event.stopImmediatePropagation()` to stop bubbling.
    */
   onClick?: (event: ClickEvent) => void;
-  onMouseDown?: (event: MouseActionEvent) => void;
-  onMouseUp?: (event: MouseActionEvent) => void;
-  onMouseDrag?: (event: MouseActionEvent) => void;
-  /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+  /** densable `onPointer` — gold `Wl` / DualInk pointer path. */
   onPointer?: (event: MouseActionEvent) => void;
   onFocus?: (event: FocusEvent) => void;
   onFocusCapture?: (event: FocusEvent) => void;
@@ -88,6 +85,13 @@ export type Props = Except<Styles, 'textWrap'> & {
    */
   elementKey?: string;
   elementPlugin?: string;
+  /**
+   * densable `drawPending` — plugin host has not painted yet. Virtual-scroll
+   * height cache must not record 0 while this (or a non-text child) is set.
+   */
+  drawPending?: boolean;
+  /** densable button hotkey stamped for yoga-window digit visibility. */
+  hotkey?: string;
 };
 
 /**
@@ -105,9 +109,6 @@ function Box({
   accessibility: accessibilityProp,
   'aria-preserve-whitespace': ariaPreserveWhitespace,
   onClick,
-  onMouseDown,
-  onMouseUp,
-  onMouseDrag,
   onPointer,
   onFocus,
   onFocusCapture,
@@ -125,6 +126,8 @@ function Box({
   onWheelCapture,
   elementKey,
   elementPlugin,
+  drawPending,
+  hotkey,
   ...style
 }: PropsWithChildren<Props>): React.ReactNode {
   // Warn if spacing values are not integers to prevent fractional layout dimensions
@@ -156,9 +159,6 @@ function Box({
       autoFocus={autoFocus}
       accessibility={accessibility}
       onClick={onClick}
-      onMouseDown={onMouseDown}
-      onMouseUp={onMouseUp}
-      onMouseDrag={onMouseDrag}
       onPointer={onPointer}
       onFocus={onFocus as unknown as (event: React.FocusEvent<Element, Element>) => void}
       onFocusCapture={onFocusCapture as unknown as (event: React.FocusEvent<Element, Element>) => void}
@@ -176,6 +176,8 @@ function Box({
       onWheelCapture={onWheelCapture as unknown as (event: React.WheelEvent<Element>) => void}
       {...(elementKey !== undefined && { elementKey })}
       {...(elementPlugin !== undefined && { elementPlugin })}
+      {...(drawPending ? { drawPending: true } : {})}
+      {...(hotkey !== undefined && { hotkey })}
       style={{
         flexWrap,
         flexDirection,

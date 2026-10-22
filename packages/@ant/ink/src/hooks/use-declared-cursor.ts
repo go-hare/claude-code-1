@@ -54,7 +54,12 @@ export function useDeclaredCursor({
   useLayoutEffect(() => {
     const node = nodeRef.current
     if (active && node) {
-      setCursorDeclaration({ relativeX: column, relativeY: line, node })
+      setCursorDeclaration({
+        relativeX: column,
+        relativeY: line,
+        node,
+        visible: true,
+      })
     } else {
       setCursorDeclaration(null, node)
     }

@@ -30,9 +30,6 @@ declare module 'react' {
         /** densable accessibility bag */
         accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void
-        onMouseDown?: (event: MouseActionEvent) => void
-        onMouseUp?: (event: MouseActionEvent) => void
-        onMouseDrag?: (event: MouseActionEvent) => void
         onPointer?: (event: MouseActionEvent) => void
         onFocus?: (event: FocusEvent) => void
         onFocusCapture?: (event: FocusEvent) => void
@@ -51,6 +48,8 @@ declare module 'react' {
         /** densable plugin drawing identity for Ide keyRows (cEe). */
         elementKey?: string
         elementPlugin?: string
+        drawPending?: boolean
+        hotkey?: string
         style?: Styles
         stickyScroll?: boolean
         /** Official 2.1.207: default true; false disables non-sticky growth follow. */

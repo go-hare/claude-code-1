@@ -3,6 +3,7 @@ import { Stream } from 'stream'
 import type { FrameEvent } from './frame.js'
 import Ink, { type Options as InkOptions } from './ink.js'
 import instances from './instances.js'
+import { isNativeCursorEnabled } from './terminal.js'
 
 export type RenderOptions = {
   /**
@@ -47,6 +48,8 @@ export type RenderOptions = {
    * Set by getBaseRenderOptions from CLAUDE_AX_SCREEN_READER / --ax-screen-reader / settings.
    */
   isScreenReaderEnabled?: boolean
+  /** densable `eD()` — `et()` / createRoot pin. */
+  nativeCursor?: boolean
 }
 
 export type Instance = {
@@ -97,6 +100,7 @@ export const renderSync = (
     exitOnCtrlC: true,
     patchConsole: true,
     ...opts,
+    nativeCursor: opts.nativeCursor ?? isNativeCursorEnabled(),
   }
 
   const instance: Ink = getInstance(
@@ -153,6 +157,7 @@ export async function createRoot({
   patchConsole = true,
   onFrame,
   isScreenReaderEnabled,
+  nativeCursor,
 }: RenderOptions = {}): Promise<Root> {
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
@@ -168,6 +173,7 @@ export async function createRoot({
     patchConsole,
     onFrame,
     isScreenReaderEnabled,
+    nativeCursor: nativeCursor ?? isNativeCursorEnabled(),
   })
 
   // Register in the instances map so that code that looks up the Ink

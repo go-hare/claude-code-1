@@ -149,10 +149,18 @@ const SENTINEL = csi('c')
 type Pending =
   | {
       kind: 'query'
+      request: string
+      written: boolean
       match: (r: TerminalResponse) => boolean
       resolve: (r: TerminalResponse | undefined) => void
     }
-  | { kind: 'sentinel'; resolve: () => void }
+  | {
+      kind: 'sentinel'
+      request: string
+      written: boolean
+      resolve: (ok: boolean) => void
+    }
+  | { kind: 'barrier' }
 
 export class TerminalQuerier {
   /**
@@ -161,8 +169,27 @@ export class TerminalQuerier {
    * before it — concurrent batches from independent callers stay isolated.
    */
   private queue: Pending[] = []
+  /**
+   * densable `hyr.isInputAttached` — stdin readable is live. Queries
+   * enqueue without writing until attach so replies are not lost.
+   */
+  private isInputAttached = false
+  /** densable theme-notify subscribers. Callback receives `dark`. */
+  private themeListeners = new Set<(dark: boolean) => void>()
 
   constructor(private stdout: NodeJS.WriteStream) {}
+
+  /**
+   * densable `hyr.setInputAttached`. Detach is a flag only; attach
+   * writes every queued item that is not a barrier and not yet `written`.
+   */
+  setInputAttached(attached: boolean): void {
+    this.isInputAttached = attached
+    if (!attached) return
+    for (const item of this.queue) {
+      if (item.kind !== 'barrier' && !item.written) this.write(item)
+    }
+  }
 
   /**
    * Send a query and wait for its response.
@@ -178,17 +205,19 @@ export class TerminalQuerier {
     query: TerminalQuery<T>,
   ): Promise<T | undefined> {
     return new Promise(resolve => {
-      this.queue.push({
+      this.enqueue({
         kind: 'query',
+        request: query.request,
+        written: false,
         match: query.match,
         resolve: r => resolve(r as T | undefined),
       })
-      this.stdout.write(query.request)
     })
   }
 
   /**
-   * Send the DA1 sentinel. Resolves when DA1's response arrives.
+   * Send the DA1 sentinel. Resolves `true` when DA1's response arrives,
+   * `false` if `resync` splices the sentinel first.
    *
    * As a side effect, all queries still pending when DA1 arrives are
    * resolved with `undefined` (terminal didn't respond → doesn't support
@@ -196,46 +225,111 @@ export class TerminalQuerier {
    *
    * Safe to call with no pending queries — still waits for a round-trip.
    */
-  flush(): Promise<void> {
+  flush(): Promise<boolean> {
     return new Promise(resolve => {
-      this.queue.push({ kind: 'sentinel', resolve })
-      this.stdout.write(SENTINEL)
+      this.enqueue({
+        kind: 'sentinel',
+        request: SENTINEL,
+        written: false,
+        resolve,
+      })
     })
   }
 
   /**
-   * Dispatch a response parsed from stdin. Called by App.tsx's
-   * processKeysInBatch for every `kind: 'response'` item.
-   *
-   * Matching strategy:
-   * - First, try to match a pending query (FIFO, first match wins).
-   *   This lets callers send(da1()) explicitly if they want the DA1
-   *   params — a separate DA1 write means the terminal sends TWO DA1
-   *   responses. The first matches the explicit query; the second
-   *   (unmatched) fires the sentinel.
-   * - Otherwise, if this is a DA1, fire the FIRST pending sentinel:
-   *   resolve any queries queued before that sentinel with undefined
-   *   (the terminal answered DA1 without answering them → unsupported)
-   *   and signal its flush() completion. Only draining up to the first
-   *   sentinel keeps later batches intact when multiple callers have
-   *   concurrent queries in flight.
-   * - Unsolicited responses (no match, no sentinel) are silently dropped.
+   * densable `owed()` — count `kind==="barrier"` or
+   * `kind==="sentinel" && n.written`. Queries never count; unwritten
+   * sentinels do not count until attach writes them.
    */
-  onResponse(r: TerminalResponse): void {
+  owed(): number {
+    let count = 0
+    for (const item of this.queue) {
+      if (
+        item.kind === 'barrier' ||
+        (item.kind === 'sentinel' && item.written)
+      ) {
+        count++
+      }
+    }
+    return count
+  }
+
+  /**
+   * Drop a still-pending query. Match is by `query.match` identity, the
+   * same object passed to `send()`. Resolves that send() with undefined.
+   */
+  cancel(query: TerminalQuery): void {
+    const idx = this.queue.findIndex(
+      p => p.kind === 'query' && p.match === query.match,
+    )
+    if (idx === -1) return
+    const [q] = this.queue.splice(idx, 1)
+    if (q?.kind === 'query') q.resolve(undefined)
+  }
+
+  /** densable `subscribeThemeChange` — DEC 2031 reports, not query replies. */
+  subscribeThemeChange(cb: (dark: boolean) => void): () => void {
+    this.themeListeners.add(cb)
+    return () => {
+      this.themeListeners.delete(cb)
+    }
+  }
+
+  /**
+   * densable `hyr.resync`. Splice-drain: query → undefined, sentinel →
+   * false. `probe && isInputAttached` pushes a DA1 barrier (not a
+   * sentinel) so the next DA1 is consumed without resolving callers.
+   */
+  resync({ probe }: { probe: boolean }): void {
+    for (const item of this.queue.splice(0)) {
+      if (item.kind === 'query') item.resolve(undefined)
+      else if (item.kind === 'sentinel') item.resolve(false)
+    }
+    if (probe && this.isInputAttached) {
+      this.queue.push({ kind: 'barrier' })
+      this.stdout.write(SENTINEL)
+    }
+  }
+
+  /**
+   * densable `hyr.onResponse`. Returns whether the response was
+   * consumed. Unmatched non-DA1 (e.g. kitty graphics) is false so App
+   * can `terminalImages.refused`.
+   */
+  onResponse(r: TerminalResponse): boolean {
+    if (r.type === 'themeNotify') {
+      for (const cb of this.themeListeners) cb(r.dark)
+      return true
+    }
+    if (this.queue[0]?.kind === 'barrier') {
+      if (r.type === 'da1') this.queue.shift()
+      return true
+    }
     const idx = this.queue.findIndex(p => p.kind === 'query' && p.match(r))
     if (idx !== -1) {
       const [q] = this.queue.splice(idx, 1)
       if (q?.kind === 'query') q.resolve(r)
-      return
+      return true
     }
+    if (r.type !== 'da1') return false
+    const s = this.queue.findIndex(p => p.kind === 'sentinel')
+    if (s === -1) return false
+    for (const p of this.queue.splice(0, s + 1)) {
+      if (p.kind === 'query') p.resolve(undefined)
+      else if (p.kind === 'sentinel') p.resolve(true)
+    }
+    return true
+  }
 
-    if (r.type === 'da1') {
-      const s = this.queue.findIndex(p => p.kind === 'sentinel')
-      if (s === -1) return
-      for (const p of this.queue.splice(0, s + 1)) {
-        if (p.kind === 'query') p.resolve(undefined)
-        else p.resolve()
-      }
-    }
+  /** densable `hyr.enqueue` — write only while stdin readable is attached. */
+  private enqueue(item: Exclude<Pending, { kind: 'barrier' }>): void {
+    this.queue.push(item)
+    if (this.isInputAttached) this.write(item)
+  }
+
+  /** densable `hyr.write`. */
+  private write(item: Exclude<Pending, { kind: 'barrier' }>): void {
+    item.written = true
+    this.stdout.write(item.request)
   }
 }

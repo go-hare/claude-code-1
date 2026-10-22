@@ -47,7 +47,7 @@ type Options = {
  * ```
  */
 const useInput = (inputHandler: Handler, options: Options = {}) => {
-  const { setRawMode, internal_exitOnCtrlC, internal_eventEmitter } = useStdin()
+  const { setRawMode, internal_eventEmitter } = useStdin()
 
   // useLayoutEffect (not useEffect) so that raw mode is enabled synchronously
   // during React's commit phase, before render() returns. With useEffect, raw
@@ -77,14 +77,7 @@ const useInput = (inputHandler: Handler, options: Options = {}) => {
     if (options.isActive === false) {
       return
     }
-    const { input, key } = event
-
-    // If app is not supposed to exit on Ctrl+C, then let input listener handle it
-    // Note: discreteUpdates is called at the App level when emitting events,
-    // so all listeners are already within a high-priority update context.
-    if (!(input === 'c' && key.ctrl) || !internal_exitOnCtrlC) {
-      inputHandler(input, key, event)
-    }
+    inputHandler(event.input, event.key, event)
   })
 
   useEffect(() => {

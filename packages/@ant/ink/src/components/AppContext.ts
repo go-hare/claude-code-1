@@ -2,6 +2,7 @@ import { createContext } from 'react'
 import type { DOMElement } from '../core/dom.js'
 import type { ClickEvent } from '../core/events/click-event.js'
 import type { FocusManager } from '../core/focus.js'
+import type { TerminalImages } from '../core/terminalImages.js'
 
 /** densable `subscribeClicks` listener — hit node (or null) + ClickEvent (or null). */
 export type ClickSubscribeListener = (
@@ -34,7 +35,7 @@ export type Props = {
    * Ink notifies via `tellFrameListeners()` after onRender paint,
    * immediately before `onFrame`.
    */
-  readonly subscribeFrames: (listener: () => void) => () => void
+  readonly subscribeFrames?: (listener: () => void) => () => void
   /**
    * densable `ib.subscribeClicks` — notified on every alt-screen click
    * *before* onClick bubble (`dispatchMouseClick` → listeners → `bubbleClick`).
@@ -44,17 +45,22 @@ export type Props = {
   /**
    * densable Twe `isHoverTracked` — `altScreenActive && mouseTracking==="full"`.
    */
-  readonly isHoverTracked: () => boolean
+  readonly isHoverTracked?: () => boolean
   /**
    * densable `ib.subscribeHoverTracked` — notified on `setAltScreenActive`
    * via `queueMicrotask`.
    */
-  readonly subscribeHoverTracked: (listener: () => void) => () => void
+  readonly subscribeHoverTracked?: (listener: () => void) => () => void
   /**
    * densable Twe `retainFinePointer` / `m1`. Gold default is `() => () => {}`.
    * PluginClient `fDn` holds the disposer while `acceptsPointer`.
    */
   readonly retainFinePointer: () => () => void
+  /**
+   * densable `HC().terminalImages` — kitty `Jd` registry. Image widgets
+   * allocate/transmit/free here; onRender drains.
+   */
+  readonly terminalImages: TerminalImages | null
 }
 
 /**
@@ -72,6 +78,7 @@ const AppContext = createContext<Props>({
   isHoverTracked: () => false,
   subscribeHoverTracked: () => () => {},
   retainFinePointer: () => () => {},
+  terminalImages: null,
 })
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects

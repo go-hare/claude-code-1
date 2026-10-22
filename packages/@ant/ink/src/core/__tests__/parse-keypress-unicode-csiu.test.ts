@@ -78,9 +78,10 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
       '\x1b[200~' + `\x1b[${FULLWIDTH_COLON_CP}u` + 'hello' + '\x1b[201~'
     const [items] = parseMultipleKeypresses(INITIAL_STATE, paste)
     expect(items).toHaveLength(1)
-    const key = asKey(items[0])
-    expect(key.isPasted).toBe(true)
-    expect(key.sequence).toBe(`${FULLWIDTH_COLON}hello`)
+    expect(items[0]).toEqual({
+      kind: 'paste',
+      text: `${FULLWIDTH_COLON}hello`,
+    })
   })
 
   test('enhanced CSI u with shifted-key subparam inserts fullwidth colon', () => {
@@ -179,9 +180,10 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
       '\x1b[200~' + '\x1b[239u\x1b[188u\x1b[154u' + 'hello' + '\x1b[201~'
     const [items] = parseMultipleKeypresses(INITIAL_STATE, paste)
     expect(items).toHaveLength(1)
-    const key = asKey(items[0])
-    expect(key.isPasted).toBe(true)
-    expect(key.sequence).toBe(`${FULLWIDTH_COLON}hello`)
+    expect(items[0]).toEqual({
+      kind: 'paste',
+      text: `${FULLWIDTH_COLON}hello`,
+    })
   })
 
   test('orphan CSI u tail after ESC flush is NOT re-prefixed (densable kTd)', () => {

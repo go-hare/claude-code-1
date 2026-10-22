@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   _resetJediTermInputForTesting,
-  createArrowBurstWindow,
   createJediTermInputState,
   isJediTermArrowFloodActive,
   rewriteJediTermInput,
-  trackArrowBurst,
 } from '../jediTermInput.js'
 import type { ParsedInput } from '../parse-keypress.js'
 
@@ -21,7 +19,6 @@ function key(name: string): ParsedInput {
     super: false,
     sequence: name,
     raw: name,
-    isPasted: false,
   }
 }
 
@@ -56,16 +53,5 @@ describe('rewriteJediTermInput', () => {
     const out = rewriteJediTermInput(s, [key('up')], 1030, undefined, env)
     expect(out).toEqual([])
     expect(isJediTermArrowFloodActive()).toBe(true)
-  })
-})
-
-describe('trackArrowBurst', () => {
-  test('fires at threshold 8', () => {
-    const w = createArrowBurstWindow()
-    const items = Array.from({ length: 8 }, () => key('down'))
-    expect(trackArrowBurst(w, items, 50)).toEqual({
-      direction: 'down',
-      count: 8,
-    })
   })
 })

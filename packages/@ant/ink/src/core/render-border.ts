@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import cliBoxes, { type Boxes, type BoxStyle } from 'cli-boxes'
 import { applyColor } from './colorize.js'
 import type { DOMNode } from './dom.js'
+import { logForDebugging } from '../utils/debug.js'
 import type Output from './output.js'
 import { stringWidth } from './stringWidth.js'
 import type { Color } from './styles.js'
@@ -94,6 +95,17 @@ const renderBorder = (
             node.style.borderStyle as keyof typeof CUSTOM_BORDER_STYLES
           ] ?? cliBoxes[node.style.borderStyle as keyof Boxes])
         : node.style.borderStyle
+
+    // densable Zmn: unknown borderStyle → no border + log, not throw at paint.
+    if (box === undefined || typeof box.top !== 'string') {
+      const style = node.style.borderStyle
+      logForDebugging(
+        typeof style === 'string'
+          ? `Box borderStyle "${style}" is not a border style; the Box is drawn with no border`
+          : `Box borderStyle is ${typeof style}, not a style name; the Box is drawn with no border`,
+      )
+      return
+    }
 
     const topBorderColor = node.style.borderTopColor ?? node.style.borderColor
     const bottomBorderColor =

@@ -263,7 +263,6 @@ export function KeybindingSetup({
         super: event.superKey,
         sequence: event.sequence,
         raw: event.sequence,
-        isPasted: false,
       };
       const inputEvent = new InputEvent(parsed);
       internal_eventEmitter.emit('input', inputEvent);
@@ -292,7 +291,6 @@ export function KeybindingSetup({
         super: false,
         sequence: '',
         raw: '',
-        isPasted: false,
       };
       const inputEvent = new InputEvent(parsed);
       internal_eventEmitter.emit('input', inputEvent);

@@ -1,39 +1,24 @@
-import { useContext, useEffect, useRef, useState } from 'react'
-import { ClockContext } from '../components/ClockContext.js'
+import { useContext, useRef, useSyncExternalStore } from 'react'
+import {
+  ClockContext,
+  snapClockIntervalMs,
+} from '../components/ClockContext.js'
 import TerminalFocusContext from '../components/TerminalFocusContext.js'
 import type { DOMElement } from '../core/dom.js'
 import { useTerminalViewport } from './use-terminal-viewport.js'
 
+/** densable `eLe`. */
+const noopSubscribe = (): (() => void) => () => {}
+
 /**
- * Hook for synchronized animations that pause when offscreen.
+ * densable `Ji` — keepAlive clock + viewport pause.
  *
- * Returns a ref to attach to the animated element and the current animation time.
- * All instances share the same clock, so animations stay in sync.
- * The clock only runs when at least one keepAlive subscriber exists.
- *
- * Pass `null` to pause — unsubscribes from the clock so no ticks fire.
- * Time freezes at the last value and resumes from the current clock time
- * when a number is passed again.
- *
- * @param intervalMs - How often to update, or null to pause
- * @returns [ref, time] - Ref to attach to element, elapsed time in ms
- *
- * @example
- * function Spinner() {
- *   const [ref, time] = useAnimationFrame(120)
- *   const frame = Math.floor(time / 120) % FRAMES.length
- *   return <Box ref={ref}>{FRAMES[frame]}</Box>
- * }
- *
- * The clock automatically slows when the terminal is blurred,
- * so consumers don't need to handle focus state.
+ * Gold: `Pt(v?r.subscribeKeepAlive:eLe, ()=>v?S.current=Math.max(S.current,Math.floor(r.now()/h)*h):S.current)`.
  */
 export function useAnimationFrame(
   intervalMs: number | null = 16,
 ): [ref: (element: DOMElement | null) => void, time: number] {
   const clock = useContext(ClockContext)
-  // densable 2.1.246 Ow: D0 + U1(terminalFocusState). Focus change recomputes
-  // visibility during render (ref-only YVe does not setState on flip).
   const [viewportRef, { isVisible }, recompute] = useTerminalViewport()
   const { terminalFocusState } = useContext(TerminalFocusContext)
   const prevFocusRef = useRef(terminalFocusState)
@@ -42,26 +27,20 @@ export function useAnimationFrame(
     prevFocusRef.current = terminalFocusState
     visible = recompute()
   }
-  const [time, setTime] = useState(() => clock?.now() ?? 0)
-
   const active = !!clock && visible && intervalMs !== null
-
-  useEffect(() => {
-    if (!clock || !active) return
-
-    let lastUpdate = clock.now()
-
-    const onChange = (): void => {
-      const now = clock.now()
-      if (now - lastUpdate >= intervalMs!) {
-        lastUpdate = now
-        setTime(now)
+  const snapped = intervalMs === null ? null : snapClockIntervalMs(intervalMs)
+  const lastRef = useRef(0)
+  const time = useSyncExternalStore(
+    active && clock ? clock.subscribeKeepAlive : noopSubscribe,
+    () => {
+      if (active && clock && snapped !== null) {
+        lastRef.current = Math.max(
+          lastRef.current,
+          Math.floor(clock.now() / snapped) * snapped,
+        )
       }
-    }
-
-    // keepAlive: true — visible animations drive the clock
-    return clock.subscribe(onChange, true)
-  }, [clock, intervalMs, active])
-
+      return lastRef.current
+    },
+  )
   return [viewportRef, time]
 }

@@ -15,10 +15,6 @@ class AttachStampBag {
 
 const bag = new AttachStampBag()
 
-function isDaemonBgBackend(): boolean {
-  return process.env.CLAUDE_BG_BACKEND === 'daemon'
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
     setTimeout(resolve, ms)
@@ -45,11 +41,12 @@ export function getAttachStampMs(): number {
   return bag.stampMs
 }
 
-/** densable LGe — true while daemon attach is still settling. */
-export function isAttachUnstable(now: number): boolean {
-  if (!isDaemonBgBackend()) return false
-  const { detachedSinceLastAttach, stampMs } = bag
-  return detachedSinceLastAttach || (stampMs !== 0 && now - stampMs < 500)
+/**
+ * densable `Ext` — 289 SEA body is `return !1`. Drain / Rlt still call it;
+ * the 500ms daemon window is kept behind this stub so gold v1 never drops.
+ */
+export function isAttachUnstable(_now: number): boolean {
+  return false
 }
 
 /** densable Rlt — wait until LGe(now) is false. */

@@ -82,6 +82,15 @@ describe('text token batch (official densable tokenizer + ZXc + sji/fag)', () =>
     expect(new InputEvent(keys[1]!).input).toBe('')
   })
 
+  test('reads ≥64 bytes still peel trailing CR as return', () => {
+    const payload = `${'x'.repeat(63)}\r`
+    expect(payload.length).toBeGreaterThanOrEqual(64)
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, payload)
+    const keys = keyItems(items)
+    expect(keys.at(-1)?.name).toBe('return')
+    expect(new InputEvent(keys.at(-1)!).key.return).toBe(true)
+  })
+
   test('astral emoji batch stays one key; fag keeps emoji', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '🙂🙂')
     const keys = keyItems(items)
@@ -118,5 +127,21 @@ describe('text token batch (official densable tokenizer + ZXc + sji/fag)', () =>
     const [items] = parseMultipleKeypresses(INITIAL_STATE, 'MMM8MMMM')
     expect(items).toHaveLength(1)
     expect(new InputEvent(keyItems(items)[0]!).input).toBe('')
+  })
+
+  test('bracketed paste is kind paste not isPasted key', () => {
+    const [items] = parseMultipleKeypresses(
+      INITIAL_STATE,
+      '\x1b[200~hello\x1b[201~',
+    )
+    expect(items).toEqual([{ kind: 'paste', text: 'hello' }])
+  })
+
+  test('DECSET 1004 reports kind focus', () => {
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[I\x1b[O')
+    expect(items).toEqual([
+      { kind: 'focus', focused: true },
+      { kind: 'focus', focused: false },
+    ])
   })
 })

@@ -11,8 +11,18 @@
  * whole input line (erase + rewrite from common prefix).
  */
 
+import { stringWidth as cellWidth } from './stringWidth.js'
+import { expandTabsForWrap } from './tabstops.js'
 import { getGraphemeSegmenter } from './utils/grapheme.js'
 import { wrapAnsi } from './wrapAnsi.js'
+import type { RowPrefixRange } from './screenReaderTree.js'
+
+/** densable `fv` for `Ko` — ambiguous-as-wide, not layout `stringWidth`. */
+const KO_OPTS = { ambiguousIsNarrow: false } as const
+const bunKo =
+  typeof Bun !== 'undefined' && typeof Bun.stringWidth === 'function'
+    ? (s: string) => Bun.stringWidth(s, KO_OPTS)
+    : cellWidth
 
 export type ScreenReaderPark = {
   row: number
@@ -61,23 +71,6 @@ export function countNewlines(text: string): number {
 }
 
 /**
- * Hard-wrap a single logical line to `columns` (official cq hard wrap subset).
- * Empty input yields one empty segment so empty logical lines still occupy a row.
- */
-export function hardWrapScreenReaderLine(
-  line: string,
-  columns: number,
-): string[] {
-  if (line === '') return ['']
-  if (columns <= 0) return [line]
-  const out: string[] = []
-  for (let i = 0; i < line.length; i += columns) {
-    out.push(line.slice(i, i + columns))
-  }
-  return out
-}
-
-/**
  * densable 2.1.218: merge overlapping preserveRanges, sorted by start.
  */
 export function mergePreserveRanges(
@@ -106,10 +99,94 @@ export function mergePreserveRanges(
  * a preserveRange, keep trailing spaces on the last hard-wrapped segment so
  * VoiceOver does not treat the caret-as-space as a "new line".
  */
+const UNREADABLE_PLACEHOLDERS = ['[unreadable text]', '[unreadable]', '[?]']
+const MARK_CONTROL_FORMAT = /^[\p{M}\p{Cc}\p{Cf}]?$/u
+const EMOJI_OR_UNASSIGNED = /[\p{Cn}\p{Emoji}]/u
+
+/** densable `Ko` — max of per-codepoint sum vs whole-string width. */
+export function wrapCellWidth(text: string): number {
+  let summed = 0
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0
+    summed +=
+      cp > 127 && EMOJI_OR_UNASSIGNED.test(ch)
+        ? 2
+        : Math.max(1, bunKo(cp >= 0xd800 && cp <= 0xdfff ? '�' : ch))
+  }
+  return Math.max(summed, bunKo(text))
+}
+
+/**
+ * densable `hv` — wrap by cell width, inserting an unreadable placeholder
+ * when a grapheme is wider than the remaining columns.
+ */
+export function wrapScreenReaderLineByCells(
+  text: string,
+  columns: number,
+): string[] {
+  const placeholder =
+    UNREADABLE_PLACEHOLDERS.find(p => wrapCellWidth(p) <= columns) ?? '?'
+  const marker = { text: placeholder, cells: wrapCellWidth(placeholder) }
+  const tokens: Array<{ text: string; cells: number }> = []
+  for (const { segment } of getGraphemeSegmenter().segment(
+    expandTabsForWrap(text),
+  )) {
+    const cells = wrapCellWidth(segment)
+    if (cells <= columns) {
+      tokens.push({ text: segment, cells })
+      continue
+    }
+    const chars = Array.from(segment)
+    const combiningAt = chars.findIndex(
+      ch => Array.from(getGraphemeSegmenter().segment(`${ch}a`)).length > 1,
+    )
+    const combining = chars[combiningAt] ?? ''
+    const combiningCells = wrapCellWidth(combining)
+    const keepCombining =
+      !MARK_CONTROL_FORMAT.test(combining) && combiningCells <= columns
+    if ((!keepCombining || combiningAt > 0) && tokens.at(-1) !== marker) {
+      tokens.push(marker)
+    }
+    if (keepCombining) {
+      tokens.push({ text: combining, cells: combiningCells })
+      if (combiningAt < chars.length - 1) tokens.push(marker)
+    }
+  }
+  const lines: string[] = []
+  let i = 0
+  while (i < tokens.length) {
+    let end = i
+    let used = 0
+    let spaceBreak = i
+    while (end < tokens.length && used + tokens[end]!.cells <= columns) {
+      used += tokens[end]!.cells
+      end++
+      if (tokens[end - 1]!.text === ' ') spaceBreak = end
+    }
+    if (end === i) end++
+    else if (
+      end < tokens.length &&
+      tokens[end]!.text !== ' ' &&
+      spaceBreak > i
+    ) {
+      end = spaceBreak
+    }
+    lines.push(
+      tokens
+        .slice(i, end)
+        .map(t => t.text)
+        .join(''),
+    )
+    i = end
+  }
+  return lines
+}
+
 export function materializeScreenReaderLines(
   fullText: string,
   columns: number,
   preserveRanges: ReadonlyArray<readonly [number, number]> = [],
+  rowPrefixRanges: ReadonlyArray<RowPrefixRange> = [],
 ): { lines: string[]; lineBaseRows: number[] } {
   const merged = mergePreserveRanges(preserveRanges)
   const logical = fullText === '' ? [] : fullText.split('\n')
@@ -118,30 +195,37 @@ export function materializeScreenReaderLines(
   let charPos = 0
   for (const logicalLine of logical) {
     const lineEnd = charPos + logicalLine.length
-    // densable L: trailing whitespace of this logical line is in a preserve range
     const trimmedLen = logicalLine.trimEnd().length
     const hasTrailing =
       charPos + trimmedLen < lineEnd &&
       merged.some(([s, e]) => s < lineEnd && lineEnd <= e)
+    const prefix =
+      rowPrefixRanges.find(([s, e]) =>
+        logicalLine === ''
+          ? s <= charPos && charPos <= e
+          : s < lineEnd && charPos < e,
+      )?.[2] ?? ''
+    const usablePrefix = columns - wrapCellWidth(prefix) >= 2 ? prefix : ''
+    const trimmedPrefix = usablePrefix.trimEnd()
     lineBaseRows.push(lines.length)
     if (logicalLine === '') {
-      lines.push('')
-    } else if (columns <= 0) {
-      lines.push(logicalLine)
+      lines.push(trimmedPrefix)
     } else {
-      // Official cq(v, t, {trim:false, hard:true}) then split + trimEnd
-      // (except last segment when trailing whitespace is preserved)
-      const wrapped = wrapAnsi(logicalLine, columns, {
-        trim: false,
-        hard: true,
-      })
-      const segs = wrapped.split('\n')
+      const segs =
+        prefix === '' || columns < 2
+          ? wrapAnsi(logicalLine, columns, { trim: false, hard: true }).split(
+              '\n',
+            )
+          : wrapScreenReaderLineByCells(
+              expandTabsForWrap(logicalLine),
+              columns - wrapCellWidth(usablePrefix),
+            )
       for (let p = 0; p < segs.length; p++) {
         const seg = segs[p]!
-        lines.push(hasTrailing && p === segs.length - 1 ? seg : seg.trimEnd())
+        const kept = hasTrailing && p === segs.length - 1 ? seg : seg.trimEnd()
+        lines.push(kept === '' ? trimmedPrefix : usablePrefix + kept)
       }
     }
-    // densable: a = O + 1  (logical line length + newline separator)
     charPos = lineEnd + 1
   }
   return { lines, lineBaseRows }
@@ -244,6 +328,21 @@ export type ScreenReaderFramePlan = {
    * Undefined when skip or suffixAppend/suffixDelete (keep previous).
    */
   nextAnchor?: ScreenReaderAnchor
+  /**
+   * Gold `K` after `N` announcement clamp, before the viewport empty-line walk.
+   * Parent `$to` CHA pre-park: `!J && K<x.length && N===-1 && !srPreParked`.
+   */
+  commonPrefixLength?: number
+  /** Gold `x.length` — new frame line count (`K<x.length` uses this, not lastRow+1). */
+  lineCount?: number
+  /**
+   * Gold `Ae` after viewport clamp: `ce>K || (Ee && ce===K)`.
+   * Erase-only extra CUU is skipped when true; anchor may go broken when
+   * `Ae && se<terminalRows`.
+   */
+  brokenByScroll?: boolean
+  /** Gold `this.terminalRows` — `evt(Math.min(B.length-K, terminalRows))`. */
+  terminalRows?: number
 }
 
 /**
@@ -260,6 +359,8 @@ export function planScreenReaderFrameUpdate(input: {
   stringWidth?: (s: string) => number
   /** densable 2.1.218 preserveRanges from xYr */
   preserveRanges?: ReadonlyArray<readonly [number, number]>
+  /** densable `$l` `rowPrefixRanges` — blockquote `"> "` per-row prefix. */
+  rowPrefixRanges?: ReadonlyArray<RowPrefixRange>
   /**
    * densable GJc announcements already appended to fullText before planning.
    * When set, clamp rewriteFrom so announcements are always spoken (not skipped
@@ -276,12 +377,18 @@ export function planScreenReaderFrameUpdate(input: {
    * cursor. Required for 2.1.222 #15 EOL delete fast path.
    */
   prevParkDeclared?: boolean
+  /**
+   * Gold `this.srPreParked` — CHA pre-park already wrote `$to` this rewrite.
+   * Suffix-append / suffix-delete require `!srPreParked`.
+   */
+  srPreParked?: boolean
 }): ScreenReaderFramePlan {
   const sw = input.stringWidth ?? ((s: string) => s.length)
   const { lines, lineBaseRows } = materializeScreenReaderLines(
     input.fullText,
     input.columns,
     input.preserveRanges,
+    input.rowPrefixRanges,
   )
   const lastRow = Math.max(0, lines.length - 1)
   const park = computeScreenReaderPark(
@@ -296,26 +403,27 @@ export function planScreenReaderFrameUpdate(input: {
     col: sw(lines[lastRow] ?? ''),
   }
 
+  // Gold K / J / N: common prefix, then `if(N!==-1&&K>N)K=N`, then
+  // `J=K===B.length&&K===x.length`.
   let common = 0
   const maxCommon = Math.min(input.prevLines.length, lines.length)
   while (common < maxCommon && input.prevLines[common] === lines[common]) {
     common++
   }
-  // densable: if(c!==-1&&f>c)f=c — announcements force rewrite from their line
+  const announcementStart = input.announcementStartLine
   if (
-    input.announcementStartLine !== undefined &&
-    input.announcementStartLine >= 0 &&
-    common > input.announcementStartLine
+    announcementStart !== undefined &&
+    announcementStart >= 0 &&
+    common > announcementStart
   ) {
-    common = input.announcementStartLine
+    common = announcementStart
   }
   const linesUnchanged =
-    common === input.prevLines.length &&
-    common === lines.length &&
-    input.announcementStartLine === undefined
+    common === input.prevLines.length && common === lines.length
   const parkChanged =
     park.row !== input.prevPark.row || park.col !== input.prevPark.col
   const prevLastRow = Math.max(0, input.prevLines.length - 1)
+  const lineCount = lines.length
   if (linesUnchanged && !parkChanged) {
     return {
       skip: true,
@@ -328,17 +436,20 @@ export function planScreenReaderFrameUpdate(input: {
       lastRow,
       parkChanged: false,
       linesUnchanged: true,
+      commonPrefixLength: common,
+      lineCount,
+      terminalRows: input.terminalRows,
     }
   }
 
   const prevAnchor = input.prevAnchor ?? 'clean'
   const prevPark = input.prevPark
-
-  // Shared gate for densable suffix-append / suffix-delete (no announcements,
-  // same line count, anchor clean|lastRowAnchored, common in viewport).
+  const srPreParked = input.srPreParked === true
+  // Gold suffix: `!J && N===-1 && !srPreParked && (clean | lastRowAnchored…)`.
   const suffixFastPathGate =
     !linesUnchanged &&
-    input.announcementStartLine === undefined &&
+    announcementStart === undefined &&
+    !srPreParked &&
     (prevAnchor === 'clean' ||
       (prevAnchor === 'lastRowAnchored' &&
         common === input.prevLines.length - 1 &&
@@ -386,14 +497,15 @@ export function planScreenReaderFrameUpdate(input: {
             prevWidth,
             suffix,
           },
-          // densable suffix path does not reassign prevScreenReaderAnchor
+          commonPrefixLength: common,
+          lineCount,
+          terminalRows: input.terminalRows,
         }
       }
     }
   }
 
   // densable 2.1.222 #15 EOL delete: separate if — NO prevPark.row viewport gate.
-  // prevLine.startsWith(nextLine), park was at EOL, declared cursor both frames.
   if (suffixFastPathGate) {
     const prevLine = input.prevLines[common] ?? ''
     const nextLine = lines[common] ?? ''
@@ -413,7 +525,6 @@ export function planScreenReaderFrameUpdate(input: {
         sw(String.fromCodePoint(deleted.codePointAt(0)!)) > 0 &&
         keepWidth + sw(deleted) === sw(prevLine) &&
         isGraphemeBoundary(prevLine, nextLine.length) &&
-        // densable: (!/\s/.test(L)||/^\s+$/.test(L)) — non-space or all-space
         (!/\s/.test(deleted) || /^\s+$/.test(deleted)) &&
         input.cursor !== null &&
         prevParkDeclared &&
@@ -435,22 +546,45 @@ export function planScreenReaderFrameUpdate(input: {
             lineIndex: common,
             keepWidth,
           },
+          commonPrefixLength: common,
+          lineCount,
+          terminalRows: input.terminalRows,
         }
       }
     }
   }
 
-  // Official: if scrolled viewport starts after common prefix, clamp rewriteFrom.
+  // Gold after `$to` arm: empty-line walk may advance K to `ce`.
+  // (`$to` itself stays in ink.tsx.)
   let rewriteFrom = common
-  const scrolledAway = input.prevLines.length - input.terminalRows
-  // densable C: b>f&&b>=i.length || T&&b===f  (T = pure shrink at end)
+  const viewportStart = input.prevLines.length - input.terminalRows
+  if (viewportStart > rewriteFrom && viewportStart < lines.length) {
+    let prevIdx = rewriteFrom
+    let nextIdx = rewriteFrom
+    while (nextIdx < viewportStart) {
+      if (lines[nextIdx] === '') {
+        nextIdx++
+        continue
+      }
+      while (prevIdx < viewportStart && input.prevLines[prevIdx] === '') {
+        prevIdx++
+      }
+      if (
+        prevIdx === viewportStart ||
+        input.prevLines[prevIdx] !== lines[nextIdx]
+      ) {
+        break
+      }
+      prevIdx++
+      nextIdx++
+    }
+    if (nextIdx === viewportStart) rewriteFrom = viewportStart
+  }
+  // Gold `Ee` / `Ae`: `ce>K || (Ee && ce===K)` — not `ce>=x.length`.
   const pureShrinkAtEnd = rewriteFrom === lines.length && rewriteFrom > 0
   const brokenByScroll =
-    (scrolledAway > rewriteFrom && scrolledAway >= lines.length) ||
-    (pureShrinkAtEnd && scrolledAway === rewriteFrom)
-  if (scrolledAway > rewriteFrom && scrolledAway < lines.length) {
-    rewriteFrom = scrolledAway
-  }
+    viewportStart > rewriteFrom ||
+    (pureShrinkAtEnd && viewportStart === rewriteFrom)
 
   const nextAnchor = computeNextScreenReaderAnchor({
     prevAnchor,
@@ -478,6 +612,10 @@ export function planScreenReaderFrameUpdate(input: {
     parkChanged,
     linesUnchanged,
     nextAnchor,
+    commonPrefixLength: common,
+    lineCount,
+    brokenByScroll,
+    terminalRows: input.terminalRows,
   }
 }
 
@@ -514,16 +652,18 @@ export function computeNextScreenReaderAnchor(input: {
     return input.prevAnchor
   }
 
-  // densable: if(C) broken
-  if (input.brokenByScroll) return 'broken'
-
-  // M = i.length - f
+  // Gold se = x.length-K
   const rewritten = input.newLineCount - input.rewriteFrom
   const parkOnLast = input.park.row === input.newLineCount - 1
   const shrunk = input.newLineCount < input.prevLineCount
   const prevFitInViewport = input.prevLineCount <= input.terminalRows
 
-  // else if(M>=Math.min(i.length,this.terminalRows)) clean
+  // Gold: if(Ae&&se<this.terminalRows) broken — not Ae alone.
+  if (input.brokenByScroll && rewritten < input.terminalRows) {
+    return 'broken'
+  }
+
+  // else if(se>=Math.min(x.length,this.terminalRows)) clean
   if (rewritten >= Math.min(input.newLineCount, input.terminalRows)) {
     return 'clean'
   }
@@ -532,6 +672,7 @@ export function computeNextScreenReaderAnchor(input: {
     if (input.prevAnchor === 'broken') {
       return parkOnLast ? 'lastRowAnchored' : 'broken'
     }
+    // Gold lastRowAnchored: if(!ue) broken — else keep lastRowAnchored
     if (input.prevAnchor === 'lastRowAnchored') {
       return parkOnLast ? 'lastRowAnchored' : 'broken'
     }
@@ -648,6 +789,11 @@ export function materializeScreenReaderFrameAnsi(
   const joined = plan.rewriteLines.join('\n')
   // newLineCount = rewriteFrom + rewriteLines.length (by construction)
   const newLineCount = rewriteFrom + plan.rewriteLines.length
+  // Gold `evt(Math.min(B.length-K, this.terminalRows))` — cap erase to viewport.
+  const eraseCount = Math.min(
+    plan.prevLineCount - rewriteFrom,
+    plan.terminalRows ?? plan.prevLineCount - rewriteFrom,
+  )
   let content: string
   if (plan.linesUnchanged) {
     // Park-only update: no content rewrite.
@@ -656,12 +802,15 @@ export function materializeScreenReaderFrameAnsi(
     // Pure append at end of previous frame.
     content = rewriteFrom > 0 ? `\n${joined}` : joined
   } else if (rewriteFrom === newLineCount) {
-    // Official l===n.length → erase trailing old lines only (y + optional CUU 1)
-    const erase = eraseScreenReaderLinesUp(plan.prevLineCount - rewriteFrom)
-    content = rewriteFrom > 0 ? erase + cursorMoveRel(0, -1) : erase
+    // Gold K===x.length: pe, extra CUU only when K>0 && !Ae
+    const erase = eraseScreenReaderLinesUp(eraseCount)
+    content =
+      rewriteFrom > 0 && plan.brokenByScroll !== true
+        ? erase + cursorMoveRel(0, -1)
+        : erase
   } else {
     // Mid-frame rewrite: erase upward then write joined rewrite lines.
-    const erase = eraseScreenReaderLinesUp(plan.prevLineCount - rewriteFrom)
+    const erase = eraseScreenReaderLinesUp(eraseCount)
     content = erase + joined
   }
 

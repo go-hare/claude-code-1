@@ -39,6 +39,23 @@ function isXtermJsHost(): boolean {
 }
 
 /**
+ * densable `jd.cachedLayout` stamp — gold `R6`/`Wl`/`tv` read `n.cachedLayout`.
+ * WeakMap `nodeCache` stays for local dirty/prevScreen blit.
+ */
+function stampLayout(
+  node: DOMElement,
+  rect: { x: number; y: number; width: number; height: number; top?: number },
+): void {
+  nodeCache.set(node, rect)
+  node.cachedLayout = {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
+/**
  * densable `b9r()` — per-paint render context.
  * Gold J$0: `v9r(i, p, b9r(), {offsetX:0, offsetY:-c, prevScreen:void 0})`.
  * `consumeClears` is tip-only: pendingClears lives on the DOM WeakMap, so
@@ -684,7 +701,7 @@ function renderNodeToOutput(
     // y+1, not y). HelpV2's third shortcuts column hits this — skipping
     // unconditionally drops "ctrl + z to suspend" from /help output.
     if (height === 0 && siblingSharesY(node, yogaNode)) {
-      nodeCache.set(node, { x, y, width, height, top: yogaTop })
+      stampLayout(node, { x, y, width, height, top: yogaTop })
       node.dirty = false
       return
     }
@@ -1386,7 +1403,7 @@ function renderNodeToOutput(
               depth,
             )
           }
-          nodeCache.set(content, {
+          stampLayout(content, {
             x: contentX,
             y: contentY,
             width: contentYoga.getComputedWidth(),
@@ -1462,7 +1479,7 @@ function renderNodeToOutput(
 
     // Cache layout bounds for dirty tracking
     const rect = { x, y, width, height, top: yogaTop }
-    nodeCache.set(node, rect)
+    stampLayout(node, rect)
     if (node.style.position === 'absolute') {
       ctx.absoluteRectsCur.push(stampAbsoluteRect(node, rect, offsetX, offsetY))
     }

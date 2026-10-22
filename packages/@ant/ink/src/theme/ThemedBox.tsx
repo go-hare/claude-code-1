@@ -43,10 +43,7 @@ export type Props = BaseStylesWithoutColors &
     /** densable aria-preserve-whitespace shorthand */
     'aria-preserve-whitespace'?: boolean;
     onClick?: (event: ClickEvent) => void;
-    onMouseDown?: (event: MouseActionEvent) => void;
-    onMouseUp?: (event: MouseActionEvent) => void;
-    onMouseDrag?: (event: MouseActionEvent) => void;
-    /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+    /** densable `onPointer` — gold `Wl` / DualInk pointer path. */
     onPointer?: (event: MouseActionEvent) => void;
     onFocus?: (event: FocusEvent) => void;
     onFocusCapture?: (event: FocusEvent) => void;

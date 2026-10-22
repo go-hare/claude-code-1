@@ -37,7 +37,7 @@ describe('densable 2.1.246 Cy selectionScopeAt', () => {
     expect(inkSrc).toContain('selectionScopeAt(this.rootNode, col, row)')
     expect(
       inkSrc.match(/selectionScopeAt\(this\.rootNode, col, row\)/g)?.length,
-    ).toBe(2)
+    ).toBe(3)
   })
 
   test('no selectionScope ancestor → undefined', () => {

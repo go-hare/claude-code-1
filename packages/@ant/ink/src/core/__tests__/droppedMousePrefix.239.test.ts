@@ -1,17 +1,29 @@
 import { describe, expect, test } from 'bun:test'
+import { InputEvent } from '../events/input-event.js'
 import {
   INITIAL_STATE,
-  isHeldSgrMousePrefix,
   parkIncompleteMousePrefix,
   parseMultipleKeypresses,
   type ParsedInput,
 } from '../parse-keypress.js'
-import { InputEvent } from '../events/input-event.js'
+
+/** densable Qpr — SGR subset of `zl`; gold is not a public export. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal ESC SGR prefix
+const INCOMPLETE_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;-]*$/
+const HELD_SGR_MOUSE_PREFIX_MAX = 32
+function isHeldSgrMousePrefix(value: string): boolean {
+  return (
+    value.length <= HELD_SGR_MOUSE_PREFIX_MAX &&
+    INCOMPLETE_SGR_MOUSE_PREFIX_RE.test(value)
+  )
+}
 
 function names(items: ParsedInput[]): string[] {
   return items.map(i => {
-    if (i.kind === 'key') return i.name || (i.isPasted ? 'paste' : 'key')
+    if (i.kind === 'key') return i.name || 'key'
     if (i.kind === 'mouse') return `mouse:${i.button}:${i.action}`
+    if (i.kind === 'paste') return 'paste'
+    if (i.kind === 'focus') return i.focused ? 'focus' : 'blur'
     return 'response'
   })
 }

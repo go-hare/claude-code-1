@@ -43,7 +43,7 @@ describe('densable 2.1.246 #32 window-activation click', () => {
       'Date.now() - this.lastActivationInputTime >= WINDOW_ACTIVATION_GRACE_MS',
     )
     expect(src).toContain('windowActivationClickArmed = true')
-    expect(src).toContain('onMouseAction')
+    expect(src).not.toContain('onMouseAction')
     expect(typeof App.prototype.consumeWindowActivationLatch).toBe('function')
   })
 
@@ -59,9 +59,7 @@ describe('densable 2.1.246 #32 window-activation click', () => {
   test('gold Yd: non-hover mouse press synthesizes handleTerminalFocus when blurred', () => {
     expect(src).toContain("item.kind === 'mouse'")
     expect(src).toContain("item.action === 'press'")
-    expect(src).toContain(
-      '!((item.button & 0x20) !== 0 && (item.button & 0x03) === 3)',
-    )
+    expect(src).toContain('!isHoverMotionButton(item.button)')
     expect(src).toContain('!getTerminalFocused()')
     expect(src).toContain('app.handleTerminalFocus(true)')
   })

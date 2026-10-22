@@ -31,13 +31,52 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
     expect(none.fine).toBeUndefined()
   })
 
-  test('App handleMouseEvent dispatches DualInk onMouseAction', () => {
-    expect(app).toContain('app.props.onMouseAction')
-    expect(ink).toContain('onMouseAction={this.dispatchMouseAction}')
-    expect(ink).toContain('hitDispatchMouseAction')
-    expect(app).toContain('consumeDualInk')
-    expect(app).toContain("if (consumeDualInk('mousedown'))")
-    expect(app).toContain("if (consumeDualInk('mouseup')) return")
+  test('App handleMouseEvent DualInk consume is onPointerPress baseButton', () => {
+    expect(ink).not.toContain('onMouseAction={this.dispatchMouseAction}')
+    expect(ink).not.toContain('hitDispatchMouseAction')
+    expect(ink).not.toContain('dispatchMouseAction(')
+    const hit = readFileSync(join(import.meta.dir, '../hit-test.ts'), 'utf8')
+    expect(hit).not.toContain('export function dispatchMouseAction')
+    expect(ink).toContain('fileLinkOpensInPanel={this.fileLinkOpensInPanel}')
+    expect(ink).toContain('isScreenReaderEnabled={this.isScreenReaderEnabled}')
+    const renderApp = ink.indexOf(
+      '<App',
+      ink.indexOf('render(node: ReactNode)'),
+    )
+    const appClose = ink.indexOf(
+      '>',
+      ink.indexOf(
+        'isScreenReaderEnabled={this.isScreenReaderEnabled}',
+        renderApp,
+      ),
+    )
+    const props = ink.slice(renderApp, appClose)
+    expect(props.indexOf('subscribeLayout')).toBeLessThan(
+      props.indexOf('terminalColumns'),
+    )
+    expect(props.indexOf('onPointerHover')).toBeLessThan(
+      props.indexOf('getHyperlinkAt'),
+    )
+    expect(props.indexOf('modes={this.modes}')).toBeLessThan(
+      props.indexOf('getMouseMode'),
+    )
+    expect(props.indexOf('onInputPriorityFrame')).toBeLessThan(
+      props.indexOf('dispatchPasteEvent'),
+    )
+    expect(props.indexOf('rootNode={this.rootNode}')).toBeLessThan(
+      props.indexOf('isScreenReaderEnabled={this.isScreenReaderEnabled}'),
+    )
+    expect(ink).not.toContain(
+      'this.isScreenReaderEnabled || this.accessibilityMode',
+    )
+    expect(ink).toContain('AccessibilityContext.Provider')
+    expect(app).not.toContain('consumeDualInk')
+    expect(app).toContain(
+      'app.props.onPointerPress?.(col, row, baseButton, mods, m.fine)',
+    )
+    expect(app).toContain(
+      'app.props.onPointerRelease?.(col, row, mods, m.fine)',
+    )
     expect(app).toContain('pendingPastePress')
     expect(app).toContain('consumePendingMousePaste')
     expect(app).toContain(
@@ -69,13 +108,22 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
     expect(app).toContain('onPointerDrag')
     expect(app).toContain('onPointerRelease')
     expect(app).toContain(
-      'return app.props.onPointerPress?.(col, row, baseButton, mods, m.fine) === true',
+      'app.props.onPointerPress?.(col, row, baseButton, mods, m.fine)',
     )
     expect(app).not.toContain(
-      'app.props.onMouseAction?.(col, row, m.button, type) === true',
+      'app.props.onMouseAction?.(col, row, m.button, type)',
     )
+    expect(app).toContain('baseButton === 1 || baseButton === 2')
+    expect(app).toContain('isAttachUnstable(Date.now())')
+    expect(app).toContain('attachQuietDrain: dropped')
+    expect(app).toContain('endScreenReaderStartupQuiet()')
+    expect(app).toContain('noteMouseObserved()')
+    expect(app).toContain('{ soloKeypress }')
+    expect(app).toContain("item.kind === 'paste'")
+    expect(app).toContain("item.kind === 'focus'")
+    expect(app).toContain('if (!attachQuiet && items.some(isUserIntentItem))')
     expect(app).toContain(
-      "app.clickCount = 0;\n      if ((m.button & 0x20) === 0 && (baseButton === 1 || baseButton === 2) && consumeDualInk('mousedown'))",
+      'app.props.onPointerPress?.(col, row, baseButton, mods, m.fine)',
     )
     expect(ink).toContain('this.releasePointerCapture(col, row, mods, fine)')
     const forgetStart = ink.indexOf('forgetPointer(): void')
@@ -98,21 +146,18 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
     expect(app).toContain(
       "m.action === 'press' && (m.button & 0x20) !== 0 && baseButton === 3",
     )
-    expect(app).toContain('consumeDualInk')
+    expect(app).not.toContain('consumeDualInk')
     const hoverArm = app.indexOf('if (isHoverMotion)')
-    const consume = app.indexOf('const consumeDualInk')
+    const drag = app.indexOf('app.props.onPointerDrag !== undefined')
     expect(hoverArm).toBeGreaterThan(0)
-    expect(consume).toBeGreaterThan(0)
-    expect(consume).toBeLessThan(hoverArm)
+    expect(drag).toBeGreaterThan(hoverArm)
   })
 
-  test('hit-test fires named handler then onPointer unless stopImmediate', () => {
+  test('gold Wl is onPointer only; no DualInk named onMouseDown bubble', () => {
     const hit = readFileSync(join(import.meta.dir, '../hit-test.ts'), 'utf8')
-    expect(hit).toContain('const pointer = handlers?.onPointer')
-    expect(hit).toContain('named?.(event)')
-    expect(hit).toContain(
-      'if (!event.didStopImmediatePropagation()) pointer?.(event)',
-    )
+    expect(hit).toContain('const handler = node._eventHandlers?.onPointer')
+    expect(hit).not.toContain('export function dispatchMouseAction')
+    expect(hit).not.toContain('named?.(event)')
   })
 
   test('dispatchHover Vd skips blank when hoverIgnoresBlankCells', () => {
@@ -152,16 +197,22 @@ describe('densable Xd tabIndex stops DualInk so left press can select', () => {
   test('tabIndex on the hit walk returns null before ancestor onPointer', () => {
     const root = createNode('ink-box')
     root._eventHandlers = { onPointer: () => {} }
-    nodeCache.set(root, { x: 0, y: 0, width: 80, height: 20 })
+    const rootRect = { x: 0, y: 0, width: 80, height: 20 }
+    nodeCache.set(root, rootRect)
+    root.cachedLayout = rootRect
     const left = createNode('ink-box')
     left.attributes.tabIndex = -1
     left.parentNode = root
     root.childNodes.push(left)
-    nodeCache.set(left, { x: 0, y: 0, width: 50, height: 20 })
+    const leftRect = { x: 0, y: 0, width: 50, height: 20 }
+    nodeCache.set(left, leftRect)
+    left.cachedLayout = leftRect
     const cell = createNode('ink-box')
     cell.parentNode = left
     left.childNodes.push(cell)
-    nodeCache.set(cell, { x: 2, y: 4, width: 20, height: 1 })
+    const cellRect = { x: 2, y: 4, width: 20, height: 1 }
+    nodeCache.set(cell, cellRect)
+    cell.cachedLayout = cellRect
     expect(findPointerHoverTarget(root, 5, 4)).toBeNull()
   })
 
@@ -265,7 +316,7 @@ describe('densable 2.1.289 DualInk SGR-Pixels DEC 1016', () => {
       'utf8',
     )
     expect(terminal).toContain('export function subscribeMousePixelsSupported')
-    expect(terminal).toContain('mousePixelsSupportedListeners')
+    expect(terminal).toContain("tD().onSettle('mousePixels'")
   })
 
   test('app contains onPointerHover mouseReportsInPixels lastHoverOnTarget', () => {
@@ -301,7 +352,7 @@ describe('densable 2.1.289 DualInk SGR-Pixels DEC 1016', () => {
     expect(probe).toContain('decrqm(DEC.MOUSE_PIXELS)')
     expect(probe).toContain('probe: DECRPM 1016 status=')
     expect(probe).toContain(', cell ')
-    expect(probe).toContain('mousePixels?.status === 3')
+    expect(probe).toContain('mousePixels.status === 1 ||')
     expect(probe).toContain('querier.send(cellSize())')
     expect(probe).toContain('Cell size asked again:')
   })
@@ -323,20 +374,28 @@ describe('densable 2.1.289 DualInk SGR-Pixels DEC 1016', () => {
     expect(ink).toContain('this.appRef.current?.reprobeCellPixels()')
   })
 
-  test('gold x1 Yd hover skips onMouseAction DualInk press/drag', () => {
+  test('gold x1 Yd hover skips DualInk press/drag', () => {
     expect(app).toContain(
       "m.action === 'press' && (m.button & 0x20) !== 0 && baseButton === 3",
     )
-    expect(app).toContain('consumeDualInk')
+    expect(app).not.toContain('consumeDualInk')
     const hoverArm = app.indexOf('if (isHoverMotion)')
-    const consume = app.indexOf('const consumeDualInk')
+    const press = app.indexOf(
+      'app.props.onPointerPress?.(col, row, baseButton, mods, m.fine)',
+    )
     expect(hoverArm).toBeGreaterThan(0)
-    expect(consume).toBeGreaterThan(0)
-    expect(consume).toBeLessThan(hoverArm)
+    expect(press).toBeGreaterThan(hoverArm)
   })
 
   test('gold $mo off reasserts SGR 1006 after 1016l', () => {
-    expect(ink).toContain('decreset(DEC.MOUSE_PIXELS) + decset(DEC.MOUSE_SGR)')
+    const modes = readFileSync(
+      join(import.meta.dir, '../terminalModes.ts'),
+      'utf8',
+    )
+    expect(modes).toContain(
+      'off: decreset(DEC.MOUSE_PIXELS) + decset(DEC.MOUSE_SGR)',
+    )
+    expect(ink).toContain("this.modes.reset('mousePixels')")
   })
 
   test('gold igo APC _G id=31 query and unique English logs', () => {

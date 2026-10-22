@@ -6,7 +6,7 @@ import { TerminalEvent } from './terminal-event.js'
  * Official densable 2.1.210 (H6e):
  *   class extends Event { text; constructor(e) { super("paste", {bubbles, cancelable}); this.text = e } }
  *
- * App lag: isPasted → dispatchPasteEvent(sequence) → focused node's onPaste.
+ * App lag: kind paste → dispatchPasteEvent(text) → focused node's onPaste.
  * Bracketed paste never becomes KeyboardEvent / InputEvent insert.
  *
  * `pastedText` is kept as an alias of `text` for older call sites.

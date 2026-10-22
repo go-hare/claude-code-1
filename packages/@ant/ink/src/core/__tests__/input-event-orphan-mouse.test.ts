@@ -14,7 +14,6 @@ function nameless(sequence: string): ParsedKey {
     super: false,
     sequence,
     raw: sequence,
-    isPasted: false,
   }
 }
 
@@ -48,12 +47,8 @@ describe('InputEvent SGR mouse fragment suppress', () => {
     expect(new InputEvent(nameless('17;19M')).input).toBe('')
   })
 
-  test('bracketed paste multi-char still keeps content', () => {
-    const pasted: ParsedKey = {
-      ...nameless('hello pasted'),
-      isPasted: true,
-    }
-    expect(new InputEvent(pasted).input).toBe('hello pasted')
+  test('bracketed paste is kind paste not InputEvent', () => {
+    expect(new InputEvent(nameless('hello pasted')).input).toBe('')
   })
 
   test('named wheeldown has empty input (official lag)', () => {
@@ -68,7 +63,6 @@ describe('InputEvent SGR mouse fragment suppress', () => {
       super: false,
       sequence: '\x1b[<65;18;16M',
       raw: '\x1b[<65;18;16M',
-      isPasted: false,
     }
     expect(new InputEvent(wheel).input).toBe('')
     expect(new InputEvent(wheel).key.wheelDown).toBe(true)
@@ -82,7 +76,7 @@ describe('InputEvent SGR mouse fragment suppress', () => {
 
   test('mixed image chip + SGR is empty via official sji (multi-codepoint)', () => {
     // Residual scrub would leave "[Image #2]"; official sji then drops it
-    // because [...input].length !== 1 and isPasted is false.
+    // because [...input].length !== 1.
     expect(
       new InputEvent(nameless('[Image #2][<65;18;16M[<65;18;16M')).input,
     ).toBe('')

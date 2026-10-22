@@ -28,10 +28,22 @@ export type ScreenReaderDOMNode = DOMNode & {
 
 /** densable preserveRanges: [start, end) char offsets in fullText. */
 export type PreserveRange = readonly [number, number]
+/** densable `rowPrefixRanges`: [start, end, prefix] — blockquote `"> "`. */
+export type RowPrefixRange = readonly [number, number, string]
+
+const BLOCKQUOTE_PREFIX = '> '
+const EMPTY_PRESERVE: PreserveRange[] = []
+const EMPTY_ROW_PREFIX: RowPrefixRange[] = []
+const EMPTY_EXTRACT: ScreenReaderExtract = {
+  text: '',
+  preserveRanges: EMPTY_PRESERVE,
+  rowPrefixRanges: EMPTY_ROW_PREFIX,
+}
 
 export type ScreenReaderExtract = {
   text: string
   preserveRanges: PreserveRange[]
+  rowPrefixRanges: RowPrefixRange[]
 }
 
 /** Official CHh control/bidi strip set used by hkc (RegExp string avoids control-char literal lint). */
@@ -97,9 +109,22 @@ function shiftPreserveRanges(
   offset: number,
 ): PreserveRange[] {
   if (child.length === 0) return base
-  const out = base.length === 0 ? [] : [...base]
+  const out = base === EMPTY_PRESERVE ? [] : [...base]
   for (const [s, e] of child) {
     out.push([s + offset, e + offset])
+  }
+  return out
+}
+
+function shiftRowPrefixRanges(
+  base: RowPrefixRange[],
+  child: RowPrefixRange[],
+  offset: number,
+): RowPrefixRange[] {
+  if (child.length === 0) return base
+  const out = base === EMPTY_ROW_PREFIX ? [] : [...base]
+  for (const [s, e, prefix] of child) {
+    out.push([s + offset, e + offset, prefix])
   }
   return out
 }
@@ -115,21 +140,23 @@ export function extractScreenReaderOutput(
   // densable xYr: if (r>=Zlt) return yir("renderNodeToScreenReaderOutput", …), empty
   if (depth >= MAX_TREE_DEPTH) {
     warnTreeDepthExceeded('renderNodeToScreenReaderOutput', node.nodeName)
-    return { text: '', preserveRanges: [] }
+    return EMPTY_EXTRACT
   }
   if (node.nodeName === '#text') {
     return {
       text: sanitizeScreenReaderText((node as TextNode).nodeValue),
-      preserveRanges: [],
+      preserveRanges: EMPTY_PRESERVE,
+      rowPrefixRanges: EMPTY_ROW_PREFIX,
     }
   }
   const el = node as DOMElement & { accessibility?: ScreenReaderAccessibility }
   const a11y = el.accessibility
-  if (a11y?.hidden) return { text: '', preserveRanges: [] }
-  if (isDisplayNone(el)) return { text: '', preserveRanges: [] }
+  if (a11y?.hidden) return EMPTY_EXTRACT
+  if (isDisplayNone(el)) return EMPTY_EXTRACT
 
   let out = ''
-  let ranges: PreserveRange[] = []
+  let ranges: PreserveRange[] = EMPTY_PRESERVE
+  let rowPrefixes: RowPrefixRange[] = EMPTY_ROW_PREFIX
 
   if (a11y?.label !== undefined) {
     out = sanitizeScreenReaderText(a11y.label)
@@ -147,6 +174,13 @@ export function extractScreenReaderOutput(
           out.length,
         )
       }
+      if (childOut.rowPrefixRanges.length > 0) {
+        rowPrefixes = shiftRowPrefixRanges(
+          rowPrefixes,
+          childOut.rowPrefixRanges,
+          out.length,
+        )
+      }
       out += childOut.text
     }
   } else if (isBoxish(el.nodeName)) {
@@ -157,6 +191,7 @@ export function extractScreenReaderOutput(
     )
     out = box.text
     ranges = box.preserveRanges
+    rowPrefixes = box.rowPrefixRanges
   }
 
   if (a11y?.state) {
@@ -164,19 +199,32 @@ export function extractScreenReaderOutput(
     if (active.length > 0) {
       const prefix = `(${active.join(', ')}) `
       out = prefix + out
-      ranges = shiftPreserveRanges([], ranges, prefix.length)
+      ranges = shiftPreserveRanges(EMPTY_PRESERVE, ranges, prefix.length)
+      rowPrefixes = shiftRowPrefixRanges(
+        EMPTY_ROW_PREFIX,
+        rowPrefixes,
+        prefix.length,
+      )
     }
   }
-  if (a11y?.role && a11y.role !== parentRole) {
+  // densable: skip role prefix when inherited or blockquote (blockquote uses rowPrefix).
+  if (a11y?.role && a11y.role !== parentRole && a11y.role !== 'blockquote') {
     const prefix = `${a11y.role}: `
     out = prefix + out
-    ranges = shiftPreserveRanges([], ranges, prefix.length)
+    ranges = shiftPreserveRanges(EMPTY_PRESERVE, ranges, prefix.length)
+    rowPrefixes = shiftRowPrefixRanges(
+      EMPTY_ROW_PREFIX,
+      rowPrefixes,
+      prefix.length,
+    )
   }
-  // densable: preserveWhitespace marks the entire node text as preserved
   if (a11y?.preserveWhitespace && out !== '') {
     ranges = [[0, out.length]]
   }
-  return { text: out, preserveRanges: ranges }
+  if (a11y?.role === 'blockquote' && out !== '') {
+    rowPrefixes = [[0, out.length, BLOCKQUOTE_PREFIX]]
+  }
+  return { text: out, preserveRanges: ranges, rowPrefixRanges: rowPrefixes }
 }
 
 /**
@@ -211,15 +259,23 @@ function extractScreenReaderBoxOutput(
   }
   if (reverse) parts.reverse()
   let text = ''
-  let ranges: PreserveRange[] = []
+  let ranges: PreserveRange[] = EMPTY_PRESERVE
+  let rowPrefixes: RowPrefixRange[] = EMPTY_ROW_PREFIX
   for (const part of parts) {
     if (text !== '') text += sep
     if (part.preserveRanges.length > 0) {
       ranges = shiftPreserveRanges(ranges, part.preserveRanges, text.length)
     }
+    if (part.rowPrefixRanges.length > 0) {
+      rowPrefixes = shiftRowPrefixRanges(
+        rowPrefixes,
+        part.rowPrefixRanges,
+        text.length,
+      )
+    }
     text += part.text
   }
-  return { text, preserveRanges: ranges }
+  return { text, preserveRanges: ranges, rowPrefixRanges: rowPrefixes }
 }
 
 /** densable wHh text-only path still used by findScreenReaderNodeStartIndex. */
@@ -266,6 +322,7 @@ export function findScreenReaderNodeStartIndex(
       prefix += `(${active.join(', ')}) `.length
     }
   }
+  // densable Ws: `y.role!==f` — includes blockquote (text itself skips the role: prefix).
   if (a11y?.role && a11y.role !== parentRole) {
     prefix += `${a11y.role}: `.length
   }

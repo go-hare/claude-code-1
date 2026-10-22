@@ -8,6 +8,8 @@ export type CursorDeclaration = {
   readonly relativeY: number
   /** The ink-box DOMElement whose yoga layout provides the absolute origin */
   readonly node: DOMElement
+  /** densable `le.visible` — native-cursor show when declared. */
+  readonly visible?: boolean
 }
 
 /**

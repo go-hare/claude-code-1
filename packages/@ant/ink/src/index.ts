@@ -71,21 +71,10 @@ export type {
 // ============================================================
 // Screen-reader park densable
 // ============================================================
-export {
-  computeScreenReaderPark,
-  countNewlines,
-  eraseScreenReaderLinesUp,
-  hardWrapScreenReaderLine,
-  materializeScreenReaderFrameAnsi,
-  materializeScreenReaderLines,
-  planAndMaterializeScreenReaderFrame,
-  planScreenReaderFrameUpdate,
-  isGraphemeBoundary,
-  computeNextScreenReaderAnchor,
-  type ScreenReaderPark,
-  type ScreenReaderCursorDeclaration,
-  type ScreenReaderFramePlan,
-  type ScreenReaderAnchor,
+export type {
+  ScreenReaderPark,
+  ScreenReaderCursorDeclaration,
+  ScreenReaderAnchor,
 } from './core/screenReaderPark.js'
 export {
   extractScreenReaderOutput,
@@ -93,6 +82,7 @@ export {
   findScreenReaderNodeStartIndex,
   sanitizeScreenReaderText,
   type PreserveRange,
+  type RowPrefixRange,
   type ScreenReaderAccessibility,
   type ScreenReaderDOMNode,
   type ScreenReaderExtract,
@@ -218,7 +208,11 @@ export {
   Yot,
   type MouseTrackingMode,
 } from './core/termio/dec.js'
-export { default as instances } from './core/instances.js'
+export {
+  default as instances,
+  Ns,
+} from './core/instances.js'
+export { bindNonBlockingStdoutRemoteFlag } from './core/nonBlockingStdout.js'
 export {
   default as renderBorder,
   type BorderTextOptions,
@@ -230,7 +224,7 @@ export {
   getXtversionName,
   setXtversionName,
   setSynchronizedOutputSupported,
-  hasCursorUpViewportYankBug,
+  subscribeKittyGraphicsSupported,
   supportsExtendedKeys,
   writeDiffToTerminal,
   writeContentToTerminal,
@@ -253,12 +247,9 @@ export {
   clearJediTermArrowFlood,
   consumeJediTermArrowBurstCount,
   rewriteJediTermInput,
-  trackArrowBurst,
   createJediTermInputState,
-  createArrowBurstWindow,
   _resetJediTermInputForTesting,
   type JediTermInputState,
-  type ArrowBurstWindow,
 } from './core/jediTermInput.js'
 export {
   colorize,
@@ -302,6 +293,8 @@ export {
   type ScrollBoxHandle,
 } from './components/ScrollBox.js'
 export { AlternateScreen } from './components/AlternateScreen.js'
+export { default as AlternateScreenHoverContext } from './components/AlternateScreenHoverContext.js'
+export { useHoverTracked } from './hooks/use-hover-tracked.js'
 export { MainScreenShell } from './components/MainScreenShell.js'
 export {
   AxcStickyHost,
@@ -319,6 +312,11 @@ export {
   NATIVE_HISTORY_PUMP_BATCH,
 } from './core/nativeHistoryPump.js'
 export { setAppCallbacks } from './components/App.js'
+export { default as AccessibilityContext } from './components/AccessibilityContext.js'
+export {
+  default as InputNowContext,
+  useInputNow,
+} from './components/InputNowContext.js'
 
 // App types
 export type { Props as AppProps } from './components/AppContext.js'
@@ -392,6 +390,7 @@ export type { Props as BoxProps } from './theme/ThemedBox.js'
 export { default as Text, TextHoverColorContext } from './theme/ThemedText.js'
 export type { Props as TextProps } from './theme/ThemedText.js'
 export { color } from './theme/color.js'
+export { subscribeSystemTheme } from './theme/systemTheme.js'
 
 // Theme sub-components
 export { SearchBox } from './theme/SearchBox.js'

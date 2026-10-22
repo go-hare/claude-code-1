@@ -68,7 +68,8 @@ export class MouseActionEvent extends Event {
    * is parent-relative and wrong when nested.
    */
   prepareForTarget(target: EventTarget): void {
-    const rect = nodeCache.get(target as DOMElement)
+    const rect =
+      (target as DOMElement).cachedLayout ?? nodeCache.get(target as DOMElement)
     if (rect) {
       const originX = Math.floor(rect.x)
       const originY = Math.floor(rect.y)

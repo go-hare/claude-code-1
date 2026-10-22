@@ -7,14 +7,27 @@
  */
 
 const MAX_QUEUE = 16
+/** densable `v` / `M` — CLAUDE_AX_PREPARK_MS default 0, cap 5000. */
+const PREPARK_DEFAULT_MS = 0
+const PREPARK_MAX_MS = 5000
+/** densable `WXo` default 1000, cap 10000. */
+const ANNOUNCEMENT_HOLD_DEFAULT_MS = 1000
+const ANNOUNCEMENT_HOLD_MAX_MS = 10_000
+
 let queue: string[] = []
+/** densable `#t` — next drain should hold the SR frame. */
+let holdRequested = false
+/** densable `#a` — hold-until epoch ms. */
+let holdUntilMs = 0
 
 /**
- * densable `pWr` — push an announcement; keep only the last MAX_QUEUE items.
+ * densable `mW` / `pWr` — push an announcement; keep only the last MAX_QUEUE items.
+ * `hold` sets takeHoldRequest for the next SR paint.
  */
-export function announceForScreenReader(text: string): void {
+export function announceForScreenReader(text: string, hold = false): void {
   if (text === '') return
   queue.push(text)
+  if (hold) holdRequested = true
   if (queue.length > MAX_QUEUE) {
     queue.splice(0, queue.length - MAX_QUEUE)
   }
@@ -33,6 +46,61 @@ export function drainScreenReaderAnnouncements(): string[] {
 /** Test helper — clear queue without reading. */
 export function clearScreenReaderAnnouncements(): void {
   queue = []
+  holdRequested = false
+  holdUntilMs = 0
+}
+
+/** densable `takeHoldRequest`. */
+export function takeScreenReaderHoldRequest(): boolean {
+  const requested = holdRequested
+  holdRequested = false
+  return requested
+}
+
+/** densable `GXo`. */
+export function startScreenReaderHold(untilMs: number): void {
+  holdUntilMs = untilMs
+}
+
+/** densable `pWe`. */
+export function endScreenReaderHold(): void {
+  holdUntilMs = 0
+  holdRequested = false
+}
+
+/** densable `zXo`. */
+export function isScreenReaderHoldActive(nowMs = Date.now()): boolean {
+  return nowMs < holdUntilMs
+}
+
+/** densable `UXo`. */
+export function getScreenReaderPreparkMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.CLAUDE_AX_PREPARK_MS
+  let configured: number | undefined
+  if (raw !== undefined && raw !== '') {
+    const parsed = Number.parseInt(raw, 10)
+    if (Number.isFinite(parsed) && parsed >= 0) configured = parsed
+  }
+  return Math.min(configured ?? PREPARK_DEFAULT_MS, PREPARK_MAX_MS)
+}
+
+/** densable `WXo` — consume the hold request and return hold ms. */
+export function takeScreenReaderAnnouncementHoldMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (!takeScreenReaderHoldRequest()) return 0
+  const raw = env.CLAUDE_AX_ANNOUNCEMENT_HOLD_MS
+  let configured: number | undefined
+  if (raw !== undefined && raw !== '') {
+    const parsed = Number.parseInt(raw, 10)
+    if (Number.isFinite(parsed) && parsed >= 0) configured = parsed
+  }
+  return Math.min(
+    configured ?? ANNOUNCEMENT_HOLD_DEFAULT_MS,
+    ANNOUNCEMENT_HOLD_MAX_MS,
+  )
 }
 
 /** Test helper — peek without drain. */

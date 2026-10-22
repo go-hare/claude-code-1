@@ -25,6 +25,7 @@ import {
   type LayoutOverflow,
   type LayoutPositionType,
   type LayoutWrap,
+  type YogaNodeConfig,
 } from './node.js'
 
 // --
@@ -53,9 +54,11 @@ const GUTTER_MAP: Record<LayoutGutter, Gutter> = {
 
 export class YogaLayoutNode implements LayoutNode {
   readonly yoga: YogaNode
+  config?: YogaNodeConfig
 
-  constructor(yoga: YogaNode) {
+  constructor(yoga: YogaNode, config?: YogaNodeConfig) {
     this.yoga = yoga
+    this.config = config
   }
 
   // Tree
@@ -74,7 +77,7 @@ export class YogaLayoutNode implements LayoutNode {
 
   getParent(): LayoutNode | null {
     const p = this.yoga.getParent()
-    return p ? new YogaLayoutNode(p) : null
+    return p ? new YogaLayoutNode(p, p.config) : null
   }
 
   // Layout
@@ -157,25 +160,25 @@ export class YogaLayoutNode implements LayoutNode {
   setHeightAuto(): void {
     this.yoga.setHeightAuto()
   }
-  setMinWidth(value: number): void {
+  setMinWidth(value: number | undefined): void {
     this.yoga.setMinWidth(value)
   }
   setMinWidthPercent(value: number): void {
     this.yoga.setMinWidthPercent(value)
   }
-  setMinHeight(value: number): void {
+  setMinHeight(value: number | undefined): void {
     this.yoga.setMinHeight(value)
   }
   setMinHeightPercent(value: number): void {
     this.yoga.setMinHeightPercent(value)
   }
-  setMaxWidth(value: number): void {
+  setMaxWidth(value: number | undefined): void {
     this.yoga.setMaxWidth(value)
   }
   setMaxWidthPercent(value: number): void {
     this.yoga.setMaxWidthPercent(value)
   }
-  setMaxHeight(value: number): void {
+  setMaxHeight(value: number | undefined): void {
     this.yoga.setMaxHeight(value)
   }
   setMaxHeightPercent(value: number): void {
@@ -311,6 +314,8 @@ export class YogaLayoutNode implements LayoutNode {
 // growth, so no preload/swap/reset machinery is needed. The Yoga instance is
 // just a plain JS object available at import time.
 
-export function createYogaLayoutNode(): LayoutNode {
-  return new YogaLayoutNode(Yoga.Node.create())
+export function createYogaLayoutNode(config?: YogaNodeConfig): LayoutNode {
+  // densable `_r(name, yogaConfig)` → hs.Node.create(u) (config may be undefined).
+  const yoga = Yoga.Node.create(config)
+  return new YogaLayoutNode(yoga, config ?? yoga.config)
 }

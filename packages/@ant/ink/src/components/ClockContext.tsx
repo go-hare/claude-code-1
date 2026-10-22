@@ -3,22 +3,38 @@ import { FRAME_INTERVAL_MS } from '../core/constants.js';
 import { useTerminalFocus } from '../hooks/use-terminal-focus.js';
 
 export type Clock = {
-  subscribe: (onChange: () => void, keepAlive: boolean) => () => void;
+  subscribeKeepAlive: (onChange: () => void) => () => void;
+  subscribeFollower: (onChange: () => void) => () => void;
   now: () => number;
   setTickInterval: (ms: number) => void;
+  setTimeout: (callback: () => void, ms: number) => () => void;
 };
+
+/** densable `Lo` — floor for `KTt` when alt-screen full-repaint is on. */
+const ALT_SCREEN_MIN_ANIM_MS = 480;
+
+/**
+ * densable `KTt` then `Math.ceil(KTt(o)/Vh)*Vh`.
+ * Gold: `a.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT?Math.max(o,Lo):o`.
+ */
+export function snapClockIntervalMs(intervalMs: number): number {
+  const stepped = process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT
+    ? Math.max(intervalMs, ALT_SCREEN_MIN_ANIM_MS)
+    : intervalMs;
+  return Math.ceil(stepped / FRAME_INTERVAL_MS) * FRAME_INTERVAL_MS;
+}
 
 export function createClock(tickIntervalMs: number): Clock {
   const subscribers = new Map<() => void, boolean>();
   let interval: ReturnType<typeof setInterval> | null = null;
   let currentTickIntervalMs = tickIntervalMs;
-  let startTime = 0;
-  // Snapshot of the current tick's time, ensuring all subscribers in the same
-  // tick see the same value (keeps animations synchronized)
+  // densable `l` — stamped at construction (`performance.now()`).
+  const origin = performance.now();
+  // densable `i` — last tick snapshot while the interval is live.
   let tickTime = 0;
 
   function tick(): void {
-    tickTime = Date.now() - startTime;
+    tickTime = performance.now() - origin;
     for (const onChange of subscribers.keys()) {
       onChange();
     }
@@ -28,48 +44,47 @@ export function createClock(tickIntervalMs: number): Clock {
     const anyKeepAlive = [...subscribers.values()].some(Boolean);
 
     if (anyKeepAlive) {
-      if (interval) {
+      if (interval !== null) {
         clearInterval(interval);
-        interval = null;
-      }
-      if (startTime === 0) {
-        startTime = Date.now();
+      } else {
+        tickTime = performance.now() - origin;
       }
       interval = setInterval(tick, currentTickIntervalMs);
-    } else if (interval) {
+    } else if (interval !== null) {
       clearInterval(interval);
       interval = null;
     }
   }
 
-  return {
-    subscribe(onChange, keepAlive) {
-      subscribers.set(onChange, keepAlive);
+  // densable `f` — gold Clock inner helper (not a public bind).
+  function f(onChange: () => void, keepAlive: boolean): () => void {
+    subscribers.set(onChange, keepAlive);
+    updateInterval();
+    return () => {
+      subscribers.delete(onChange);
       updateInterval();
-      return () => {
-        subscribers.delete(onChange);
-        updateInterval();
-      };
-    },
+    };
+  }
 
+  return {
+    subscribeKeepAlive(onChange) {
+      return f(onChange, true);
+    },
+    subscribeFollower(onChange) {
+      return f(onChange, false);
+    },
     now() {
-      if (startTime === 0) {
-        startTime = Date.now();
-      }
-      // When the clock interval is running, return the synchronized tickTime
-      // so all subscribers in the same tick see the same value.
-      // When paused (no keepAlive subscribers), return real-time to avoid
-      // returning a stale tickTime from the last tick before the pause.
-      if (interval && tickTime) {
-        return tickTime;
-      }
-      return Date.now() - startTime;
+      if (interval !== null) return tickTime;
+      return performance.now() - origin;
     },
-
     setTickInterval(ms) {
       if (ms === currentTickIntervalMs) return;
       currentTickIntervalMs = ms;
       updateInterval();
+    },
+    setTimeout(callback, ms) {
+      const timer = setTimeout(callback, ms);
+      return () => clearTimeout(timer);
     },
   };
 }

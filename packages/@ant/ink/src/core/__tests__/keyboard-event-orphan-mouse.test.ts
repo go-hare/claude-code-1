@@ -14,7 +14,6 @@ function nameless(sequence: string): ParsedKey {
     super: false,
     sequence,
     raw: sequence,
-    isPasted: false,
   }
 }
 

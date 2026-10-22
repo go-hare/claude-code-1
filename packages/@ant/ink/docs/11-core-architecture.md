@@ -37,7 +37,7 @@ Each render cycle (`onRender`) follows these phases:
 const FRAME_INTERVAL_MS = 16  // ~60fps cap
 ```
 
-Renders are throttled. Multiple state updates in one frame are batched.
+Renders are paced by densable `scheduleFrame` (Vh=16 / SSo=4). Multiple state updates in one frame are batched.
 
 ### Double Buffering
 

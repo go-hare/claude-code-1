@@ -15,6 +15,7 @@
  * inside Windows Terminal (covers WSL).
  */
 import bidiFactory from 'bidi-js'
+import { inkSessionHost } from './instances.js'
 
 type BidiInstance = {
   getEmbeddingLevels: (
@@ -38,16 +39,40 @@ type ClusteredChar = {
 }
 
 let bidiInstance: BidiInstance | undefined
-let needsSoftwareBidi: boolean | undefined
+
+/**
+ * densable `cv` — gold `needed` cache per `U().host`.
+ * `typeof process.env.WT_SESSION==="string"||a.TERM_PROGRAM==="vscode"`.
+ * No `process.platform==="win32"` (that was analog extra).
+ */
+class SoftwareBidiNeed {
+  needed: boolean | undefined
+  isNeeded(): boolean {
+    if (this.needed === undefined) {
+      this.needed =
+        typeof process.env.WT_SESSION === 'string' ||
+        process.env.TERM_PROGRAM === 'vscode'
+    }
+    return this.needed
+  }
+}
+
+/** densable `I1` — `new z(()=>new cv)` keyed by `U().host`. */
+const softwareBidiByHost = new WeakMap<object, SoftwareBidiNeed>()
+
+/** densable `ef` — `return I1.of(U().host).isNeeded()`. */
+export function isSoftwareBidiNeeded(): boolean {
+  const host = inkSessionHost()
+  let slot = softwareBidiByHost.get(host)
+  if (slot === undefined) {
+    slot = new SoftwareBidiNeed()
+    softwareBidiByHost.set(host, slot)
+  }
+  return slot.isNeeded()
+}
 
 function needsBidi(): boolean {
-  if (needsSoftwareBidi === undefined) {
-    needsSoftwareBidi =
-      process.platform === 'win32' ||
-      typeof process.env['WT_SESSION'] === 'string' || // WSL in Windows Terminal
-      process.env['TERM_PROGRAM'] === 'vscode' // VS Code integrated terminal (xterm.js)
-  }
-  return needsSoftwareBidi
+  return isSoftwareBidiNeeded()
 }
 
 function getBidi() {

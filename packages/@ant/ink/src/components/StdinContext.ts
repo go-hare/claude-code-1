@@ -1,5 +1,9 @@
 import { createContext } from 'react'
 import { EventEmitter } from '../core/events/emitter.js'
+import {
+  createJediTermInputState,
+  type JediTermInputState,
+} from '../core/jediTermInput.js'
 import type { TerminalQuerier } from '../core/terminal-querier.js'
 
 export type Props = {
@@ -19,13 +23,13 @@ export type Props = {
    */
   readonly isRawModeSupported: boolean
 
-  readonly internal_exitOnCtrlC: boolean
-
   readonly internal_eventEmitter: EventEmitter
 
   /** Query the terminal and await responses (DECRQM, OSC 11, etc.).
    *  Null only in the never-reached default context value. */
   readonly internal_querier: TerminalQuerier | null
+  /** densable `internal_jediTermInput` — `cst()` on App; gold rle bag. */
+  readonly internal_jediTermInput: JediTermInputState
 }
 
 /**
@@ -38,9 +42,8 @@ const StdinContext = createContext<Props>({
   internal_eventEmitter: new EventEmitter(),
   setRawMode() {},
   isRawModeSupported: false,
-
-  internal_exitOnCtrlC: true,
   internal_querier: null,
+  internal_jediTermInput: createJediTermInputState(),
 })
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects

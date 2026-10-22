@@ -47,4 +47,17 @@ describe('densable 2.1.238 #14 wrapAnsi DH/pAb', () => {
     expect(out.includes('\n')).toBe(true)
     expect(out).toContain('\x1b[31m')
   })
+
+  test('Lu/Z is Bun.wrapAnsi, not wrap-ansi npm', async () => {
+    const src = await Bun.file(
+      new URL('../wrapAnsi.ts', import.meta.url),
+    ).text()
+    expect(src).toContain('Bun.wrapAnsi')
+    expect(src).not.toContain("from 'wrap-ansi'")
+    expect(src).not.toContain('wrapAnsiNpm')
+    expect(src).toContain("from './utils/sliceAnsi.js'")
+    // densable Z restore: `n[l++]??c` keeps the PUA if the stand-in was unmatched
+    expect(src).toContain('saved[i++] ?? c')
+    expect(src).not.toContain("saved[i++] ?? ''")
+  })
 })

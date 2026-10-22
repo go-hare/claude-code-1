@@ -7,10 +7,15 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   announceDeletedText,
+  announceForScreenReader,
   clearScreenReaderAnnouncements,
   drainScreenReaderAnnouncements,
+  endScreenReaderHold,
   formatDeletedTextAnnouncement,
+  isScreenReaderHoldActive,
   peekScreenReaderAnnouncements,
+  startScreenReaderHold,
+  takeScreenReaderAnnouncementHoldMs,
 } from '../screenReaderAnnounce.js'
 import {
   materializeScreenReaderLines,
@@ -69,6 +74,17 @@ describe('announce queue (densable pWr / GJc)', () => {
     expect(q[0]).toBe('k4')
     expect(q[15]).toBe('k19')
   })
+
+  test('WXo / GXo / zXo hold request', () => {
+    expect(takeScreenReaderAnnouncementHoldMs()).toBe(0)
+    announceForScreenReader('held', true)
+    expect(takeScreenReaderAnnouncementHoldMs()).toBe(1000)
+    expect(takeScreenReaderAnnouncementHoldMs()).toBe(0)
+    startScreenReaderHold(Date.now() + 50)
+    expect(isScreenReaderHoldActive()).toBe(true)
+    endScreenReaderHold()
+    expect(isScreenReaderHoldActive()).toBe(false)
+  })
 })
 
 describe('materializeScreenReaderLines preserveRanges (densable #13)', () => {
@@ -109,7 +125,7 @@ describe('extractScreenReaderOutput preserveWhitespace', () => {
 
   function inkText(
     children: ScreenReaderDOMNode[],
-    accessibility?: { preserveWhitespace?: boolean },
+    accessibility?: { preserveWhitespace?: boolean; role?: string },
   ): DOMElement {
     const node: DOMElement = {
       nodeName: 'ink-text',
@@ -131,5 +147,12 @@ describe('extractScreenReaderOutput preserveWhitespace', () => {
     const out = extractScreenReaderOutput(node)
     expect(out.text).toBe('hi  ')
     expect(out.preserveRanges).toEqual([[0, 4]])
+  })
+
+  test('blockquote role is rowPrefix not role: prefix', () => {
+    const node = inkText([text('quoted')], { role: 'blockquote' })
+    const out = extractScreenReaderOutput(node)
+    expect(out.text).toBe('quoted')
+    expect(out.rowPrefixRanges).toEqual([[0, 6, '> ']])
   })
 })

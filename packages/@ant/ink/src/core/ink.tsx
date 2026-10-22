@@ -1,17 +1,34 @@
 import autoBind from 'auto-bind';
 import { closeSync, constants as fsConstants, openSync, readSync, writeSync } from 'fs';
 import noop from 'lodash-es/noop.js';
-import throttle from 'lodash-es/throttle.js';
 import React, { type ReactNode } from 'react';
 import type { FiberRoot } from 'react-reconciler';
 import { ConcurrentRoot } from 'react-reconciler/constants.js';
 import { onExit } from 'signal-exit';
-import { getYogaCounters } from './yoga-layout/index.js';
+import Yoga, { getYogaCounters } from './yoga-layout/index.js';
+import { TerminalImages } from './terminalImages.js';
 import { format } from 'util';
 import { colorize } from './colorize.js';
+import AccessibilityContext from '../components/AccessibilityContext.js';
 import App from '../components/App.js';
+import TerminalModesContext from '../components/TerminalModesContext.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from '../components/CursorDeclarationContext.js';
-import { FRAME_INTERVAL_MS } from './constants.js';
+import {
+  FRAME_INTERVAL_MS,
+  INPUT_PRIORITY_FRAME_MS,
+  OWED_REPLY_HOLD_MS,
+  STDOUT_BACKLOG_BYTES,
+  STDOUT_BACKLOG_RETRY_MS,
+} from './constants.js';
+import {
+  installNonBlockingStdout,
+  isNonBlockingStdoutInstalled,
+  shouldInstallNonBlockingStdout,
+  type NonBlockingStdoutHandle,
+  type StdoutBackpressureEpisode,
+} from './nonBlockingStdout.js';
+import { restoreTerminalModes, TerminalModes } from './terminalModes.js';
+import { InkTree } from './tree.js';
 import * as dom from './dom.js';
 import { ClickEvent, EMPTY_CLICK_MODS, type ClickMods, type MouseClickResult } from './events/click-event.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
@@ -24,14 +41,13 @@ import {
   cellIsBlankForHover,
   dispatchHover,
   followHover as applyFollowHover,
-  dispatchMouseAction as hitDispatchMouseAction,
   dispatchPointer,
   findPointerHoverTarget,
   hitPointerHover,
   hitTest,
   nodeHasWheelHandler,
 } from './hit-test.js';
-import instances from './instances.js';
+import instances, { Ns } from './instances.js';
 import { LogUpdate } from './log-update.js';
 import { nodeCache } from './node-cache.js';
 import { optimize } from './optimizer.js';
@@ -84,48 +100,50 @@ import {
 } from './selection.js';
 import {
   computeScreenReaderPark,
-  materializeScreenReaderFrameAnsi,
-  materializeScreenReaderLines,
-  planScreenReaderFrameUpdate,
+  countNewlines,
+  eraseScreenReaderLinesUp as evt,
+  isGraphemeBoundary as Iv,
+  mergePreserveRanges,
+  wrapCellWidth as Ko,
+  wrapScreenReaderLineByCells as hv,
   type ScreenReaderAnchor,
   type ScreenReaderPark,
 } from './screenReaderPark.js';
-import { endScreenReaderStartupQuiet, getScreenReaderStartupQuietRemainingMs } from './screenReaderStartupQuiet.js';
-import { drainScreenReaderAnnouncements } from './screenReaderAnnounce.js';
-import {
-  extractScreenReaderOutput,
-  extractScreenReaderText,
-  findScreenReaderNodeStartIndex,
-  sanitizeScreenReaderText,
-  type ScreenReaderDOMNode,
-} from './screenReaderTree.js';
+import { expandTabsForWrap as r7 } from './tabstops.js';
+import { wrapAnsi } from './wrapAnsi.js';
 import { stringWidth } from './stringWidth.js';
 import {
   getCellPixels,
   getMousePixelsSupported,
+  isNativeCursorEnabled,
   isXtermJs,
   subscribeMousePixelsSupported,
   SYNC_OUTPUT_SUPPORTED,
-  supportsExtendedKeys,
   type Terminal,
   recordSlowestWrite,
   writeContentToTerminal,
   writeDiffToTerminal,
+  kittyKeyboardPopSeq,
 } from './terminal.js';
 import type { TerminalQuerier } from './terminal-querier.js';
 import { cursorPosition as cursorPositionQuery } from './terminal-querier.js';
-import { MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS, readStdoutSize, sanitizeTerminalDimension } from './terminalSize.js';
+import { endScreenReaderStartupQuiet, getScreenReaderStartupQuietRemainingMs } from './screenReaderStartupQuiet.js';
 import {
-  CURSOR_HOME,
-  cursorMove,
-  cursorPosition,
-  cursorTo,
-  DISABLE_KITTY_KEYBOARD,
-  DISABLE_MODIFY_OTHER_KEYS,
-  ENABLE_KITTY_KEYBOARD,
-  ENABLE_MODIFY_OTHER_KEYS,
-  ERASE_SCREEN,
-} from './termio/csi.js';
+  drainScreenReaderAnnouncements,
+  endScreenReaderHold,
+  getScreenReaderPreparkMs,
+  isScreenReaderHoldActive,
+  startScreenReaderHold,
+  takeScreenReaderAnnouncementHoldMs,
+} from './screenReaderAnnounce.js';
+import {
+  extractScreenReaderOutput,
+  findScreenReaderNodeStartIndex,
+  sanitizeScreenReaderText,
+  type ScreenReaderDOMNode,
+} from './screenReaderTree.js';
+import { MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS, readStdoutSize, sanitizeTerminalDimension } from './terminalSize.js';
+import { csi, CURSOR_HOME, cursorMove, cursorPosition, cursorTo, ERASE_SCREEN } from './termio/csi.js';
 import {
   ATLAS_KEY_THRESHOLD,
   ATLAS_RESET_COOLDOWN_MS,
@@ -138,27 +156,19 @@ import {
   recordAtlasReset,
 } from './xtermAtlas.js';
 import {
-  DBP,
   DEC,
   decreset,
-  decset,
   DFE,
   DISABLE_MOUSE_TRACKING,
   EFE,
   enableMouseTracking,
   ENTER_ALT_SCREEN,
-  exitAltScreenSequence,
+  EXIT_ALT_SCREEN,
   HIDE_CURSOR,
-  type MouseTrackingMode,
   SHOW_CURSOR,
+  type MouseTrackingMode,
 } from './termio/dec.js';
-import {
-  CLEAR_ITERM2_PROGRESS,
-  CLEAR_TAB_STATUS,
-  setClipboard,
-  supportsTabStatus,
-  wrapForMultiplexer,
-} from './termio/osc.js';
+import { setClipboard } from './termio/osc.js';
 import { TerminalWriteProvider } from '../hooks/useTerminalNotification.js';
 
 // Alt-screen: renderer.ts sets cursor.visible = !isTTY || screen.height===0,
@@ -252,6 +262,28 @@ function isEnvTruthyLike(value: string | undefined): boolean {
   return value === '1' || value === 'true' || value === 'yes' || value === 'on';
 }
 
+/** densable `O` — gold `u().getPlatform()`; ctor only branches on `"windows"`. */
+function O(): 'macos' | 'windows' | 'linux' {
+  switch (process.platform) {
+    case 'win32':
+      return 'windows';
+    case 'darwin':
+      return 'macos';
+    default:
+      return 'linux';
+  }
+}
+
+/** densable `ZY` / `MHe` — relative cursor for gold onRenderScreenReader BODY. */
+function ZY(dx: number, dy: number): string {
+  let r = '';
+  if (dx < 0) r += csi(-dx, 'D');
+  else if (dx > 0) r += csi(dx, 'C');
+  if (dy < 0) r += csi(-dy, 'A');
+  else if (dy > 0) r += csi(dy, 'B');
+  return r;
+}
+
 export type Logger = {
   debug(message: string, options?: { level?: string }): void;
   error(error: Error | unknown): void;
@@ -275,6 +307,8 @@ export type Options = {
    * onRenderScreenReader (plain-text + park ANSI write path).
    */
   isScreenReaderEnabled?: boolean;
+  /** densable `eD()` — `et()` / createRoot pin. */
+  nativeCursor?: boolean;
 };
 
 /** No-op logger used when no logger is injected. */
@@ -291,6 +325,39 @@ export default class Ink {
   private isUnmounted = false;
   private isPaused = false;
   /**
+   * densable `modes` (`dqe`) — DEC stack. `isHandedOff` ORs `isSuspended`.
+   */
+  readonly modes = new TerminalModes();
+  /**
+   * densable `ownTree` — set when `tree()` is used instead of React `render()`.
+   */
+  private ownTree: InkTree | undefined;
+  /**
+   * densable `nonBlockingStdout` — gold `mbo` wrap of process.stdout.write.
+   */
+  private nonBlockingStdout: NonBlockingStdoutHandle | null = null;
+  /**
+   * densable `isHandedOff` —
+   * `this.isPaused||this.modes.isSuspended||this.ownTree!==void 0&&Ns().has(this.options.stdout)`.
+   * `Ns` is gold `Ht.of(U().host)`.
+   */
+  get isHandedOff(): boolean {
+    return this.isPaused || this.modes.isSuspended || (this.ownTree !== undefined && Ns().has(this.options.stdout));
+  }
+  // densable scheduleFrame pacer — Vh / SSo / lastPacedFrameAt / frameTimer.
+  private frameMicrotaskQueued = false;
+  /** Bumps on each onRender so a queued paced microtask from an earlier
+   *  scheduleFrame is a no-op once this paint already ran (frameSink tests
+   *  call onRender() synchronously after render()). */
+  private pacedFrameEpoch = 0;
+  private lastPacedFrameAt = Number.NEGATIVE_INFINITY;
+  private frameTimer: ReturnType<typeof setTimeout> | null = null;
+  private frameTimerDueAt = 0;
+  private inputPriorityUntil = 0;
+  /** densable `frameHeldForBacklog` — true while queuePacedFrame waits on bSo. */
+  private frameHeldForBacklog = false;
+  private pacerNow = (): number => performance.now();
+  /**
    * densable renderCalled — set true on first render(). unmount only writes
    * renderPreviousOutput when renderCalled && !isPaused (handoffAltScreen
    * pauses so open→attach does not repaint/exit mid-handoff).
@@ -305,6 +372,9 @@ export default class Ink {
   private hyperlinkPool: HyperlinkPool;
   private exitPromise?: Promise<void>;
   private restoreConsole?: () => void;
+  /** densable `hasExited` / `exitError` — settled before mode restore. */
+  private hasExited = false;
+  private exitError: Error | undefined;
   private restoreStderr?: () => void;
   /**
    * densable unsubscribeTTYHandlers — set lazily by ensureInteractive (not
@@ -369,6 +439,25 @@ export default class Ink {
    * densable srStartupQuietTimer — defers first SR paints during quiet window.
    */
   private srStartupQuietTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * densable `srPreParkTimer` — park-then-repaint after `$to` pre-park write.
+   */
+  private srPreParkTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * densable `srAnnouncementHoldTimer` — hold SR frame until announcement TTL.
+   */
+  private srAnnouncementHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  /** densable `srPreParked` — CHA pre-park already written this SR rewrite. */
+  private srPreParked = false;
+  /**
+   * densable `srHeldAnnouncements` — persist drained SR announcements across
+   * frames until content above them changes (or growth exceeds KC=3).
+   */
+  private srHeldAnnouncements: string[] = [];
+  /** densable `BXo` — `a.CLAUDE_AX_REWRITE_HELD_ANNOUNCEMENT??!1`. */
+  private srRewriteHeldAnnouncement = Boolean(process.env.CLAUDE_AX_REWRITE_HELD_ANNOUNCEMENT ?? false);
+  /** densable `KC` — max extra held-announcement rows before drop. */
+  private static readonly SR_HELD_ANNOUNCEMENT_MAX_EXTRA = 3;
   /** Official prevScreenReaderLines — last written SR frame lines. */
   private prevScreenReaderLines: string[] = [];
   /** Official prevScreenReaderPark — last parked SR cursor. */
@@ -550,6 +639,13 @@ export default class Ink {
   // one full-render frame; steady-state frames after clear it and regain
   // the blit + narrow-damage fast path.
   private prevFrameContaminated = false;
+  /**
+   * densable `keptForNextFrame` / `leftAltScreenSinceFrame` — DEC sequences
+   * coalesced into the next paint so AlternateScreen 1049h is not a separate
+   * write from the first frame.
+   */
+  private keptForNextFrame = '';
+  private leftAltScreenSinceFrame = false;
   // Set by handleResize: prepend ERASE_SCREEN to the next onRender's patches
   // INSIDE the BSU/ESU block so clear+paint is atomic. Writing ERASE_SCREEN
   // synchronously in handleResize would leave the screen blank for the ~80ms
@@ -576,6 +672,30 @@ export default class Ink {
   // for log-update's relative-move invariants). Alt-screen doesn't need
   // this — every frame begins with CSI H. null = no move emitted last frame.
   private displayCursor: { x: number; y: number; emittedRows: number } | null = null;
+  /**
+   * densable `Jd` kitty registry. Ctor: `terminalImages=new Jd(()=>this.scheduleRender())`.
+   */
+  private readonly terminalImages = new TerminalImages(() => this.scheduleRender());
+  /**
+   * densable `imagesStale` — SIGCONT / resume / alt reset / full reset mark
+   * kitty cells dirty. onRender consume: `if(this.imagesStale)this.imagesStale=!1,this.terminalImages.retransmitAll()` immediately before renderer.
+   */
+  private imagesStale = false;
+  /**
+   * densable `nativeCursorVisible` — gold handleResume sets this to
+   * `accessibilityMode` on the main-screen arm.
+   */
+  private nativeCursorVisible = false;
+  /**
+   * densable `bgWorkerForceShowCursor` —
+   * `altScreenFullRepaint && !nativeCursor && SESSION_KIND==="bg" && windows`.
+   */
+  private bgWorkerForceShowCursor = false;
+  /**
+   * densable `mainScreenBehindAlt` — snapshot of the main screen while alt is
+   * active. handleResume clears it on the main-screen arm.
+   */
+  private mainScreenBehindAlt: Frame | undefined;
   private readonly logger: Logger;
 
   constructor(private readonly options: Options) {
@@ -587,6 +707,13 @@ export default class Ink {
     this.accessibilityMode = isEnvTruthyLike(process.env.CLAUDE_CODE_ACCESSIBILITY);
     // densable: this.altScreenFullRepaint=xH(CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)
     this.altScreenFullRepaint = isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT);
+    // densable: bgWorkerForceShowCursor = altScreenFullRepaint && !nativeCursor && bg && windows
+    this.bgWorkerForceShowCursor =
+      this.altScreenFullRepaint &&
+      !this.options.nativeCursor &&
+      process.env.CLAUDE_CODE_SESSION_KIND === 'bg' &&
+      O() === 'windows';
+    this.nativeCursorVisible = this.accessibilityMode;
     // Official: e.isScreenReaderEnabled ?? (!!stdout.isTTY && ct(INK_SCREEN_READER))
     this.isScreenReaderEnabled =
       options.isScreenReaderEnabled ?? (!!options.stdout.isTTY && isEnvTruthyLike(process.env.INK_SCREEN_READER));
@@ -600,6 +727,11 @@ export default class Ink {
       stdout: options.stdout,
       stderr: options.stderr,
     };
+
+    // densable: stdout===process.stdout && (fZt()||gbo(...)) → mbo(handleStdoutBackpressure)
+    if (options.stdout === process.stdout && (isNonBlockingStdoutInstalled() || shouldInstallNonBlockingStdout())) {
+      this.nonBlockingStdout = installNonBlockingStdout(this.handleStdoutBackpressure);
+    }
 
     // densable pCi(stdout, warnGarbageWinsizeOnce) — clamp, not || 80/24
     const ctorSize = readStdoutSize(options.stdout, this.warnGarbageWinsizeOnce);
@@ -629,19 +761,10 @@ export default class Ink {
       stylePool: this.stylePool,
     });
 
-    // scheduleRender is called from the reconciler's resetAfterCommit, which
-    // runs BEFORE React's layout phase (ref attach + useLayoutEffect). Any
-    // state set in layout effects — notably the cursorDeclaration from
-    // useDeclaredCursor — would lag one commit behind if we rendered
-    // synchronously. Deferring to a microtask runs onRender after layout
-    // effects have committed, so the native cursor tracks the caret without
-    // a one-keystroke lag. Same event-loop tick, so throughput is unchanged.
-    // Test env uses onImmediateRender (direct onRender, no throttle) so
-    // existing synchronous lastFrame() tests are unaffected.
-    const deferredRender = (): void => queueMicrotask(this.onRender);
-    this.scheduleRender = throttle(deferredRender, FRAME_INTERVAL_MS, {
-      leading: true,
-      trailing: true,
+    // densable: scheduleRender=Object.assign(()=>this.scheduleFrame(),{cancel:()=>this.cancelScheduledFrame()})
+    // Test env uses onImmediateRender (direct onRender) so lastFrame() tests stay sync.
+    this.scheduleRender = Object.assign(() => this.scheduleFrame(), {
+      cancel: () => this.cancelScheduledFrame(),
     });
 
     // Ignore last render after unmounting a tree to prevent empty output before exit
@@ -654,7 +777,8 @@ export default class Ink {
     // (onRawModeEnter / setAltScreenActive / subsequent onRender), not in
     // the constructor — keeps non-interactive short paths free of listeners.
 
-    this.rootNode = dom.createNode('ink-root');
+    // densable: this.rootNode=_r("ink-root",hs.Config.create())
+    this.rootNode = dom.createNode('ink-root', Yoga.Config.create());
     this.focusManager = new FocusManager((target, event) => dispatcher.dispatchDiscrete(target, event));
     this.rootNode.focusManager = this.focusManager;
     this.renderer = createRenderer(this.rootNode, this.stylePool);
@@ -714,15 +838,24 @@ export default class Ink {
       return;
     }
 
-    // Alt screen: after SIGCONT, content is stale (shell may have written
-    // to main screen, switching focus away) and mouse tracking was
-    // disabled by handleSuspend.
+    // densable: process.kill(pid, SIGWINCH) then alt: if modes.isSuspended
+    // resetFrames+imagesStale+scheduleRender (App resume() reasserts DEC);
+    // else reenter. Main: clear mainScreenBehindAlt, reset frames, imagesStale,
+    // nativeCursorVisible=accessibilityMode. No analog mouse write on SIGCONT.
+    process.kill(process.pid, 'SIGWINCH');
     if (this.altScreenActive) {
+      if (this.modes.isSuspended) {
+        this.resetFramesForAltScreen();
+        this.imagesStale = true;
+        this.scheduleRender();
+        return;
+      }
       this.reenterAltScreen();
       return;
     }
 
     // Main screen: start fresh to prevent clobbering terminal content
+    this.mainScreenBehindAlt = undefined;
     this.frontFrame = emptyFrame(
       this.frontFrame.viewport.height,
       this.frontFrame.viewport.width,
@@ -738,19 +871,12 @@ export default class Ink {
       this.hyperlinkPool,
     );
     this.log.reset();
-    // Physical cursor position is unknown after the shell took over during
-    // suspend. Clear displayCursor so the next frame's cursor preamble
-    // doesn't emit a relative move from a stale park position.
+    this.prevFrameContaminated = true;
+    this.imagesStale = true;
     this.displayCursor = null;
-    // Official: this.nativeCursorVisible=this.accessibilityMode; reset SR diff
+    this.nativeCursorVisible = this.accessibilityMode;
     this.resetScreenReaderDiffState();
-    // handleSuspend disabled mouse. Alt path re-enters via reenterAltScreen;
-    // sticky-main (MainScreenShell / setMouseTracking) must re-assert here.
-    // Gold syncTerminalSize only re-asserts mouse on alt resize; SIGCONT is
-    // not a resize.
-    if (this.altScreenMouseTracking !== 'off') {
-      this.options.stdout.write(this.mouseOnSeq());
-    }
+    this.scheduleRender();
   };
 
   /** Official resetScreenReaderDiffState — clear prev SR frame + park + anchor. */
@@ -759,6 +885,59 @@ export default class Ink {
     this.prevScreenReaderPark = { row: 0, col: 0 };
     this.prevScreenReaderParkDeclared = false;
     this.prevScreenReaderAnchor = 'clean';
+    this.srPreParked = false;
+    this.srHeldAnnouncements = [];
+  }
+
+  /**
+   * densable `oyr` — stamp the cut node on the ink-root (`transcriptFrontCutRows`).
+   */
+  setTranscriptFrontCut(cutNode: unknown): void {
+    let node: typeof this.rootNode | undefined = this.rootNode;
+    while (node.parentNode !== undefined) node = node.parentNode;
+    if (node.nodeName === 'ink-root') {
+      (node as { transcriptFrontCutRows?: unknown }).transcriptFrontCutRows = cutNode;
+    }
+  }
+
+  /**
+   * densable `applyTranscriptFrontCut` — splice dropped transcript rows out of
+   * the previous SR frame when the park is below the cut.
+   */
+  applyTranscriptFrontCut(
+    cutNode: unknown,
+    fullText: string,
+    lineBaseRows: readonly number[],
+    newLines: readonly string[],
+  ): void {
+    if (this.prevScreenReaderAnchor !== 'clean') return;
+    const prev = this.prevScreenReaderLines;
+    const park = this.prevScreenReaderPark;
+    const above = prev.length - this.terminalRows;
+    if (above <= 0) return;
+    const start = findScreenReaderNodeStartIndex(this.rootNode as ScreenReaderDOMNode, cutNode as ScreenReaderDOMNode);
+    if (start === null) return;
+    const M = lineBaseRows[countNewlines(fullText.slice(0, start))];
+    if (M === undefined) return;
+    for (let T = 1; M + T + 1 < above; T++) {
+      let aligned = true;
+      let nonempty = 0;
+      for (let F = M + T + 1; F < above; F++) {
+        const L = F - T;
+        if (L >= newLines.length || prev[F] !== newLines[L]) {
+          aligned = false;
+          break;
+        }
+        if (prev[F] !== '') nonempty++;
+      }
+      if (!aligned || nonempty < this.terminalRows) continue;
+      if (park.row >= M && park.row < M + T) return;
+      this.prevScreenReaderLines = [...prev.slice(0, M), newLines[M], ...prev.slice(M + T + 1)];
+      if (park.row >= M + T) {
+        this.prevScreenReaderPark = { row: park.row - T, col: park.col };
+      }
+      return;
+    }
   }
 
   // densable handleResize = () => { if (!syncTerminalSize()) return; render }
@@ -772,7 +951,11 @@ export default class Ink {
     if (!this.syncTerminalSize()) return;
     if (this.currentNode !== null) {
       this.render(this.currentNode);
+      return;
     }
+    this.rootNode.layoutStale = false;
+    this.rootNode.onComputeLayout?.();
+    this.scheduleRender();
   };
 
   /**
@@ -810,11 +993,8 @@ export default class Ink {
   prepareTerminalForHandoff(): void {
     this.pause();
     this.forgetPointer();
-    this.options.stdout.write(
-      (this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') +
-        (this.pixelReportsLive ? decreset(DEC.MOUSE_PIXELS) : '') +
-        DFE,
-    );
+    this.options.stdout.write((this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + DFE);
+    this.nonBlockingStdout?.flush();
     this.suspendStdin();
   }
 
@@ -837,22 +1017,17 @@ export default class Ink {
   enterAlternateScreen(): void {
     this.pause();
     this.forgetPointer();
-    this.suspendStdin();
+    // densable: modes.suspend("altScreen") + (already-alt?"":1049h+kittyPop) + SGR0 + show + 2J + H
     this.options.stdout.write(
-      // Disable extended key reporting first — editors that don't speak
-      // CSI-u (e.g. nano) show "Unknown sequence" for every Ctrl-<key> if
-      // kitty/modifyOtherKeys stays active. exitAlternateScreen re-enables.
-      DISABLE_KITTY_KEYBOARD +
-        DISABLE_MODIFY_OTHER_KEYS +
-        (this.altScreenMouseTracking !== 'off' ? DISABLE_MOUSE_TRACKING : '') + // disable mouse (no-op if off)
-        (this.pixelReportsLive ? decreset(DEC.MOUSE_PIXELS) : '') +
-        (this.altScreenActive ? '' : '\x1b[?1049h') + // enter alt (already in alt if fullscreen)
-        '\x1b[?1004l' + // disable focus reporting
-        '\x1b[0m' + // reset attributes
-        '\x1b[?25h' + // show cursor
-        '\x1b[2J' + // clear screen
-        '\x1b[H', // cursor home
+      this.modes.suspend('altScreen') +
+        (this.altScreenActive ? '' : ENTER_ALT_SCREEN + kittyKeyboardPopSeq()) +
+        '\x1b[0m' +
+        SHOW_CURSOR +
+        ERASE_SCREEN +
+        CURSOR_HOME,
     );
+    this.nonBlockingStdout?.flush();
+    this.suspendStdin();
   }
 
   /**
@@ -868,31 +1043,21 @@ export default class Ink {
    * returns, fullscreen scroll is dead.
    */
   exitAlternateScreen(): void {
-    this.options.stdout.write(
-      (this.altScreenActive ? ENTER_ALT_SCREEN : '') + // re-enter alt — vim's rmcup dropped us to main
-        '\x1b[2J' + // clear screen (now alt if fullscreen)
-        '\x1b[H' + // cursor home
-        this.mouseOnSeq() + // re-enable mouse (skip if off; reassert 1016)
-        (this.altScreenActive ? '' : '\x1b[?1049l') + // exit alt (non-fullscreen only)
-        '\x1b[?25l', // hide cursor (Ink manages)
-    );
     this.resumeStdin();
+    const hideCursor = this.altScreenActive || !(this.accessibilityMode || this.isScreenReaderEnabled);
+    this.options.stdout.write(
+      (this.altScreenActive ? '' : EXIT_ALT_SCREEN) +
+        (hideCursor ? HIDE_CURSOR : '') +
+        this.modes.resume({ clearKeys: true }) +
+        (this.altScreenActive ? HIDE_CURSOR : ''),
+    );
     if (this.altScreenActive) {
       this.resetFramesForAltScreen();
-    } else {
+      this.imagesStale = true;
+    } else if (!this.isScreenReaderEnabled) {
       this.repaint();
     }
     this.resume();
-    // Re-enable focus reporting and extended key reporting — terminal
-    // editors (vim, nano, etc.) write their own modifyOtherKeys level on
-    // entry and reset it on exit, leaving us unable to distinguish
-    // ctrl+shift+<letter> from ctrl+<letter>. Pop-before-push keeps the
-    // Kitty stack balanced (a well-behaved editor restores our entry, so
-    // without the pop we'd accumulate depth on each editor round-trip).
-    this.options.stdout.write(
-      '\x1b[?1004h' +
-        (supportsExtendedKeys() ? DISABLE_KITTY_KEYBOARD + ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS : ''),
-    );
   }
 
   /**
@@ -1033,6 +1198,114 @@ export default class Ink {
   }
 
   /**
+   * densable requestInputPriorityFrame — arm SSo interval for _So=50ms.
+   * Gold also ends an SR announcement hold (`pWe`) and drops held
+   * announcements so the next paint is not stuck behind the timer.
+   */
+  requestInputPriorityFrame = (): void => {
+    this.inputPriorityUntil = this.pacerNow() + 50;
+    let dirty = false;
+    if (this.srAnnouncementHoldTimer !== null) {
+      endScreenReaderHold();
+      dirty = true;
+    }
+    if (this.isScreenReaderEnabled && this.srHeldAnnouncements.length > 0) {
+      this.srHeldAnnouncements = [];
+      dirty = true;
+    }
+    if (dirty) this.onRender();
+  };
+
+  /**
+   * densable scheduleFrame — Vh=16 / SSo=4 pacer. Leading path queues a
+   * microtask onRender; else a timeout to lastPacedFrameAt+interval.
+   */
+  private scheduleFrame(): void {
+    if (this.frameMicrotaskQueued) return;
+    const now = this.pacerNow();
+    const elapsed = now - this.lastPacedFrameAt;
+    const interval = now < this.inputPriorityUntil ? INPUT_PRIORITY_FRAME_MS : FRAME_INTERVAL_MS;
+    if (elapsed >= interval) {
+      this.queuePacedFrame();
+      return;
+    }
+    const due = this.lastPacedFrameAt + interval;
+    if (this.frameTimer === null || due < this.frameTimerDueAt) {
+      this.cancelScheduledFrame();
+      this.frameTimerDueAt = due;
+      this.frameTimer = setTimeout(
+        () => {
+          this.frameTimer = null;
+          this.queuePacedFrame();
+        },
+        Math.max(0, due - now),
+      );
+    }
+  }
+
+  /** densable queuePacedFrame — hold the frame while stdout backlog > bSo. */
+  private queuePacedFrame(): void {
+    this.cancelScheduledFrame();
+    if (this.nonBlockingStdout !== null && this.nonBlockingStdout.queuedBytes() > STDOUT_BACKLOG_BYTES) {
+      this.frameHeldForBacklog = true;
+      this.frameTimerDueAt = this.pacerNow() + STDOUT_BACKLOG_RETRY_MS;
+      this.frameTimer = setTimeout(() => {
+        this.frameTimer = null;
+        this.queuePacedFrame();
+      }, STDOUT_BACKLOG_RETRY_MS);
+      return;
+    }
+    this.frameHeldForBacklog = false;
+    this.frameMicrotaskQueued = true;
+    this.inputPriorityUntil = 0;
+    this.lastPacedFrameAt = this.pacerNow();
+    const epoch = this.pacedFrameEpoch;
+    queueMicrotask(() => {
+      this.frameMicrotaskQueued = false;
+      if (epoch !== this.pacedFrameEpoch) return;
+      this.onRender();
+    });
+  }
+
+  private cancelScheduledFrame(): void {
+    if (this.frameTimer !== null) {
+      clearTimeout(this.frameTimer);
+      this.frameTimer = null;
+    }
+  }
+
+  /**
+   * densable `handleStdoutBackpressure` — mbo episode end. Drain unblocks a
+   * held paced frame; dropped bytes force redraw / repaint.
+   */
+  private handleStdoutBackpressure = (episode: StdoutBackpressureEpisode): void => {
+    if (episode.droppedBytes > 0) {
+      const probe = episode.endedBy === 'drain';
+      this.appRef.current?.querier?.resync({ probe });
+      if (probe) {
+        this.reassertTerminalModes();
+        this.forceRedraw();
+      } else {
+        this.repaint();
+      }
+    }
+    if (this.frameHeldForBacklog && episode.endedBy === 'drain') {
+      this.frameHeldForBacklog = false;
+      this.scheduleFrame();
+    }
+    if (episode.droppedBytes > 0 || episode.durationMs >= 1000) {
+      this.logger.debug(
+        `tengu_stdout_backpressure duration_ms=${episode.durationMs} peak_queued_bytes=${episode.peakQueuedBytes} dropped_bytes=${episode.droppedBytes}`,
+      );
+    }
+  };
+
+  get nativeCursorSeq(): string {
+    if (this.accessibilityMode || this.isScreenReaderEnabled) return '';
+    return this.nativeCursorVisible ? SHOW_CURSOR : HIDE_CURSOR;
+  }
+
+  /**
    * densable notifyLayoutListeners — after yoga pass; one throw pauses until
    * this flush unwinds (`queueMicrotask` unpause).
    */
@@ -1102,7 +1375,7 @@ export default class Ink {
   }
 
   onRender() {
-    if (this.isUnmounted || this.isPaused) {
+    if (this.isUnmounted || this.isHandedOff) {
       return;
     }
     // densable: if(this.hasRendered&&!this.isExiting)this.ensureInteractive();
@@ -1111,12 +1384,31 @@ export default class Ink {
       this.ensureInteractive();
     }
     this.hasRendered = true;
-    // Entering a render cancels any pending drain tick — this render will
-    // handle the drain (and re-schedule below if needed). Prevents a
-    // wheel-event-triggered render AND a drain-timer render both firing.
+    this.pacedFrameEpoch++;
+    this.frameMicrotaskQueued = false;
+    // Entering a render cancels any pending drain tick AND the Vh pacer —
+    // this render will handle the drain (and re-schedule below if needed).
+    // Prevents a wheel-event-triggered render AND a drain-timer / 16ms
+    // frameTimer both firing.
     if (this.drainTimer !== null) {
       clearTimeout(this.drainTimer);
       this.drainTimer = null;
+    }
+    this.cancelScheduledFrame();
+
+    // densable: if(this.rootNode.layoutStale){ clear; stale winsize → handleResize
+    // else onComputeLayout + flushSyncWork }. Re-layout after Ab subscribe.
+    if (this.rootNode.layoutStale) {
+      this.rootNode.layoutStale = false;
+      if (this.options.stdout.isTTY && this.hasStaleTerminalSize()) {
+        this.handleResize();
+      } else {
+        this.rootNode.onComputeLayout?.();
+        reconciler.flushSyncWork();
+      }
+      if (this.isUnmounted || this.isHandedOff) {
+        return;
+      }
     }
 
     // Flush deferred interaction-time update before rendering so we call
@@ -1127,6 +1419,8 @@ export default class Ink {
 
     // Official: if (this.isScreenReaderEnabled) { this.onRenderScreenReader(); return }
     if (this.isScreenReaderEnabled) {
+      this.writeKeptForNextFrame();
+      this.leftAltScreenSinceFrame = false;
       this.onRenderScreenReader();
       return;
     }
@@ -1138,6 +1432,10 @@ export default class Ink {
 
     const renderStart = performance.now();
     const { columns: terminalWidth, rows: terminalRows } = this.stdoutSize();
+
+    // densable: after overlay sig, before renderer — consume kitty dirty flag.
+    // biome-ignore lint/complexity/noCommaOperator: gold imagesStale consume is comma-operator
+    if (this.imagesStale) (this.imagesStale = false), this.terminalImages.retransmitAll();
 
     const frame = this.renderer({
       frontFrame: this.frontFrame,
@@ -1156,12 +1454,16 @@ export default class Ink {
     // `frame.scrollDrainPending` is NOT a gold field — cell-diff path below
     // still honours it. Do not OR it into the sink arm (that invents gold).
     if (this.frameSink) {
+      // densable: main-screen kitty drain before frameSink; alt skips.
+      const pendingImages = this.altScreenActive ? '' : this.terminalImages.drain();
+      if (pendingImages !== '') this.writeContent(pendingImages);
       const sinkResult = this.frameSink(frame, this.stylePool);
       if (sinkResult) {
         this.backFrame = this.frontFrame;
         this.frontFrame = frame;
         this.prevFrameContaminated = false;
-        this.repaintAfterStaleAbsolutePaint(frame);
+        // Gold sink arm: swap + optional `"tick"` timer + onFrame + return.
+        // Do not scheduleRender here (staleAbsolutePaint is the cell-diff path).
         this.maybeResetPools(renderStart);
         if (sinkResult === 'tick') {
           this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
@@ -1437,7 +1739,13 @@ export default class Ink {
     // Preserve the empty-diff zero-write fast path: skip all cursor writes
     // when nothing rendered AND the park target is unchanged.
     const targetMoved = target !== null && (parked === null || parked.x !== target.x || parked.y !== target.y);
-    if (hasDiff || targetMoved || (target === null && parked !== null)) {
+    const nativeCursorWanted = Boolean(decl?.visible) || this.accessibilityMode;
+    const nativeCursorFlip =
+      Boolean(this.options.nativeCursor) &&
+      target !== null &&
+      decl !== null &&
+      nativeCursorWanted !== this.nativeCursorVisible;
+    if (hasDiff || targetMoved || nativeCursorFlip || (target === null && parked !== null)) {
       // Main-screen preamble: log-update's relative moves assume the
       // physical cursor is at prevFrame.cursor. If last frame parked it
       // elsewhere, move back before the diff runs. Alt-screen's CSI H
@@ -1474,6 +1782,16 @@ export default class Ink {
           }
         }
         this.displayCursor = { ...target, emittedRows: this.stdoutSize().rows };
+        if (this.options.nativeCursor || this.bgWorkerForceShowCursor) {
+          const show = this.bgWorkerForceShowCursor || Boolean(decl?.visible) || this.accessibilityMode;
+          if (this.nativeCursorVisible) {
+            optimized.unshift({ type: 'cursorHide' });
+          }
+          if (show) {
+            optimized.push({ type: 'cursorShow' });
+          }
+          this.nativeCursorVisible = show;
+        }
       } else {
         // Declaration cleared (input blur, unmount). Restore physical cursor
         // to frame.cursor before forgetting the park position — otherwise
@@ -1490,6 +1808,14 @@ export default class Ink {
           }
         }
         this.displayCursor = null;
+        if (
+          (this.options.nativeCursor || this.bgWorkerForceShowCursor) &&
+          this.nativeCursorVisible &&
+          !this.accessibilityMode
+        ) {
+          optimized.unshift({ type: 'cursorHide' });
+          this.nativeCursorVisible = false;
+        }
       }
     }
 
@@ -1497,10 +1823,15 @@ export default class Ink {
     if (hasDiff) {
       this.maybeProactiveAtlasReset(optimized);
     }
+    // densable: terminalImages.drain() prepended onto the patch list.
+    const imageSeq = this.terminalImages.drain();
+    if (imageSeq !== '') {
+      optimized.unshift({ type: 'stdout', content: imageSeq });
+    }
 
     const tWrite = performance.now();
-    // densable: dj8(this.terminal, Z, this.skipSyncMarkers())
-    writeDiffToTerminal(this.terminal, optimized, this.skipSyncMarkers());
+    // densable dyr(this.terminal,X,skipSyncMarkers(),f,this.takeKeptForNextFrame())
+    writeDiffToTerminal(this.terminal, optimized, this.skipSyncMarkers(), terminalRows, this.takeKeptForNextFrame());
     const writeMs = performance.now() - tWrite;
 
     // Update blit safety for the NEXT frame. The frame just rendered
@@ -1511,17 +1842,13 @@ export default class Ink {
     this.repaintAfterStaleAbsolutePaint(frame);
 
     // A ScrollBox has pendingScrollDelta left to drain — schedule the next
-    // frame. MUST NOT call this.scheduleRender() here: we're inside a
-    // trailing-edge throttle invocation, timerId is undefined, and lodash's
-    // debounce sees timeSinceLastCall >= wait (last call was at the start
-    // of this window) → leadingEdge fires IMMEDIATELY → double render ~0.1ms
-    // apart → jank. Use a plain timeout. If a wheel event arrives first,
-    // its scheduleRender path fires a render which clears this timer at
-    // the top of onRender — no double.
+    // frame. MUST NOT call this.scheduleRender() here: queuePacedFrame already
+    // ran this onRender from a microtask; re-entering scheduleFrame this tick
+    // would either no-op (frameMicrotaskQueued) or queue another frame too soon.
+    // Use a plain timeout. If a wheel event arrives first, its scheduleRender
+    // path fires a render which clears this timer at the top of onRender.
     //
-    // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) so run at
-    // quarter interval (~250fps, setTimeout practical floor) for max scroll
-    // speed. Regular renders stay at FRAME_INTERVAL_MS via the throttle.
+    // Drain frames stay on a short timer; regular frames go through scheduleFrame.
     if (frame.scrollDrainPending) {
       this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
     }
@@ -1604,84 +1931,273 @@ export default class Ink {
       }
     }
 
+    // densable: pending pre-park / announcement-hold skip the rest of the
+    // SR paint unless unmount is flushing (`isExiting`).
+    if (this.srPreParkTimer !== null) {
+      if (!this.isExiting) return;
+      clearTimeout(this.srPreParkTimer);
+      this.srPreParkTimer = null;
+    }
+    if (this.srAnnouncementHoldTimer !== null) {
+      if (isScreenReaderHoldActive() && !this.isExiting) return;
+      clearTimeout(this.srAnnouncementHoldTimer);
+      this.srAnnouncementHoldTimer = null;
+    }
+
     // densable xYr: text + preserveRanges (aria-preserve-whitespace)
     const extracted = extractScreenReaderOutput(this.rootNode as ScreenReaderDOMNode);
-    let fullText = extracted.text;
-    const preserveRanges = extracted.preserveRanges;
-    const { columns, rows: terminalRows } = this.stdoutSize();
-
-    // densable GJc: append ephemeral kill announcements after frame text
-    const announcements = drainScreenReaderAnnouncements();
-    let announcementStartLine: number | undefined;
-    if (announcements.length > 0) {
-      const baseLines = materializeScreenReaderLines(fullText, columns, preserveRanges).lines;
-      announcementStartLine = baseLines.length;
-      for (const raw of announcements) {
-        const clean = sanitizeScreenReaderText(raw);
-        if (clean === '') continue;
-        fullText = fullText === '' ? clean : `${fullText}\n${clean}`;
+    const n = extracted.text;
+    const u = extracted.preserveRanges;
+    const f = extracted.rowPrefixRanges;
+    const { columns: m } = this.stdoutSize();
+    // Gold wrap BODY inline in onRenderScreenReader (not materializeScreenReaderLines).
+    const y = mergePreserveRanges(u);
+    const g = n === '' ? [] : n.split('\n');
+    const x: string[] = [];
+    const R: number[] = [];
+    let M = 0;
+    for (const se of g) {
+      const ue = M + se.length;
+      const Te = M + se.trimEnd().length < ue && y.some(([Ve, st]) => Ve < ue && ue <= st);
+      const Ne = f.find(([Ve, st]) => (se === '' ? Ve <= M && M <= st : Ve < ue && M < st))?.[2] ?? '';
+      const Ie = m - Ko(Ne) >= 2 ? Ne : '';
+      const tt = Ie.trimEnd();
+      R.push(x.length);
+      if (se === '') {
+        x.push(tt);
+      } else {
+        const Ve =
+          Ne === '' || m < 2 ? wrapAnsi(se, m, { trim: false, hard: true }).split('\n') : hv(r7(se), m - Ko(Ie));
+        for (let st = 0; st < Ve.length; st++) {
+          const Rt = Ve[st]!;
+          const yt = Te && st === Ve.length - 1 ? Rt : Rt.trimEnd();
+          x.push(yt === '' ? tt : Ie + yt);
+        }
+      }
+      M = ue + 1;
+    }
+    const originalFullText = n;
+    // densable `T=this.computeScreenReaderPark(n,R,x,m)` before announcements.
+    const declaredPark = this.computeScreenReaderPark(n, R, x, m);
+    const drained = drainScreenReaderAnnouncements()
+      .map(text => sanitizeScreenReaderText(text))
+      .filter(text => text !== '');
+    if (drained.length > 0 || this.isExiting) {
+      this.srHeldAnnouncements = drained;
+    }
+    const F = x.length;
+    let N = -1;
+    for (const se of this.srHeldAnnouncements) {
+      for (const ue of se.split('\n')) {
+        if (N === -1 && drained.length > 0) {
+          N = x.length;
+        }
+        if (ue === '') {
+          x.push('');
+        } else {
+          const ye = wrapAnsi(ue, m, { trim: false, hard: true });
+          for (const Te of ye.split('\n')) {
+            x.push(Te.trimEnd());
+          }
+        }
       }
     }
-
-    const decl = this.cursorDeclaration;
-    let cursor: {
-      nodeStartIndex: number;
-      relativeX: number;
-      relativeY: number;
-    } | null = null;
-    if (decl !== null) {
-      const nodeStart = findScreenReaderNodeStartIndex(
-        this.rootNode as ScreenReaderDOMNode,
-        decl.node as ScreenReaderDOMNode,
-      );
-      if (nodeStart !== null) {
-        cursor = {
-          nodeStartIndex: nodeStart,
-          relativeX: decl.relativeX,
-          relativeY: decl.relativeY,
-        };
-      }
+    // densable `L=WXo(),I=wv(this.rootNode)` — consume hold before skip / `$to`.
+    const holdMs = takeScreenReaderAnnouncementHoldMs();
+    const cut = this.rootNode.transcriptFrontCutRows ?? null;
+    this.rootNode.transcriptFrontCutRows = undefined;
+    if (cut !== null) {
+      this.applyTranscriptFrontCut(cut, originalFullText, R, x);
+    }
+    const extra = x.length - F;
+    const tooBig = extra > Math.min(Ink.SR_HELD_ANNOUNCEMENT_MAX_EXTRA, Math.floor(this.terminalRows / 4));
+    if (tooBig) this.srHeldAnnouncements = [];
+    const prev = this.prevScreenReaderLines;
+    if (
+      drained.length === 0 &&
+      extra > 0 &&
+      (tooBig ||
+        (!this.srRewriteHeldAnnouncement &&
+          (prev.length !== x.length || x.some((se, ue) => ue < F && se !== prev[ue]))))
+    ) {
+      this.srHeldAnnouncements = [];
+      x.length = F;
     }
 
-    const plan = planScreenReaderFrameUpdate({
-      fullText,
-      columns,
-      prevLines: this.prevScreenReaderLines,
-      prevPark: this.prevScreenReaderPark,
-      terminalRows,
-      cursor,
-      stringWidth,
-      preserveRanges,
-      announcementStartLine,
-      prevAnchor: this.prevScreenReaderAnchor,
-      prevParkDeclared: this.prevScreenReaderParkDeclared,
-    });
-    // densable: even on skip, update parkDeclared = l!==null
-    if (plan.skip) {
-      this.prevScreenReaderParkDeclared = cursor !== null;
+    // Gold onRenderScreenReader BODY: inline K / J / N.
+    const B = this.prevScreenReaderLines;
+    const W = Math.max(0, x.length - 1);
+    const q = declaredPark ?? { row: W, col: stringWidth(x[W] ?? '') };
+    let K = 0;
+    const X = Math.min(B.length, x.length);
+    while (K < X && B[K] === x[K]) K++;
+    if (N !== -1 && K > N) K = N;
+    const J = K === B.length && K === x.length;
+    const ie = this.prevScreenReaderPark;
+    const le = q.row === ie.row && q.col === ie.col;
+    if (J && le) {
+      if (this.srPreParked) {
+        this.srPreParked = false;
+        this.options.stdout.write(cursorTo(q.col + 1));
+      }
+      this.prevScreenReaderParkDeclared = declaredPark !== null;
       return;
     }
-
-    const ansi = materializeScreenReaderFrameAnsi(plan);
-    if (ansi.length > 0) {
-      this.options.stdout.write(ansi);
+    if (
+      !J &&
+      N === -1 &&
+      !this.srPreParked &&
+      (this.prevScreenReaderAnchor === 'clean' ||
+        (this.prevScreenReaderAnchor === 'lastRowAnchored' && K === B.length - 1 && ie.row === K && q.row === K)) &&
+      B.length === x.length &&
+      K >= B.length - this.terminalRows &&
+      ie.row >= B.length - this.terminalRows &&
+      (x[K] ?? '').startsWith(B[K] ?? '') &&
+      !(x[K] ?? '').includes('\t')
+    ) {
+      let se = true;
+      for (let Ne = K + 1; Ne < B.length; Ne++) {
+        if (B[Ne] !== x[Ne]) {
+          se = false;
+          break;
+        }
+      }
+      const ue = se ? (x[K] ?? '').slice((B[K] ?? '').length) : '';
+      const ye = ue === '' ? 0 : stringWidth(B[K] ?? '');
+      if (
+        ue !== '' &&
+        stringWidth(String.fromCodePoint(ue.codePointAt(0)!)) > 0 &&
+        ye + stringWidth(ue) === stringWidth(x[K] ?? '') &&
+        Iv(x[K] ?? '', (B[K] ?? '').length)
+      ) {
+        const Ne = (K !== ie.row ? ZY(0, K - ie.row) : '') + cursorTo(ye + 1);
+        const Ie = cursorTo(q.col + 1) + (q.row !== K ? ZY(0, q.row - K) : '');
+        this.writeContent(Ne + ue + Ie);
+        this.prevScreenReaderLines = x;
+        this.prevScreenReaderPark = q;
+        this.prevScreenReaderParkDeclared = declaredPark !== null;
+        return;
+      }
     }
-
-    // Official: this.prevScreenReaderLines=n; this.prevScreenReaderPark=a
-    // densable 2.1.219: nextAnchor only on full rewrite; suffix keeps anchor
-    // densable 2.1.222: parkDeclared = l!==null after every write path
-    const { lines } = materializeScreenReaderLines(fullText, columns, preserveRanges);
-    this.prevScreenReaderLines = lines;
-    this.prevScreenReaderPark = plan.park;
-    this.prevScreenReaderParkDeclared = cursor !== null;
-    if (plan.nextAnchor !== undefined) {
-      this.prevScreenReaderAnchor = plan.nextAnchor;
+    if (
+      !J &&
+      N === -1 &&
+      !this.srPreParked &&
+      (this.prevScreenReaderAnchor === 'clean' ||
+        (this.prevScreenReaderAnchor === 'lastRowAnchored' && K === B.length - 1 && ie.row === K && q.row === K)) &&
+      B.length === x.length &&
+      K >= B.length - this.terminalRows &&
+      (B[K] ?? '').startsWith(x[K] ?? '') &&
+      !(B[K] ?? '').includes('\t')
+    ) {
+      let se = true;
+      for (let Ne = K + 1; Ne < B.length; Ne++) {
+        if (B[Ne] !== x[Ne]) {
+          se = false;
+          break;
+        }
+      }
+      const ue = se ? (B[K] ?? '').slice((x[K] ?? '').length) : '';
+      const ye = ue === '' ? 0 : stringWidth(x[K] ?? '');
+      if (
+        ue !== '' &&
+        stringWidth(String.fromCodePoint(ue.codePointAt(0)!)) > 0 &&
+        ye + stringWidth(ue) === stringWidth(B[K] ?? '') &&
+        Iv(B[K] ?? '', (x[K] ?? '').length) &&
+        (!/\s/.test(ue) || /^\s+$/.test(ue)) &&
+        declaredPark !== null &&
+        this.prevScreenReaderParkDeclared &&
+        ie.row === K &&
+        ie.col === stringWidth(B[K] ?? '')
+      ) {
+        const Ne = cursorTo(ye + 1);
+        const Ie = cursorTo(q.col + 1) + (q.row !== K ? ZY(0, q.row - K) : '');
+        this.writeContent(Ne + csi('K') + Ie);
+        this.prevScreenReaderLines = x;
+        this.prevScreenReaderPark = q;
+        this.prevScreenReaderParkDeclared = declaredPark !== null;
+        return;
+      }
+    }
+    if (!this.isExiting && !J && K < x.length && N === -1 && !this.srPreParked) {
+      const se = getScreenReaderPreparkMs();
+      if (se > 0) {
+        this.options.stdout.write(csi('G'));
+        this.srPreParked = true;
+        this.srPreParkTimer = setTimeout(() => {
+          this.srPreParkTimer = null;
+          this.onRender();
+        }, se);
+        return;
+      }
+    }
+    const ne = Math.max(0, B.length - 1);
+    const he = ie.row !== ne ? ZY(0, ne - ie.row) : '';
+    const ce = B.length - this.terminalRows;
+    if (ce > K && ce < x.length) {
+      let se = K;
+      let ue = K;
+      while (ue < ce) {
+        if (x[ue] === '') {
+          ue++;
+          continue;
+        }
+        while (se < ce && B[se] === '') se++;
+        if (se === ce || B[se] !== x[ue]) break;
+        se++;
+        ue++;
+      }
+      if (ue === ce) K = ce;
+    }
+    const Ee = K === x.length && K > 0;
+    const Ae = ce > K || (Ee && ce === K);
+    const pe = evt(Math.min(B.length - K, this.terminalRows));
+    const fe = x.slice(K).join('\n');
+    let xe: string;
+    if (J) xe = '';
+    else if (K === B.length) xe = K > 0 ? `\n${fe}` : fe;
+    else if (K === x.length) xe = K > 0 && !Ae ? pe + ZY(0, -1) : pe;
+    else xe = pe + fe;
+    const Ce = cursorTo(q.col + 1) + (q.row !== W ? ZY(0, q.row - W) : '');
+    this.writeContent(he + xe + Ce);
+    if (N !== -1 && holdMs > 0 && !this.isExiting) {
+      startScreenReaderHold(Date.now() + holdMs);
+      this.srAnnouncementHoldTimer = setTimeout(() => {
+        this.srAnnouncementHoldTimer = null;
+        this.onRender();
+      }, holdMs);
+    }
+    this.prevScreenReaderLines = x;
+    this.prevScreenReaderPark = q;
+    this.prevScreenReaderParkDeclared = declaredPark !== null;
+    this.srPreParked = false;
+    if (!J) {
+      const se = x.length - K;
+      const ue = q.row === x.length - 1;
+      const ye = x.length < B.length;
+      const Te = B.length <= this.terminalRows;
+      if (Ae && se < this.terminalRows) this.prevScreenReaderAnchor = 'broken';
+      else if (se >= Math.min(x.length, this.terminalRows)) this.prevScreenReaderAnchor = 'clean';
+      else if (se > 0) {
+        if (this.prevScreenReaderAnchor === 'broken') this.prevScreenReaderAnchor = ue ? 'lastRowAnchored' : 'broken';
+        else if (this.prevScreenReaderAnchor === 'lastRowAnchored') {
+          if (!ue) this.prevScreenReaderAnchor = 'broken';
+        } else if (ye && !Te) this.prevScreenReaderAnchor = ue ? 'lastRowAnchored' : 'broken';
+      } else if (this.prevScreenReaderAnchor === 'lastRowAnchored') this.prevScreenReaderAnchor = 'broken';
+      else if (ye && this.prevScreenReaderAnchor === 'clean' && !Te) {
+        this.prevScreenReaderAnchor = ue ? 'lastRowAnchored' : 'broken';
+      }
+    } else if (
+      this.prevScreenReaderAnchor === 'lastRowAnchored' &&
+      (ie.row !== Math.max(0, B.length - 1) || q.row !== W)
+    ) {
+      this.prevScreenReaderAnchor = 'broken';
     }
   }
 
   /**
-   * Official computeScreenReaderPark method form — used by densable path
-   * via planScreenReaderFrameUpdate; kept for parity / tests.
+   * Official computeScreenReaderPark method form — gold
+   * `computeScreenReaderPark(n,u,f,m)` on Ink.
    */
   computeScreenReaderPark(
     fullText: string,
@@ -1735,6 +2251,8 @@ export default class Ink {
     this.altScreenActive = false;
     this.endPointerCapture();
     this.tellClickedNowhere();
+    this.modes.reset('altScreen');
+    this.modes.reset('surface');
   }
 
   resume(): void {
@@ -1772,6 +2290,7 @@ export default class Ink {
     this.prevFrameContaminated = true;
     // Official repaint also resets screen-reader diff state
     this.resetScreenReaderDiffState();
+    this.imagesStale = true;
   }
 
   /**
@@ -1787,7 +2306,7 @@ export default class Ink {
    * buffer wipe) and the diff engine thinks unchanged cells need no paint.
    */
   forceRedraw(opts?: { flushReact?: boolean }): boolean {
-    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) return false;
+    if (!this.options.stdout.isTTY || this.isUnmounted || this.isHandedOff) return false;
     if (opts?.flushReact) {
       reconciler.flushSyncWork();
     }
@@ -1803,9 +2322,11 @@ export default class Ink {
       this.needsEraseBeforePaint = true;
       this.displayCursor = null;
       this.resetFramesForAltScreen();
+      this.imagesStale = true;
     } else {
       this.log.forceFullReset();
       this.prevFrameContaminated = true;
+      this.imagesStale = true;
     }
     this.resetScreenReaderDiffState();
     this.onRender();
@@ -2019,8 +2540,12 @@ export default class Ink {
    * effect (iTerm ?1049h flicker if Ink also 2J). This only flags alt-screen
    * + seeds blank frames so the first onRender diffs against a known buffer.
    */
-  setAltScreenActive(active: boolean, mouseTracking: boolean | MouseTrackingMode = 'off'): void {
-    if (this.altScreenActive === active) return;
+  setAltScreenActive(active: boolean, mouseTracking: boolean | MouseTrackingMode = 'off'): string {
+    if (!active) {
+      this.writeKeptForNextFrame();
+      this.leftAltScreenSinceFrame = true;
+    }
+    if (this.altScreenActive === active) return '';
     this.altScreenActive = active;
     const mode: MouseTrackingMode = !active
       ? 'off'
@@ -2031,22 +2556,76 @@ export default class Ink {
           : mouseTracking;
     this.altScreenMouseTracking = mode;
     if (!active) this.forgetPointer();
-    this.syncMousePixels();
-    // densable: queueMicrotask hoverTrackedListeners even when toggling
     queueMicrotask(() => {
       if (this.isUnmounted) return;
       for (const listener of this.hoverTrackedListeners) listener();
     });
-    // densable: if(H)this.ensureInteractive(),this.resetFramesForAltScreen()
+    this.syncMousePixels();
     if (active) {
       this.ensureInteractive();
       this.resetFramesForAltScreen();
-    } else {
-      this.endPointerCapture();
-      this.tellClickedNowhere();
-      this.repaint();
+      return '';
     }
+    this.endPointerCapture();
+    this.tellClickedNowhere();
+    this.repaint();
+    return '';
   }
+
+  /**
+   * densable `keepForNextFrame` — gold:
+   *   if (leftAlt || unmounted) return false
+   *   if (kept==="" && n!=="") setImmediate(writeKept)
+   *   kept+=n; return true
+   * Gold's first scheduleFrame is always `queuePacedFrame` (`lastPacedFrameAt`
+   * is -Inf), so `queueMicrotask(onRender)` `takeKept`s before `setImmediate`
+   * writes. If a prior onRender already armed the 16ms timeout, promote that
+   * paint to a microtask so the same order holds (otherwise 1049h lands
+   * between frames and blanks the transcript while PromptInput stays).
+   */
+  keepForNextFrame(seq: string): boolean {
+    if (this.leftAltScreenSinceFrame || this.isUnmounted) return false;
+    if (this.keptForNextFrame === '' && seq !== '') {
+      setImmediate(this.writeKeptForNextFrame);
+      if (!this.frameMicrotaskQueued) this.queuePacedFrame();
+    }
+    this.keptForNextFrame += seq;
+    return true;
+  }
+
+  private takeKeptForNextFrame(): string {
+    const seq = this.keptForNextFrame;
+    this.keptForNextFrame = '';
+    return seq;
+  }
+
+  private writeKeptForNextFrame = (): void => {
+    const seq = this.takeKeptForNextFrame();
+    if (seq !== '' && !this.isUnmounted) {
+      writeContentToTerminal(this.terminal, seq);
+    }
+  };
+
+  private writeAfterKept(seq: string): void {
+    if (this.keptForNextFrame !== '') this.keptForNextFrame += seq;
+    else this.options.stdout.write(seq);
+  }
+
+  /** densable `restoreConsolePatches`. */
+  private restoreConsolePatches(): void {
+    this.restoreConsole?.();
+    this.restoreConsole = undefined;
+    this.restoreStderr?.();
+    this.restoreStderr = undefined;
+  }
+
+  /**
+   * densable `writeBeforeExit` — `stdout===process.stdout` uses writeSync(1).
+   */
+  private writeBeforeExit = (seq: string): void => {
+    if (this.options.stdout === process.stdout) writeSync(1, seq);
+    else this.options.stdout.write(seq);
+  };
 
   /** Official densable getMouseMode — current alt-screen tracking mode. */
   getMouseMode = (): MouseTrackingMode => this.altScreenMouseTracking;
@@ -2066,16 +2645,25 @@ export default class Ink {
    * Capability is DECRPM 1016 (not GrowthBook `tD().now`).
    */
   syncMousePixels = (): void => {
+    if (this.isUnmounted) return;
     const on =
       this.finePointerHolds > 0 &&
       this.altScreenActive &&
       this.altScreenMouseTracking === 'full' &&
       getMousePixelsSupported() &&
       getCellPixels() !== undefined;
-    if (on === this.pixelReportsLive) return;
-    // densable `$mo` off: 1016l then reassert SGR 1006h. On: 1016h only.
-    this.options.stdout.write(on ? decset(DEC.MOUSE_PIXELS) : decreset(DEC.MOUSE_PIXELS) + decset(DEC.MOUSE_SGR));
-    this.pixelReportsLive = on;
+    if (on === this.modes.isSet('mousePixels')) return;
+    const seq = on ? this.modes.set('mousePixels') : this.modes.reset('mousePixels');
+    const write = seq !== '' && !this.isHandedOff;
+    if (write) this.writeAfterKept(seq);
+    const querier = this.appRef.current?.querier;
+    if (write && querier && this.appRef.current && this.appRef.current.rawModeEnabledCount > 0) {
+      void querier.flush().then(() => {
+        this.pixelReportsLive = on;
+      });
+    } else {
+      this.pixelReportsLive = on;
+    }
   };
 
   /**
@@ -2130,7 +2718,7 @@ export default class Ink {
 
   /**
    * densable `handlePointerPress` — Xd hit → capture + Wl kind down.
-   * True skips App selection (independent of DualInk onMouseDown).
+   * True skips App selection.
    */
   handlePointerPress = (
     col: number,
@@ -2200,7 +2788,7 @@ export default class Ink {
 
   /** densable `mouseOnSeq` — tracking enable + reassert 1016 if live. */
   private mouseOnSeq(): string {
-    return enableMouseTracking(this.altScreenMouseTracking) + (this.pixelReportsLive ? decset(DEC.MOUSE_PIXELS) : '');
+    return enableMouseTracking(this.altScreenMouseTracking) + this.modes.reassert('mousePixels');
   }
 
   /**
@@ -2211,7 +2799,12 @@ export default class Ink {
   setMouseTracking(mouseTracking: boolean | MouseTrackingMode): void {
     const mode: MouseTrackingMode = mouseTracking === true ? 'full' : mouseTracking === false ? 'off' : mouseTracking;
     this.altScreenMouseTracking = mode;
-    if (mode !== 'off') this.ensureInteractive();
+    // Stack only — MainScreenShell writes the DEC. Gold reassert('mouse')
+    // reads this entry after sleep-wake / stdin-gap.
+    if (this.modes.isSet('mouse')) this.modes.reset('mouse');
+    if (mode === 'off') return;
+    this.modes.set('mouse', mode);
+    this.ensureInteractive();
   }
 
   get isAltScreenActive(): boolean {
@@ -2249,6 +2842,14 @@ export default class Ink {
   }
 
   /**
+   * densable `holdsRawMode` —
+   * `(this.appRef.current?.rawModeEnabledCount??0)>0`.
+   */
+  get holdsRawMode(): boolean {
+    return (this.appRef.current?.rawModeEnabledCount ?? 0) > 0;
+  }
+
+  /**
    * Re-assert terminal modes after a gap (>5s stdin silence or event-loop
    * stall). Catches tmux detach→attach, ssh reconnect, and laptop
    * sleep/wake — none of which send SIGCONT. The terminal may reset DEC
@@ -2271,35 +2872,17 @@ export default class Ink {
    */
   reassertTerminalModes = (includeAltScreen = false): void => {
     if (!this.options.stdout.isTTY) return;
-    // Don't touch the terminal during an editor handoff — re-enabling kitty
-    // keyboard here would undo enterAlternateScreen's disable and nano would
-    // start seeing CSI-u sequences again.
-    if (this.isPaused) return;
-    // Extended keys — re-assert if enabled (App.tsx enables these on
-    // allowlisted terminals at raw-mode entry; a terminal reset clears them).
-    // Pop-before-push keeps Kitty stack depth at 1 instead of accumulating
-    // on each call.
-    if (supportsExtendedKeys()) {
-      this.options.stdout.write(DISABLE_KITTY_KEYBOARD + ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS);
-    }
-    // Mouse tracking — alt-screen OR main-screen sticky (MainScreenShell).
-    // Must run before the altScreenActive early-return: sleep-wake
-    // (eventLoopStallDetector) calls this with includeAltScreen=false.
-    if (this.altScreenMouseTracking !== 'off') {
-      this.options.stdout.write(this.mouseOnSeq());
-    }
-    if (!this.altScreenActive) return;
-    // Alt-screen re-entry — destructive (ERASE_SCREEN). Only for callers that
-    // have a strong signal the terminal actually dropped mode 1049.
-    if (includeAltScreen) {
+    if (this.isHandedOff || this.isUnmounted) return;
+    this.options.stdout.write(
+      '\x1b(B\x0f' +
+        this.modes.reassert('bracketedPaste') +
+        this.modes.reassert('extendedKeys') +
+        this.modes.reassert('mouse') +
+        this.modes.reassert('mousePixels'),
+    );
+    if (includeAltScreen && this.altScreenActive) {
       this.reenterAltScreen();
-      return;
     }
-    // Soft recover wiped alt buffer after long stdin silence (app-switch /
-    // tmux attach without FOCUS_IN). Full-damage only — no erase. Footer
-    // timers alone would otherwise repaint only dirty footer cells while
-    // main stays blank (diff thinks main cells are already painted).
-    this.repaintAfterFocus();
   };
 
   /**
@@ -2314,6 +2897,7 @@ export default class Ink {
    * as restoring the saved cursor position — clobbering the resume hint.
    */
   detachForShutdown(): void {
+    this.nonBlockingStdout?.flush();
     this.isUnmounted = true;
     // unmount() already cleared these before EXIT_ALT_SCREEN; also clear here
     // for the catch-path fallback that only writeSync's 1049l without going
@@ -2321,7 +2905,7 @@ export default class Ink {
     // reader from thinking we're still fullscreen after process.exit cleanup.
     this.altScreenActive = false;
     this.altScreenMouseTracking = 'off';
-    // Cancel any pending throttled render so it doesn't fire between
+    // Cancel any pending paced frame so it doesn't fire between
     // cleanupTerminalModes() and process.exit() and write to main screen.
     this.scheduleRender.cancel?.();
     // Restore stdin from raw mode. unmount() used to do this via React
@@ -2339,9 +2923,14 @@ export default class Ink {
     }
   }
 
-  /** @see drainStdin */
-  drainStdin(): void {
-    drainStdin(this.options.stdin);
+  /**
+   * densable `aqe` + `resync({probe:!1})` when a query reply is still owed.
+   */
+  drainStdin(): Buffer | undefined {
+    const querier = this.appRef.current?.querier;
+    const drained = drainStdin(this.options.stdin, querier?.owed() ?? 0);
+    if (querier && querier.owed() > 0) querier.resync({ probe: false });
+    return drained;
   }
 
   /**
@@ -2358,6 +2947,7 @@ export default class Ink {
   private reenterAltScreen(): void {
     this.options.stdout.write(ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME + this.mouseOnSeq());
     this.resetFramesForAltScreen();
+    this.imagesStale = true;
     this.onRender();
   }
 
@@ -2663,7 +3253,7 @@ export default class Ink {
   private notifySelectionChange(): void {
     // Skip during/after unmount: AlternateScreen cleanup may clearTextSelection
     // after 1049l. scheduleRender.cancel() already ran, but notifySelectionChange
-    // would re-arm the throttle and a late onRender can flash main-buffer frames
+    // would re-arm the pacer and a late onRender can flash main-buffer frames
     // on Windows Terminal (stacked-window look). Restored from 92e1ffdd.
     if (this.isUnmounted) return;
     this.scheduleRender();
@@ -2765,19 +3355,9 @@ export default class Ink {
     }
   }
 
-  /**
-   * DualInk `Jhr` mouse-action bubble (onMouseDown/Up/Drag + onPointer alias).
-   * Grips / PluginClient onMouseDown live here. Return is unused for consume —
-   * gold x1 consume is `handlePointerPress` Xd, not any DualInk hit.
-   */
-  dispatchMouseAction(col: number, row: number, button: number, type: 'mousedown' | 'mouseup' | 'mousedrag'): boolean {
-    if (!this.altScreenActive) return false;
-    return hitDispatchMouseAction(this.rootNode, col, row, button, type) !== null;
-  }
-
-  dispatchKeyboardEvent(parsedKey: ParsedKey): void {
+  dispatchKeyboardEvent(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }): void {
     const target = this.focusManager.activeElement ?? this.rootNode;
-    const event = new KeyboardEvent(parsedKey);
+    const event = new KeyboardEvent(parsedKey, extras);
     dispatcher.dispatchDiscrete(target, event);
 
     // Tab cycling is the default action — only fires if no handler
@@ -2794,7 +3374,7 @@ export default class Ink {
   /**
    * Official densable 2.1.210 dispatchPasteEvent:
    *   focusManager.activeElement ?? root → new PasteEvent(text) → dispatchDiscrete
-   * Bracketed paste is a separate event from keydown (lag: isPasted branch).
+   * Bracketed paste is a separate event from keydown (kind paste).
    */
   dispatchPasteEvent(text: string): void {
     const target = this.focusManager.activeElement ?? this.rootNode;
@@ -2863,6 +3443,16 @@ export default class Ink {
    */
   openHyperlink(url: string): void {
     this.onHyperlinkClick?.(url);
+  }
+
+  /**
+   * densable `fileHyperlinkOpensInPanel` — FullscreenLayout pins a getter.
+   * `fileLinkOpensInPanel()` is `this.fileHyperlinkOpensInPanel?.()===!0`.
+   */
+  fileHyperlinkOpensInPanel: (() => boolean) | undefined;
+
+  fileLinkOpensInPanel(): boolean {
+    return this.fileHyperlinkOpensInPanel?.() === true;
   }
 
   /**
@@ -3039,8 +3629,25 @@ export default class Ink {
     this.cursorDeclaration = decl;
   };
 
+  /**
+   * densable `tree()` — imperative DOM instead of React `render()`.
+   * Gold: throws if render() already ran; then ensureInteractive + ownTree.
+   */
+  tree(): InkTree {
+    if (this.renderCalled) {
+      throw new Error("Ink: this root is React's (render() was called), so it can't be drawn with Tree too");
+    }
+    this.ensureInteractive();
+    this.ownTree ??= new InkTree(this.rootNode);
+    Ns().treeRoots.set(this.options.stdout, this);
+    return this.ownTree;
+  }
+
   render(node: ReactNode): void {
-    // densable: this.renderCalled=!0,this.currentNode=H
+    // densable: if(this.ownTree) throw; this.renderCalled=!0,this.currentNode=H
+    if (this.ownTree) {
+      throw new Error("Ink: this root is drawn with Tree (tree() was called), so it can't be React's too");
+    }
     this.renderCalled = true;
     this.currentNode = node;
 
@@ -3052,6 +3659,13 @@ export default class Ink {
         stderr={this.options.stderr}
         exitOnCtrlC={this.options.exitOnCtrlC}
         onExit={this.unmount}
+        subscribeLayout={this.subscribeLayout}
+        subscribeFrames={this.subscribeFrames}
+        subscribeClicks={this.subscribeClicks}
+        subscribeHoverTracked={this.subscribeHoverTracked}
+        isHoverTracked={this.isHoverTracked}
+        retainFinePointer={this.retainFinePointer}
+        terminalImages={this.terminalImages}
         terminalColumns={this.terminalColumns}
         terminalRows={this.terminalRows}
         selection={this.selection}
@@ -3060,36 +3674,36 @@ export default class Ink {
         onClickAt={this.dispatchMouseClick}
         onHoverAt={this.dispatchHover}
         onHoverLost={this.forgetPointer}
-        onMouseAction={this.dispatchMouseAction}
         onPointerPress={this.handlePointerPress}
         onPointerDrag={this.handlePointerDrag}
         onPointerRelease={this.handlePointerRelease}
-        mouseReportsInPixels={this.mouseReportsInPixels}
         onPointerHover={this.handlePointerHover}
-        retainFinePointer={this.retainFinePointer}
-        onCellPixels={this.syncMousePixels}
         getHyperlinkAt={this.getHyperlinkAt}
         onOpenHyperlink={this.openHyperlink}
+        fileLinkOpensInPanel={this.fileLinkOpensInPanel}
         onMultiClick={this.handleMultiClick}
         onSelectionStart={this.handleSelectionStart}
         onSelectionDrag={this.handleSelectionDrag}
         onStdinResume={this.reassertTerminalModes}
+        modes={this.modes}
+        getMouseMode={this.getMouseMode}
+        mouseReportsInPixels={this.mouseReportsInPixels}
+        onCellPixels={this.syncMousePixels}
         onRawModeEnter={this.ensureInteractive}
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
+        onInputPriorityFrame={this.requestInputPriorityFrame}
         dispatchPasteEvent={this.dispatchPasteEvent}
         dispatchWheelEvent={this.dispatchWheelEvent}
-        subscribeClicks={this.subscribeClicks}
-        subscribeLayout={this.subscribeLayout}
-        subscribeFrames={this.subscribeFrames}
-        subscribeHoverTracked={this.subscribeHoverTracked}
-        isHoverTracked={this.isHoverTracked}
         focusManager={this.focusManager}
         rootNode={this.rootNode}
-        getMouseMode={this.getMouseMode}
-        isScreenReaderEnabled={this.isScreenReaderEnabled || this.accessibilityMode}
+        isScreenReaderEnabled={this.isScreenReaderEnabled}
       >
-        <TerminalWriteProvider value={this.writeRaw}>{node}</TerminalWriteProvider>
+        <AccessibilityContext.Provider value={this.isScreenReaderEnabled}>
+          <TerminalWriteProvider value={this.writeRaw}>
+            <TerminalModesContext.Provider value={this.modes}>{node}</TerminalModesContext.Provider>
+          </TerminalWriteProvider>
+        </AccessibilityContext.Provider>
       </App>
     );
 
@@ -3102,91 +3716,63 @@ export default class Ink {
       return;
     }
 
+    if (error instanceof Error) {
+      this.exitError = error;
+      this.hasExited = true;
+      this.rejectExitPromise(error);
+    } else {
+      this.hasExited = true;
+      this.resolveExitPromise();
+    }
+
     // densable: this.isExiting=!0; clear srStartupQuietTimer; then final onRender
     this.isExiting = true;
     if (this.srStartupQuietTimer !== null) {
       clearTimeout(this.srStartupQuietTimer);
       this.srStartupQuietTimer = null;
     }
+    if (this.srPreParkTimer !== null) {
+      clearTimeout(this.srPreParkTimer);
+      this.srPreParkTimer = null;
+    }
+    if (this.srAnnouncementHoldTimer !== null) {
+      clearTimeout(this.srAnnouncementHoldTimer);
+      this.srAnnouncementHoldTimer = null;
+    }
 
+    this.writeKeptForNextFrame();
     this.onRender();
     this.unsubscribeExit();
-
-    if (typeof this.restoreConsole === 'function') {
-      this.restoreConsole();
-    }
-    this.restoreStderr?.();
-
+    this.restoreConsolePatches();
     this.unsubscribeTTYHandlers?.();
-
-    // densable: only when renderCalled && !isPaused — handoffAltScreen sets
-    // isPaused so open→attach does not write a main-buffer/previous frame
-    // over the handed-off alt screen before PTY attach.
-    if (this.renderCalled && !this.isPaused) {
-      // Non-TTY environments don't handle erasing ansi escapes well, so it's better to
-      // only render last frame of non-static output
-      const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
-      // densable: dj8(..., this.skipSyncMarkers())
-      writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers());
-    }
-
-    // Clean up terminal modes synchronously before process exit.
-    // React's componentWillUnmount won't run in time when process.exit() is called,
-    // so we must reset terminal modes here to prevent escape sequence leakage.
-    // Use writeSync to stdout (fd 1) to ensure writes complete before exit.
-    // We unconditionally send all disable sequences because terminal detection
-    // may not work correctly (e.g., in tmux, screen) and these are no-ops on
-    // terminals that don't support them.
-    /* eslint-disable custom-rules/no-sync-fs -- process exiting; async writes would be dropped */
-    if (this.options.stdout.isTTY) {
-      if (this.altScreenActive) {
-        // Gate renders BEFORE leaving the alt buffer. Official clears the flag
-        // right after the sole wrapped 1049l; we also set isUnmounted first so
-        // nothing between writeSync and React teardown can scheduleRender onto
-        // the newly-visible main buffer (Windows Terminal multi-frame flash).
-        // Do NOT call setAltScreenActive(false) — its inactive branch repaints.
-        // AlternateScreen cleanup still runs, sees alreadyInactive, skips a
-        // second 1049l (92e1ffdd / DECRC stacked-window).
-        this.isUnmounted = true;
-        this.scheduleRender.cancel?.();
-        writeSync(1, exitAltScreenSequence());
-        this.altScreenActive = false;
-        this.altScreenMouseTracking = 'off';
-      }
-      // Disable mouse tracking — unconditional because altScreenActive can be
-      // stale if AlternateScreen's unmount (which flips the flag) raced a
-      // blocked event loop + SIGINT. No-op if tracking was never enabled.
-      writeSync(1, DISABLE_MOUSE_TRACKING);
-      if (this.pixelReportsLive) writeSync(1, decreset(DEC.MOUSE_PIXELS));
-      // Drain stdin so in-flight mouse events don't leak to the shell
-      this.drainStdin();
-      // Disable extended key reporting (both kitty and modifyOtherKeys)
-      writeSync(1, DISABLE_MODIFY_OTHER_KEYS);
-      writeSync(1, DISABLE_KITTY_KEYBOARD);
-      // Disable focus events (DECSET 1004)
-      writeSync(1, DFE);
-      // Disable bracketed paste mode
-      writeSync(1, DBP);
-      // Show cursor
-      writeSync(1, SHOW_CURSOR);
-      // Do NOT write RESET_SCROLL_REGION (CSI r homes the cursor). Sticky-main
-      // DECSTBM is owned by Axc.restore() in useAxcFrameSink cleanup, which
-      // follows with cursorPosition(contentHeight+1).
-      // Clear iTerm2 progress bar
-      writeSync(1, CLEAR_ITERM2_PROGRESS);
-      // Clear tab status (OSC 21337) so a stale dot doesn't linger
-      if (supportsTabStatus()) writeSync(1, wrapForMultiplexer(CLEAR_TAB_STATUS));
-    }
-    /* eslint-enable custom-rules/no-sync-fs */
-
-    // Mark unmounted BEFORE React tree teardown so AlternateScreen cleanup /
-    // selection clear cannot schedule a main-buffer onRender after 1049l.
-    // (May already be true from the alt-screen exit path above.)
-    this.isUnmounted = true;
     this.cancelFinePointerSettle?.();
     this.cancelFinePointerSettle = undefined;
 
-    // Cancel any pending throttled renders to prevent accessing freed Yoga nodes
+    // densable: if(this.renderCalled&&!this.isHandedOff) dyr(..., skipSync, stdoutSize().rows)
+    if (this.renderCalled && !this.isHandedOff) {
+      const diff = this.log.renderPreviousOutput_DEPRECATED(this.frontFrame);
+      writeDiffToTerminal(this.terminal, optimize(diff), this.skipSyncMarkers(), this.stdoutSize().rows);
+    }
+
+    this.nonBlockingStdout?.flush();
+    if (this.options.stdout.isTTY) {
+      try {
+        restoreTerminalModes(this.modes, this.writeBeforeExit);
+        this.altScreenActive = false;
+        this.drainStdin();
+      } catch (err) {
+        if (err && typeof err === 'object' && 'code' in err) {
+          this.logger.debug(`unmount terminal cleanup writeSync failed: ${err}`, { level: 'error' });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    this.isUnmounted = true;
+    this.cancelFinePointerSettle = undefined;
+
+    // Cancel any pending paced frames to prevent accessing freed Yoga nodes
     this.scheduleRender.cancel?.();
     if (this.drainTimer !== null) {
       clearTimeout(this.drainTimer);
@@ -3195,6 +3781,17 @@ export default class Ink {
 
     reconciler.updateContainerSync(null, this.container, null, noop);
     reconciler.flushSyncWork();
+    if (this.ownTree) {
+      for (const child of this.rootNode.childNodes.slice()) {
+        if (child.nodeName !== '#text') {
+          dom.removeChildNode(this.rootNode, child);
+        }
+      }
+    }
+    const registry = Ns();
+    if (registry.treeRoots.get(this.options.stdout) === this) {
+      registry.treeRoots.delete(this.options.stdout);
+    }
     instances.delete(this.options.stdout);
 
     // Free the root yoga node, then clear its reference. Children are already
@@ -3202,12 +3799,6 @@ export default class Ink {
     // .freeRecursive()) avoids double-freeing them.
     this.rootNode.yogaNode?.free();
     this.rootNode.yogaNode = undefined;
-
-    if (error instanceof Error) {
-      this.rejectExitPromise(error);
-    } else {
-      this.resolveExitPromise();
-    }
   }
 
   async waitUntilExit(): Promise<void> {
@@ -3340,62 +3931,60 @@ export default class Ink {
   }
 }
 
+/** densable `Kv` — count DA1 replies in a latin1 buffer. */
+function countDa1Replies(buf: Buffer): number {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: gold `Kv` DA1 CSI
+  return buf.toString('latin1').match(/\x1b\[\?[\d;]*c/g)?.length ?? 0;
+}
+
+/** densable `YC` — nonblocking read; EAGAIN → 0, other errors → -1. */
+function readTtyNonblock(fd: number, buf: Buffer): number {
+  try {
+    return readSync(fd, buf, 0, buf.length, null);
+  } catch (err) {
+    return err && typeof err === 'object' && 'code' in err && (err as NodeJS.ErrnoException).code === 'EAGAIN' ? 0 : -1;
+  }
+}
+
 /**
- * Discard pending stdin bytes so in-flight escape sequences (mouse tracking
- * reports, bracketed-paste markers) don't leak to the shell after exit.
- *
- * Two layers of trickiness:
- *
- * 1. setRawMode is termios, not fcntl — the stdin fd stays blocking, so
- *    readSync on it would hang forever. Node doesn't expose fcntl, so we
- *    open /dev/tty fresh with O_NONBLOCK (all fds to the controlling
- *    terminal share one line-discipline input queue).
- *
- * 2. By the time forceExit calls this, detachForShutdown has already put
- *    the TTY back in cooked (canonical) mode. Canonical mode line-buffers
- *    input until newline, so O_NONBLOCK reads return EAGAIN even when
- *    mouse bytes are sitting in the buffer. We briefly re-enter raw mode
- *    so reads return any available bytes, then restore cooked mode.
- *
- * Safe to call multiple times. Call as LATE as possible in the exit path:
- * DISABLE_MOUSE_TRACKING has terminal round-trip latency, so events can
- * arrive for a few ms after it's written.
+ * densable `aqe(n=process.stdin,u=0)`. `owed` is `querier.owed()`: wait up
+ * to `Gd` for that many DA1 replies on `/dev/tty`.
  */
 /* eslint-disable custom-rules/no-sync-fs -- must be sync; called from signal handler / unmount */
-export function drainStdin(stdin: NodeJS.ReadStream = process.stdin): void {
+export function drainStdin(stdin: NodeJS.ReadStream = process.stdin, owed = 0): Buffer | undefined {
   if (!stdin.isTTY) return;
-  // Drain Node's stream buffer (bytes libuv already pulled in). read()
-  // returns null when empty — never blocks.
+  const chunks: Buffer[] = [];
   try {
-    while (stdin.read() !== null) {
-      /* discard */
+    let chunk: string | Buffer | null;
+    while ((chunk = stdin.read()) !== null) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
     }
   } catch {
     /* stream may be destroyed */
   }
-  // No /dev/tty on Windows; CONIN$ doesn't support O_NONBLOCK semantics.
-  // Windows Terminal also doesn't buffer mouse reports the same way.
-  if (process.platform === 'win32') return;
-  // termios is per-device: flip stdin to raw so canonical-mode line
-  // buffering doesn't hide partial input from the non-blocking read.
-  // Restored in the finally block.
   const tty = stdin as NodeJS.ReadStream & {
     isRaw?: boolean;
     setRawMode?: (raw: boolean) => void;
   };
   const wasRaw = tty.isRaw === true;
-  // Drain the kernel TTY buffer via a fresh O_NONBLOCK fd. Bounded at 64
-  // reads (64KB) — a real mouse burst is a few hundred bytes; the cap
-  // guards against a terminal that ignores O_NONBLOCK.
   let fd = -1;
   try {
-    // setRawMode inside try: on revoked TTY (SIGHUP/SSH disconnect) the
-    // ioctl throws EBADF — same recovery path as openSync/readSync below.
     if (!wasRaw) tty.setRawMode?.(true);
     fd = openSync('/dev/tty', fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
     const buf = Buffer.alloc(1024);
-    for (let i = 0; i < 64; i++) {
-      if (readSync(fd, buf, 0, buf.length, null) <= 0) break;
+    const deadline = owed > 0 ? performance.now() + OWED_REPLY_HOLD_MS : 0;
+    let remaining = owed - countDa1Replies(Buffer.concat(chunks));
+    for (let reads = 0; reads < 64; ) {
+      const n = readTtyNonblock(fd, buf);
+      if (n > 0) {
+        const piece = Buffer.from(buf.subarray(0, n));
+        chunks.push(piece);
+        remaining -= countDa1Replies(piece);
+        reads++;
+        continue;
+      }
+      if (n < 0 || remaining <= 0 || performance.now() >= deadline) break;
+      Bun.sleepSync(2);
     }
   } catch {
     // EAGAIN (buffer empty — expected), ENXIO/ENOENT (no controlling tty),
@@ -3416,6 +4005,7 @@ export function drainStdin(stdin: NodeJS.ReadStream = process.stdin): void {
       }
     }
   }
+  return chunks.length ? Buffer.concat(chunks) : undefined;
 }
 /* eslint-enable custom-rules/no-sync-fs */
 

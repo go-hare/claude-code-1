@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   computeScreenReaderPark,
   countNewlines,
-  hardWrapScreenReaderLine,
   materializeScreenReaderFrameAnsi,
   materializeScreenReaderLines,
   planAndMaterializeScreenReaderFrame,
@@ -68,11 +67,6 @@ describe('computeScreenReaderPark densable', () => {
 })
 
 describe('screenReader frame densables', () => {
-  test('hardWrapScreenReaderLine', () => {
-    expect(hardWrapScreenReaderLine('', 4)).toEqual([''])
-    expect(hardWrapScreenReaderLine('abcdef', 3)).toEqual(['abc', 'def'])
-  })
-
   test('materializeScreenReaderLines tracks base rows', () => {
     const { lines, lineBaseRows } = materializeScreenReaderLines('hi\nworld', 3)
     // "hi" → 1 row; "world" hard-wraps to "wor"+"ld"

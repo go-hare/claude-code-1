@@ -1,3 +1,5 @@
+import type { Config as YogaConfig } from '../yoga-layout/index.js'
+
 // --
 // Adapter interface for the layout engine (Yoga)
 
@@ -90,7 +92,15 @@ export const LayoutMeasureMode = {
 export type LayoutMeasureMode =
   (typeof LayoutMeasureMode)[keyof typeof LayoutMeasureMode]
 
+/**
+ * densable yoga Config handle (`hs.Config.create()`).
+ */
+export type YogaNodeConfig = YogaConfig
+
 export type LayoutNode = {
+  /** densable `_r(name, yogaConfig)` — optional shared config reference. */
+  config?: YogaNodeConfig
+
   // Tree
   insertChild(child: LayoutNode, index: number): void
   removeChild(child: LayoutNode): void
@@ -123,13 +133,13 @@ export type LayoutNode = {
   setHeight(value: number): void
   setHeightPercent(value: number): void
   setHeightAuto(): void
-  setMinWidth(value: number): void
+  setMinWidth(value: number | undefined): void
   setMinWidthPercent(value: number): void
-  setMinHeight(value: number): void
+  setMinHeight(value: number | undefined): void
   setMinHeightPercent(value: number): void
-  setMaxWidth(value: number): void
+  setMaxWidth(value: number | undefined): void
   setMaxWidthPercent(value: number): void
-  setMaxHeight(value: number): void
+  setMaxHeight(value: number | undefined): void
   setMaxHeightPercent(value: number): void
   setFlexDirection(dir: LayoutFlexDirection): void
   setFlexGrow(value: number): void

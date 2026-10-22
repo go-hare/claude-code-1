@@ -24,7 +24,7 @@
 | `chalk` | ANSI color generation |
 | `cli-boxes` | Border style definitions |
 | `get-east-asian-width` | CJK character width measurement |
-| `wrap-ansi` | ANSI-aware word wrapping |
+| `Bun.wrapAnsi` (local `wrapAnsi.ts`) | ANSI-aware word wrapping (no `wrap-ansi` npm) |
 | `bidi-js` | Bidirectional text support |
 | `lodash-es` | Utility functions (throttle, noop) |
 | `signal-exit` | Process exit handler cleanup |

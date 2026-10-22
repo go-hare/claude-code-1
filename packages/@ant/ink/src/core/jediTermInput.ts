@@ -1,7 +1,7 @@
 /**
- * Official 2.1.210 JediTerm / arrow-burst densables (RJc, Tog/CJc/xJc/X9n/kJc,
- * eag arrow-burst window). Ported from native-binary constants:
- *   Hog=75, Cog=250, j3i=200, Qsg=100, Zsg=8
+ * Official 2.1.210 JediTerm densables (RJc, Tog/CJc/xJc/X9n/kJc).
+ * Gold `M1` / `eag` arrow-burst lives on App (`trackAppArrowBurst`), not here.
+ * Ported constants: Hog=75, Cog=250, j3i=200.
  */
 import type { ParsedInput, ParsedKey } from './parse-keypress.js'
 
@@ -11,19 +11,12 @@ export const JEDI_ARROW_FLOOD_GAP_MS = 75
 export const JEDI_WHEEL_FLIP_GAP_MS = 250
 /** Official j3i — idle gap that clears lastWheelDownTime / jb flood. */
 export const JEDI_WHEEL_IDLE_MS = 200
-/** Official Qsg — arrow-burst sliding window ms. */
-export const ARROW_BURST_WINDOW_MS = 100
-/** Official Zsg — arrow count in window that fires arrow-burst. */
-export const ARROW_BURST_THRESHOLD = 8
 
 export type JediTermInputState = {
   lastWheelTime: number
   lastWheelDownTime: number
-}
-
-export type ArrowBurstWindow = {
-  dir: string | null
-  entries: Array<{ t: number; n: number }>
+  /** densable Hmo `r.notified` — emit jediterm-scroll-bug once per state. */
+  notified: boolean
 }
 
 /** Official TERMINAL_EMULATOR === JetBrains-JediTerm. */
@@ -40,15 +33,9 @@ let jediBugConfirmed = false
 let jediArrowFloodActive = false
 /** Official Y9n — pending burst count consumed by FSp jb path. */
 let jediArrowBurstPending = 0
-/** Official HJc — emit jediterm-scroll-bug once. */
-let jediScrollBugEmitted = false
 
 export function createJediTermInputState(): JediTermInputState {
-  return { lastWheelTime: 0, lastWheelDownTime: 0 }
-}
-
-export function createArrowBurstWindow(): ArrowBurstWindow {
-  return { dir: null, entries: [] }
+  return { lastWheelTime: 0, lastWheelDownTime: 0, notified: false }
 }
 
 /** Official Tog densable. */
@@ -141,11 +128,10 @@ export function rewriteJediTermInput(
       !key.ctrl &&
       !key.meta &&
       !key.shift &&
-      !key.isPasted &&
       now - state.lastWheelTime < JEDI_ARROW_FLOOD_GAP_MS
     ) {
-      if (!jediScrollBugEmitted) {
-        jediScrollBugEmitted = true
+      if (!state.notified) {
+        state.notified = true
         onScrollBug?.()
       }
       noteJediTermArrowFlood()
@@ -157,61 +143,9 @@ export function rewriteJediTermInput(
   return out ?? items
 }
 
-/**
- * Official eag densable — sliding window of bare same-dir arrows; when
- * count ≥ 8 within 100ms emit arrow-burst payload.
- * Returns payload to emit, or null.
- */
-export function trackArrowBurst(
-  window: ArrowBurstWindow,
-  items: ParsedInput[],
-  now: number = performance.now(),
-): { direction: string; count: number } | null {
-  const first = items[0]
-  if (
-    !first ||
-    first.kind !== 'key' ||
-    (first.name !== 'up' && first.name !== 'down') ||
-    first.ctrl ||
-    first.meta ||
-    first.shift ||
-    first.isPasted ||
-    !items.every(
-      s =>
-        s.kind === 'key' &&
-        s.name === first.name &&
-        !s.ctrl &&
-        !s.meta &&
-        !s.shift,
-    )
-  ) {
-    window.entries.length = 0
-    return null
-  }
-  if (window.dir !== first.name) {
-    window.entries.length = 0
-    window.dir = first.name
-  }
-  window.entries.push({ t: now, n: items.length })
-  while (
-    window.entries.length > 0 &&
-    now - window.entries[0]!.t > ARROW_BURST_WINDOW_MS
-  ) {
-    window.entries.shift()
-  }
-  let count = 0
-  for (const e of window.entries) count += e.n
-  if (count >= ARROW_BURST_THRESHOLD) {
-    window.entries.length = 0
-    return { direction: first.name!, count }
-  }
-  return null
-}
-
 /** Test-only reset. */
 export function _resetJediTermInputForTesting(): void {
   jediBugConfirmed = false
   jediArrowFloodActive = false
   jediArrowBurstPending = 0
-  jediScrollBugEmitted = false
 }

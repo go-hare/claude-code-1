@@ -1,13 +1,13 @@
 /* eslint-disable custom-rules/no-top-level-side-effects */
 
 import createReconciler from 'react-reconciler'
-import { getYogaCounters } from './yoga-layout/index.js'
 import {
   appendChildNode,
   clearYogaNodeReferences,
   createNode,
   createTextNode,
   type DOMElement,
+  type DOMNode,
   type DOMNodeAttribute,
   type ElementNames,
   insertBeforeNode,
@@ -97,7 +97,7 @@ const diff = (before: AnyObject, after: AnyObject): AnyObject | undefined => {
   return isChanged ? changed : undefined
 }
 
-const cleanupYogaNode = (node: DOMElement | TextNode): void => {
+const cleanupYogaNode = (node: DOMNode): void => {
   const yogaNode = node.yogaNode
   if (yogaNode) {
     yogaNode.unsetMeasureFunc()
@@ -125,6 +125,56 @@ function setEventHandler<K extends keyof EventHandlerProps>(
     node._eventHandlers = {}
   }
   node._eventHandlers[key] = value
+}
+
+/** densable `ad` — handlers that hold stdin raw mode. */
+const RAW_MODE_HANDLER_PROPS = new Set<string>([
+  'onKeyDown',
+  'onKeyDownCapture',
+  'onPaste',
+  'onPasteCapture',
+  'onWheel',
+  'onWheelCapture',
+])
+
+/** densable `EE` — true if any `ad` handler is non-null. */
+function nodeHoldsRawMode(node: DOMElement): boolean {
+  const handlers = node._eventHandlers
+  if (!handlers) return false
+  for (const key of RAW_MODE_HANDLER_PROPS) {
+    if (handlers[key as keyof EventHandlerProps] != null) return true
+  }
+  return false
+}
+
+/** densable `fy` — `setRawMode(delta>0)` or accrue `_pendingRawModeDelta`. */
+function applyRawModeDelta(host: DOMElement, delta: number): void {
+  if (host.setRawMode) host.setRawMode(delta > 0)
+  else host._pendingRawModeDelta = (host._pendingRawModeDelta ?? 0) + delta
+}
+
+/**
+ * densable `sy(n,u)` — sync this node's raw-mode hold against the root host.
+ * Not exported (gold is a local helper, not a public API).
+ */
+function syncRawModeHold(node: DOMElement, host: DOMElement): void {
+  const holds = nodeHoldsRawMode(node)
+  if (holds === !!node._holdsRawModeRef) return
+  node._holdsRawModeRef = holds
+  applyRawModeDelta(host, holds ? 1 : -1)
+}
+
+/** densable `hy` — release this subtree's raw-mode holds on unmount. */
+function releaseRawModeHoldTree(node: DOMElement, host: DOMElement): void {
+  if (node._holdsRawModeRef) {
+    node._holdsRawModeRef = false
+    applyRawModeDelta(host, -1)
+  }
+  for (const child of node.childNodes) {
+    if (child.nodeName !== '#text') {
+      releaseRawModeHoldTree(child, host)
+    }
+  }
 }
 
 function applyProp(node: DOMElement, key: string, value: unknown): void {
@@ -205,23 +255,6 @@ export function isDebugRepaintsEnabled(): boolean {
 
 export const dispatcher = new Dispatcher()
 
-// --- COMMIT INSTRUMENTATION (debug logging) ---
-// Uses console.warn instead of fs.appendFileSync to avoid filesystem dependencies.
-// Set CLAUDE_CODE_COMMIT_LOG=1 to enable debug logging to stderr.
-const COMMIT_LOG = process.env.CLAUDE_CODE_COMMIT_LOG
-let _commits = 0
-let _lastLog = 0
-let _lastCommitAt = 0
-let _maxGapMs = 0
-let _createCount = 0
-let _prepareAt = 0
-
-/** Debug log helper — replaces fs.appendFileSync with console.warn. */
-function debugLog(message: string): void {
-  console.warn(`[ink-commit] ${message}`)
-}
-// --- END ---
-
 // --- SCROLL PROFILING (bench/scroll-e2e.sh reads via getLastYogaMs) ---
 // Set by onComputeLayout wrapper in ink.tsx; read by onRender for phases.
 let _lastYogaMs = 0
@@ -263,70 +296,22 @@ const reconciler = createReconciler<
   null
 >({
   getRootHostContext: () => ({ isInsideText: false }),
-  prepareForCommit: () => {
-    if (COMMIT_LOG) _prepareAt = performance.now()
-    return null
-  },
+  prepareForCommit: () => null,
   preparePortalMount: () => null,
   clearContainer: () => false,
   resetAfterCommit(rootNode) {
-    _lastCommitMs = _commitStart > 0 ? performance.now() - _commitStart : 0
-    _commitStart = 0
-    if (COMMIT_LOG) {
-      const now = performance.now()
-      _commits++
-      const gap = _lastCommitAt > 0 ? now - _lastCommitAt : 0
-      if (gap > _maxGapMs) _maxGapMs = gap
-      _lastCommitAt = now
-      const reconcileMs = _prepareAt > 0 ? now - _prepareAt : 0
-      if (gap > 30 || reconcileMs > 20 || _createCount > 50) {
-        debugLog(
-          `${now.toFixed(1)} gap=${gap.toFixed(1)}ms reconcile=${reconcileMs.toFixed(1)}ms creates=${_createCount}`,
-        )
-      }
-      _createCount = 0
-      if (now - _lastLog > 1000) {
-        debugLog(
-          `${now.toFixed(1)} commits=${_commits}/s maxGap=${_maxGapMs.toFixed(1)}ms`,
-        )
-        _commits = 0
-        _maxGapMs = 0
-        _lastLog = now
-      }
-    }
-    const _t0 = COMMIT_LOG ? performance.now() : 0
+    // densable: let u=n.scrollCommitStartedAt; n.lastCommitMs=u===void 0?0:now-u;
+    // n.scrollCommitStartedAt=void 0, n.layoutStale=!1, onComputeLayout(); onRender?.()
+    const startedAt = rootNode.scrollCommitStartedAt
+    rootNode.lastCommitMs =
+      startedAt === undefined ? 0 : performance.now() - startedAt
+    _lastCommitMs = rootNode.lastCommitMs
+    rootNode.scrollCommitStartedAt = undefined
+    rootNode.layoutStale = false
     if (typeof rootNode.onComputeLayout === 'function') {
       rootNode.onComputeLayout()
     }
-    if (COMMIT_LOG) {
-      const layoutMs = performance.now() - _t0
-      if (layoutMs > 20) {
-        const c = getYogaCounters()
-        debugLog(
-          `${_t0.toFixed(1)} SLOW_YOGA ${layoutMs.toFixed(1)}ms visited=${c.visited} measured=${c.measured} hits=${c.cacheHits} live=${c.live}`,
-        )
-      }
-    }
-
-    if (process.env.NODE_ENV === 'test') {
-      if (rootNode.childNodes.length === 0 && rootNode.hasRenderedContent) {
-        return
-      }
-      if (rootNode.childNodes.length > 0) {
-        rootNode.hasRenderedContent = true
-      }
-      rootNode.onImmediateRender?.()
-      return
-    }
-
-    const _tr = COMMIT_LOG ? performance.now() : 0
     rootNode.onRender?.()
-    if (COMMIT_LOG) {
-      const renderMs = performance.now() - _tr
-      if (renderMs > 10) {
-        debugLog(`${_tr.toFixed(1)} SLOW_PAINT ${renderMs.toFixed(1)}ms`)
-      }
-    }
   },
   getChildHostContext(
     parentHostContext: HostContext,
@@ -359,12 +344,15 @@ const reconciler = createReconciler<
         ? 'ink-virtual-text'
         : originalType
 
-    const node = createNode(type)
-    if (COMMIT_LOG) _createCount++
+    // densable: x=_r(g,f.yogaNode?.config) — inherit root Config.create()
+    const node = createNode(type, _root.yogaNode?.config)
 
     for (const [key, value] of Object.entries(newProps)) {
       applyProp(node, key, value)
     }
+
+    // densable: sy(x,f) — raw-mode hold against the root container
+    syncRawModeHold(node, _root)
 
     if (isDebugRepaintsEnabled()) {
       node.debugOwnerChain = getOwnerChain(internalHandle)
@@ -432,10 +420,13 @@ const reconciler = createReconciler<
   getInstanceFromScope: () => null,
   appendChildToContainer: appendChildNode,
   insertInContainerBefore: insertBeforeNode,
-  removeChildFromContainer(node: DOMElement, removeNode: DOMElement): void {
+  removeChildFromContainer(node: DOMElement, removeNode: DOMNode): void {
     removeChildNode(node, removeNode)
     cleanupYogaNode(removeNode)
+    if (removeNode.nodeName === '#text') return
     getFocusManager(node).handleNodeRemoved(removeNode, node)
+    // densable: hy(u,f)
+    releaseRawModeHoldTree(removeNode, getRootNode(node))
   },
   // React 19 commitUpdate receives old and new props directly instead of an updatePayload
   commitUpdate(
@@ -448,6 +439,7 @@ const reconciler = createReconciler<
     const style = diff(oldProps['style'] as Styles, newProps['style'] as Styles)
 
     if (props) {
+      let rawModeHandlersChanged = false
       for (const [key, value] of Object.entries(props)) {
         if (key === 'style') {
           setStyle(node, value as Styles)
@@ -470,10 +462,15 @@ const reconciler = createReconciler<
             key as keyof EventHandlerProps,
             value as EventHandlerProps[keyof EventHandlerProps],
           )
+          if (RAW_MODE_HANDLER_PROPS.has(key)) rawModeHandlersChanged = true
           continue
         }
 
         setAttribute(node, key, value as DOMNodeAttribute)
+      }
+      // densable: if(g)sy(n,R7t(n))
+      if (rawModeHandlersChanged) {
+        syncRawModeHold(node, getRootNode(node))
       }
     }
 
@@ -490,6 +487,8 @@ const reconciler = createReconciler<
     if (removeNode.nodeName !== '#text') {
       const root = getRootNode(node)
       root.focusManager!.handleNodeRemoved(removeNode, root)
+      // densable: hy(u,f)
+      releaseRawModeHoldTree(removeNode, root)
     }
   },
   // React 19 required methods

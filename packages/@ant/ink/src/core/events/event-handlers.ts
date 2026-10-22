@@ -37,10 +37,7 @@ export type EventHandlerProps = {
   onResize?: ResizeEventHandler
 
   onClick?: ClickEventHandler
-  onMouseDown?: MouseActionEventHandler
-  onMouseUp?: MouseActionEventHandler
-  onMouseDrag?: MouseActionEventHandler
-  /** densable `onPointer` — DualInk alias of onMouseDown/Up/Drag. */
+  /** densable `onPointer` — gold `Wl`. */
   onPointer?: MouseActionEventHandler
   onMouseEnter?: HoverEventHandler
   onMouseLeave?: HoverEventHandler
@@ -65,9 +62,6 @@ export const HANDLER_FOR_EVENT: Record<
   wheel: { bubble: 'onWheel', capture: 'onWheelCapture' },
   resize: { bubble: 'onResize' },
   click: { bubble: 'onClick' },
-  mousedown: { bubble: 'onMouseDown' },
-  mouseup: { bubble: 'onMouseUp' },
-  mousedrag: { bubble: 'onMouseDrag' },
 }
 
 /**
@@ -87,9 +81,6 @@ export const EVENT_HANDLER_PROPS = new Set<string>([
   'onWheelCapture',
   'onResize',
   'onClick',
-  'onMouseDown',
-  'onMouseUp',
-  'onMouseDrag',
   'onPointer',
   'onMouseEnter',
   'onMouseLeave',

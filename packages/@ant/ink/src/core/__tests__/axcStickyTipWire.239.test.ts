@@ -99,24 +99,29 @@ describe('Axc sticky tip wire (Project C)', () => {
     expect(fn).not.toContain('absoluteYogaLayout')
   })
 
-  test('handleResume and reassertTerminalModes re-assert mouse on main screen', () => {
+  test('handleResume and reassertTerminalModes follow gold dqe', () => {
     const inkSrc = readFileSync(join(import.meta.dir, '../ink.tsx'), 'utf8')
     const resumeStart = inkSrc.indexOf('private handleResume')
     const resumeEnd = inkSrc.indexOf('resetScreenReaderDiffState():')
     const resume = inkSrc.slice(resumeStart, resumeEnd)
-    expect(resume).toContain('enableMouseTracking(this.altScreenMouseTracking)')
-    expect(resume).toContain("altScreenMouseTracking !== 'off'")
+    expect(resume).toContain("process.kill(process.pid, 'SIGWINCH')")
+    expect(resume).toContain('this.modes.isSuspended')
+    expect(resume).toContain('this.imagesStale = true')
+    expect(resume).toContain('this.mainScreenBehindAlt = undefined')
+    expect(resume).toContain(
+      'this.nativeCursorVisible = this.accessibilityMode',
+    )
+    expect(resume.match(/this\.imagesStale = true/g)?.length).toBe(2)
+    expect(resume).not.toContain(
+      'enableMouseTracking(this.altScreenMouseTracking)',
+    )
 
     const reassertStart = inkSrc.indexOf('reassertTerminalModes =')
     const reassertEnd = inkSrc.indexOf('Mark this instance as unmounted')
     const reassert = inkSrc.slice(reassertStart, reassertEnd)
-    const mouseIdx = reassert.indexOf(
-      'enableMouseTracking(this.altScreenMouseTracking)',
-    )
-    const altReturnIdx = reassert.indexOf('if (!this.altScreenActive) return')
-    expect(mouseIdx).toBeGreaterThan(-1)
-    expect(altReturnIdx).toBeGreaterThan(-1)
-    expect(mouseIdx).toBeLessThan(altReturnIdx)
+    expect(reassert).toContain('this.isHandedOff || this.isUnmounted')
+    expect(reassert).toContain("this.modes.reassert('mouse')")
+    expect(reassert).toContain('includeAltScreen && this.altScreenActive')
   })
 
   test('AxcFrameSinkBridge forwards bottom/overlay refs to useAxcFrameSink', () => {

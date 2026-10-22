@@ -28,7 +28,6 @@ function parsed(partial: Partial<ParsedKey> & { sequence: string }): ParsedKey {
     option: false,
     super: false,
     raw: partial.sequence,
-    isPasted: false,
     ...partial,
   }
 }
@@ -90,5 +89,15 @@ describe('dispatchKeyboardEvent target path (official densable)', () => {
     const e = new KeyboardEvent(parsed({ sequence: big }))
     expect(e.key.length).toBe(801)
     expect(e.key.length > 800).toBe(true)
+  })
+
+  test('soloKeypress extras land on KeyboardEvent', () => {
+    const e = new KeyboardEvent(parsed({ sequence: 'a', name: 'a' }), {
+      soloKeypress: true,
+    })
+    expect(e.soloKeypress).toBe(true)
+    expect(
+      new KeyboardEvent(parsed({ sequence: 'a', name: 'a' })).soloKeypress,
+    ).toBeUndefined()
   })
 })

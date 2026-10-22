@@ -5,11 +5,10 @@ import {
   tokenize,
 } from '@alcalzone/ansi-tokenize'
 import { getGraphemeSegmenter } from './utils/grapheme.js'
-import sliceAnsi from './utils/sliceAnsi.js'
 
 /** Debug logger — no-op placeholder until proper logger injection is added */
 const logForDebugging = (_message: string) => {}
-import { reorderBidi } from './bidi.js'
+import { isSoftwareBidiNeeded, reorderBidi } from './bidi.js'
 import { type Rectangle, unionRect } from './layout/geometry.js'
 import {
   blitRegion,
@@ -25,13 +24,24 @@ import {
   shiftRows,
 } from './screen.js'
 import { stringWidth } from './stringWidth.js'
+import { LineCells, sanitizeBidiControls } from './tabstops.js'
+import sliceAnsiFallback from './utils/sliceAnsi.js'
 import {
   SoftWrapKind,
   type SoftWrapKind as SoftWrapKindValue,
   packSoftWrap,
   SW_ELIDED_SEP,
 } from './softWrap.js'
-import { widestLine } from './widest-line.js'
+
+function sliceAnsi(text: string, start: number, end?: number): string {
+  const bunSlice =
+    typeof Bun !== 'undefined' && typeof Bun.sliceAnsi === 'function'
+      ? Bun.sliceAnsi
+      : undefined
+  return bunSlice
+    ? bunSlice(text, start, end)
+    : sliceAnsiFallback(text, start, end)
+}
 
 /**
  * A grapheme cluster with precomputed terminal width, styleId, and hyperlink.
@@ -178,6 +188,8 @@ export default class Output {
   height: number
   private readonly stylePool: StylePool
   private screen: Screen
+  /** densable `lineCells` — gold `new nf(stylePool, charPool)`. */
+  private readonly lineCells: LineCells
 
   private readonly operations: Operation[] = []
 
@@ -190,6 +202,7 @@ export default class Output {
     this.height = height
     this.stylePool = stylePool
     this.screen = screen
+    this.lineCells = new LineCells(stylePool, screen.charPool)
 
     resetScreen(screen, width, height)
   }
@@ -443,39 +456,55 @@ export default class Output {
             // If text is positioned outside of clipping area altogether,
             // skip to the next operation to avoid unnecessary calculations
             if (clipHorizontally) {
-              const width = widestLine(text)
-
-              if (x + width <= clip.x1! || x >= clip.x2!) {
+              // gold: if(ie&&B>K.x2)continue
+              if (x > clip.x2!) {
                 continue
               }
             }
 
             if (clipVertically) {
               const height = lines.length
-
-              if (y + height <= clip.y1! || y >= clip.y2!) {
+              // gold: j+he<K.y1||j>K.y2
+              if (y + height < clip.y1! || y > clip.y2!) {
                 continue
               }
             }
 
             if (clipHorizontally) {
-              lines = lines.map(line => {
+              // densable: Ya + lineCells.width from column x; skip lines
+              // outside the vertical slice (`fe<he-1||fe>=ce`).
+              let sliceStart = 0
+              let sliceEnd = lines.length
+              let sliceY = y
+              if (clipVertically) {
+                sliceStart = y < clip.y1! ? clip.y1! - y : 0
+                sliceEnd = y + lines.length > clip.y2! ? clip.y2! - y : sliceEnd
+                sliceY = y < clip.y1! ? clip.y1! : y
+              }
+              sliceEnd = Math.min(sliceEnd, sliceStart + (this.height - sliceY))
+              const reorder = isSoftwareBidiNeeded()
+              let intersects = false
+              lines = lines.map((line, index) => {
+                if (index < sliceStart - 1 || index >= sliceEnd) return line
                 const from = x < clip.x1! ? clip.x1! - x : 0
-                const width = stringWidth(line)
-                const to = x + width > clip.x2! ? clip.x2! - x : width
-                let sliced = sliceAnsi(line, from, to)
-                // Wide chars (CJK, emoji) occupy 2 cells. When `to` lands
-                // on the first cell of a wide char, sliceAnsi includes the
-                // entire glyph and the result overflows clip.x2 by one cell,
-                // writing a SpacerTail into the adjacent sibling. Re-slice
-                // one cell earlier; wide chars are exactly 2 cells, so a
-                // single retry always fits.
-                if (stringWidth(sliced) > to - from) {
-                  sliced = sliceAnsi(line, from, to - 1)
+                const lineWidth = this.lineCells.width(line, x, reorder)
+                if (x + lineWidth >= clip.x1!) intersects = true
+                if (from === 0 && x + lineWidth <= clip.x2!) return line
+                const sanitized = sanitizeBidiControls(line)
+                let to = clip.x2! - x
+                let sliced = sliceAnsi(sanitized, from, to)
+                const placedX = Math.max(x, clip.x1!)
+                const maxCells = clip.x2! - placedX
+                while (
+                  to > from &&
+                  this.lineCells.width(sliced, placedX, reorder) > maxCells
+                ) {
+                  to--
+                  sliced = sliceAnsi(sanitized, from, to)
                 }
                 return sliced
               })
-
+              if (!intersects) continue
               if (x < clip.x1!) {
                 x = clip.x1!
               }
@@ -494,7 +523,15 @@ export default class Output {
                 from > 0 &&
                 kindAtFrom !== SoftWrapKind.HardBreak
               ) {
-                packedPrev = packSoftWrap(x + stringWidth(lines[from - 1]!), x)
+                packedPrev = packSoftWrap(
+                  x +
+                    this.lineCells.width(
+                      lines[from - 1]!,
+                      x,
+                      isSoftwareBidiNeeded(),
+                    ),
+                  x,
+                )
               }
 
               lines = lines.slice(from, to)

@@ -21,6 +21,23 @@ describe('densable uy wrap aliases', () => {
     const out = wrapText('abcdefghij', 5, 'wrap-stream')
     expect(out.includes('\n')).toBe(true)
   })
+
+  test('cm defaults wrapType to wrap', async () => {
+    const src = await Bun.file(
+      new URL('../wrap-text.ts', import.meta.url),
+    ).text()
+    expect(src).toContain("wrapType: Styles['textWrap'] = 'wrap'")
+  })
+
+  test('p0/Sr is Bun.sliceAnsi + r7, not slice-ansi npm', async () => {
+    const src = await Bun.file(
+      new URL('../wrap-text.ts', import.meta.url),
+    ).text()
+    expect(src).toContain('Bun.sliceAnsi')
+    expect(src).toContain("from './utils/sliceAnsi.js'")
+    expect(src).toContain('expandTabsForWrap')
+    expect(src).not.toContain("from 'slice-ansi'")
+  })
 })
 
 describe('densable qv wrap-stream paint pop', () => {

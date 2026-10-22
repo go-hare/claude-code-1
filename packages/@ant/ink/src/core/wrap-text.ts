@@ -1,48 +1,75 @@
-import sliceAnsi from './utils/sliceAnsi.js'
 import { stringWidth } from './stringWidth.js'
 import type { Styles } from './styles.js'
+import { expandTabsForWrap } from './tabstops.js'
 import { wrapAnsi } from './wrapAnsi.js'
+import sliceAnsiFallback from './utils/sliceAnsi.js'
 
 const ELLIPSIS = '…'
 
-// sliceAnsi may include a boundary-spanning wide char (e.g. CJK at position
-// end-1 with width 2 overshoots by 1). Retry with a tighter bound once.
-function sliceFit(text: string, start: number, end: number): string {
-  const s = sliceAnsi(text, start, end)
-  return stringWidth(s) > end - start ? sliceAnsi(text, start, end - 1) : s
+/** densable `Sr` — Bun.sliceAnsi when present; Node falls back to sliceAnsi. */
+function sliceAnsi(text: string, start: number, end?: number): string {
+  const bunSlice =
+    typeof Bun !== 'undefined' && typeof Bun.sliceAnsi === 'function'
+      ? Bun.sliceAnsi
+      : undefined
+  return bunSlice
+    ? bunSlice(text, start, end)
+    : sliceAnsiFallback(text, start, end)
 }
 
+function sliceFit(text: string, start: number, end: number): string {
+  let sliced = sliceAnsi(text, start, end)
+  while (end > start && stringWidth(sliced) > end - start) {
+    end--
+    sliced = sliceAnsi(text, start, end)
+  }
+  return sliced
+}
+
+/**
+ * densable `YTt` — null when the (r7) text already fits. columns===1 is
+ * `{head:"",tail:""}` so `p0` becomes just the ellipsis.
+ */
+function truncateParts(
+  text: string,
+  columns: number,
+  position: 'start' | 'middle' | 'end',
+): { head: string; tail: string } | null {
+  const sanitized = expandTabsForWrap(text)
+  const length = stringWidth(sanitized)
+  if (length <= columns) return null
+  if (columns === 1) return { head: '', tail: '' }
+  if (position === 'start') {
+    return { head: '', tail: sliceFit(sanitized, length - columns + 1, length) }
+  }
+  if (position === 'middle') {
+    const half = Math.floor(columns / 2)
+    return {
+      head: sliceFit(sanitized, 0, half),
+      tail: sliceFit(sanitized, length - (columns - half) + 1, length),
+    }
+  }
+  return { head: sliceFit(sanitized, 0, columns - 1), tail: '' }
+}
+
+/** densable `p0`. */
 function truncate(
   text: string,
   columns: number,
   position: 'start' | 'middle' | 'end',
 ): string {
   if (columns < 1) return ''
-  if (columns === 1) return ELLIPSIS
-
-  const length = stringWidth(text)
-  if (length <= columns) return text
-
-  if (position === 'start') {
-    return ELLIPSIS + sliceFit(text, length - columns + 1, length)
-  }
-  if (position === 'middle') {
-    const half = Math.floor(columns / 2)
-    return (
-      sliceFit(text, 0, half) +
-      ELLIPSIS +
-      sliceFit(text, length - (columns - half) + 1, length)
-    )
-  }
-  return sliceFit(text, 0, columns - 1) + ELLIPSIS
+  const sanitized = expandTabsForWrap(text)
+  const parts = truncateParts(sanitized, columns, position)
+  return parts === null ? sanitized : parts.head + ELLIPSIS + parts.tail
 }
 
 export default function wrapText(
   text: string,
   maxWidth: number,
-  wrapType: Styles['textWrap'],
+  wrapType: Styles['textWrap'] = 'wrap',
 ): string {
-  // densable C3: wrap and wrap-stream share the same hard wrap path
+  // densable cm: wrap and wrap-stream share the same hard wrap path
   if (wrapType === 'wrap' || wrapType === 'wrap-stream') {
     return wrapAnsi(text, maxWidth, {
       trim: false,
@@ -61,7 +88,7 @@ export default function wrapText(
   if (
     wrapType === 'end' ||
     wrapType === 'middle' ||
-    wrapType!.startsWith('truncate')
+    wrapType.startsWith('truncate')
   ) {
     let position: 'end' | 'middle' | 'start' = 'end'
 

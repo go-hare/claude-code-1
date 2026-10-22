@@ -9,14 +9,18 @@ import { KeyboardEvent } from '../events/keyboard-event.js'
 
 function names(items: ParsedInput[]): string[] {
   return items.map(i => {
-    if (i.kind === 'key') return i.name || (i.isPasted ? 'paste' : 'key')
+    if (i.kind === 'key') return i.name || 'key'
     if (i.kind === 'mouse') return `mouse:${i.button}:${i.action}`
+    if (i.kind === 'paste') return 'paste'
+    if (i.kind === 'focus') return i.focused ? 'focus' : 'blur'
     return `response`
   })
 }
 
 function sequences(items: ParsedInput[]): string[] {
-  return items.map(i => i.sequence ?? '')
+  return items.map(i =>
+    i.kind === 'paste' ? i.text : i.kind === 'focus' ? '' : (i.sequence ?? ''),
+  )
 }
 
 /**

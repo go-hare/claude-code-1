@@ -147,6 +147,6 @@ describe('densable 2.1.222 #15 suffix-delete (EOL backspace)', () => {
   test('wire-up: ink tracks prevScreenReaderParkDeclared', () => {
     const src = readFileSync(join(import.meta.dir, '../ink.tsx'), 'utf8')
     expect(src).toContain('prevScreenReaderParkDeclared')
-    expect(src).toContain('prevParkDeclared:')
+    expect(src).toContain('this.prevScreenReaderParkDeclared')
   })
 })

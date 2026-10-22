@@ -67,7 +67,7 @@ describe('onRender uses stdoutSize not raw TTY', () => {
       /onRender\(\)[\s\S]*\{ columns: terminalWidth, rows: terminalRows \} = this\.stdoutSize\(\)/,
     )
     expect(src).toMatch(
-      /onRenderScreenReader\(\)[\s\S]*\{ columns, rows: terminalRows \} = this\.stdoutSize\(\)/,
+      /onRenderScreenReader\(\)[\s\S]*\{ columns: m \} = this\.stdoutSize\(\)/,
     )
     expect(src).not.toMatch(
       /onRender\(\)[\s\S]{0,900}this\.options\.stdout\.columns \|\| 80/,

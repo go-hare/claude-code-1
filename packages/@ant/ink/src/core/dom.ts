@@ -1,13 +1,15 @@
 import type { EventHandlerProps } from './events/event-handlers.js'
 import type { FocusManager } from './focus.js'
 import { createLayoutNode } from './layout/engine.js'
-import type { LayoutNode } from './layout/node.js'
+import type { LayoutNode, YogaNodeConfig } from './layout/node.js'
 import { LayoutDisplay, LayoutMeasureMode } from './layout/node.js'
 import measureText from './measure-text.js'
 import { addPendingClear, nodeCache } from './node-cache.js'
-import squashTextNodes from './squash-text-nodes.js'
+import squashTextNodes, {
+  squashTextNodesToSegments,
+} from './squash-text-nodes.js'
 import type { Styles, TextStyles } from './styles.js'
-import { expandTabs } from './tabstops.js'
+import { expandTabsJoin, hasEscOrC1 } from './tabstops.js'
 import wrapText from './wrap-text.js'
 
 type InkNode = {
@@ -54,6 +56,28 @@ export type DOMElement = {
   onComputeLayout?: () => void
   onRender?: () => void
   onImmediateRender?: () => void
+  /**
+   * densable `layoutStale` — gold scheduleRenderFrom sets this on the root so
+   * the next `onRender` re-runs `onComputeLayout` (notifyLayoutListeners after
+   * Ab has subscribed). Cleared in resetAfterCommit and at the start of that
+   * onRender arm.
+   */
+  layoutStale?: boolean
+  /**
+   * densable `transcriptFrontCutRows` — cut node stamped by `oyr`; `wv`
+   * consumes it for SR `applyTranscriptFrontCut`.
+   */
+  transcriptFrontCutRows?: unknown
+  /**
+   * densable `cachedLayout` — gold `jd.rect` is this field only
+   * (`if(!u)return`). Cache miss is undefined; no yoga getComputed* fallback.
+   * Local paint still writes `nodeCache` (WeakMap) for hit-test.
+   */
+  cachedLayout?: { x: number; y: number; width: number; height: number }
+  /** densable `resetAfterCommit` — `n.lastCommitMs` from `scrollCommitStartedAt`. */
+  lastCommitMs?: number
+  /** densable `Yhr` stamp; cleared in `resetAfterCommit`. */
+  scrollCommitStartedAt?: number
   // Used to skip empty renders during React 19's effect double-invoke in test mode
   hasRenderedContent?: boolean
 
@@ -64,6 +88,21 @@ export type DOMElement = {
   // 协调器写入的事件处理器（捕获/冒泡分发用）。
   // 与 attributes 分离，避免 handler 引用变化触发 dirty 破坏 blit 优化。
   _eventHandlers?: Partial<EventHandlerProps> // 见 event-handlers.ts EventHandlerProps
+  /**
+   * densable `_holdsRawModeRef` — this node currently contributes +1 to the
+   * root raw-mode refcount (`sy` / `hy`).
+   */
+  _holdsRawModeRef?: boolean
+  /**
+   * densable `setRawMode` — bound on the root after App mount (`handleSetRawMode`).
+   * `fy` calls this with `delta > 0` when present.
+   */
+  setRawMode?: (enabled: boolean) => void
+  /**
+   * densable `_pendingRawModeDelta` — raw-mode refcount accrued on the root
+   * before App binds `setRawMode` (createInstance can run pre-mount).
+   */
+  _pendingRawModeDelta?: number
 
   // Scroll state for overflow: 'scroll' boxes. scrollTop is the number of
   // rows the content is scrolled down by. scrollHeight/scrollViewportHeight
@@ -137,7 +176,11 @@ export type DOMNode<T = { nodeName: NodeNames }> = T extends {
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export type DOMNodeAttribute = boolean | string | number
 
-export const createNode = (nodeName: ElementNames): DOMElement => {
+export const createNode = (
+  nodeName: ElementNames,
+  // densable `_r(n,u)` → hs.Node.create(u)
+  yogaConfig?: YogaNodeConfig,
+): DOMElement => {
   const needsYogaNode =
     nodeName !== 'ink-virtual-text' &&
     nodeName !== 'ink-link' &&
@@ -148,8 +191,12 @@ export const createNode = (nodeName: ElementNames): DOMElement => {
     attributes: {},
     childNodes: [],
     parentNode: undefined,
-    yogaNode: needsYogaNode ? createLayoutNode() : undefined,
+    yogaNode: needsYogaNode ? createLayoutNode(yogaConfig) : undefined,
     dirty: false,
+    layoutStale: undefined,
+    cachedLayout: undefined,
+    lastCommitMs: undefined,
+    scrollCommitStartedAt: undefined,
   }
 
   if (nodeName === 'ink-text') {
@@ -376,11 +423,20 @@ const measureTextNode = function (
 ): { width: number; height: number } {
   const rawText =
     node.nodeName === '#text' ? node.nodeValue : squashTextNodes(node)
-
-  // Expand tabs for measurement (worst case: 8 spaces each).
-  // Actual tab expansion happens in output.ts based on screen position.
-  const text = expandTabs(rawText)
   const textWrap = node.style?.textWrap ?? 'wrap'
+  const keepBidi =
+    textWrap === 'wrap' ||
+    textWrap === 'wrap-trim' ||
+    textWrap === 'wrap-stream'
+  // densable Oc: ink-text with ESC/C1 expands per wr() segment, else [raw].
+  const text = expandTabsJoin(
+    node.nodeName !== '#text' && hasEscOrC1(rawText)
+      ? squashTextNodesToSegments(node as DOMElement).map(
+          segment => segment.text,
+        )
+      : [rawText],
+    keepBidi,
+  )
 
   // densable h1: wrap-stream ALWAYS wraps then drops the last visual row,
   // before the "fits in container" return. A short first sentence is one
@@ -394,8 +450,8 @@ const measureTextNode = function (
 
   const dimensions = measureText(text, width)
 
-  // Text fits into container, no need to wrap
-  if (dimensions.width <= width) {
+  // densable: if(f===0||x.width<=u)return x  (Undefined OR fits)
+  if (widthMode === LayoutMeasureMode.Undefined || dimensions.width <= width) {
     return dimensions
   }
 
@@ -403,19 +459,6 @@ const measureTextNode = function (
   // if we can fit this text node in a <1px space, so we just say "no"
   if (dimensions.width >= 1 && width > 0 && width < 1) {
     return dimensions
-  }
-
-  // For text with embedded newlines (pre-wrapped content), avoid re-wrapping
-  // at measurement width when layout is asking for intrinsic size (Undefined mode).
-  // This prevents height inflation during min/max size checks.
-  //
-  // However, when layout provides an actual constraint (Exactly or AtMost mode),
-  // we must respect it and measure at that width. Otherwise, if the actual
-  // rendering width is smaller than the natural width, the text will wrap to
-  // more lines than layout expects, causing content to be truncated.
-  if (text.includes('\n') && widthMode === LayoutMeasureMode.Undefined) {
-    const effectiveWidth = Math.max(width, dimensions.width)
-    return measureText(text, effectiveWidth)
   }
 
   const wrappedText = wrapText(text, width, textWrap)
@@ -469,7 +512,11 @@ export const markDirty = (node?: DOMNode): void => {
 export const scheduleRenderFrom = (node?: DOMNode): void => {
   let cur: DOMNode | undefined = node
   while (cur?.parentNode) cur = cur.parentNode
-  if (cur && cur.nodeName !== '#text') (cur as DOMElement).onRender?.()
+  if (cur && cur.nodeName !== '#text') {
+    const root = cur as DOMElement
+    root.layoutStale = true
+    root.onRender?.()
+  }
 }
 
 export const setTextNodeValue = (node: TextNode, text: string): void => {

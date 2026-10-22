@@ -249,9 +249,8 @@ function parseKey(keypress: ParsedKey): [Key, string] {
   // reach the keyboard path:
   //   input = name==="enter" ? "\n" : [...e.key].length===1 ? e.key : ""
   // Multi-codepoint sequences are NOT typed. Single codepoints (ASCII, CJK,
-  // fullwidth punct) still insert. Bracketed paste sets isPasted and keeps
-  // the full payload for the paste handler (official uses dispatchPasteEvent).
-  if (!keypress.isPasted && input !== '' && [...input].length !== 1) {
+  // fullwidth punct) still insert. Bracketed paste is kind paste → PasteEvent.
+  if (input !== '' && [...input].length !== 1) {
     input = ''
   }
 

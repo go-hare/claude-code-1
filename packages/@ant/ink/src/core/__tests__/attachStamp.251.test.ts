@@ -21,23 +21,15 @@ afterEach(() => {
 })
 
 describe('densable LGe / Won / Hlt', () => {
-  test('non-daemon LGe is always false', () => {
+  test('289 Ext is always false (gold `return !1`)', () => {
     delete process.env.CLAUDE_BG_BACKEND
     stampAttachTime(Date.now())
     expect(isAttachUnstable(Date.now())).toBe(false)
-  })
-
-  test('Won(0) resets; Hlt makes LGe true on daemon', () => {
     process.env.CLAUDE_BG_BACKEND = 'daemon'
     stampAttachTime(0)
     expect(getAttachStampMs()).toBe(0)
-    expect(isAttachUnstable(Date.now())).toBe(false)
     markDetachedSinceLastAttach()
-    expect(isAttachUnstable(Date.now())).toBe(true)
-  })
-
-  test('Won stamps only when detached or stampMs===0', () => {
-    process.env.CLAUDE_BG_BACKEND = 'daemon'
+    expect(isAttachUnstable(Date.now())).toBe(false)
     stampAttachTime(1000)
     expect(getAttachStampMs()).toBe(1000)
     stampAttachTime(2000)
@@ -45,7 +37,7 @@ describe('densable LGe / Won / Hlt', () => {
     markDetachedSinceLastAttach()
     stampAttachTime(3000)
     expect(getAttachStampMs()).toBe(3000)
-    expect(isAttachUnstable(3000)).toBe(true)
+    expect(isAttachUnstable(3000)).toBe(false)
     expect(isAttachUnstable(3500)).toBe(false)
   })
 

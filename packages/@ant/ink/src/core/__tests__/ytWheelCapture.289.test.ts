@@ -88,17 +88,12 @@ describe('densable 2.1.289 Yt eo wheel capture', () => {
     )
     const ink = readFileSync(join(import.meta.dir, '../ink.tsx'), 'utf8')
     expect(app).toContain(
-      'app.props.dispatchWheelEvent?.(convertWheelIfPixels(app, item));',
+      'app.props.dispatchWheelEvent(convertWheelIfPixels(app, item));',
     )
-    const nonMouse = app.slice(
-      app.indexOf("if (item.name !== 'mouse')"),
-      app.indexOf(
-        'const event = new InputEvent(item);',
-        app.indexOf("if (item.name !== 'mouse')"),
-      ),
-    )
-    expect(nonMouse).toContain('continue;')
-    expect(nonMouse).not.toContain("internal_eventEmitter.emit('input'")
+    expect(app).toContain("if (item.name !== 'mouse')")
+    expect(app).toContain('noteMouseObserved()')
+    expect(app).not.toContain('new InputEvent(item)')
+    expect(app).not.toContain("internal_eventEmitter.emit('input'")
     expect(setup).toContain('onWheelCapture={handleWheelCapture}')
     expect(setup).toContain('wheelCaptureOwnedByDescendant')
     expect(setup).toContain('onKeyDownCapture={handleKeyDownCapture}')

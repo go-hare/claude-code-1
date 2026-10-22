@@ -1,67 +1,96 @@
-import { useContext, useEffect, useRef, useState } from 'react'
-import { ClockContext } from '../components/ClockContext.js'
+import { useCallback, useContext, useRef, useSyncExternalStore } from 'react'
+import {
+  ClockContext,
+  snapClockIntervalMs,
+} from '../components/ClockContext.js'
+
+/** densable `eLe`. */
+const noopSubscribe = (): (() => void) => () => {}
+/** densable `TDn`. */
+const nullSnapshot = (): null => null
 
 /**
- * Returns the clock time, updating at the given interval.
- * Subscribes as non-keepAlive — won't keep the clock alive on its own,
- * but updates whenever a keepAlive subscriber (e.g. the spinner)
- * is driving the clock.
+ * densable `pDn` — follower clock, quantized.
  *
- * Use this to drive pure time-based computations (shimmer position,
- * frame index) from the shared clock.
+ * Gold: `subscribeFollower` + `Math.floor(u.current/l)*l`.
  */
-export function useAnimationTimer(intervalMs: number): number {
+export function useAnimationTimer(intervalMs: number | null): number {
   const clock = useContext(ClockContext)
-  const [time, setTime] = useState(() => clock?.now() ?? 0)
-
-  useEffect(() => {
-    if (!clock) return
-
-    let lastUpdate = clock.now()
-
-    const onChange = (): void => {
-      const now = clock.now()
-      if (now - lastUpdate >= intervalMs) {
-        lastUpdate = now
-        setTime(now)
-      }
+  const snapped = intervalMs === null ? null : snapClockIntervalMs(intervalMs)
+  const lastRef = useRef<number | null>(null)
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      if (!clock || snapped === null) return noopSubscribe()
+      return clock.subscribeFollower(() => {
+        lastRef.current = clock.now()
+        onStoreChange()
+      })
+    },
+    [clock, snapped],
+  )
+  return useSyncExternalStore(subscribe, () => {
+    if (!clock || snapped === null) {
+      lastRef.current = null
+      return 0
     }
-
-    return clock.subscribe(onChange, false)
-  }, [clock, intervalMs])
-
-  return time
+    if (lastRef.current === null) lastRef.current = clock.now()
+    return Math.floor(lastRef.current / snapped) * snapped
+  })
 }
 
 /**
- * Interval hook backed by the shared Clock.
+ * densable `gi` / `uhe` — clock `setTimeout` loop, not a keepAlive tick.
  *
- * Unlike `useInterval` from `usehooks-ts` (which creates its own setInterval),
- * this piggybacks on the single shared clock so all timers consolidate into
- * one wake-up. Pass `null` for intervalMs to pause.
+ * Gold: `Pt(C, TDn)` with `l?.immediate??!1`.
  */
 export function useInterval(
   callback: () => void,
   intervalMs: number | null,
+  options?: { immediate?: boolean },
 ): void {
   const callbackRef = useRef(callback)
   callbackRef.current = callback
-
   const clock = useContext(ClockContext)
-
-  useEffect(() => {
-    if (!clock || intervalMs === null) return
-
-    let lastUpdate = clock.now()
-
-    const onChange = (): void => {
-      const now = clock.now()
-      if (now - lastUpdate >= intervalMs) {
-        lastUpdate = now
-        callbackRef.current()
+  const immediate = options?.immediate ?? false
+  const armedRef = useRef<number | null>(null)
+  const subscribe = useCallback(
+    (_onStoreChange: () => void) => {
+      if (!clock || intervalMs === null) {
+        armedRef.current = null
+        return () => {}
       }
-    }
+      if (immediate && armedRef.current === null) callbackRef.current()
+      armedRef.current = intervalMs
+      return startClockTimeoutLoop(
+        clock,
+        () => callbackRef.current(),
+        intervalMs,
+      )
+    },
+    [clock, intervalMs, immediate],
+  )
+  useSyncExternalStore(subscribe, nullSnapshot)
+}
 
-    return clock.subscribe(onChange, false)
-  }, [clock, intervalMs])
+/** densable `uhe`. */
+function startClockTimeoutLoop(
+  clock: { setTimeout: (callback: () => void, ms: number) => () => void },
+  callback: () => void,
+  intervalMs: number,
+): () => void {
+  let stopped = false
+  let cancel = (): void => {}
+  const tick = (): void => {
+    if (stopped) return
+    try {
+      callback()
+    } finally {
+      if (!stopped) cancel = clock.setTimeout(tick, intervalMs)
+    }
+  }
+  cancel = clock.setTimeout(tick, intervalMs)
+  return () => {
+    stopped = true
+    cancel()
+  }
 }

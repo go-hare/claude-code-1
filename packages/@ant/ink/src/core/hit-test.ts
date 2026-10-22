@@ -20,6 +20,12 @@ import { isEmptyCellAt, type Screen } from './screen.js'
  * Returns the hit node even if it has no onClick — dispatchClick walks up
  * via parentNode to find handlers.
  */
+function layoutRect(
+  node: DOMElement,
+): { x: number; y: number; width: number; height: number } | undefined {
+  return node.cachedLayout ?? nodeCache.get(node)
+}
+
 function hasAbsoluteDescendant(node: DOMElement): boolean {
   return Boolean(
     (node as DOMElement & { hasAbsoluteDescendant?: boolean })
@@ -57,7 +63,7 @@ export function hitTest(
     warnTreeDepthExceeded('hitTest', node.nodeName)
     return null
   }
-  const y = nodeCache.get(node)
+  const y = layoutRect(node)
   if (!y) return null
   const g = rectContains(y, col, row)
   if (!g && !hasAbsoluteDescendant(node)) return null
@@ -78,7 +84,7 @@ export function hitTest(
     const childNode = node.childNodes[i]!
     if (childNode.nodeName === '#text') continue
     const child = childNode as DOMElement
-    const childRect = nodeCache.get(child)
+    const childRect = layoutRect(child)
     if (!childRect) continue
     const childContains = rectContains(childRect, col, row)
     if (!childContains && !hasAbsoluteDescendant(child)) continue
@@ -131,7 +137,7 @@ export function bubbleClick(
       | ((event: ClickEvent) => void)
       | undefined
     if (handler) {
-      const rect = nodeCache.get(target)
+      const rect = layoutRect(target)
       if (rect) {
         event.localCol = col - rect.x
         event.localRow = row - rect.y
@@ -264,7 +270,7 @@ export function cellIsBlankForHover(
   if (!isEmptyCellAt(screen, col, row)) return false
   const layout =
     hit?.nodeName === 'ink-text' || hit?.nodeName === 'ink-raw-ansi'
-      ? nodeCache.get(hit)
+      ? layoutRect(hit)
       : undefined
   if (!layout) return true
   const left = firstNonEmptyColToward(
@@ -385,54 +391,6 @@ export function followHover(
   return changed
 }
 
-export function dispatchMouseAction(
-  root: DOMElement,
-  col: number,
-  row: number,
-  button: number,
-  type: 'mousedown' | 'mouseup' | 'mousedrag',
-  targetOverride?: DOMElement,
-  mods: { shift?: boolean; alt?: boolean; ctrl?: boolean } = {},
-): DOMElement | null {
-  let target: DOMElement | undefined =
-    targetOverride ?? hitTest(root, col, row) ?? undefined
-  if (!target) return null
-
-  const propName =
-    type === 'mousedown'
-      ? 'onMouseDown'
-      : type === 'mouseup'
-        ? 'onMouseUp'
-        : 'onMouseDrag'
-
-  const event = new MouseActionEvent(type, col, row, button, {
-    shift: mods.shift === true || (button & 0x04) !== 0,
-    alt: mods.alt === true || (button & 0x08) !== 0,
-    ctrl: mods.ctrl === true || (button & 0x10) !== 0,
-  })
-  let handledBy: DOMElement | null = null
-
-  while (target) {
-    const handlers = target._eventHandlers as EventHandlerProps | undefined
-    const named = handlers?.[propName] as
-      | ((event: MouseActionEvent) => void)
-      | undefined
-    const pointer = handlers?.onPointer
-    if (named || pointer) {
-      handledBy ??= target
-      event.prepareForTarget(target)
-      named?.(event)
-      if (!event.didStopImmediatePropagation()) pointer?.(event)
-      if (event.didStopImmediatePropagation()) {
-        return handledBy
-      }
-    }
-    target = target.parentNode as DOMElement | undefined
-  }
-
-  return handledBy
-}
-
 /**
  * densable `Xd` — walk from hit to the first `onPointer` ancestor.
  * Stops with null if `onClick` or `tabIndex` is reached first.
@@ -469,7 +427,7 @@ export function dispatchPointer(
   fine: { col: number; row: number } | undefined,
 ): void {
   const handler = node._eventHandlers?.onPointer
-  const rect = nodeCache.get(node)
+  const rect = layoutRect(node)
   if (!(handler && rect && (node.parentNode || kind === 'up'))) return
   const originX = Math.floor(rect.x)
   const originY = Math.floor(rect.y)

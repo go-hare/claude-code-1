@@ -5,6 +5,8 @@
  * then interprets sequences as keypresses.
  */
 import { Buffer } from 'buffer'
+import { familyFromTerm } from './terminalCapabilities.js'
+import { attacherCaps } from './termio/osc.js'
 import { FOCUS_IN, FOCUS_OUT, PASTE_END, PASTE_START } from './termio/csi.js'
 import {
   createTokenizer,
@@ -62,6 +64,9 @@ const CURSOR_POSITION_RE = /^\x1b\[\?(\d+);(\d+)R$/
 // XTWINOPS cell size: CSI 6 ; height ; width t  — answer to CSI 16 t.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CELL_SIZE_RE = /^\x1b\[6;(\d+);(\d+)t$/
+// densable theme notify: CSI ? 997 ; 1 n (dark) / CSI ? 997 ; 2 n (light)
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const THEME_NOTIFY_RE = /^\x1b\[\?997;([12])n$/
 // OSC response: OSC code ; data (BEL|ST)
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const OSC_RESPONSE_RE = /^\x1b\](\d+);(.*?)(?:\x07|\x1b\\)$/s
@@ -78,25 +83,25 @@ const KITTY_GRAPHICS_RE = /^\x1b_G(?:[^;]*,)?i=(\d+)[^;]*;(.*?)\x1b\\$/s
 // Button codes: 64=wheel-up, 65=wheel-down (0x40 | wheel-bit).
 // Button 32=left-drag (0x20 | motion-bit). Plain 0/1/2 = left/mid/right click.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/
+const SGR_MOUSE_RE = /^\x1b\[<(\d+);(-?\d+);(-?\d+)([Mm])$/
 // densable 2.1.239 Qpr / Xyf / mwS / hwS — split mouse reports across writes.
 // Incomplete ESC[ < digits;  prefix is held (not flushed as typed keys).
 // Completed prefix is dropped (changelog "35;150;7M"), not pendingSgr invent.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const INCOMPLETE_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*$/
+const INCOMPLETE_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;-]*$/
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const COMPLETED_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;]*[Mm]/
+const COMPLETED_SGR_MOUSE_PREFIX_RE = /^\x1b\[<[\d;-]*[Mm]/
 /** densable hwS — max length still treated as a held incomplete SGR prefix. */
 const HELD_SGR_MOUSE_PREFIX_MAX = 32
 /** densable 2.1.247 jM — completed SGR after flushed ESC / ESC[. */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const FLUSHED_ESCAPE_MOUSE_COMPLETE_RE = /^\x1b\[<\d+;\d+;\d+[Mm]/
+const FLUSHED_ESCAPE_MOUSE_COMPLETE_RE = /^\x1b\[<\d+;-?\d+;-?\d+[Mm]/
 // densable 2.1.228 kTd text-branch orphan mouse recovery (was ZXc):
 // whole-token only — not prefix peel, not multi-event burst, not embedded.
 //   /^\[<\d+;\d+;\d+[Mm]$/   SGR
 //   /^\[M[\x60-\x7f][\x20-\uffff]{2}$/  X10 wheel payload
 // Bursts / incomplete / param residue stay one text key.
-const ORPHAN_SGR_WHOLE_TOKEN_RE = /^\[<\d+;\d+;\d+[Mm]$/
+const ORPHAN_SGR_WHOLE_TOKEN_RE = /^\[<\d+;-?\d+;-?\d+[Mm]$/
 const ORPHAN_X10_WHEEL_WHOLE_TOKEN_RE = /^\[M[\u0060-\u007f][\u0020-\uffff]{2}$/
 
 /**
@@ -171,24 +176,11 @@ function altGrTextKey(
     super: false,
     sequence,
     raw: sequence,
-    isPasted: false,
   }
 }
 
-function createPasteKey(content: string): ParsedKey {
-  return {
-    kind: 'key',
-    name: '',
-    fn: false,
-    ctrl: false,
-    meta: false,
-    shift: false,
-    option: false,
-    super: false,
-    sequence: content,
-    raw: content,
-    isPasted: true,
-  }
+function createPaste(content: string): ParsedPaste {
+  return { kind: 'paste', text: content }
 }
 
 /** DECRPM status values (response to DECRQM) */
@@ -215,6 +207,8 @@ export type TerminalResponse =
   | { type: 'kittyKeyboard'; flags: number }
   /** DSR: cursor position report (answer to CSI 6 n) */
   | { type: 'cursorPosition'; row: number; col: number }
+  /** densable theme notify — DEC 2031 report. `dark` is true for `?997;1n`. */
+  | { type: 'themeNotify'; dark: boolean }
   /** OSC response: generic operating-system-command reply (e.g. OSC 11 bg color) */
   | { type: 'osc'; code: number; data: string }
   /** XTVERSION: terminal name/version string (answer to CSI > 0 q).
@@ -265,6 +259,10 @@ function parseTerminalResponse(s: string): TerminalResponse | null {
         row: parseInt(m[1]!, 10),
         col: parseInt(m[2]!, 10),
       }
+    }
+
+    if ((m = THEME_NOTIFY_RE.exec(s))) {
+      return { type: 'themeNotify', dark: m[1] === '1' }
     }
 
     if ((m = CELL_SIZE_RE.exec(s))) {
@@ -343,6 +341,11 @@ export type KeyParseState = {
    * Next text is prepended so `<35;150;7M` completes SGR instead of typing.
    */
   flushedEscapePrefix: string
+  /**
+   * densable `win32HighSurrogate` — gold `Hy` holds a UTF-16 high surrogate
+   * until the matching low-surrogate CSI _ arrives.
+   */
+  win32HighSurrogate?: string
   // Internal tokenizer instance — incomplete CSI stays in tokenizer.buffer()
   // until App NORMAL_TIMEOUT / mousePrefixDropAt flush (densable Qyf).
   _tokenizer?: Tokenizer
@@ -355,10 +358,37 @@ export const INITIAL_STATE: KeyParseState = {
   pendingByteEvents: [],
   droppedMousePrefix: '',
   flushedEscapePrefix: '',
+  win32HighSurrogate: '',
 }
 
-/** densable Qpr */
-export function isHeldSgrMousePrefix(value: string): boolean {
+/** densable `vd`. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const INCOMPLETE_SGR_MOUSE_CSI_RE = /^\x1b\[<[\d;-]*$/
+/** densable `ux`. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const INCOMPLETE_CSI_GENERIC_RE = /^\x1b\[(?:[0-9:;]+|[<=>?][0-9:;]*[ -/]*)$/
+/** densable `cx`. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const INCOMPLETE_OSC_DCS_APC_RE = /^\x1b(?:\][0-9]|P[0-9>|$+=!]|_G)[^\x07]*$/s
+const INCOMPLETE_OSC_MAX = 256
+const INCOMPLETE_CSI_GENERIC_MAX = 64
+
+/** densable `md` / `zl` — hold incomplete CSI/OSC, not only Qpr SGR. */
+export function isHeldIncompleteSequence(value: string): boolean {
+  if (INCOMPLETE_SGR_MOUSE_CSI_RE.test(value)) {
+    return value.length <= HELD_SGR_MOUSE_PREFIX_MAX
+  }
+  if (INCOMPLETE_OSC_DCS_APC_RE.test(value)) {
+    return value.length <= INCOMPLETE_OSC_MAX
+  }
+  return (
+    value.length <= INCOMPLETE_CSI_GENERIC_MAX &&
+    INCOMPLETE_CSI_GENERIC_RE.test(value)
+  )
+}
+
+/** densable Qpr — SGR subset of `zl`. */
+function isHeldSgrMousePrefix(value: string): boolean {
   return (
     value.length <= HELD_SGR_MOUSE_PREFIX_MAX &&
     INCOMPLETE_SGR_MOUSE_PREFIX_RE.test(value)
@@ -374,6 +404,23 @@ export function parkIncompleteMousePrefix(state: KeyParseState): KeyParseState {
   const prefix = state._tokenizer?.buffer() ?? ''
   state._tokenizer?.reset()
   return { ...state, incomplete: '', droppedMousePrefix: prefix }
+}
+
+/** densable `Wy` — `nu()?.keyDialect ?? gst(TERM)`. */
+function Wy(): string | null {
+  const dialect = attacherCaps()?.keyDialect
+  if (dialect !== undefined) return dialect
+  return familyFromTerm(process.env.TERM)
+}
+
+/** densable `mx` — `Wy()==="st"`. */
+function isStTerm(): boolean {
+  return Wy() === 'st'
+}
+
+/** densable `px` — `Wy()==="rxvt"`. */
+function isRxvtEscPrefixedAlt(): boolean {
+  return Wy() === 'rxvt'
 }
 
 function inputToString(input: Buffer | string): string {
@@ -434,8 +481,13 @@ export function parseMultipleKeypresses(
   const isFlush = input === null
   const inputString = isFlush ? '' : inputToString(input)
 
-  // densable Qyf: mbt({x10Mouse:!0}) + droppedMousePrefix hold on flush
-  const tokenizer = prevState._tokenizer ?? createTokenizer({ x10Mouse: true })
+  // densable Qyf: `$me({x10Mouse:!0,escPrefixedKeyIsAlt:px})`
+  const tokenizer =
+    prevState._tokenizer ??
+    createTokenizer({
+      x10Mouse: true,
+      escPrefixedKeyIsAlt: isRxvtEscPrefixedAlt,
+    })
   let droppedMousePrefix = prevState.droppedMousePrefix ?? ''
   // densable 2.1.247 qb: f is only written on flush; m is the working copy.
   let flushedEscapePrefix = isFlush ? (prevState.flushedEscapePrefix ?? '') : ''
@@ -443,7 +495,7 @@ export function parseMultipleKeypresses(
   let tokens: Token[]
   if (isFlush && prevState.mode !== 'IN_PASTE') {
     const held = tokenizer.buffer()
-    if (isHeldSgrMousePrefix(held)) {
+    if (isHeldIncompleteSequence(held)) {
       tokens = []
     } else if (INCOMPLETE_SGR_MOUSE_PREFIX_RE.test(held)) {
       tokenizer.reset()
@@ -462,10 +514,10 @@ export function parseMultipleKeypresses(
   const keys: ParsedInput[] = []
   let inPaste = prevState.mode === 'IN_PASTE'
   let pasteBuffer = prevState.pasteBuffer
-  // Copy so we never mutate prevState.pendingByteEvents in place.
-  let pendingByteEvents: PendingByteEvent[] = [
-    ...(prevState.pendingByteEvents ?? []),
-  ]
+  // Gold `qy` keeps the same array identity until a high-byte run mutates it.
+  // `Ed` uses `g.pendingByteEvents!==R.pendingByteEvents` to extend Fl.
+  let pendingByteEvents: PendingByteEvent[] = prevState.pendingByteEvents
+  let win32HighSurrogate = prevState.win32HighSurrogate ?? ''
 
   /** Emit a single pending high-byte event as a normal key/paste char. */
   const emitPendingByte = (ev: PendingByteEvent): void => {
@@ -540,7 +592,7 @@ export function parseMultipleKeypresses(
       } else if (token.value === PASTE_END) {
         flushPendingBytes()
         // Always emit a paste key, even for empty pastes (clipboard image path).
-        keys.push(createPasteKey(pasteBuffer))
+        keys.push(createPaste(pasteBuffer))
         inPaste = false
         pasteBuffer = ''
       } else if (inPaste) {
@@ -570,6 +622,15 @@ export function parseMultipleKeypresses(
           unicodeFromExtendedKeySequence(token.value) ?? token.value
       } else {
         // densable kTd sequence branch (no pendingSgr / absorbMm invent).
+        const win32Keys = parseWin32Input(token.value, win32HighSurrogate)
+        if (win32Keys) {
+          flushPendingBytes()
+          win32HighSurrogate = win32Keys.highSurrogate
+          for (const seq of win32Keys.sequences) {
+            keys.push(parseKeypress(seq))
+          }
+          continue
+        }
         const highByte = highByteFromExtendedKeySequence(token.value)
         if (highByte !== undefined) {
           reassembleHighByte(token.value, highByte)
@@ -592,6 +653,10 @@ export function parseMultipleKeypresses(
             !(token.value.length === 6 && token.value.startsWith('\x1b[M')))
         ) {
           flushPendingBytes()
+        }
+        if (token.value === FOCUS_IN || token.value === FOCUS_OUT) {
+          keys.push({ kind: 'focus', focused: token.value === FOCUS_IN })
+          continue
         }
         // densable: incomplete CSI flush becomes a sequence → U_n (parseKeypress).
         // Qpr hold is on flush (above), not here.
@@ -640,31 +705,7 @@ export function parseMultipleKeypresses(
         const mouse = parseMouseEvent(seq)
         keys.push(mouse ?? parseKeypress(seq))
       } else {
-        // densable: whole text token → one ZUr key.
-        // Extra (local enter safety, not densable invent for mouse): if a large
-        // batch still embeds CR/LF (buffer ≥64 / no peel), split + collapse
-        // consecutive terminators so Enter is not lost / double-submit.
-        if ([...text].length > 1 && /[\r\n]/.test(text)) {
-          const chars = [...text]
-          for (let i = 0; i < chars.length; ) {
-            const ch = chars[i]!
-            if (ch === '\r' || ch === '\n') {
-              keys.push(parseKeypress(ch))
-              i++
-              while (
-                i < chars.length &&
-                (chars[i] === '\r' || chars[i] === '\n')
-              ) {
-                i++
-              }
-              continue
-            }
-            keys.push(parseKeypress(ch))
-            i++
-          }
-        } else {
-          keys.push(parseKeypress(text))
-        }
+        emitParsedTextKeys(keys, text)
       }
     }
   }
@@ -673,7 +714,7 @@ export function parseMultipleKeypresses(
   if (isFlush) {
     flushPendingBytes()
     if (inPaste && pasteBuffer) {
-      keys.push(createPasteKey(pasteBuffer))
+      keys.push(createPaste(pasteBuffer))
       inPaste = false
       pasteBuffer = ''
     }
@@ -686,6 +727,7 @@ export function parseMultipleKeypresses(
     pendingByteEvents,
     droppedMousePrefix,
     flushedEscapePrefix,
+    win32HighSurrogate,
     _tokenizer: tokenizer,
   }
 
@@ -1102,7 +1144,6 @@ export type ParsedKey = {
   sequence: string | undefined
   raw: string | undefined
   code?: string
-  isPasted: boolean
   /**
    * densable SGR wheel `col` — 1-indexed. Pixel reports stay raw until App `S1`.
    */
@@ -1124,6 +1165,16 @@ export type ParsedResponse = {
 /** SGR mouse event with coordinates. Emitted for clicks, drags, and
  *  releases (wheel events remain ParsedKey). col/row are 1-indexed
  *  from the terminal sequence (CSI < btn;col;row M/m). */
+export type ParsedPaste = {
+  kind: 'paste'
+  text: string
+}
+
+export type ParsedFocus = {
+  kind: 'focus'
+  focused: boolean
+}
+
 export type ParsedMouse = {
   kind: 'mouse'
   /** Raw SGR button code. Low 2 bits = button (0=left,1=mid,2=right),
@@ -1145,14 +1196,196 @@ export type ParsedMouse = {
 }
 
 /** Everything that can come out of the input parser: a user keypress/paste,
- *  a mouse click/drag event, or a terminal response to a query we sent. */
-export type ParsedInput = ParsedKey | ParsedMouse | ParsedResponse
+ *  a mouse click/drag event, a focus report, or a terminal response. */
+export type ParsedInput =
+  | ParsedKey
+  | ParsedMouse
+  | ParsedResponse
+  | ParsedPaste
+  | ParsedFocus
 
 /**
  * Parse an SGR mouse event sequence into a ParsedMouse, or null if not a
  * mouse event or if it's a wheel event (wheel stays as ParsedKey for the
  * keybinding system). Button bit 0x40 = wheel, bit 0x20 = drag/motion.
  */
+/**
+ * densable `Hy` — Windows conhost CSI _ (`ESC [ vk ; sc ; uc ; kd ; cs ; rc _`).
+ * Gold: official-289 SEA @193225902.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const WIN32_INPUT_RE = /^\x1b\[(\d*(?:;\d*){0,5})_$/
+const WIN32_SHIFT_BITS = 1 | 2
+const WIN32_CTRL_BITS = 4 | 8
+const WIN32_ALT_BIT = 16
+const WIN32_VK_BACK = 8
+const WIN32_VK_TAB = 9
+const WIN32_VK_RETURN = 13
+const WIN32_VK_CONTROL = 18
+const WIN32_VK_ESCAPE = 27
+const WIN32_VK_SPACE = 32
+const WIN32_VK_F1 = 112
+const WIN32_VK_F4 = 115
+const WIN32_VK_F5 = 116
+const WIN32_VK_F12 = 123
+const WIN32_REPEAT_MAX = 8
+const WIN32_NAMED_VK: Record<
+  number,
+  { code: number; final: string } | undefined
+> = {
+  33: { code: 5, final: '~' },
+  34: { code: 6, final: '~' },
+  35: { code: 1, final: 'F' },
+  36: { code: 1, final: 'H' },
+  37: { code: 1, final: 'D' },
+  38: { code: 1, final: 'A' },
+  39: { code: 1, final: 'C' },
+  40: { code: 1, final: 'B' },
+  45: { code: 2, final: '~' },
+  46: { code: 3, final: '~' },
+}
+const WIN32_F5_CODES = [15, 17, 18, 19, 20, 21, 23, 24]
+
+function win32Param(parts: string[], index: number, fallback: number): number {
+  const raw = parts[index]
+  return raw === undefined || raw === '' ? fallback : parseInt(raw, 10)
+}
+
+function win32Repeat(
+  count: number,
+  sequence: string,
+): {
+  sequences: string[]
+  highSurrogate: string
+} {
+  return { sequences: Array(count).fill(sequence), highSurrogate: '' }
+}
+
+/** densable `Xa` — params joined with `;`, final byte appended. */
+function win32Csi(...parts: Array<number | string>): string {
+  const final = parts.at(-1) ?? ''
+  const params = parts.slice(0, -1)
+  return `\x1b[${params.join(';')}${final}`
+}
+
+function win32CtrlChar(code: number): number {
+  if (code < 32) return code
+  if ((code >= 64 && code <= 95) || (code >= 97 && code <= 122))
+    return code & 31
+  switch (code) {
+    case 32:
+    case 50:
+      return 0
+    case 51:
+    case 52:
+    case 53:
+    case 54:
+    case 55:
+      return code - 51 + 27
+    case 56:
+    case 63:
+      return 127
+    case 47:
+      return 31
+    default:
+      return code
+  }
+}
+
+function parseWin32Input(
+  sequence: string,
+  highSurrogate: string,
+): { sequences: string[]; highSurrogate: string } | null {
+  const match = WIN32_INPUT_RE.exec(sequence)
+  if (!match) return null
+  const parts = match[1]!.split(';')
+  const vk = win32Param(parts, 0, 0)
+  const unicode = win32Param(parts, 2, 0)
+  const keyDown = win32Param(parts, 3, 0) !== 0
+  const controlState = win32Param(parts, 4, 0)
+  const repeat = Math.min(
+    Math.max(win32Param(parts, 5, 1), 1),
+    WIN32_REPEAT_MAX,
+  )
+  if (!keyDown) {
+    if (vk === WIN32_VK_CONTROL && unicode !== 0) {
+      return { sequences: [String.fromCharCode(unicode)], highSurrogate: '' }
+    }
+    return { sequences: [], highSurrogate }
+  }
+  const shift = (controlState & WIN32_SHIFT_BITS) !== 0
+  const ctrl = (controlState & WIN32_CTRL_BITS) !== 0
+  const alt = (controlState & WIN32_ALT_BIT) !== 0
+  const ctrlShiftLetter = shift && ctrl && unicode > 32 && unicode !== 127
+  const ctrlOnly = ctrl && !ctrlShiftLetter
+  const shiftOnly = shift && !ctrlShiftLetter
+  const mods = 1 + (alt ? 1 : 0) + (shiftOnly ? 2 : 0) + (ctrlOnly ? 4 : 0)
+  const named = WIN32_NAMED_VK[vk]
+  if (named) {
+    if (named.final === '~') {
+      return win32Repeat(
+        repeat,
+        mods === 1
+          ? win32Csi(named.code, '~')
+          : win32Csi(named.code, mods, '~'),
+      )
+    }
+    return win32Repeat(
+      repeat,
+      mods === 1 ? win32Csi(named.final) : win32Csi(1, mods, named.final),
+    )
+  }
+  if (vk >= WIN32_VK_F1 && vk <= WIN32_VK_F4) {
+    const letter = String.fromCharCode(80 + (vk - WIN32_VK_F1))
+    return win32Repeat(
+      repeat,
+      mods === 1 ? `\x1bO${letter}` : win32Csi(1, mods, letter),
+    )
+  }
+  if (vk >= WIN32_VK_F5 && vk <= WIN32_VK_F12) {
+    const code = WIN32_F5_CODES[vk - WIN32_VK_F5]!
+    return win32Repeat(
+      repeat,
+      mods === 1 ? win32Csi(code, '~') : win32Csi(code, mods, '~'),
+    )
+  }
+  const meta = shiftOnly ? '\x1b' : ''
+  switch (vk) {
+    case WIN32_VK_BACK:
+      return win32Repeat(repeat, meta + (ctrlOnly ? '\b' : '\x7f'))
+    case WIN32_VK_TAB:
+      return win32Repeat(repeat, meta + (alt ? win32Csi('Z') : '\t'))
+    case WIN32_VK_RETURN:
+      return win32Repeat(repeat, meta + (ctrlOnly ? '\n' : '\r'))
+    case WIN32_VK_ESCAPE:
+      return win32Repeat(repeat, meta + '\x1b')
+    default:
+      break
+  }
+  let charCode = unicode
+  if (ctrlOnly && vk === WIN32_VK_SPACE) charCode = 0
+  else if (charCode === 0) {
+    const isLetter = vk >= 65 && vk <= 90
+    const isDigit = vk >= 48 && vk <= 57
+    if (!(ctrlOnly || shiftOnly) || !(isLetter || isDigit)) {
+      return { sequences: [], highSurrogate }
+    }
+    charCode = isLetter && !alt ? vk + 32 : vk
+    if (ctrlOnly) charCode = win32CtrlChar(charCode)
+  } else if (ctrlOnly) {
+    charCode = win32CtrlChar(charCode)
+  }
+  if (charCode >= 0xd800 && charCode <= 0xdbff) {
+    return { sequences: [], highSurrogate: String.fromCharCode(charCode) }
+  }
+  let chars = String.fromCharCode(charCode)
+  if (charCode >= 0xdc00 && charCode <= 0xdfff) {
+    if (!highSurrogate) return { sequences: [], highSurrogate: '' }
+    chars = highSurrogate + chars
+  }
+  return win32Repeat(repeat, meta + chars)
+}
+
 function parseMouseEvent(s: string): ParsedMouse | null {
   const match = SGR_MOUSE_RE.exec(s)
   if (!match) return null
@@ -1170,6 +1403,28 @@ function parseMouseEvent(s: string): ParsedMouse | null {
   }
 }
 
+/**
+ * Tokenizer only peels C0 when the whole chunk is under 64 bytes (gold D).
+ * A long read of text plus CR stays one text token; split CR/LF so
+ * parseKeypress still sees a lone CR/LF and names return/enter.
+ */
+function emitParsedTextKeys(keys: ParsedInput[], text: string): void {
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code !== 13 && code !== 10) continue
+    if (i > start) keys.push(parseKeypress(text.slice(start, i)))
+    if (code === 13 && text.charCodeAt(i + 1) === 10) {
+      keys.push(parseKeypress('\r'))
+      i++
+    } else {
+      keys.push(parseKeypress(text[i]!))
+    }
+    start = i + 1
+  }
+  if (start < text.length) keys.push(parseKeypress(text.slice(start)))
+}
+
 function parseKeypress(s: string = ''): ParsedKey {
   let parts
 
@@ -1184,7 +1439,6 @@ function parseKeypress(s: string = ''): ParsedKey {
     super: false,
     sequence: s,
     raw: s,
-    isPasted: false,
   }
 
   key.sequence = key.sequence || s || key.name
@@ -1263,7 +1517,6 @@ function parseKeypress(s: string = ''): ParsedKey {
       super: mods.super,
       sequence: s,
       raw: s,
-      isPasted: false,
     }
   }
 
@@ -1290,7 +1543,6 @@ function parseKeypress(s: string = ''): ParsedKey {
       super: mods.super,
       sequence: s,
       raw: s,
-      isPasted: false,
     }
   }
 
@@ -1380,7 +1632,9 @@ function parseKeypress(s: string = ''): ParsedKey {
     key.shift = !!(modifier & 1)
     key.code = code
 
-    key.name = keyName[code]
+    // densable: `g==="[P"&&x===0&&mx()?"delete":Ex[g]`
+    key.name =
+      code === '[P' && modifier === 0 && isStTerm() ? 'delete' : keyName[code]
     key.shift = isShiftKey(code) || key.shift
     key.ctrl = isCtrlKey(code) || key.ctrl
   }
@@ -1430,7 +1684,6 @@ function createNavKey(
     fn: false,
     sequence: s,
     raw: s,
-    isPasted: false,
     ...(col !== undefined && row !== undefined ? { col, row } : {}),
   }
 }

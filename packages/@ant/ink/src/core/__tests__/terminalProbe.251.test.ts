@@ -47,9 +47,10 @@ describe('gold bv / FOCUS_IN attach probe source', () => {
       .split('\n')
       .filter(l => !/^\s*\/\//.test(l) && !/^\s*\*/.test(l))
       .join('\n')
-    expect(focusCode).not.toContain("prev !== 'focused'")
+    expect(focusCode).toContain("prev !== 'focused'")
     expect(focusCode).toContain("process.env.CLAUDE_BG_BACKEND === 'daemon'")
     expect(focusCode).toContain('waitUntilAttachStable()')
+    expect(focusCode).toContain('Jk().resetCapabilities()')
     expect(focusCode).toContain('probeTerminalIdentity')
     expect(focusCode).not.toContain('repaintAfterFocus')
   })
@@ -60,6 +61,9 @@ describe('gold bv / FOCUS_IN attach probe source', () => {
     expect(src).toContain("name.startsWith('tmux ')")
     expect(src).toContain("TERM_PROGRAM === 'Apple_Terminal'")
     expect(src).toContain('decrqm(DEC.SYNCHRONIZED_UPDATE)')
-    expect(src).toContain('decrpm?.status === 1 || decrpm?.status === 2')
+    expect(src).toContain('kittyKeyboard')
+    expect(src).toContain(
+      'decrpm.status === 1 || decrpm.status === 2 || decrpm.status === 3',
+    )
   })
 })

@@ -27,8 +27,10 @@ export class KeyboardEvent extends TerminalEvent {
   readonly meta: boolean
   readonly superKey: boolean
   readonly fn: boolean
+  /** densable `soloKeypress` — gold `G(g,Id)===1`. */
+  readonly soloKeypress: boolean | undefined
 
-  constructor(parsedKey: ParsedKey) {
+  constructor(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) {
     super('keydown', { bubbles: true, cancelable: true })
 
     this.key = keyFromParsed(parsedKey)
@@ -39,6 +41,7 @@ export class KeyboardEvent extends TerminalEvent {
     this.meta = parsedKey.meta || parsedKey.option
     this.superKey = parsedKey.super
     this.fn = parsedKey.fn
+    this.soloKeypress = extras?.soloKeypress
   }
 }
 

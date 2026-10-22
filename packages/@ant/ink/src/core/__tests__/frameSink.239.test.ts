@@ -236,7 +236,7 @@ describe('Ink sticky-main mouse restore', () => {
     }
   })
 
-  test('SIGCONT handleResume re-asserts mouse on main screen', () => {
+  test('SIGCONT handleResume on main screen does not write mouse (gold)', () => {
     const stdout = makeTtyStdout()
     const chunks: string[] = []
     stdout.on('data', (c: Buffer | string) => {
@@ -251,9 +251,12 @@ describe('Ink sticky-main mouse restore', () => {
     })
     try {
       ink.setMouseTracking('scroll')
+      ink.ensureInteractive()
       chunks.length = 0
       process.emit('SIGCONT')
-      expect(chunks.join('')).toContain(ENABLE_MOUSE_TRACKING_SCROLL)
+      const out = chunks.join('')
+      expect(out).not.toContain(ENABLE_MOUSE_TRACKING)
+      expect(out).not.toContain(ENABLE_MOUSE_TRACKING_SCROLL)
     } finally {
       ink.unmount()
     }

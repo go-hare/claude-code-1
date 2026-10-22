@@ -16,6 +16,10 @@ export type ClipboardAttacherCaps = {
   ssh?: unknown
   /** densable Al().syncOutput — daemon attacher DEC 2026. */
   syncOutput?: boolean
+  /** densable `nu()?.isVscodeTerm` — zm extra arm. */
+  isVscodeTerm?: boolean
+  /** densable `nu()?.keyDialect` — `Wy()` / `gst(TERM)` `'st' | 'rxvt' | null`. */
+  keyDialect?: 'st' | 'rxvt' | null
 }
 
 let attacherCapsGetter:

@@ -21,6 +21,8 @@ export const DEC = {
   /** densable `MOUSE_SGR_PIXELS` — DEC 1016 SGR-Pixels (CSI < btn;x;y in pixels). */
   MOUSE_PIXELS: 1016,
   FOCUS_EVENTS: 1004,
+  /** densable theme reports — DEC 2031 (`CSI ? 2031 h`). */
+  THEME_NOTIFY: 2031,
   BRACKETED_PASTE: 2004,
   SYNCHRONIZED_UPDATE: 2026,
   WIN32_INPUT_MODE: 9001,
@@ -43,6 +45,9 @@ export const EBP = decset(DEC.BRACKETED_PASTE)
 export const DBP = decreset(DEC.BRACKETED_PASTE)
 export const EFE = decset(DEC.FOCUS_EVENTS)
 export const DFE = decreset(DEC.FOCUS_EVENTS)
+/** densable `Nmo` / `$7t` — enable / disable DEC 2031 theme reports. */
+export const ETR = decset(DEC.THEME_NOTIFY)
+export const DTR = decreset(DEC.THEME_NOTIFY)
 export const SHOW_CURSOR = decset(DEC.CURSOR_VISIBLE)
 export const HIDE_CURSOR = decreset(DEC.CURSOR_VISIBLE)
 export const ENTER_ALT_SCREEN = decset(DEC.ALT_SCREEN_CLEAR)

@@ -270,7 +270,7 @@ function identifySequence(
  * ```
  */
 export class Parser {
-  private tokenizer: Tokenizer = createTokenizer()
+  private tokenizer: Tokenizer = createTokenizer({ forOutput: true })
 
   style: TextStyle = defaultStyle()
   inLink = false
