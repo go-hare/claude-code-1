@@ -531,7 +531,7 @@ UI 展示的是不同状态源的投影，不是单一真相。
 | TaskListV2 | task files + `teamContext` | work item task、owner、状态 | owner 对应 teammate 一定还活。 |
 | TeammateSpinnerTree | running in-process teammates | 当前 leader 进程内的 teammate 活动 | pane-based teammate 或历史 teammate 全部状态。 |
 | TeammateSpinnerLine | `InProcessTeammateTaskState` | idle、approval、stopping、tool/token、最近消息 | 完整 transcript。 |
-| BackgroundAgentSelector | backgrounded `LocalAgentTask` | 可选择的本地后台 agent | remote/shell/workflow/in-process teammate。 |
+| CoordinatorTaskPanel | `AppState.tasks` 里的 coordinator / local agent 行 | 底部可见的后台 agent 列表，↑/↓ 在行间移动 | remote/shell 的完整外部状态。 |
 | agent transcript view | `viewingAgentTaskId` | local agent 或 in-process teammate 的可视化对话 | pane teammate 的完整外部进程状态。 |
 | TeamsDialog / TeamStatus | `AppState.teamContext` + team file | 团队成员展示、管理、kill/shutdown/mode | runner 一定可恢复。 |
 
@@ -594,7 +594,7 @@ pane-based team 主要通过 footer TeamStatus 和 TeamsDialog 管理：Enter �
 | `TaskCreate` 创建了一个运行中的 agent | 它只创建 work item JSON；运行体是 `LocalAgentTask` / `InProcessTeammateTask` 等。 |
 | teammate 完成一轮后结果自动给 lead | 不一定。teammate 需要通过 `SendMessage` 沟通；runner 也会发送 idle notification。 |
 | mailbox 按 agentId 寻址 | Swarm mailbox 按 teammate name 寻址。 |
-| BackgroundAgentSelector 会列出所有后台任务 | 它只列 backgrounded `LocalAgentTask`，不列 remote/shell/workflow/in-process teammate。 |
+| CoordinatorTaskPanel 会列出所有后台任务 | 它列面板里的 local agent 行。shell 任务在面板行数为 0 时由 tasks footer 的 ↓ 打开 bash 对话框。 |
 | `TeamUpdate` 是一个工具 | 当前源码没有独立 `TeamUpdateTool`；团队成员更新分散在 spawn、teamHelpers、dialogs 中。 |
 | `SyntheticOutput` 是 Swarm 内部通信工具 | 它主要用于结构化输出，不是 Team 协作核心。 |
 | shutdown request 是强杀 | 不是，它是模型处理的 graceful shutdown 协议。 |
@@ -648,4 +648,4 @@ pane-based team 主要通过 footer TeamStatus 和 TeamsDialog 管理：Enter �
 | teammate view | `src/state/teammateViewHelpers.ts`、`src/screens/REPL.tsx` |
 | teammate spinner | `src/components/Spinner/TeammateSpinnerTree.tsx`、`TeammateSpinnerLine.tsx` |
 | team dialog/status | `src/components/teams/TeamsDialog.tsx`、`src/components/teams/TeamStatus.tsx` |
-| background local agent selector | `src/hooks/useBackgroundAgentTasks.ts`、`src/components/tasks/BackgroundAgentSelector.tsx` |
+| background task panel | `src/components/CoordinatorAgentStatus.tsx` |

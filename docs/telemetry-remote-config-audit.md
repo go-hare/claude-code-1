@@ -8,7 +8,7 @@
 - **行为**: 批量发送日志（15s flush 间隔，100 条上限），仅限 1P（`He()==="firstParty"`）
 - **事件白名单**: densable 2.1.289 SEA `I` 217 个事件
 - **基线数据**: 收集 model、platform、arch、version、userBucket（用户 hash 到 30 个桶）等
-- **关闭**: fork 默认关（`DISABLE_TELEMETRY` unset）。`DISABLE_TELEMETRY=0` 才开。`DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` / 3P provider 仍关
+- **关闭**: 对齐 `Ivt`：未设置 `DISABLE_TELEMETRY` 时为 `default`（开）。任意非空 `DISABLE_TELEMETRY`（含 `"0"`）→ `no-telemetry`。`DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` / 3P provider 仍关
 - **sink**: `logEvent` 在收集 metadata 时同步重入会 drop（unique English `logEvent reentered while collecting metadata`）
 
 ## 2. 1P 事件日志（BigQuery）
@@ -21,7 +21,7 @@
 - **弹性**: 本地磁盘持久化失败事件（JSONL），二次退避重试，最多 8 次尝试
 - **Proto schema**: 事件序列化为 `ClaudeCodeInternalEvent` / `GrowthbookExperimentEvent` protobuf 格式
 - **Auth fallback**: 401 时自动去掉 auth header 重试
-- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`DO_NOT_TRACK` → `isAnalyticsDisabled()`
+- **关闭**: 未设置 `DISABLE_TELEMETRY` 时开。任意非空值（含 `"0"`）关。`DO_NOT_TRACK` → `isAnalyticsDisabled()`
 
 ## 3. GrowthBook 远程 Feature Flags / 动态配置
 
@@ -37,7 +37,7 @@
   - 控制 BQ batch 配置（`tengu_1p_event_batch_config`）
   - 控制版本上限/自动更新 kill switch
 - **用户属性**: 发送 deviceId, sessionId, organizationUUID, accountUUID, email, subscriptionType 等
-- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`DISABLE_GROWTHBOOK` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 仍关
+- **关闭**: 未设置 `DISABLE_TELEMETRY` 时开。任意非空值（含 `"0"`）关。`DISABLE_GROWTHBOOK` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 仍关
 
 ## 4. Remote Managed Settings（已产品拆除）
 

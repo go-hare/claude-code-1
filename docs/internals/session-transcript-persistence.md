@@ -700,7 +700,7 @@ user:
 
 | 限制 | 原因 |
 |---|---|
-| 需要 `FORK_SUBAGENT` feature。 | 功能门控。 |
+| 交互默认开；headless 需 `CLAUDE_CODE_FORK_SUBAGENT=1`。编译 `FORK_SUBAGENT` 不是门。 | `isForkSubagentProductEnabled()`。 |
 | coordinator mode 禁用。 | coordinator 已有自己的编排模型。 |
 | non-interactive session 禁用。 | fork subagent 偏交互式后台任务模型。 |
 | fork child 禁止递归 fork。 | 防止无限 fork；通过 querySource 和 boilerplate tag 检测。 |

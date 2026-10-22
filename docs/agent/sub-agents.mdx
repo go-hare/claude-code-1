@@ -86,7 +86,7 @@ assistant message
 
 | 参数 | 可能不可见的情况 | 说明 |
 |------|------------------|------|
-| `run_in_background` | `DISABLE_BACKGROUND_TASKS` 生效，或 `isForkSubagentEnabled()` 为 true | fork gate 开启时所有 `AgentTool` spawn 都会被强制异步，所以不需要让模型再选择 |
+| `run_in_background` | `DISABLE_BACKGROUND_TASKS` 生效，或 `isForkSubagentProductEnabled()` 为 true | 产品门开启时 schema 去掉 `run_in_background`，spawn 走强制异步 |
 | `cwd` | 非 `KAIROS` 构建 / 模式 | schema 会 omit 掉，但实现类型仍保留该字段 |
 | `isolation: "remote"` | 非内部构建 | 外部构建只接受 `worktree` |
 | `model` | coordinator mode 或 fork path | coordinator 会清空 model override；fork 需要继承父模型以保持请求前缀和行为一致 |
@@ -95,7 +95,7 @@ assistant message
 
 | 配置项 | 调用参数 | agent definition | 最终规则 |
 |--------|----------|------------------|----------|
-| agent 类型 | `subagent_type` | 默认 / active agents | 显式 `subagent_type` 优先；省略时由 fork gate 决定 fork 或 `general-purpose` |
+| agent 类型 | `subagent_type` | 默认 / active agents | 显式 `subagent_type` 优先。省略时用 `general-purpose`（可用时）。fork 只在显式 `"fork"` 且产品门打开时 |
 | 模型 | `model` | `selectedAgent.model` | 普通命名 agent 中调用参数优先；没有参数则用定义；再没有则继承父模型 |
 | 后台运行 | `run_in_background` | `selectedAgent.background` | 任一为 true 都会异步；还有 coordinator、assistant、fork gate 等强制异步条件 |
 | 隔离 | `isolation` | `selectedAgent.isolation` | 调用参数优先 |
@@ -175,14 +175,14 @@ You are a focused code reviewer. Prioritize bugs, regressions, and missing tests
 `AgentTool.call()` 首先决定这次调用到底要跑哪一种 agent：
 
 ```text
-subagent_type 有值
-  -> 使用命名 agent
-
-subagent_type 省略 && isForkSubagentEnabled() 为 true
+subagent_type 为 "fork" && isForkSubagentProductEnabled()
   -> 使用 fork agent
 
-subagent_type 省略 && fork gate 关闭
-  -> 回退到 general-purpose
+subagent_type 省略
+  -> general-purpose（可用时）；不会隐式 fork
+
+其他 subagent_type
+  -> 使用命名 agent
 ```
 
 命名 agent 来自内置 agent、用户配置目录、插件 agent 等定义。fork agent 是代码里内置的特殊 agent，定义在 `forkSubagent.ts`，它不是普通专业角色，而是"继承父上下文的 worker"。
@@ -460,26 +460,24 @@ AgentTool fork 是 `Agent` 工具的一种特殊路由，不是普通命名 agen
 
 ### Gate
 
-fork 默认关闭。需要构建/运行时启用 `FORK_SUBAGENT` feature，例如开发时显式设置：
+产品门是 `isForkSubagentProductEnabled()`（densable 2.1.289 `Omo` / `Imo`），不读编译旗标 `FORK_SUBAGENT`。交互会话默认开；显式 `subagent_type: "fork"` 才走 fork，省略 type 不会隐式 fork。
 
-```powershell
-$env:FEATURE_FORK_SUBAGENT='1'; bun run dev
-```
+`CLAUDE_CODE_FORK_SUBAGENT=1` 在 headless 下也开，并写入会话 sticky。`=0` / coordinator 在 sticky 之前关闭。
 
-即使 feature 打开，以下场景也会强制关闭：
-
-| 场景 | 原因 |
+| 场景 | 结果 |
 |------|------|
-| coordinator mode | coordinator 已有自己的委派模型 |
-| non-interactive session | pipe / SDK 场景下避免不可见的 fork 嵌套 |
+| 交互会话，环境变量未设置 | 开（source `default`，会话内 sticky） |
+| headless / pipe / SDK，环境变量未设置 | 关（`disabled` 不写入 sticky） |
+| coordinator mode | 关 |
+| `CLAUDE_CODE_FORK_SUBAGENT` 为假值 | 关，压过 sticky |
 
 ### 路径
 
 ```text
 主模型
-  -> Agent({ prompt })，没有 subagent_type
+  -> Agent({ subagent_type: "fork", prompt })
   -> AgentTool.call()
-  -> isForkSubagentEnabled()
+  -> isForkSubagentProductEnabled()
   -> selectedAgent = FORK_AGENT
   -> buildForkedMessages(...)
   -> runAgent(... useExactTools: true, forkContextMessages: parent messages)
@@ -798,7 +796,7 @@ Audit the authentication flow and return only correctness risks.
 | `SendMessage` 找不到目标 | `name` 是否还在 registry；是否可以改用 raw `agentId`；sidechain transcript 是否仍存在 |
 | 子 Agent 没有某个工具 | agent definition 的 `tools` 是否过滤掉了；MCP server 是否连接；fork path 是否用了 exact tools |
 | 子 Agent 权限和预期不同 | 普通 agent 看 `permissionMode`；teammate 的 `mode` 不是普通子 Agent 权限覆盖；fork 看 `bubble` |
-| fork 没触发 | `FORK_SUBAGENT` feature 是否打开；是否在 coordinator 或 non-interactive；是否传了 `subagent_type` |
+| fork 没触发 | 是否显式 `subagent_type: "fork"`；`isForkSubagentProductEnabled()` 是否为关（coordinator、headless 且未设 `CLAUDE_CODE_FORK_SUBAGENT=1`、或该环境变量为假） |
 | slash command 没有 fork | skill frontmatter 是否写 `context: fork`；加载后 command.context 是否为 `fork` |
 | worktree 没清理 | 是否有未提交变更；是否 hook-based worktree；cleanup 是否被后台 task 保留到通知后处理 |
 | `TaskOutput(block=true)` 一直等 | task 是否真的进入 terminal status；如果是 async path，确认状态更新是否发生在 classifier / cleanup 之前 |
@@ -821,7 +819,7 @@ Audit the authentication flow and return only correctness risks.
 | `mode` 可以覆盖普通子 Agent 权限 | `mode` 只影响 teammate spawn 的 plan 模式；普通子 Agent 权限来自 agent definition 的 `permissionMode` |
 | `SendMessage` 只能发给 running agent | running 时排队，stopped / evicted 时会尝试从 transcript 后台恢复 |
 | 后台 agent 完成会直接改当前 tool_result | 后台完成走 `<task-notification>` 队列，下一轮模型才会看到 |
-| fork 默认开启 | fork 默认关闭，需要 `FORK_SUBAGENT` feature，且 coordinator / non-interactive 会禁用 |
+| fork 要编译旗标才开 | 交互会话默认开。编译 `FORK_SUBAGENT` 保持注释。coordinator 关；headless 默认关，`CLAUDE_CODE_FORK_SUBAGENT=1` 可开 |
 | fork 是内部 `runForkedAgent()` | AgentTool fork 经过 Tool 协议；`runForkedAgent()` 是内部运行时 API |
 | `cwd` 和 `isolation: "worktree"` 可以随便一起用 | schema 文案要求互斥；实现上 `cwd` 会优先覆盖运行目录，调用方应避免混用 |
 | 读后台输出应该优先 `TaskOutput` | 当前提示建议优先 `Read(output_file)`；`TaskOutput` 保留兼容和阻塞等待能力 |
@@ -836,7 +834,7 @@ Audit the authentication flow and return only correctness risks.
 | 普通子 Agent 为什么同步等待 | `toolExecution.ts` 的 `await tool.call()` -> `AgentTool.call()` 同步分支 -> `runAgent()` |
 | 后台完成为什么会通知主模型 | `registerAsyncAgent()` -> `runAsyncAgentLifecycle()` -> `enqueueAgentNotification()` -> queue processor |
 | `SendMessage` 为什么能恢复旧 agent | `SendMessageTool.ts` 地址解析 -> `queuePendingMessage()` / `resumeAgentBackground()` -> sidechain transcript |
-| fork 为什么不是普通 agent | `isForkSubagentEnabled()` -> `FORK_AGENT` -> `buildForkedMessages()` -> `useExactTools` |
+| fork 为什么不是普通 agent | `isForkSubagentProductEnabled()` -> `FORK_AGENT` -> `buildForkedMessages()` -> `useExactTools` |
 | slash command fork 为什么不走 Tool 协议 | skill load frontmatter -> `processSlashCommand()` -> `executeForkedSlashCommand()` |
 | 内部 fork 为什么没有 tool result | `runForkedAgent()` -> `query()` -> 调用方消费 `ForkedAgentResult` |
 

@@ -11,11 +11,11 @@
 | 3 | Google Vertex AI | `{region}-aiplatform.googleapis.com` | HTTPS | 需 `CLAUDE_CODE_USE_VERTEX=1` |
 | 4 | Azure Foundry | `{resource}.services.ai.azure.com` | HTTPS | 需 `CLAUDE_CODE_USE_FOUNDRY=1` |
 | 5 | OAuth (Anthropic) | `platform.claude.com`, `claude.com`, `claude.ai` | HTTPS | 用户登录时 |
-| 6 | GrowthBook | `api.anthropic.com` (remoteEval) | HTTPS | fork 默认关；`DISABLE_TELEMETRY=0` 才开；`DISABLE_GROWTHBOOK` 可关 |
+| 6 | GrowthBook | `api.anthropic.com` (remoteEval) | HTTPS | `Ivt` 默认开；非空 `DISABLE_TELEMETRY`（含 `"0"`）关；`DISABLE_GROWTHBOOK` 可关 |
 | 7 | Sentry | 可配置 (`SENTRY_DSN`) | HTTPS | 需设环境变量 |
-| 8 | Datadog | `http-intake.logs.us5.datadoghq.com` | HTTPS | fork 默认关（1P 管线保留）；`DISABLE_TELEMETRY=0` 才开 |
+| 8 | Datadog | `http-intake.logs.us5.datadoghq.com` | HTTPS | `Ivt` 默认开（1P 管线保留）；非空 `DISABLE_TELEMETRY`（含 `"0"`）关 |
 | 9 | OpenTelemetry Collector | 可配置 (`OTEL_EXPORTER_OTLP_ENDPOINT`) | gRPC/HTTP | 需设环境变量（用户自己的 collector） |
-| 10 | 1P Event Logging | `api.anthropic.com/api/event_logging/batch` | HTTPS | fork 默认关；`DISABLE_TELEMETRY=0` 才开 |
+| 10 | 1P Event Logging | `api.anthropic.com/api/event_logging/batch` | HTTPS | `Ivt` 默认开；非空 `DISABLE_TELEMETRY`（含 `"0"`）关 |
 | 11 | BigQuery Metrics | `api.anthropic.com/api/claude_code/metrics` | HTTPS | 默认启用（1P/C4E/Team）；`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 可关 |
 | 12 | MCP Proxy | `mcp-proxy.anthropic.com` | HTTPS+WS | 使用 MCP 工具时 |
 | 13 | MCP Registry | `api.anthropic.com/mcp-registry` | HTTPS | 查询 MCP 服务器时 |
@@ -76,7 +76,7 @@ OAuth 2.0 + PKCE 授权码流程。
 
 - **端点**: `https://api.anthropic.com/` (remoteEval 模式) 或 `CLAUDE_GB_ADAPTER_URL`
 - **SDK Keys**: `sdk-zAZezfDKGoZuXXKe` (外部), `sdk-xRVcrliHIlrg4og4` (ant prod), `sdk-yZQvlplybuXjYh6L` (ant dev)
-- **关闭**: fork 默认关（`DISABLE_TELEMETRY` unset）。`DISABLE_TELEMETRY=0` 才开。`DISABLE_GROWTHBOOK` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 仍关
+- **关闭**: 未设置 `DISABLE_TELEMETRY` 时开。任意非空值（含 `"0"`）关。`DISABLE_GROWTHBOOK` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 仍关
 - **文件**: `src/services/analytics/growthbook.ts`, `src/constants/keys.ts`
 
 ### 7. Sentry (错误追踪)
@@ -88,7 +88,7 @@ OAuth 2.0 + PKCE 授权码流程。
 ### 8. Datadog (日志)
 
 - **入口**: densable 2.1.289 硬编码 US5 `https://http-intake.logs.us5.datadoghq.com/api/v2/logs` + pub token（无 `DATADOG_*` 覆盖）
-- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`isAnalyticsDisabled()` / 3P provider（`He()!=="firstParty"`）仍关
+- **关闭**: 未设置 `DISABLE_TELEMETRY` 时开。任意非空值（含 `"0"`）关。`isAnalyticsDisabled()` / 3P provider（`He()!=="firstParty"`）仍关
 - **gzip**: 默认 gzip；拒绝后本进程改 uncompressed（`CLAUDE_CODE_GZIP_DATADOG_LOGS=0` 可关）
 - **文件**: `src/services/analytics/datadog.ts`
 
@@ -102,7 +102,7 @@ OAuth 2.0 + PKCE 授权码流程。
 
 - **端点**: `https://api.anthropic.com/api/event_logging/batch`
 - **协议**: 批量导出 (10s 间隔, 每批 200 事件)
-- **关闭**: fork 默认关。`DISABLE_TELEMETRY=0` 才开。`DO_NOT_TRACK` → `isAnalyticsDisabled()`
+- **关闭**: 未设置 `DISABLE_TELEMETRY` 时开。任意非空值（含 `"0"`）关。`DO_NOT_TRACK` → `isAnalyticsDisabled()`
 - **文件**: `src/services/analytics/firstPartyEventLoggingExporter.ts`
 
 ### 11. BigQuery Metrics

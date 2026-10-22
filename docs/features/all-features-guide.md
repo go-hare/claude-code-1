@@ -468,16 +468,15 @@ AI 也可通过 `SnipTool` 自动截断过长的对话：
 ## 17. Fork 子Agent
 
 **PR**: #241（同上）  
-**Feature Flag**: `FORK_SUBAGENT`（**默认 build 未列入**；`FEATURE_FORK_SUBAGENT=1` 或 `CLAUDE_CODE_FORK_SUBAGENT=1` / GB `tengu_fork_subagent`）
+**产品门**: `isForkSubagentProductEnabled()`。编译 `FORK_SUBAGENT` **不在默认 build**，Agent 不读它。交互默认开；headless 用 `CLAUDE_CODE_FORK_SUBAGENT=1`。
 
 ### 说明
-在当前对话上下文中 fork 一个独立的子 agent，继承完整会话状态独立执行。  
-**`/fork` 与 AgentTool 隐式 fork 共用** `isForkSubagentEnabled()`（见 `docs/features/fork-subagent.md`）— 不是 stub。
+在当前对话上下文中 fork 一个独立的子 agent，继承完整会话状态独立执行。必须显式 `subagent_type: "fork"`。  
+**`/fork` session copy 只看 coordinator**，不走这条产品门（见 `docs/features/fork-subagent.md`）。
 
 ### 使用
 ```
-FEATURE_FORK_SUBAGENT=1 claude
-# 或
+# 交互会话默认可用。headless：
 CLAUDE_CODE_FORK_SUBAGENT=1 claude
 
 /fork Fix the null check in validate.ts
@@ -529,7 +528,7 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `MONITOR_TOOL` | ✅ dev+build | 后台监控 |
 | `WORKFLOW_SCRIPTS` | ✅ dev+build | 工作流脚本 |
 | `REACTIVE_COMPACT` | ✅ dev+build | 413/PTL withhold + reactive compact（densable SEA 对齐） |
-| `FORK_SUBAGENT` | ❌ 默认 build 关；dev/env 可开 | 隐式 fork + `/fork`（与 AgentTool 统一门控） |
+| `FORK_SUBAGENT` | ❌ 编译旗标保持注释 | 289 产品门是 `isForkSubagentProductEnabled()`，不读这个旗标 |
 | `KAIROS` | ✅ dev+build | 常驻助手（tick/Sleep/assistant；见 kairos.md） |
 | `COORDINATOR_MODE` | ✅ dev+build | 多 Worker |
 | `HISTORY_SNIP` | ❌ 默认 build 关；dev/env 可开 | 历史 snip（暂关） |
@@ -546,6 +545,7 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | `BG_SESSIONS` | ✅ dev only | 后台会话 |
 | `TEMPLATES` | ✅ dev only | 模板系统 |
 | `TRANSCRIPT_CLASSIFIER` | ✅ dev only | 对话分类 |
+| `AUTO_THEME` | ✅ dev+build | 官方 theme:'auto' + OSC 11 / DEC 2031 系统主题跟踪 |
 
 手动启用任意 flag：
 ```bash

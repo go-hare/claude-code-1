@@ -230,7 +230,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 **启用方式**: 环境变量 `FEATURE_<FLAG_NAME>=1`。例如 `FEATURE_BUDDY=1 bun run dev`。
 
-**Build 默认 features**：**41 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
+**Build 默认 features**：**42 个**，唯一来源是 `scripts/defines.ts` 的 `DEFAULT_BUILD_FEATURES`（`build.ts` 和 `vite.config.ts` 都从这里 import，不要在别处维护第二份清单）：
 
 - 基础: `BUDDY`, `TRANSCRIPT_CLASSIFIER`, `BRIDGE_MODE`, `AGENT_TRIGGERS_REMOTE`, `CHICAGO_MCP`, `VOICE_MODE`
 - 统计/缓存: `SHOT_STATS`, `PROMPT_CACHE_BREAK_DETECTION`, `TOKEN_BUDGET`
@@ -246,13 +246,13 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 - 连接器: `CONNECTOR_TEXT`, `COMMIT_ATTRIBUTION`, `DIRECT_CONNECT`
 - 实验性: `EXPERIMENTAL_SKILL_SEARCH`, `EXPERIMENTAL_SEARCH_EXTRA_TOOLS`
 - 模式: `POOR`, `SSH_REMOTE`
-- 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`
+- 其他: `AUTOFIX_PR`, `NATIVE_CLIPBOARD_IMAGE`, `AUTO_THEME`
 
 **已注释禁用（6 个）**——每条上方都有注释写明原因，**不要随手加回来**：
 
-`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
+`TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`（289 产品门是 `isForkSubagentProductEnabled()`：交互默认开、headless 默认关、coordinator 关；**不读**这个编译旗标）、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
 
-**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）；Anthropic Team/Enterprise 控制面（`remoteManagedSettings`、MDM、org tips、CRI policy webhook、managed-settings security 对话框）。`policyLimits` 永远允许。
+**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）；Anthropic Team/Enterprise 控制面（`remoteManagedSettings`、MDM、org tips、CRI policy webhook、managed-settings security 对话框）。`policyLimits` **已接回**：`src/services/policyLimits/` fetch + leftover `Jt` 评测；Team/Enterprise OAuth 或 Console key 才 eligible。
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 
@@ -326,7 +326,7 @@ Effort 解析对齐 densable 2.1.211 的 model-driven 链路：`resolveAppliedEf
 | OpenAI/Gemini/Grok 兼容层 | Restored |
 | Remote Control Server | Restored — 自托管 RCS + Web UI |
 | `packages/shell/`, `packages/swarm/`, `packages/mcp-server/`, `packages/cc-knowledge/` | Removed — 功能合并或废弃 |
-| Analytics / GrowthBook / Sentry | Restored — Datadog/1P/BQ/Sentry/Perfetto/GB remoteEval 管线保留。**fork 默认关**（`DISABLE_TELEMETRY` unset → `no-telemetry`）；`DISABLE_TELEMETRY=0` 才开。官方开关仍有效：`DISABLE_TELEMETRY` / `DO_NOT_TRACK` / `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` / `DISABLE_GROWTHBOOK`。`logEvent` 调用点 + `LOCAL_GATE_DEFAULTS` + 用户 OTEL 保留 |
+| Analytics / GrowthBook / Sentry | Restored — Datadog/1P/BQ/Sentry/Perfetto/GB remoteEval 管线保留。对齐 densable `Ivt`/`Wlr`：`DISABLE_TELEMETRY` **未设置 → `default`（遥测开）**；任意非空值（含 `"0"`）→ `no-telemetry`。`DO_NOT_TRACK` truthy、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`、`DISABLE_GROWTHBOOK` 仍关。`logEvent` 调用点 + `LOCAL_GATE_DEFAULTS` + 用户 OTEL 保留 |
 | Magic Docs / LSP Server | Restored — Magic Docs 自动更新 + LSP 服务器管理器 |
 | Plugins / Marketplace | Restored — 插件安装/卸载/启用/禁用 + Marketplace 浏览（`src/services/plugins` + `src/utils/plugins`） |
 | MCP OAuth | **完整 densable 客户端**（`src/services/mcp/auth.ts`：浏览器 OAuth、refresh、step-up、XAA 实验路径）。旧文档 “Simplified” 已过时；边角：XAA GA 锁 / IDE lockfile token |
@@ -432,7 +432,7 @@ bun run precheck
 ## Working with This Codebase
 
 - **precheck must pass** — `bun run precheck`（typecheck + `check:fix` + `docs:check` + test + `check:ci`）必须零错误，任何修改都不能引入新的类型/lint/格式/文档/测试错误。最后那步 `check:ci`（= `biome ci .`）是**非改写**的复核，跑在 `bun test` 之后：`check:fix` 会顺手改文件，所以它自己"通过"不代表工作树最终是干净的。有它兜底，precheck 就不可能放过一个 `biome ci` 会拒的状态。
-- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（41 个默认 ON），含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
+- **Feature flags** — **runtime** 无 env 时 `feature()` 返回 `false`；**dev/build** 注入 `DEFAULT_BUILD_FEATURES`（42 个默认 ON），含 `UDS_INBOX`/`LAN_PIPES`/`TEAMMEM`/KAIROS 外围等，见上文 Feature Flag System 与 `scripts/defines.ts`。不要写成「本地默认全 OFF」。不要在 `cli.tsx` 中重定义 `feature` 函数——它从 `bun:bundle` 导入。
 - **React Compiler output** — Components have decompiled memoization boilerplate (`const $ = _c(N)`). This is normal.
 - **`bun:bundle` import** — `import { feature } from 'bun:bundle'` 是 Bun 内置模块，由运行时/构建器解析。不要用自定义函数替代它。**`feature()` 只能直接用在 `if` 语句或三元表达式的条件位置**（Bun 编译器限制），不能赋值给变量、不能放在箭头函数体里、不能作为 `&&` 链的一部分。正确：`if (feature('X')) {}` 或 `feature('X') ? a : b`。
 - **`src/` path alias** — tsconfig maps `src/*` to `./src/*`. Imports like `import { ... } from 'src/utils/...'` are valid.

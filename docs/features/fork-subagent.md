@@ -1,12 +1,11 @@
 # FORK_SUBAGENT — 上下文继承子 Agent
 
-> Feature Flag: `FEATURE_FORK_SUBAGENT=1`
+> 产品门：`isForkSubagentProductEnabled()`（densable 2.1.289 `Omo`）。编译旗标 `FORK_SUBAGENT` 保持注释，Agent 不读它。
 > 实现状态：完整可用
-> 引用数：4
 
 ## 一、功能概述
 
-FORK_SUBAGENT 让 AgentTool 生成"fork 子 agent"，继承父级完整对话上下文。子 agent 看到父级的所有历史消息、工具集和系统提示，并且与父级共享 API 请求前缀以最大化 prompt cache 命中率。
+AgentTool 在 `subagent_type: "fork"` 时生成 fork 子 agent，继承父级完整对话上下文。子 agent 看到父级的所有历史消息、工具集和系统提示，并且与父级共享 API 请求前缀以最大化 prompt cache 命中率。交互会话默认允许这条路径。
 
 ### 核心优势
 
@@ -19,11 +18,11 @@ FORK_SUBAGENT 让 AgentTool 生成"fork 子 agent"，继承父级完整对话上
 
 ### 触发方式
 
-当 `FORK_SUBAGENT` 启用时，AgentTool 调用不指定 `subagent_type` 时自动走 fork 路径：
+AgentTool 只有显式 `subagent_type: "fork"` 才走 fork。省略 type 是普通 agent，不是隐式 fork。
 
 ```
 // Fork 路径（继承上下文）
-Agent({ prompt: "修复这个 bug" })  // 无 subagent_type
+Agent({ subagent_type: "fork", prompt: "修复这个 bug" })
 
 // 普通 agent 路径（全新上下文）
 Agent({ subagent_type: "general-purpose", prompt: "..." })
@@ -34,7 +33,7 @@ Agent({ subagent_type: "general-purpose", prompt: "..." })
 | 命令 | densable | 行为 | 门控 |
 |------|----------|------|------|
 | **`/fork [prompt]`** | `L2p` → `D$t(..., {keepParent:true})` via=`fork_session` | **复制当前对话到新后台 session**（`claude agents` 独立一行），**主会话继续**。flush 10s 硬失败；parent transcript **快照**到 `jobs/<short>/tmp/parent-transcript.jsonl`（live-parent）；job 写 `forkSourceAlive` + boundary/ids + `bgIsolation:"default"`；densable 多行 toast | 非 coordinator；`BG_SESSIONS` + daemon |
-| **`/subtask <task>`** | `s$y` → `xZr` | **会话内**全上下文 fork worker（212 前 `/fork`），结果经 task-notification 回主会话 | `isForkSubagentEnabled()`（`FEATURE_FORK_SUBAGENT` 或 portable env/GB） |
+| **`/subtask <task>`** | `s$y` → `xZr` | **会话内**全上下文 fork worker（212 前 `/fork`），结果经 task-notification 回主会话 | 显式 `subagent_type: "fork"`；产品门 `isForkSubagentProductEnabled()` |
 
 实现入口：
 
@@ -47,13 +46,13 @@ Agent({ subagent_type: "general-purpose", prompt: "..." })
 
 **densable agent-view OFF**：旧 `gwd` 把 `/fork` 指到 `xZr`。本地产品默认 agent view 路径（session-copy）；关闭 agent view 时仍用 session-copy（不回退到 directive-only xZr），避免双语义混淆。
 
-本地开启会话内 subtask：
+交互会话里 subtask / `subagent_type: "fork"` 默认可用。headless 需要：
 
 ```bash
-FEATURE_FORK_SUBAGENT=1 bun run dev
-# 或 portable densable 路径（默认 build 未列入 FORK_SUBAGENT 时）：
 CLAUDE_CODE_FORK_SUBAGENT=1 claude
 ```
+
+`CLAUDE_CODE_FORK_SUBAGENT=0` 或 coordinator 关闭。编译 `FEATURE_FORK_SUBAGENT` 不是产品门。
 
 ## 三、实现架构
 
@@ -62,22 +61,15 @@ CLAUDE_CODE_FORK_SUBAGENT=1 claude
 | 路径 | 门控 |
 |------|------|
 | **`/fork` session copy** | 始终注册；`isCoordinatorMode()` 禁用；运行时 `feature('BG_SESSIONS')` + daemon |
-| **`/subtask` + AgentTool 隐式 fork** | `isForkSubagentEnabled()`：`feature('FORK_SUBAGENT')` **或** portable `CLAUDE_CODE_FORK_SUBAGENT` / GB；再排除 coordinator / non-interactive |
+| **`/subtask` + AgentTool `subagent_type: "fork"`** | `isForkSubagentProductEnabled()`：coordinator 与 `CLAUDE_CODE_FORK_SUBAGENT` 假值先关；否则读会话 sticky。未 sticky 时 env 真值 → `env`（headless 也开），headless 且未设 env → `disabled`（不写入），交互默认 → `default` 并 sticky |
 
 文件：`packages/builtin-tools/src/tools/AgentTool/forkSubagent.ts`
 
 ```ts
-// 启用路径 OR：
-// 1) feature('FORK_SUBAGENT') — 编译 FEATURE_FORK_SUBAGENT=1 / build 列表
-// 2) CLAUDE_CODE_FORK_SUBAGENT / GB tengu_fork_subagent
-//    （src/utils/forkSubagentGate.ts，densable portable）
-// 然后：
-// - coordinator 模式 → false
-// - 非交互（pipe/SDK）→ false
-export function isForkSubagentEnabled(): boolean
+export function isForkSubagentProductEnabled(): boolean
 ```
 
-**默认 build 未列入 `FORK_SUBAGENT`**。需要 `/subtask` / 隐式 fork 时用 env 或 dev feature。**`/fork` session copy 不依赖 FORK_SUBAGENT。**
+编译 `FORK_SUBAGENT` 不在 `DEFAULT_BUILD_FEATURES` 里，函数也不读 `feature('FORK_SUBAGENT')`。`src/utils/forkSubagentGate.ts` 是 2.1.232 的 `Drb`，289 的 `Yne` 不调用它。**`/fork` session copy 只看 coordinator，不看 Yne。**
 
 ### 3.2 FORK_AGENT 定义
 
@@ -193,21 +185,19 @@ isForkSubagentEnabled() && !subagent_type?
 
 ## 六、关键设计决策
 
-1. **Fork ≠ 普通 agent**：fork 继承完整上下文，普通 agent 从零开始。选择依据是 `subagent_type` 是否存在
+1. **Fork ≠ 普通 agent**：fork 继承完整上下文，普通 agent 从零开始。选择依据是 `subagent_type` 是否为 `"fork"`
 2. **renderedSystemPrompt 直传**：避免 fork 时重新调用 `getSystemPrompt()`。父级在 turn 开始时冻结 prompt 字节
 3. **占位符结果共享**：多个并行 fork 使用完全相同的占位符，只有 directive 不同
 4. **Coordinator 互斥**：Coordinator 模式下禁用 fork，两者有不兼容的委派模型
-5. **非交互式禁用**：pipe 模式和 SDK 模式下禁用，避免不可见的 fork 嵌套
+5. **非交互式默认禁用**：pipe / SDK 未设 `CLAUDE_CODE_FORK_SUBAGENT=1` 时 `Imo` 返回 `disabled`。一旦本会话记过 `env` 或 `default`，清掉环境变量不会重跑 headless 判定；假值环境变量和 coordinator 仍关
 
 ## 七、使用方式
 
 ```bash
-# 启用 feature
-FEATURE_FORK_SUBAGENT=1 bun run dev
+# 交互会话默认可用。headless：
+CLAUDE_CODE_FORK_SUBAGENT=1 claude
 
-# 在 REPL 中使用（不指定 subagent_type 即走 fork）
-# Agent({ prompt: "研究这个模块的结构" })
-# Agent({ prompt: "实现这个功能" })
+# Agent({ subagent_type: "fork", prompt: "研究这个模块的结构" })
 ```
 
 ## 八、文件索引
@@ -223,5 +213,5 @@ FEATURE_FORK_SUBAGENT=1 bun run dev
 | `src/utils/forkedAgent.ts` | — | CacheSafeParams + ContentReplacementState 克隆 |
 | `src/commands/fork/index.ts` + `fork.tsx` | — | densable 212 `/fork`：bg session 拷贝 |
 | `src/utils/spawnBackgroundSessionFork.ts` | — | `/fork` → writeA8q + submitDispatch resume/fork |
-| `src/commands/subtask/index.ts` + `subtask.tsx` | — | densable 212 `/subtask`：AgentTool 隐式 fork |
-| `src/utils/forkSubagentGate.ts` | — | portable densable：`CLAUDE_CODE_FORK_SUBAGENT` / `tengu_fork_subagent` |
+| `src/commands/subtask/index.ts` + `subtask.tsx` | — | densable 212 `/subtask`：`subagent_type: "fork"` |
+| `src/utils/forkSubagentGate.ts` | — | 2.1.232 `Drb` sticky。289 `Yne` 不调用 |

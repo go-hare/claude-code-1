@@ -133,9 +133,8 @@ export function isCoordinatorMode(): boolean {
 # 基本启用
 FEATURE_COORDINATOR_MODE=1 CLAUDE_CODE_COORDINATOR_MODE=1 bun run dev
 
-# 配合 Fork Subagent
-FEATURE_COORDINATOR_MODE=1 FEATURE_FORK_SUBAGENT=1 \
-CLAUDE_CODE_COORDINATOR_MODE=1 bun run dev
+# Coordinator 下 fork 产品门关闭（isForkSubagentProductEnabled）。
+# 编译 FEATURE_FORK_SUBAGENT 不是门，不要为了 fork 打开它。
 
 # Simple 模式（worker 只有 Bash/Read/Edit）
 FEATURE_COORDINATOR_MODE=1 CLAUDE_CODE_COORDINATOR_MODE=1 \
