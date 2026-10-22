@@ -638,6 +638,55 @@ export async function getAnthropicClient({
     return new AnthropicAwsClient(awsArgs) as unknown as Anthropic
   }
 
+  let useAnthropicGoogleCloud = isEnvTruthy(
+    process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD,
+  )
+  let skipAnthropicGoogleCloudAuth = isEnvTruthy(
+    process.env.CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH,
+  )
+  try {
+    const residual =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    useAnthropicGoogleCloud = residual.isAnthropicGoogleCloudProviderEnabled()
+    skipAnthropicGoogleCloudAuth = residual.shouldSkipAnthropicGoogleCloudAuth()
+  } catch {
+    // keep raw env fallbacks
+  }
+
+  if (requestProvider === 'anthropicGoogleCloud' && useAnthropicGoogleCloud) {
+    if (!skipAnthropicGoogleCloudAuth && !isHostManagedProviderAuth()) {
+      await refreshGcpCredentialsIfNeeded()
+    }
+    const { AnthropicGoogleCloudClient } = await import(
+      './anthropicGoogleCloudClient.js'
+    )
+    const peeled = peelAuth(
+      (ARGS.defaultHeaders ?? {}) as Record<string, string>,
+    )
+    const skipAuthBearer = skipAnthropicGoogleCloudAuth
+      ? peeled.value
+      : undefined
+    const agcArgs: ConstructorParameters<typeof AnthropicGoogleCloudClient>[0] =
+      {
+        ...ARGS,
+        defaultHeaders: peeled.rest,
+        ...(skipAnthropicGoogleCloudAuth &&
+          !skipAuthBearer && {
+            skipAuth: true,
+          }),
+        ...(skipAuthBearer && {
+          defaultHeaders: {
+            ...peeled.rest,
+            Authorization: skipAuthBearer,
+          },
+          skipAuth: true,
+        }),
+        ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+      }
+    return new AnthropicGoogleCloudClient(agcArgs) as unknown as Anthropic
+  }
+
   if (requestProvider === 'mantle' && useMantle) {
     const { AnthropicBedrockMantle } = await import('@anthropic-ai/bedrock-sdk')
     const peeled = peelAuth(

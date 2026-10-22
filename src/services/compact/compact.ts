@@ -50,6 +50,7 @@ import {
   getMcpInstructionsDeltaAttachment,
   type Attachment,
 } from '../../utils/attachments.js'
+import { compactSpinnerHintText } from '../../utils/autoCompactWindow.js'
 import { getMemoryPath } from '../../utils/config.js'
 import { COMPACT_MAX_OUTPUT_TOKENS } from '../../utils/context.js'
 import {
@@ -518,7 +519,13 @@ export async function compactConversation(
     // Show requesting mode with up arrow and custom message
     context.setStreamMode?.('requesting')
     context.setResponseLength?.(() => 0)
-    context.onCompactProgress?.({ type: 'compact_start' })
+    const spinnerHintText = isAutoCompact
+      ? compactSpinnerHintText(context.options.mainLoopModel)
+      : null
+    context.onCompactProgress?.({
+      type: 'compact_start',
+      ...(spinnerHintText ? { hintText: spinnerHintText } : {}),
+    })
 
     // 3P default: true — forked-agent path reuses main conversation's prompt cache.
     // Experiment (Jan 2026) confirmed: false path is 98% cache miss, costs ~0.76% of
@@ -930,7 +937,8 @@ export async function partialCompactConversation(
         messagesToKeep.some(m => m.type === 'assistant') &&
         messagesToSummarize.some(
           m =>
-            m.type === 'attachment' && m.attachment.type === 'advisor_stripped',
+            m.type === 'attachment' &&
+            m.attachment?.type === 'advisor_stripped',
         )
       ) {
         messagesToKeep.push(

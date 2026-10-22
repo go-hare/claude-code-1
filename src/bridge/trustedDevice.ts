@@ -1,6 +1,10 @@
 import axios from 'axios'
 import memoize from 'lodash-es/memoize.js'
 import { hostname } from 'os'
+import {
+  isPolicyEnforced,
+  isPolicyEnforcedOrHintedByRefusedCache,
+} from '../cli/leftoverTulip.js'
 import { getOauthConfig } from '../constants/oauth.js'
 import {
   checkGate_CACHED_OR_BLOCKING,
@@ -45,10 +49,10 @@ export const CLOUD_CANNOT_REACH_ELEVATED_HINT =
 
 /**
  * densable iFn / isTrustedDeviceActiveForOrg — GB gate then eya(nFn).
- * Product-cut: policy limits never enforce require_trusted_devices.
  */
 export function isTrustedDeviceActiveForOrg(): boolean {
-  return false
+  if (!isGateEnabled()) return false
+  return isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY)
 }
 
 /**
@@ -76,10 +80,9 @@ function isGateEnabled(): boolean {
 
 /**
  * densable `wV` @180889346 — GB gate then policy allow.
- * Product-cut: policy limits always allow require_trusted_devices.
  */
 export function isTrustedDeviceGateEnabled(): boolean {
-  return isGateEnabled()
+  return isGateEnabled() && isPolicyEnforcedOrHintedByRefusedCache()
 }
 
 /**
@@ -292,12 +295,12 @@ export async function enrollTrustedDevice(opts?: {
     if (getAPIProvider() !== 'firstParty' || !isClaudeAISubscriber()) {
       return
     }
-    // Product-cut: policy limits never enforce require_trusted_devices.
-    // Keep densable bind/deny trigger path (policy allow is always true).
+    const { isPolicyEnforced } =
+      require('../services/policyLimits/index.js') as typeof import('../services/policyLimits/index.js')
     const bindOrDenied =
       trigger === 'server_denied' ||
       (trigger === 'device_bind' && isConsumerSubscriber())
-    if (!bindOrDenied) {
+    if (!isPolicyEnforced(REQUIRE_TRUSTED_DEVICES_POLICY) && !bindOrDenied) {
       logForDebugging(
         `[trusted-device] Org has not enabled ${REQUIRE_TRUSTED_DEVICES_POLICY}, skipping enrollment`,
       )

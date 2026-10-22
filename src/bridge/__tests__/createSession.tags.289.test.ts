@@ -1,40 +1,60 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
+import { setupAxiosMock } from '../../../tests/mocks/axios.js'
+import { authMock } from '../../../tests/mocks/auth.js'
+import {
+  oauthClientMock,
+  oauthConfigMock,
+} from '../../../tests/mocks/oauthSurface.js'
+import { snapshotModuleExports } from '../../../tests/mocks/settings.js'
+import * as realBridgeConfig from '../bridgeConfig.js'
+
+const bridgeConfigSnap = snapshotModuleExports(realBridgeConfig)
 
 const axiosGet = mock(
   async (_url: string, _opts?: unknown) =>
     ({ status: 200, data: {} }) as { status: number; data: unknown },
 )
 
-mock.module('axios', () => ({
-  default: {
-    get: axiosGet,
-    isAxiosError: () => false,
-  },
-}))
+const axiosHandle = setupAxiosMock()
+axiosHandle.stubs.get = axiosGet
+axiosHandle.stubs.isAxiosError = () => false
 
-mock.module('../../utils/auth.js', () => ({
-  getClaudeAIOAuthTokens: () => ({ accessToken: 'tok' }),
-}))
-
-mock.module('../../services/oauth/client.js', () => ({
-  getOrganizationUUID: async () => 'org',
-}))
-
-mock.module('../../constants/oauth.js', () => ({
-  getOauthConfig: () => ({ BASE_API_URL: 'https://api.example' }),
-}))
-
-mock.module('../../utils/teleport/api.js', () => ({
-  getOAuthHeaders: () => ({ Authorization: 'Bearer tok' }),
-}))
-
+mock.module('src/utils/auth.js', authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/constants/oauth.js', oauthConfigMock)
+mock.module('../../constants/oauth.js', oauthConfigMock)
+mock.module('src/services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org',
+  }),
+)
+mock.module('../../services/oauth/client.js', () =>
+  oauthClientMock({
+    getOrganizationUUID: async () => 'org',
+  }),
+)
 mock.module('../bridgeConfig.js', () => ({
+  ...bridgeConfigSnap,
   isSelfHostedBridge: () => false,
   getBridgeBaseUrl: () => 'https://api.example',
 }))
 
 const { getBridgeSessionWithNotFound } = await import('../createSession.js')
 
+beforeAll(() => {
+  axiosHandle.useStubs = true
+})
+afterAll(() => {
+  axiosHandle.useStubs = false
+})
 afterEach(() => {
   axiosGet.mockClear()
 })

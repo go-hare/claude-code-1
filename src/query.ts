@@ -142,7 +142,8 @@ import {
 } from './services/tools/toolExecution.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
-import { handleStopHooks } from './query/stopHooks.js'
+import { handleStopHooks, runTurnEndReactions } from './query/stopHooks.js'
+import { enqueueSdkEvent } from './utils/sdkEventQueue.js'
 import {
   endTurnSourceFromToolResult,
   type ToolEndTurnSource,
@@ -157,7 +158,6 @@ import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
-  getMainThreadAgentType,
   getSessionId,
 } from './bootstrap/state.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
@@ -341,9 +341,9 @@ export function OS(
   },
 ): void {
   // cT(e) ABSENT — treat as missing query-cost handle.
-  const o: unknown = undefined
+  const o = undefined as unknown
   // Jh tracker ABSENT — optional global, gold short-circuits on !Jh.
-  const Jh:
+  const Jh = undefined as
     | undefined
     | (() => {
         markApiFailure: (
@@ -353,7 +353,7 @@ export function OS(
           details: unknown,
           apiError: unknown,
         ) => Promise<void>
-      }) = undefined
+      })
   if (!Jh || !o || !t.startsWith('repl_main_thread') || e.agentId) return
   // Unreachable while Jh/cT stay ABSENT; keep gold arm shape for when a
   // tracker lands without inventing callees here.
@@ -388,20 +388,20 @@ export function malformedToolUseRetryAction(input: {
 }
 
 /**
- * Is this a max_output_tokens error message? If so, the streaming loop should
- * withhold it from SDK callers until we know whether the recovery loop can
- * continue. Yielding early leaks an intermediate error to SDK callers (e.g.
- * cowork/desktop) that terminate the session on any `error` field — the
- * recovery loop keeps running but nobody is listening.
- *
- * Mirrors reactiveCompact.isWithheldPromptTooLong.
+ * densable ap / GJn.
+ * truncatedAfterOutput && (subagent || (main && noninteractive)) && GB.
  */
-/**
- * densable GJn @214370857.
- * assistant + isApiErrorMessage + truncatedAfterOutput +
- * isNonInteractiveSession + kl(source)==="main" +
- * we("tengu_truncated_response_recovery", true).
- */
+function querySourceFamilyOf(querySource: QuerySource): string | undefined {
+  try {
+    const { getQuerySourceFamily } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
+    return getQuerySourceFamily(querySource)
+  } catch {
+    return undefined
+  }
+}
+
 function isTruncatedAfterOutputRecovery(
   msg: Message | StreamEvent | undefined,
   toolUseContext: ToolUseContext,
@@ -411,25 +411,46 @@ function isTruncatedAfterOutputRecovery(
   const assistant = msg as AssistantMessage
   if (assistant.isApiErrorMessage !== true) return false
   if (assistant.truncatedAfterOutput !== true) return false
-  if (!toolUseContext.options.isNonInteractiveSession) return false
-  let family: string | undefined
-  try {
-    const { getQuerySourceFamily } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./utils/observerAgents.js') as typeof import('./utils/observerAgents.js')
-    family = getQuerySourceFamily(querySource)
-  } catch {
-    family = undefined
-  }
-  return (
-    family === 'main' &&
+  if (
     getFeatureValue_CACHED_MAY_BE_STALE(
       'tengu_truncated_response_recovery',
       true,
-    ) === true
+    ) !== true
+  ) {
+    return false
+  }
+  const family = querySourceFamilyOf(querySource)
+  if (family === 'subagent') return true
+  return (
+    family === 'main' && toolUseContext.options.isNonInteractiveSession === true
   )
 }
 
+/** densable gwt — main / non-subagent truncated recovery. */
+const TRUNCATED_RECOVERY_RESUME =
+  `Your response above was cut off mid-stream. Resume directly from where it stops — no apology, no recap. ` +
+  `If none of it survived, answer the request from the start.`
+
+/** densable hwt — subagent truncated recovery. */
+const TRUNCATED_RECOVERY_REWRITE =
+  `Your response above was cut off mid-stream and only your next message is delivered. ` +
+  `Write the complete response again from the start — no apology, no mention of the cut-off.`
+
+function truncatedRecoveryCopy(querySource: QuerySource): string {
+  return querySourceFamilyOf(querySource) === 'subagent'
+    ? TRUNCATED_RECOVERY_REWRITE
+    : TRUNCATED_RECOVERY_RESUME
+}
+
+/**
+ * Is this a max_output_tokens error message? If so, the streaming loop should
+ * withhold it from SDK callers until we know whether the recovery loop can
+ * continue. Yielding early leaks an intermediate error to SDK callers (e.g.
+ * cowork/desktop) that terminate the session on any `error` field — the
+ * recovery loop keeps running but nobody is listening.
+ *
+ * Mirrors reactiveCompact.isWithheldPromptTooLong.
+ */
 function isWithheldMaxOutputTokens(
   msg: Message | StreamEvent | undefined,
 ): msg is AssistantMessage {
@@ -598,8 +619,8 @@ function* enforceHandbackSend(
 }
 
 /**
- * densable Aa turn-end p7e — bounce on completed / max_turns /
- * toolRequestedEndTurn, not only the zero-tool_use completed exit.
+ * densable Aa turn-end p7e — bounce on the zero-tool_use completed exit.
+ * Gold does not bounce on max_turns / toolRequestedEndTurn / hook_stopped.
  */
 function* maybeHandbackBounce(
   params: QueryParams,
@@ -953,10 +974,8 @@ async function* queryLoop(
   | ToolBridgeEvent,
   Terminal
 > {
-  // Immutable params — never reassigned during the query loop except
-  // systemPrompt, which densable 2.1.289 rebuilds from the new tool names
-  // after refreshTools when the pool changes.
-  let { systemPrompt } = params
+  // Immutable params — gold does not rebuild systemPrompt after refreshTools.
+  const { systemPrompt } = params
   const {
     userContext,
     systemContext,
@@ -1059,6 +1078,24 @@ async function* queryLoop(
     }
   }
 
+  // densable adn.isRunning — true for this queryLoop, depth-counted so a
+  // nested subagent loop does not clear the parent. Disposes on close.
+  using _pluginDevModsTurn = (() => {
+    try {
+      const { isDevModsPersonTurn, trackPluginDevModsTurn } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/plugins/pluginDevMods.js') as typeof import('./utils/plugins/pluginDevMods.js')
+      return trackPluginDevModsTurn({
+        person:
+          params.toolUseContext.agentId === undefined &&
+          isDevModsPersonTurn(params.messages),
+      })
+    } catch {
+      return { [Symbol.dispose]() {} }
+    }
+  })()
+  void _pluginDevModsTurn
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     // Destructure state at the top of each iteration. toolUseContext alone
@@ -1085,16 +1122,23 @@ async function* queryLoop(
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { bindPluginDevModsSession, markPluginDevModsTurnRunning } =
+      const { bindPluginDevModsSession, restorePluginDevModsHost } =
         require('./utils/plugins/pluginDevMods.js') as typeof import('./utils/plugins/pluginDevMods.js')
-      markPluginDevModsTurnRunning(true)
+      const { refreshActivePlugins } =
+        require('./utils/plugins/refresh.js') as typeof import('./utils/plugins/refresh.js')
       bindPluginDevModsSession({
         canUseTool,
         toolContext: ac => ({
           ...toolUseContext,
           abortController: ac,
         }),
+        reloadPlugins: async () => {
+          await refreshActivePlugins(toolUseContext.setAppState, {
+            applyStagedInstalls: false,
+          })
+        },
       })
+      restorePluginDevModsHost()
     } catch {
       // optional until plugin_dev_mods host is present
     }
@@ -2357,9 +2401,10 @@ async function* queryLoop(
               }
             }
             // Withhold recoverable errors (prompt-too-long, media-size,
-            // max-output-tokens) until we know whether recovery (collapse
-            // drain / reactive compact / truncation retry) can succeed.
-            // Still pushed to assistantMessages so recovery finds them.
+            // max-output-tokens, truncatedAfterOutput/ap) until we know
+            // whether recovery (collapse drain / reactive compact /
+            // truncation retry) can succeed. Still pushed to
+            // assistantMessages so recovery finds them.
             // Media (EFi) is also buffered in Ji and replayed on the next
             // non-withheld message; leftover Ji is not flushed at stream end.
             // Either subsystem's withhold is sufficient — they're
@@ -2369,7 +2414,7 @@ async function* queryLoop(
             // feature() only works in if/ternary conditions (bun:bundle
             // tree-shaking constraint), so the collapse check is nested
             // rather than composed.
-            // densable Gm/Ji: ztm/EFi/Jsm withhold; only EFi pushes Co.
+            // densable Gm/Ji: ztm/EFi/Jsm/ap withhold; only EFi pushes Co.
             let withholdPtl = false
             if (feature('CONTEXT_COLLAPSE')) {
               if (
@@ -2394,6 +2439,13 @@ async function* queryLoop(
                     message as Message,
                   ) === true,
                 maxOutputTokens: isWithheldMaxOutputTokens(message),
+                truncatedAfterOutput:
+                  !needsFollowUp &&
+                  isTruncatedAfterOutputRecovery(
+                    message,
+                    toolUseContext,
+                    querySource,
+                  ),
               })
             // densable: (Gt||Yt) soft/exact land BEFORE yield so consumers
             // see joined text + supersedesUuids on first delivery.
@@ -3295,12 +3347,11 @@ async function* queryLoop(
             attempt: maxOutputTokensRecoveryCount + 1,
           })
           const recoveryMessage = createUserMessage({
-            content:
-              `Your response above was cut off mid-stream. Resume directly from where it stops — no apology, no recap. ` +
-              `If none of it survived, answer the request from the start.`,
+            content: truncatedRecoveryCopy(querySource),
             isMeta: true,
             turnCompanion: true,
           })
+          // densable lQn: the nudge is only the next request. Do not yield it.
           const next: State = {
             messages: [
               ...messagesForQuery,
@@ -3329,11 +3380,8 @@ async function* queryLoop(
           status:
             'exhausted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
-        // No yield here, unlike the max_output_tokens branch above: that banner
-        // carries apiError 'max_output_tokens' and is withheld by
-        // applyStreamMediaReplay, so exhaustion is its first delivery. This one
-        // is 'server_error' (createAssistantAPIErrorMessage in claude.ts), never
-        // withheld, and was already yielded when the stream produced it.
+        // Recovery exhausted — surface the withheld error now (densable yield h).
+        yield lastMessage
       }
 
       // densable excerpt @186913600: (kn?.message.stop_reason??Bn)==="tool_use"
@@ -3503,20 +3551,111 @@ async function* queryLoop(
         stopHookActive,
       )
 
+      const stopHookIsSubagent = toolUseContext.agentId !== undefined
+      const stopHookGoalActive =
+        !stopHookIsSubagent &&
+        toolUseContext.getAppState().activeGoal !== undefined
+      // densable: recovered log when prior blocks cleared this turn.
+      if (
+        stopHookBlockCount > 0 &&
+        stopHookResult.blockingErrors.length === 0
+      ) {
+        logEvent('tengu_stop_hook_block_count', {
+          count: stopHookBlockCount,
+          is_subagent: stopHookIsSubagent,
+          hit_max_turns: false,
+          hit_cap: false,
+          goal_active: stopHookGoalActive,
+        })
+      }
+
       if (stopHookResult.preventContinuation) {
-        return { reason: 'stop_hook_prevented' }
+        return {
+          reason: stopHookResult.aborted
+            ? 'aborted_streaming'
+            : 'stop_hook_prevented',
+        }
       }
 
       if (stopHookResult.blockingErrors.length > 0) {
-        const MAX_CONSECUTIVE_STOP_HOOK_BLOCKS = resolveStopHookBlockCap()
-        // densable Z=_r+1 includes not_met.
-        const nextBlockCount = stopHookBlockCount + 1
-        if (nextBlockCount >= MAX_CONSECUTIVE_STOP_HOOK_BLOCKS) {
-          yield createSystemMessage(
-            `Stop hook blocked ${MAX_CONSECUTIVE_STOP_HOOK_BLOCKS} consecutive times. Ending turn to prevent infinite loop.`,
-            'warning',
+        // densable Ra(sessionState, () => blocking.length > 0 || be()).
+        // be is () => false here. Drain the transcript queue before
+        // max_turns / cap / the next model turn.
+        try {
+          const { flushSessionStorage } = await import(
+            './utils/sessionStorage.js'
           )
-          return { reason: 'stop_hook_prevented' }
+          await flushSessionStorage()
+        } catch (err) {
+          logForDebugging(
+            `Stop continuation persist wait failed: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        }
+        // densable Z=_r+1 includes not_met. Cap fires when ye>0 && Z>ye.
+        const nextBlockCount = stopHookBlockCount + 1
+        const nextTurnCountOnBlock = turnCount + 1
+        if (maxTurns && nextTurnCountOnBlock > maxTurns) {
+          logEvent('tengu_stop_hook_block_count', {
+            count: nextBlockCount,
+            is_subagent: stopHookIsSubagent,
+            hit_max_turns: true,
+            hit_cap: false,
+            goal_active: stopHookGoalActive,
+          })
+          yield createAttachmentMessage({
+            type: 'max_turns_reached',
+            maxTurns,
+            turnCount: nextTurnCountOnBlock,
+          })
+          yield* runTurnEndReactions(
+            [...messagesForQuery, ...assistantMessages],
+            toolUseContext,
+            stopHookActive,
+          )
+          return { reason: 'max_turns', turnCount: nextTurnCountOnBlock }
+        }
+        const cap = resolveStopHookBlockCap()
+        if (cap > 0 && nextBlockCount > cap) {
+          logEvent('tengu_stop_hook_block_count', {
+            count: nextBlockCount,
+            is_subagent: stopHookIsSubagent,
+            hit_max_turns: false,
+            hit_cap: true,
+            goal_active: stopHookGoalActive,
+          })
+          const warning =
+            `A hook blocked the turn from ending ${nextBlockCount} consecutive times — overriding and ending turn. ` +
+            `For Stop/SubagentStop hooks, check stop_hook_active in the input and return success while it's true. Set CLAUDE_CODE_STOP_HOOK_BLOCK_CAP to raise this limit.`
+          yield createSystemMessage(warning, 'warning')
+          if (toolUseContext.agentType !== 'teammate' && !stopHookIsSubagent) {
+            try {
+              // densable xa → Vi (enqueueSdkEvent). Interactive REPL Vi
+              // no-ops; addNotification is the toast analog.
+              enqueueSdkEvent({
+                type: 'system',
+                subtype: 'notification',
+                key: 'stop-hook-block-cap',
+                text: warning,
+                priority: 'high',
+                color: 'warning',
+              })
+              toolUseContext.addNotification?.({
+                key: 'stop-hook-block-cap',
+                text: warning,
+                priority: 'high',
+                color: 'warning',
+              })
+            } catch {
+              // densable xa: never fail the turn on toast
+            }
+          }
+          yield* runTurnEndReactions(
+            [...messagesForQuery, ...assistantMessages],
+            toolUseContext,
+            stopHookActive,
+          )
+          return { reason: 'completed' }
         }
         const next: State = {
           messages: [
@@ -3814,8 +3953,12 @@ async function* queryLoop(
       return { reason: 'tool_deferred' }
     }
     if (shouldPreventContinuation) {
-      // densable: hook_stopped does not bounce. Gold Aa skill_inline is on
-      // the zero-tool completed bundle only — not PostTool preventContinuation.
+      // densable: hook_stopped does not bounce. Ot discards blocks.
+      yield* runTurnEndReactions(
+        messagesForQuery.concat(assistantMessages, toolResults),
+        updatedToolUseContext,
+        stopHookActive,
+      )
       return { reason: 'hook_stopped' }
     }
     // densable 2.1.283 Ud @ 190790198 — StructuredOutput / MCP claude/endTurn
@@ -3881,49 +4024,18 @@ async function* queryLoop(
           })
         }
       }
-      // densable Aa: bounce before Stop (Stop result still discarded here —
-      // gold's preventContinuation is on the no-tool completed path).
-      // Gold skill_inline not_run is on the zero-tool completed bundle only.
-      {
-        const bounce = yield* maybeHandbackBounce(
-          params,
-          querySource,
-          updatedToolUseContext,
-        )
-        yield* handleStopHooks(
-          messagesForQuery,
-          assistantMessages,
-          systemPrompt,
-          userContext,
-          systemContext,
-          updatedToolUseContext,
-          querySource,
-          stopHookActive,
-          toolRequestedEndTurn,
-        )
-        if (bounce) {
-          state = {
-            messages: [
-              ...messagesForQuery,
-              ...assistantMessages,
-              ...toolResults,
-              bounce,
-            ],
-            toolUseContext: updatedToolUseContext,
-            autoCompactTracking: tracking,
-            maxOutputTokensRecoveryCount: 0,
-            hasAttemptedReactiveCompact: false,
-            maxOutputTokensOverride: undefined,
-            pendingToolUseSummary: undefined,
-            stopHookActive,
-            stopHookBlockCount: 0,
-            turnCount,
-            thinkingOnlyNudged,
-            transition: { reason: 'next_turn' },
-          }
-          continue
-        }
-      }
+      // densable ip: Stop via gs (endTurnSource); no handback bounce.
+      yield* handleStopHooks(
+        messagesForQuery,
+        assistantMessages,
+        systemPrompt,
+        userContext,
+        systemContext,
+        updatedToolUseContext,
+        querySource,
+        stopHookActive,
+        toolRequestedEndTurn,
+      )
       return { reason: 'completed' }
     }
 
@@ -4049,9 +4161,11 @@ async function* queryLoop(
             toolUseID: hookId,
             hookEvent: 'PostToolBatch',
           })
+          // densable command Stop / goal / TeammateIdle still run; ignore
+          // the return so the turn stays hook_stopped (no model re-invoke).
           yield* handleStopHooks(
-            messagesForQuery,
-            assistantMessages,
+            messagesForQuery.concat(assistantMessages, toolResults),
+            [],
             systemPrompt,
             userContext,
             systemContext,
@@ -4061,6 +4175,42 @@ async function* queryLoop(
           )
           return { reason: 'hook_stopped' }
         }
+      }
+    }
+
+    // densable: refreshTools then refreshMcpClients before attachments.
+    if (updatedToolUseContext.options.refreshTools) {
+      const refreshedTools = updatedToolUseContext.options.refreshTools()
+      if (refreshedTools !== updatedToolUseContext.options.tools) {
+        const oldMcpCount = count(
+          updatedToolUseContext.options.tools,
+          tool => !!tool.mcpInfo,
+        )
+        const newMcpCount = count(refreshedTools, tool => !!tool.mcpInfo)
+        if (oldMcpCount !== newMcpCount) {
+          logEvent('tengu_mcp_tools_refreshed_mid_turn', {
+            oldMcpCount,
+            newMcpCount,
+            recovered: oldMcpCount === 0 && newMcpCount > 0,
+          })
+        }
+        updatedToolUseContext = {
+          ...updatedToolUseContext,
+          options: {
+            ...updatedToolUseContext.options,
+            tools: refreshedTools,
+          },
+        }
+      }
+    }
+    if (updatedToolUseContext.options.refreshMcpClients) {
+      const refreshedClients = updatedToolUseContext.options.refreshMcpClients()
+      updatedToolUseContext = {
+        ...updatedToolUseContext,
+        options: {
+          ...updatedToolUseContext.options,
+          mcpClients: refreshedClients,
+        },
       }
     }
 
@@ -4250,149 +4400,6 @@ async function* queryLoop(
       queryDepth: queryTracking.depth,
     })
 
-    // Refresh tools between turns so newly-connected MCP servers become available
-    const toolsBeforeRefresh = updatedToolUseContext.options.tools
-    if (updatedToolUseContext.options.refreshTools) {
-      const refreshedTools = updatedToolUseContext.options.refreshTools()
-      if (refreshedTools !== updatedToolUseContext.options.tools) {
-        const oldMcpCount = count(
-          updatedToolUseContext.options.tools,
-          tool => !!tool.mcpInfo,
-        )
-        const newMcpCount = count(refreshedTools, tool => !!tool.mcpInfo)
-        if (oldMcpCount !== newMcpCount) {
-          logEvent('tengu_mcp_tools_refreshed_mid_turn', {
-            oldMcpCount,
-            newMcpCount,
-            recovered: oldMcpCount === 0 && newMcpCount > 0,
-          })
-        }
-        updatedToolUseContext = {
-          ...updatedToolUseContext,
-          options: {
-            ...updatedToolUseContext.options,
-            tools: refreshedTools,
-          },
-        }
-      }
-    }
-    // densable 2.1.289 refreshMcpClients after refreshTools (gold query
-    // after PostToolBatch / tengu_query_before_attachments).
-    if (updatedToolUseContext.options.refreshMcpClients) {
-      const refreshedClients = updatedToolUseContext.options.refreshMcpClients()
-      updatedToolUseContext = {
-        ...updatedToolUseContext,
-        options: {
-          ...updatedToolUseContext.options,
-          mcpClients: refreshedClients,
-        },
-      }
-    }
-    // densable 2.1.289: tool names changed → rebuild system prompt from the
-    // new list (getSystemPrompt / mho analog). Entry snapshot is not kept.
-    const toolsAfterRefresh = updatedToolUseContext.options.tools
-    const toolNamesChanged =
-      toolsAfterRefresh !== toolsBeforeRefresh &&
-      toolsAfterRefresh.map(tool => tool.name).join('\0') !==
-        toolsBeforeRefresh.map(tool => tool.name).join('\0')
-    if (toolNamesChanged) {
-      // Fork child: keep the entry snapshot. FORK_AGENT.getSystemPrompt is
-      // empty; spawn threaded parent bytes via override.systemPrompt so the
-      // prompt-cache prefix stays identical. Rebuilding would replace them
-      // with DEFAULT_AGENT_PROMPT or '' and may splice append-subagent.
-      const isForkChild =
-        querySource === 'agent:builtin:fork' ||
-        updatedToolUseContext.agentType === 'fork' ||
-        updatedToolUseContext.options.querySource === 'agent:builtin:fork'
-      if (!isForkChild) {
-        // Lazy: prompts / systemPrompt sit above query in the graph.
-        const additionalWorkingDirectories = Array.from(
-          updatedToolUseContext
-            .getAppState()
-            .toolPermissionContext.additionalWorkingDirectories.keys(),
-        )
-        if (updatedToolUseContext.agentId) {
-          // Subagent: rebuild from this agent's prompt, not the main-thread catalog.
-          const { DEFAULT_AGENT_PROMPT, enhanceSystemPromptWithEnvDetails } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('./constants/prompts.js') as typeof import('./constants/prompts.js')
-          const { mergeAppendSubagentSystemPrompt } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('./utils/appendSubagentPrompt.js') as typeof import('./utils/appendSubagentPrompt.js')
-          const { asSystemPrompt } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('./utils/systemPromptType.js') as typeof import('./utils/systemPromptType.js')
-          const agentType = updatedToolUseContext.agentType
-          const agentDefinition = agentType
-            ? updatedToolUseContext.options.agentDefinitions.activeAgents.find(
-                agent => agent.agentType === agentType,
-              )
-            : undefined
-          const enabledToolNames = new Set(
-            toolsAfterRefresh.map(tool => tool.name),
-          )
-          let basePrompt: string[]
-          try {
-            basePrompt = agentDefinition
-              ? [
-                  agentDefinition.getSystemPrompt({
-                    toolUseContext: updatedToolUseContext,
-                  }),
-                ]
-              : [DEFAULT_AGENT_PROMPT]
-          } catch {
-            basePrompt = [DEFAULT_AGENT_PROMPT]
-          }
-          systemPrompt = asSystemPrompt(
-            mergeAppendSubagentSystemPrompt({
-              basePrompt: await enhanceSystemPromptWithEnvDetails(
-                basePrompt,
-                updatedToolUseContext.options.mainLoopModel,
-                additionalWorkingDirectories,
-                enabledToolNames,
-              ),
-              appendSubagentSystemPrompt:
-                updatedToolUseContext.options.appendSubagentSystemPrompt,
-              // Observer spawn is useExactTools (skip append). Fork keeps the
-              // entry snapshot above.
-              useExactTools:
-                updatedToolUseContext.options.querySource?.startsWith(
-                  'agent:observer:',
-                ) === true,
-            }),
-          )
-        } else {
-          const { getSystemPrompt } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('./constants/prompts.js') as typeof import('./constants/prompts.js')
-          const { buildEffectiveSystemPrompt } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('./utils/systemPrompt.js') as typeof import('./utils/systemPrompt.js')
-          const defaultSystemPrompt = await getSystemPrompt(
-            toolsAfterRefresh,
-            updatedToolUseContext.options.mainLoopModel,
-            additionalWorkingDirectories,
-            updatedToolUseContext.options.mcpClients,
-          )
-          const agentType = getMainThreadAgentType()
-          const mainThreadAgentDefinition = agentType
-            ? updatedToolUseContext.options.agentDefinitions.activeAgents.find(
-                agent => agent.agentType === agentType,
-              )
-            : undefined
-          systemPrompt = buildEffectiveSystemPrompt({
-            mainThreadAgentDefinition,
-            toolUseContext: updatedToolUseContext,
-            customSystemPrompt:
-              updatedToolUseContext.options.customSystemPrompt,
-            defaultSystemPrompt,
-            appendSystemPrompt:
-              updatedToolUseContext.options.appendSystemPrompt,
-          })
-        }
-      }
-    }
-
     const toolUseContextWithQueryTracking = {
       ...updatedToolUseContext,
       queryTracking,
@@ -4425,41 +4432,16 @@ async function* queryLoop(
 
     // Check if we've reached the max turns limit
     if (maxTurns && nextTurnCount > maxTurns) {
-      {
-        const bounce = yield* maybeHandbackBounce(
-          params,
-          querySource,
-          toolUseContextWithQueryTracking,
-        )
-        if (bounce) {
-          state = {
-            messages: messagesForQuery.concat(
-              assistantMessages,
-              toolResults,
-              bounce,
-            ),
-            toolUseContext: toolUseContextWithQueryTracking,
-            autoCompactTracking: tracking,
-            // Stay at the cap so the bounce turn can call SubagentHandback;
-            // yGo-exhausted bounce returns undefined and we still stop below.
-            turnCount: maxTurns,
-            maxOutputTokensRecoveryCount: 0,
-            hasAttemptedReactiveCompact: false,
-            pendingToolUseSummary: nextPendingToolUseSummary,
-            maxOutputTokensOverride: undefined,
-            stopHookActive,
-            stopHookBlockCount: 0,
-            thinkingOnlyNudged,
-            transition: { reason: 'next_turn' },
-          }
-          continue
-        }
-      }
       yield createAttachmentMessage({
         type: 'max_turns_reached',
         maxTurns,
         turnCount: nextTurnCount,
       })
+      yield* runTurnEndReactions(
+        messagesForQuery.concat(assistantMessages, toolResults),
+        toolUseContextWithQueryTracking,
+        stopHookActive,
+      )
       return { reason: 'max_turns', turnCount: nextTurnCount }
     }
 

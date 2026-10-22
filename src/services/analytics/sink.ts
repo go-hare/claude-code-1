@@ -20,11 +20,12 @@ import {
   initializeGrowthBook,
   isGrowthBookEnabled,
 } from './growthbook.js'
-import { attachAnalyticsSink, stripProtoFields } from './index.js'
+import {
+  attachAnalyticsSink,
+  stripProtoFields,
+  type LogEventMetadata,
+} from './index.js'
 import { isSinkKilled } from './sinkKillswitch.js'
-
-// Local type matching the logEvent metadata signature
-type LogEventMetadata = { [key: string]: boolean | number | undefined }
 
 const DATADOG_GATE_NAME = 'tengu_log_datadog_events'
 

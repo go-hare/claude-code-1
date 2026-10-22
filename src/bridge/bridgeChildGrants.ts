@@ -216,7 +216,9 @@ export function applyAutoModeEnvironmentFacts(
   incoming: string[],
   previouslyHeld: readonly string[] = [],
 ): string[] {
-  const inline = (getFlagSettingsInline() ?? {}) as SettingsJson
+  const inline = (getFlagSettingsInline() ?? {}) as SettingsJson & {
+    autoMode?: { environment?: string[] }
+  }
   const existing = inline.autoMode?.environment ?? []
   const afterRetract = retractHeldFactsOnce(existing, previouslyHeld)
   const nextHeld = sanitizeIncomingFacts(incoming)

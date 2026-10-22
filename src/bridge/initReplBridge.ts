@@ -673,7 +673,37 @@ export async function initReplBridge(
     }
   }
 
-  // 3. Product-cut: policy limits always allow remote control.
+  // 3. densable QD("allow_remote_control"):
+  //   cache_miss → Xb("policy_unverified") + W?.("failed", nbn(...), "terminal")
+  //   org_denied → Xb("policy_denied") + W?.("policy_disabled", v_n())
+  const { waitForPolicyLimitsToLoad, getPolicyDenyKind } = await import(
+    '../services/policyLimits/index.js'
+  )
+  await waitForPolicyLimitsToLoad()
+  const remoteControlPolicy = getPolicyDenyKind('allow_remote_control')
+  if (remoteControlPolicy === 'cache_miss') {
+    logBridgeSkip(
+      'policy_unverified',
+      '[bridge:repl] Skipping: allow_remote_control policy unverified (cache miss)',
+    )
+    onStateChange?.(
+      'failed',
+      "disabled by your organization's policy",
+      'terminal',
+    )
+    return null
+  }
+  if (remoteControlPolicy === 'org_denied') {
+    logBridgeSkip(
+      'policy_denied',
+      '[bridge:repl] Skipping: allow_remote_control policy not allowed',
+    )
+    onStateChange?.(
+      'policy_disabled',
+      "Remote Control is disabled by your organization's policy. Contact your organization admin for access.",
+    )
+    return null
+  }
 
   // densable 2.1.243 #58 / 2.1.246 qn — occupancy `sn&&qn&&T&&Mr()`.
   // Zn latches takeover; Ye fires immediately before Yr, not here

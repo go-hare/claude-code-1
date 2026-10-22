@@ -58,7 +58,9 @@ export function stripProtoFields<V>(
 }
 
 // Internal type for logEvent metadata - different from the enriched EventMetadata in metadata.ts
-type LogEventMetadata = { [key: string]: boolean | number | undefined }
+export type LogEventMetadata = {
+  [key: string]: boolean | number | string | undefined
+}
 
 type QueuedEvent = {
   eventName: string

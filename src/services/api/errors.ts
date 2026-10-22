@@ -1429,6 +1429,7 @@ function buildAssistantMessageFromError(
     const provider = getAPIProvider()
     const vertexish =
       provider === 'vertex' ||
+      provider === 'anthropicGoogleCloud' ||
       isEnvTruthy(process.env.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD)
     if (vertexish) {
       return createAssistantAPIErrorMessage({

@@ -89,6 +89,8 @@ describe('densable 2.1.289 serverConfigSession meta mount (vt.A)', () => {
             type: 'connected',
             config,
             client: {} as never,
+            capabilities: {},
+            cleanup: async () => {},
           },
           tools: [],
           commands: [],
@@ -140,6 +142,8 @@ describe('densable 2.1.289 serverConfigSession meta mount (vt.A)', () => {
         type: 'connected',
         config: existingConfig,
         client: {} as never,
+        capabilities: {},
+        cleanup: async () => {},
       },
     ])
     const session = createServerConfigSession({

@@ -143,6 +143,7 @@ describe('densable 2.1.289 bridgeChildGrants (ne/ae)', () => {
 
   test('RQt machineSettings only for projectThreadChild (spawn stamp input)', () => {
     const base = {
+      tagsRead: true,
       rcChild: false,
       attended: false,
       projectThreadChild: false,
@@ -167,6 +168,7 @@ describe('densable 2.1.289 bridgeChildGrants (ne/ae)', () => {
 
   test('RQt autoDefault for rcChild when mode not pinned (spawn stamp input)', () => {
     const base = {
+      tagsRead: true,
       rcChild: false,
       attended: false,
       projectThreadChild: false,
@@ -311,7 +313,7 @@ describe('densable 2.1.289 bridgeChildGrants (ne/ae)', () => {
       setMode: () => ({ ok: true, mode: 'auto' }),
     })
     expect(withI7n.granted.artifact).toBe(true)
-    expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBe('1')
+    expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT === '1').toBe(true)
     withI7n.undo()
     expect(process.env.CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT).toBeUndefined()
 

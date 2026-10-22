@@ -517,6 +517,15 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   // densable 2.1.289 k("tengu_swirling_meteor", !0) — print task-notification
   // coalesce (hold shouldQuery for follower notifications / owed empty prompt).
   tengu_swirling_meteor: true,
+  // densable gbo `k("tengu_event_loop_stall", !1)`. Disk cache true must not
+  // wrap stdout with mbo on public TTY start.
+  tengu_event_loop_stall: false,
+  // densable eD/syr `k("tengu_native_cursor", !1)`. Disk cache true must not
+  // pin nativeCursor on public TTY start.
+  tengu_native_cursor: false,
+  // densable x6 `k("tengu_marlin_porch", !1)`. Disk cache true must not
+  // pin DECSTBM renderer (and thereby `!x6()` native-cursor) on public TTY.
+  tengu_marlin_porch: false,
   // densable 2.1.289 gAe / k("tengu_omelette_fouet", !1). Gold default is
   // false; hollow GB would leave ClaudeDesign + `/design` hub off.
   tengu_omelette_fouet: true,
@@ -1162,6 +1171,14 @@ export function getPinnedFeatureValue<T>(feature: string, defaultValue: T): T {
   return pinned.get(feature) as T
 }
 
+export function getFeatureValue_CACHED_MAY_BE_STALE(
+  feature: string,
+  defaultValue: boolean,
+): boolean
+export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
+  feature: string,
+  defaultValue: T,
+): T
 export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
   feature: string,
   defaultValue: T,

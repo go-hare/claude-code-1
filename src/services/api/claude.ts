@@ -496,6 +496,24 @@ export function getPromptCachingEnabled(model: string): boolean {
     if (model === defaultOpus) return false
   }
 
+  // densable Dde @189266434 — FABLE: Rfe (`claude-fable-`) || nY (env default).
+  if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_FABLE)) {
+    if (model.includes('claude-fable-')) return false
+    const defaultFable = process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
+    if (
+      defaultFable &&
+      firstPartyNameToCanonical(model) ===
+        firstPartyNameToCanonical(defaultFable)
+    ) {
+      return false
+    }
+  }
+
+  // densable Dde — MYTHOS: nbt (`claude-mythos-`).
+  if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_MYTHOS)) {
+    if (model.includes('claude-mythos-')) return false
+  }
+
   return true
 }
 
@@ -1190,6 +1208,7 @@ export async function* executeNonStreamingRequest(
     onError?: (
       error: unknown,
     ) => string | null | undefined | Promise<string | null | undefined>
+    onRetryStatus?: Options['onRetryStatus']
   },
   paramsFromContext: (context: RetryContext) => BetaMessageStreamParams,
   onAttempt: (attempt: number, start: number, maxOutputTokens: number) => void,
@@ -1279,6 +1298,7 @@ export async function* executeNonStreamingRequest(
       initialConsecutive529Errors: retryOptions.initialConsecutive529Errors,
       querySource: retryOptions.querySource,
       onError: retryOptions.onError,
+      onRetryStatus: retryOptions.onRetryStatus,
     },
   )
 
@@ -1732,7 +1752,10 @@ async function* queryModel(
       buildThinkingStripPlanFromMessages(messages),
     )
     if (thinkingPlan.size > 0) {
-      next = applyThinkingStripPlanToMessages(next, thinkingPlan)
+      next = applyThinkingStripPlanToMessages(
+        next as Message[],
+        thinkingPlan,
+      ) as typeof next
     }
 
     // densable Lv: FFe(s?.advisorStripPlan, UD(g)) then C_.
@@ -1741,7 +1764,10 @@ async function* queryModel(
       buildAdvisorStripPlanFromMessages(messages),
     )
     if (advisorPlan.size > 0) {
-      next = stripAdvisorBlocksFromMessageIds(next, advisorPlan)
+      next = stripAdvisorBlocksFromMessageIds(
+        next as never,
+        advisorPlan,
+      ) as typeof next
     }
 
     // Strip advisor blocks — the API rejects them without the beta header.
@@ -2961,6 +2987,7 @@ async function* queryModel(
             signal,
             querySource: options.querySource,
             onError: onThinkingDisplayApiError,
+            onRetryStatus: options.onRetryStatus,
           },
         )
 
@@ -4644,6 +4671,7 @@ async function* queryModel(
               initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
               querySource: options.querySource,
               onError: onThinkingDisplayApiError,
+              onRetryStatus: options.onRetryStatus,
             },
             paramsFromContext,
             (attempt, _startTime, tokens) => {
@@ -4892,6 +4920,7 @@ async function* queryModel(
                 ...(isFastModeEnabled() && { fastMode: isFastMode }),
                 signal,
                 onError: onThinkingDisplayApiError,
+                onRetryStatus: options.onRetryStatus,
               },
               paramsFromContext,
               (attempt, _startTime, tokens) => {

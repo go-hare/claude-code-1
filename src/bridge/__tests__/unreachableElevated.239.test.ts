@@ -52,7 +52,7 @@ describe('densable 2.1.239 H9b / P9b elevated RC unreachable', () => {
     )
   })
 
-  test('H9b stays false after policyLimits product-cut (iFn never enforces)', () => {
+  test('H9b is false without require_trusted_devices enforced', () => {
     delete process.env.CLAUDE_CODE_REMOTE
     delete process.env.CLAUDE_TRUSTED_DEVICE_TOKEN
     gateOn = true

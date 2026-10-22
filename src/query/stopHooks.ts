@@ -18,7 +18,12 @@ import type {
 } from '../types/message.js'
 import { createAttachmentMessage } from '../utils/attachments.js'
 import { logForDebugging } from '../utils/debug.js'
-import { errorMessage } from '../utils/errors.js'
+import {
+  ControlStreamClosedError,
+  errorMessage,
+  isAbortError,
+} from '../utils/errors.js'
+import { logError } from '../utils/log.js'
 import type { REPLHookContext } from '../utils/hooks/postSamplingHooks.js'
 import {
   executeStopHooks,
@@ -113,6 +118,68 @@ type StopHookResult = {
   preventContinuation: boolean
   /** densable `goalPass` / `me` — not_met still yields to the model. */
   goalPass?: string
+  /** User Esc / abort during Stop — query maps this to aborted_streaming. */
+  aborted?: boolean
+}
+
+/**
+ * densable Ot — Stop/SubagentStop function-hooks-only pass. Blocking and
+ * preventContinuation are discarded (no model re-invoke).
+ */
+export async function* runTurnEndReactions(
+  messages: Message[],
+  toolUseContext: ToolUseContext,
+  stopHookActive?: boolean,
+): AsyncGenerator<
+  | StreamEvent
+  | RequestStartEvent
+  | Message
+  | TombstoneMessage
+  | ToolUseSummaryMessage
+> {
+  try {
+    const permissionMode =
+      toolUseContext.getAppState().toolPermissionContext.mode
+    const generator = executeStopHooks(
+      permissionMode,
+      toolUseContext.abortController.signal,
+      undefined,
+      stopHookActive ?? false,
+      toolUseContext.agentId,
+      toolUseContext,
+      messages,
+      toolUseContext.agentType,
+      undefined,
+      'turn_end_reactions',
+    )
+    for await (const result of generator) {
+      if (result.message) yield result.message
+      if (result.blockingError || result.preventContinuation) {
+        logForDebugging(
+          `[stop-hooks] Turn-end reaction hook block discarded: ${
+            result.blockingError?.blockingError ??
+            result.stopReason ??
+            'preventContinuation'
+          }`,
+        )
+      }
+    }
+  } catch (err) {
+    if (
+      isAbortError(err) &&
+      (toolUseContext.abortController.signal.aborted ||
+        err instanceof ControlStreamClosedError)
+    ) {
+      logForDebugging(
+        '[stop-hooks] Turn-end reactions pass cancelled (abort or stream teardown)',
+      )
+      return
+    }
+    logForDebugging('[stop-hooks] Turn-end reactions pass failed', {
+      level: 'error',
+    })
+    logError(err)
+  }
 }
 
 export async function* handleStopHooks(
@@ -323,8 +390,14 @@ export async function* handleStopHooks(
   let removedGoalStopHook:
     | import('../utils/settings/types.js').HookCommand
     | undefined
+  // Hoisted so the abort/error catch can return what Stop already collected
+  // (densable H=[...Qe,...Ye], _t=yt||B).
+  let blockingErrors: Message[] = [...briefEnforceBlocking]
+  let preventedContinuation = false
+  let teammateBlockingErrors: Message[] = []
+  let teammatePreventedContinuation = false
+  let goalPass: string | undefined
   try {
-    const blockingErrors: Message[] = [...briefEnforceBlocking]
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
 
@@ -450,10 +523,8 @@ export async function* handleStopHooks(
     // Consume all progress messages and get blocking errors
     let stopHookToolUseID = ''
     let hookCount = 0
-    let preventedContinuation = false
     let stopReason = ''
     let hasOutput = false
-    let goalPass: string | undefined
     const hookErrors: string[] = []
     const hookInfos: StopHookInfo[] = []
 
@@ -675,7 +746,7 @@ export async function* handleStopHooks(
               : undefined,
           })
         }
-        return { blockingErrors: [], preventContinuation: true }
+        return { blockingErrors: [], preventContinuation: true, aborted: true }
       }
     }
 
@@ -708,6 +779,13 @@ export async function* handleStopHooks(
     }
 
     if (preventedContinuation) {
+      // densable Aa: yield*Ot before preventContinuation so session-function
+      // Stop (turn_end_reactions) still runs when command Stop already blocked.
+      yield* runTurnEndReactions(
+        stopHookContext.messages,
+        toolUseContext,
+        stopHookActive,
+      )
       return { blockingErrors: [], preventContinuation: true, goalPass }
     }
 
@@ -720,8 +798,8 @@ export async function* handleStopHooks(
     if (isTeammate()) {
       const teammateName = getAgentName() ?? ''
       const teamName = getTeamName() ?? ''
-      const teammateBlockingErrors: Message[] = []
-      let teammatePreventedContinuation = false
+      teammateBlockingErrors = []
+      teammatePreventedContinuation = false
       let teammateStopReason: string | undefined
       // Each hook executor generates its own toolUseID — capture from progress
       // messages (same pattern as stopHookToolUseID at L142), not the Stop ID.
@@ -779,7 +857,11 @@ export async function* handleStopHooks(
             })
           }
           if (toolUseContext.abortController.signal.aborted) {
-            return { blockingErrors: [], preventContinuation: true }
+            return {
+              blockingErrors: [],
+              preventContinuation: true,
+              aborted: true,
+            }
           }
         }
       }
@@ -821,11 +903,20 @@ export async function* handleStopHooks(
           })
         }
         if (toolUseContext.abortController.signal.aborted) {
-          return { blockingErrors: [], preventContinuation: true }
+          return {
+            blockingErrors: [],
+            preventContinuation: true,
+            aborted: true,
+          }
         }
       }
 
       if (teammatePreventedContinuation) {
+        yield* runTurnEndReactions(
+          stopHookContext.messages,
+          toolUseContext,
+          stopHookActive,
+        )
         return { blockingErrors: [], preventContinuation: true }
       }
 
@@ -837,8 +928,50 @@ export async function* handleStopHooks(
       }
     }
 
+    // densable Aa: if(!b()) yield*Ot — session-function Stop is a reaction
+    // pass (blocks discarded). Command Stop already ran above.
+    if (!endTurnSource) {
+      yield* runTurnEndReactions(
+        stopHookContext.messages,
+        toolUseContext,
+        stopHookActive,
+      )
+    }
     return { blockingErrors: [], preventContinuation: false, goalPass }
   } catch (error) {
+    const collectedBlockingErrors = [
+      ...blockingErrors,
+      ...teammateBlockingErrors,
+    ]
+    const alreadyStopped =
+      preventedContinuation || teammatePreventedContinuation
+    // User Esc / abortController.abort: empty blocking, aborted so query
+    // records cancelled not stop_hook_prevented / failed.
+    if (
+      isAbortError(error) &&
+      (toolUseContext.abortController.signal.aborted ||
+        error instanceof ControlStreamClosedError)
+    ) {
+      logForDebugging('Stop hook cancelled (abort or stream teardown)')
+      if (toolUseContext.abortController.signal.aborted) {
+        return { blockingErrors: [], preventContinuation: true, aborted: true }
+      }
+      // densable Aa: ControlStreamClosed without abort keeps H / yt||B.
+      if (
+        alreadyStopped ||
+        (collectedBlockingErrors.length === 0 && !endTurnSource)
+      ) {
+        yield* runTurnEndReactions(
+          stopHookContext.messages,
+          toolUseContext,
+          stopHookActive,
+        )
+      }
+      return {
+        blockingErrors: collectedBlockingErrors,
+        preventContinuation: alreadyStopped,
+      }
+    }
     const durationMs = Date.now() - hookStartTime
     logEvent('tengu_stop_hook_error', {
       duration: durationMs,
@@ -853,7 +986,20 @@ export async function* handleStopHooks(
       `Stop hook failed: ${errorMessage(error)}`,
       'warning',
     )
-    return { blockingErrors: [], preventContinuation: false }
+    if (collectedBlockingErrors.length === 0 && !endTurnSource) {
+      yield* runTurnEndReactions(
+        stopHookContext.messages,
+        toolUseContext,
+        stopHookActive,
+      )
+    }
+    // densable V on throw is enforce-only. Keep preventContinuation when
+    // a prior Stop already blocked so query does not complete or retry.
+    return {
+      blockingErrors: alreadyStopped ? [] : briefEnforceBlocking,
+      preventContinuation: alreadyStopped,
+      goalPass,
+    }
   } finally {
     // densable: finally{if(y) sessionHooksRegistry.add(Vt(),"Stop","",y)}
     // DMv defer tip-removes Stop; must re-arm so later turns re-evaluate.

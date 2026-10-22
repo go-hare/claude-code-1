@@ -119,4 +119,17 @@ describe('densable 2.1.239 Ji media replay', () => {
     })
     expect(buffer).toEqual([media])
   })
+
+  test('ap: truncatedAfterOutput withhold does not push Ji', () => {
+    const buffer: ReplayItem[] = []
+    const out = applyStreamMediaReplay(buffer, assistant('trunc'), {
+      ptl: false,
+      media: false,
+      maxOutputTokens: false,
+      truncatedAfterOutput: true,
+    })
+    expect(out.withheld).toBe(true)
+    expect(out.replay).toEqual([])
+    expect(buffer).toEqual([])
+  })
 })

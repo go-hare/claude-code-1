@@ -157,7 +157,7 @@ export function is1PEventLoggingEnabled(): boolean {
 async function logEventTo1PAsync(
   firstPartyEventLogger: Logger,
   eventName: string,
-  metadata: Record<string, number | boolean | undefined> = {},
+  metadata: Record<string, number | boolean | string | undefined> = {},
 ): Promise<void> {
   try {
     // Enrich with core metadata at log time (similar to Statsig pattern)
@@ -208,7 +208,7 @@ async function logEventTo1PAsync(
  */
 export function logEventTo1P(
   eventName: string,
-  metadata: Record<string, number | boolean | undefined> = {},
+  metadata: Record<string, number | boolean | string | undefined> = {},
 ): void {
   if (!is1PEventLoggingEnabled()) {
     return
@@ -225,7 +225,7 @@ export function logEventTo1P(
 /** densable oC — same emit as logEventTo1P, awaited by gold logEventAsync. */
 export function logEventTo1PPromise(
   eventName: string,
-  metadata: Record<string, number | boolean | undefined> = {},
+  metadata: Record<string, number | boolean | string | undefined> = {},
 ): Promise<void> {
   if (!is1PEventLoggingEnabled()) {
     return Promise.resolve()

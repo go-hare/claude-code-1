@@ -543,7 +543,9 @@ export function createServerConfigSession(
         )
         return CCRClient.readProjectsBindingFor(sessionUrl, () => {
           const token = getBearerToken()
-          return token ? { Authorization: `Bearer ${token}` } : {}
+          const headers: Record<string, string> = {}
+          if (token) headers.Authorization = `Bearer ${token}`
+          return headers
         })
       },
       sdkHostConfigs: deps.sdkHostConfigs,

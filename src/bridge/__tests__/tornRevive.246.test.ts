@@ -34,14 +34,14 @@ describe('densable 2.1.246 torn-pair + revive', () => {
     expect(init).toContain('targetExists: true')
   })
 
-  test('Jn(jn) revive identity recheck remains; policyLimits QD gone', () => {
+  test('Jn(jn) revive identity recheck remains; QD allow_remote_control restored', () => {
     expect(init).toContain('expectedAccount')
     expect(init).toContain('revive_identity_recheck_failed')
     expect(init).toContain(
       'revive identity re-check failed (store changed or unreadable since the watcher validated)',
     )
     expect(init.indexOf('revive_identity_recheck_failed')).toBeGreaterThan(-1)
-    expect(init).not.toContain("getPolicyDenyKind('allow_remote_control')")
+    expect(init).toContain("getPolicyDenyKind('allow_remote_control')")
   })
 
   test('hook consumes Yn/Dr and auth-revive watcher', () => {

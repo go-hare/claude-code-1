@@ -253,6 +253,16 @@ interface RetryOptions {
   onError?: (
     error: unknown,
   ) => string | null | undefined | Promise<string | null | undefined>
+  /** densable onRetryStatus kind:"retrying" while the backoff sleep runs. */
+  onRetryStatus?: (
+    status: {
+      kind: 'retrying'
+      deadline: number
+      attempt: number
+      maxRetries: number
+      error: { status?: number; formatted: string }
+    } | null,
+  ) => void
 }
 
 export class CannotRetryError extends Error {
@@ -498,6 +508,7 @@ export async function* withRetry<T>(
         client = await getClient()
       }
 
+      options.onRetryStatus?.(null)
       return await operation(client, attempt, retryContext)
     } catch (error) {
       // densable `if (x instanceof nd) throw x`
@@ -832,6 +843,18 @@ export async function* withRetry<T>(
           .message as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         status: (error as APIError).status,
         provider: getAPIProviderForStatsig(),
+      })
+
+      options.onRetryStatus?.({
+        kind: 'retrying',
+        deadline: Date.now() + delayMs,
+        attempt: reportedAttempt,
+        maxRetries,
+        error: {
+          status: error instanceof APIError ? error.status : undefined,
+          formatted:
+            error instanceof APIError ? error.message : errorMessage(error),
+        },
       })
 
       if (persistent) {

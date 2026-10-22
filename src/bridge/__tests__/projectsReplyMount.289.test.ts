@@ -50,6 +50,8 @@ describe('densable 2.1.289 createProjectsReplyMount (uur)', () => {
           scope: 'dynamic',
         },
         client: {} as never,
+        capabilities: {},
+        cleanup: async () => {},
       },
     ])
     const mount = createProjectsReplyMount({
@@ -112,6 +114,8 @@ describe('densable 2.1.289 createProjectsReplyMount (uur)', () => {
             type: 'connected',
             config,
             client: {} as never,
+            capabilities: {},
+            cleanup: async () => {},
           },
           tools: [],
           commands: [],

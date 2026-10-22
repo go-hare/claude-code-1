@@ -885,7 +885,7 @@ export class QueryEngine {
         is_error: false,
         duration_ms: Date.now() - startTime,
         duration_api_ms: getTotalAPIDuration(),
-        num_turns: messages.length - 1,
+        num_turns: 0,
         result: resultText ?? '',
         stop_reason: null,
         session_id: getSessionId(),
