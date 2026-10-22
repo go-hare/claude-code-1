@@ -8,6 +8,7 @@ import type { LoadedPlugin } from '../../../types/plugin.js'
 import {
   getEnabledVia,
   hashPluginId,
+  sanitizeSkillNameForTelemetry,
   telemetryMarketplaceForPlugin,
   telemetryServerPluginId,
 } from '../pluginTelemetry.js'
@@ -110,5 +111,44 @@ describe('Vsn server_plugin_id (2.1.246)', () => {
     expect(telemetryServerPluginId(undefined)).toBeUndefined()
     expect(telemetryServerPluginId('not-a-plugin-id')).toBeUndefined()
     expect(telemetryServerPluginId('plugin_')).toBeUndefined()
+  })
+})
+
+describe('sanitizeSkillNameForTelemetry (densable QMe/Jxg)', () => {
+  test('custom skills hash canonical name; built-in/mcp do not', () => {
+    const custom = sanitizeSkillNameForTelemetry({
+      rawName: 'my-skill',
+      canonicalName: 'my-skill',
+      isMcp: false,
+      isBuiltIn: false,
+      isBundled: false,
+      isOfficial: false,
+    })
+    expect(custom.sanitizedName).toBe('custom')
+    expect(custom.skillNameHash.skill_name_hash as unknown as string).toBe(
+      hashPluginId('my-skill'),
+    )
+
+    const builtIn = sanitizeSkillNameForTelemetry({
+      rawName: 'commit',
+      canonicalName: 'commit',
+      isMcp: false,
+      isBuiltIn: true,
+      isBundled: false,
+      isOfficial: false,
+    })
+    expect(builtIn.sanitizedName).toBe('commit')
+    expect(builtIn.skillNameHash).toEqual({})
+
+    const mcp = sanitizeSkillNameForTelemetry({
+      rawName: 'mcp__srv__skill',
+      canonicalName: 'mcp__srv__skill',
+      isMcp: true,
+      isBuiltIn: false,
+      isBundled: false,
+      isOfficial: false,
+    })
+    expect(mcp.sanitizedName).toBe('mcp')
+    expect(mcp.skillNameHash).toEqual({})
   })
 })

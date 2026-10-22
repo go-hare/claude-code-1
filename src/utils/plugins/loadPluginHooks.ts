@@ -192,6 +192,9 @@ async function registerPluginHooksOnce(): Promise<void> {
       name: plugin.name,
       path: plugin.path,
       source: plugin.source,
+      // densable `Gue` — user-installed copy (`link !== undefined`).
+      link: plugin.source,
+      tier: 'user' as const,
     })),
   ])
 

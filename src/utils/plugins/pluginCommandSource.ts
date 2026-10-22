@@ -895,8 +895,11 @@ export async function promptCommandSourceConsent(
     `"${nameDisp}" is installed by running a command from marketplace "${mktDisp}" on this machine${changeNote}:\n  ${command}\n  (${describeCommandPluginMode(entry.source)})\n`,
   )
 
-  const { confirmMarketplaceDeclaredCommand, describeCommandSourceShown, withAcceptCommandMatched } =
-    await import('./pluginAcceptCommand.js')
+  const {
+    confirmMarketplaceDeclaredCommand,
+    describeCommandSourceShown,
+    withAcceptCommandMatched,
+  } = await import('./pluginAcceptCommand.js')
   const shown = await describeCommandSourceShown({
     pluginId,
     command,
@@ -906,7 +909,9 @@ export async function promptCommandSourceConsent(
     ...withAcceptCommandMatched(shown, options.acceptCommand),
     ...(acceptedCommand !== undefined && {
       previousAcceptance:
-        acceptedCommand !== grantKey ? ('changed' as const) : ('unreliable' as const),
+        acceptedCommand !== grantKey
+          ? ('changed' as const)
+          : ('unreliable' as const),
     }),
   })
   const verdict = await confirmMarketplaceDeclaredCommand({

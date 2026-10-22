@@ -34,17 +34,20 @@ export function resolveCommandPathWithinPlugin(
   pluginPath: string,
   source: string,
 ): string | null {
-  const root = resolve(pluginPath)
+  const lexicalRoot = resolve(pluginPath)
   let full: string
   try {
-    full = resolve(root, source)
+    full = resolve(lexicalRoot, source)
   } catch {
     return null
   }
-  if (!isInsidePlugin(root, full)) return null
+  if (!isInsidePlugin(lexicalRoot, full)) return null
   try {
+    // macOS `/var` → `/private/var`: realpath the root too so an on-disk
+    // file is not flagged as leaving the plugin (densable VHt).
+    const realRoot = realpathSync(pluginPath)
     const real = realpathSync(full)
-    if (!isInsidePlugin(root, real)) return null
+    if (!isInsidePlugin(realRoot, real)) return null
   } catch {
     // Not on disk yet — lexical containment is the traversal check.
   }

@@ -210,19 +210,26 @@ describe('densable 2.1.289 s$ / FMn / _Ee onWheel / Wm', () => {
     const src = readFileSync(PANES, 'utf8')
     const site = src.slice(src.indexOf('export function PluginAbovePromptSite'))
     expect(site).toContain(
-      'onWheel={hasCue && !dialogOpen ? bandWheel : undefined}',
+      'onWheel={hasCue && !bandBlocked ? bandWheel : undefined}',
     )
-    expect(site).toContain('maxHeight={rows + listRows}')
+    expect(site).toContain('maxHeight={promptRoom + listRows}')
+    expect(site).toContain('maxHeight={windowRows + listRows}')
+    expect(site).toContain('AbovePromptLeftoverContext')
+    expect(site).toContain('leftoverHostRef')
+    expect(site).not.toContain(
+      'if (node === null && aboveHeldRows === undefined) return null',
+    )
     expect(site).toContain('useBandDigitHotkey')
     expect(site).toContain('enterConfirms:!1')
   })
 
-  test('Wm digit visibility: !hasCue always; cue requires a seat', () => {
-    const seats = new Map([['1', { plugin: 'p', handle: 1 }]])
-    expect(hotkeyDigitVisible(false, seats, '1')).toBe(true)
-    expect(hotkeyDigitVisible(true, new Map(), '1')).toBe(false)
-    expect(hotkeyDigitVisible(true, seats, '1')).toBe(true)
-    expect(hotkeyDigitVisible(true, seats, '2')).toBe(false)
+  test('Wm digit visibility: cue off always; cue on requires the yoga seat in window', () => {
+    const inView = [{ hotkey: '1', top: 2, height: 1 }]
+    expect(hotkeyDigitVisible(false, '1', [], 0, 4)).toBe(true)
+    expect(hotkeyDigitVisible(true, '1', [], 0, 4)).toBe(false)
+    expect(hotkeyDigitVisible(true, '1', inView, 0, 4)).toBe(true)
+    expect(hotkeyDigitVisible(true, '2', inView, 0, 4)).toBe(false)
+    expect(hotkeyDigitVisible(true, '1', inView, 4, 4)).toBe(false)
   })
 })
 
@@ -230,6 +237,13 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
   test('useBandScrollPlace wires offset/marginTop (no deferred offset=0 stub)', () => {
     const src = readFileSync(PANES, 'utf8')
     expect(src).toContain('export function useBandScrollPlace')
+    const place = src.slice(
+      src.indexOf('export function useBandScrollPlace'),
+      src.indexOf('export function nextBandFocus'),
+    )
+    expect(place).toContain('subscribeRasterFrames')
+    expect(place).toContain('getPluginScrollSite')
+    expect(place).toContain('site.followEnd')
     // densable `e$` — primary export is floorOffset; floorBandOffset is alias.
     expect(src).toContain('export function floorOffset')
     expect(src).toContain('export const floorBandOffset = floorOffset')
@@ -279,7 +293,7 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(site).toContain('contentRows: treeRows')
     expect(site).toContain('bandKeysWithScroll(ring, scrollHandlers, hasCue)')
     expect(site).toContain('scroll: { offset, bodyRows }')
-    expect(site).toContain('maxHeight={windowRows}')
+    expect(site).toContain('maxHeight={windowRows + listRows}')
     // densable fEe keptColumns=DZ + XXt body columns + o$ view.
     expect(site).toContain('marginRight={COLLAPSE_HANDLE_COLUMNS}')
     expect(site).toContain('PaneBodyColumnsContext.Provider')
@@ -352,7 +366,7 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(site).toContain('settlePaneFocusRequest(false)')
     expect(site).toContain('promptEmpty &&')
     expect(site).toContain('!hasSurvey')
-    expect(site).toContain('!dialogOpen')
+    expect(site).toContain('!bandBlocked')
     expect(site).toContain('focusIndex === null')
     expect(site).toContain('panes.focusedId === null')
     expect(site).toContain('panes.placements > 0')
@@ -521,8 +535,18 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(repl).toContain('timeoutMs: toast.timeoutMs ?? 4000')
     expect(repl).toContain('${toast.plugin}: ${toast.text}')
     expect(repl).toContain("kind: 'event'")
-    expect(src).toContain('nothing was drawn')
-    expect(src).toContain(
+    expect(src).toContain('reportDrawWhileDrawn')
+    expect(src).toContain("L1t(component, teller, 'answer')")
+    expect(src).toContain("L1t(component, tellerOfPlugin(plugin), 'Client')")
+    expect(src).toContain('telemetryMessage')
+    expect(src).toContain('isFullscreenEnvEnabled')
+    expect(src).toContain('useHeldSiteRows')
+    expect(src).toContain('useSiteMeasure')
+    expect(src).toContain('subscribeFrames')
+    expect(src).toContain('isG2eComponent')
+    expect(src).toContain('minHeight: aboveHeldRows')
+    expect(src).toContain('fallback={engine}')
+    expect(src).not.toContain(
       "ui.render (AbovePrompt): a plugin's tree threw while drawn",
     )
     const prompt = readFileSync(
@@ -727,16 +751,16 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
       // omit submit → Input press no-ops (does not invent a buffer)
     })
     ringNoSubmit['abovePrompt:next']()
-    expect(index).toBe(0)
+    expect(index === 0).toBe(true)
     ringNoSubmit['abovePrompt:next']()
-    expect(index).toBe(1)
+    expect(index === 1).toBe(true)
     ringNoSubmit['abovePrompt:previous']()
-    expect(index).toBe(0)
+    expect(index === 0).toBe(true)
     index = 1
     ringNoSubmit['abovePrompt:press']()
     expect(submitted).toEqual([])
     ringNoSubmit['abovePrompt:leave']()
-    expect(index).toBe(null)
+    expect(index === null).toBe(true)
     expect(left).toEqual(['leave'])
 
     // densable: pass fields.submit into bandRingHandlers so AbovePrompt Input press lands.
@@ -833,13 +857,13 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
       close: () => closed.push('close'),
     })
     extended['abovePrompt:next']()
-    expect(index).toBeNull()
-    expect(engine).toBe(0)
+    expect(index === null).toBe(true)
+    expect(engine === 0).toBe(true)
     extended['abovePrompt:press']()
     expect(closed).toEqual(['close'])
     extended['abovePrompt:next']()
-    expect(index).toBe(0)
-    expect(engine).toBeNull()
+    expect(index === 0).toBe(true)
+    expect(engine === null).toBe(true)
   })
 
   test('extendPaneRingWithCloseMark tabCount>0 press picks other pane (aee ze)', () => {
@@ -883,13 +907,13 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
       pick: id => picked.push(id),
     })
     extended['abovePrompt:next']()
-    expect(index).toBeNull()
-    expect(engine).toBe(0)
+    expect(index === null).toBe(true)
+    expect(engine === 0).toBe(true)
     extended['abovePrompt:press']()
     expect(picked).toEqual(['other'])
     expect(closed).toEqual([])
     extended['abovePrompt:next']()
-    expect(engine).toBe(1)
+    expect(engine === 1).toBe(true)
     extended['abovePrompt:press']()
     expect(closed).toEqual(['close'])
   })
@@ -937,7 +961,11 @@ describe('densable 2.1.289 soft remainder xze / l$ / d$ / m$', () => {
     ])
     expect(resolveHotkeyPresses('x', key, seats)).toEqual([])
     expect(
-      resolveHotkeyPresses('g', { ...key, ctrl: true } as never, seats),
+      resolveHotkeyPresses(
+        'g',
+        { ...(key as object), ctrl: true } as never,
+        seats,
+      ),
     ).toEqual([])
   })
 

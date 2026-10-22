@@ -6,7 +6,11 @@ import { lstat, realpath } from 'fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'path'
 import { CASE_FILE_NAMES, SKIP_DIR_NAMES } from './constants.js'
 import { PluginEvalPathError, vetPluginEvalPath } from './pathVet.js'
-import type { EvalDirValue, PluginEvalTrustState, ScreenedEvalTarget } from './types.js'
+import type {
+  EvalDirValue,
+  PluginEvalTrustState,
+  ScreenedEvalTarget,
+} from './types.js'
 
 function isCaseFileName(name: string): boolean {
   return (CASE_FILE_NAMES as readonly string[]).includes(name)
@@ -98,15 +102,21 @@ export function evalDirOverlapArgs(params: {
   overlapBase: string[]
   overlapAdvisory: boolean
 } {
-  const { scopeDir, scopeIsNamedDirectory, trustedRoot, otherManifestDir, adoptedAbove } =
-    params
+  const {
+    scopeDir,
+    scopeIsNamedDirectory,
+    trustedRoot,
+    otherManifestDir,
+    adoptedAbove,
+  } = params
   return {
     pluginRoot: trustedRoot,
     overlapRoot: trustedRoot ?? otherManifestDir ?? scopeDir,
     overlapBase:
       trustedRoot === null &&
       otherManifestDir !== null &&
-      (scopeDir === otherManifestDir || scopeDir.startsWith(otherManifestDir + sep))
+      (scopeDir === otherManifestDir ||
+        scopeDir.startsWith(otherManifestDir + sep))
         ? relative(otherManifestDir, scopeDir).split(sep).filter(Boolean)
         : [],
     overlapAdvisory:

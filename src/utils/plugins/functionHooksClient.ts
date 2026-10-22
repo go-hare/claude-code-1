@@ -1662,7 +1662,9 @@ function transpileSurfaceSource(file: string, source: string): string {
   const loader = surfaceLoaderOf(file)
   if (loader === 'js') return source
   const prefix = loader === 'ts' ? '' : SURFACE_JSX_PRAGMA
-  const transpiler = new Bun.Transpiler({ loader, macro: false })
+  const transpiler = new Bun.Transpiler({
+    loader: loader as 'js' | 'jsx' | 'ts' | 'tsx',
+  })
   return transpiler.transformSync(`${prefix}${source}`)
 }
 

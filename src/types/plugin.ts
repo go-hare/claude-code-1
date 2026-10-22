@@ -32,6 +32,8 @@ export type BuiltinPluginDefinition = {
   isAvailable?: () => boolean
   /** Default enabled state before the user sets a preference (defaults to true) */
   defaultEnabled?: boolean
+  /** densable builtin `userConfig` — same shape as plugin.json userConfig. */
+  userConfig?: PluginManifest['userConfig']
 }
 
 export type PluginRepository = {
@@ -175,6 +177,7 @@ export type PluginError =
       plugin?: string
       manifestPath: string
       validationErrors: string[]
+      path?: string
     }
   | {
       type: 'plugin-not-found'
@@ -447,4 +450,13 @@ export function getPluginErrorMessage(error: PluginError): string {
     case 'plugin-cache-miss':
       return `Plugin "${error.plugin}" not cached at ${error.installPath} — run /plugin to refresh`
   }
+}
+
+/** densable pluginErrorInitPath — filesystem path on load errors, if any. */
+export function pluginErrorInitPath(error: PluginError): string | undefined {
+  if ('path' in error && typeof error.path === 'string') return error.path
+  if ('manifestPath' in error && typeof error.manifestPath === 'string') {
+    return error.manifestPath
+  }
+  return undefined
 }

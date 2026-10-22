@@ -1658,7 +1658,7 @@ async function loadPluginHooks(
     rawHooksConfig,
   )) {
     logForDebugging(`Plugin ${pluginName}: ${message} (${hooksConfigPath})`, {
-      level: "warn",
+      level: 'warn',
     })
   }
 

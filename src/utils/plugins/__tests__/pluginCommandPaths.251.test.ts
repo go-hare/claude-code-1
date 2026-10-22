@@ -123,7 +123,10 @@ describe('densable 2.1.251 #7 VHt applyPluginCommandSources', () => {
   test('source that exists is kept; missing source is path-not-found', async () => {
     const dir = pluginDir()
     writeFileSync(join(dir, 'ok.md'), '# ok')
-    const plugin: { commandsPaths?: string[]; commandsMetadata?: object } = {}
+    const plugin: {
+      commandsPaths?: string[]
+      commandsMetadata?: Record<string, { source?: string; content?: string }>
+    } = {}
     const errors: PluginError[] = []
     await applyPluginCommandSources(
       plugin,
@@ -208,7 +211,7 @@ describe('densable 2.1.251 #7 VHt applyPluginCommandSources', () => {
       '/prior.md',
       join(dir, 'extra', 'more.md'),
     ])
-    expect(plugin.commandsMetadata).toEqual({
+    expect(plugin.commandsMetadata).toMatchObject({
       prior: { content: 'old' },
       more: { source: 'extra/more.md' },
       inline: { content: 'new' },

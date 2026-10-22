@@ -1,7 +1,14 @@
 /**
- * Local kitty graphics sink for PluginImage (densable `xo` / `co` / `Pqr` / `Iqr`).
- * Ink has no `terminalImages`; this sink is used only by the Image widget.
+ * Kitty graphics encode helpers for PluginImage (densable `xo` / `co` / `Pqr` / `Iqr`).
+ * Transmit/drain go through Ink `Jd` (`HC().terminalImages`).
  */
+
+import chalk from 'chalk'
+import {
+  getKittyGraphicsSupported,
+  subscribeKittyGraphicsSupported,
+} from '../../../packages/@ant/ink/src/core/terminal.js'
+import { logForDebugging } from '../debug.js'
 
 const ESC = '\x1b'
 const CSI = `${ESC}[`
@@ -11,9 +18,18 @@ const PLACEHOLDER = String.fromCodePoint(1_109_742)
 const SMALL_ID_LIMIT = 256
 const PAYLOAD_CHUNK = 4096
 const ID_MAX = 4_294_967_295
+const PIXEL_MAX = 10_000
+const NAME_MAX_BYTES = 3_072
 const RGB_MASK = 255
 const RED_SHIFT = 16
 const GREEN_SHIFT = 8
+const REFUSED_LOG_MS = 5_000
+const ID_BITS = {
+  indexed: 2,
+  truecolor: 3,
+  smallIdWidth: 8,
+  wideIdWidth: 24,
+} as const
 
 /**
  * densable combining marks `y` (Pqr cell diacritics). Kitty paints over this
@@ -47,42 +63,73 @@ const KITTY_MARKS = [
   119364,
 ] as const
 
-const FORMAT_CTRL: Record<string, string> = {
+const FORMAT_CTRL = {
   png: 'f=100',
   rgba: 'f=32',
   rgb: 'f=24',
-}
+} as const
 
-const MEDIUM_CTRL: Record<string, string> = {
+const MEDIUM_CTRL = {
   file: 't=f',
   shm: 't=s',
-}
+} as const
 
-const freeSmallIds = new Set<number>()
-let nextSmallId = 1
-
-/** densable `No()` kitty branch: TERM contains kitty, or KITTY_WINDOW_ID. */
-export function isKittyGraphicsTerminal(): boolean {
+/** densable `HUr` — shm sources skip resend (`{resend:!HUr}`). */
+export function isKittyShmSource(source: unknown): boolean {
   return (
-    process.env.TERM?.includes('kitty') === true ||
-    process.env.KITTY_WINDOW_ID !== undefined
+    source !== null &&
+    typeof source === 'object' &&
+    Object.hasOwn(source, 'shm')
   )
 }
 
-/** densable `Zd.takeSmall` — 8-bit ids 1..255. */
-export function allocateKittyImageId(): number | undefined {
-  for (const recycled of freeSmallIds) {
-    freeSmallIds.delete(recycled)
-    return recycled
+/**
+ * densable `yo` — id width from kittyGraphics capability + chalk.level.
+ * No probe / chalk < indexed → undefined (Image draws alt).
+ */
+export function kittyImageIdBits(): number | undefined {
+  if (!getKittyGraphicsSupported() || chalk.level < ID_BITS.indexed) {
+    return undefined
   }
-  if (nextSmallId >= SMALL_ID_LIMIT) return undefined
-  const id = nextSmallId
-  nextSmallId += 1
-  return id
+  return chalk.level >= ID_BITS.truecolor
+    ? ID_BITS.wideIdWidth
+    : ID_BITS.smallIdWidth
 }
 
-export function freeKittyImageId(id: number): void {
-  if (id >= 1 && id < SMALL_ID_LIMIT) freeSmallIds.add(id)
+/** densable `cgo` — Image reallocates when the kittyGraphics probe settles. */
+export { subscribeKittyGraphicsSupported }
+
+/**
+ * densable `xo` — `allocate(k, xo)` onRefused. Coalesces identical reasons
+ * for 5s.
+ */
+export function createKittyRefusedLogger(opts: {
+  plugin: string
+  requestId: string
+  key?: string
+}): (reason: string) => void {
+  const label = opts.key === undefined ? 'Image' : `Image "${opts.key}"`
+  let last = ''
+  let at = Number.NEGATIVE_INFINITY
+  return reason => {
+    const now = Date.now()
+    if (reason === last && now - at < REFUSED_LOG_MS) return
+    last = reason
+    at = now
+    logForDebugging(
+      `${label} (${opts.plugin}) in ${opts.requestId}: the terminal refused its source: ${sanitizeRefusedReason(reason)}`,
+      { level: 'warn' },
+    )
+  }
+}
+
+function sanitizeRefusedReason(reason: string): string {
+  let out = ''
+  for (const ch of reason) {
+    const code = ch.codePointAt(0) ?? 0
+    out += code < 32 || code === 127 ? '?' : ch
+  }
+  return out
 }
 
 function requirePositiveInt(value: number, max: number): void {
@@ -106,25 +153,20 @@ function markRun(count: number): string[] {
   return KITTY_MARKS.slice(0, count).map(code => String.fromCodePoint(code))
 }
 
+/** densable `u(n,y.length)` max — placeholder/transmit columns and rows. */
+export const KITTY_PLACEHOLDER_MAX = KITTY_MARKS.length
+
 /**
- * densable `Pqr(id, columns, rows)` — unicode placeholder cells.
- * Falls back to a same-size blank grid when the mark table cannot cover the box.
+ * densable `Qmo(id, columns, rows)` — unicode placeholder cells.
+ * Gold `u(n,y.length)` throws when the mark table cannot cover the box.
  */
 export function kittyPlaceholderGrid(
   id: number,
   columns: number,
   rows: number,
 ): string {
-  if (
-    columns < 1 ||
-    rows < 1 ||
-    columns > KITTY_MARKS.length ||
-    rows > KITTY_MARKS.length
-  ) {
-    return Array.from({ length: Math.max(0, rows) }, () =>
-      ' '.repeat(Math.max(0, columns)),
-    ).join('\n')
-  }
+  requirePositiveInt(columns, KITTY_MARKS.length)
+  requirePositiveInt(rows, KITTY_MARKS.length)
   const color = sgrForId(id)
   const colMarks = markRun(columns)
   const rowMarks = markRun(rows)
@@ -155,64 +197,104 @@ type WireSource =
       height?: number
     }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object') {
+    throw new TypeError(
+      'kitty graphics: payload must be standard base64 (A-Z a-z 0-9 + / =)',
+    )
+  }
+  return value as Record<string, unknown>
 }
 
-/** densable `Xoo` — ImageSource → kitty payload. */
-function wireSource(source: unknown): WireSource | undefined {
-  const rec = asRecord(source)
-  if (rec === undefined) return undefined
-  if (typeof rec.png === 'string') {
-    return { format: 'png', base64: rec.png }
+function requireBase64(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    throw new TypeError(
+      'kitty graphics: payload must be standard base64 (A-Z a-z 0-9 + / =)',
+    )
   }
-  if (typeof rec.rgba === 'string') {
-    const width = rec.width
-    const height = rec.height
-    if (typeof width !== 'number' || typeof height !== 'number')
-      return undefined
-    return { format: 'rgba', base64: rec.rgba, width, height }
+  return value
+}
+
+function requirePathName(value: unknown): string {
+  if (
+    !(
+      typeof value === 'string' &&
+      value !== '' &&
+      !value.includes('\0') &&
+      Buffer.byteLength(value, 'utf8') <= NAME_MAX_BYTES
+    )
+  ) {
+    throw new TypeError(
+      'kitty graphics: a file path or shared-memory name must be a non-empty string of at most 3072 bytes, no NUL',
+    )
+  }
+  return value
+}
+
+/** densable `_Uo` — ImageSource → kitty payload. */
+function wireSource(source: unknown): WireSource {
+  const rec = asRecord(source)
+  if (Object.hasOwn(rec, 'png')) {
+    return { format: 'png', base64: rec.png as string }
+  }
+  if (!Object.hasOwn(rec, 'file') && !Object.hasOwn(rec, 'shm')) {
+    return {
+      format: 'rgba',
+      base64: rec.rgba as string,
+      width: rec.width as number,
+      height: rec.height as number,
+    }
   }
   const medium = Object.hasOwn(rec, 'shm') ? 'shm' : 'file'
   const name = medium === 'shm' ? rec.shm : rec.file
-  if (typeof name !== 'string' || name === '') return undefined
-  const format = rec.format
-  if (format !== 'png' && format !== 'rgba' && format !== 'rgb')
-    return undefined
-  if (format === 'png') return { medium, name, format }
-  const width = rec.width
-  const height = rec.height
-  if (typeof width !== 'number' || typeof height !== 'number') return undefined
-  return { medium, name, format, width, height }
+  if (rec.format === 'png') {
+    return { medium, name: name as string, format: 'png' }
+  }
+  return {
+    medium,
+    name: name as string,
+    format: rec.format as 'rgba' | 'rgb',
+    width: rec.width as number,
+    height: rec.height as number,
+  }
 }
 
-/** densable `Iqr` — APC transmit (`a=T,U=1`, png `f=100`, placement `c`/`r`). */
+/** densable `Zmo` / `Iqr` — APC transmit (`a=T,U=1`, png `f=100`, placement `c`/`r`). */
 export function encodeKittyTransmit(
   id: number,
   source: unknown,
   columns: number,
   rows: number,
-): string | undefined {
+): string {
   const wired = wireSource(source)
-  if (wired === undefined) return undefined
   requirePositiveInt(id, ID_MAX)
   requirePositiveInt(columns, KITTY_MARKS.length)
   requirePositiveInt(rows, KITTY_MARKS.length)
+  if (wired.format !== 'png') {
+    requirePositiveInt(wired.width as number, PIXEL_MAX)
+    requirePositiveInt(wired.height as number, PIXEL_MAX)
+  }
   const sizeCtrl =
-    wired.format !== 'png' && 'width' in wired && wired.width !== undefined
-      ? `,s=${wired.width},v=${wired.height}`
-      : ''
-  const formatCtrl = `${FORMAT_CTRL[wired.format] ?? 'f=100'}${sizeCtrl}`
+    wired.format !== 'png' ? `,s=${wired.width},v=${wired.height}` : ''
+  const formatCtrl = FORMAT_CTRL[wired.format as keyof typeof FORMAT_CTRL]
+  if (formatCtrl === undefined) {
+    throw new TypeError(
+      `kitty graphics: format must be png, rgba, or rgb (got ${String(wired.format)})`,
+    )
+  }
+  const formatCtrlWithSize = `${formatCtrl}${sizeCtrl}`
   const place = `i=${id},c=${columns},r=${rows}`
   if ('medium' in wired) {
+    const name = requirePathName(wired.name)
     const mediumCtrl = MEDIUM_CTRL[wired.medium]
-    const nameB64 = Buffer.from(wired.name, 'utf8').toString('base64')
-    return apcFrame(`a=T,U=1,q=1,${formatCtrl},${mediumCtrl},${place}`, nameB64)
+    const nameB64 = Buffer.from(name, 'utf8').toString('base64')
+    return apcFrame(
+      `a=T,U=1,q=1,${formatCtrlWithSize},${mediumCtrl},${place}`,
+      nameB64,
+    )
   }
-  const payload = wired.base64
-  const head = `a=T,U=1,q=2,${formatCtrl},${place}`
+  const payload = requireBase64(wired.base64)
+  const head = `a=T,U=1,q=2,${formatCtrlWithSize},${place}`
   if (payload.length <= PAYLOAD_CHUNK) return apcFrame(head, payload)
   const frames: string[] = []
   for (let at = 0; at < payload.length; at += PAYLOAD_CHUNK) {
@@ -222,26 +304,6 @@ export function encodeKittyTransmit(
     frames.push(apcFrame(params, payload.slice(at, at + PAYLOAD_CHUNK)))
   }
   return frames.join('')
-}
-
-/**
- * densable `images.transmit`. Returns false when the sink refuses (gold
- * swap string: "the terminal sink refused the source").
- */
-export function transmitKittyImage(
-  id: number,
-  source: unknown,
-  columns: number,
-  rows: number,
-): boolean {
-  try {
-    const sequence = encodeKittyTransmit(id, source, columns, rows)
-    if (sequence === undefined) return false
-    process.stdout.write(sequence)
-    return true
-  } catch {
-    return false
-  }
 }
 
 export const KITTY_SINK_REFUSED = 'the terminal sink refused the source'

@@ -137,9 +137,7 @@ export function clearPluginOptionsCache(): void {
 }
 
 async function mutatePluginSecrets(
-  mutator: (data: {
-    pluginSecrets?: Record<string, unknown>
-  }) => {
+  mutator: (data: { pluginSecrets?: Record<string, unknown> }) => {
     pluginSecrets?: Record<string, unknown>
   },
   credentials?: unknown,
@@ -149,7 +147,9 @@ async function mutatePluginSecrets(
     | ((
         fn: typeof mutator,
         creds?: unknown,
-      ) => Promise<{ success: boolean; warning?: string }> | { success: boolean; warning?: string })
+      ) =>
+        | Promise<{ success: boolean; warning?: string }>
+        | { success: boolean; warning?: string })
     | undefined
   if (typeof mutate === 'function') {
     return await mutate(mutator, credentials)
@@ -396,7 +396,10 @@ export async function getUnconfiguredOptions(
     return {}
   }
 
-  const saved = await loadPluginOptionsNw(getPluginStorageId(plugin), credentials)
+  const saved = await loadPluginOptionsNw(
+    getPluginStorageId(plugin),
+    credentials,
+  )
   const unconfigured: PluginOptionSchema = {}
   for (const [key, fieldSchema] of Object.entries(manifestSchema)) {
     const value = saved[key]
@@ -404,10 +407,9 @@ export async function getUnconfiguredOptions(
       value === undefined ||
       value === '' ||
       (fieldSchema.sensitive !== true &&
-        !validateUserConfig(
-          { [key]: value } as PluginOptionValues,
-          { [key]: fieldSchema },
-        ).valid)
+        !validateUserConfig({ [key]: value } as PluginOptionValues, {
+          [key]: fieldSchema,
+        }).valid)
     ) {
       unconfigured[key] = fieldSchema
     }

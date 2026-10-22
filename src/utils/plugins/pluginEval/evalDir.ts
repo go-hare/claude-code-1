@@ -25,7 +25,9 @@ function quote(segment: string): string {
 
 export function parseEvalDirFlag(
   raw: string | undefined,
-): { ok: true; dir: string; segments: string[] } | { ok: false; error: string } {
+):
+  | { ok: true; dir: string; segments: string[] }
+  | { ok: false; error: string } {
   if (raw === undefined) {
     return {
       ok: true,
@@ -174,9 +176,7 @@ function readManifestEvals(pluginRoot: string | null): {
             }
           }
         }
-      } catch {
-        continue
-      }
+      } catch {}
     }
   } catch {
     // ignore

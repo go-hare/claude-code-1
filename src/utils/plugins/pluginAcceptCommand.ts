@@ -178,7 +178,10 @@ async function hashMarketplaceCatalogFiles(
   let packageJson: string | null = null
   if (nested) {
     try {
-      packageJson = await readFile(join(installLocation, 'package.json'), 'utf8')
+      packageJson = await readFile(
+        join(installLocation, 'package.json'),
+        'utf8',
+      )
     } catch (error) {
       if (!isMissingPathError(error)) throw error
     }
@@ -209,14 +212,13 @@ export async function resolveMarketplaceCatalogRevision(
     const known = await loadKnownMarketplacesConfig()
     const entry = known[marketplace]
     if (!entry) return unread
-    if (entry.source.source === 'claudeai') return unread
+    if ((entry.source.source as string) === 'claudeai') return unread
     const installLocation = entry.installLocation
     if (!installLocation) return unread
     if (entry.source.source === 'github' || entry.source.source === 'git') {
       const { execFileNoThrowWithCwd } = await import('../execFileNoThrow.js')
       const rev = await execFileNoThrowWithCwd('git', ['rev-parse', 'HEAD'], {
         cwd: installLocation,
-        useCwd: false,
       })
       if (rev.code === 0 && rev.stdout.trim()) {
         return `git:${rev.stdout.trim()}`
@@ -284,7 +286,10 @@ export async function confirmMarketplaceDeclaredCommand(options: {
   const yes = options.yes === true
   const shown = options.shown
   const acceptCommand = options.acceptCommand
-  if (yes || (shown !== undefined && acceptCommandMatches(acceptCommand, shown))) {
+  if (
+    yes ||
+    (shown !== undefined && acceptCommandMatches(acceptCommand, shown))
+  ) {
     if (!isInsideClaudeCodeSession()) return 'accepted'
     if (!isTty) {
       write(

@@ -1,4 +1,4 @@
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useApp } from '@anthropic/ink';
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefCallback } from 'react';
 import {
   attachImageWidgetSwap,
@@ -11,12 +11,13 @@ import {
   type RasterPalette,
 } from '../utils/plugins/functionHooksModules.js';
 import {
-  allocateKittyImageId,
-  freeKittyImageId,
-  isKittyGraphicsTerminal,
+  createKittyRefusedLogger,
+  encodeKittyTransmit,
+  isKittyShmSource,
+  kittyImageIdBits,
   kittyPlaceholderGrid,
+  subscribeKittyGraphicsSupported,
   KITTY_SINK_REFUSED,
-  transmitKittyImage,
 } from '../utils/plugins/kittyGraphics.js';
 
 /** densable `ko` — waiting palette retry. */
@@ -169,59 +170,84 @@ export type PluginImageProps = {
 };
 
 /**
- * densable `xo` / `co`: kitty id → `Pqr` placeholders in ink-raw-ansi;
- * no sink / no id → dim alt. Widget swap transmits (`Iqr`); host `umt` already ran.
+ * densable `ko` / `To` / `xo` / `co`: kitty id → `Qmo` placeholders in ink-raw-ansi;
+ * no sink / no id → dim alt. Widget swap transmits (`Zmo`/`Qt`); host `umt` already ran.
  */
 export function PluginImage(props: PluginImageProps): ReactNode {
   const { plugin, requestId, elementKey, columns, rows, alt = 'image' } = props;
+  const { terminalImages } = useApp();
   const [kittyId, setKittyId] = useState<number | undefined>(undefined);
-  const placeholder = useMemo(
-    () => (kittyId === undefined ? '' : kittyPlaceholderGrid(kittyId, columns, rows)),
-    [kittyId, columns, rows],
-  );
+  const [kittyProbe, setKittyProbe] = useState(0);
+  const imageColumns = columns;
+  const imageRows = rows;
+  const placeholder = useMemo(() => {
+    if (kittyId === undefined) return undefined;
+    try {
+      return kittyPlaceholderGrid(kittyId, imageColumns, imageRows);
+    } catch {
+      return undefined;
+    }
+  }, [kittyId, imageColumns, imageRows]);
+  const placeholderFailed = kittyId !== undefined && placeholder === undefined;
 
   useEffect(() => {
-    // densable `co`: allocate only when a kitty sink exists (`fo` width analog).
-    const sink = isKittyGraphicsTerminal();
-    const id = sink ? allocateKittyImageId() : undefined;
+    return subscribeKittyGraphicsSupported(() => {
+      setKittyProbe(n => n + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    // densable `ko`: allocate(k, xo) on `HC().terminalImages` when yo() has bits.
+    const bits = kittyImageIdBits();
+    const triedAllocate = terminalImages !== null && bits !== undefined;
+    const id =
+      terminalImages === null || bits === undefined
+        ? undefined
+        : terminalImages.allocate(bits, createKittyRefusedLogger({ plugin, requestId, key: elementKey }));
     setKittyId(id);
     const detach = attachImageWidgetSwap(plugin, requestId, elementKey, source => {
-      // No kitty sink: gold `xo` dims alt; blit still succeeds (umt already ran).
-      if (!sink) return undefined;
+      if (terminalImages === null) return 'the Image is not drawn under a terminal root';
+      // Probe still open, or this terminal cannot draw placeholders: keep alt
+      // and accept the blit. Exhausted is only allocate() returning undefined.
+      if (!triedAllocate) return undefined;
       if (id === undefined) {
         return 'the Image draws its alt here: every 8-bit image id is in use';
       }
-      if (!transmitKittyImage(id, source, columns, rows)) return KITTY_SINK_REFUSED;
+      const consumed = isKittyShmSource(source);
+      if (consumed && terminalImages.isBackedUp(id)) {
+        return 'the surface has not written its last frames (paused or busy); the object was not sent, unlink it and blit again later';
+      }
+      // densable `Qt({source,columns,rows})` + `{resend:!HUr}`.
+      const ok = terminalImages.transmit(id, imageId => encodeKittyTransmit(imageId, source, columns, rows), {
+        resend: !consumed,
+      });
+      if (!ok) return KITTY_SINK_REFUSED;
       return undefined;
     });
     noteDrawnElement(plugin, requestId, elementKey);
     bumpRasterFrames();
     return () => {
       detach();
-      if (id !== undefined) freeKittyImageId(id);
+      if (id !== undefined) terminalImages?.free(id);
       setKittyId(undefined);
       bumpRasterFrames();
     };
-  }, [plugin, requestId, elementKey, columns, rows]);
+  }, [plugin, requestId, elementKey, columns, rows, terminalImages, kittyProbe]);
 
-  // densable `xo`: no id → dim alt; else sized overflow box + ink-raw-ansi placeholders.
-  if (kittyId === undefined) {
-    return (
-      <Box
-        flexShrink={0}
-        width={columns}
-        height={rows}
-        overflow="hidden"
-        elementKey={elementKey}
-        elementPlugin={plugin}
-      >
-        <Text dimColor>{alt}</Text>
-      </Box>
-    );
+  // densable `To`: no id → dim alt Text; else sized overflow box + ink-raw-ansi placeholders.
+  if (kittyId === undefined || placeholderFailed || placeholder === undefined) {
+    return <Text dimColor>{alt}</Text>;
   }
   return (
-    <Box flexShrink={0} width={columns} height={rows} overflow="hidden" elementKey={elementKey} elementPlugin={plugin}>
-      <ink-raw-ansi rawText={placeholder} rawWidth={columns} rawHeight={rows} />
+    <Box
+      flexShrink={0}
+      width={imageColumns}
+      height={imageRows}
+      overflow="hidden"
+      elementKey={elementKey}
+      elementPlugin={plugin}
+    >
+      <ink-raw-ansi rawText={placeholder} rawWidth={imageColumns} rawHeight={imageRows} />
     </Box>
   );
 }

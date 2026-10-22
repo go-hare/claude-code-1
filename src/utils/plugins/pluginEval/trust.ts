@@ -45,9 +45,7 @@ export async function promptTrustYesNo(
 }
 
 /** densable `sIe`/`BFr` — persist hasTrustDialogAccepted for the plugin dir. */
-export async function persistPluginEvalTrust(
-  pluginDir: string,
-): Promise<void> {
+export async function persistPluginEvalTrust(pluginDir: string): Promise<void> {
   acceptTrustForDirectory(pluginDir)
 }
 

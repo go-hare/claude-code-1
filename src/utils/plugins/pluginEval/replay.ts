@@ -44,12 +44,23 @@ export function recordingKey(params: {
   input: unknown
   mockHash: string
   prompt: string
-  history: Array<{ tool: string; input: unknown; verdict: string; output: string }>
+  history: Array<{
+    tool: string
+    input: unknown
+    verdict: string
+    output: string
+  }>
 }): string {
   const hist = sha256(
     params.history
       .map(
-        h => jsonStringify([h.tool, jsonStringify(h.input) ?? '', h.verdict, h.output]) ?? '',
+        h =>
+          jsonStringify([
+            h.tool,
+            jsonStringify(h.input) ?? '',
+            h.verdict,
+            h.output,
+          ]) ?? '',
       )
       .join('\n'),
   )

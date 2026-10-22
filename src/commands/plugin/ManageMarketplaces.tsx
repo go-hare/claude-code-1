@@ -16,7 +16,9 @@ import { shouldSkipPluginAutoupdate } from '../../utils/config.js';
 import { errorMessage } from '../../utils/errors.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import {
+  countClaudeAiZipStemMismatches,
   createPluginId,
+  formatClaudeAiMarketplaceNote,
   formatMarketplaceLoadingErrors,
   getMarketplaceSourceDisplay,
   loadMarketplacesWithGracefulDegradation,
@@ -59,6 +61,8 @@ type MarketplaceState = {
   pendingUpdate?: boolean;
   pendingRemove?: boolean;
   autoUpdate?: boolean;
+  /** densable `$u` note — load error or zip-stem updates. */
+  note?: string;
 };
 
 type InternalViewState = 'list' | 'details' | 'confirm-remove';
@@ -101,6 +105,9 @@ export function ManageMarketplaces({
         for (const { name, config: entry, data: marketplace } of marketplaces) {
           // Get all plugins installed from this marketplace
           const installedFromMarketplace = allPlugins.filter(plugin => plugin.source.endsWith(`@${name}`));
+          const note = formatClaudeAiMarketplaceNote(
+            countClaudeAiZipStemMismatches(marketplace, installedFromMarketplace),
+          );
 
           states.push({
             name,
@@ -111,6 +118,7 @@ export function ManageMarketplaces({
             pendingUpdate: false,
             pendingRemove: false,
             autoUpdate: isMarketplaceAutoUpdate(name, entry),
+            ...(note !== undefined && { note }),
           });
         }
 
@@ -797,6 +805,7 @@ export function ManageMarketplaces({
                   {indicators.length > 0 && <Text color="warning">[{indicators.join(', ')}]</Text>}
                 </Box>
                 <Text dimColor>{re(state.source)}</Text>
+                {state.note && <Text dimColor>{re(state.note)}</Text>}
                 <Text dimColor>
                   {state.pluginCount !== undefined && <>{state.pluginCount} available</>}
                   {state.installedPlugins && state.installedPlugins.length > 0 && (

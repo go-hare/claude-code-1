@@ -537,7 +537,7 @@ export function parseUiAttachControlRequest(
   }
   return {
     ok: true,
-    surface,
+    surface: surface as UiAttachSurface,
     clientId,
     ...(viewport !== undefined && { viewport }),
     ...(answers !== undefined && { answers }),
@@ -697,7 +697,7 @@ export function parseUiRenderControlRequest(
   }
   return {
     ok: true,
-    surface,
+    surface: surface as UiAttachSurface,
     component: component as UiRenderSite,
     instanceId,
     props: request.props as Record<string, unknown>,

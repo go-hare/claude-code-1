@@ -4,7 +4,15 @@
  */
 
 import { readdir, readFile, realpath, stat } from 'fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import { parseFrontmatter } from '../../frontmatterParser.js'
 import { parseYaml } from '../../yaml.js'
 import { CASE_FILE_NAMES, DEFAULT_EVAL_DIR } from './constants.js'
@@ -62,9 +70,12 @@ function graderFromFrontmatter(
   body: string,
 ): Grader {
   const grader = { name, ...fm } as Grader
-  const field =
-    typeof fm.type === 'string' ? BODY_BY_TYPE[fm.type] : undefined
-  if (field && (grader as Record<string, unknown>)[field] === undefined && body) {
+  const field = typeof fm.type === 'string' ? BODY_BY_TYPE[fm.type] : undefined
+  if (
+    field &&
+    (grader as Record<string, unknown>)[field] === undefined &&
+    body
+  ) {
     ;(grader as Record<string, unknown>)[field] = body
   }
   return grader
@@ -250,7 +261,8 @@ async function resolvePluginDirs(
             : `case ${JSON.stringify(definition.name)}: plugins entry ${JSON.stringify(entry)} is unreadable (${code ?? 'unknown error'})`,
         )
       }
-      const framed = frameRoot !== null && (real === frameRoot || isInside(real, frameRoot))
+      const framed =
+        frameRoot !== null && (real === frameRoot || isInside(real, frameRoot))
       if (!isInside(real, root) && !framed) {
         throw new Error(
           `case ${JSON.stringify(definition.name)}: plugins entry ${JSON.stringify(entry)} resolves to ${real}, outside the containment root ${root} (the enclosing plugin for a target inside one you control, else the directory you ran 'claude plugin eval' against). Only plugins under it can be loaded from case.yaml.`,
@@ -296,7 +308,8 @@ export async function loadEvalCases(
   )
   const errors: CaseLoadError[] = [...skipped]
   const cases: ResolvedCase[] = []
-  const root = frameRoot && isInside(resolvedRoot, frameRoot) ? frameRoot : resolvedRoot
+  const root =
+    frameRoot && isInside(resolvedRoot, frameRoot) ? frameRoot : resolvedRoot
 
   for (const caseDir of caseDirs) {
     const yamlPath = join(caseDir, 'case.yaml')
@@ -321,7 +334,11 @@ export async function loadEvalCases(
               merged.tags.every(t => typeof t === 'string')
             ? merged.tags
             : undefined
-      if (name !== undefined && tags !== undefined && !caseMatchesFilter({ name, tags }, filter)) {
+      if (
+        name !== undefined &&
+        tags !== undefined &&
+        !caseMatchesFilter({ name, tags }, filter)
+      ) {
         continue
       }
       if (merged === null) {
@@ -334,10 +351,18 @@ export async function loadEvalCases(
       }
       const parsed = parseCaseDefinition(merged)
       if (!parsed.ok) {
-        errors.push({ file: yaml !== null ? yamlPath : caseDir, error: parsed.error })
+        errors.push({
+          file: yaml !== null ? yamlPath : caseDir,
+          error: parsed.error,
+        })
         continue
       }
-      const pluginDirs = await resolvePluginDirs(parsed.case, caseDir, root, frameRoot)
+      const pluginDirs = await resolvePluginDirs(
+        parsed.case,
+        caseDir,
+        root,
+        frameRoot,
+      )
       cases.push({
         ...parsed.case,
         caseFile: yamlPath,

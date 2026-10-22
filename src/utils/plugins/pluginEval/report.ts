@@ -21,14 +21,19 @@ import type {
 
 export function evalVersion(): string {
   try {
-    return typeof MACRO !== 'undefined' && MACRO.VERSION ? MACRO.VERSION : '2.1.283'
+    return typeof MACRO !== 'undefined' && MACRO.VERSION
+      ? MACRO.VERSION
+      : '2.1.283'
   } catch {
     return '2.1.283'
   }
 }
 
 /** densable `nXn`. */
-export function averageScores(runs: RunReport[]): { score: number; passRate: number } {
+export function averageScores(runs: RunReport[]): {
+  score: number
+  passRate: number
+} {
   if (runs.length === 0) return { score: 0, passRate: 0 }
   const score = runs.reduce((sum, run) => sum + run.score, 0) / runs.length
   const passRate = runs.filter(run => run.score >= 1).length / runs.length
@@ -136,7 +141,8 @@ export async function writeJsonResult(
       'warning: --json result withheld because it failed schema validation\n',
     )
     logEvent('cli_plugin_eval', {
-      outcome: 'json_withheld_invalid' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome:
+        'json_withheld_invalid' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return false
   }
@@ -144,7 +150,9 @@ export async function writeJsonResult(
     const body = `${preformatted ?? JSON.stringify(payload.result, null, 2)}\n`
     if (json === true) {
       await new Promise<void>((resolveWrite, reject) => {
-        process.stdout.write(body, error => (error ? reject(error) : resolveWrite()))
+        process.stdout.write(body, error =>
+          error ? reject(error) : resolveWrite(),
+        )
       })
     } else if (typeof json === 'string') {
       const path = resolve(process.cwd(), json)
@@ -153,9 +161,12 @@ export async function writeJsonResult(
     }
     return true
   } catch (error) {
-    process.stderr.write(`warning: could not write --json result: ${String(error)}\n`)
+    process.stderr.write(
+      `warning: could not write --json result: ${String(error)}\n`,
+    )
     logEvent('cli_plugin_eval', {
-      outcome: 'json_write_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome:
+        'json_write_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return false
   }
@@ -185,7 +196,9 @@ export async function maybeWriteHtmlReport(params: {
   if (path === null) return
   try {
     if (abortSignal.aborted && options.publishReport) {
-      process.stderr.write('Skipped publishing because the run was interrupted.\n')
+      process.stderr.write(
+        'Skipped publishing because the run was interrupted.\n',
+      )
       return
     }
     await mkdir(dirname(path), { recursive: true })
@@ -193,7 +206,9 @@ export async function maybeWriteHtmlReport(params: {
     await writeFile(path, wrapReportDocument(result, fragment))
     process.stderr.write(`Report: ${path}\n`)
   } catch (error) {
-    process.stderr.write(`Couldn't write the report to ${path}: ${String(error)}\n`)
+    process.stderr.write(
+      `Couldn't write the report to ${path}: ${String(error)}\n`,
+    )
   }
 }
 
@@ -210,19 +225,22 @@ export async function logSuiteAnalytics(
 ): Promise<void> {
   if (authPreflightFailed) {
     logEvent('cli_plugin_eval', {
-      outcome: 'auth_preflight_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome:
+        'auth_preflight_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return
   }
   if (gitPreflightFailed) {
     logEvent('cli_plugin_eval', {
-      outcome: 'git_preflight_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome:
+        'git_preflight_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return
   }
   if (harnessFailures > 0) {
     logEvent('cli_plugin_eval', {
-      outcome: 'harness_failure' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      outcome:
+        'harness_failure' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return
   }
@@ -242,7 +260,8 @@ export async function logSuiteAnalytics(
     return
   }
   logEvent('cli_plugin_eval', {
-    trust_source: trustSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    trust_source:
+      trustSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     all_passed: report.cases.every(cse => cse.score >= threshold),
     num_cases: report.cases.length,
   })

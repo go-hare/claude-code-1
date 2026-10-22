@@ -721,19 +721,25 @@ describe('densable 2.1.289 CLI ui_panes through ui_client_fault', () => {
   test('YAn ui_client_fault parse unique English', () => {
     expect(UI_CLIENT_FAULT_MALFORMED).toBe('ui_client_fault: malformed')
     expect(
-      parseUiClientFaultControlRequest({ subtype: 'ui_client_fault' }).error,
+      (
+        parseUiClientFaultControlRequest({
+          subtype: 'ui_client_fault',
+        }) as { error?: string }
+      ).error,
     ).toBe('ui_client_fault: plugin: Required')
     expect(
-      parseUiClientFaultControlRequest({
-        subtype: 'ui_client_fault',
-        plugin: 'p',
-        component: 'Pane',
-        instance_id: 'pane_1',
-        client: 'c',
-        module: 'hooks/board.tsx',
-        phase: 'blur',
-        reason: 'x',
-      }).error,
+      (
+        parseUiClientFaultControlRequest({
+          subtype: 'ui_client_fault',
+          plugin: 'p',
+          component: 'Pane',
+          instance_id: 'pane_1',
+          client: 'c',
+          module: 'hooks/board.tsx',
+          phase: 'blur',
+          reason: 'x',
+        }) as { error?: string }
+      ).error,
     ).toContain('ui_client_fault: phase:')
     expect(
       parseUiClientFaultControlRequest({

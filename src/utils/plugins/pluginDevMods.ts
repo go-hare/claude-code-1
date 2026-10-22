@@ -5,8 +5,9 @@
  * `${CLAUDE_DEV_MODS_DIR}` expands to this session's mods folder.
  */
 import { mkdirSync, readdirSync, statSync, watch, type FSWatcher } from 'fs'
-import { mkdir } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, utimes } from 'fs/promises'
+import { basename, join, sep } from 'path'
+import { pathToFileURL } from 'url'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { ConfirmWithUserResult } from '../permissions/confirmWithUser.js'
@@ -49,9 +50,42 @@ type Stage = {
 
 let binding: PluginDevModsBinding | undefined
 let stage: Stage | undefined
-let watcher: FSWatcher | undefined
 let queryTurnRunning = false
+let queryTurnDepth = 0
 let restoredFolder: string | undefined
+
+/** densable ho — one live mods-folder watch. */
+const QUIET_MS = 2000
+type DevModLoad = 'reloaded' | 'held' | 'unbound' | 'failed'
+type WatchCtrl = {
+  folder: string
+  watcher?: FSWatcher
+  /** densable ho `r` — names declined this watch; new children re-ask. */
+  declined: Set<string>
+  /** densable ho `s` — names already loaded when the watch started. */
+  loaded: Set<string>
+  /** densable ho `n` — a filesystem event has fired. */
+  dirty: boolean
+  /** densable ho `a` — Enable during a turn; load at turn end. */
+  deferEnable: boolean
+  /** densable ho `i` — decline during a turn; latch children at turn end. */
+  declineDuringTurn: boolean
+  /** densable ho `f` — increments on each turn begin. */
+  turnGen: number
+  /** densable ho `L` — turnGen of the latched ask, or -Infinity. */
+  askedAt: number
+  /** densable ho `T` — run Q again when the turn ends. */
+  pending: boolean
+  /** densable ho `E` — unanswered note already sent. */
+  unansweredSent: boolean
+  /** densable ho `V` */
+  asking: boolean
+  /** densable ho `v` */
+  closed: boolean
+  timer?: ReturnType<typeof setTimeout>
+  askAbort?: AbortController
+}
+let watchCtrl: WatchCtrl | undefined
 
 export function bindPluginDevModsSession(
   next: PluginDevModsBinding | undefined,
@@ -59,8 +93,53 @@ export function bindPluginDevModsSession(
   binding = next
 }
 
-export function markPluginDevModsTurnRunning(running: boolean): void {
-  queryTurnRunning = running
+/**
+ * densable mpr — this turn's opener is a non-meta user message whose
+ * origin is missing or kind human. A continuation that already passed an
+ * assistant is not a person turn.
+ */
+export function isDevModsPersonTurn(
+  messages: readonly {
+    type?: string
+    isMeta?: boolean
+    origin?: { kind?: string }
+  }[],
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message?.type === 'assistant') return false
+    if (message?.type === 'user' && message.isMeta !== true) {
+      return message.origin === undefined || message.origin.kind === 'human'
+    }
+  }
+  return false
+}
+
+export function markPluginDevModsTurnRunning(
+  running: boolean,
+  person = false,
+): void {
+  if (running) {
+    queryTurnDepth += 1
+    queryTurnRunning = true
+    onDevModsTurnBegin(person)
+    return
+  }
+  queryTurnDepth = Math.max(0, queryTurnDepth - 1)
+  queryTurnRunning = queryTurnDepth > 0
+  if (!queryTurnRunning) void onDevModsTurnEnd()
+}
+
+/** Dispose when the queryLoop generator closes, including nested loops. */
+export function trackPluginDevModsTurn(opts?: {
+  person?: boolean
+}): Disposable {
+  markPluginDevModsTurnRunning(true, opts?.person === true)
+  return {
+    [Symbol.dispose]() {
+      markPluginDevModsTurnRunning(false)
+    },
+  }
 }
 
 export function sessionDevModsFolder(): string {
@@ -70,7 +149,10 @@ export function sessionDevModsFolder(): string {
   const { getSessionId } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
-  return join(getClaudeConfigHomeDir(), getSessionId())
+  // Gold O9 rft is `join(we(), "dev-mods")`; dirname(pluginRoot) or its
+  // parent matching rft is provenance `dev_mods`. Nest the session folder
+  // so live mods attribute as gold, not plugin_dir.
+  return join(getClaudeConfigHomeDir(), 'dev-mods', getSessionId())
 }
 
 function mapAsk(
@@ -93,7 +175,30 @@ function mapAsk(
 }
 
 function folderMarkdown(folder: string): string {
-  return `this session's folder (${folder})`
+  try {
+    const href = pathToFileURL(folder)
+      .href.replaceAll('(', '%28')
+      .replaceAll(')', '%29')
+    return `[this session's folder](${href})`
+  } catch {
+    return `this session's folder (${folder})`
+  }
+}
+
+function notePluginDevMods(text: string): void {
+  try {
+    const { enqueuePendingNotification } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../messageQueueManager.js') as typeof import('../messageQueueManager.js')
+    enqueuePendingNotification({
+      value: text,
+      mode: 'task-notification',
+      skipAttachments: true,
+      priority: 'next',
+    })
+  } catch {
+    // ignore
+  }
 }
 
 function loadWhen(when: 'now' | 'turn-end'): string {
@@ -359,7 +464,116 @@ export function listPluginDevModChildren(folder: string): string[] | undefined {
   }
 }
 
-async function enablePluginDevMods(folder: string): Promise<void> {
+function devModLoadSentence(where: string, outcome: DevModLoad): string {
+  switch (outcome) {
+    case 'held':
+      return `The person enabled mod hot-reloading for this session, but the mods under ${where} wait for /reload-plugins (the load would rewrite the prompt cache): they are NOT loaded yet.`
+    case 'unbound':
+      return `The person enabled mod hot-reloading for this session, but the mods under ${where} did not load (this session cannot reload its plugins; only a restart loads them).`
+    case 'failed':
+      return `The person enabled mod hot-reloading for this session, but the mods under ${where} did not load (the load failed; the transcript says why, and /reload-plugins tries again).`
+    case 'reloaded':
+      return `The person enabled mod hot-reloading for this session and the mods under ${where} loaded: they load and reload by themselves as their files change; the transcript names any mod that failed.`
+  }
+}
+
+function devModLine(outcome: DevModLoad, loaded: boolean): string | undefined {
+  if (outcome === 'failed') return undefined
+  if (outcome === 'held') {
+    return "in this session's mods folder, on hold: /reload-plugins applies it"
+  }
+  if (outcome === 'unbound') {
+    return "in this session's mods folder; restart to apply"
+  }
+  return loaded
+    ? "loaded from this session's mods folder"
+    : "in this session's mods folder, not loaded; /plugin shows why"
+}
+
+function recordDevModLines(folder: string, outcome: DevModLoad): void {
+  const { recordPluginUiLog } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./pluginUiLog.js') as typeof import('./pluginUiLog.js')
+  const present = listPluginDevModChildren(folder) ?? []
+  if (outcome !== 'reloaded') {
+    const text = devModLine(outcome, false)
+    if (text === undefined) return
+    for (const name of present) recordPluginUiLog(name, text)
+    return
+  }
+  let enabled: Array<{ name: string; path: string }> = []
+  try {
+    enabled =
+      binding?.toolContext(new AbortController()).getAppState().plugins
+        .enabled ?? []
+  } catch {
+    enabled = []
+  }
+  const loadedChild = new Set<string>()
+  for (const plugin of enabled) {
+    const child = present.find(name => {
+      const root = join(folder, name)
+      return plugin.path === root || plugin.path.startsWith(root + sep)
+    })
+    if (child === undefined) continue
+    loadedChild.add(child)
+    const text = devModLine('reloaded', true)
+    if (text !== undefined) recordPluginUiLog(plugin.name, text)
+  }
+  const missing = devModLine('reloaded', false)
+  if (missing === undefined) return
+  for (const name of present) {
+    if (!loadedChild.has(name)) recordPluginUiLog(name, missing)
+  }
+}
+
+/** densable gqn / M9t — held when a reload would bust the prompt cache. */
+async function reloadDevMods(): Promise<DevModLoad> {
+  if (binding?.reloadPlugins === undefined) return 'unbound'
+  try {
+    const ctx = binding.toolContext(new AbortController())
+    const { assessPluginReloadCacheImpact } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./activateAfterInstall.js') as typeof import('./activateAfterInstall.js')
+    const impact = await assessPluginReloadCacheImpact({
+      model: ctx.options.mainLoopModel,
+      mcpClients: ctx.options.mcpClients,
+    })
+    if (impact.wouldInvalidateCache) {
+      ctx.setAppState(prev =>
+        prev.plugins.needsRefresh
+          ? prev
+          : {
+              ...prev,
+              plugins: { ...prev.plugins, needsRefresh: true },
+            },
+      )
+      return 'held'
+    }
+    await binding.reloadPlugins()
+    return 'reloaded'
+  } catch (error) {
+    try {
+      const { logForDebugging } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../debug.js') as typeof import('../debug.js')
+      const { errorMessage } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../errors.js') as typeof import('../errors.js')
+      logForDebugging(`dev mods: reload failed: ${errorMessage(error)}`, {
+        level: 'error',
+      })
+    } catch {
+      // ignore
+    }
+    return 'failed'
+  }
+}
+
+async function enablePluginDevMods(
+  folder: string,
+  opts?: { loadedAtStart?: boolean },
+): Promise<DevModLoad> {
   const { getInlinePlugins, setInlinePlugins } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
@@ -369,20 +583,226 @@ async function enablePluginDevMods(folder: string): Promise<void> {
   }
   restoredFolder = folder
   stage = { stage: 'enabled', folder }
-  await binding?.reloadPlugins?.()
+  await utimes(folder, new Date(), new Date()).catch(() => undefined)
+  const outcome = await reloadDevMods()
+  recordDevModLines(folder, outcome)
+  const where = folderMarkdown(folder)
+  // densable Co — loaded_at_start is ui.log only. A person's Enable also
+  // enqueues one task-notification whose sentence follows the outcome.
+  if (opts?.loadedAtStart !== true) {
+    notePluginDevMods(devModLoadSentence(where, outcome))
+  }
   try {
     const { logEvent } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
-    logEvent('plugin_dev_mods', { enabled: true })
+    logEvent('plugin_dev_mods', {
+      ...(opts?.loadedAtStart ? { loaded_at_start: true } : { enabled: true }),
+    })
   } catch {
     // ignore
   }
+  return outcome
 }
 
 function stopWatch(): void {
-  watcher?.close()
-  watcher = undefined
+  const ctrl = watchCtrl
+  watchCtrl = undefined
+  if (ctrl === undefined) return
+  ctrl.closed = true
+  if (ctrl.timer !== undefined) clearTimeout(ctrl.timer)
+  ctrl.askAbort?.abort()
+  ctrl.watcher?.close()
+}
+
+function clearWatchTimer(ctrl: WatchCtrl): void {
+  if (ctrl.timer === undefined) return
+  clearTimeout(ctrl.timer)
+  ctrl.timer = undefined
+}
+
+function noteUnanswered(folder: string): void {
+  const where = folderMarkdown(folder)
+  notePluginDevMods(
+    `The person has not answered the mod hot-reloading question yet; it is asked again once a turn ends. What this run wrote under ${where} is written but NOT loaded yet. Do not say it was declined, and do not suggest --plugin-dir or a restart.`,
+  )
+}
+
+function onDevModsTurnBegin(person: boolean): void {
+  // densable mpr — f increments on a person turn only. A nested query
+  // must not open the "already asked this turn" latch.
+  if (!person) return
+  const ctrl = watchCtrl
+  if (ctrl === undefined || ctrl.closed) return
+  ctrl.turnGen += 1
+  const ask = ctrl.askAbort
+  if (ask === undefined || ask.signal.aborted) return
+  ask.abort()
+  if (ctrl.unansweredSent) return
+  ctrl.unansweredSent = true
+  noteUnanswered(ctrl.folder)
+}
+
+async function onDevModsTurnEnd(): Promise<void> {
+  const ctrl = watchCtrl
+  if (ctrl === undefined || ctrl.closed) return
+  if (ctrl.declineDuringTurn) {
+    ctrl.declineDuringTurn = false
+    for (const name of listPluginDevModChildren(ctrl.folder) ?? []) {
+      ctrl.declined.add(name)
+    }
+  }
+  if (ctrl.deferEnable) {
+    ctrl.deferEnable = false
+    await finishEnable(ctrl)
+    return
+  }
+  if (!ctrl.pending) return
+  ctrl.pending = false
+  await runAsk(ctrl)
+}
+
+function scheduleAsk(ctrl: WatchCtrl): void {
+  if (ctrl.closed || ctrl.deferEnable) return
+  clearWatchTimer(ctrl)
+  if (queryTurnRunning) {
+    void runAsk(ctrl)
+    return
+  }
+  ctrl.timer = setTimeout(() => {
+    void runAsk(ctrl)
+  }, QUIET_MS)
+}
+
+async function finishEnable(ctrl: WatchCtrl): Promise<void> {
+  if (ctrl.closed) return
+  if (pluginDevModsRefusal() !== undefined) {
+    stopWatch()
+    stage = { stage: 'wanted', folder: ctrl.folder }
+    return
+  }
+  const folder = ctrl.folder
+  stopWatch()
+  await enablePluginDevMods(folder)
+}
+
+async function runAsk(ctrl: WatchCtrl): Promise<void> {
+  if (ctrl !== watchCtrl || ctrl.closed) return
+  clearWatchTimer(ctrl)
+  const firstDirty =
+    queryTurnRunning && ctrl.dirty && ctrl.askedAt === Number.NEGATIVE_INFINITY
+  const closedOrDeferred = ctrl.closed || ctrl.deferEnable
+  const runningNotFirst = queryTurnRunning && !firstDirty
+  if (
+    closedOrDeferred ||
+    ctrl.asking ||
+    runningNotFirst ||
+    ctrl.askedAt === ctrl.turnGen
+  ) {
+    ctrl.pending = !closedOrDeferred
+    return
+  }
+  ctrl.asking = true
+  try {
+    const children = listPluginDevModChildren(ctrl.folder) ?? []
+    const novel = firstDirty
+      ? []
+      : children.filter(name => !ctrl.declined.has(name))
+    const should =
+      firstDirty ||
+      (novel.length > 0 &&
+        (ctrl.dirty || novel.some(name => !ctrl.loaded.has(name))))
+    if (ctrl.closed || !should) return
+    if (queryTurnRunning && !firstDirty) {
+      ctrl.pending = true
+      return
+    }
+    if (pluginDevModsRefusal() !== undefined) {
+      stopWatch()
+      stage = { stage: 'wanted', folder: ctrl.folder }
+      return
+    }
+    ctrl.askedAt = ctrl.turnGen
+    const abort = new AbortController()
+    ctrl.askAbort = abort
+    const answer = await askPluginDevMods(ctrl.folder, abort.signal).finally(
+      () => {
+        if (ctrl.askAbort === abort) ctrl.askAbort = undefined
+      },
+    )
+    if (ctrl.closed) return
+    switch (answer) {
+      case 'enable':
+        if (queryTurnRunning && pluginDevModsRefusal() === undefined) {
+          ctrl.deferEnable = true
+          const { recordPluginUiLog } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('./pluginUiLog.js') as typeof import('./pluginUiLog.js')
+          recordPluginUiLog(
+            basename(ctrl.folder),
+            "Mod hot-reloading is on; this session's mods load when this turn ends.",
+          )
+          return
+        }
+        await finishEnable(ctrl)
+        return
+      case 'decline': {
+        ctrl.unansweredSent = false
+        ctrl.declineDuringTurn = queryTurnRunning
+        for (const name of [
+          ...novel,
+          ...(listPluginDevModChildren(ctrl.folder) ?? []),
+        ]) {
+          ctrl.declined.add(name)
+        }
+        try {
+          const { getInlinePlugins, setInlinePlugins } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+          const folder = ctrl.folder
+          const prefix = folder.endsWith(sep) ? folder : `${folder}${sep}`
+          setInlinePlugins(
+            getInlinePlugins().filter(
+              path => path !== folder && !path.startsWith(prefix),
+            ),
+          )
+        } catch {
+          // ignore
+        }
+        stage = { stage: 'watching', folder: ctrl.folder }
+        notePluginDevMods(
+          `The person declined mod hot-reloading: what this run wrote under ${folderMarkdown(ctrl.folder)} is written but NOT loaded (a mod that loaded when the session started keeps running as it loaded). Do not say the change is running. It loads the next time this session starts (/reload-plugins reloads only a mod that loaded at the start); the person can ask again.`,
+        )
+        return
+      }
+      case 'withdrawn': {
+        const { recordPluginUiLog } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./pluginUiLog.js') as typeof import('./pluginUiLog.js')
+        recordPluginUiLog(
+          basename(ctrl.folder),
+          'Mod hot-reloading was not answered; it will be asked again once a turn ends.',
+        )
+        if (!ctrl.unansweredSent) {
+          ctrl.unansweredSent = true
+          noteUnanswered(ctrl.folder)
+        }
+        ctrl.askedAt = Number.NEGATIVE_INFINITY
+        ctrl.pending = true
+        return
+      }
+      case 'retry':
+        ctrl.askedAt = Number.NEGATIVE_INFINITY
+        ctrl.pending = true
+        return
+      case 'no_one_to_ask':
+        stopWatch()
+        stage = { stage: 'off', folder: ctrl.folder }
+        return
+    }
+  } finally {
+    ctrl.asking = false
+  }
 }
 
 async function startWatch(folder: string): Promise<void> {
@@ -393,51 +813,52 @@ async function startWatch(folder: string): Promise<void> {
   }
   await mkdir(folder, { recursive: true })
   stopWatch()
-  let asking = false
+  const ctrl: WatchCtrl = {
+    folder,
+    declined: new Set(),
+    loaded: new Set(),
+    dirty: false,
+    deferEnable: false,
+    declineDuringTurn: false,
+    turnGen: 0,
+    askedAt: Number.NEGATIVE_INFINITY,
+    pending: false,
+    unansweredSent: false,
+    asking: false,
+    closed: false,
+  }
+  watchCtrl = ctrl
   const onChange = () => {
-    if (asking || stage?.stage === 'enabled' || stage?.stage === 'off') {
-      return
-    }
-    const children = listPluginDevModChildren(folder) ?? []
-    if (children.length === 0) return
-    asking = true
-    void askPluginDevMods(folder)
-      .then(async answer => {
-        if (answer === 'enable') {
-          stopWatch()
-          await enablePluginDevMods(folder)
-        } else if (answer === 'decline' || answer === 'no_one_to_ask') {
-          stopWatch()
-          stage = { stage: 'off', folder }
-        }
-      })
-      .finally(() => {
-        asking = false
-      })
+    if (ctrl.closed || ctrl !== watchCtrl) return
+    ctrl.dirty = true
+    scheduleAsk(ctrl)
   }
   try {
-    watcher = watch(folder, { persistent: true }, onChange)
+    ctrl.watcher = watch(folder, { persistent: true }, onChange)
   } catch {
     // watch optional
   }
   stage = { stage: 'watching', folder }
-  onChange()
+  scheduleAsk(ctrl)
 }
 
 /** densable Fo — mkdir + start watch, return folder. */
 export async function ensurePluginDevModsFolder(): Promise<string> {
   const folder = sessionDevModsFolder()
+  if (stage?.stage === 'enabled' && stage.folder === folder) {
+    return folder
+  }
   if (stage?.stage === 'watching' && stage.folder !== folder) {
     stopWatch()
   }
   const closedOrMoved =
     stage === undefined ||
     stage.stage === 'off' ||
-    (stage.stage === 'watching' && watcher === undefined)
+    (stage.stage === 'watching' && watchCtrl?.watcher === undefined)
   if (stage?.folder !== folder || closedOrMoved) {
     stage = { stage: 'wanted', folder }
   }
-  if (pluginDevModsRefusal() === undefined) {
+  if (pluginDevModsRefusal() === undefined && stage?.stage !== 'enabled') {
     await startWatch(folder)
   }
   return folder
@@ -463,13 +884,14 @@ export function presentPluginDevModsFolder(): void {
   }
   stopWatch()
   stage = { stage: 'present', folder }
-  if (pluginDevModsRefusal() === undefined) {
-    const children = listPluginDevModChildren(folder)
-    if (children && children.length > 0) {
-      mkdirSync(folder, { recursive: true })
-      void startWatch(folder)
-    }
+  if (pluginDevModsRefusal() !== undefined) return
+  const children = listPluginDevModChildren(folder)
+  if (children && children.length > 0) {
+    mkdirSync(folder, { recursive: true })
+    void enablePluginDevMods(folder, { loadedAtStart: true })
+    return
   }
+  void startWatch(folder)
 }
 
 /** densable bOn — install expander + present or restore enabled folder. */

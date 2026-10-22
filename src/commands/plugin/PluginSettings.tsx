@@ -30,6 +30,7 @@ import { ManagePlugins } from './ManagePlugins.js';
 import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
 import { type ParsedCommand, parsePluginArgs } from './parseArgs.js';
 import type { PluginSettingsProps, ViewState } from './types.js';
+import { PluginEval } from './PluginEval.js';
 import { ValidatePlugin } from './ValidatePlugin.js';
 
 type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors';
@@ -594,6 +595,8 @@ function getInitialViewState(parsedCommand: ParsedCommand): ViewState {
       return { type: 'help' };
     case 'validate':
       return { type: 'validate', path: parsedCommand.path };
+    case 'eval':
+      return { type: 'eval', path: parsedCommand.path };
     case 'install':
       if (parsedCommand.marketplace) {
         return {
@@ -731,10 +734,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   const pluginsChangedThisVisit = useRef(false);
   const closeReloadOnce = useRef(false);
   const needsRefresh = useAppState(s => s.plugins.needsRefresh);
-  const autoReloadOnClose = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_plugin_menu_close_reload',
-    true,
-  );
+  const autoReloadOnClose = getFeatureValue_CACHED_MAY_BE_STALE('tengu_plugin_menu_close_reload', true);
 
   const markPluginsChanged = useCallback(() => {
     pluginsChangedThisVisit.current = true;
@@ -750,9 +750,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
       }
       closeReloadOnce.current = true;
       const outcome =
-        autoReloadOnClose && pluginsChangedThisVisit.current
-          ? pluginMenuCloseReloadOutcome(needsRefresh)
-          : 'none';
+        autoReloadOnClose && pluginsChangedThisVisit.current ? pluginMenuCloseReloadOutcome(needsRefresh) : 'none';
       if (outcome === 'none') {
         onComplete(message);
         return;
@@ -843,7 +841,11 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         <Text> /plugin install &lt;marketplace&gt; - Install from specific marketplace</Text>
         <Text> /plugin install &lt;plugin&gt; - Install specific plugin</Text>
         <Text> /plugin install &lt;plugin&gt;@&lt;market&gt; - Install plugin from marketplace</Text>
-        <Text> /plugin install &lt;plugin&gt; --marketplace &lt;source&gt; - Install plugin from a marketplace source, adding it first</Text>
+        <Text>
+          {' '}
+          /plugin install &lt;plugin&gt; --marketplace &lt;source&gt; - Install plugin from a marketplace source, adding
+          it first
+        </Text>
         <Text> </Text>
         <Text dimColor>Management:</Text>
         <Text> /plugin manage - Manage installed plugins</Text>
@@ -863,6 +865,10 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         <Text> </Text>
         <Text dimColor>Validation:</Text>
         <Text> /plugin validate &lt;path&gt; - Validate a manifest file or directory</Text>
+        <Text>
+          {' '}
+          /plugin eval &lt;path&gt; - Run trigger evaluations for a skill against the queries in its evals/ folder
+        </Text>
         <Text> </Text>
         <Text dimColor>Other:</Text>
         <Text> /plugin - Main plugin menu</Text>
@@ -874,6 +880,10 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
 
   if (viewState.type === 'validate') {
     return <ValidatePlugin onComplete={completePluginMenu} path={viewState.path} />;
+  }
+
+  if (viewState.type === 'eval') {
+    return <PluginEval onComplete={completePluginMenu} path={viewState.path} />;
   }
 
   if (viewState.type === 'marketplace-menu') {

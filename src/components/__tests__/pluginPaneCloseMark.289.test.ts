@@ -14,26 +14,27 @@ describe('densable 2.1.289 mods CloseMark + load invalidate', () => {
     expect(src).toContain('export function PluginPaneCloseMark')
     expect(src).toContain('BORDER_MARK_INSET = 2')
     expect(src).toContain('CLOSE_MARK_COLUMNS = 2')
-    expect(src).toContain("position=\"absolute\"")
+    expect(src).toContain('position="absolute"')
     expect(src).toContain('top={0}')
     expect(src).toContain('right={inset}')
     expect(src).toContain("{'✕'}")
     expect(src).toContain('<PluginPaneCloseMark')
-    expect(src).toContain(
-      "void closePluginPane(pane.id, { kind: 'person' })",
-    )
+    expect(src).toContain('if (event.isWindowActivation) return')
+    expect(src).toContain("void closePluginPane(pane.id, { kind: 'person' })")
   })
 
   test('replaceLoadedFunctionHooksModules invalidates ui.render', () => {
     const src = readFileSync(HOOKS, 'utf8')
     const start = src.indexOf('function replaceLoadedFunctionHooksModules')
     expect(start).toBeGreaterThan(0)
-    const body = src.slice(start, start + 900)
+    const body = src.slice(start, start + 1800)
     // gold E1e.onInvalidate → Vi; analog is bumpFaultRenderFv → invalidateRender
     expect(body).toContain('bumpFaultRenderFv()')
     expect(body).toContain('bumpRasterFrames()')
     const bump = src.indexOf('function bumpFaultRenderFv')
     expect(bump).toBeGreaterThan(0)
-    expect(src.slice(bump, bump + 400)).toContain("invalidateRender('ui.render')")
+    expect(src.slice(bump, bump + 400)).toContain(
+      "invalidateRender('ui.render')",
+    )
   })
 })

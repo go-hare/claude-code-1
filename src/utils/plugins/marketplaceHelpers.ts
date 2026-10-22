@@ -7,7 +7,12 @@ import { plural } from '../stringUtils.js'
 import { re } from './escapeSafeText.js'
 import { checkGitAvailable } from './gitAvailability.js'
 import { getMarketplace } from './marketplaceManager.js'
-import type { KnownMarketplace, MarketplaceSource } from './schemas.js'
+import type {
+  KnownMarketplace,
+  MarketplaceSource,
+  PluginMarketplace,
+} from './schemas.js'
+import type { LoadedPlugin } from '../../types/plugin.js'
 
 /**
  * densable F4u — GitHub owner/repo name segment (policy owner/* + concrete repo).
@@ -390,6 +395,54 @@ export function getMarketplaceSourceDisplay(source: MarketplaceSource): string {
     default:
       return 'Unknown source'
   }
+}
+
+/**
+ * densable `$u` zip-stem note — catalog entries whose source is claudeai
+ * with a non-empty version that does not match the installed zip stem.
+ * Does not add MarketplaceSourceSchema `claudeai` (hosted control plane).
+ */
+export function countClaudeAiZipStemMismatches(
+  catalog: PluginMarketplace | null | undefined,
+  installed: ReadonlyArray<Pick<LoadedPlugin, 'name' | 'path'>>,
+): number {
+  if (!catalog) return 0
+  let n = 0
+  for (const plugin of installed) {
+    const entry = catalog.plugins.find(p => p.name === plugin.name)
+    if (!entry || typeof entry.source !== 'object' || entry.source === null) {
+      continue
+    }
+    const src = entry.source as {
+      source?: string
+      version?: string
+    }
+    if (
+      src.source !== 'claudeai' ||
+      src.version === undefined ||
+      src.version === ''
+    ) {
+      continue
+    }
+    // densable Of(oe.path) — basename, then strip trailing .zip
+    const base = plugin.path.split(/[/\\]/).pop() ?? plugin.path
+    const stem = base.replace(/\.zip$/i, '')
+    if (stem !== src.version) n++
+  }
+  return n
+}
+
+/**
+ * densable `$u` note: failure copy, else zip-stem updates.
+ * `N plugin update(s) available · update the marketplace to apply`
+ */
+export function formatClaudeAiMarketplaceNote(
+  mismatchCount: number,
+  loadError?: string,
+): string | undefined {
+  if (loadError) return loadError
+  if (mismatchCount <= 0) return undefined
+  return `${mismatchCount} plugin ${plural(mismatchCount, 'update')} available · update the marketplace to apply`
 }
 
 /**

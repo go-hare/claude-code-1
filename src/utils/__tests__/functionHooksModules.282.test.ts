@@ -1085,6 +1085,21 @@ describe('function-hooks classic pattern', () => {
       handleHostOp('interface.call', [{ name: 'x', method: 'y' }]),
     ).rejects.toThrow('takes { owner, name, method, args }')
     expect(await handleHostOp('ui.log', [{ text: 'hello' }])).toBeUndefined()
+    const debugLog = spyOn(debug, 'logForDebugging').mockImplementation(
+      () => {},
+    )
+    expect(
+      await handleHostOp('ui.log', [{ text: 'secret', to: 'debug' }], 'demo'),
+    ).toBeUndefined()
+    expect(debugLog).toHaveBeenCalled()
+    expect(
+      debugLog.mock.calls.some(
+        call =>
+          typeof call[0] === 'string' &&
+          call[0].includes('$.ui.log (to debug): secret'),
+      ),
+    ).toBe(true)
+    debugLog.mockRestore()
     const shown: Array<{ plugin: string; text: string; timeoutMs?: number }> =
       []
     setUiToastShowHandler(toast => {
@@ -1396,6 +1411,22 @@ describe('function-hooks classic pattern', () => {
     ).toEqual({
       deny: 'no conversation of agent gone in this session: not one of its agents, running in another process, or finished with no saved transcript this session reads back',
     })
+    setFunctionHooksAppStateReader(
+      () =>
+        ({
+          tasks: {
+            a1: {
+              type: 'local_agent',
+              agentId: 'agent-live',
+              status: 'running',
+              messages: [{ type: 'user', uuid: 'live-1' }],
+            },
+          },
+        }) as unknown as AppState,
+    )
+    expect(
+      await handleHostOp('session.messages', [{ agentId: 'agent-live' }]),
+    ).toEqual([{ type: 'user', uuid: 'live-1' }])
     setFunctionHooksAppStateReader(
       () =>
         ({

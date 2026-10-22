@@ -48,6 +48,7 @@ import {
   type SurfaceModuleScan,
 } from './functionHooksClient.js'
 import { logForDebugging } from '../debug.js'
+import { KITTY_PLACEHOLDER_MAX } from './kittyGraphics.js'
 import { createSignal } from '../signal.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
 import {
@@ -86,11 +87,26 @@ import {
   PLUGIN_TOOL_REGISTER_VISIBLE_TIMEOUT_MS,
 } from './pluginToolLoopbackRegistrar.js'
 import { getPluginToolSessionHost } from './pluginToolSessionHost.js'
+import {
+  formatDrawnPlainLinks,
+  rewriteDrawnLinksToPlainText,
+} from './pluginLinkHref.js'
+import {
+  EMPTY_HOP_FLOORS,
+  floorsAfterNextTo,
+  handlerTier,
+  hopBypassReason,
+  type FunctionHookNext,
+  type HopFloor,
+  type HopHandler,
+} from './functionHooksHop.js'
 
 export type FunctionHookHandler = (
   api: Record<string, unknown>,
   event: Record<string, unknown>,
-  next: (value?: unknown) => Promise<unknown>,
+  next: ((value?: unknown) => Promise<unknown>) & {
+    to?: FunctionHookNext['to']
+  },
 ) => unknown
 
 export type LoadedFunctionHook = {
@@ -98,6 +114,9 @@ export type LoadedFunctionHook = {
   matcher?: unknown
   hook: FunctionHookHandler
   catch?: FunctionHookHandler
+  /** densable `$e` / `se` on the hook itself. */
+  isManaged?: boolean
+  isCore?: boolean
 }
 
 export type LoadedFunctionHooksModule = {
@@ -111,11 +130,27 @@ export type LoadedFunctionHooksModule = {
   surfaceModules?: readonly SurfaceModuleScan[]
   /** densable _k — LoadedPlugin.source / name@builtin */
   pluginStorageId?: string
+  /**
+   * densable `Gue` — marketplace/user hop handle. Set when the module
+   * is a user-installed copy (`link !== undefined`).
+   */
+  link?: unknown
+  /** densable module `tier` (`$e` / `ZEn`). */
+  tier?: 'user' | 'prepend' | 'append' | 'builtin' | 'core'
+  /** densable `$e` / `se` — seated managed hooks are prepend and sit above floors. */
+  isManaged?: boolean
+  /** densable `$e` / `se`. */
+  isCore?: boolean
 }
 
 let loadedModules: LoadedFunctionHooksModule[] = []
 /** densable last hook that returned a `ui.render` tree (`Te` restamp). */
 let lastUiRenderPlugin = ''
+
+/** densable lead for `L1t` / `Imt` — empty when no hook returned a tree. */
+export function getLastUiRenderPlugin(): string {
+  return lastUiRenderPlugin
+}
 
 /**
  * densable `za` / `cV` — ui.render drawing ALS. `$.state.get` fills
@@ -241,6 +276,10 @@ function replaceLoadedFunctionHooksModules(
     ...(mod.pluginStorageId !== undefined && {
       pluginStorageId: mod.pluginStorageId,
     }),
+    ...(mod.link !== undefined && { link: mod.link }),
+    ...(mod.tier !== undefined && { tier: mod.tier }),
+    ...(mod.isManaged !== undefined && { isManaged: mod.isManaged }),
+    ...(mod.isCore !== undefined && { isCore: mod.isCore }),
   }))
   for (const mod of loadedModules) {
     setPluginSurfaceModules(mod.name, mod.root, mod.surfaceModules ?? [])
@@ -293,13 +332,14 @@ export function functionHookPatternMatches(
   return negated ? !hit : hit
 }
 
-/** densable `zk` module half: some loaded hook's pattern matches the event. */
+/** densable `zk` / `Cc` — some loaded hook's pattern matches the event. */
 export function hasMatchingFunctionHook(
   event: string,
   payload?: Record<string, unknown>,
+  among?: readonly LoadedFunctionHooksModule[],
 ): boolean {
   const needle = event.includes('.') ? event : `classic.${event}`
-  return loadedModules.some(mod =>
+  return (among ?? loadedModules).some(mod =>
     (mod.hooks ?? []).some(hook => {
       if (!functionHookPatternMatches(hook.pattern, needle)) return false
       if (payload === undefined) return true
@@ -795,6 +835,120 @@ export async function runFunctionHookChain(
       return returned
     }),
   )
+}
+
+export type FunctionHookHopSite = {
+  checkArgument?: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ) => string | undefined
+  restoreArgument?: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ) => Record<string, unknown>
+}
+
+function hopHandlerOf(
+  mod: LoadedFunctionHooksModule,
+  hook: LoadedFunctionHook,
+): HopHandler & { hook: FunctionHookHandler; mod: LoadedFunctionHooksModule } {
+  return {
+    name: mod.name,
+    tier: mod.tier,
+    isManaged: hook.isManaged ?? mod.isManaged,
+    isCore: hook.isCore ?? mod.isCore,
+    hook: hook.hook,
+    mod,
+  }
+}
+
+function argumentForNext(
+  handler: HopHandler,
+  site: FunctionHookHopSite | undefined,
+  passed: unknown,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  const record = isEventRecord(passed) ? passed : original
+  if (site === undefined) return record
+  const restored = site.restoreArgument?.(record, original) ?? record
+  const problem = site.checkArgument?.(restored, original)
+  if (problem !== undefined) {
+    throw new Error(
+      `${handler.name}: next() passed an argument with ${problem}`,
+    )
+  }
+  return restored
+}
+
+/**
+ * densable `ya` / `qT` / `eg` / `By` / `Mo.to` — hop with floors.
+ * `next.to(e, "append")` is `Fn` then `Mn` skips the bracketed tiers.
+ */
+export async function runFunctionHookHop(
+  event: string,
+  payload: Record<string, unknown>,
+  tail: FunctionHookTail,
+  extra?: {
+    prepend?: Array<
+      HopHandler & {
+        hook: FunctionHookHandler
+        mod?: LoadedFunctionHooksModule
+      }
+    >
+    site?: FunctionHookHopSite
+  },
+): Promise<unknown> {
+  const needle = event.includes('.') ? event : `classic.${event}`
+  const fromLoaded = loadedModules.flatMap(mod => {
+    if (mod.status === 'unloaded') return []
+    return (mod.hooks ?? [])
+      .filter(hook => functionHookPatternMatches(hook.pattern, needle))
+      .filter(hook => matcherAllows(hook.matcher, payload, needle))
+      .map(hook => hopHandlerOf(mod, hook))
+  })
+  const handlers = [...(extra?.prepend ?? []), ...fromLoaded]
+  const site = extra?.site
+  const callAt = (
+    index: number,
+    value: Record<string, unknown>,
+    floors: readonly HopFloor[],
+  ): Promise<unknown> => {
+    const step = handlers[index]
+    if (step === undefined) return tail(value)
+    const bypass = hopBypassReason(step, floors)
+    if (bypass !== undefined) {
+      logForDebugging(
+        `${step.name}: ${event} ${bypass} (tier ${handlerTier(step)}); beneath runs`,
+      )
+      return callAt(index + 1, value, floors)
+    }
+    const engine = pluginEngine(step.mod ?? { name: step.name })
+    const next = ((passed?: unknown) =>
+      callAt(
+        index + 1,
+        argumentForNext(step, site, passed, value),
+        floors,
+      )) as FunctionHookNext
+    next.to = (passed: unknown, ...tiers: string[]) => {
+      const named =
+        tiers.length === 1 && Array.isArray(tiers[0])
+          ? (tiers[0] as string[])
+          : tiers
+      return callAt(
+        index + 1,
+        argumentForNext(step, site, passed, value),
+        floorsAfterNextTo(floors, named, {
+          plugin: step.name,
+          tier: handlerTier(step),
+        }),
+      )
+    }
+    enterModule(step.name)
+    return Promise.resolve(step.hook(engine, value, next)).finally(() =>
+      leaveModule(step.name),
+    )
+  }
+  return hookEvalAls.run(true, () => callAt(0, payload, EMPTY_HOP_FLOORS))
 }
 
 type StateRef = { plugin: string; key: string; id?: string }
@@ -2581,6 +2735,15 @@ export async function handleHostOp(
     if (textCheck !== undefined) hostCheck(op, textCheck, plugin)
     const toCheck = uiLogToCheck(rec?.to)
     if (toCheck !== undefined) hostCheck(op, toCheck, plugin)
+    const { recordPluginUiLog, recordPluginUiLogDebug } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./pluginUiLog.js') as typeof import('./pluginUiLog.js')
+    const line = String(rec?.text ?? '')
+    if (rec?.to === 'debug') {
+      recordPluginUiLogDebug(plugin ?? '', line)
+    } else {
+      recordPluginUiLog(plugin ?? '', line)
+    }
     return undefined
   }
   if (op === 'ui.toast') {
@@ -4291,15 +4454,109 @@ function countSessionTurns(): number {
   return sessionUserMessages().filter(isCountableUserTurn).length
 }
 
-function listSessionMessages(
-  input: Record<string, unknown>,
-): unknown[] | { deny: string } {
-  if (typeof input.agentId === 'string') {
-    return {
-      deny: `no conversation of agent ${input.agentId} in this session: not one of its agents, running in another process, or finished with no saved transcript this session reads back`,
-    }
+function agentConversationDeny(agentId: string): { deny: string } {
+  return {
+    deny: `no conversation of agent ${agentId} in this session: not one of its agents, running in another process, or finished with no saved transcript this session reads back`,
   }
-  return sessionUserMessages()
+}
+
+function liveAgentMessages(agentId: string): unknown[] | undefined {
+  const tasks = functionHooksAppStateReader?.()?.tasks ?? {}
+  const matches: Record<string, unknown>[] = []
+  for (const task of Object.values(tasks) as unknown[]) {
+    if (!isEventRecord(task)) continue
+    if (task.type !== 'local_agent' && task.type !== 'in_process_teammate') {
+      continue
+    }
+    const identity = isEventRecord(task.identity) ? task.identity : undefined
+    const id =
+      typeof task.agentId === 'string'
+        ? task.agentId
+        : typeof task.id === 'string'
+          ? task.id
+          : undefined
+    const identityId =
+      typeof identity?.agentId === 'string' ? identity.agentId : undefined
+    const resumable =
+      typeof identity?.resumableAgentId === 'string'
+        ? identity.resumableAgentId
+        : undefined
+    if (id !== agentId && identityId !== agentId && resumable !== agentId) {
+      continue
+    }
+    // densable Joe: fork workers and teammates without a resumable id
+    // are not this session's live transcript for $.session.messages.
+    if (task.type === 'local_agent' && task.forkWorker === true) continue
+    if (task.type === 'in_process_teammate' && resumable === undefined) continue
+    matches.push(task)
+  }
+  const live =
+    matches.find(
+      t =>
+        t.status !== 'completed' &&
+        t.status !== 'failed' &&
+        t.status !== 'killed',
+    ) ?? matches.at(-1)
+  if (live === undefined) return undefined
+  const messages = live.messages
+  return Array.isArray(messages) ? messages : []
+}
+
+async function savedAgentMessages(
+  agentId: string,
+): Promise<unknown[] | undefined> {
+  try {
+    const { asAgentId } = await import('../../types/ids.js')
+    const { getAgentTranscriptPath } = await import('../sessionPaths.js')
+    const { existsSync } = await import('fs')
+    const transcriptPath = getAgentTranscriptPath(asAgentId(agentId))
+    if (!existsSync(transcriptPath)) return undefined
+    const { loadTranscriptFile } = await import('../sessionStorage.js')
+    const loaded = await loadTranscriptFile(transcriptPath)
+    const messages = [...loaded.messages.values()]
+    return messages.length > 0 ? messages : undefined
+  } catch (error) {
+    logForDebugging(
+      `$.session.messages: the saved transcript of agent ${agentId} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      { level: 'warn' },
+    )
+    return undefined
+  }
+}
+
+function messageUuid(message: unknown): string | undefined {
+  if (!isEventRecord(message) || typeof message.uuid !== 'string') {
+    return undefined
+  }
+  return message.uuid
+}
+
+async function listSessionMessages(
+  input: Record<string, unknown>,
+): Promise<unknown[] | { deny: string }> {
+  if (typeof input.agentId !== 'string') {
+    return sessionUserMessages()
+  }
+  const agentId = input.agentId
+  const saved = await savedAgentMessages(agentId)
+  const live = liveAgentMessages(agentId)
+  if (!saved) {
+    return live ?? agentConversationDeny(agentId)
+  }
+  const liveList = live ?? []
+  const seen = new Set(
+    liveList.flatMap(message => {
+      const uuid = messageUuid(message)
+      return uuid === undefined ? [] : [uuid]
+    }),
+  )
+  return [
+    ...saved.filter(message => {
+      const uuid = messageUuid(message)
+      return uuid === undefined || !seen.has(uuid)
+    }),
+    ...liveList,
+  ]
 }
 
 function sessionTools(): SessionListedTool[] {
@@ -5681,16 +5938,24 @@ export async function evaluateUiRender(
     logUiRenderRefused(component, hoverReason)
     throw new Error(hoverReason)
   }
-  const accepted = acceptAskUserQuestionRewrite(tree, input, component)
-  rememberUiRenderDrawing(plugin, component, requestId, accepted)
+  const accepted = stripUnknownBoxBorderStyles(
+    acceptAskUserQuestionRewrite(tree, input, component),
+  )
+  // densable `i8n` / `eBo` — Vmn-failing Links become Text; pane keeps drawing.
+  drawn = rewriteDrawnLinksToPlainText(accepted, surface, problems => {
+    logForDebugging(formatDrawnPlainLinks(component, problems), {
+      level: 'warn',
+    })
+  })
+  rememberUiRenderDrawing(plugin, component, requestId, drawn)
   if (evalRecord !== undefined && !signal?.aborted) {
-    evalRecord.settled = accepted
+    evalRecord.settled = drawn
   }
   // densable `!V` U2 — previous cache occupied this MD (stale replace).
   if (liveNames.length > 0 && !signal?.aborted && previous !== undefined) {
     noteSlowUiRender(liveNames, Date.now() - startedAt)
   }
-  return accepted
+  return drawn
 }
 
 /** densable `DBr` / `tBo` — refusal still lets the engine draw its own. */
@@ -5698,6 +5963,63 @@ function logUiRenderRefused(component: string, problem: string): void {
   logForDebugging(
     `ui.render (${component}) refused: ${problem}; the engine drew its own`,
   )
+}
+
+/** densable q6t — Ink + dashed. Unknown names are stripped (Zmn / qmn). */
+const KNOWN_BOX_BORDER_STYLES = new Set([
+  'single',
+  'double',
+  'round',
+  'bold',
+  'singleDouble',
+  'doubleSingle',
+  'classic',
+  'arrow',
+  'dashed',
+])
+
+function isUnknownBoxBorderStyle(style: unknown): boolean {
+  return typeof style !== 'string' || !KNOWN_BOX_BORDER_STYLES.has(style)
+}
+
+/** densable qmn — drop unknown Box borderStyle; the Box is drawn with no border. */
+function stripUnknownBoxBorderStyles(tree: unknown): unknown {
+  if (!isEventRecord(tree)) return tree
+  if (tree.type !== 'Box' && tree.type !== 'Text' && tree.type !== 'Link') {
+    return tree
+  }
+  const children = Array.isArray(tree.children)
+    ? tree.children.map(child =>
+        typeof child === 'string' ? child : stripUnknownBoxBorderStyles(child),
+      )
+    : undefined
+  let next: Record<string, unknown> = tree
+  if (
+    children !== undefined &&
+    children.some((child, i) => child !== (tree.children as unknown[])[i])
+  ) {
+    next = { ...tree, children }
+  }
+  if (next.type !== 'Box') return next
+  const props = isEventRecord(next.props) ? next.props : undefined
+  const hover = isEventRecord(next.hover) ? next.hover : undefined
+  if (
+    props !== undefined &&
+    props.borderStyle !== undefined &&
+    isUnknownBoxBorderStyle(props.borderStyle)
+  ) {
+    const { borderStyle: _dropped, ...rest } = props
+    next = { ...next, props: rest }
+  }
+  if (
+    hover !== undefined &&
+    hover.borderStyle !== undefined &&
+    isUnknownBoxBorderStyle(hover.borderStyle)
+  ) {
+    const { borderStyle: _dropped, ...rest } = hover
+    next = { ...next, hover: rest }
+  }
+  return next
 }
 
 function describeThrown(err: unknown): string {
@@ -6907,6 +7229,36 @@ function mountImage(mount: MountedImage): () => void {
   })
 }
 
+function existingRasterMount(
+  plugin: string,
+  requestId: string,
+  key: string,
+): MountedRaster | undefined {
+  const site = mountedRasters.get(mountSiteKey(requestId, key, plugin))
+  if (!site) return undefined
+  return [...site.rasters].find(
+    item =>
+      item.plugin === plugin &&
+      item.key === key &&
+      item.requestId === requestId,
+  )
+}
+
+function existingImageMount(
+  plugin: string,
+  requestId: string,
+  key: string,
+): MountedImage | undefined {
+  const site = mountedImages.get(mountSiteKey(requestId, key, plugin))
+  if (!site) return undefined
+  return [...site.images].find(
+    item =>
+      item.plugin === plugin &&
+      item.key === key &&
+      item.requestId === requestId,
+  )
+}
+
 /**
  * densable `ILo` from Raster `wo`: replace the mount's paint with the
  * widget's `R.paint` (Joo + go on that ink-raw-ansi node). Tests keep the
@@ -7098,43 +7450,63 @@ function walkUiMounts(
   if (type === 'Raster' && key && req) {
     const cols = Math.min(Math.max(1, columns), RASTER_MAX_COLUMNS)
     const rws = Math.min(Math.max(1, rows), RASTER_MAX_ROWS)
-    const raster: MountedRaster = {
-      plugin: owner,
-      requestId: req,
-      key,
-      columns: cols,
-      rows: rws,
-      paint(words) {
-        raster.lastWords = words
-        raster.lastAnsi = rasterWordsToAnsi(
-          words,
-          raster.columns,
-          raster.rows,
-          sharedRasterPalette,
-        )
-      },
+    const existing = existingRasterMount(owner, req, key)
+    if (existing) {
+      existing.columns = cols
+      existing.rows = rws
+    } else {
+      const raster: MountedRaster = {
+        plugin: owner,
+        requestId: req,
+        key,
+        columns: cols,
+        rows: rws,
+        paint(words) {
+          raster.lastWords = words
+          raster.lastAnsi = rasterWordsToAnsi(
+            words,
+            raster.columns,
+            raster.rows,
+            sharedRasterPalette,
+          )
+        },
+      }
+      mountRaster(raster)
     }
-    mountRaster(raster)
     holdPluginSite(owner, req, scrollSiteComponent(req)).keys.add(key)
   }
   if (type === 'Image' && key && req) {
-    const cols = Math.min(Math.max(1, columns), RASTER_MAX_COLUMNS)
-    const rws = Math.min(Math.max(1, rows), RASTER_MAX_ROWS)
-    const image: MountedImage = {
-      plugin: owner,
-      requestId: req,
-      key,
-      columns: cols,
-      rows: rws,
-      swap(next) {
-        // Gold `io({hasRoot, ...})` may deny when a kitty sink is busy/refuses.
-        // We have no `terminalImages` sink: still record the source and accept
-        // (tests expect `{}` on valid ImageSource). Do not deny just for no kitty.
-        image.lastSource = next
-        return undefined
-      },
+    const cols = Math.min(
+      Math.max(1, columns),
+      KITTY_PLACEHOLDER_MAX,
+      RASTER_MAX_COLUMNS,
+    )
+    const rws = Math.min(
+      Math.max(1, rows),
+      KITTY_PLACEHOLDER_MAX,
+      RASTER_MAX_ROWS,
+    )
+    const existing = existingImageMount(owner, req, key)
+    if (existing) {
+      existing.columns = cols
+      existing.rows = rws
+    } else {
+      const image: MountedImage = {
+        plugin: owner,
+        requestId: req,
+        key,
+        columns: cols,
+        rows: rws,
+        swap(next) {
+          // Gold `io({hasRoot, ...})` may deny when a kitty sink is busy/refuses.
+          // Widget attach wraps this swap; a second walk must not add another
+          // stub that would make blit treat kitty refuse as success.
+          image.lastSource = next
+          return undefined
+        },
+      }
+      mountImage(image)
     }
-    mountImage(image)
     holdPluginSite(owner, req, scrollSiteComponent(req)).keys.add(key)
   }
   if (node.children !== undefined) walkUiMounts(node.children, owner, req)
@@ -9977,9 +10349,9 @@ function fallbackFocusCommit(
   site: PluginFocusSite,
   input: PluginFocusDispatchInput,
 ): string | undefined {
-  const omitted = input.element === undefined || input.element === ''
-  if (omitted) return 'no element named'
-  if (!site.keys.has(input.element)) {
+  const element = input.element
+  if (element === undefined || element === '') return 'no element named'
+  if (!site.keys.has(element)) {
     return `no element of ${input.plugin ?? ''} is drawn under that key`
   }
   focusedPaneId = site.requestId
@@ -12317,6 +12689,10 @@ export type FunctionHookPlugin = {
   options?: Record<string, unknown>
   /** densable _k — LoadedPlugin.source / name@builtin */
   source?: string
+  /** densable `Gue` hop handle — user-installed copy. */
+  link?: unknown
+  /** densable module `tier`. */
+  tier?: LoadedFunctionHooksModule['tier']
 }
 
 function resolvePluginStorageId(pluginName: string): string {
@@ -12610,6 +12986,7 @@ export function listBuiltinFunctionHookPlugins(): FunctionHookPlugin[] {
           name: `builtin:${name}`,
           path: join(BUILTIN_MODS_DIR, name),
           source: `${name}@builtin`,
+          tier: 'builtin',
         }
         if (name === 'agents-md') {
           try {
@@ -12738,5 +13115,7 @@ async function recordRegisterPatterns(
     hooks,
     ...(surfaceModules.length > 0 && { surfaceModules }),
     ...(plugin.source !== undefined && { pluginStorageId: plugin.source }),
+    ...(plugin.link !== undefined && { link: plugin.link }),
+    ...(plugin.tier !== undefined && { tier: plugin.tier }),
   }
 }

@@ -32,6 +32,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { AbovePromptLeftoverContext, leftoverPluginBandBudget } from './FullscreenLayout.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../utils/render/invalidateAllRenders.js';
@@ -44,6 +45,8 @@ import {
   dispatchUiFocus,
   logUiScrollSettled,
   evaluateUiRender,
+  getLastUiRenderPlugin,
+  hasMatchingFunctionHook,
   focusPane,
   getPaneRemountGeneration,
   getPanesState,
@@ -84,6 +87,7 @@ import {
 import { useIsOverlayActive } from '../context/overlayContext.js';
 import { useHasOpenDialogs } from '../dialog/DialogStoreContext.js';
 import { logForDebugging } from '../utils/debug.js';
+import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { useNotifications } from '../context/notifications.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { createStore } from '../state/store.js';
@@ -96,6 +100,17 @@ import TextInput from './TextInput.js';
 import { HighlightedCode } from './HighlightedCode.js';
 import { Markdown } from './Markdown.js';
 import { PluginImage, PluginRaster } from './PluginRaster.js';
+import { encodePluginLinkHref, encodePluginLinkLabel } from '../utils/plugins/pluginLinkHref.js';
+import { Jmn, L1t, tellerOf, tellerOfPlugin } from '../utils/plugins/pluginDrawError.js';
+import {
+  RZ,
+  hasPluginDrawing,
+  isEngineFallback,
+  isG2eComponent,
+  siteIsOff,
+  useHeldSiteRows,
+  useSiteMeasure,
+} from '../utils/plugins/pluginSiteHold.js';
 import {
   computeWheelStep,
   initWheelAccel,
@@ -202,15 +217,50 @@ export function hotkeyMapOfDrawing(drawn: unknown): Map<string, HotkeyPress> {
   return map;
 }
 
+export type HotkeyYogaSeat = {
+  hotkey: string;
+  top: number;
+  height: number;
+};
+
 /**
- * densable `LZ({hasCue,content,offset,windowRows}, seatsOf(digit))`.
- * Without yoga seats, a digit is visible when the cue is off (gold `!M→true`)
- * or when the hotkey map has that digit (cue on, seats empty → false).
+ * densable `LZ` — cue off means every digit is visible. Cue on means every
+ * yoga seat for that digit sits fully inside [offset, offset+windowRows].
  */
-export function hotkeyDigitVisible(hasCue: boolean, seats: Map<string, HotkeyPress>, digit: string): boolean {
+export function hotkeyDigitVisible(
+  hasCue: boolean,
+  digit: string,
+  seats: readonly HotkeyYogaSeat[],
+  offset: number,
+  windowRows: number,
+): boolean {
   if (!hasCue) return true;
-  if (seats.size === 0) return false;
-  return seats.has(digit);
+  const mine = seats.filter(seat => seat.hotkey === digit);
+  if (mine.length === 0) return false;
+  const end = offset + windowRows;
+  return mine.every(seat => seat.top >= offset && seat.top + seat.height <= end);
+}
+
+function hotkeySeatsIn(content: DOMElement | null): HotkeyYogaSeat[] {
+  if (content === null) return [];
+  const seats: HotkeyYogaSeat[] = [];
+  const walk = (node: DOMElement): void => {
+    const hotkey = node.attributes.hotkey;
+    const yoga = node.yogaNode;
+    if (typeof hotkey === 'string' && yoga) {
+      seats.push({
+        hotkey,
+        top: yoga.getComputedTop(),
+        height: yoga.getComputedHeight(),
+      });
+    }
+    for (const child of node.childNodes) {
+      if (child.nodeName === '#text') continue;
+      walk(child);
+    }
+  };
+  walk(content);
+  return seats;
 }
 
 /**
@@ -343,6 +393,8 @@ type PaneErrorBoundaryProps = {
   children: ReactNode;
   resetKey: string | number;
   onError: (error: Error, info: ErrorInfo) => void;
+  /** densable BO `telemetryMessage` — Client `L1t(..., "Client")`. */
+  telemetryMessage?: () => string | null;
   /** densable Client BO fallback — empty sized box. Pane QT omits (null). */
   fallback?: ReactNode;
 };
@@ -370,6 +422,8 @@ class PaneErrorBoundary extends Component<PaneErrorBoundaryProps, PaneErrorBound
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    const debug = this.props.telemetryMessage?.();
+    if (debug) logForDebugging(debug);
     this.props.onError(error, info);
   }
 
@@ -684,7 +738,7 @@ function useOpenListRows(): number {
 }
 
 /**
- * densable `OM` DimButton — label + optional held/hover bold.
+ * densable `OM` DimButton — hover or held is inverse, otherwise dim.
  */
 export function PluginDimButton({
   label,
@@ -698,7 +752,7 @@ export function PluginDimButton({
   const [hover, setHover] = useState(false);
   return (
     <Box onClick={onAction} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <Text bold={hover || isHeld} dimColor={!hover && !isHeld}>
+      <Text inverse={hover || isHeld} dimColor={!hover && !isHeld}>
         {label}
       </Text>
     </Box>
@@ -729,7 +783,7 @@ export function PluginBandCollapsedHint({ shortcut, onExpand }: { shortcut: stri
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <Text dimColor={!hover} inverse={hover} wrap="truncate-end">
+      <Text dimColor inverse={hover} wrap="truncate-end">
         {`▸ plugin panel hidden · ${shortcut} or click to show`}
       </Text>
     </Box>
@@ -835,6 +889,33 @@ export function useBandScrollPlace(input: {
       setPlaced(dims.current.maxOffset);
     }
   }, [followEnd, input.maxOffset, placed]);
+  // densable raster bump — ui.scroll / follow-end write the site, then
+  // bumpRasterFrames. Paint reads React offset, so adopt the site here.
+  const rasterFrame = useSyncExternalStore(subscribeRasterFrames, getRasterFrameVersion, getRasterFrameVersion);
+  useEffect(() => {
+    const siteMeta = personScrollRef.current;
+    if (siteMeta.plugin === '' || siteMeta.requestId === '') return;
+    const site = getPluginScrollSite(siteMeta.plugin, siteMeta.requestId, siteMeta.component);
+    if (site === undefined) return;
+    // Person scroll still in flight: do not pull React back to a stale site.offset.
+    if (inFlightRef.current) return;
+    if (site.followEnd) {
+      const pinned = Math.max(0, dims.current.maxOffset);
+      if (!followEndRef.current || placedRef.current !== pinned) {
+        followEndRef.current = true;
+        placedRef.current = pinned;
+        setFollowEnd(true);
+        setPlaced(pinned);
+      }
+      return;
+    }
+    if (followEndRef.current || placedRef.current !== site.offset) {
+      followEndRef.current = false;
+      placedRef.current = site.offset;
+      setFollowEnd(false);
+      setPlaced(site.offset);
+    }
+  }, [rasterFrame]);
   const dispatchPersonIfRegistered = (nextOffset: number, by: number): Promise<void> => {
     const siteMeta = personScrollRef.current;
     // densable yEe commits for Pane + AbovePrompt once Ide site is registered.
@@ -862,19 +943,43 @@ export function useBandScrollPlace(input: {
     setPlaced(clamped);
     return clamped - before;
   }, []);
+  // Person path: the ui.scroll hook commits the site. React follows only if
+  // that commit landed. An unregistered site still moves locally.
+  const commitIfPersonAllowed = (target: number, by: number): Promise<void> => {
+    const siteMeta = personScrollRef.current;
+    const registered =
+      siteMeta.plugin !== '' &&
+      siteMeta.requestId !== '' &&
+      getPluginScrollSite(siteMeta.plugin, siteMeta.requestId, siteMeta.component) !== undefined;
+    if (!registered) {
+      commit(target);
+      return Promise.resolve();
+    }
+    return dispatchPersonIfRegistered(target, by).then(() => {
+      const site = getPluginScrollSite(siteMeta.plugin, siteMeta.requestId, siteMeta.component);
+      if (site?.offset === target) commit(target);
+    });
+  };
   // densable yEe `io=ce((no)=>Vt(no(Ne())),[Vt,Ne])` — stable place identity.
   const place = useCallback(
     (fn: (prev: number) => number): void => {
-      const by = commit(fn(placedRef.current));
-      if (by !== 0) {
-        void dispatchPersonIfRegistered(placedRef.current, by);
+      inFlightRef.current = true;
+      const target = clamp(fn(placedRef.current));
+      const by = target - liveOffset();
+      if (by === 0) {
+        inFlightRef.current = false;
+        return;
       }
+      void commitIfPersonAllowed(target, by).finally(() => {
+        inFlightRef.current = false;
+      });
     },
     [commit],
   );
   const fireScroll = (delta: number): void => {
     inFlightRef.current = true;
-    const by = commit(liveOffset() + delta);
+    const target = clamp(liveOffset() + delta);
+    const by = target - liveOffset();
     // densable QLt.finally — keep inFlight until person scroll settles, then drain.
     const after = (): void => {
       if (!aliveRef.current) {
@@ -891,7 +996,7 @@ export function useBandScrollPlace(input: {
       after();
       return;
     }
-    void dispatchPersonIfRegistered(placedRef.current, by).finally(after);
+    void commitIfPersonAllowed(target, by).finally(after);
   };
   const scrollBy = (delta: number): void => {
     if (delta === 0) return;
@@ -1041,11 +1146,15 @@ export function PluginPaneCloseMark({
       top={0}
       right={inset}
       width={CLOSE_MARK_COLUMNS}
-      onClick={onClose}
+      onClick={event => {
+        if (event.isWindowActivation) return;
+        event.stopImmediatePropagation();
+        onClose();
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <Text bold={hover || isHeld} dimColor={!hover && !isHeld}>
+      <Text inverse={hover || isHeld} dimColor={!hover && !isHeld}>
         {'✕'}
       </Text>
     </Box>
@@ -1182,10 +1291,11 @@ const DOCK_FLOOR_COLUMNS = 110;
  * densable `ZP` / `V7` default (`ZN`): min(floor(h*0.45), 90, h-70),
  * clamped to [h7, h-b7], 0 if h<nq.
  */
-export function pluginPaneDockColumns(columns: number, chosen?: number | null): number {
+export function pluginPaneDockColumns(columns: number, chosen?: number | null, requested?: number | null): number {
   if (columns < DOCK_FLOOR_COLUMNS) return 0;
   const clamp = (value: number) => Math.min(columns - DOCK_TRANSCRIPT_MIN_COLUMNS, Math.max(DOCK_MIN_COLUMNS, value));
   if (typeof chosen === 'number') return clamp(chosen);
+  if (typeof requested === 'number') return clamp(requested);
   const raw = Math.min(Math.floor(columns * 0.45), 90, columns - 70);
   return clamp(raw);
 }
@@ -1402,6 +1512,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isEngineDrawing(value: unknown): boolean {
   return isRecord(value) && value.type === 'engine';
+}
+
+/** densable `L1t` debug + `Jmn` toast. Kind is gold `answer`. */
+function reportDrawWhileDrawn(
+  component: string,
+  names: readonly string[],
+  error: Error,
+  addNotification: (notification: {
+    key: string;
+    text: string;
+    priority: 'immediate';
+    kind: 'warning';
+    color: 'error';
+  }) => void,
+): void {
+  const teller = tellerOf(names);
+  const debug = L1t(component, teller, 'answer');
+  if (debug !== null) logForDebugging(debug);
+  const toast = Jmn({ component, teller, error });
+  if (toast === null) return;
+  addNotification({
+    key: toast.key,
+    text: toast.text,
+    priority: 'immediate',
+    kind: 'warning',
+    color: 'error',
+  });
 }
 
 function stampedPlugin(node: Record<string, unknown>, fallback: string): string {
@@ -1818,6 +1955,20 @@ export type PluginSelectSeatState = {
   highlight: number;
 };
 
+function selectOptionsOf(row: DrawingFocusable): Array<{ value: string; label?: string }> {
+  const raw = row.options;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap(item => {
+    if (!isRecord(item) || typeof item.value !== 'string') return [];
+    return [
+      {
+        value: item.value,
+        ...(typeof item.label === 'string' && { label: item.label }),
+      },
+    ];
+  });
+}
+
 export function selectFocusableAt(
   focusables: readonly DrawingFocusable[] | undefined,
   index: number | 'band' | null | undefined,
@@ -2038,8 +2189,11 @@ export function usePluginSelectSeat(
 /** densable y$ return — `{fields, handlers, intercept}` plus SiteFields hosts. */
 export type PluginSelectSeat = ReturnType<typeof usePluginSelectSeat>;
 
-/** densable `Ode(list, index)` — focusable at ring index. */
-export function focusableAt(focusables: DrawingFocusable[], index: number | null | undefined): DrawingFocusable | null {
+/** densable `Ode(list, index)` — focusable at ring index. `'band'` is not a row. */
+export function focusableAt(
+  focusables: readonly DrawingFocusable[],
+  index: number | 'band' | null | undefined,
+): DrawingFocusable | null {
   if (typeof index !== 'number') return null;
   return focusables[index] ?? null;
 }
@@ -2566,6 +2720,7 @@ type BoxLayout = {
     | 'marginX'
     | 'marginY'
     | 'marginTop'
+    | 'borderStyle'
   >]: ComponentProps<typeof Box>[K];
 };
 
@@ -2634,6 +2789,9 @@ function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   if (typeof props.marginX === 'number') out.marginX = props.marginX;
   if (typeof props.marginY === 'number') out.marginY = props.marginY;
   if (typeof props.marginTop === 'number') out.marginTop = props.marginTop;
+  if (typeof props.borderStyle === 'string') {
+    out.borderStyle = props.borderStyle as BoxLayout['borderStyle'];
+  }
   return out;
 }
 
@@ -2688,6 +2846,7 @@ function PluginPressButton({
       flexShrink={0}
       alignSelf="flex-start"
       {...(element !== undefined && { elementKey: element, elementPlugin: plugin })}
+      {...(hotkey !== undefined && { hotkey })}
       onClick={event => {
         if (event.isWindowActivation) return;
         clicked?.({ plugin, handle });
@@ -3077,9 +3236,13 @@ function PluginPressSelect({
 function PluginCode({ source, format }: { source?: unknown; format?: unknown }): ReactNode {
   const text = typeof source === 'string' ? source : '';
   const filePath = typeof format === 'string' && format !== '' ? format : 'code';
+  // densable 2.1.289: highlight once at the pane's final width, not a
+  // provisional 80-column pass and not a 0-width measure of an empty box.
+  const bodyColumns = useContext(PaneBodyColumnsContext);
+  const width = bodyColumns !== null && bodyColumns > 2 ? bodyColumns : undefined;
   return (
-    <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-      {text === '' ? <Text>{text}</Text> : <HighlightedCode code={text} filePath={filePath} />}
+    <Box flexDirection="column" flexGrow={1} flexShrink={1} {...(width !== undefined ? { width } : {})}>
+      {text === '' ? <Text>{text}</Text> : <HighlightedCode code={text} filePath={filePath} width={width} />}
     </Box>
   );
 }
@@ -3200,6 +3363,7 @@ function PluginClient({
   moduleName,
   elementKey,
   requestId,
+  component = 'AbovePrompt',
   props,
   drawn,
   width,
@@ -3211,6 +3375,8 @@ function PluginClient({
   moduleName: string;
   elementKey?: string;
   requestId?: string;
+  /** densable `Z` / `L1t(..., "Client")` component. */
+  component?: string;
   props?: unknown;
   /** densable `o.drawn` — Client node props identity (`x(()=>i.drawnAgain(),[i,o.drawn])`). */
   drawn?: unknown;
@@ -3346,6 +3512,7 @@ function PluginClient({
   return (
     <PaneErrorBoundary
       resetKey={clientResetKey}
+      telemetryMessage={() => L1t(component, tellerOfPlugin(plugin), 'Client')}
       onError={error => {
         instanceRef.current.threw(error);
       }}
@@ -3360,6 +3527,7 @@ function PluginClient({
         flexShrink={0}
         overflow="hidden"
         {...(elementKey !== undefined && { elementKey, elementPlugin: plugin })}
+        {...(snapshot.status !== 'drawn' && snapshot.status !== 'failed' ? { drawPending: true } : {})}
         {...(width !== undefined && { width })}
         {...(height !== undefined && { height })}
         {...(flexGrow !== undefined && { flexGrow })}
@@ -3376,7 +3544,14 @@ function PluginClient({
           : {})}
       >
         {isDrawn ? (
-          <DrawingNode node={snapshot.tree} plugin={plugin} requestId={requestId} index={0} engine={engine} />
+          <DrawingNode
+            node={snapshot.tree}
+            plugin={plugin}
+            requestId={requestId}
+            index={0}
+            engine={engine}
+            component={component}
+          />
         ) : null}
         {snapshot.status === 'failed' && (
           <Text dimColor wrap="truncate-end">
@@ -3430,6 +3605,7 @@ export function DrawingNode({
   index,
   engine,
   seenKeys,
+  component = 'AbovePrompt',
 }: {
   node: unknown;
   plugin: string;
@@ -3438,11 +3614,21 @@ export function DrawingNode({
   /** densable `pt` `i(ref)` — engine node. Pane/AbovePrompt is null; UserMessage is the engine draw. */
   engine?: ReactNode;
   seenKeys?: Set<unknown>;
+  /** densable `Z` / Client `L1t` component. */
+  component?: string;
 }): ReactNode {
   if (typeof node === 'string') return <Text>{node}</Text>;
   if (Array.isArray(node)) {
     return node.map((child, i) => (
-      <DrawingNode key={i} node={child} plugin={plugin} requestId={requestId} index={i} engine={engine} />
+      <DrawingNode
+        key={i}
+        node={child}
+        plugin={plugin}
+        requestId={requestId}
+        index={i}
+        engine={engine}
+        component={component}
+      />
     ));
   }
   if (!isRecord(node)) return null;
@@ -3545,6 +3731,7 @@ export function DrawingNode({
         moduleName={stringProp(props, node, 'module') ?? ''}
         elementKey={key}
         requestId={req}
+        component={component}
         props={props.props}
         drawn={props}
         width={numberProp(props, node, 'width')}
@@ -3571,21 +3758,24 @@ export function DrawingNode({
         index={i}
         engine={engine}
         seenKeys={siblingKeys}
+        component={component}
       />
     ),
   );
   if (type === 'Link') {
     const href = stringProp(props, node, 'href') ?? '';
     const label = stringProp(props, node, 'label');
-    const inner = mapped.length > 0 ? mapped : [label ?? href];
+    // densable pane Link: visible URL is `PYe(k)`, OSC 8 url is `HYe(k)`.
+    const shown = encodePluginLinkLabel(href);
+    const inner = mapped.length > 0 ? mapped : [label ?? shown];
     const fallback =
       mapped.length === 0 && label === undefined ? undefined : (
         <Text>
-          {inner} <Text dimColor>{href}</Text>
+          {inner} <Text dimColor>{shown}</Text>
         </Text>
       );
     return (
-      <Link url={href} fallback={fallback}>
+      <Link url={encodePluginLinkHref(href)} fallback={fallback}>
         {inner}
       </Link>
     );
@@ -3641,10 +3831,13 @@ export function DrawingNode({
 }
 
 /**
- * densable `ar` consumer: call `Hoe().ui.render` (`evaluateUiRender`) and
- * rebuild with `pt` (`DrawingNode`). Engine fallback (`sMe`) is `undefined`.
+ * densable `fr` / `ar` consumer: `Hoe().ui.render` then `pt`. Fail and
+ * engine reply settle as gold `RZ` so `pr` can see `isFallback`.
  */
-function useRenderDrawing(input: Record<string, unknown> | null, inputKey: string): unknown {
+function useRenderDrawing(
+  input: Record<string, unknown> | null,
+  inputKey: string,
+): { drawn: unknown; markThrown: () => void } {
   const [drawn, setDrawn] = useState<unknown>(undefined);
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -3659,7 +3852,7 @@ function useRenderDrawing(input: Record<string, unknown> | null, inputKey: strin
     const abort = new AbortController();
     void evaluateUiRender(current, abort.signal).then(
       tree => {
-        if (!abort.signal.aborted) setDrawn(isEngineDrawing(tree) ? undefined : tree);
+        if (!abort.signal.aborted) setDrawn(isEngineDrawing(tree) ? RZ : tree);
       },
       err => {
         // densable `mr` — site failed log then engine fallback (`RZ`).
@@ -3667,14 +3860,17 @@ function useRenderDrawing(input: Record<string, unknown> | null, inputKey: strin
           `ui.render (${String(current.component)} ${String(current.requestId ?? '')}): site failed: ${err instanceof Error ? err.message : String(err)}`,
           { level: 'error' },
         );
-        if (!abort.signal.aborted) setDrawn(undefined);
+        if (!abort.signal.aborted) setDrawn(RZ);
       },
     );
     return () => {
       abort.abort();
     };
   }, [inputKey, version]);
-  return drawn;
+  const markThrown = useCallback(() => {
+    setDrawn(RZ);
+  }, []);
+  return { drawn, markThrown };
 }
 
 function PluginSiteFields({
@@ -3895,9 +4091,12 @@ function rebuild(
   selectSeat?: PluginSelectSeat,
   inputSeat?: PluginInputMapApi,
   inputFocusHost?: BandInputFocusHost,
+  component: string = site,
 ): ReactNode {
   if (drawn === undefined || isEngineDrawing(drawn)) return engine ?? null;
-  const node = <DrawingNode node={drawn} plugin={plugin} requestId={requestId} index={0} engine={engine} />;
+  const node = (
+    <DrawingNode node={drawn} plugin={plugin} requestId={requestId} index={0} engine={engine} component={component} />
+  );
   if (selectSeat !== undefined && inputSeat !== undefined) {
     return (
       <PluginSiteFields
@@ -4016,16 +4215,10 @@ export function PluginPaneSite({
   if (pane === undefined) return null;
   if (!((rows ?? 0) > 0 && (columns ?? 0) > 0)) return null;
   const onPaneDrawError = (error: Error): void => {
-    // densable BO onError: u3(null) + l8e(id,{kind:"unload"}) + Jmn toast.
+    // densable BO onError: u3(null) + l8e(id,{kind:"unload"}) + L1t + Jmn.
     focusPane(null);
     void closePluginPane(pane.id, { kind: 'unload' });
-    addNotification({
-      key: `pane-threw-while-drawn:${pane.id}`,
-      text: `ui.render (Pane) threw while drawn: ${error.message}; the pane was closed`,
-      priority: 'immediate',
-      kind: 'warning',
-      color: 'error',
-    });
+    reportDrawWhileDrawn('Pane', [pane.plugin || getLastUiRenderPlugin()], error, addNotification);
   };
   // densable QT: BO wraps pee (gate then e(BO,{children:e(pee,...)})).
   return (
@@ -4128,10 +4321,18 @@ function PluginPaneSiteBody({
       view: viewingAgentView,
     },
   };
-  const drawn = useRenderDrawing(
+  const { drawn } = useRenderDrawing(
     input,
     `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${JSON.stringify(viewingAgentView)}`,
   );
+  const paneHeldRows = useHeldSiteRows({
+    isOff: siteIsOff(hasMatchingFunctionHook('ui.render', { component: 'Pane' }), input),
+    input: `${pane.id}\0${pane.title}`,
+    drawn,
+    isFallback: isEngineFallback(drawn),
+    lastRows: paneTreeRows,
+    contentRows: paneTreeRows,
+  });
   useLayoutEffect(() => {
     const contentH = paneContentRef.current?.yogaNode?.getComputedHeight() ?? 0;
     setPaneTreeRows(prev => (prev === contentH ? prev : contentH));
@@ -4530,7 +4731,7 @@ function PluginPaneSiteBody({
               overflow="hidden"
               selectionScope
               onWheel={
-                dialogOpen
+                dialogOpen || overlayActive
                   ? undefined
                   : (event: WheelEvent) => {
                       // densable gEe(yEe, dEe) — scrollBy via local Me; no paneWheelScroll bypass.
@@ -4611,6 +4812,7 @@ function PluginPaneSiteBody({
                       paneContentRef.current = node;
                       bindPluginScrollSiteLayout(pane.plugin, pane.id, node, 'Pane');
                     }}
+                    {...(paneHeldRows !== undefined && { minHeight: paneHeldRows })}
                   >
                     {node}
                   </Box>
@@ -4646,29 +4848,66 @@ export function PluginAbovePromptSite({
   promptEmpty?: boolean;
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
+  // densable `_Ee` `bt` from tot leftover `f5` (`Pe`), not a second floor(rows/2).
+  const leftoverOf = useContext(AbovePromptLeftoverContext);
   const { addNotification } = useNotifications();
   const [aboveResetKey, setAboveResetKey] = useState(0);
   const bandCollapsed = useBandCollapsed();
   const panesFocusRequest = useSyncExternalStore(subscribePanes, () => getPanesState().focusRequest);
   const contentRef = useRef<DOMElement | null>(null);
+  const leftoverHostRef = useRef<DOMElement | null>(null);
   const heldFocusRef = useRef<{ node: DOMElement; index: number } | null>(null);
   const [focusPlaceBump, setFocusPlaceBump] = useState(0);
-  const [focusTop, setFocusTop] = useState(-1);
-  const [focusBottom, setFocusBottom] = useState(-1);
-  const [treeRows, setTreeRows] = useState(0);
   // densable `d$` — store is source of truth for settled budget used by bandWindow.
   const settledFromStore = useSettledBudget();
-  const settledBudget = settledFromStore ?? rows;
   // densable `Me` — focus index: number | 'band' | null.
   const [focusIndex, setFocusIndex] = useState<number | 'band' | null>(null);
   const focusIndexRef = useRef(focusIndex);
   focusIndexRef.current = focusIndex;
+  // densable `_Ee` `bt=$l(...)` / `Rt=$l` / `dn`/`Wn=$l(Jq)`.
+  const promptRoom = useYogaMeasure(() =>
+    leftoverPluginBandBudget(
+      leftoverOf,
+      leftoverOf === null ? null : leftoverOf(),
+      leftoverHostRef.current,
+      leftoverHostRef.current?.yogaNode?.getComputedHeight() ?? 0,
+      getSettledBudget(),
+      rows,
+    ),
+  );
+  const treeRows = useYogaMeasure(() => contentRef.current?.yogaNode?.getComputedHeight() ?? 0);
+  const focusTop = useYogaMeasure(() =>
+    heldFocusEdge(
+      {
+        held: heldFocusRef.current,
+        index: typeof focusIndexRef.current === 'number' ? focusIndexRef.current : null,
+        content: contentRef.current,
+      },
+      'top',
+    ),
+  );
+  const focusBottom = useYogaMeasure(() =>
+    heldFocusEdge(
+      {
+        held: heldFocusRef.current,
+        index: typeof focusIndexRef.current === 'number' ? focusIndexRef.current : null,
+        content: contentRef.current,
+      },
+      'bottom',
+    ),
+  );
+  const settledBudget = settledFromStore ?? promptRoom;
   const [bandInputFocused, setBandInputFocused] = useState<FocusedInput | null>(null);
   const bandSelectRef = useRef<PluginSelectSeat | null>(null);
   const bandInputRef = useRef<PluginInputMapApi | null>(null);
   const toggleShortcut = getShortcutDisplay('abovePrompt:toggle', 'Chat', 'ctrl+x ctrl+a');
   // densable `Wr=l1()` — dialog open blocks auto-settle.
   const dialogOpen = useHasOpenDialogs();
+  // densable overlay (BackgroundTasksDialog registers as overlay, not a dialog).
+  const overlayActive = useIsOverlayActive();
+  const bandBlocked = dialogOpen || overlayActive;
+  // Fullscreen Background tasks replaces the prompt; leave no stale band row above it.
+  const backgroundTasksOpen = useAppState(s => s.activeOverlays.has('background-tasks-dialog'));
 
   // densable `sst(h,v,M)` — write d3 then oNo. Chrome = CollapseHandle columns.
   useEffect(() => {
@@ -4688,36 +4927,26 @@ export function PluginAbovePromptSite({
     settlePaneFocusRequest(
       promptEmpty &&
         !hasSurvey &&
-        !dialogOpen &&
+        !bandBlocked &&
         focusIndex === null &&
         panes.focusedId === null &&
         panes.placements > 0,
     );
-  }, [panesFocusRequest, promptEmpty, hasSurvey, dialogOpen, focusIndex]);
+  }, [panesFocusRequest, promptEmpty, hasSurvey, bandBlocked, focusIndex]);
 
   // densable `NZ` settle: fold live budget into `d$` settledBudget after HEIGHT_SETTLE_MS.
   useEffect(() => {
-    if (settledFromStore === rows) return;
-    const handle = setTimeout(() => setSettledBudget(rows), HEIGHT_SETTLE_MS);
+    if (settledFromStore === promptRoom) return;
+    const handle = setTimeout(() => setSettledBudget(promptRoom), HEIGHT_SETTLE_MS);
     return () => clearTimeout(handle);
-  }, [rows, settledFromStore]);
+  }, [promptRoom, settledFromStore]);
 
-  useLayoutEffect(() => {
-    const height = contentRef.current?.yogaNode?.getComputedHeight() ?? 0;
-    setTreeRows(prev => (prev === height ? prev : height));
-    const index = typeof focusIndexRef.current === 'number' ? focusIndexRef.current : null;
-    const top = heldFocusEdge({ held: heldFocusRef.current, index, content: contentRef.current }, 'top');
-    const bottom = heldFocusEdge({ held: heldFocusRef.current, index, content: contentRef.current }, 'bottom');
-    setFocusTop(prev => (prev === top ? prev : top));
-    setFocusBottom(prev => (prev === bottom ? prev : bottom));
-  });
-
-  const { windowRows, hasCue, maxOffset, bodyRows } = bandWindow({
-    budget: rows,
-    settledBudget,
-    treeRows,
-  });
   const listRows = useOpenListRows();
+  const { windowRows, hasCue, maxOffset, bodyRows } = bandWindow({
+    budget: promptRoom,
+    settledBudget,
+    treeRows: Math.max(0, treeRows - listRows),
+  });
   // densable Ide — owner from AbovePrompt drawing when known; else ''.
   // Hde/`QLt` person-origin HAVE via useBandScrollPlace → dispatchPersonUiScroll.
   const scrollOwner =
@@ -4783,7 +5012,7 @@ export function PluginAbovePromptSite({
 
   const viewingAgentView = useViewingAgentView();
   const aboveBodyColumns = Math.max(0, columns - COLLAPSE_HANDLE_COLUMNS);
-  const drawn = useRenderDrawing(
+  const { drawn, markThrown } = useRenderDrawing(
     {
       surface: 'terminal',
       component: 'AbovePrompt',
@@ -4804,6 +5033,23 @@ export function PluginAbovePromptSite({
     drawn !== undefined &&
     drawn !== null &&
     (typeof drawn === 'string' || (typeof drawn === 'object' && (drawn as { type?: string }).type !== 'engine'));
+  const aboveHeldRows = useHeldSiteRows({
+    isOff: siteIsOff(hasMatchingFunctionHook('ui.render', { component: 'AbovePrompt' }), {
+      props: {
+        hasSurvey,
+        isWorking,
+        maxRows: settledBudget,
+        bodyColumns: aboveBodyColumns,
+        scroll: { offset, bodyRows },
+        view: viewingAgentView,
+      },
+    }),
+    input: `${String(isWorking)}\0${String(hasSurvey)}\0${String(settledBudget)}\0${String(offset)}`,
+    drawn,
+    isFallback: isEngineFallback(drawn),
+    lastRows: treeRows,
+    contentRows: treeRows,
+  });
 
   // densable `Nn=xze(Fo)` — focusables after drawn.
   const focusables = useMemo(() => focusablesOfDrawing(drawn), [drawn]);
@@ -5177,7 +5423,8 @@ export function PluginAbovePromptSite({
   const bandWheelAccel = useRef<WheelAccelState | null>(null);
   const bandWheelProfile = useRef<WheelProfile | null>(null);
   const digitEnabled = !hasSurvey && bandHotkeys.size > 0;
-  const digitVisible = (digit: string): boolean => hotkeyDigitVisible(hasCue, bandHotkeys, digit);
+  const digitVisible = (digit: string): boolean =>
+    hotkeyDigitVisible(hasCue, digit, hotkeySeatsIn(contentRef.current), offset, windowRows);
   useBandDigitHotkey({
     inputValue: promptValue,
     enabled: digitEnabled,
@@ -5206,16 +5453,33 @@ export function PluginAbovePromptSite({
   );
 
   // densable: collapsed → n$ inside We (ITt host stays bound).
+  if (backgroundTasksOpen) return null;
   if (bandCollapsed) {
-    if (!hasPluginTree) return null;
+    if (!hasPluginTree) {
+      return (
+        <Box
+          ref={node => {
+            leftoverHostRef.current = node;
+            bandAwayRef.current = node;
+          }}
+          flexShrink={0}
+          flexDirection="column"
+          maxHeight={promptRoom + listRows}
+          overflowY="hidden"
+        />
+      );
+    }
     return (
       <Box
         ref={node => {
+          leftoverHostRef.current = node;
           bandAwayRef.current = node;
         }}
         flexShrink={0}
         flexDirection="column"
-        onWheel={hasCue && !dialogOpen ? bandWheel : undefined}
+        maxHeight={promptRoom + listRows}
+        overflowY="hidden"
+        onWheel={hasCue && !bandBlocked ? bandWheel : undefined}
       >
         <PluginBandCollapsedHint
           shortcut={toggleShortcut}
@@ -5241,18 +5505,11 @@ export function PluginAbovePromptSite({
     bandInput,
     bandInputFocusHost,
   );
-  if (node === null) return null;
   const focusedPress = focused === null ? null : { plugin: focused.plugin, handle: focused.handle };
   const onAboveDrawError = (error: Error): void => {
-    // densable Jmn/NBr + Ymn.AbovePrompt; L1t unique English on the debug log.
-    logForDebugging(`ui.render (AbovePrompt): a plugin's tree threw while drawn (plugin unattributed, unattributed)`);
-    addNotification({
-      key: `above-threw-while-drawn:${aboveResetKey}`,
-      text: `ui.render (AbovePrompt) threw while drawn: ${error.message}; nothing was drawn`,
-      priority: 'immediate',
-      kind: 'warning',
-      color: 'error',
-    });
+    // densable L1t + Jmn/NBr/Ymn.AbovePrompt; markThrown settles RZ for pr.
+    markThrown();
+    reportDrawWhileDrawn('AbovePrompt', [getLastUiRenderPlugin() || scrollOwner], error, addNotification);
     setAboveResetKey(n => n + 1);
   };
   return (
@@ -5263,16 +5520,17 @@ export function PluginAbovePromptSite({
             <PaneBodyColumnsContext.Provider value={aboveBodyColumns}>
               <Box
                 ref={node => {
+                  leftoverHostRef.current = node;
                   bandAwayRef.current = node;
                 }}
                 position="relative"
                 flexShrink={0}
                 flexDirection="column"
-                maxHeight={rows + listRows}
+                maxHeight={promptRoom + listRows}
                 overflowY="hidden"
-                onWheel={hasCue && !dialogOpen ? bandWheel : undefined}
+                onWheel={hasCue && !bandBlocked ? bandWheel : undefined}
               >
-                <Box flexDirection="column" flexShrink={0} maxHeight={windowRows} overflowY="hidden">
+                <Box flexDirection="column" flexShrink={0} maxHeight={windowRows + listRows} overflowY="hidden">
                   {/* densable `fEe` — marginTop=-offset; keptColumns=DZ under CollapseHandle. */}
                   <Box
                     ref={node => {
@@ -5283,6 +5541,7 @@ export function PluginAbovePromptSite({
                     flexShrink={0}
                     marginTop={-offset}
                     marginRight={COLLAPSE_HANDLE_COLUMNS}
+                    {...(aboveHeldRows !== undefined && { minHeight: aboveHeldRows })}
                   >
                     {node}
                   </Box>
@@ -5332,20 +5591,67 @@ export function PluginUserMessageSite({
   from?: unknown;
   children: ReactNode;
 }): ReactNode {
-  const drawn = useRenderDrawing(
-    {
-      surface: 'terminal',
-      component: 'UserMessage',
-      requestId,
-      props: {
-        text,
-        ...(origin !== undefined && { origin }),
-        ...(isExpanded !== undefined && { isExpanded }),
-        ...(task !== undefined && { task }),
-        ...(from !== undefined && { from }),
-      },
+  const { addNotification } = useNotifications();
+  const { subscribeFrames } = useApp();
+  const hasHook = hasMatchingFunctionHook('ui.render', { component: 'UserMessage' });
+  // densable `ar`: `ii()&&g2e&&MYe` — `ii` is fullscreen (virtual scroll).
+  const measure = isFullscreenEnvEnabled() && isG2eComponent('UserMessage') && hasHook;
+  const {
+    ref: cardRef,
+    lastRows,
+    contentRows,
+    onScreen,
+  } = useSiteMeasure(measure, `UserMessage\0${requestId}`, subscribeFrames);
+  const userInput = {
+    surface: 'terminal',
+    component: 'UserMessage',
+    requestId,
+    props: {
+      text,
+      ...(origin !== undefined && { origin }),
+      ...(isExpanded !== undefined && { isExpanded }),
+      ...(task !== undefined && { task }),
+      ...(from !== undefined && { from }),
+      ...(onScreen !== undefined && { onScreen }),
     },
-    `${requestId}\0${text}\0${origin?.kind ?? ''}\0${String(isExpanded ?? '')}`,
+  };
+  const userInputKey = `${requestId}\0${text}\0${origin?.kind ?? ''}\0${String(isExpanded ?? '')}`;
+  const { drawn, markThrown } = useRenderDrawing(userInput, userInputKey);
+  const userHeldRows = useHeldSiteRows({
+    isOff: siteIsOff(hasHook, userInput),
+    input: userInputKey,
+    drawn,
+    isFallback: isEngineFallback(drawn),
+    lastRows,
+    contentRows,
+  });
+  const [userResetKey, setUserResetKey] = useState(0);
+  const pluginTree = hasHook && hasPluginDrawing(drawn);
+  const engine = children;
+  const pluginNode = <DrawingNode node={drawn} plugin="" requestId={requestId} index={0} component="UserMessage" />;
+  return (
+    <Box
+      ref={node => {
+        cardRef.current = node;
+      }}
+      flexDirection="column"
+      {...(userHeldRows !== undefined && { minHeight: userHeldRows })}
+    >
+      {pluginTree ? (
+        <PaneErrorBoundary
+          resetKey={userResetKey}
+          fallback={engine}
+          onError={error => {
+            markThrown();
+            reportDrawWhileDrawn('UserMessage', [getLastUiRenderPlugin()], error, addNotification);
+            setUserResetKey(n => n + 1);
+          }}
+        >
+          {pluginNode}
+        </PaneErrorBoundary>
+      ) : (
+        engine
+      )}
+    </Box>
   );
-  return rebuild(drawn, '', requestId, children);
 }

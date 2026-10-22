@@ -9,7 +9,11 @@ export const PLUGIN_DESCRIPTION =
   'AGENTS.md as project instructions: by default loaded where the project has no CLAUDE.md; by its instructionFiles option, loaded beside CLAUDE.md, left out, or with the project instructions dropped'
 
 export const AGENTS_NAMES = ['AGENTS.md', '.claude/AGENTS.md']
-export const CLAUDE_NAMES = ['CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md']
+export const CLAUDE_NAMES = [
+  'CLAUDE.md',
+  '.claude/CLAUDE.md',
+  'CLAUDE.local.md',
+]
 export const DEFAULT_MODE = 'claude-md-or-agents-md'
 export const DROPPED_KINDS = ['project', 'local', 'user']
 export const MODES = [
@@ -186,8 +190,9 @@ export function withProjectFiles(existing, added) {
 export function legacyModeOf(value) {
   if (value === undefined) return undefined
   return (
-    (typeof value === 'string' ? LEGACY_PROJECT_INSTRUCTIONS[value] : undefined) ??
-    'claude-md'
+    (typeof value === 'string'
+      ? LEGACY_PROJECT_INSTRUCTIONS[value]
+      : undefined) ?? 'claude-md'
   )
 }
 
@@ -207,7 +212,10 @@ export function loadCountsOf(files, isYielded, isWalkFailed) {
   return {
     fileCount: files.length - importCount,
     importCount,
-    totalContentLength: files.reduce((sum, file) => sum + file.content.length, 0),
+    totalContentLength: files.reduce(
+      (sum, file) => sum + file.content.length,
+      0,
+    ),
     isYielded,
     isWalkFailed,
   }
@@ -432,9 +440,9 @@ export function register(on, options = {}) {
     const agentId = String(event.agentId ?? MAIN_LOOP)
     const seen = nestedSeen.get(agentId) ?? new Set()
     nestedSeen.set(agentId, seen)
-    const scoped = (fallback ? outsideClaudeDirs(agents, claude) : agents).filter(
-      hit => isBelow(hit.dir, root),
-    )
+    const scoped = (
+      fallback ? outsideClaudeDirs(agents, claude) : agents
+    ).filter(hit => isBelow(hit.dir, root))
     const fresh = unseenFiles(filesOf(scoped), [
       ...lastContextFiles,
       ...filesOf(claude),

@@ -192,7 +192,10 @@ export async function discoverEvalCaseDirs(
               relative(rootReal, nextReal) === '' ||
               !relative(nextReal, rootReal).startsWith('..')
             ) {
-              if (nextReal === rootReal || rootReal.startsWith(nextReal + sep)) {
+              if (
+                nextReal === rootReal ||
+                rootReal.startsWith(nextReal + sep)
+              ) {
                 report(
                   child,
                   child,
@@ -201,7 +204,10 @@ export async function discoverEvalCaseDirs(
                 continue
               }
             }
-            if (onRoute.has(`suite:${nextReal}`) || onRoute.has(`tree:${nextReal}`)) {
+            if (
+              onRoute.has(`suite:${nextReal}`) ||
+              onRoute.has(`tree:${nextReal}`)
+            ) {
               continue
             }
           } catch {
@@ -225,7 +231,12 @@ export async function discoverEvalCaseDirs(
           continue
         }
         remaining--
-        await walk(child, nextReal === real ? resolve(child) : nextReal, depth + 1, inSuite)
+        await walk(
+          child,
+          nextReal === real ? resolve(child) : nextReal,
+          depth + 1,
+          inSuite,
+        )
       }
     } finally {
       onRoute.delete(routeKey)

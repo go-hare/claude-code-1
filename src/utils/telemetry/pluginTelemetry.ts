@@ -55,6 +55,42 @@ export function hashPluginId(name: string, marketplace?: string): string {
 }
 
 /**
+ * densable QMe / GG — sanitized command_name plus skill_name_hash.
+ * Hash is sha256(canonicalName + claude-plugin-telemetry-v1) first 16 hex,
+ * and only when the sanitized name is "custom" (Jxg).
+ */
+export function sanitizeSkillNameForTelemetry(input: {
+  rawName: string
+  canonicalName: string
+  isMcp: boolean
+  isBuiltIn: boolean
+  isBundled: boolean
+  isOfficial: boolean
+}): {
+  sanitizedName: string
+  skillNameHash: {
+    skill_name_hash?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  }
+} {
+  const sanitizedName = input.isMcp
+    ? 'mcp'
+    : input.isBuiltIn || input.isBundled || input.isOfficial
+      ? input.rawName
+      : 'custom'
+  if (sanitizedName !== 'custom') {
+    return { sanitizedName, skillNameHash: {} }
+  }
+  return {
+    sanitizedName,
+    skillNameHash: {
+      skill_name_hash: hashPluginId(
+        input.canonicalName,
+      ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    },
+  }
+}
+
+/**
  * 4-value scope enum for plugin origin. Distinct from PluginScope
  * (managed/user/project/local) which is installation-target — this is
  * marketplace-origin.

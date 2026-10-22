@@ -472,9 +472,9 @@ export async function updatePluginCli(
         const { describeEntryHelperShown, withAcceptCommandMatched } =
           await import('../../utils/plugins/pluginAcceptCommand.js')
         const shown = await describeEntryHelperShown({
-          pluginId: helperPluginId,
-          command: helper.command,
-          archiveUrl: helper.archiveUrl,
+          pluginId: helperPluginId ?? plugin,
+          command: helper?.command ?? '',
+          archiveUrl: helper?.archiveUrl ?? '',
         })
         shownCommand = withAcceptCommandMatched(shown, options.acceptCommand)
         const verdict = await promptEntryHeadersHelperConfirm({

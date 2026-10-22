@@ -11,6 +11,7 @@ export type ParsedCommand =
   | { type: 'disable'; plugin?: string }
   | { type: 'configure'; plugin?: string }
   | { type: 'validate'; path?: string }
+  | { type: 'eval'; path?: string }
   | {
       type: 'marketplace'
       action?: 'add' | 'remove' | 'update' | 'list'
@@ -131,6 +132,11 @@ export function parsePluginArgs(args?: string): ParsedCommand {
     case 'validate': {
       const target = parts.slice(1).join(' ').trim()
       return { type: 'validate', path: target || undefined }
+    }
+
+    case 'eval': {
+      const target = parts.slice(1).join(' ').trim()
+      return { type: 'eval', path: target || undefined }
     }
 
     case 'marketplace':

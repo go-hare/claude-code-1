@@ -10,6 +10,11 @@ import type { HooksSettings } from '../settings/types.js'
 import { parseYaml } from '../yaml.js'
 import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
 import {
+  ANTHROPIC_OWN_PLUGIN_VALIDATE_MARKETPLACE,
+  checkAnthropicOwnPluginName,
+} from './pluginReservedName.js'
+import { isOfficialMarketplaceName } from './pluginIdentifier.js'
+import {
   collectUnknownPluginHooksJsonKeyWarnings,
   PluginHooksSchema,
   PluginManifestSchema,
@@ -387,6 +392,17 @@ export async function validatePluginManifest(
       })
     }
 
+    // densable `fkt` + `spo` — plugin.json is gold kind "alone".
+    const reserved = checkAnthropicOwnPluginName(manifest.name)
+    if (reserved) {
+      const row = {
+        path: 'name',
+        message: `${reserved.message} ${ANTHROPIC_OWN_PLUGIN_VALIDATE_MARKETPLACE}`,
+      }
+      if (reserved.severity === 'error') errors.push(row)
+      else warnings.push(row)
+    }
+
     // Warn if no version specified
     if (!manifest.version) {
       warnings.push({
@@ -547,6 +563,7 @@ export async function validateMarketplaceManifest(
 
     // Check each plugin entry
     if (marketplace.plugins) {
+      const skipOwnNameCheck = isOfficialMarketplaceName(marketplace.name)
       marketplace.plugins.forEach((plugin, i) => {
         // Check for duplicate plugin names
         const duplicates = marketplace.plugins.filter(
@@ -557,6 +574,18 @@ export async function validateMarketplaceManifest(
             path: `plugins[${i}].name`,
             message: `Duplicate plugin name "${plugin.name}" found in marketplace`,
           })
+        }
+        // densable `fkt` on marketplace entries (no `spo`); skip official catalog.
+        if (!skipOwnNameCheck) {
+          const reserved = checkAnthropicOwnPluginName(plugin.name)
+          if (reserved) {
+            const row = {
+              path: `plugins[${i}].name`,
+              message: reserved.message,
+            }
+            if (reserved.severity === 'error') errors.push(row)
+            else warnings.push(row)
+          }
         }
       })
 

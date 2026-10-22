@@ -61,9 +61,7 @@ describe('parsePluginArgs', () => {
   })
 
   test('parses /plugin install --marketplace source', () => {
-    expect(
-      parsePluginArgs('install demo --marketplace owner/repo'),
-    ).toEqual({
+    expect(parsePluginArgs('install demo --marketplace owner/repo')).toEqual({
       type: 'install-from-source',
       plugin: 'demo',
       marketplaceSource: 'owner/repo',
@@ -136,6 +134,17 @@ describe('parsePluginArgs', () => {
       type: 'validate',
       path: '/path/to/plugin',
     })
+  })
+
+  test("returns { type: 'eval', path: '...' }", () => {
+    expect(parsePluginArgs('eval ./my-skill')).toEqual({
+      type: 'eval',
+      path: './my-skill',
+    })
+  })
+
+  test("returns { type: 'eval' } with no path", () => {
+    expect(parsePluginArgs('eval')).toEqual({ type: 'eval' })
   })
 
   // Manage

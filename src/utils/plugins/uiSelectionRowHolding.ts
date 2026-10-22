@@ -11,8 +11,7 @@
  *
  * Plugin-facing host maps gold `requestId` → `instance_id` (ui_read_selection name).
  */
-import type { DOMElement } from '@anthropic/ink'
-import type { SelectionState } from '@anthropic/ink/src/core/selection.js'
+import type { DOMElement, SelectionState } from '@anthropic/ink'
 
 export type UiSelectionAnswer = {
   text: string
