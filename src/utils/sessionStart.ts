@@ -97,161 +97,191 @@ export async function processSessionStartHooks(
   if (isBareMode()) {
     return []
   }
-  // densable 2.1.223 #16/#17 — startup notices for DISABLE_1M / unknown model window
-  if (model) {
-    logContextWindowEnforcementStartupNotices(model)
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { leftoverIhrUxe, LEFTOVER_IHR_SESSION_START } =
+      require('./collapseReadSearch.js') as typeof import('./collapseReadSearch.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    leftoverIhrUxe.setSpinnerColors(
+      'claudeBlue_FOR_SYSTEM_SPINNER',
+      'claudeBlueShimmer_FOR_SYSTEM_SPINNER',
+    )
+    leftoverIhrUxe.setSpinnerMessage(LEFTOVER_IHR_SESSION_START)
+  } catch {
+    // isolation — optional
   }
-  const hookMessages: HookResultMessage[] = []
-  const additionalContexts: string[] = []
-  const allWatchPaths: string[] = []
-  let shouldReloadSkills = false
-  let sessionTitleFromHooks: string | undefined
+  try {
+    // densable 2.1.223 #16/#17 — startup notices for DISABLE_1M / unknown model window
+    if (model) {
+      logContextWindowEnforcementStartupNotices(model)
+    }
+    const hookMessages: HookResultMessage[] = []
+    const additionalContexts: string[] = []
+    const allWatchPaths: string[] = []
+    let shouldReloadSkills = false
+    let sessionTitleFromHooks: string | undefined
 
-  // Skip loading plugin hooks if restricted to managed hooks only
-  // Plugin hooks are untrusted external code that should be blocked by policy
-  if (shouldAllowManagedHooksOnly()) {
-    logForDebugging('Skipping plugin hooks - allowManagedHooksOnly is enabled')
-  } else {
-    // Ensure plugin hooks are loaded before executing SessionStart hooks.
-    // loadPluginHooks() may be called early during startup (fire-and-forget, non-blocking)
-    // to pre-load hooks, but we must guarantee hooks are registered before executing them.
-    // This function is memoized, so if hooks are already loaded, this returns immediately
-    // with negligible overhead (just a cache lookup).
-    try {
-      await withDiagnosticsTiming('load_plugin_hooks', () => loadPluginHooks())
-    } catch (error) {
-      // Log error but don't crash - continue with session start without plugin hooks
-      /* eslint-disable no-restricted-syntax -- both branches wrap with context, not a toError case */
-      const enhancedError =
-        error instanceof Error
-          ? new Error(
-              `Failed to load plugin hooks during ${source}: ${error.message}`,
-            )
-          : new Error(
-              `Failed to load plugin hooks during ${source}: ${String(error)}`,
-            )
-      /* eslint-enable no-restricted-syntax */
-
-      if (error instanceof Error && error.stack) {
-        enhancedError.stack = error.stack
-      }
-
-      logError(enhancedError)
-
-      // Provide specific guidance based on error type
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      let userGuidance = ''
-
-      if (
-        errorMessage.includes('Failed to clone') ||
-        errorMessage.includes('network') ||
-        errorMessage.includes('ETIMEDOUT') ||
-        errorMessage.includes('ENOTFOUND')
-      ) {
-        userGuidance =
-          'This appears to be a network issue. Check your internet connection and try again.'
-      } else if (
-        errorMessage.includes('Permission denied') ||
-        errorMessage.includes('EACCES') ||
-        errorMessage.includes('EPERM')
-      ) {
-        userGuidance =
-          'This appears to be a permissions issue. Check file permissions on ~/.claude/plugins/'
-      } else if (
-        errorMessage.includes('Invalid') ||
-        errorMessage.includes('parse') ||
-        errorMessage.includes('JSON') ||
-        errorMessage.includes('schema')
-      ) {
-        userGuidance =
-          'This appears to be a configuration issue. Check your plugin settings in .claude/settings.json'
-      } else {
-        userGuidance =
-          'Please fix the plugin configuration or remove problematic plugins from your settings.'
-      }
-
+    // Skip loading plugin hooks if restricted to managed hooks only
+    // Plugin hooks are untrusted external code that should be blocked by policy
+    if (shouldAllowManagedHooksOnly()) {
       logForDebugging(
-        `Warning: Failed to load plugin hooks. SessionStart hooks from plugins will not execute. ` +
-          `Error: ${errorMessage}. ${userGuidance}`,
-        { level: 'warn' },
+        'Skipping plugin hooks - allowManagedHooksOnly is enabled',
       )
+    } else {
+      // Ensure plugin hooks are loaded before executing SessionStart hooks.
+      // loadPluginHooks() may be called early during startup (fire-and-forget, non-blocking)
+      // to pre-load hooks, but we must guarantee hooks are registered before executing them.
+      // This function is memoized, so if hooks are already loaded, this returns immediately
+      // with negligible overhead (just a cache lookup).
+      try {
+        await withDiagnosticsTiming('load_plugin_hooks', () =>
+          loadPluginHooks(),
+        )
+      } catch (error) {
+        // Log error but don't crash - continue with session start without plugin hooks
+        /* eslint-disable no-restricted-syntax -- both branches wrap with context, not a toError case */
+        const enhancedError =
+          error instanceof Error
+            ? new Error(
+                `Failed to load plugin hooks during ${source}: ${error.message}`,
+              )
+            : new Error(
+                `Failed to load plugin hooks during ${source}: ${String(error)}`,
+              )
+        /* eslint-enable no-restricted-syntax */
 
-      // Continue execution - plugin hooks won't be available, but project-level hooks
-      // from .claude/settings.json (loaded via captureHooksConfigSnapshot) will still work
-    }
-  }
+        if (error instanceof Error && error.stack) {
+          enhancedError.stack = error.stack
+        }
 
-  // Execute SessionStart hooks, ignoring blocking errors
-  // Use the provided agentType or fall back to the one stored in bootstrap state
-  const resolvedAgentType = agentType ?? getMainThreadAgentType()
-  for await (const hookResult of executeSessionStartHooks(
-    source,
-    sessionId,
-    resolvedAgentType,
-    model,
-    undefined,
-    undefined,
-    forceSyncExecution,
-  )) {
-    if (hookResult.message) {
-      hookMessages.push(hookResult.message)
+        logError(enhancedError)
+
+        // Provide specific guidance based on error type
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        let userGuidance = ''
+
+        if (
+          errorMessage.includes('Failed to clone') ||
+          errorMessage.includes('network') ||
+          errorMessage.includes('ETIMEDOUT') ||
+          errorMessage.includes('ENOTFOUND')
+        ) {
+          userGuidance =
+            'This appears to be a network issue. Check your internet connection and try again.'
+        } else if (
+          errorMessage.includes('Permission denied') ||
+          errorMessage.includes('EACCES') ||
+          errorMessage.includes('EPERM')
+        ) {
+          userGuidance =
+            'This appears to be a permissions issue. Check file permissions on ~/.claude/plugins/'
+        } else if (
+          errorMessage.includes('Invalid') ||
+          errorMessage.includes('parse') ||
+          errorMessage.includes('JSON') ||
+          errorMessage.includes('schema')
+        ) {
+          userGuidance =
+            'This appears to be a configuration issue. Check your plugin settings in .claude/settings.json'
+        } else {
+          userGuidance =
+            'Please fix the plugin configuration or remove problematic plugins from your settings.'
+        }
+
+        logForDebugging(
+          `Warning: Failed to load plugin hooks. SessionStart hooks from plugins will not execute. ` +
+            `Error: ${errorMessage}. ${userGuidance}`,
+          { level: 'warn' },
+        )
+
+        // Continue execution - plugin hooks won't be available, but project-level hooks
+        // from .claude/settings.json (loaded via captureHooksConfigSnapshot) will still work
+      }
     }
+
+    // Execute SessionStart hooks, ignoring blocking errors
+    // Use the provided agentType or fall back to the one stored in bootstrap state
+    const resolvedAgentType = agentType ?? getMainThreadAgentType()
+    for await (const hookResult of executeSessionStartHooks(
+      source,
+      sessionId,
+      resolvedAgentType,
+      model,
+      undefined,
+      undefined,
+      forceSyncExecution,
+    )) {
+      if (hookResult.message) {
+        hookMessages.push(hookResult.message)
+      }
+      if (
+        hookResult.additionalContexts &&
+        hookResult.additionalContexts.length > 0
+      ) {
+        additionalContexts.push(...hookResult.additionalContexts)
+      }
+      if (hookResult.initialUserMessage) {
+        pendingInitialUserMessage = hookResult.initialUserMessage
+      }
+      if (hookResult.sessionTitle) {
+        sessionTitleFromHooks = hookResult.sessionTitle
+      }
+      if (hookResult.reloadSkills) {
+        shouldReloadSkills = true
+      }
+      if (hookResult.watchPaths && hookResult.watchPaths.length > 0) {
+        allWatchPaths.push(...hookResult.watchPaths)
+      }
+    }
+
+    // Official 2.1.x: reload skills before applying title so skills installed
+    // by this SessionStart run are available in the same session.
+    if (shouldReloadSkills) {
+      reloadSkillsFromSessionStartHook()
+    }
+
+    // densable: Wos = e==="startup"||e==="resume"||e==="fork" ? c : void 0
+    // (title cache for startup/resume/fork; not clear/compact).
     if (
-      hookResult.additionalContexts &&
-      hookResult.additionalContexts.length > 0
+      (source === 'startup' || source === 'resume' || source === 'fork') &&
+      sessionTitleFromHooks
     ) {
-      additionalContexts.push(...hookResult.additionalContexts)
+      pendingSessionTitle = sessionTitleFromHooks
+      // Also apply immediately so interactive UI can show it without waiting
+      // for takeSessionStartTitle consumers.
+      applyHookSessionTitle(sessionTitleFromHooks)
     }
-    if (hookResult.initialUserMessage) {
-      pendingInitialUserMessage = hookResult.initialUserMessage
+
+    if (allWatchPaths.length > 0) {
+      updateWatchPaths(allWatchPaths)
     }
-    if (hookResult.sessionTitle) {
-      sessionTitleFromHooks = hookResult.sessionTitle
+
+    // If hooks provided additional context, add it as a message
+    if (additionalContexts.length > 0) {
+      const contextMessage = createAttachmentMessage({
+        type: 'hook_additional_context',
+        content: additionalContexts,
+        hookName: 'SessionStart',
+        toolUseID: 'SessionStart',
+        hookEvent: 'SessionStart',
+      })
+      hookMessages.push(contextMessage)
     }
-    if (hookResult.reloadSkills) {
-      shouldReloadSkills = true
-    }
-    if (hookResult.watchPaths && hookResult.watchPaths.length > 0) {
-      allWatchPaths.push(...hookResult.watchPaths)
+
+    return hookMessages
+  } finally {
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { leftoverIhrUxe } =
+        require('./collapseReadSearch.js') as typeof import('./collapseReadSearch.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      leftoverIhrUxe.setSpinnerMessage(null)
+      leftoverIhrUxe.setSpinnerColors(null, null)
+    } catch {
+      // isolation — optional
     }
   }
-
-  // Official 2.1.x: reload skills before applying title so skills installed
-  // by this SessionStart run are available in the same session.
-  if (shouldReloadSkills) {
-    reloadSkillsFromSessionStartHook()
-  }
-
-  // densable: Wos = e==="startup"||e==="resume"||e==="fork" ? c : void 0
-  // (title cache for startup/resume/fork; not clear/compact).
-  if (
-    (source === 'startup' || source === 'resume' || source === 'fork') &&
-    sessionTitleFromHooks
-  ) {
-    pendingSessionTitle = sessionTitleFromHooks
-    // Also apply immediately so interactive UI can show it without waiting
-    // for takeSessionStartTitle consumers.
-    applyHookSessionTitle(sessionTitleFromHooks)
-  }
-
-  if (allWatchPaths.length > 0) {
-    updateWatchPaths(allWatchPaths)
-  }
-
-  // If hooks provided additional context, add it as a message
-  if (additionalContexts.length > 0) {
-    const contextMessage = createAttachmentMessage({
-      type: 'hook_additional_context',
-      content: additionalContexts,
-      hookName: 'SessionStart',
-      toolUseID: 'SessionStart',
-      hookEvent: 'SessionStart',
-    })
-    hookMessages.push(contextMessage)
-  }
-
-  return hookMessages
 }
 
 export async function processSetupHooks(

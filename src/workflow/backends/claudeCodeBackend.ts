@@ -9,7 +9,10 @@ import {
 } from '@claude-code/workflow-engine'
 import { assembleToolPool } from '../../tools.js'
 import { finalizeAgentTool } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
-import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
+import {
+  isRunAgentSpinnerMode,
+  runAgent,
+} from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
 import {
   isBuiltInAgent,
   type AgentDefinition,
@@ -349,7 +352,8 @@ export const claudeCodeBackend: AgentAdapter = {
           ...(model ? { model: model as unknown as ModelAlias } : {}),
           ...(worktreeInfo ? { worktreePath: worktreeInfo.worktreePath } : {}),
         })) {
-          messages.push(msg as Message)
+          if (isRunAgentSpinnerMode(msg)) continue
+          messages.push(msg)
           // densable ht.responded() on first non-error assistant message
           if (
             msg.type === 'assistant' &&

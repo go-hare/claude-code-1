@@ -523,6 +523,11 @@ export type SubagentContextOverrides = {
   abortController?: AbortController
   /** Override the getAppState function */
   getAppState?: ToolUseContext['getAppState']
+  /**
+   * Gold Eqn `onRetryStatus: n?.onRetryStatus`. Absent means the child has
+   * no retry callback. Do not invent Phn(child) here.
+   */
+  setRetryStatus?: ToolUseContext['setRetryStatus']
 
   /**
    * Explicit opt-in to share parent's setAppState callback.
@@ -629,6 +634,8 @@ export function createSubagentContext(
           }
         }
 
+  const childAgentId = overrides?.agentId ?? createAgentId()
+
   return {
     // Preserve the parent Langfuse trace separately so nested side queries
     // like auto_mode can attach to the main agent trace instead of the
@@ -709,10 +716,13 @@ export function createSubagentContext(
     // when setAppState is stubbed. Concurrent calls compose via React's state queue.
     updateAttributionState: parentContext.updateAttributionState,
 
-    // UI callbacks - undefined for subagents (can't control parent UI)
+    // UI callbacks - undefined for subagents (can't control parent UI).
+    // Gold Eqn copies onRetryStatus: n?.onRetryStatus. It does not Phn(child).
+    // runAgent then copies override.onRetryStatus onto the child when set.
     addNotification: undefined,
     setToolJSX: undefined,
     setStreamMode: undefined,
+    setRetryStatus: overrides?.setRetryStatus,
     setSDKStatus: undefined,
     openMessageSelector: undefined,
 
@@ -720,7 +730,7 @@ export function createSubagentContext(
     options: overrides?.options ?? parentContext.options,
     messages: overrides?.messages ?? parentContext.messages,
     // Generate new agentId for subagents (each subagent should have its own ID)
-    agentId: overrides?.agentId ?? createAgentId(),
+    agentId: childAgentId,
     agentType: overrides?.agentType,
     // densable 2.1.289 Ct/innerCall: nested-in-tool only — do NOT default true
     // for subagents (they use agentId). Leave unset unless an override adds it.
@@ -791,6 +801,14 @@ function isMessageDeltaStreamEvent(
     (message as StreamEventMessage).event.type === 'message_delta'
   )
 }
+
+const FORKED_TRANSCRIPT_TYPES = new Set([
+  'user',
+  'assistant',
+  'attachment',
+  'progress',
+  'system',
+])
 
 export async function runForkedAgent({
   promptMessages,
@@ -890,6 +908,20 @@ export async function runForkedAgent({
         continue
       }
       if (message.type === 'stream_request_start') {
+        continue
+      }
+      // densable eZe: a tombstone retracts the message it carries; every
+      // other control event (spinner_mode, query_model_change, …) is dropped
+      // so only transcript messages reach outputMessages / onMessage.
+      if (message.type === 'tombstone') {
+        const retracted = (message as { message?: { uuid?: string } }).message
+        const idx = outputMessages.findLastIndex(
+          m => m.uuid === retracted?.uuid,
+        )
+        if (idx !== -1) outputMessages.splice(idx, 1)
+        continue
+      }
+      if (!FORKED_TRANSCRIPT_TYPES.has(message.type)) {
         continue
       }
 

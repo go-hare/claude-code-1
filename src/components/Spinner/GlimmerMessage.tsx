@@ -19,20 +19,14 @@ type Props = {
 
 const ERROR_RED = { r: 171, g: 43, b: 63 };
 
-/** densable RTt thinking/stall/tool-use is 2 Text. Analog Ink markDirty walks
- *  ancestors — 4→2 removeChildNode flashes the whole spinner row (Image 37).
- *  KEEP a stable 4-Text sibling shape on every 50ms path. */
-function stableVerbRow(color: keyof Theme | RGBColor, message: string): React.ReactNode {
-  return (
-    <>
-      <Text color={color}>{message}</Text>
-      <Text color={color}>{''}</Text>
-      <Text color={color}>{''}</Text>
-      <Text color={color}> </Text>
-    </>
-  );
-}
-
+/**
+ * densable `RTt`. Gold returns:
+ *   stalled / thinking / tool-use / offscreen → 2 Text (message + space)
+ *   on-screen shimmer → before&& / shim / after&& / space
+ * DualInk leftoverGs analog extra of always-4-Text left h=0 nodes in the
+ * wrap row; leftoverGs then dirty-clears the outer width-100% column
+ * (verb + Tip) every glimmerIndex tick.
+ */
 export function GlimmerMessage({
   message,
   mode,
@@ -46,9 +40,6 @@ export function GlimmerMessage({
   const [themeName] = useTheme();
   const theme = getTheme(themeName);
 
-  // This component re-renders at 20fps (glimmerIndex changes every 50ms) but
-  // message is stable within a turn. Precompute grapheme segmentation + widths
-  // once per message instead of per frame. Measured -81% on the shimmer path.
   const { segments, messageWidth } = React.useMemo(() => {
     const segs: { segment: string; width: number }[] = [];
     for (const { segment } of getGraphemeSegmenter().segment(message)) {
@@ -59,61 +50,72 @@ export function GlimmerMessage({
 
   if (!message) return null;
 
-  // When stalled, show text that smoothly transitions to red
   if (stalledIntensity > 0) {
     const baseColorStr = theme[messageColor];
     const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
-
-    if (baseRGB) {
-      const interpolated = interpolateColor(baseRGB, ERROR_RED, stalledIntensity);
-      return stableVerbRow(toRGBColor(interpolated), message);
-    }
-
-    // Fallback for ANSI themes: use messageColor until fully stalled, then error
-    const color = stalledIntensity > 0.5 ? 'error' : messageColor;
-    return stableVerbRow(color, message);
+    const color: keyof Theme | RGBColor = baseRGB
+      ? toRGBColor(interpolateColor(baseRGB, ERROR_RED, stalledIntensity))
+      : stalledIntensity > 0.5
+        ? 'error'
+        : messageColor;
+    return (
+      <>
+        <Text color={color}>{message}</Text>
+        <Text color={color}> </Text>
+      </>
+    );
   }
 
-  // densable RTt: after stall, fade the verb toward theme.warning.
   if (thinkingIntensity > 0) {
     const baseColorStr = theme[messageColor];
     const warningStr = theme.warning;
     const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
     const warningRGB = warningStr ? parseRGB(warningStr) : null;
-
-    if (baseRGB && warningRGB) {
-      const interpolated = interpolateColor(baseRGB, warningRGB, thinkingIntensity);
-      return stableVerbRow(toRGBColor(interpolated), message);
-    }
-
-    const color = thinkingIntensity > 0.5 ? 'warning' : messageColor;
-    return stableVerbRow(color, message);
+    const color: keyof Theme | RGBColor =
+      baseRGB && warningRGB
+        ? toRGBColor(interpolateColor(baseRGB, warningRGB, thinkingIntensity))
+        : thinkingIntensity > 0.5
+          ? 'warning'
+          : messageColor;
+    return (
+      <>
+        <Text color={color}>{message}</Text>
+        <Text color={color}> </Text>
+      </>
+    );
   }
 
-  // tool-use mode: all chars flash with the same opacity, so render as a
-  // single <Text> instead of N individual FlashingChar components.
   if (mode === 'tool-use') {
     const baseColorStr = theme[messageColor];
     const shimmerColorStr = theme[shimmerColor];
     const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
     const shimmerRGB = shimmerColorStr ? parseRGB(shimmerColorStr) : null;
-
-    if (baseRGB && shimmerRGB) {
-      const interpolated = interpolateColor(baseRGB, shimmerRGB, flashOpacity);
-      return stableVerbRow(toRGBColor(interpolated), message);
-    }
-
-    const color = flashOpacity > 0.5 ? shimmerColor : messageColor;
-    return stableVerbRow(color, message);
+    const color: keyof Theme | RGBColor =
+      baseRGB && shimmerRGB
+        ? toRGBColor(interpolateColor(baseRGB, shimmerRGB, flashOpacity))
+        : flashOpacity > 0.5
+          ? shimmerColor
+          : messageColor;
+    return (
+      <>
+        <Text color={color}>{message}</Text>
+        <Text color={messageColor}> </Text>
+      </>
+    );
   }
 
-  // densable RTt offscreen is 2 Text. Analog Ink appendChildNode/removeChildNode
-  // markDirty the whole spinner row on 2↔4 (Image 37 闪, official Ink does not).
-  // KEEP a stable 4-Text sibling shape; offscreen puts the whole message in `before`.
   const shimmerStart = glimmerIndex - 1;
   const shimmerEnd = glimmerIndex + 1;
-  const glimmerOffscreen = shimmerStart >= messageWidth || shimmerEnd < 0;
-  const clampedStart = glimmerOffscreen ? messageWidth : Math.max(0, shimmerStart);
+  if (shimmerStart >= messageWidth || shimmerEnd < 0) {
+    return (
+      <>
+        <Text color={messageColor}>{message}</Text>
+        <Text color={messageColor}> </Text>
+      </>
+    );
+  }
+
+  const clampedStart = Math.max(0, shimmerStart);
   let colPos = 0;
   let before = '';
   let shim = '';
@@ -131,9 +133,9 @@ export function GlimmerMessage({
 
   return (
     <>
-      <Text color={messageColor}>{before}</Text>
+      {before ? <Text color={messageColor}>{before}</Text> : null}
       <Text color={shimmerColor}>{shim}</Text>
-      <Text color={messageColor}>{after}</Text>
+      {after ? <Text color={messageColor}>{after}</Text> : null}
       <Text color={messageColor}> </Text>
     </>
   );

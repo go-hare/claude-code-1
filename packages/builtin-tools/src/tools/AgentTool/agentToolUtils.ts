@@ -86,6 +86,10 @@ import {
   ONE_SHOT_BUILTIN_AGENT_TYPES,
 } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
+import {
+  isRunAgentSpinnerMode,
+  type RunAgentSpinnerMode,
+} from './spinnerModeEvent.js'
 
 /**
  * densable Lco / nXg — tools stripped from observer exact pools, then
@@ -919,7 +923,7 @@ export async function runAsyncAgentLifecycle({
   abortController: AbortController
   makeStream: (
     onCacheSafeParams: ((p: CacheSafeParams) => void) | undefined,
-  ) => AsyncGenerator<MessageType, void>
+  ) => AsyncGenerator<MessageType | RunAgentSpinnerMode, void>
   metadata: Parameters<typeof finalizeAgentTool>[2]
   description: string
   toolUseContext: ToolUseContext
@@ -976,6 +980,11 @@ export async function runAsyncAgentLifecycle({
         }
       : undefined
     for await (const message of makeStream(onCacheSafeParams)) {
+      // densable Phn/Ohr — query yields spinner_mode for teammate Phn.setMode.
+      // Do not retain control events in agentMessages / task.messages.
+      if (isRunAgentSpinnerMode(message)) {
+        continue
+      }
       agentMessages.push(message)
       isIdleTracker.track(message)
       // Append immediately when UI holds the task (retain). Bootstrap reads

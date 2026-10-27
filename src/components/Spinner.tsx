@@ -1,10 +1,13 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { Box, Text, stringWidth } from '@anthropic/ink';
+import { leftoverBhrConnLabel, leftoverBhrIdleBudget } from './Spinner/leftoverZxt.js';
 import * as React from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { computeGlimmerIndex, computeShimmerSegments, SHIMMER_INTERVAL_MS } from '../bridge/bridgeStatusUtil.js';
 import { feature } from 'bun:bundle';
 import { getKairosActive, getSessionId, getUserMsgOptIn } from '../bootstrap/state.js';
+import { leftoverIhrGet, leftoverIhrHas, leftoverIhrSubscribe } from '../utils/collapseReadSearch.js';
+import { leftoverIhrSlice, useLeftoverIhrStore } from '../state/leftoverIhrStore.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { count } from '../utils/array.js';
@@ -183,6 +186,26 @@ type Props = {
 // hook call chains. Without this split, toggling /brief mid-render would
 // violate Rules of Hooks (the inner variant calls ~10 more hooks).
 export function SpinnerWithVerb(props: Props): React.ReactNode {
+  const leftoverIhrSession = props.agentId ?? getSessionId();
+  useLeftoverIhrStore();
+  const leftoverOhr = useSyncExternalStore(
+    leftoverIhrSubscribe,
+    () => leftoverIhrSlice(leftoverIhrSession),
+    () => leftoverIhrSlice(leftoverIhrSession),
+  );
+  const leftoverHas = leftoverIhrHas(leftoverIhrSession);
+  const leftoverProps: Props = {
+    ...props,
+    mode: leftoverHas && leftoverOhr.mode ? (leftoverOhr.mode as SpinnerMode) : props.mode,
+    overrideMessage: leftoverOhr.overrideMessage ?? props.overrideMessage,
+    overrideColor: (leftoverOhr.overrideColor as Props['overrideColor']) ?? props.overrideColor,
+    overrideShimmerColor:
+      (leftoverOhr.overrideShimmerColor as Props['overrideShimmerColor']) ?? props.overrideShimmerColor,
+    retryStatus: (leftoverOhr.retryStatus as Props['retryStatus']) ?? props.retryStatus,
+    outputLimitRecovery: (leftoverOhr.outputLimitRecovery as Props['outputLimitRecovery']) ?? props.outputLimitRecovery,
+    compactingHint: leftoverOhr.compactingHintText ?? props.compactingHint,
+    compactingStartTime: leftoverOhr.compactingStartTime ?? props.compactingStartTime,
+  };
   const isBriefOnly = useAppState(s => s.isBriefOnly);
   // REPL overrides isBriefOnly→false when viewing a teammate transcript
   // (see isBriefOnly={viewedTeammateTask ? false : isBriefOnly}). That
@@ -203,10 +226,10 @@ export function SpinnerWithVerb(props: Props): React.ReactNode {
     isBriefOnly &&
     !viewingAgentTaskId
   ) {
-    return <BriefSpinner mode={props.mode} overrideMessage={props.overrideMessage} />;
+    return <BriefSpinner mode={leftoverProps.mode} overrideMessage={leftoverProps.overrideMessage} />;
   }
 
-  return <SpinnerWithVerbInner {...props} />;
+  return <SpinnerWithVerbInner {...leftoverProps} />;
 }
 
 function SpinnerWithVerbInner({
@@ -303,8 +326,16 @@ function SpinnerWithVerbInner({
     : undefined;
   const nextTask = isMainSession ? findNextPendingTask(tasksV2) : undefined;
 
-  // Use useState with initializer to pick a random verb once on mount
-  const [randomVerb] = useState(() => sample(getSpinnerVerbs()));
+  // densable Ohr — defaultVerb is leftoverIhr `hN(DTt())`, not a local sample.
+  const leftoverIhrSession = agentId ?? getSessionId();
+  const leftoverDefaultVerb = useSyncExternalStore(
+    leftoverIhrSubscribe,
+    () => leftoverIhrGet(leftoverIhrSession).defaultVerb,
+    () => leftoverIhrGet(leftoverIhrSession).defaultVerb,
+  );
+  // densable Cn `[ct]=g(()=>hN(DTt())??"Working")`, verb `S||ct`.
+  const [fallbackVerb] = useState(() => sample(getSpinnerVerbs()) ?? 'Working');
+  const randomVerb = leftoverDefaultVerb || fallbackVerb;
 
   // densable pt: current todo activeForm, else subject, whitespace collapsed.
   // Ytt truncates only that todo verb. Override and the random verb are not clipped.
@@ -558,6 +589,8 @@ type BriefSpinnerProps = {
 function BriefSpinner({ mode, overrideMessage }: BriefSpinnerProps): React.ReactNode {
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
+  // densable _n `[h]=g(()=>hN(DTt())??"Working")`, label `t??h` — brief mode
+  // does not read the Ihr store's defaultVerb.
   const [randomVerb] = useState(() => sample(getSpinnerVerbs()) ?? 'Working');
   const verb = overrideMessage ?? randomVerb;
   const connStatus = useAppState(s => s.remoteConnectionStatus);
@@ -636,11 +669,9 @@ export function BriefIdleStatus(): React.ReactNode {
   const connStatus = useAppState(s => s.remoteConnectionStatus);
   const runningCount = useAppState(s => count(Object.values(s.tasks), isBackgroundTask) + s.remoteBackgroundTaskCount);
   const { columns } = useTerminalSize();
-
   const showConnWarning = connStatus === 'reconnecting' || connStatus === 'disconnected';
-  const connText = connStatus === 'reconnecting' ? 'Reconnecting…' : 'Disconnected';
-  const leftText = showConnWarning ? connText : '';
-  const rightText = runningCount > 0 ? `${runningCount} in background` : '';
+  const { labelBudget, rightText } = leftoverBhrIdleBudget(columns, runningCount, showConnWarning);
+  const leftText = leftoverBhrConnLabel(connStatus, labelBudget);
 
   if (!leftText && !rightText) return <Box height={2} />;
 

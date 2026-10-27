@@ -13,6 +13,7 @@ import type { SettingsChangeExtra } from '../utils/settings/changeDetector.js';
 import type { SettingSource } from '../utils/settings/constants.js';
 import type { SettingsJson } from '../utils/settings/types.js';
 import { createStore } from './store.js';
+import { LeftoverIhrStoreProvider } from './leftoverIhrStore.js';
 
 // DCE: voice context is ant-only. External builds get a noop provider that
 // still wraps children in VoiceContext so useVoiceState never throws.
@@ -100,11 +101,13 @@ export function AppStateProvider({ children, initialState, onChangeAppState }: P
   return (
     <HasAppStateContext.Provider value={true}>
       <AppStoreContext.Provider value={store}>
-        <DialogStoreProvider>
-          <MailboxProvider>
-            <VoiceProvider>{children}</VoiceProvider>
-          </MailboxProvider>
-        </DialogStoreProvider>
+        <LeftoverIhrStoreProvider>
+          <DialogStoreProvider>
+            <MailboxProvider>
+              <VoiceProvider>{children}</VoiceProvider>
+            </MailboxProvider>
+          </DialogStoreProvider>
+        </LeftoverIhrStoreProvider>
       </AppStoreContext.Provider>
     </HasAppStateContext.Provider>
   );

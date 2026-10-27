@@ -75,7 +75,7 @@ import type { ModelAlias } from 'src/utils/model/aliases.js'
 import { resolveSkillModelOverride } from 'src/utils/model/model.js'
 import { recordSkillUsage } from 'src/utils/suggestions/skillUsageTracking.js'
 import { createAgentId } from 'src/utils/uuid.js'
-import { runAgent } from '../AgentTool/runAgent.js'
+import { isRunAgentSpinnerMode, runAgent } from '../AgentTool/runAgent.js'
 import {
   getToolUseIDFromParentMessage,
   tagMessagesWithToolUseID,
@@ -333,6 +333,7 @@ async function executeForkedSkill(
       webFetchReadmissionAllowed,
       override: { agentId, readFileState: forkReadFileState },
     })) {
+      if (isRunAgentSpinnerMode(message)) continue
       agentMessages.push(message)
 
       // Report progress for tool uses (like AgentTool does)

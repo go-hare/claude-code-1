@@ -22,6 +22,8 @@ describe('densable zm streaming spinner gate', () => {
     expect(src).toContain(
       '!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly || focusFoldHoldsPreview',
     )
+    expect(src).toContain('{showSpinner && !liveStateRowMounted && (')
+    expect(src).toContain('const [liveStateRowMounted] = useState(false)')
     expect(src).toContain('!reducedMotion && !process.env.WT_SESSION')
     expect(src).not.toContain('hasCursorUpViewportYankBug')
   })
@@ -43,15 +45,15 @@ describe('densable zm streaming spinner gate', () => {
     expect(src).not.toMatch(/hasContentAfter\s*=\s*[\s\S]*?!!streamingText/)
   })
 
-  test('StreamingTextPreview hides empty-after-strip (no lone ●)', () => {
+  test('StreamingTextPreview is gold Oa (getDerived, if (!displayed) return null)', () => {
     const src = readFileSync(
       join(ROOT, 'src/components/StreamingTextPreview.tsx'),
       'utf8',
     ).replace(/\r\n/g, '\n')
-    expect(src).toContain(
-      'if (!displayed || isEmptyMessageText(displayed)) return null',
-    )
+    expect(src).toContain('if (!displayed) return null')
+    expect(src).toContain('store.getDerived')
     expect(src).toContain('hideTrailingLine={hideTrailingLine}')
+    expect(src).not.toContain('isEmptyMessageText')
   })
 
   test('raw flush writes the whole buffer', () => {

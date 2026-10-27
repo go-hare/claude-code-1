@@ -17,7 +17,7 @@ const src = readFileSync(
 describe('densable 2.1.228 #15 SpinnerAnimationRow retry vs compact', () => {
   test('retryStatus early-return replaces the row; compact has no ProgressBar', () => {
     const retryIf = src.indexOf('if (retryStatus)')
-    const retryingIn = src.indexOf('Retrying in')
+    const retryingIn = src.indexOf('leftoverZxt')
 
     expect(retryIf).toBeGreaterThan(-1)
     expect(retryingIn).toBeGreaterThan(-1)
@@ -26,13 +26,18 @@ describe('densable 2.1.228 #15 SpinnerAnimationRow retry vs compact', () => {
   })
 
   test('stalled retry copy and error retry copy both present', () => {
-    expect(src).toContain("retryStatus.kind === 'stalled'")
-    expect(src).toContain('will retry in')
-    expect(src).toContain('check your network')
-    expect(src).toContain('Retrying in')
-    expect(src).toContain(
-      'attempt ${retryStatus.attempt}/${retryStatus.maxRetries}',
+    expect(src).toContain('leftoverZxt({ status: retryStatus, columns })')
+    const zxt = readFileSync(
+      join(import.meta.dir, '../leftoverZxt.tsx'),
+      'utf8',
     )
+    expect(zxt).toContain("t.kind === 'stalled'")
+    expect(zxt).toContain('will retry in')
+    expect(zxt).toContain('check your network')
+    expect(zxt).toContain('Retrying in')
+    expect(zxt).toContain('low_priority_waiting')
+    expect(zxt).toContain('auto_mode_unavailable')
+    expect(zxt).toContain('noResponse')
   })
 
   test('compact elapsed uses compactingStartTime and does not draw a bar', () => {

@@ -157,7 +157,7 @@ import {
 import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
 import { getPrompt } from './prompt.js';
-import { runAgent } from './runAgent.js';
+import { isRunAgentSpinnerMode, runAgent } from './runAgent.js';
 import {
   renderGroupedAgentToolUse,
   renderToolResultMessage,
@@ -1870,6 +1870,10 @@ export const AgentTool = buildTool({
                               }
                             : undefined,
                         })) {
+                          // densable Phn/Ohr — skip spinner_mode control events.
+                          if (isRunAgentSpinnerMode(msg)) {
+                            continue;
+                          }
                           agentMessages.push(msg);
                           isIdleTracker.track(msg);
 
@@ -2097,8 +2101,11 @@ export const AgentTool = buildTool({
                 }
                 const { result } = raceResult;
                 if (result.done) break;
+                // densable Phn/Ohr — skip spinner_mode control events.
+                if (isRunAgentSpinnerMode(result.value)) {
+                  continue;
+                }
                 const message = result.value as MessageType;
-
                 agentMessages.push(message);
 
                 // Rebuild so late message_delta usage mutations stick.

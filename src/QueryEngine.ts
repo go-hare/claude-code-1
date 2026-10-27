@@ -54,7 +54,6 @@ import { transformCompletedAssistantMessage } from './utils/messageDisplayTransf
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
-import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
 import { isBareMode } from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
@@ -138,6 +137,7 @@ import {
   isResultSuccessful,
   normalizeMessage,
 } from './utils/queryHelpers.js'
+import { getThemeSetting } from './utils/themeSetting.js'
 
 // Dead code elimination: conditional import for coordinator mode.
 // Lazy require — top-level `.prop` on require() can hang under Bun incomplete
@@ -278,6 +278,15 @@ export class QueryEngine {
     this.permissionDenials = []
     this.readFileState = config.readFileCache
     this.totalUsage = EMPTY_USAGE
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { leftoverIhrStartXe } =
+        require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      leftoverIhrStartXe()
+    } catch {
+      // isolation — optional
+    }
   }
 
   async *submitMessage(
@@ -430,6 +439,33 @@ export class QueryEngine {
       registerStructuredOutputEnforcement(setAppState, getSessionId())
     }
 
+    const leftoverIhrSdkRetry = (
+      status: import('./utils/advisorNetworkStall.js').RetryStatus | null,
+    ) => {
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { leftoverIhrMain } =
+          require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        leftoverIhrMain(getSessionId()).setRetryStatus(status)
+      } catch {
+        // isolation — optional
+      }
+    }
+    const leftoverIhrSdkMode = (
+      mode: import('./components/Spinner/index.js').SpinnerMode,
+    ) => {
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { leftoverIhrMain } =
+          require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        leftoverIhrMain(getSessionId()).setMode(mode)
+      } catch {
+        // isolation — optional
+      }
+    }
+
     let processUserInputContext: ProcessUserInputContext = {
       messages: this.mutableMessages,
       // Slash commands that mutate the message array (e.g. /force-snip)
@@ -461,7 +497,7 @@ export class QueryEngine {
         appendSystemPrompt,
         appendSubagentSystemPrompt,
         agentDefinitions: { activeAgents: agents, allAgents: [] },
-        theme: resolveThemeSetting(getGlobalConfig().theme),
+        theme: resolveThemeSetting(getThemeSetting()),
         maxBudgetUsd,
         // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
         forwardSubagentText,
@@ -493,6 +529,8 @@ export class QueryEngine {
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: () => {},
       setResponseLength: () => {},
+      setRetryStatus: leftoverIhrSdkRetry,
+      setStreamMode: leftoverIhrSdkMode,
       updateFileHistoryState: (
         updater: (prev: FileHistoryState) => FileHistoryState,
       ) => {
@@ -728,7 +766,7 @@ export class QueryEngine {
         customSystemPrompt,
         appendSystemPrompt,
         appendSubagentSystemPrompt,
-        theme: resolveThemeSetting(getGlobalConfig().theme),
+        theme: resolveThemeSetting(getThemeSetting()),
         agentDefinitions: { activeAgents: agents, allAgents: [] },
         maxBudgetUsd,
         // densable 2.1.219 #6
@@ -761,6 +799,8 @@ export class QueryEngine {
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: () => {},
       setResponseLength: () => {},
+      setRetryStatus: leftoverIhrSdkRetry,
+      setStreamMode: leftoverIhrSdkMode,
       updateFileHistoryState: processUserInputContext.updateFileHistoryState,
       updateAttributionState: processUserInputContext.updateAttributionState,
       setSDKStatus,
@@ -963,6 +1003,21 @@ export class QueryEngine {
         'type' in message &&
         (message as { type: string }).type === 'set_expanded_view'
       ) {
+        continue
+      }
+      if (
+        message &&
+        typeof message === 'object' &&
+        'type' in message &&
+        (message as { type: string }).type === 'spinner_mode'
+      ) {
+        leftoverIhrSdkMode(
+          (
+            message as unknown as {
+              mode: import('./components/Spinner/index.js').SpinnerMode
+            }
+          ).mode,
+        )
         continue
       }
       // Record assistant, user, and compact boundary messages

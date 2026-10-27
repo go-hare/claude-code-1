@@ -46,7 +46,10 @@ import {
   updateAgentProgress,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
-import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
+import {
+  isRunAgentSpinnerMode,
+  runAgent,
+} from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
 import { awaitClassifierAutoApproval } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
@@ -58,6 +61,7 @@ import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpda
 import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js'
 import { TEAM_DELETE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamDeleteTool/constants.js'
 import type { Message } from '../../types/message.js'
+import { asAgentId } from '../../types/ids.js'
 import type { PermissionDecision } from '../../types/permissions.js'
 import {
   createAssistantAPIErrorMessage,
@@ -1008,6 +1012,19 @@ async function waitForNextPromptOrShutdown(
  * @param config - Runner configuration
  * @returns Result with messages and success status
  */
+/** Drop the Phn(taskId) spinner slice once the teammate reaches a terminal state. */
+function evictTeammateSpinnerSlice(taskId: string): void {
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { leftoverIhrEvict } =
+      require('../collapseReadSearch.js') as typeof import('../collapseReadSearch.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    leftoverIhrEvict(taskId)
+  } catch {
+    // isolation — optional
+  }
+}
+
 export async function runInProcessTeammate(
   config: InProcessRunnerConfig,
 ): Promise<InProcessRunnerResult> {
@@ -1029,6 +1046,15 @@ export async function runInProcessTeammate(
   } = config
   const { setAppState } = toolUseContext
   const startTime = Date.now()
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { leftoverIhrPhn } =
+      require('../collapseReadSearch.js') as typeof import('../collapseReadSearch.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    leftoverIhrPhn(taskId).setMode('responding')
+  } catch {
+    // isolation — optional
+  }
 
   logForDebugging(
     `[inProcessRunner] Starting agent loop for ${identity.agentId}`,
@@ -1215,11 +1241,13 @@ export async function runInProcessTeammate(
         // Create an isolated copy of toolUseContext so that compaction
         // does not clear the main session's readFileState cache or
         // trigger the main session's UI callbacks.
+        // Gold `_Bo` `onRetryStatus:void 0` — compact isolate does not Phn.
         const isolatedContext: ToolUseContext = {
           ...toolUseContext,
           readFileState: cloneFileStateCache(toolUseContext.readFileState),
           onCompactProgress: undefined,
           setStreamMode: undefined,
+          setRetryStatus: undefined,
         }
         const compactedSummary = await compactConversation(
           allMessages,
@@ -1307,167 +1335,193 @@ export async function runInProcessTeammate(
           // In-process teammates are async but run in the same process as the leader,
           // so they CAN show permission prompts (unlike true background agents).
           // Use currentWorkAbortController so Escape stops this turn only, not the teammate.
-          for await (const message of runAgent({
-            agentDefinition: iterationAgentDefinition,
-            promptMessages,
-            toolUseContext,
-            canUseTool: createInProcessCanUseTool(
-              identity,
-              currentWorkAbortController,
-              (waitMs: number) => {
-                updateTaskState(
-                  taskId,
-                  task => ({
-                    ...task,
-                    totalPausedMs: (task.totalPausedMs ?? 0) + waitMs,
-                  }),
-                  setAppState,
-                )
+          const leftoverTeammatePhn = (() => {
+            try {
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const { leftoverIhrPhn } =
+                require('../collapseReadSearch.js') as typeof import('../collapseReadSearch.js')
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              return leftoverIhrPhn(taskId)
+            } catch {
+              return null
+            }
+          })()
+          leftoverTeammatePhn?.setMode('responding')
+          try {
+            for await (const message of runAgent({
+              agentDefinition: iterationAgentDefinition,
+              promptMessages,
+              toolUseContext,
+              canUseTool: createInProcessCanUseTool(
+                identity,
+                currentWorkAbortController,
+                (waitMs: number) => {
+                  updateTaskState(
+                    taskId,
+                    task => ({
+                      ...task,
+                      totalPausedMs: (task.totalPausedMs ?? 0) + waitMs,
+                    }),
+                    setAppState,
+                  )
+                },
+              ),
+              isAsync: true,
+              canShowPermissionPrompts: allowPermissionPrompts ?? true,
+              forkContextMessages,
+              querySource: 'agent:custom',
+              override: {
+                abortController: currentWorkAbortController,
+                agentId: asAgentId(taskId),
+                setRetryStatus: status => {
+                  leftoverTeammatePhn?.setRetryStatus(status)
+                },
               },
-            ),
-            isAsync: true,
-            canShowPermissionPrompts: allowPermissionPrompts ?? true,
-            forkContextMessages,
-            querySource: 'agent:custom',
-            override: { abortController: currentWorkAbortController },
-            model: model as ModelAlias | undefined,
-            preserveToolUseResults: true,
-            availableTools: toolUseContext.options.tools,
-            allowedTools,
-            contentReplacementState: teammateReplacementState,
-          })) {
-            // Check lifecycle abort first (kills whole teammate)
-            if (abortController.signal.aborted) {
-              logForDebugging(
-                `[inProcessRunner] ${identity.agentId} lifecycle aborted`,
+              model: model as ModelAlias | undefined,
+              preserveToolUseResults: true,
+              availableTools: toolUseContext.options.tools,
+              allowedTools,
+              contentReplacementState: teammateReplacementState,
+            })) {
+              if (isRunAgentSpinnerMode(message)) {
+                leftoverTeammatePhn?.setMode(message.mode)
+                continue
+              }
+              // Check lifecycle abort first (kills whole teammate)
+              if (abortController.signal.aborted) {
+                logForDebugging(
+                  `[inProcessRunner] ${identity.agentId} lifecycle aborted`,
+                )
+                break
+              }
+
+              // Check work abort (stops current turn only)
+              if (currentWorkAbortController.signal.aborted) {
+                logForDebugging(
+                  `[inProcessRunner] ${identity.agentId} current work aborted (Escape pressed)`,
+                )
+                workWasAborted = true
+                break
+              }
+
+              iterationMessages.push(message)
+              allMessages.push(message)
+
+              // Rebuild so late message_delta usage mutations stick.
+              rebuildProgressFromMessages(
+                tracker,
+                iterationMessages,
+                resolveActivity,
+                toolUseContext.options.tools,
               )
-              break
+              const progress = getProgressUpdate(tracker, iterationMessages)
+
+              updateTaskState(
+                taskId,
+                task => {
+                  // Track in-progress tool use IDs for animation in transcript view
+                  let inProgressToolUseIDs = task.inProgressToolUseIDs
+                  if (message.type === 'assistant') {
+                    for (const block of Array.isArray(message.message!.content)
+                      ? message.message!.content
+                      : []) {
+                      if (
+                        typeof block !== 'string' &&
+                        block.type === 'tool_use'
+                      ) {
+                        inProgressToolUseIDs = new Set([
+                          ...(inProgressToolUseIDs ?? []),
+                          block.id,
+                        ])
+                      }
+                    }
+                  } else if (message.type === 'user') {
+                    const content = message.message!.content
+                    if (Array.isArray(content)) {
+                      for (const block of content) {
+                        if (
+                          typeof block === 'object' &&
+                          'type' in block &&
+                          block.type === 'tool_result'
+                        ) {
+                          if (inProgressToolUseIDs) {
+                            inProgressToolUseIDs = new Set(inProgressToolUseIDs)
+                            inProgressToolUseIDs.delete(block.tool_use_id)
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // Never regress live footer tokens (pre-message_delta zeros /
+                  // stale sibling snapshots must not wipe a higher count).
+                  const tokenCount = Math.max(
+                    progress.tokenCount ?? 0,
+                    task.progress?.tokenCount ?? 0,
+                  )
+                  const toolUseCount = Math.max(
+                    progress.toolUseCount ?? 0,
+                    task.progress?.toolUseCount ?? 0,
+                  )
+
+                  return {
+                    ...task,
+                    progress: {
+                      ...progress,
+                      tokenCount,
+                      toolUseCount,
+                    },
+                    messages: appendCappedMessage(task.messages, message),
+                    inProgressToolUseIDs,
+                  }
+                },
+                setAppState,
+              )
+              // message_delta often lands with no further yields until the next
+              // tool result — deferred rebuild unfreezes footer tokens.
+              // updateAgentProgress works for any running task with progress.
+              scheduleDeferredAgentProgressRebuild(
+                taskId,
+                tracker,
+                iterationMessages,
+                setAppState as Parameters<typeof updateAgentProgress>[2],
+                resolveActivity,
+                toolUseContext.options.tools,
+              )
             }
 
-            // Check work abort (stops current turn only)
-            if (currentWorkAbortController.signal.aborted) {
-              logForDebugging(
-                `[inProcessRunner] ${identity.agentId} current work aborted (Escape pressed)`,
-              )
-              workWasAborted = true
-              break
-            }
-
-            iterationMessages.push(message)
-            allMessages.push(message)
-
-            // Rebuild so late message_delta usage mutations stick.
+            // Final rebuild after stream ends — last message_delta may mutate
+            // usage after the final content_block_stop with no further yields.
             rebuildProgressFromMessages(
               tracker,
               iterationMessages,
               resolveActivity,
               toolUseContext.options.tools,
             )
-            const progress = getProgressUpdate(tracker, iterationMessages)
-
+            const finalProgress = getProgressUpdate(tracker, iterationMessages)
             updateTaskState(
               taskId,
-              task => {
-                // Track in-progress tool use IDs for animation in transcript view
-                let inProgressToolUseIDs = task.inProgressToolUseIDs
-                if (message.type === 'assistant') {
-                  for (const block of Array.isArray(message.message!.content)
-                    ? message.message!.content
-                    : []) {
-                    if (
-                      typeof block !== 'string' &&
-                      block.type === 'tool_use'
-                    ) {
-                      inProgressToolUseIDs = new Set([
-                        ...(inProgressToolUseIDs ?? []),
-                        block.id,
-                      ])
-                    }
-                  }
-                } else if (message.type === 'user') {
-                  const content = message.message!.content
-                  if (Array.isArray(content)) {
-                    for (const block of content) {
-                      if (
-                        typeof block === 'object' &&
-                        'type' in block &&
-                        block.type === 'tool_result'
-                      ) {
-                        if (inProgressToolUseIDs) {
-                          inProgressToolUseIDs = new Set(inProgressToolUseIDs)
-                          inProgressToolUseIDs.delete(block.tool_use_id)
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // Never regress live footer tokens (pre-message_delta zeros /
-                // stale sibling snapshots must not wipe a higher count).
-                const tokenCount = Math.max(
-                  progress.tokenCount ?? 0,
-                  task.progress?.tokenCount ?? 0,
-                )
-                const toolUseCount = Math.max(
-                  progress.toolUseCount ?? 0,
-                  task.progress?.toolUseCount ?? 0,
-                )
-
-                return {
-                  ...task,
-                  progress: {
-                    ...progress,
-                    tokenCount,
-                    toolUseCount,
-                  },
-                  messages: appendCappedMessage(task.messages, message),
-                  inProgressToolUseIDs,
-                }
-              },
+              task => ({
+                ...task,
+                progress: {
+                  ...finalProgress,
+                  tokenCount: Math.max(
+                    finalProgress.tokenCount ?? 0,
+                    task.progress?.tokenCount ?? 0,
+                  ),
+                  toolUseCount: Math.max(
+                    finalProgress.toolUseCount ?? 0,
+                    task.progress?.toolUseCount ?? 0,
+                  ),
+                },
+              }),
               setAppState,
             )
-            // message_delta often lands with no further yields until the next
-            // tool result — deferred rebuild unfreezes footer tokens.
-            // updateAgentProgress works for any running task with progress.
-            scheduleDeferredAgentProgressRebuild(
-              taskId,
-              tracker,
-              iterationMessages,
-              setAppState as Parameters<typeof updateAgentProgress>[2],
-              resolveActivity,
-              toolUseContext.options.tools,
-            )
+
+            return { success: true, messages: iterationMessages }
+          } finally {
+            leftoverTeammatePhn?.setTurnEffort(null, null)
           }
-
-          // Final rebuild after stream ends — last message_delta may mutate
-          // usage after the final content_block_stop with no further yields.
-          rebuildProgressFromMessages(
-            tracker,
-            iterationMessages,
-            resolveActivity,
-            toolUseContext.options.tools,
-          )
-          const finalProgress = getProgressUpdate(tracker, iterationMessages)
-          updateTaskState(
-            taskId,
-            task => ({
-              ...task,
-              progress: {
-                ...finalProgress,
-                tokenCount: Math.max(
-                  finalProgress.tokenCount ?? 0,
-                  task.progress?.tokenCount ?? 0,
-                ),
-                toolUseCount: Math.max(
-                  finalProgress.toolUseCount ?? 0,
-                  task.progress?.toolUseCount ?? 0,
-                ),
-              },
-            }),
-            setAppState,
-          )
-
-          return { success: true, messages: iterationMessages }
         })
       })
 
@@ -1713,6 +1767,7 @@ export async function runInProcessTeammate(
       setAppState,
     )
     void evictTaskOutput(taskId)
+    evictTeammateSpinnerSlice(taskId)
     // Eagerly evict task from AppState since it's been consumed
     evictTerminalTask(taskId, setAppState)
     // notified:true pre-set → no XML notification → print.ts won't emit
@@ -1765,6 +1820,7 @@ export async function runInProcessTeammate(
       setAppState,
     )
     void evictTaskOutput(taskId)
+    evictTeammateSpinnerSlice(taskId)
     // Eagerly evict task from AppState since it's been consumed
     evictTerminalTask(taskId, setAppState)
     // notified:true pre-set → no XML notification → close SDK bookend directly.

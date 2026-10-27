@@ -21,6 +21,10 @@ import {
   DEFAULT_AGENT_PROMPT,
   enhanceSystemPromptWithEnvDetails,
 } from 'src/constants/prompts.js'
+import {
+  isRunAgentSpinnerMode,
+  type RunAgentSpinnerMode,
+} from './spinnerModeEvent.js'
 import type { QuerySource } from 'src/constants/querySource.js'
 import { getSystemContext, getUserContext } from 'src/context.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
@@ -408,6 +412,11 @@ function isRecordableMessage(
   )
 }
 
+export {
+  isRunAgentSpinnerMode,
+  type RunAgentSpinnerMode,
+} from './spinnerModeEvent.js'
+
 export async function* runAgent({
   agentDefinition,
   promptMessages,
@@ -464,6 +473,8 @@ export async function* runAgent({
     systemPrompt?: SystemPrompt
     abortController?: AbortController
     agentId?: AgentId
+    /** Gold override.onRetryStatus. Copied onto the child only when set. */
+    setRetryStatus?: ToolUseContext['setRetryStatus']
     /** Official Lto `forkReadFileState` (`g`) passed through nK override. */
     readFileState?: FileStateCache
   }
@@ -555,7 +566,7 @@ export async function* runAgent({
   forkedSkillName?: string
   /** densable ALo — inject CLo before the TRe sharesCwd stamp. */
   sameCwdWriteCapableSibling?: boolean
-}): AsyncGenerator<Message, void> {
+}): AsyncGenerator<Message | RunAgentSpinnerMode, void> {
   // Track subagent usage for feature discovery
 
   const appState = toolUseContext.getAppState()
@@ -1185,6 +1196,11 @@ export async function* runAgent({
     contentReplacementState,
   })
 
+  // Gold: if (override?.onRetryStatus) child.onRetryStatus = override.onRetryStatus.
+  if (override?.setRetryStatus) {
+    agentToolUseContext.setRetryStatus = override.setRetryStatus
+  }
+
   // Preserve tool use results for subagents with viewable transcripts (in-process teammates)
   if (preserveToolUseResults) {
     agentToolUseContext.preserveToolUseResults = true
@@ -1275,6 +1291,12 @@ export async function* runAgent({
       ...(handbackArmed ? { requiresHandback: true } : {}),
     })) {
       onQueryProgress?.()
+      // densable Phn/Ohr — query yields spinner_mode; inProcessRunner Phn.setMode
+      // consumes it. Do not drop through the recordable filter.
+      if (isRunAgentSpinnerMode(message)) {
+        yield message
+        continue
+      }
       // Forward subagent API request starts to parent's metrics display
       // so TTFT/OTPS update during subagent execution.
       if (message.type === 'stream_event') {

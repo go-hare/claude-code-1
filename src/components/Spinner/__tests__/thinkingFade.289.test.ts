@@ -75,9 +75,9 @@ describe('densable 2.1.289 Ye/ze/no spinner color', () => {
     expect(src).toContain('STALL_TELEMETRY_THRESHOLDS_MS')
     expect(src).toContain('showToolCallTimer')
     expect(src).toContain('outputLimitRecovery')
-    expect(src).toContain('Math.floor(time / 120)')
-    expect(src).not.toContain('pingPongFrameIndex(')
-    expect(src).not.toContain('getDefaultCharacters().length')
+    expect(src).toContain('pingPongFrameIndex(')
+    expect(src).toContain('getDefaultCharacters().length')
+    expect(src).not.toContain('Math.floor(time / 120)')
   })
 
   test('RTt/Rte fade thinkingIntensity toward warning after stall', () => {
@@ -97,5 +97,9 @@ describe('densable 2.1.289 Ye/ze/no spinner color', () => {
     expect(glyph).toContain('thinkingIntensity')
     expect(glyph).toContain('theme.warning')
     expect(glyph).toContain('thinkingIntensity >= 0.5')
+    expect(glyph).toContain('flexWrap="wrap"')
+    expect(glyph).toContain('width={2}')
+    expect(glyph).not.toContain('function GlyphBox')
+    expect((glyph.match(/<Box flexWrap="wrap"/g) ?? []).length).toBe(1)
   })
 })

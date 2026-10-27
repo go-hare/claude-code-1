@@ -4,8 +4,9 @@ import { useMemo, useRef } from 'react';
 import { Box, Text, useAnimationFrame, stringWidth, Byline, useTheme } from '@anthropic/ink';
 import { toInkColor } from '../../utils/ink.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
-import { remainingRetryMs, type RetryStatus } from '../../utils/advisorNetworkStall.js';
+import type { RetryStatus } from '../../utils/advisorNetworkStall.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';
+import { leftoverZxt } from './leftoverZxt.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -19,6 +20,7 @@ import {
   advanceSpinnerToolWindow,
   emptySpinnerToolWindow,
   formatSpinnerStatusText,
+  pingPongFrameIndex,
   resolveSpinnerStatusKind,
   STALL_TELEMETRY_THRESHOLDS_MS,
   type OutputLimitRecovery,
@@ -26,7 +28,7 @@ import {
 import { thinkingFadeIntensity } from './thinkingFade.js';
 import type { SpinnerMode } from './types.js';
 import { useStalledAnimation } from './useStalledAnimation.js';
-import { interpolateColor, parseRGB, toRGBColor } from './utils.js';
+import { getDefaultCharacters, interpolateColor, parseRGB, toRGBColor } from './utils.js';
 
 const SEP_WIDTH = stringWidth(' · ');
 const THINKING_BARE_WIDTH = stringWidth('thinking');
@@ -131,8 +133,11 @@ export function SpinnerAnimationRow({
   const [themeName] = useTheme();
   const theme = getTheme(themeName);
 
-  // densable Msn always animates countdown; keep the 50ms clock when status is set.
-  const [viewportRef, time] = useAnimationFrame(reducedMotion && !retryStatus ? null : 50);
+  // densable Je: Ji(t?null:l==="requesting"&&!R?50:100).
+  // DualInk always-50 was leftover analog extra — thinking/tool-use
+  // committed twice as often and leftoverGs dirty-cleared the outer
+  // width-100% column (verb + Tip) every tick.
+  const [viewportRef, time] = useAnimationFrame(reducedMotion ? null : mode === 'requesting' ? 50 : 100);
 
   // densable #18: monotonic elapsed (performance.now) matching loadingStartTimeRef
   const now = performance.now();
@@ -265,9 +270,8 @@ export function SpinnerAnimationRow({
   }
   const thinkingIntensity = reducedMotion ? thinkingTarget : thinkingIntensityRef.current;
 
-  // densable Je `frame:mt` is Xn cosine. Analog Ink + Xn dwells at ping-pong
-  // peaks → 闪 (Image 27/37). KEEP KCe indexed by time/120 (gold Launching `ne`).
-  const frame = reducedMotion ? 0 : Math.floor(time / 120);
+  // densable Je `frame:mt=t?0:Xn(S)` — cosine onto h7t.length-1.
+  const frame = pingPongFrameIndex(time, getDefaultCharacters().length, reducedMotion);
 
   const glimmerSpeed = mode === 'requesting' ? 50 : 200;
   // message is stable within a turn; stringWidth is expensive enough (Bun native
@@ -412,97 +416,65 @@ export function SpinnerAnimationRow({
       : []),
   ];
 
-  // Gold Je ht is nullable. Official Ink does not flash on null↔JSX.
-  // Analog markDirty walks ancestors — nullable status insert/remove
-  // (Image 37 thinking-with-xhigh) repaints the whole spinner row.
-  // KEEP: always mount a 3-child slot (Text, Box, Text) so the row never
-  // appendChildNode/removeChildNode the status sibling.
+  // gold mn ht: Ct.length>0 ? (Et ? Byline : Fragment[(, Byline, )]) : null
   const teammateActive = Boolean(foregroundedTeammate && !foregroundedTeammate.isIdle);
-  const showStatusParens = !teammateActive && parts.length > 0 && !thinkingOnly;
-  const statusSlot = (
-    <Box flexDirection="row" flexWrap="wrap">
-      <Text dimColor>{teammateActive ? '(esc to interrupt ' : showStatusParens ? '(' : ''}</Text>
-      <Box flexDirection="row">
-        {teammateActive && foregroundedTeammate ? (
-          <Text color={toInkColor(foregroundedTeammate.identity.color)}>{foregroundedTeammate.identity.agentName}</Text>
-        ) : (
-          <Byline>{parts.length > 0 ? parts : <Text dimColor>{''}</Text>}</Byline>
-        )}
-      </Box>
-      <Text dimColor>{teammateActive || showStatusParens ? ')' : ''}</Text>
-    </Box>
-  );
-
-  // densable Msn(status) — replaces verb/glimmer row when retryStatus is set.
-  // void time keeps the 50ms clock subscribed so the countdown ticks live.
-  if (retryStatus) {
-    void time;
-    const remainMs = remainingRetryMs(retryStatus.deadline);
-    const mostSignificantOnly = remainMs >= 300_000;
-    const countdown = formatDuration(remainMs, { mostSignificantOnly });
-    const errorMark = (
-      <Box aria-hidden flexWrap="wrap" height={1} width={2}>
-        <Text color="error">{figures.cross}</Text>
-      </Box>
+  let ht: React.ReactNode = null;
+  if (teammateActive && foregroundedTeammate) {
+    ht = (
+      <>
+        <Text dimColor>(esc to interrupt </Text>
+        <Text color={toInkColor(foregroundedTeammate.identity.color)}>{foregroundedTeammate.identity.agentName}</Text>
+        <Text dimColor>)</Text>
+      </>
     );
-    if (retryStatus.kind === 'stalled') {
-      return (
-        <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
-          {errorMark}
-          <Box flexShrink={1}>
-            <Text color="error">Waiting for API response</Text>
-            <Text dimColor>
-              {' · will retry in '}
-              {countdown}
-              {' · check your network'}
-            </Text>
-          </Box>
-        </Box>
-      );
-    }
-    // densable error path: " · Retrying in {n} · attempt a/b"
-    const rateLimits = (retryStatus.error as { rateLimits?: { resetsAt?: number } } | undefined)?.rateLimits;
-    const resetsSuffix =
-      rateLimits?.resetsAt != null
-        ? ` (${formatDuration(Math.max(0, rateLimits.resetsAt * 1000 - Date.now()), { mostSignificantOnly: true })})`
-        : '';
-    return (
-      <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
-        {errorMark}
-        <Box flexShrink={1}>
-          <Text dimColor>
-            {` · Retrying in ${countdown}${resetsSuffix} · attempt ${retryStatus.attempt}/${retryStatus.maxRetries}`}
-          </Text>
-        </Box>
-      </Box>
+  } else if (parts.length > 0) {
+    ht = thinkingOnly ? (
+      <Byline>{parts}</Byline>
+    ) : (
+      <>
+        <Text dimColor>(</Text>
+        <Byline>{parts}</Byline>
+        <Text dimColor>)</Text>
+      </>
     );
   }
 
-  const spinnerRow = (
-    <Box ref={viewportRef} flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
-      <SpinnerGlyph
-        frame={frame}
-        messageColor={messageColor}
-        stalledIntensity={overrideColor ? 0 : stalledIntensity}
-        thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
-        reducedMotion={reducedMotion}
-        time={time}
-      />
-      <GlimmerMessage
-        message={message}
-        mode={mode}
-        messageColor={messageColor}
-        glimmerIndex={glimmerIndex}
-        flashOpacity={flashOpacity}
-        shimmerColor={shimmerColor}
-        stalledIntensity={overrideColor ? 0 : stalledIntensity}
-        thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
-      />
-      {statusSlot}
+  // gold mn: outer column width 100%; inner row wrap marginTop 1 width 100%;
+  // children N?zXt:Fragment[Rte,RTt,ht]. DualInk DA is gold DA.
+  if (retryStatus) {
+    void time;
+  }
+  return (
+    <Box ref={viewportRef} flexDirection="column" width="100%">
+      <Box flexDirection="row" flexWrap="wrap" marginTop={1} width="100%">
+        {retryStatus ? (
+          leftoverZxt({ status: retryStatus, columns })
+        ) : (
+          <>
+            <SpinnerGlyph
+              frame={frame}
+              messageColor={messageColor}
+              stalledIntensity={overrideColor ? 0 : stalledIntensity}
+              thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
+              reducedMotion={reducedMotion}
+              time={time}
+            />
+            <GlimmerMessage
+              message={message}
+              mode={mode}
+              messageColor={messageColor}
+              glimmerIndex={glimmerIndex}
+              flashOpacity={flashOpacity}
+              shimmerColor={shimmerColor}
+              stalledIntensity={overrideColor ? 0 : stalledIntensity}
+              thinkingIntensity={overrideColor ? 0 : thinkingIntensity}
+            />
+            {ht}
+          </>
+        )}
+      </Box>
     </Box>
   );
-
-  return spinnerRow;
 }
 
 function SpinnerModeGlyph({ mode }: { mode: SpinnerMode }): React.ReactNode {

@@ -129,7 +129,7 @@ describe('densable 2.1.289 Je extras', () => {
     expect(pingPongFrameIndex(1000, 6, true)).toBe(0)
   })
 
-  test('Rte glyph uses accessibility.hidden, cosinePulse, KCe ping-pong', () => {
+  test('Rte glyph uses accessibility.hidden, cosinePulse, h7t base frames', () => {
     const glyph = readFileSync(
       join(import.meta.dir, '../SpinnerGlyph.tsx'),
       'utf8',
@@ -138,38 +138,55 @@ describe('densable 2.1.289 Je extras', () => {
     expect(glyph).toContain('hidden: true')
     expect(glyph).toContain('cosinePulse')
     expect(glyph).toContain('PULSE_BLACK')
-    expect(glyph).toContain('getSpinnerPingPongFrames()')
-    expect(glyph).not.toContain('getDefaultCharacters()')
+    expect(glyph).toContain('getDefaultCharacters()')
+    expect(glyph).not.toContain('getSpinnerPingPongFrames()')
   })
 
-  test('Je live glyph is time/120 not Xn cosine', () => {
+  test('Je live glyph is gold Xn cosine onto h7t, requesting 50 else 100', () => {
     const row = readFileSync(
       join(import.meta.dir, '../SpinnerAnimationRow.tsx'),
       'utf8',
     )
-    expect(row).toContain('Math.floor(time / 120)')
-    expect(row).not.toContain('pingPongFrameIndex(')
+    expect(row).toContain('pingPongFrameIndex(')
+    expect(row).toContain('getDefaultCharacters().length')
+    expect(row).not.toContain('Math.floor(time / 120)')
+    expect(row).toContain("mode === 'requesting' ? 50 : 100")
+    expect(row).not.toContain('reducedMotion && !retryStatus ? null : 50')
   })
 
-  test('Je status slot is always mounted (no nullable {status} insert)', () => {
+  test('Je mn is gold outer column + inner row wrap; ht nullable', () => {
     const row = readFileSync(
       join(import.meta.dir, '../SpinnerAnimationRow.tsx'),
       'utf8',
     )
-    expect(row).toContain('statusSlot')
-    expect(row).toContain('always mount a 3-child slot')
-    expect(row).not.toMatch(/\{status\}/)
+    expect(row).toContain('flexDirection="column" width="100%"')
+    expect(row).toContain(
+      'flexDirection="row" flexWrap="wrap" marginTop={1} width="100%"',
+    )
+    expect(row).toContain('let ht: React.ReactNode = null')
+    expect(row).not.toContain('statusSlot')
+    expect(row).not.toContain('always mount a 3-child slot')
   })
 
-  test('GlimmerMessage keeps a stable 4-Text child shape', () => {
+  test('GlimmerMessage is gold RTt 2-Text early returns, not always-4-Text', () => {
     const glimmer = readFileSync(
       join(import.meta.dir, '../GlimmerMessage.tsx'),
       'utf8',
     )
-    expect(glimmer).toContain('stable 4-Text sibling shape')
-    expect(glimmer).toContain('function stableVerbRow')
-    expect(glimmer).not.toContain('{before ? <Text')
-    expect(glimmer).not.toContain('{after ? <Text')
+    expect(glimmer).not.toContain('function leftoverRttPair')
+    expect(glimmer).not.toContain('function stableVerbRow')
+    expect(glimmer).not.toContain('DualInk leftoverGs analog extra: ONE 4-Text')
+    expect(glimmer).toContain('if (stalledIntensity > 0)')
+    expect(glimmer).toContain('if (thinkingIntensity > 0)')
+    expect(glimmer).toContain("if (mode === 'tool-use')")
+    expect(glimmer).toContain('shimmerStart >= messageWidth || shimmerEnd < 0')
+    expect(glimmer).toContain(
+      '{before ? <Text color={messageColor}>{before}</Text> : null}',
+    )
+    expect(glimmer).toContain(
+      '{after ? <Text color={messageColor}>{after}</Text> : null}',
+    )
+    expect(glimmer).toContain('<Text color={shimmerColor}>{shim}</Text>')
   })
 
   test('SpinnerWithVerb threads shining_fractals and agentId', () => {
@@ -219,29 +236,39 @@ describe('densable 2.1.289 Je extras', () => {
     expect(prompt).not.toContain('selectedBgAgentIndex')
   })
 
-  test('REPL SpinnerWithVerb is scrollable after Messages; tot.abovePrompt is not Cn', () => {
+  test('REPL SpinnerWithVerb is gold bJ scrollable after flexGrow', () => {
     const repl = readFileSync(
       join(import.meta.dir, '../../../screens/REPL.tsx'),
       'utf8',
     )
-    const spinner = repl.indexOf('<SpinnerWithVerb')
-    const messages = repl.lastIndexOf('<Messages', spinner)
-    const scrollable = repl.lastIndexOf('scrollable={', spinner)
-    const bottom = repl.indexOf('bottom={', spinner)
+    const spinner = repl.lastIndexOf('<SpinnerWithVerb')
+    const scrollable = repl.lastIndexOf('scrollable={')
+    const above = repl.lastIndexOf('abovePrompt={')
+    const bottom = repl.lastIndexOf('bottom={')
     expect(spinner).toBeGreaterThan(0)
-    expect(messages).toBeGreaterThan(0)
     expect(scrollable).toBeGreaterThan(0)
-    expect(bottom).toBeGreaterThan(spinner)
-    expect(spinner).toBeGreaterThan(messages)
+    expect(above).toBeGreaterThan(scrollable)
+    expect(bottom).toBeGreaterThan(above)
     expect(spinner).toBeGreaterThan(scrollable)
-    expect(repl.lastIndexOf('abovePrompt={', spinner)).toBe(-1)
-    const above = repl.indexOf('abovePrompt={', spinner)
-    const scrollEnd = above > spinner ? above : bottom
-    const scrollChunk = repl.slice(scrollable, scrollEnd)
+    expect(spinner).toBeLessThan(above)
+    const scrollChunk = repl.slice(scrollable, above)
     expect(scrollChunk).toContain('<SpinnerWithVerb')
     expect(scrollChunk).toContain('<BriefIdleStatus')
-    expect(scrollChunk).not.toContain('<Box flexGrow={1} />')
-    expect(scrollChunk).not.toContain('<PluginAbovePromptSite')
+    expect(scrollChunk).toContain('<Box flexGrow={1} />')
+    expect(scrollChunk.indexOf('<Box flexGrow={1} />')).toBeLessThan(
+      scrollChunk.indexOf('<SpinnerWithVerb'),
+    )
+    expect(scrollChunk).toContain('isLoading && !showSpinner')
+    expect(scrollChunk).toContain('LeftoverMhrRetryRow')
+    expect(scrollChunk.indexOf('LeftoverMhrRetryRow')).toBeLessThan(
+      scrollChunk.indexOf('<SpinnerWithVerb'),
+    )
+    expect(scrollChunk).not.toContain('isLoading && !isBriefOnly')
+    expect(scrollChunk).not.toContain('!hasRunningTeammates &&')
+    expect(repl.slice(bottom)).toContain('<DialogHost')
+    expect(repl.slice(bottom)).not.toContain('<SpinnerWithVerb')
+    expect(repl.slice(bottom)).not.toContain('<BriefIdleStatus')
+    expect(repl.slice(bottom)).not.toContain('<PluginAbovePromptSite')
   })
 
   test('Spinner Cn has no Idle teammates-running early return; footer XOR compacting/retry', () => {

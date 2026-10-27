@@ -1494,6 +1494,15 @@ export function killAsyncAgent(
     // Official XV: if (i) Zeo(e,t), zS(e)
     rewireOrphanedOwnerNotifications(taskId, setAppState);
     evictAgentTaskOutputIfPersistent(taskId);
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { leftoverIhrEvict } =
+        require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      leftoverIhrEvict(taskId);
+    } catch {
+      // isolation — optional
+    }
     // densable lx after zA not_taken — notified, quietlyParked false.
     // Gold does not delete the registry row (ze is concurrency slot, not GC).
     if (opts?.lifecycleNotStarted && !wasParked) {

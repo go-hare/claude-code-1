@@ -35,7 +35,7 @@ import { getDumpPromptsPath } from '../../services/api/dumpPrompts.js';
 import { buildPostCompactMessages } from '../../services/compact/compact.js';
 import { resetMicrocompactState } from '../../services/compact/microCompact.js';
 import type { Progress as AgentProgress } from '@claude-code/builtin-tools/tools/AgentTool/AgentTool.js';
-import { runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js';
+import { isRunAgentSpinnerMode, runAgent } from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js';
 import { renderToolUseProgressMessage } from '@claude-code/builtin-tools/tools/AgentTool/UI.js';
 import type { CommandResultDisplay } from '../../types/command.js';
 import { createAbortController } from '../abortController.js';
@@ -399,6 +399,7 @@ async function executeForkedSlashCommand(
         availableTools: freshTools,
         override: { agentId, readFileState: forkReadFileState },
       })) {
+        if (isRunAgentSpinnerMode(message)) continue;
         agentMessages.push(message);
       }
       const resultText = extractResultText(agentMessages, 'Command completed');
@@ -495,6 +496,7 @@ async function executeForkedSlashCommand(
       webFetchReadmissionAllowed,
       override: { readFileState: forkReadFileState },
     })) {
+      if (isRunAgentSpinnerMode(message)) continue;
       agentMessages.push(message);
       const normalizedNew = normalizeMessages([message]);
 
