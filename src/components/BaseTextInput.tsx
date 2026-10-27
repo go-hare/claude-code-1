@@ -6,10 +6,11 @@ import {
   insertInputFromKeyboardEvent,
   keyFromKeyboardEvent,
 } from '../utils/keyboardEventInput.js';
-import { Ansi, Box, Text, useFocusReclaim, useInput } from '@anthropic/ink';
+import { Ansi, Box, Input, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
 import type { DOMElement, KeyboardEvent, PasteEvent } from '@anthropic/ink';
-import { useDeclaredCursor } from '@anthropic/ink';
 import type { BaseInputState, BaseTextInputProps } from '../types/textInputTypes.js';
+import { leftoverXy } from '../utils/leftoverXy.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { HighlightedInput } from './PromptInput/ShimmeredInput.js';
 
@@ -20,6 +21,8 @@ type BaseTextInputComponentProps = BaseTextInputProps & {
   highlights?: TextHighlight[];
   invert?: (text: string) => string;
   hidePlaceholderText?: boolean;
+  /** densable UTt `cursorCellPainted` — voice hex already painted the caret cell. */
+  cursorCellPainted?: boolean;
 };
 
 /**
@@ -35,25 +38,25 @@ export function BaseTextInput({
   terminalFocus,
   invert,
   hidePlaceholderText,
+  cursorCellPainted = false,
   ...props
 }: BaseTextInputComponentProps): React.ReactNode {
   const { onInput, renderedValue, cursorLine, cursorColumn } = inputState;
   const nodeRef = React.useRef<DOMElement | null>(null);
+  // densable UTt: Ie=eD(); Ye showCursor:o.showCursor&&!Ie; hidePlaceholderText:u||Xe().
+  const nativeCursor = isNativeCursorEnabled();
+  const screenReader = isScreenReaderModeEnabled();
+  // densable UTt caret `O=focus&&showCursor?{line,column,visible:!c}:void 0`.
+  // c is the painted invert cell (voice waveform). Screen reader and the
+  // native-cursor vim path draw no cell — the hardware cursor must show.
+  const caret =
+    props.focus && props.showCursor
+      ? { line: cursorLine, column: cursorColumn, visible: !cursorCellPainted }
+      : undefined;
 
-  const declaredCursorRef = useDeclaredCursor({
-    line: cursorLine,
-    column: cursorColumn,
-    // Official densable rfo: active: Boolean(focus && showCursor) — not terminalFocus
-    active: Boolean(props.focus && props.showCursor),
-  });
-
-  const setBoxRef = React.useCallback(
-    (node: DOMElement | null) => {
-      nodeRef.current = node;
-      declaredCursorRef(node);
-    },
-    [declaredCursorRef],
-  );
+  const setBoxRef = React.useCallback((node: DOMElement | null) => {
+    nodeRef.current = node;
+  }, []);
 
   // Official densable nR(ref, isActive): reclaim focus so dispatch* hits this node.
   // E = focus !== false (undefined counts as active, matching densable).
@@ -115,11 +118,11 @@ export function BaseTextInput({
   const { showPlaceholder, renderedPlaceholder } = renderPlaceholder({
     placeholder: props.placeholder,
     value: props.value,
-    showCursor: props.showCursor,
+    showCursor: Boolean(props.showCursor) && !nativeCursor,
     focus: props.focus,
     terminalFocus,
-    invert,
-    hidePlaceholderText,
+    invert: invert ?? leftoverXy,
+    hidePlaceholderText: Boolean(hidePlaceholderText) || screenReader,
   });
 
   // Raw mode only for stdin/bracketed paste enablement. Typed keys and paste
@@ -160,48 +163,73 @@ export function BaseTextInput({
 
   const hasHighlights = filteredHighlights && filteredHighlights.length > 0;
 
-  // Official: k = E ? { tabIndex:0, autoFocus:!0, onKeyDown:m, onPaste:g } : {}
-  const focusProps = isActive
-    ? ({ tabIndex: 0, autoFocus: true, onKeyDown: handleKeyDown, onPaste } as const)
-    : ({} as const);
-
+  // densable UTt @202724600:
+  //   highlight: n7 children = [preserve Box(Z), se, i]
+  //   normal:    we = Text(wrap, [X, se, i]); n7 children = we
+  // argumentHint / children are siblings of the value node — not nested inside it,
+  // and not bare Input/Box row siblings (that flexes hint into a second column).
   // densable 2.1.218 #13: aria-preserve-whitespace on the input value so
   // trailing spaces (including the cursor cell) are not trimEnd'd in SR mode.
   if (hasHighlights) {
+    // Gold highlight: se has wrap:"truncate-end".
+    const highlightHint = showArgumentHint ? (
+      <Text dimColor wrap="truncate-end">
+        {props.value?.endsWith(' ') ? '' : ' '}
+        {props.argumentHint}
+      </Text>
+    ) : null;
     return (
-      <Box ref={setBoxRef} {...focusProps}>
-        <Box accessibility={{ preserveWhitespace: true }}>
+      <Input
+        ref={setBoxRef}
+        autoFocus={isActive}
+        disabled={!isActive}
+        caret={caret}
+        onKeyDown={isActive ? handleKeyDown : undefined}
+        onPaste={isActive ? onPaste : undefined}
+      >
+        <Box flexShrink={0} accessibility={{ preserveWhitespace: true }}>
           <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
         </Box>
-        {showArgumentHint && (
-          <Text dimColor>
-            {props.value?.endsWith(' ') ? '' : ' '}
-            {props.argumentHint}
-          </Text>
-        )}
+        {highlightHint}
         {children}
-      </Box>
+      </Input>
     );
   }
 
+  // Gold normal: se has dimColor only (no wrap); wrap lives on the outer Text.
+  const argumentHint = showArgumentHint ? (
+    <Text dimColor>
+      {props.value?.endsWith(' ') ? '' : ' '}
+      {props.argumentHint}
+    </Text>
+  ) : null;
+
+  const valueNode = (
+    <Text aria-preserve-whitespace>
+      {showPlaceholder && props.placeholderElement ? (
+        props.placeholderElement
+      ) : showPlaceholder && renderedPlaceholder ? (
+        <Ansi>{renderedPlaceholder}</Ansi>
+      ) : (
+        <Ansi>{renderedValue}</Ansi>
+      )}
+    </Text>
+  );
+
   return (
-    <Box ref={setBoxRef} {...focusProps}>
-      <Text wrap="truncate-end" dimColor={props.dimColor} aria-preserve-whitespace>
-        {showPlaceholder && props.placeholderElement ? (
-          props.placeholderElement
-        ) : showPlaceholder && renderedPlaceholder ? (
-          <Ansi>{renderedPlaceholder}</Ansi>
-        ) : (
-          <Ansi>{renderedValue}</Ansi>
-        )}
-        {showArgumentHint && (
-          <Text dimColor>
-            {props.value?.endsWith(' ') ? '' : ' '}
-            {props.argumentHint}
-          </Text>
-        )}
+    <Input
+      ref={setBoxRef}
+      autoFocus={isActive}
+      disabled={!isActive}
+      caret={caret}
+      onKeyDown={isActive ? handleKeyDown : undefined}
+      onPaste={isActive ? onPaste : undefined}
+    >
+      <Text wrap="truncate-end" dimColor={props.dimColor}>
+        {valueNode}
+        {argumentHint}
         {children}
       </Text>
-    </Box>
+    </Input>
   );
 }

@@ -109,6 +109,7 @@ import {
   savePromptInputCursorOffset,
   setPromptInputStoreVimMode,
 } from '../../utils/promptInputCursorStore.js';
+import type { PromptDraftController } from '../../utils/promptDraftController.js';
 import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
@@ -217,6 +218,7 @@ import {
 } from './useSwarmBanner.js';
 import { isNonSpacePrintable, isVimModeEnabled } from './utils.js';
 import { resolveViewedTask, viewedAgentNameForPlaceholder } from './viewedAgent.js';
+import { getThemeSetting } from '../../utils/themeSetting.js';
 
 type Props = {
   debug: boolean;
@@ -231,6 +233,13 @@ type Props = {
   messages: Message[];
   onAutoUpdaterResult: (result: AutoUpdaterResult) => void;
   autoUpdaterResult: AutoUpdaterResult | null;
+  /**
+   * densable P$ / HWe draft controller. When provided, PromptInput
+   * subscribes to the controller snapshot for value (and later cursor/
+   * mode/pasted). Parent `input`/`onInputChange` remain as a fallback
+   * for tests and as a write bridge into the controller.
+   */
+  draftController?: PromptDraftController;
   input: string;
   onInputChange: (value: string) => void;
   mode: PromptInputMode;
@@ -317,6 +326,9 @@ type Props = {
 // minus footer (can be 0). The tot box itself stays Ne.
 const PROMPT_FOOTER_LINES = 5;
 
+const noopSubscribe = (): (() => void) => () => {};
+const nullDraftSnapshot = (): null => null;
+
 // densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
 
 function PromptInput({
@@ -332,7 +344,8 @@ function PromptInput({
   messages,
   onAutoUpdaterResult,
   autoUpdaterResult,
-  input,
+  draftController,
+  input: inputProp,
   onInputChange,
   mode,
   onModeChange,
@@ -364,6 +377,14 @@ function PromptInput({
   insertTextRef,
   voiceInterimRange,
 }: Props): React.ReactNode {
+  // densable HWe: when draftController is present, value comes from P$ snapshot
+  // — not parent React state — so typing does not re-render REPL/Messages.
+  const draftSnapshot = useSyncExternalStore(
+    draftController?.subscribe ?? noopSubscribe,
+    draftController?.getSnapshot ?? nullDraftSnapshot,
+    draftController?.getSnapshot ?? nullDraftSnapshot,
+  );
+  const input = draftController ? (draftSnapshot?.value ?? '') : inputProp;
   const mainLoopModel = useMainLoopModel();
   // Gold XE.onBgDetach — per PromptInput mount (#s on the instance, not process-global).
   const onBgDetach = useMemo(() => (process.env.CLAUDE_BG_BACKEND === 'daemon' ? createOnBgDetach() : undefined), []);
@@ -464,6 +485,10 @@ function PromptInput({
   // densable 2.1.211 ze.current — cursor offset mirror for N1-style insert.
   const cursorOffsetRef = React.useRef(cursorOffset);
   cursorOffsetRef.current = cursorOffset;
+  const draftControllerRef = React.useRef(draftController);
+  draftControllerRef.current = draftController;
+  const onInputChangeRef = React.useRef(onInputChange);
+  onInputChangeRef.current = onInputChange;
   if (promptEditComposerRef.current === null) {
     promptEditComposerRef.current = createPromptEditComposer({
       read: () => ({
@@ -473,7 +498,12 @@ function PromptInput({
       commit: box => {
         lastInternalInputRef.current = box.text;
         liveInputRef.current = box.text;
-        onInputChange(box.text);
+        const draft = draftControllerRef.current;
+        if (draft) {
+          draft.setValueWithCursor(box.text, box.cursor);
+        } else {
+          onInputChangeRef.current(box.text);
+        }
         setCursorOffset(box.cursor);
       },
     });
@@ -503,13 +533,17 @@ function PromptInput({
       const before = { text: liveInputRef.current, cursor: cursorOffsetRef.current };
       lastInternalInputRef.current = value;
       liveInputRef.current = value;
-      onInputChange(value);
+      if (draftController) {
+        draftController.setValue(value);
+      } else {
+        onInputChange(value);
+      }
       promptEditComposerRef.current?.record({
         before,
         after: { text: value, cursor: cursorOffsetRef.current },
       });
     },
-    [onInputChange],
+    [draftController, onInputChange],
   );
   // Expose an insertText function so callers (e.g. STT) can splice text at the
   // current cursor position instead of replacing the entire input.
@@ -520,15 +554,24 @@ function PromptInput({
         const needsSpace = cursorOffset === input.length && input.length > 0 && !/\s$/.test(input);
         const insertText = needsSpace ? ' ' + text : text;
         const newValue = input.slice(0, cursorOffset) + insertText + input.slice(cursorOffset);
+        const nextCursor = cursorOffset + insertText.length;
         lastInternalInputRef.current = newValue;
         liveInputRef.current = newValue;
-        onInputChange(newValue);
-        setCursorOffset(cursorOffset + insertText.length);
+        if (draftController) {
+          draftController.setValueWithCursor(newValue, nextCursor);
+        } else {
+          onInputChange(newValue);
+        }
+        setCursorOffset(nextCursor);
       },
       setInputWithCursor: (value: string, cursor: number) => {
         lastInternalInputRef.current = value;
         liveInputRef.current = value;
-        onInputChange(value);
+        if (draftController) {
+          draftController.setValueWithCursor(value, cursor);
+        } else {
+          onInputChange(value);
+        }
         setCursorOffset(cursor);
       },
     };
@@ -1249,6 +1292,7 @@ function PromptInput({
   const defaultPlaceholder = usePromptInputPlaceholder({
     input,
     submitCount,
+    hasMessages: messages.length > 0,
     viewingAgentName,
   });
 
@@ -3133,7 +3177,7 @@ function PromptInput({
         borderLeft={false}
         borderRight={false}
         borderBottom
-        width="100%"
+        width={promptInputColumns}
       >
         <Text dimColor italic>
           Save and close editor to continue...
@@ -3198,7 +3242,7 @@ function PromptInput({
               );
             })()}
           </Text>
-          <Box flexDirection="row" width="100%" tabIndex={-1} onClick={handleInputClick}>
+          <Box flexDirection="row" width={promptInputColumns} tabIndex={-1} onClick={handleInputClick}>
             <PromptInputModeIndicator
               mode={mode}
               isLoading={isLoading}
@@ -3216,15 +3260,20 @@ function PromptInput({
           flexDirection="row"
           alignItems="flex-start"
           justifyContent="flex-start"
-          borderColor={getBorderColor()}
-          borderStyle="round"
-          borderLeft={false}
-          borderRight={false}
-          borderBottom
-          width="100%"
+          {...(hostBlocksKeys
+            ? {}
+            : {
+                borderColor: getBorderColor(),
+                borderStyle: 'round' as const,
+                borderLeft: false,
+                borderRight: false,
+                borderBottom: true as const,
+              })}
+          width={promptInputColumns}
+          flexShrink={0}
           tabIndex={-1}
           onClick={handleInputClick}
-          borderText={promptBorderText}
+          borderText={hostBlocksKeys ? undefined : promptBorderText}
         >
           <PromptInputModeIndicator
             mode={mode}
@@ -3370,7 +3419,7 @@ function buildBorderText(
 ): BorderTextOptions | undefined {
   const parts: string[] = [];
   if (ultracodeActive) {
-    const themeName = resolveThemeSetting(getGlobalConfig().theme);
+    const themeName = resolveThemeSetting(getThemeSetting());
     parts.push(color('effortUltra', themeName)('ultracode'));
   }
   if (showFastIcon) {

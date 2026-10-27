@@ -186,7 +186,7 @@ describe('resolveSubmitInputFromLive', () => {
     expect(src).toMatch(
       /viewSelectionMode === 'selecting-agent'[\s\S]*?return false/,
     )
-    expect(src).toMatch(/enterTeammateView\(picked\.id/)
+    expect(src).toMatch(/enterTeammateView\(selectedRow\.id/)
   })
 
   // Defense in depth: even if openSelected still races into onSubmit with

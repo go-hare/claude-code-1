@@ -4,16 +4,42 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   clampNormalModeCursorOffset,
+  getPromptInputCursorState,
+  getPromptInputStoreStash,
+  getPromptInputValueStore,
   getSavedPromptInputCursorOffset,
   normalizeVimModeForCursorRestore,
   resetPromptInputCursorStoreForTests,
   resolveRemountCursorOffset,
   savePromptInputCursorOffset,
+  setPromptInputStoreStash,
   setPromptInputStoreValue,
 } from '../promptInputCursorStore.js'
 
 afterEach(() => {
   resetPromptInputCursorStoreForTests()
+})
+
+describe('densable 2.1.289 nD valueStore fields', () => {
+  test('initial state has stash/linkSuppliedTexts/submittedLinkPrefill', () => {
+    const s = getPromptInputCursorState()
+    expect(s.stash).toBeNull()
+    expect(s.submittedLinkPrefill).toBeNull()
+    expect(s.linkSuppliedTexts.size).toBe(0)
+    expect(s.active).toBe(false)
+  })
+
+  test('sSr stash round-trip', () => {
+    setPromptInputStoreStash({
+      text: 'x',
+      cursorOffset: 1,
+      mode: 'prompt',
+      pastedContents: {},
+    })
+    expect(getPromptInputStoreStash()?.text).toBe('x')
+    setPromptInputStoreStash(null)
+    expect(getPromptInputStoreStash()).toBeNull()
+  })
 })
 
 describe('densable 2.1.235 #15 savedCursorOffset', () => {
@@ -97,5 +123,21 @@ describe('densable 2.1.235 #15 savedCursorOffset', () => {
         vimMode: 'NORMAL',
       }),
     ).toBe(4)
+  })
+})
+
+describe('densable 2.1.289 wLe empty clears launchWarning', () => {
+  test('emptying non-empty value clears launchWarning', () => {
+    getPromptInputValueStore().setState(prev => ({
+      ...prev,
+      value: 'deeplink',
+      launchWarning: { type: 'deep-link', text: undefined },
+    }))
+    setPromptInputStoreValue('')
+    const s = getPromptInputCursorState()
+    expect(s.value).toBe('')
+    expect(s.launchWarning).toBeNull()
+    expect(s.linkSuppliedTexts.has('deeplink')).toBe(true)
+    expect(s.submittedLinkPrefill).toBe('deeplink')
   })
 })

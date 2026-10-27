@@ -1,5 +1,4 @@
 import memoize from 'lodash-es/memoize.js'
-import sample from 'lodash-es/sample.js'
 import { getCwd } from '../utils/cwd.js'
 import { getCurrentProjectConfig, saveCurrentProjectConfig } from './config.js'
 import { env } from './env.js'
@@ -139,12 +138,26 @@ async function getFrequentlyModifiedFiles(): Promise<string[]> {
 
 const ONE_WEEK_IN_MS = 7 * 24 * 60 * 60 * 1000
 
-export const getExampleCommandFromCache = memoize(() => {
-  const projectConfig = getCurrentProjectConfig()
-  const frequentFile = projectConfig.exampleFiles?.length
-    ? sample(projectConfig.exampleFiles)
-    : '<filepath>'
+/**
+ * densable `jee` — djb2-ish seed for Slo. Gold SEA @179426218.
+ * Do not export minify `jee`.
+ */
+export function leftoverJee(text: string): number {
+  let hash = 0
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0
+  }
+  return hash
+}
 
+/**
+ * densable `Slo(q())`. Gold: `o=Math.abs(jee(e))`, file `r[o%r.length]`,
+ * command `h[(o>>>8)%h.length]`. `e` is cwd (`q()`).
+ */
+export const getExampleCommandFromCache = memoize(() => {
+  const seed = Math.abs(leftoverJee(getCwd()))
+  const files = getCurrentProjectConfig().exampleFiles ?? []
+  const frequentFile = files[seed % files.length] ?? '<filepath>'
   const commands = [
     'fix lint errors',
     'fix typecheck errors',
@@ -155,8 +168,7 @@ export const getExampleCommandFromCache = memoize(() => {
     `write a test for ${frequentFile}`,
     'create a util logging.py that...',
   ]
-
-  return `Try "${sample(commands)}"`
+  return `Try "${commands[(seed >>> 8) % commands.length]}"`
 })
 
 export const refreshExampleCommands = memoize(async (): Promise<void> => {

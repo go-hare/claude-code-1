@@ -23,10 +23,17 @@ describe('REPL type-into-empty Hi latch (SEA typedIntoEmpty)', () => {
     const idx = src.indexOf('densable typedIntoEmpty')
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 900)
-    expect(slice).toMatch(/inputValueRef\.current === ''/)
+    // densable onEdit(next, prev): empty→nonempty while sticky.
+    // Gate uses `prev === ''` (pre-write); inputValueRef may already be next.
+    expect(slice).toMatch(/prev === ''/)
+    expect(slice).toMatch(/next !== ''/)
     expect(slice).toMatch(/!scrolledAwayRef\.current/)
-    expect(slice).toMatch(/repinScroll\(false,\s*'typedIntoEmpty'\)/)
+    // onEdit closes over repinScrollRef so P$ is not recreated each render.
+    expect(slice).toMatch(
+      /repinScrollRef\.current\(false,\s*'typedIntoEmpty'\)/,
+    )
     expect(slice).not.toMatch(/isSticky\(\)\s*!==\s*true/)
+    expect(src).not.toMatch(/useState\(\(\)\s*=>\s*consumeEarlyInput\(\)\)/)
   })
 
   test('source: composedOnScroll latches scrolledAwayRef = !sticky', async () => {

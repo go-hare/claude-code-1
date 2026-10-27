@@ -86,7 +86,8 @@ type InsertTextHandle = {
 };
 
 type UseVoiceIntegrationArgs = {
-  setInputValueRaw: React.Dispatch<React.SetStateAction<string>>;
+  /** densable setValueRaw — string write only (no typedIntoEmpty / active latch). */
+  setInputValueRaw: (value: string) => void;
   inputValueRef: React.RefObject<string>;
   insertTextRef: React.RefObject<InsertTextHandle | null>;
 };

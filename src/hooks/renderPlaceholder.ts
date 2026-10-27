@@ -1,4 +1,5 @@
 import chalk from 'chalk'
+import { leftoverXy } from '../utils/leftoverXy.js'
 
 type PlaceholderRendererProps = {
   placeholder?: string
@@ -16,7 +17,7 @@ export function renderPlaceholder({
   showCursor,
   focus,
   terminalFocus = true,
-  invert = chalk.inverse,
+  invert = leftoverXy,
   hidePlaceholderText = false,
 }: PlaceholderRendererProps): {
   renderedPlaceholder: string | undefined
@@ -32,7 +33,7 @@ export function renderPlaceholder({
     } else {
       renderedPlaceholder = chalk.dim(placeholder)
 
-      // Show inverse cursor only when both input and terminal are focused
+      // densable Ye: invert(raw t[0]) + dim rest. Empty placeholder invert(" ").
       if (showCursor && focus && terminalFocus) {
         renderedPlaceholder =
           placeholder.length > 0

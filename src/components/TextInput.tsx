@@ -1,13 +1,14 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
-import React, { useMemo, useRef } from 'react';
+import React, { useRef } from 'react';
 import { useVoiceState } from '../context/voice.js';
 import { useClipboardImageHint } from '../hooks/useClipboardImageHint.js';
 import { useSettings } from '../hooks/useSettings.js';
 import { useTextInput } from '../hooks/useTextInput.js';
-import { Box, color, useAnimationFrame, useTerminalFocus, useTheme } from '@anthropic/ink';
+import { Box, color, isNativeCursorEnabled, useAnimationFrame, useTerminalFocus, useTheme } from '@anthropic/ink';
 import type { BaseTextInputProps } from '../types/textInputTypes.js';
-import { isAccessibilityEnvEnabled } from '../utils/residualFinalEnvGates.js';
+import { leftoverXt, leftoverXy } from '../utils/leftoverXy.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { BaseTextInput } from './BaseTextInput.js';
 import { hueToRgb } from './Spinner/utils.js';
@@ -39,8 +40,6 @@ export type Props = BaseTextInputProps & {
 export default function TextInput(props: Props): React.ReactNode {
   const [theme] = useTheme();
   const isTerminalFocused = useTerminalFocus();
-  // Hoisted to mount-time — this component re-renders on every keystroke.
-  const accessibilityEnabled = useMemo(() => isAccessibilityEnvEnabled(), []);
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
 
@@ -60,16 +59,13 @@ export default function TextInput(props: Props): React.ReactNode {
   // Show hint when terminal regains focus and clipboard has an image
   useClipboardImageHint(isTerminalFocused, !!props.onImagePaste);
 
-  // Cursor invert function: mini waveform during voice recording,
-  // standard chalk.inverse otherwise. No warmup pulse — the ~120ms
-  // warmup window is too short for a 1s-period pulse to register, and
-  // driving TextInput re-renders at 50ms during warmup (while spaces
-  // are simultaneously arriving every 30-80ms) causes visible stutter.
-  const canShowCursor = isTerminalFocused && !accessibilityEnabled;
+  // densable ir: S=!i?Xt:P?hex:u?Yt:xY. u=eD() nativeCursor. P=nst hex.
+  const nativeCursor = isNativeCursorEnabled();
+  const leftoverVoiceHex = isVoiceRecording && !reducedMotion;
   let invert: (text: string) => string;
-  if (!canShowCursor) {
-    invert = (text: string) => text;
-  } else if (isVoiceRecording && !reducedMotion) {
+  if (!isTerminalFocused) {
+    invert = leftoverXt;
+  } else if (leftoverVoiceHex) {
     // Single-bar waveform from the latest audio level
     const smoothed = smoothedRef.current;
     const raw = audioLevels.length > 0 ? (audioLevels[audioLevels.length - 1] ?? 0) : 0;
@@ -81,8 +77,10 @@ export default function TextInput(props: Props): React.ReactNode {
     const hue = ((animTime / 1000) * 90) % 360;
     const { r, g, b } = isSilent ? { r: 128, g: 128, b: 128 } : hueToRgb(hue);
     invert = () => chalk.rgb(r, g, b)(BARS[barIndex]!);
+  } else if (nativeCursor) {
+    invert = leftoverXt;
   } else {
-    invert = chalk.inverse;
+    invert = leftoverXy;
   }
 
   const textInputState = useTextInput({
@@ -101,7 +99,10 @@ export default function TextInput(props: Props): React.ReactNode {
     focus: props.focus,
     mask: props.mask,
     multiline: props.multiline,
-    cursorChar: props.showCursor ? ' ' : '',
+    // densable ir @202727401: `E=t.showCursor&&!c?" ":""` — c=Xe() screen
+    // reader only. Native eD() switches invert to Yt/identity; it does not
+    // clear cursorChar. Vim path still gates with !eD (gold N=eD).
+    cursorChar: props.showCursor && !isScreenReaderModeEnabled() ? ' ' : '',
     highlightPastedText: props.highlightPastedText,
     invert,
     themeText: color('text', theme),
@@ -128,6 +129,10 @@ export default function TextInput(props: Props): React.ReactNode {
         invert={invert}
         hidePlaceholderText={isVoiceRecording}
         {...props}
+        // densable UTt `visible:!c` — soft invert cell (voice hex or leftoverXy)
+        // counts as painted so the hardware caret stays off. Native / unfocused
+        // identity invert is unpainted. Match Vim `!nativeCursor` when focused.
+        cursorCellPainted={leftoverVoiceHex || (isTerminalFocused && !nativeCursor)}
       />
     </Box>
   );
