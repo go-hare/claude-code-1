@@ -27,12 +27,11 @@ const FN_KEY_RE =
 // Examples:
 //   ESC[13;2u              Shift+Enter (basic)
 //   ESC[27u                Escape, no modifiers
-//   ESC[58:65306;2u        key ":" with shifted key U+FF1A (fullwidth colon)
-//   ESC[58:65306;2:1;65306u  same + event-type press + associated text U+FF1A
-// Each field accepts digits and ":" so subparams don't fail the match and get
-// swallowed as unmapped functional keys (the CJK fullwidth-colon bug).
+// Gold `gs`: ESC [ code[:shifted[:base]] ; mods u
+//   ESC[58:65306;2u  primary ":" (58), shifted U+FF1A, shift
+// Field 1 has exactly three slots. There is no third `;text` field.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
-const CSI_U_RE = /^\x1b\[([\d:]+)(?:;([\d:]+))?(?:;([\d:]+))?u/
+const CSI_U_RE = /^\x1b\[(\d+)(?::(\d*)(?::(\d+))?)?(?:;(\d+))?u/
 
 // xterm modifyOtherKeys: ESC [ 27 ; modifier ; keycode ~
 // Example: ESC[27;2;13~ = Shift+Enter. Emitted by Ghostty/tmux/xterm when
@@ -119,18 +118,15 @@ function resolveAltGrAsTextMode(): 'force' | 'off' | 'auto' {
 }
 
 /**
- * Official jog / qgg — codepoints that may be AltGr text.
- * Extended past official `e>=160&&e<55296` so fullwidth forms (U+FF1A etc.)
- * and CJK after the surrogate block also rewrite ctrl+meta → plain text.
- * Without this, ESC[65306;7u (AltGr/IME) keeps ctrl+meta and useTextInput
- * mapKey swallows the character via handleCtrl/handleMeta.
+ * Gold `Vy` / jog — codepoints that may be AltGr text or the CSI-u shifted
+ * slot. Printable ASCII, or 160 ≤ n < 55296 (stops before surrogates).
+ * Fullwidth (U+FF00–) is NOT in this range; IME commits arrive as UTF-8.
  */
 function isAltGrPrintableCodepoint(codepoint: number): boolean {
-  if (codepoint > 32 && codepoint < 127) return true
-  if (codepoint >= 160 && codepoint < 0xd800) return true
-  // Fullwidth / CJK beyond surrogates (official FJc stops at 55296; we need
-  // these for IME punctuation under AltGr-reported mods).
-  return isPrintableUnicodeCodepoint(codepoint)
+  return (
+    (codepoint > 32 && codepoint < 127) ||
+    (codepoint >= 160 && codepoint < 55296)
+  )
 }
 
 /** Official Wog/zgg — ASCII alnum; auto mode leaves these as real ctrl+meta. */
@@ -452,8 +448,8 @@ function highByteFromExtendedKeySequence(sequence: string): number | undefined {
   let code: number | undefined
   let mods: number | undefined
   if (csi) {
-    code = firstSubparam(csi[1])
-    mods = firstSubparam(csi[2])
+    code = parseInt(csi[1]!, 10)
+    mods = csi[4] === undefined ? undefined : parseInt(csi[4], 10)
   } else {
     const mok = MODIFY_OTHER_KEYS_RE.exec(sequence)
     if (mok) {
@@ -465,12 +461,6 @@ function highByteFromExtendedKeySequence(sequence: string): number | undefined {
   // Only unmodified (or omitted mods, treated as 1). Real Shift/Alt/Ctrl
   // high-byte events are not UTF-8 fragments.
   if (mods !== undefined && mods !== 1) return undefined
-  // Progressive-enhancement event-type subparam: only press (or default)
-  // participates in reassembly. Release/repeat would corrupt the buffer.
-  if (csi?.[2]?.includes(':')) {
-    const eventType = parseInt(csi[2].split(':')[1] ?? '1', 10)
-    if (Number.isFinite(eventType) && eventType !== 1) return undefined
-  }
   return code
 }
 
@@ -942,122 +932,57 @@ export function traditionalCtrlAliasName(
 }
 
 /**
- * True for printable Unicode codepoints that should become text input when
- * reported via Kitty CSI u / modifyOtherKeys (MO5-style recovery / name).
- *
- * Official 2.1.210 splits this:
- *   - VXc keycodeToName: only `e >= 160 && e < 55296` (stops before surrogates)
- *   - sig / MO5 recovery: any `e <= 0x10FFFF` via fromCodePoint
- *
- * Fullwidth forms (U+FF00–U+FFEF, e.g. `：` U+FF1A = 65306) sit AFTER the
- * surrogate block, so official VXc does NOT name them — recovery is via MO5
- * on empty name. We intentionally include them here so both name mapping and
- * characterFromCsiUMatch accept IME fullwidth punctuation without relying
- * solely on the empty-name path.
- *
- * Excludes:
- * - ASCII (handled separately with toLowerCase for key names)
- * - Surrogate halves (invalid scalar values)
- * - BMP Private Use Area U+E000–U+F8FF — Kitty functional keys live here
- *   (Caps Lock 57358, KP_0 57399, …)
- * - Supplementary Private Use Areas
+ * Gold `Xy`: shifted slot (field 1, subparam 2) only when `Vy`.
+ * `Vy` stops before surrogates, so U+FF0C is not this slot.
+ * IME fullwidth commits arrive as UTF-8 (KeyboardEvent length 1) under `>5u`.
  */
-function isPrintableUnicodeCodepoint(codepoint: number): boolean {
-  if (codepoint <= 126 || codepoint > 0x10ffff) return false
-  // Surrogates
-  if (codepoint >= 0xd800 && codepoint <= 0xdfff) return false
-  // BMP Private Use Area (Kitty functional-key codepoints)
-  if (codepoint >= 0xe000 && codepoint <= 0xf8ff) return false
-  // Supplementary Private Use Area-A / Area-B
-  if (codepoint >= 0xf0000 && codepoint <= 0xffffd) return false
-  if (codepoint >= 0x100000 && codepoint <= 0x10fffd) return false
-  return true
-}
-
-/** First numeric subparameter of a CSI u field (`"58:65306"` → 58). */
-function firstSubparam(field: string | undefined): number | undefined {
-  if (!field) return undefined
-  const n = parseInt(field.split(':')[0]!, 10)
-  return Number.isFinite(n) ? n : undefined
+export function shiftedKeyFromCsiUSequence(
+  sequence: string | undefined,
+): string | undefined {
+  if (!sequence) return undefined
+  const match = CSI_U_RE.exec(sequence)
+  if (!match?.[2]) return undefined
+  const codepoint = parseInt(match[2], 10)
+  if (!isAltGrPrintableCodepoint(codepoint)) return undefined
+  return String.fromCodePoint(codepoint)
 }
 
 /**
- * Best character to insert for a Kitty CSI u sequence under progressive
- * enhancement. Preference order mirrors the protocol's text field intent:
- *   1. associated text codepoints (3rd CSI field) — what IME/terminals
- *      report as the produced text (e.g. fullwidth `：`)
- *   2. shifted-key codepoint (2nd subparam of 1st field) when present
- *   3. primary unicode-key-code
- * Only returns printable codepoints (ASCII or non-PUA Unicode).
- */
-function characterFromCsiUMatch(match: RegExpExecArray): string | undefined {
-  const candidates: number[] = []
-  // 3rd field: text-as-codepoints, may be colon-separated multiples
-  if (match[3]) {
-    for (const part of match[3].split(':')) {
-      const n = parseInt(part, 10)
-      if (Number.isFinite(n)) candidates.push(n)
-    }
-  }
-  // 1st field: unicode-key-code[:shifted-key[:base-layout-key]]
-  if (match[1]) {
-    const parts = match[1].split(':')
-    // shifted key (index 1) preferred over primary for text insertion when
-    // the primary is a bare ASCII key and IME produced a fullwidth form.
-    if (parts[1]) {
-      const shifted = parseInt(parts[1], 10)
-      if (Number.isFinite(shifted)) candidates.push(shifted)
-    }
-    const primary = parseInt(parts[0]!, 10)
-    if (Number.isFinite(primary)) candidates.push(primary)
-  }
-  for (const codepoint of candidates) {
-    if (
-      (isPrintableUnicodeCodepoint(codepoint) ||
-        (codepoint >= 32 && codepoint <= 126)) &&
-      codepoint <= 0x10ffff &&
-      !(codepoint >= 0xd800 && codepoint <= 0xdfff)
-    ) {
-      return String.fromCodePoint(codepoint)
-    }
-  }
-  return undefined
-}
-
-/**
- * Recover a Unicode character from a CSI u / modifyOtherKeys sequence.
- * Mirrors official densable MO5, extended for Kitty progressive enhancement
- * (`code:shifted;mods:event;text u`) so IME fullwidth punctuation is not
- * swallowed when the sequence is more than simple `ESC[N;Mu`.
+ * Gold `Rx`: paste converts CSI u / modifyOtherKeys to the primary codepoint.
+ * Any scalar ≤ U+10FFFF, including the private-use area. Surrogates are not
+ * scalars; gold `fromCodePoint` throws, this returns the original sequence.
+ * Unparsed input is returned unchanged.
  */
 export function unicodeFromExtendedKeySequence(
   sequence: string | undefined,
 ): string | undefined {
   if (!sequence) return undefined
   const csi = CSI_U_RE.exec(sequence)
-  if (csi) {
-    // Release events (mods:3) must not insert — InputEvent recovers via this
-    // helper when name is empty, so skip here too.
-    if (csi[2]?.includes(':')) {
-      const eventType = parseInt(csi[2].split(':')[1] ?? '1', 10)
-      if (Number.isFinite(eventType) && eventType === 3) return undefined
+  const mok = csi ? null : MODIFY_OTHER_KEYS_RE.exec(sequence)
+  if (!csi && !mok) return sequence
+  const codepoint = csi ? parseInt(csi[1]!, 10) : parseInt(mok![2]!, 10)
+  const mods = csi
+    ? csi[4] === undefined
+      ? 1
+      : parseInt(csi[4], 10)
+    : parseInt(mok![1]!, 10)
+  if (!Number.isFinite(codepoint) || codepoint > 0x10ffff) return sequence
+  if (codepoint >= 0xd800 && codepoint <= 0xdfff) return sequence
+  const decoded = decodeModifier(Number.isFinite(mods) && mods >= 1 ? mods : 1)
+  if (decoded.ctrl) {
+    switch (codepoint) {
+      case 105:
+      case 73:
+        return '\t'
+      case 106:
+      case 74:
+        return '\n'
+      case 109:
+      case 77:
+        return '\r'
     }
-    return characterFromCsiUMatch(csi)
   }
-  const mok = MODIFY_OTHER_KEYS_RE.exec(sequence)
-  if (mok) {
-    const codepoint = parseInt(mok[2]!, 10)
-    if (
-      Number.isFinite(codepoint) &&
-      codepoint <= 0x10ffff &&
-      !(codepoint >= 0xd800 && codepoint <= 0xdfff) &&
-      (isPrintableUnicodeCodepoint(codepoint) ||
-        (codepoint >= 32 && codepoint <= 126))
-    ) {
-      return String.fromCodePoint(codepoint)
-    }
-  }
-  return undefined
+  return String.fromCodePoint(codepoint)
 }
 
 /**
@@ -1067,10 +992,8 @@ export function unicodeFromExtendedKeySequence(
  * Numpad codepoints are from Unicode Private Use Area, defined at:
  * https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions
  *
- * Non-ASCII printable Unicode (CJK, fullwidth punctuation, etc.) is returned
- * as the actual character so InputEvent can insert it. Without this, IME
- * commits of e.g. fullwidth colon (`：`, U+FF1A) arrive as ESC[65306u and
- * are swallowed as "unmapped Kitty functional keys".
+ * Gold `Fy` names printable non-ASCII only for 160 ≤ n < 55296.
+ * Fullwidth (U+FF00–) is unnamed. A nameless ESC sequence does not insert.
  */
 function keycodeToName(keycode: number): string | undefined {
   switch (keycode) {
@@ -1119,13 +1042,36 @@ function keycodeToName(keycode: number): string | undefined {
       return 'return'
     case 57415: // KP_EQUAL
       return '='
+    case 57416: // KP_SEPARATOR
+      return ','
+    case 57417:
+      return 'left'
+    case 57418:
+      return 'right'
+    case 57419:
+      return 'up'
+    case 57420:
+      return 'down'
+    case 57421:
+      return 'pageup'
+    case 57422:
+      return 'pagedown'
+    case 57423:
+      return 'home'
+    case 57424:
+      return 'end'
+    case 57425:
+      return 'insert'
+    case 57426:
+      return 'delete'
     default:
       // Printable ASCII characters
       if (keycode >= 32 && keycode <= 126) {
         return String.fromCharCode(keycode).toLowerCase()
       }
-      // Printable non-ASCII Unicode (CJK, fullwidth punct, emoji base, …)
-      if (isPrintableUnicodeCodepoint(keycode)) {
+      // Gold Fy: printable non-ASCII stops before surrogates. Fullwidth
+      // (U+FF00–) and emoji are unnamed here; the shifted slot carries them.
+      if (keycode >= 160 && keycode < 55296) {
         return String.fromCodePoint(keycode)
       }
       return undefined
@@ -1443,49 +1389,18 @@ function parseKeypress(s: string = ''): ParsedKey {
 
   key.sequence = key.sequence || s || key.name
 
-  // Handle CSI u (kitty keyboard protocol), including progressive enhancement:
-  // ESC [ code[:shifted[:base]] ; mods[:event] ; text-codepoints u
-  // Prefer associated text / shifted codepoint for the inserted character so
-  // IME fullwidth punctuation (e.g. `：` U+FF1A) is not dropped.
-  //
-  // Event-type subparam (official progressive enhancement):
-  //   mods:event  →  "1:1" press, "1:2" repeat, "1:3" release
-  // Only press (1, default) and repeat (2) produce input. Release must not
-  // insert, or press+release would double fullwidth characters.
+  // Gold `ko` CSI u: ESC [ code[:shifted[:base]] ; mods u
+  // Name is Fy(primary), or the base-layout key under Ctrl. The shifted
+  // glyph (「，」) is not the name — KeyboardEvent.key reads it via Xy.
   let match: RegExpExecArray | null
   if ((match = CSI_U_RE.exec(s))) {
-    const primary = firstSubparam(match[1]) ?? 0
-    // Modifier field may be "2" or "2:1" (mods:event-type); first subparam wins.
-    const modifier = firstSubparam(match[2]) ?? 1
-    const mods = decodeModifier(modifier)
-    const eventTypeField = match[2]?.includes(':')
-      ? parseInt(match[2]!.split(':')[1] ?? '1', 10)
-      : 1
-    const isRelease = Number.isFinite(eventTypeField) && eventTypeField === 3
-    // Official NJc/OJc: AltGr (ctrl+meta) printable → plain text key before
-    // functional naming so useTextInput does not route through handleCtrl/Meta.
-    // Prefer recovered text codepoint (IME fullwidth) over primary physical key.
-    if (!isRelease) {
-      const textChar = characterFromCsiUMatch(match)
-      const altGrCp =
-        textChar !== undefined
-          ? textChar.codePointAt(0)!
-          : isAltGrPrintableCodepoint(primary)
-            ? primary
-            : undefined
-      if (altGrCp !== undefined && shouldRewriteAltGrAsText(mods, altGrCp)) {
-        return altGrTextKey(s, altGrCp, mods.shift)
-      }
+    const primary = parseInt(match[1]!, 10)
+    const modifier = match[4] === undefined ? 1 : parseInt(match[4], 10)
+    const mods = decodeModifier(Number.isFinite(modifier) ? modifier : 1)
+    if (shouldRewriteAltGrAsText(mods, primary)) {
+      return altGrTextKey(s, primary, mods.shift)
     }
-    // Name for keybindings uses primary codepoint (physical key). The text to
-    // insert is recovered later in InputEvent via unicodeFromExtendedKeySequence
-    // / key name when printable non-ASCII.
-    // densable 2.1.247 Ea: Ctrl + non-ASCII primary uses kitty base-layout-key
-    // (CSI u field 1 `::base`) so Cyrillic Ctrl+C names `c`, not `ф`.
-    const field1Parts = match[1]?.split(':') ?? []
-    const baseLayoutKey = field1Parts[2]
-      ? parseInt(field1Parts[2], 10)
-      : undefined
+    const baseLayoutKey = match[3] ? parseInt(match[3], 10) : undefined
     const usedBaseLayoutKey =
       mods.ctrl &&
       primary > 127 &&
@@ -1493,22 +1408,10 @@ function parseKeypress(s: string = ''): ParsedKey {
       Number.isFinite(baseLayoutKey)
     const namedCode = usedBaseLayoutKey ? baseLayoutKey : primary
     const remapped = traditionalCtrlAliasName(mods, namedCode)
-    const mapped = remapped ?? keycodeToName(namedCode)
-    const textChar = isRelease ? undefined : characterFromCsiUMatch(match)
-    // Functional names (return/escape/tab/space/backspace/numpad labels) are
-    // multi-char and must win for keybindings. Otherwise prefer the recovered
-    // text character so ESC[58:65306;2u] inserts `：` rather than `:`.
-    // On release, keep the functional/primary name for bindings but InputEvent
-    // will clear printable insert (empty textChar + nonAlphanumeric / name).
-    // Official Ea names p??kb(h) when the base-layout remap applies.
-    const name = usedBaseLayoutKey
-      ? (mapped ?? '')
-      : mapped && mapped.length > 1
-        ? mapped
-        : (textChar ?? mapped)
+    const name = remapped ?? keycodeToName(namedCode)
     return {
       kind: 'key',
-      name: isRelease && !(mapped && mapped.length > 1) ? '' : name,
+      name,
       fn: false,
       ctrl: remapped === undefined && mods.ctrl,
       meta: mods.meta,

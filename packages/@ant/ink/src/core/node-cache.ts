@@ -1,11 +1,14 @@
 import type { DOMElement } from './dom.js'
 import type { Rectangle } from './layout/geometry.js'
+import type { Color } from './styles.js'
 
 /**
  * Cached layout bounds for each rendered node (used for blit + clearing).
  * `top` is the yoga-local getComputedTop() — stored so ScrollBox viewport
  * culling can skip yoga reads for clean children whose position hasn't
  * shifted (O(dirty) instead of O(mounted) first-pass).
+ * `background` is densable `jd.background` / `M` — inherited fill at stamp
+ * time. Blit must miss when it changes or hover tint sticks on clean children.
  */
 export type CachedLayout = {
   x: number
@@ -13,6 +16,16 @@ export type CachedLayout = {
   width: number
   height: number
   top?: number
+  background?: Color
+  /** densable `jd.clip` — last paint's overflow clip. */
+  clip?: {
+    x1: number | undefined
+    x2: number | undefined
+    y1: number | undefined
+    y2: number | undefined
+  }
+  /** densable `unpainted` — SC hide/cull stamp; skip-blit yC miss. */
+  unpainted?: boolean
 }
 
 export const nodeCache = new WeakMap<DOMElement, CachedLayout>()

@@ -55,7 +55,12 @@ export function computeElementViewportVisibility(
       absoluteTop += parent.yogaNode.getComputedTop()
       root = parent.yogaNode
     }
-    // Official: if (u.scrollTop) s -= HS(u)
+    // densable Ze: overflowY/overflow scroll && scrollTopRendered===void 0 → null
+    const overflowY = parent.style?.overflowY ?? parent.style?.overflow
+    if (overflowY === 'scroll' && parent.scrollTopRendered === undefined) {
+      return null
+    }
+    // densable Ze: if (m.scrollTop) c -= Ite(m)
     if (parent.scrollTop) absoluteTop -= readClampedScrollTop(parent)
     parent = parent.parentNode
   }
@@ -100,6 +105,10 @@ export function useTerminalViewport(): [
 
   const setElement = useCallback((el: DOMElement | null) => {
     elementRef.current = el
+    // densable QV: h===null && !l.current.isVisible → isVisible:!0
+    if (el === null && !entryRef.current.isVisible) {
+      entryRef.current = { isVisible: true }
+    }
   }, [])
 
   // densable D0 `s()` — ref-only; never setState.

@@ -8,7 +8,7 @@ import { addPendingClear, nodeCache } from './node-cache.js'
 import squashTextNodes, {
   squashTextNodesToSegments,
 } from './squash-text-nodes.js'
-import type { Styles, TextStyles } from './styles.js'
+import type { Color, Styles, TextStyles } from './styles.js'
 import { expandTabsJoin, hasEscOrC1 } from './tabstops.js'
 import wrapText from './wrap-text.js'
 
@@ -73,7 +73,30 @@ export type DOMElement = {
    * (`if(!u)return`). Cache miss is undefined; no yoga getComputed* fallback.
    * Local paint still writes `nodeCache` (WeakMap) for hit-test.
    */
-  cachedLayout?: { x: number; y: number; width: number; height: number }
+  cachedLayout?: {
+    x: number
+    y: number
+    width: number
+    height: number
+    top?: number
+    background?: Color
+    clip?: {
+      x1: number | undefined
+      x2: number | undefined
+      y1: number | undefined
+      y2: number | undefined
+    }
+    unpainted?: boolean
+  }
+  /**
+   * densable `nd()` — walked up on insert of absolute (or abs-descendant)
+   * children. yC skip-blit miss when clip grew.
+   */
+  hasAbsoluteDescendant?: boolean
+  /** densable Mv `paintsPastRect` — child overflow or descendant overflow. */
+  paintsPastRect?: boolean
+  /** densable `hasEscapingDescendant` — absolute overlay outside parent rect. */
+  hasEscapingDescendant?: boolean
   /** densable `resetAfterCommit` — `n.lastCommitMs` from `scrollCommitStartedAt`. */
   lastCommitMs?: number
   /** densable `Yhr` stamp; cleared in `resetAfterCommit`. */
@@ -134,6 +157,12 @@ export type DOMElement = {
   scrollHeightHwm?: number
   scrollViewportHeight?: number
   scrollViewportTop?: number
+  /**
+   * densable Gs `scrollTopRendered` — last visual `at` after drain/clamp.
+   * followScroll delta is `at - (scrollTopRendered ?? at)` (signed, including
+   * scroll-up).
+   */
+  scrollTopRendered?: number
   stickyScroll?: boolean
   // Set by ScrollBox.scrollToElement; render-node-to-output reads
   // el.yogaNode.getComputedTop() (FRESH — same Yoga pass as scrollHeight)
@@ -208,6 +237,26 @@ export const createNode = (
   return node
 }
 
+/** densable `nd(n)` — walk parents setting hasAbsoluteDescendant. */
+function leftoverGsStampAbsoluteDescendant(node: DOMElement | undefined): void {
+  let cur: DOMElement | undefined = node
+  while (cur && !cur.hasAbsoluteDescendant) {
+    cur.hasAbsoluteDescendant = true
+    cur = cur.parentNode
+  }
+}
+
+function leftoverGsMaybeStampAbsolute(
+  parent: DOMElement,
+  child: DOMNode,
+): void {
+  if (child.nodeName === '#text') return
+  const elem = child as DOMElement
+  if (elem.style.position === 'absolute' || elem.hasAbsoluteDescendant) {
+    leftoverGsStampAbsoluteDescendant(parent)
+  }
+}
+
 export const appendChildNode = (
   node: DOMElement,
   childNode: DOMElement,
@@ -225,6 +274,8 @@ export const appendChildNode = (
       node.yogaNode.getChildCount(),
     )
   }
+
+  leftoverGsMaybeStampAbsolute(node, childNode)
 
   markDirty(node)
 }
@@ -262,6 +313,7 @@ export const insertBeforeNode = (
       node.yogaNode.insertChild(newChildNode.yogaNode, yogaIndex)
     }
 
+    leftoverGsMaybeStampAbsolute(node, newChildNode)
     markDirty(node)
     return
   }
@@ -275,6 +327,7 @@ export const insertBeforeNode = (
     )
   }
 
+  leftoverGsMaybeStampAbsolute(node, newChildNode)
   markDirty(node)
 }
 
@@ -315,6 +368,7 @@ function collectRemovedRects(
   if (cached) {
     addPendingClear(parent, cached, isAbsolute)
     nodeCache.delete(elem)
+    elem.cachedLayout = undefined
   }
   for (const child of elem.childNodes) {
     collectRemovedRects(parent, child, isAbsolute)
@@ -356,7 +410,11 @@ export const setStyle = (node: DOMNode, style: Styles): void => {
   if (stylesEqual(node.style, style)) {
     return
   }
+  const wasAbsolute = node.style.position === 'absolute'
   node.style = style
+  if (!wasAbsolute && style.position === 'absolute' && node.parentNode) {
+    leftoverGsStampAbsoluteDescendant(node.parentNode)
+  }
   markDirty(node)
 }
 

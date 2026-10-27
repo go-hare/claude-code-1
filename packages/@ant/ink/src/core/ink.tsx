@@ -61,7 +61,12 @@ import reconciler, {
   recordYogaMs,
   resetProfileCounters,
 } from './reconciler.js';
-import renderNodeToOutput, { consumeFollowScroll, didLayoutShift } from './render-node-to-output.js';
+import renderNodeToOutput, {
+  consumeFollowScroll,
+  didLayoutShift,
+  leftoverGsFollowCapture,
+  leftoverGsOverlayActive,
+} from './render-node-to-output.js';
 import { applyPositionedHighlight, type MatchPosition, scanPositions } from './render-to-screen.js';
 import createRenderer, { type Renderer } from './renderer.js';
 import {
@@ -87,6 +92,7 @@ import {
   findPlainTextUrlAt,
   getSelectedText,
   hasSelection,
+  leftoverGsSelectionBothEndsOff,
   moveFocus,
   type SelectionState,
   selectLineAt,
@@ -639,6 +645,12 @@ export default class Ink {
   // one full-render frame; steady-state frames after clear it and regain
   // the blit + narrow-damage fast path.
   private prevFrameContaminated = false;
+  /**
+   * densable `prevOverlaySig` — selection/search overlay fingerprint.
+   * Contaminates prevScreen when it changes so Kt does not DECSTBM-blit
+   * inverted cells.
+   */
+  private prevOverlaySig = '';
   /**
    * densable `keptForNextFrame` / `leftAltScreenSinceFrame` — DEC sequences
    * coalesced into the next paint so AlternateScreen 1049h is not a separate
@@ -1433,6 +1445,23 @@ export default class Ink {
     const renderStart = performance.now();
     const { columns: terminalWidth, rows: terminalRows } = this.stdoutSize();
 
+    // densable: overlay sig before renderer. Gold:
+    //   x=`${m?.row},${m?.col},${y?.row},${y?.col}|${query}|${g?.currentIdx},...`
+    //   R=prevFrameContaminated||x!==prevOverlaySig
+    //   M=m!==null&&y!==null&&!sqe||!!query||!!g
+    const { anchor: leftoverGsAnchor, focus: leftoverGsFocus } = this.selection;
+    const leftoverGsPos = this.searchPositions;
+    const leftoverGsOverlaySig = `${leftoverGsAnchor?.row},${leftoverGsAnchor?.col},${leftoverGsFocus?.row},${leftoverGsFocus?.col}|${this.searchHighlightQuery}|${leftoverGsPos?.currentIdx},${leftoverGsPos?.rowOffset},${leftoverGsPos?.positions.length}`;
+    const leftoverGsContaminated = this.prevFrameContaminated || leftoverGsOverlaySig !== this.prevOverlaySig;
+    this.prevOverlaySig = leftoverGsOverlaySig;
+    const leftoverGsOverlay = leftoverGsOverlayActive({
+      anchor: leftoverGsAnchor,
+      focus: leftoverGsFocus,
+      selectionBothEndsOff: leftoverGsSelectionBothEndsOff(this.selection),
+      searchHighlightQuery: this.searchHighlightQuery,
+      searchPositions: leftoverGsPos,
+    });
+
     // densable: after overlay sig, before renderer — consume kitty dirty flag.
     // biome-ignore lint/complexity/noCommaOperator: gold imagesStale consume is comma-operator
     if (this.imagesStale) (this.imagesStale = false), this.terminalImages.retransmitAll();
@@ -1444,7 +1473,8 @@ export default class Ink {
       terminalWidth,
       terminalRows,
       altScreen: this.altScreenActive,
-      prevFrameContaminated: this.prevFrameContaminated,
+      prevFrameContaminated: leftoverGsContaminated,
+      overlayActive: leftoverGsOverlay,
     });
     const rendererMs = performance.now() - renderStart;
 
@@ -1499,9 +1529,12 @@ export default class Ink {
       // viewportBottom, teleporting it into the scrollbox. Mirror the
       // bounds check the deleted check() in ScrollKeybindingHandler had.
       this.selection.anchor.row >= follow.viewportTop &&
-      this.selection.anchor.row <= follow.viewportBottom
+      this.selection.anchor.row <= follow.viewportBottom &&
+      (this.selection.virtualAnchorCol ?? this.selection.anchor.col) >= follow.viewportLeft &&
+      (this.selection.virtualAnchorCol ?? this.selection.anchor.col) <= follow.viewportRight
     ) {
-      const { delta, viewportTop, viewportBottom } = follow;
+      const { delta, viewportTop, viewportBottom, viewportLeft, viewportRight } = follow;
+      const leftoverGsCap = leftoverGsFollowCapture(delta, viewportTop, viewportBottom);
       // captureScrolledRows and shift* are a pair: capture grabs rows about
       // to scroll off, shift moves the selection endpoint so the same rows
       // won't intersect again next frame. Capturing without shifting leaves
@@ -1511,7 +1544,13 @@ export default class Ink {
       // each shift branch so the pairing can't be broken by a new guard.
       if (this.selection.isDragging) {
         if (hasSelection(this.selection)) {
-          captureScrolledRows(this.selection, this.frontFrame.screen, viewportTop, viewportTop + delta - 1, 'above');
+          captureScrolledRows(
+            this.selection,
+            this.frontFrame.screen,
+            leftoverGsCap.firstRow,
+            leftoverGsCap.lastRow,
+            leftoverGsCap.side,
+          );
         }
         shiftAnchor(this.selection, -delta, viewportTop, viewportBottom);
       } else if (
@@ -1528,10 +1567,19 @@ export default class Ink {
         // shiftAnchor ignores focus, and the anchor DOES shift (so capture
         // is correct there even when focus is in the footer).
         !this.selection.focus ||
-        (this.selection.focus.row >= viewportTop && this.selection.focus.row <= viewportBottom)
+        (this.selection.focus.row >= viewportTop &&
+          this.selection.focus.row <= viewportBottom &&
+          (this.selection.virtualFocusCol ?? this.selection.focus.col) >= viewportLeft &&
+          (this.selection.virtualFocusCol ?? this.selection.focus.col) <= viewportRight)
       ) {
         if (hasSelection(this.selection)) {
-          captureScrolledRows(this.selection, this.frontFrame.screen, viewportTop, viewportTop + delta - 1, 'above');
+          captureScrolledRows(
+            this.selection,
+            this.frontFrame.screen,
+            leftoverGsCap.firstRow,
+            leftoverGsCap.lastRow,
+            leftoverGsCap.side,
+          );
         }
         const cleared = shiftSelectionForFollow(this.selection, -delta, viewportTop, viewportBottom);
         // Auto-clear (both ends overshot minRow) must notify React-land
@@ -2857,7 +2905,7 @@ export default class Ink {
    *
    * Always re-asserts extended key reporting and mouse tracking. Mouse
    * tracking is idempotent (DEC private mode set-when-set is a no-op). The
-   * Kitty keyboard protocol is NOT — CSI >1u is a stack push, so we pop
+   * Kitty keyboard protocol is NOT — CSI >5u is a stack push, so we pop
    * first to keep depth balanced (pop on empty stack is a no-op per spec,
    * so after a terminal reset this still restores depth 0→1). Without the
    * pop, each >5s idle gap adds a stack entry, and the single pop on exit

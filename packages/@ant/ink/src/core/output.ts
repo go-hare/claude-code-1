@@ -16,8 +16,10 @@ import {
   extractHyperlinkFromStyles,
   filterOutHyperlinkStyles,
   markNoSelectRegion,
+  clearNoSelectRegion,
   OSC8_PREFIX,
   resetScreen,
+  restoreNoSelectRegion,
   type Screen,
   type StylePool,
   setCellAt,
@@ -156,6 +158,10 @@ type BlitOperation = {
   y: number
   width: number
   height: number
+  /** densable `unclipped` — skip clip stack (hn blit past new viewport). */
+  unclipped?: boolean
+  /** densable `restoreNoSelect` — pg after writes (opaque skip-blit). */
+  restoreNoSelect?: boolean
 }
 
 type ShiftOperation = {
@@ -181,6 +187,8 @@ type ClearOperation = {
 type NoSelectOperation = {
   type: 'noSelect'
   region: Rectangle
+  /** densable `value`: 1 = fg mark, 0 = hg clear. */
+  value: 0 | 1
 }
 
 export default class Output {
@@ -226,8 +234,24 @@ export default class Output {
   /**
    * Copy cells from a source screen region (blit = block image transfer).
    */
-  blit(src: Screen, x: number, y: number, width: number, height: number): void {
-    this.operations.push({ type: 'blit', src, x, y, width, height })
+  blit(
+    src: Screen,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    opts?: { unclipped?: boolean; restoreNoSelect?: boolean },
+  ): void {
+    this.operations.push({
+      type: 'blit',
+      src,
+      x,
+      y,
+      width,
+      height,
+      unclipped: opts?.unclipped,
+      restoreNoSelect: opts?.restoreNoSelect,
+    })
   }
 
   /**
@@ -272,7 +296,12 @@ export default class Output {
    * the mark wins regardless of what's blitted into the region.
    */
   noSelect(region: Rectangle): void {
-    this.operations.push({ type: 'noSelect', region })
+    this.operations.push({ type: 'noSelect', region, value: 1 })
+  }
+
+  /** densable `clearNoSelect` — opaque fill arm, value 0. */
+  clearNoSelect(region: Rectangle): void {
+    this.operations.push({ type: 'noSelect', region, value: 0 })
   }
 
   write(
@@ -327,8 +356,9 @@ export default class Output {
     // and since clear is damage-only, the ghost survives diff. Normal-
     // flow clears don't need this — a normal-flow node's old position
     // can't have been painted on top of a sibling's current position.
-    const absoluteClears: Rectangle[] = []
-    for (const operation of this.operations) {
+    const absoluteClears: { rect: Rectangle; opIndex: number }[] = []
+    for (let i = 0; i < this.operations.length; i++) {
+      const operation = this.operations[i]!
       if (operation.type !== 'clear') continue
       const { x, y, width, height } = operation.region
       const startX = Math.max(0, x)
@@ -343,12 +373,20 @@ export default class Output {
         height: maxY - startY,
       }
       screen.damage = screen.damage ? unionRect(screen.damage, rect) : rect
-      if (operation.fromAbsolute) absoluteClears.push(rect)
+      if (operation.fromAbsolute) absoluteClears.push({ rect, opIndex: i })
     }
 
     const clips: Clip[] = []
-
-    for (const operation of this.operations) {
+    const restoreNoSelect: {
+      opIndex: number
+      src: Screen
+      x1: number
+      y1: number
+      x2: number
+      y2: number
+    }[] = []
+    for (let opIndex = 0; opIndex < this.operations.length; opIndex++) {
+      const operation = this.operations[opIndex]!
       switch (operation.type) {
         case 'clear':
           // handled in pass 1
@@ -383,8 +421,9 @@ export default class Output {
           // Intersect with active clip — a child's clean-blit passes its full
           // cached rect, but the parent ScrollBox may have shrunk (pill mount).
           // Without this, the blit writes past the ScrollBox's new bottom edge
-          // into the pill's row.
-          const clip = clips.at(-1)
+          // into the pill's row. densable `unclipped` skips the stack (hn
+          // copies rows below the new viewport before DECSTBM).
+          const clip = operation.unclipped ? undefined : clips.at(-1)
           const startX = Math.max(regionX, clip?.x1 ?? 0)
           const startY = Math.max(regionY, clip?.y1 ?? 0)
           const maxY = Math.min(
@@ -404,17 +443,29 @@ export default class Output {
           // Absolute nodes overlay normal-flow siblings, so prevScreen in
           // that region holds the absolute node's stale paint — blitting
           // it back would ghost. See absoluteClears collection above.
+          const queueRestore = (
+            x1: number,
+            y1: number,
+            x2: number,
+            y2: number,
+          ) => {
+            if (operation.restoreNoSelect) {
+              restoreNoSelect.push({ opIndex, src, x1, y1, x2, y2 })
+            }
+          }
           if (absoluteClears.length === 0) {
             blitRegion(screen, src, startX, startY, maxX, maxY)
             blitCells += (maxY - startY) * (maxX - startX)
+            queueRestore(startX, startY, maxX, maxY)
             continue
           }
+          const laterAbs = absoluteClears.filter(c => c.opIndex > opIndex)
           let rowStart = startY
           for (let row = startY; row <= maxY; row++) {
             const excluded =
               row < maxY &&
-              absoluteClears.some(
-                r =>
+              laterAbs.some(
+                ({ rect: r }) =>
                   row >= r.y &&
                   row < r.y + r.height &&
                   startX >= r.x &&
@@ -424,6 +475,7 @@ export default class Output {
               if (row > rowStart) {
                 blitRegion(screen, src, startX, rowStart, maxX, row)
                 blitCells += (row - rowStart) * (maxX - startX)
+                queueRestore(startX, rowStart, maxX, row)
               }
               rowStart = row + 1
             }
@@ -581,15 +633,41 @@ export default class Output {
       }
     }
 
-    // noSelect ops go LAST so they win over blits (which copy noSelect
-    // from prevScreen) and writes (which don't touch noSelect). This way
-    // a <NoSelect> box correctly fences its region even when the parent
-    // blits, and moving a <NoSelect> between frames correctly clears the
-    // old region (resetScreen already zeroed the bitmap).
-    for (const operation of this.operations) {
-      if (operation.type === 'noSelect') {
-        const { x, y, width, height } = operation.region
-        markNoSelectRegion(screen, x, y, width, height)
+    // densable get() second pass: restoreNoSelect pg then noSelect, in
+    // operation order so later writes don't keep stomping opaque fences.
+    {
+      const clips2: Clip[] = []
+      let restoreAt = 0
+      for (let i = 0; i < this.operations.length; i++) {
+        const operation = this.operations[i]!
+        if (operation.type === 'clip') {
+          clips2.push(intersectClip(clips2.at(-1), operation.clip))
+        } else if (operation.type === 'unclip') {
+          clips2.pop()
+        } else if (operation.type === 'blit') {
+          while (
+            restoreAt < restoreNoSelect.length &&
+            restoreNoSelect[restoreAt]!.opIndex === i
+          ) {
+            const r = restoreNoSelect[restoreAt]!
+            restoreNoSelectRegion(screen, r.src, r.x1, r.y1, r.x2, r.y2)
+            restoreAt++
+          }
+        } else if (operation.type === 'noSelect') {
+          const { x, y, width, height } = operation.region
+          const clip = clips2.at(-1)
+          const x1 = Math.max(x, clip?.x1 ?? 0)
+          const y1 = Math.max(y, clip?.y1 ?? 0)
+          const x2 = Math.min(x + width, clip?.x2 ?? Infinity)
+          const y2 = Math.min(y + height, clip?.y2 ?? Infinity)
+          if (x2 > x1 && y2 > y1) {
+            if (operation.value === 1) {
+              markNoSelectRegion(screen, x1, y1, x2 - x1, y2 - y1)
+            } else {
+              clearNoSelectRegion(screen, x1, y1, x2 - x1, y2 - y1)
+            }
+          }
+        }
       }
     }
 

@@ -30,6 +30,7 @@ const SGR_RESET = '\x1b[0m'
 function clearCachedLayoutSubtree(root: DOMElement): void {
   const stack: DOMElement[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    node.cachedLayout = undefined
     nodeCache.delete(node)
     const children = node.childNodes
     for (let i = children.length - 1; i >= 0; i--) {
@@ -167,7 +168,10 @@ export function serializeGapBackfill(
   output.unclip()
   // densable J$0: nCi(i); if (f) i.cachedLayout = f; i.dirty = true
   clearCachedLayoutSubtree(content)
-  if (prevCache) nodeCache.set(content, prevCache)
+  if (prevCache) {
+    content.cachedLayout = prevCache
+    nodeCache.set(content, prevCache)
+  }
   const rendered = output.get()
   content.dirty = true
 

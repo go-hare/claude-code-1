@@ -1,8 +1,4 @@
-import {
-  nonAlphanumericKeys,
-  type ParsedKey,
-  unicodeFromExtendedKeySequence,
-} from '../parse-keypress.js'
+import { nonAlphanumericKeys, type ParsedKey } from '../parse-keypress.js'
 import { Event } from './event.js'
 import { isSgrMouseResidue } from './keyboard-event.js'
 
@@ -121,59 +117,20 @@ function parseKey(keypress: ParsedKey): [Key, string] {
   // For these, we don't want to clear input with nonAlphanumericKeys check.
   let processedAsSpecialSequence = false
 
-  // Handle CSI u sequences (Kitty keyboard protocol): after stripping ESC,
-  // we're left with "[codepoint;modifieru" (e.g., "[98;3u" for Alt+b).
-  // Use the parsed key name instead for input handling. Require a digit
-  // after [ — real CSI u is always [<digits>…u, and a bare startsWith('[')
-  // false-matches X10 mouse at row 85 (Cy = 85+32 = 'u'), leaking the
-  // literal text "mouse" into the prompt via processedAsSpecialSequence.
-  // Also accept progressive-enhancement params with ":" (e.g. "[58:65306;2u").
-  //
-  // Official 2.1.210: VXc does not name codepoints past the surrogate block
-  // (so U+FF1A fullwidth colon has empty name), and fag() then swallows
-  // ESC-prefixed nameless sequences as "". Recovery for paste uses sig
-  // (fromCodePoint any ≤0x10FFFF). Live IME paths that emit ESC[65306u
-  // therefore need empty-name recovery here — which is what we do — while
-  // named printable Unicode (our keycodeToName extension) still inserts.
+  // Gold sji: CSI u uses the parsed name. The shifted glyph is
+  // KeyboardEvent.key (Xy), not this adapter. Require a digit after `[`
+  // so X10 mouse at row 85 (Cy = 'u') is not treated as CSI u.
   if (/^\[\d/.test(input) && input.endsWith('u')) {
     if (!keypress.name) {
-      // Prefer recovering printable Unicode (CJK / fullwidth punct via IME)
-      // from the CSI u codepoint. Only swallow true unmapped functional keys
-      // (Caps Lock 57358, F13–F35, KP nav, bare modifiers, etc.) so the raw
-      // "[57358u" doesn't leak into the prompt. See #38781.
-      // Use the original sequence (with ESC) for the regex match.
-      // Release events (mods:3) return undefined from the helper → empty.
-      input =
-        unicodeFromExtendedKeySequence(keypress.sequence ?? keypress.raw) ?? ''
+      // Gold T1: nameless ESC-prefixed sequence inserts nothing.
+      input = ''
     } else {
-      // Prefer text recovered from progressive CSI u (shifted/text fields)
-      // when the primary name is a bare ASCII printable and the IME produced
-      // a different fullwidth/CJK character (ESC[58:65306;2u → name ":" but
-      // text is "："). Functional multi-char names always win for bindings.
-      const recovered = unicodeFromExtendedKeySequence(
-        keypress.sequence ?? keypress.raw,
-      )
-      if (
-        recovered &&
-        recovered !== keypress.name &&
-        keypress.name.length === 1 &&
-        keypress.name >= ' ' &&
-        keypress.name <= '~' &&
-        !nonAlphanumericKeys.includes(keypress.name)
-      ) {
-        input = recovered
-      } else {
-        // processedAsSpecialSequence bypasses nonAlphanumericKeys below, so
-        // functional multi-char names must be cleared here (return/tab/escape/
-        // backspace would otherwise leak as literal text). space → ' '.
-        // Single-char / Unicode printable names pass through for insertion.
-        input =
-          keypress.name === 'space'
-            ? ' '
-            : nonAlphanumericKeys.includes(keypress.name)
-              ? ''
-              : keypress.name
-      }
+      input =
+        keypress.name === 'space'
+          ? ' '
+          : nonAlphanumericKeys.includes(keypress.name)
+            ? ''
+            : keypress.name
     }
     processedAsSpecialSequence = true
   }
@@ -184,9 +141,9 @@ function parseKey(keypress: ParsedKey): [Key, string] {
   // names) skip the nonAlphanumericKeys clear and leak "[27;..." as input.
   if (input.startsWith('[27;') && input.endsWith('~')) {
     if (!keypress.name) {
-      // Recover printable Unicode codepoints; swallow true unmapped keys.
-      input =
-        unicodeFromExtendedKeySequence(keypress.sequence ?? keypress.raw) ?? ''
+      // Gold T1 @193288248: empty name + ESC-prefixed sequence → "".
+      // Paste uses Rx separately; live keys must not recover PUA / raw MOK.
+      input = ''
     } else {
       input =
         keypress.name === 'space'

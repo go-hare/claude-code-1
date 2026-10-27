@@ -138,6 +138,7 @@ export type {
   FocusMove,
 } from './core/selection.js'
 export { selectionOwnsScroll } from './core/selection.js'
+export { hitTest } from './core/hit-test.js'
 export type { Progress } from './core/terminal.js'
 
 // ============================================================
@@ -219,6 +220,7 @@ export {
 } from './core/render-border.js'
 export {
   isSynchronizedOutputSupported,
+  isNativeCursorEnabled,
   isXtermJs,
   isGhosttyXtversion,
   getXtversionName,
@@ -386,6 +388,7 @@ export {
   useThemeSetting,
 } from './theme/ThemeProvider.js'
 export { default as Box } from './theme/ThemedBox.js'
+export { Input, type InputCaret } from './components/Input.js'
 export type { Props as BoxProps } from './theme/ThemedBox.js'
 export { default as Text, TextHoverColorContext } from './theme/ThemedText.js'
 export type { Props as TextProps } from './theme/ThemedText.js'

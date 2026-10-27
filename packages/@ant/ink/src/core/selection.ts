@@ -787,6 +787,25 @@ export function hasSelection(s: SelectionState): boolean {
 }
 
 /**
+ * densable `sqe` — both ends are virtually off the same edge.
+ * OverlayActive M is `anchor&&focus&&!sqe`.
+ */
+export function leftoverGsSelectionBothEndsOff(s: SelectionState): boolean {
+  if (
+    !s.anchor ||
+    !s.focus ||
+    s.virtualAnchorRow === undefined ||
+    s.virtualFocusRow === undefined
+  ) {
+    return false
+  }
+  return (
+    (s.virtualAnchorRow < s.anchor.row && s.virtualFocusRow < s.focus.row) ||
+    (s.virtualAnchorRow > s.anchor.row && s.virtualFocusRow > s.focus.row)
+  )
+}
+
+/**
  * Normalized selection bounds: start is always before end in reading order.
  * Returns null if no active selection.
  */

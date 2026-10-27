@@ -8,6 +8,7 @@ import renderNodeToOutput, {
   getAbsolutePaintCut,
   getScrollDrainNode,
   getScrollHint,
+  leftoverGsSetOverlayActive,
   resetRenderFrameContext,
   vanishedOverflowingAbsoluteBlit,
 } from './render-node-to-output.js'
@@ -25,6 +26,11 @@ export type RenderOptions = {
   // or reset to 0×0 (forceRedraw). Blitting from such a prevScreen would
   // copy stale inverted cells, blanks, or nothing. When false, blit is safe.
   prevFrameContaminated: boolean
+  /**
+   * densable `overlayActive:M` — selection or search highlight this paint.
+   * Kt misses DECSTBM when true.
+   */
+  overlayActive?: boolean
 }
 
 export type Renderer = (options: RenderOptions) => Frame
@@ -120,6 +126,7 @@ export default function createRenderer(
     }
 
     resetRenderFrameContext()
+    leftoverGsSetOverlayActive(options.overlayActive === true)
 
     // prevFrameContaminated: selection overlay mutated the returned screen
     // buffer post-render (in ink.tsx), resetFramesForAltScreen() replaced it

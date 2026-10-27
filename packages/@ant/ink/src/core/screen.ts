@@ -933,7 +933,7 @@ export function blitRegion(
   // blitted content (a cached ink-text node) is what set the bit.
   dst.softWrap.set(src.softWrap.subarray(regionY, maxY), regionY)
 
-  // Fast path: contiguous memory when copying full-width rows at same stride
+  // Gold `_d`: TypedArray.set copies the packed region, including empty cells.
   if (regionX === 0 && maxX === src.width && src.width === dst.width) {
     const srcStart = regionY * srcStride
     const totalBytes = (maxY - regionY) * srcStride
@@ -941,12 +941,10 @@ export function blitRegion(
       srcCells.subarray(srcStart, srcStart + totalBytes),
       srcStart, // srcStart === dstStart when strides match and regionX === 0
     )
-    // noSelect is 1 byte/cell vs cells' 8 — same region, different scale
     const nsStart = regionY * src.width
     const nsLen = (maxY - regionY) * src.width
     dstNoSel.set(srcNoSel.subarray(nsStart, nsStart + nsLen), nsStart)
   } else {
-    // Per-row copy for partial-width or mismatched-stride regions
     let srcRowCI = regionY * srcStride + (regionX << 1)
     let dstRowCI = regionY * dstStride + (regionX << 1)
     let srcRowNS = regionY * src.width + regionX
@@ -1515,6 +1513,34 @@ function diffDifferentWidth(
 }
 
 /**
+ * densable `pg` — copy noSelect only. Gold get() second pass:
+ *   blit restoreNoSelect → pg(dst, src, x1, y1, x2, y2)
+ * after writes so opaque skip-blit fences survive later writes.
+ */
+export function restoreNoSelectRegion(
+  dst: Screen,
+  src: Screen,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): void {
+  const startX = Math.max(0, x1)
+  const startY = Math.max(0, y1)
+  const maxX = Math.min(x2, dst.width, src.width)
+  const maxY = Math.min(y2, dst.height, src.height)
+  if (startX >= maxX || startY >= maxY) return
+  const rowLen = maxX - startX
+  let srcOff = startY * src.width + startX
+  let dstOff = startY * dst.width + startX
+  for (let row = startY; row < maxY; row++) {
+    dst.noSelect.set(src.noSelect.subarray(srcOff, srcOff + rowLen), dstOff)
+    srcOff += src.width
+    dstOff += dst.width
+  }
+}
+
+/**
  * Mark a rectangular region as noSelect (exclude from text selection).
  * Clamps to screen bounds. Called from output.ts when a <NoSelect> box
  * renders. No damage tracking — noSelect doesn't affect terminal output,
@@ -1534,5 +1560,23 @@ export function markNoSelectRegion(
   for (let row = Math.max(0, y); row < maxY; row++) {
     const rowStart = row * stride
     noSel.fill(1, rowStart + Math.max(0, x), rowStart + maxX)
+  }
+}
+
+/** densable `hg` — clear noSelect (value 0). */
+export function clearNoSelectRegion(
+  screen: Screen,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const maxX = Math.min(x + width, screen.width)
+  const maxY = Math.min(y + height, screen.height)
+  const noSel = screen.noSelect
+  const stride = screen.width
+  for (let row = Math.max(0, y); row < maxY; row++) {
+    const rowStart = row * stride
+    noSel.fill(0, rowStart + Math.max(0, x), rowStart + maxX)
   }
 }

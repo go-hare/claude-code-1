@@ -152,6 +152,11 @@ function ScrollBox({
         el.pendingScrollDelta = undefined;
         el.scrollAnchor = undefined;
         el.scrollTop = Math.max(0, Math.floor(y));
+        // DualInk jump KEEP: callers (page/home/end) already
+        // translateSelectionForJump. Gold followScroll would otherwise
+        // stamp kn=at-(scrollTopRendered??at) and double-shift. Pin
+        // rendered to the eager write so paint kn===0.
+        el.scrollTopRendered = el.scrollTop;
         scrollMutated(el);
       },
       scrollToElement(el: DOMElement, offset = 0, opts?: { block?: 'start' | 'center' | 'end' | 'nearest' }) {
@@ -197,6 +202,7 @@ function ScrollBox({
         if (stickyScroll === false) {
           el.scrollAnchor = undefined;
           el.scrollTop = Math.max(0, (el.scrollHeight ?? 0) - (el.scrollViewportHeight ?? 0));
+          el.scrollTopRendered = el.scrollTop;
           scrollMutated(el);
           return;
         }

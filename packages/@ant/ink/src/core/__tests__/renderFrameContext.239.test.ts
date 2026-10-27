@@ -98,7 +98,13 @@ describe('resetRenderFrameContext (densable oSf)', () => {
     ctx.layoutShifted = true
     ctx.scrollHint = { top: 1, bottom: 2, delta: 3 }
     ctx.scrollDrainNode = createNode('ink-box')
-    ctx.followScroll = { delta: 7, viewportTop: 0, viewportBottom: 10 }
+    ctx.followScroll = {
+      delta: 7,
+      viewportTop: 0,
+      viewportBottom: 10,
+      viewportLeft: 0,
+      viewportRight: 79,
+    }
 
     runWithRenderFrameContext(ctx, () => {
       resetRenderFrameContext()
@@ -113,7 +119,16 @@ describe('resetRenderFrameContext (densable oSf)', () => {
 
   test('rotates absolute rects: prev = cur, cur = []', () => {
     const ctx = createRenderFrameContext()
-    const cur = [{ x: 0, y: 0, width: 1, height: 1, withinParent: true }]
+    const cur = [
+      {
+        node: createNode('ink-box'),
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        withinParent: true,
+      },
+    ]
     ctx.absoluteRectsCur = cur
     ctx.absoluteRectsPrev = []
 
@@ -132,7 +147,13 @@ describe('resetRenderFrameContext (densable oSf)', () => {
     runWithRenderFrameContext(ctx, () => {
       // Frame N set a delta; a sticky frameSink returned before ink.tsx could
       // consume it.
-      ctx.followScroll = { delta: 4, viewportTop: 2, viewportBottom: 9 }
+      ctx.followScroll = {
+        delta: 4,
+        viewportTop: 2,
+        viewportBottom: 9,
+        viewportLeft: 0,
+        viewportRight: 79,
+      }
 
       // Frame N+1 begins.
       resetRenderFrameContext()

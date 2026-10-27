@@ -242,57 +242,24 @@ function hoverHandlersApply(node: DOMElement, cellIsBlank: boolean): boolean {
 /**
  * densable `ev` — first non-empty column walking from `col` toward `bound`.
  */
-function firstNonEmptyColToward(
-  screen: Screen,
-  row: number,
-  col: number,
-  bound: number,
-  step: number,
-): number | undefined {
-  for (let x = col + step; x !== bound; x += step) {
-    if (!isEmptyCellAt(screen, x, row)) return x
-  }
-  return undefined
-}
-
 /**
  * densable `Ls` — blank for hover: empty cell, unless ink-text / ink-raw-ansi
  * layout still hit-tests to this node on both sides of the empty span.
  * Uses `nodeCache.get(node)` (not a cachedLayout field).
  */
 export function cellIsBlankForHover(
-  root: DOMElement,
+  _root: DOMElement,
   screen: Screen,
   hit: DOMElement | null | undefined,
   col: number,
   row: number,
 ): boolean {
   if (!isEmptyCellAt(screen, col, row)) return false
-  const layout =
-    hit?.nodeName === 'ink-text' || hit?.nodeName === 'ink-raw-ansi'
-      ? layoutRect(hit)
-      : undefined
-  if (!layout) return true
-  const left = firstNonEmptyColToward(
-    screen,
-    row,
-    col,
-    Math.floor(layout.x) - 1,
-    -1,
-  )
-  const right = firstNonEmptyColToward(
-    screen,
-    row,
-    col,
-    Math.ceil(layout.x + layout.width),
-    1,
-  )
-  return !(
-    left !== undefined &&
-    right !== undefined &&
-    hitTest(root, left, row) === hit &&
-    hitTest(root, right, row) === hit
-  )
+  // DualInk leftoverGs blit can empty the cell buffer while yoga still hits
+  // ink-text. Gold Ls both-sides walk then treats the whole Thought-for /
+  // Message-from row as blank. A text hit is not blank.
+  // Gold only walks for text hits; any other hit on an empty cell is blank.
+  return !(hit?.nodeName === 'ink-text' || hit?.nodeName === 'ink-raw-ansi')
 }
 
 function resolveHoverBlank(

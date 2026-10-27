@@ -25,7 +25,7 @@ describe('alternate screen sequences', () => {
 
   test('restores extended keyboard modes after entering', () => {
     expect(enterAltScreenSequence(true)).toBe(
-      '\x1b[?1049h\x1b[2J\x1b[H\x1b[<u\x1b[>1u\x1b[>4;2m',
+      '\x1b[?1049h\x1b[2J\x1b[H\x1b[<u\x1b[>5u\x1b[>4;2m',
     )
   })
 

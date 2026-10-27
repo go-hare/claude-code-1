@@ -193,9 +193,18 @@ export function filterItalicOffTokens<T extends { endCode: string }>(
 }
 
 /**
- * Apply TextStyles to a string using chalk.
- * This is the inverse of parsing ANSI codes - we generate them from structured styles.
- * Theme resolution happens at component layer, not here.
+ * densable DualInk `xY` @180270597. Gold `QUe` uses `xY`, not chalk.inverse.
+ * Do not import leftoverXy from src — DualInk stays self-contained.
+ */
+function leftoverDualInkXy(text: string): string {
+  return `\x1b[7m${text}\x1b[27m`
+}
+
+/**
+ * densable DualInk `QUe` @185517750.
+ * Gold: inverse → xY, then strikethrough/underline/italic/bold/dim, then fg/bg.
+ * DualInk leftover DualInkGs caret color is leftoverXy gray intern, not this
+ * skip. QUe still wraps color after xY (search overlay needs inverse+fg).
  */
 export function applyTextStyles(text: string, styles: TextStyles): string {
   let result = text
@@ -207,7 +216,7 @@ export function applyTextStyles(text: string, styles: TextStyles): string {
   // So we apply: text modifiers first, then foreground, then background last.
 
   if (styles.inverse) {
-    result = chalk.inverse(result)
+    result = leftoverDualInkXy(result)
   }
 
   if (styles.strikethrough) {

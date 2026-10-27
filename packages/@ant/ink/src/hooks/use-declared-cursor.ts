@@ -26,10 +26,13 @@ export function useDeclaredCursor({
   line,
   column,
   active,
+  visible = false,
 }: {
   line: number
   column: number
   active: boolean
+  /** densable Vb default `visible:u=!1`. UTt caret `visible:!c` — true only when invert did not paint. */
+  visible?: boolean
 }): (element: DOMElement | null) => void {
   const setCursorDeclaration = useContext(CursorDeclarationContext)
   const nodeRef = useRef<DOMElement | null>(null)
@@ -58,7 +61,7 @@ export function useDeclaredCursor({
         relativeX: column,
         relativeY: line,
         node,
-        visible: true,
+        visible,
       })
     } else {
       setCursorDeclaration(null, node)

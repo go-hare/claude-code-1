@@ -213,19 +213,23 @@ export class LogUpdate {
     // shifted rows: more bytes, no intermediate state. next.screen from
     // render-node-to-output's blit+shift is correct either way.
     let scrollPatch: Diff = []
+    // gold: xe=Math.max(scrollHint.top,1); if(xe<pe&&pe<heights) xs(xe,pe)
+    // DualInk used top as-is (0) — DECSTBM from row 0 scrolls the header
+    // and leftoverGs-clears the spinner on sticky follow (first stream token).
     if (altScreen && next.scrollHint && decstbmSafe) {
-      const { top, bottom, delta } = next.scrollHint
+      const { bottom, delta } = next.scrollHint
+      const xe = Math.max(next.scrollHint.top, 1)
       if (
-        top >= 0 &&
+        xe < bottom &&
         bottom < prev.screen.height &&
         bottom < next.screen.height
       ) {
-        shiftRows(prev.screen, top, bottom, delta)
+        shiftRows(prev.screen, xe, bottom, delta)
         scrollPatch = [
           {
             type: 'stdout',
             content:
-              setScrollRegion(top + 1, bottom + 1) +
+              setScrollRegion(xe + 1, bottom + 1) +
               (delta > 0 ? csiScrollUp(delta) : csiScrollDown(-delta)) +
               RESET_SCROLL_REGION +
               CURSOR_HOME,

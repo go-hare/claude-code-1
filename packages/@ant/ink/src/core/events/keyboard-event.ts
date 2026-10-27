@@ -1,4 +1,7 @@
-import type { ParsedKey } from '../parse-keypress.js'
+import {
+  shiftedKeyFromCsiUSequence,
+  type ParsedKey,
+} from '../parse-keypress.js'
 import { TerminalEvent } from './terminal-event.js'
 
 /**
@@ -176,6 +179,9 @@ function keyFromParsed(parsed: ParsedKey): string {
   // only a–z (covers non-Latin when terminals report shift).
   if (name) {
     if (parsed.shift && name.length === 1) {
+      // Gold `Xy` then toUpperCase. `Vy` does not include U+FF00–.
+      const shifted = shiftedKeyFromCsiUSequence(seq)
+      if (shifted !== undefined) return shifted
       const upper = name.toUpperCase()
       if (upper !== name && upper.length === 1) return upper
     }

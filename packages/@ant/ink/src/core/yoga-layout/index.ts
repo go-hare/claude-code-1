@@ -477,6 +477,7 @@ export class Node {
   _fbAvailMain = NaN
   _fbAvailCross = NaN
   _fbCrossMode: MeasureMode = 0
+  _fbIsRow = false
   // Generation at which _fbBasis was written. Dirty nodes from a PREVIOUS
   // generation have stale cache (subtree changed), but within the SAME
   // generation the cache is fresh — the dirty chain's measure→layout
@@ -495,6 +496,12 @@ export class Node {
   _cGen = -1
   _cN = 0
   _cWr = 0
+  // densable `_mGen` — generation of the last measure-pass compute. Measure
+  // passes write layout.width/height (and recurse into children) in place,
+  // so a layout pass on a node measured this generation must not take any
+  // cache hit: the hit would skip STEP 5 and leave descendants at their
+  // measured (intrinsic) sizes.
+  _mGen = -1
 
   constructor(config?: Config) {
     this.style = defaultStyle()
@@ -597,6 +604,7 @@ export class Node {
       n._cGen = -1
       n._fbCrossMode = 0 as MeasureMode
       n._fbGen = -1
+      n._mGen = -1
       const kids = n.children
       if (Array.isArray(kids)) {
         for (let i = 0, s = kids.length; i < s && i < remaining; i++) {
@@ -1002,7 +1010,7 @@ export class Node {
 
 const DEFAULT_CONFIG = createConfig()
 
-const CACHE_SLOTS = 4
+const CACHE_SLOTS = 8
 function cacheWrite(
   node: Node,
   aW: number,
@@ -1013,21 +1021,20 @@ function cacheWrite(
   oH: number,
   fW: boolean,
   fH: boolean,
+  performLayout: boolean,
   wasDirty: boolean,
 ): void {
-  if (!node._cIn) {
-    node._cIn = new Float64Array(CACHE_SLOTS * 8)
-    node._cOut = new Float64Array(CACHE_SLOTS * 2)
-  }
-  // First write after a dirty clears stale entries from before the dirty.
-  // _cGen < _generation means entries are from a previous calculateLayout;
-  // if wasDirty, the subtree changed since then → old dimensions invalid.
-  // Clean nodes' old entries stay — same subtree → same result for same
-  // inputs, so cross-generation caching works (the scroll hot path where
-  // 499 clean messages cache-hit while one dirty leaf recomputes).
+  // densable `M0`: first write after a dirty drops pre-dirty entries (the
+  // subtree changed); clean nodes keep theirs. Only measure results are
+  // stored — a layout pass must reach STEP 5.
   if (wasDirty && node._cGen !== _generation) {
     node._cN = 0
     node._cWr = 0
+  }
+  if (performLayout) return
+  if (!node._cIn) {
+    node._cIn = new Float64Array(CACHE_SLOTS * 8)
+    node._cOut = new Float64Array(CACHE_SLOTS * 2)
   }
   // LRU write index wraps; _cN stays at CACHE_SLOTS so the read scan always
   // checks all populated slots (not just those since last wrap).
@@ -1121,7 +1128,8 @@ function layoutNode(
   // skip the child-positioning recursion (STEP 5), leaving children at
   // stale positions. Measure calls only need w/h which the cache stores.
   const sameGen = node._cGen === _generation && !performLayout
-  if (!node.isDirty_ || sameGen) {
+  const measuredThisGen = performLayout && node._mGen === _generation
+  if ((!node.isDirty_ || sameGen) && !measuredThisGen) {
     if (
       !node.isDirty_ &&
       node._hasL &&
@@ -1139,16 +1147,14 @@ function layoutNode(
       layout.height = node._lOutH
       return
     }
-    // Multi-entry cache: scan for matching inputs, restore cached w/h on hit.
-    // Covers the scroll case where a dirty ancestor's measure→layout cascade
-    // produces N>1 distinct input combos per clean child — the single _hasL
-    // slot thrashed, forcing full subtree recursion. With 500-message
-    // scrollbox and one dirty leaf, this took dirty-leaf relayout from
-    // 76k layoutNode calls (21.7×nodes) to 4k (1.2×nodes), 6.86ms → 550µs.
+    // Multi-entry cache (densable `M0`/`as`=8): measure calls only. Scan for
+    // matching inputs and restore cached w/h on hit. Layout passes never
+    // read or write these slots — they must reach STEP 5 to position
+    // children — and fall back to the single _hasL slot above.
     // Same-generation check covers fresh-mounted (dirty) nodes during
-    // virtual scroll — the dirty chain invokes them ≥2^depth times, first
-    // call writes cache, rest hit: 105k visits → ~10k for 1593-node tree.
-    if (node._cN > 0 && (sameGen || !node.isDirty_)) {
+    // virtual scroll — the dirty chain measures them repeatedly, first
+    // call writes cache, rest hit.
+    if (node._cN > 0 && !performLayout && (sameGen || !node.isDirty_)) {
       const cIn = node._cIn!
       for (let i = 0; i < node._cN; i++) {
         const o = i * 8
@@ -1221,6 +1227,7 @@ function layoutNode(
     node._mOW = ownerWidth
     node._mOH = ownerHeight
     node._hasM = true
+    node._mGen = _generation
     // Don't clear isDirty_. For DIRTY nodes, invalidate _hasL so the upcoming
     // performLayout=true call recomputes with the new child set (otherwise
     // sticky-scroll never follows new content — the bug from 4557bc9f9c).
@@ -1320,6 +1327,7 @@ function layoutNode(
       ownerHeight,
       forceWidth,
       forceHeight,
+      performLayout,
       wasDirty,
     )
     return
@@ -1351,6 +1359,7 @@ function layoutNode(
       ownerHeight,
       forceWidth,
       forceHeight,
+      performLayout,
       wasDirty,
     )
     return
@@ -1630,6 +1639,7 @@ function layoutNode(
     ownerHeight,
     forceWidth,
     forceHeight,
+    performLayout,
     wasDirty,
   )
 
@@ -2111,9 +2121,11 @@ function computeFlexBasis(
   // cache from a PREVIOUS generation, also hit if inputs match — isDirty_
   // gates since a dirty child's previous-gen cache is stale.
   const sameGen = child._fbGen === _generation
+  const isMainRow = isRow(mainAxis)
   if (
     (sameGen || !child.isDirty_) &&
     child._fbCrossMode === crossMode &&
+    child._fbIsRow === isMainRow &&
     sameFloat(child._fbOwnerW, ownerWidth) &&
     sameFloat(child._fbOwnerH, ownerHeight) &&
     sameFloat(child._fbAvailMain, availableMain) &&
@@ -2122,7 +2134,6 @@ function computeFlexBasis(
     return child._fbBasis
   }
   const cs = child.style
-  const isMainRow = isRow(mainAxis)
 
   // Explicit flex-basis
   const basis = resolveValue(cs.flexBasis, availableMain)
@@ -2134,6 +2145,7 @@ function computeFlexBasis(
     child._fbAvailMain = availableMain
     child._fbAvailCross = availableCross
     child._fbCrossMode = crossMode
+    child._fbIsRow = isMainRow
     child._fbGen = _generation
     return b
   }
@@ -2150,6 +2162,7 @@ function computeFlexBasis(
     child._fbAvailMain = availableMain
     child._fbAvailCross = availableCross
     child._fbCrossMode = crossMode
+    child._fbIsRow = isMainRow
     child._fbGen = _generation
     return b
   }
@@ -2204,6 +2217,7 @@ function computeFlexBasis(
   child._fbAvailMain = availableMain
   child._fbAvailCross = availableCross
   child._fbCrossMode = crossMode
+  child._fbIsRow = isMainRow
   child._fbGen = _generation
   return b
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { KeyboardEvent } from '../events/keyboard-event.js'
 import { InputEvent } from '../events/input-event.js'
 import {
   INITIAL_STATE,
@@ -10,6 +11,9 @@ import {
 /** Fullwidth colon `：` U+FF1A — common CJK IME punctuation. */
 const FULLWIDTH_COLON = '：'
 const FULLWIDTH_COLON_CP = 0xff1a // 65306
+/** Fullwidth comma `，` U+FF0C. flags=1 (`>1u`) reports this as ASCII `,`. */
+const FULLWIDTH_COMMA = '，'
+const FULLWIDTH_COMMA_CP = 0xff0c // 65292
 
 function asKey(item: unknown): ParsedKey {
   expect((item as ParsedKey).kind).toBe('key')
@@ -28,30 +32,31 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     expect(unicodeFromExtendedKeySequence('\x1b[20013u')).toBe('中')
   })
 
-  test('unicodeFromExtendedKeySequence does not recover Kitty functional PUA keys', () => {
-    // Caps Lock = 57358
-    expect(unicodeFromExtendedKeySequence('\x1b[57358u')).toBeUndefined()
+  test('unicodeFromExtendedKeySequence converts PUA codepoints (paste Rx)', () => {
+    // Caps Lock = 57358. Gold Rx uses fromCodePoint, no private-use skip.
+    expect(unicodeFromExtendedKeySequence('\x1b[57358u')).toBe(
+      String.fromCodePoint(57358),
+    )
   })
 
-  test('parseMultipleKeypresses names fullwidth colon CSI u as the character', () => {
+  test('parseMultipleKeypresses leaves fullwidth colon primary unnamed', () => {
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
       `\x1b[${FULLWIDTH_COLON_CP}u`,
     )
     expect(items).toHaveLength(1)
     const key = asKey(items[0])
-    expect(key.name).toBe(FULLWIDTH_COLON)
+    expect(key.name).toBeUndefined()
   })
 
-  test('InputEvent inserts fullwidth colon from CSI u (does not swallow)', () => {
+  test('nameless fullwidth CSI u does not insert (gold T1)', () => {
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
       `\x1b[${FULLWIDTH_COLON_CP}u`,
     )
-    const event = new InputEvent(asKey(items[0]))
-    expect(event.input).toBe(FULLWIDTH_COLON)
-    expect(event.key.ctrl).toBe(false)
-    expect(event.key.meta).toBe(false)
+    const key = asKey(items[0])
+    expect(new KeyboardEvent(key).key).toBe('')
+    expect(new InputEvent(key).input).toBe('')
   })
 
   test('InputEvent still swallows unmapped Kitty functional keys', () => {
@@ -65,6 +70,41 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[58u')
     const event = new InputEvent(asKey(items[0]))
     expect(event.input).toBe(':')
+  })
+
+  test('CSI u fullwidth comma primary inserts U+FF0C', () => {
+    const [items] = parseMultipleKeypresses(
+      INITIAL_STATE,
+      `\x1b[${FULLWIDTH_COMMA_CP}u`,
+    )
+    const key = asKey(items[0])
+    expect(key.name).toBeUndefined()
+    expect(new KeyboardEvent(key).key).toBe('')
+  })
+
+  test('Vy shifted slot inserts; U+FF0C is outside Vy', () => {
+    const [wide] = parseMultipleKeypresses(
+      INITIAL_STATE,
+      `\x1b[44:${FULLWIDTH_COMMA_CP};2u`,
+    )
+    const wideKey = asKey(wide[0])
+    expect(wideKey.name).toBe(',')
+    expect(wideKey.shift).toBe(true)
+    expect(new KeyboardEvent(wideKey).key).toBe(',')
+
+    const [cjk] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[97:20013;2u')
+    const cjkKey = asKey(cjk[0])
+    expect(cjkKey.name).toBe('a')
+    expect(new KeyboardEvent(cjkKey).key).toBe('中')
+  })
+
+  test('raw UTF-8 fullwidth comma text path is unchanged', () => {
+    const [items] = parseMultipleKeypresses(INITIAL_STATE, FULLWIDTH_COMMA)
+    const key = asKey(items[0])
+    expect(key.name).toBe('')
+    expect(key.sequence).toBe(FULLWIDTH_COMMA)
+    const event = new InputEvent(key)
+    expect(event.input).toBe(FULLWIDTH_COMMA)
   })
 
   test('raw UTF-8 fullwidth colon text path is unchanged', () => {
@@ -90,28 +130,32 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
       INITIAL_STATE,
       `\x1b[58:${FULLWIDTH_COLON_CP};2u`,
     )
-    const event = new InputEvent(asKey(items[0]))
-    expect(event.input).toBe(FULLWIDTH_COLON)
+    const key = asKey(items[0])
+    expect(key.name).toBe(':')
+    expect(new KeyboardEvent(key).key).toBe(':')
   })
 
-  test('enhanced CSI u with associated text field inserts fullwidth colon', () => {
-    // ESC[58:65306;2:1;65306u — text-as-codepoints field carries U+FF1A
+  test('gold gs does not parse a third text field', () => {
+    // ESC[58:65306;2:1;65306u is not gold `gs` (mods is a single integer).
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
       `\x1b[58:${FULLWIDTH_COLON_CP};2:1;${FULLWIDTH_COLON_CP}u`,
     )
-    const event = new InputEvent(asKey(items[0]))
-    expect(event.input).toBe(FULLWIDTH_COLON)
+    const key = asKey(items[0])
+    expect(key.sequence).toBe(
+      `\x1b[58:${FULLWIDTH_COLON_CP};2:1;${FULLWIDTH_COLON_CP}u`,
+    )
+    expect(key.name).not.toBe(FULLWIDTH_COLON)
   })
 
-  test('enhanced CSI u event-type subparam on unicode primary still works', () => {
-    // ESC[65306;1:1u — primary fullwidth colon, mods=1 event=press
+  test('unshifted fullwidth primary past surrogates is unnamed', () => {
+    // Gold Fy stops at 55296. U+FF1A is not a name; insert is the raw path.
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
-      `\x1b[${FULLWIDTH_COLON_CP};1:1u`,
+      `\x1b[${FULLWIDTH_COLON_CP}u`,
     )
-    const event = new InputEvent(asKey(items[0]))
-    expect(event.input).toBe(FULLWIDTH_COLON)
+    const key = asKey(items[0])
+    expect(key.name).toBeUndefined()
   })
 
   test('Shift+Enter still maps to return (functional name wins over text)', () => {
@@ -162,17 +206,14 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     expect(new InputEvent(asKey(items[0])).input).toBe('中')
   })
 
-  test('CSI u release event does not insert (press+release no double)', () => {
+  test('gold gs does not parse mods:event release subparam', () => {
+    // Gold mods is one integer. `1:3` is not a release event.
     const [items] = parseMultipleKeypresses(
       INITIAL_STATE,
-      `\x1b[${FULLWIDTH_COLON_CP};1:1u\x1b[${FULLWIDTH_COLON_CP};1:3u`,
+      `\x1b[${FULLWIDTH_COLON_CP};1:3u`,
     )
-    // Only press should insert; release is empty name / no input
-    const inputs = items
-      .filter(i => i.kind === 'key')
-      .map(i => new InputEvent(i as never).input)
-      .filter(Boolean)
-    expect(inputs).toEqual([FULLWIDTH_COLON])
+    const key = asKey(items[0])
+    expect(key.sequence).toBe(`\x1b[${FULLWIDTH_COLON_CP};1:3u`)
   })
 
   test('paste high-byte CSI u fragments reassemble to fullwidth colon', () => {
@@ -205,21 +246,18 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     expect(new InputEvent(key).input).toBe('')
   })
 
-  test('AltGr CSI u (ctrl+meta) fullwidth colon clears modifiers for insert', () => {
+  test('AltGr CSI u (ctrl+meta) CJK before surrogates clears modifiers', () => {
     // Official NJc/OJc densable. force so WT_SESSION is not required in CI.
     const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
     process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '1'
     try {
-      const [items] = parseMultipleKeypresses(
-        INITIAL_STATE,
-        `\x1b[${FULLWIDTH_COLON_CP};7u`,
-      )
+      const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[20013;7u')
       const key = asKey(items[0])
       expect(key.ctrl).toBe(false)
       expect(key.meta).toBe(false)
-      expect(key.name).toBe(FULLWIDTH_COLON)
+      expect(key.name).toBe('中')
       const event = new InputEvent(key)
-      expect(event.input).toBe(FULLWIDTH_COLON)
+      expect(event.input).toBe('中')
       // mapKey routes key.ctrl / key.meta to handleCtrl/Meta — must stay clear
       expect(event.key.ctrl).toBe(false)
       expect(event.key.meta).toBe(false)
@@ -232,18 +270,15 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     }
   })
 
-  test('AltGr modifyOtherKeys fullwidth colon clears modifiers', () => {
+  test('AltGr modifyOtherKeys CJK before surrogates clears modifiers', () => {
     const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
     process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '1'
     try {
-      const [items] = parseMultipleKeypresses(
-        INITIAL_STATE,
-        `\x1b[27;7;${FULLWIDTH_COLON_CP}~`,
-      )
+      const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[27;7;20013~')
       const key = asKey(items[0])
       expect(key.ctrl).toBe(false)
       expect(key.meta).toBe(false)
-      expect(new InputEvent(key).input).toBe(FULLWIDTH_COLON)
+      expect(new InputEvent(key).input).toBe('中')
     } finally {
       if (prev === undefined) {
         delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
@@ -253,20 +288,17 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     }
   })
 
-  test('AltGr auto mode rewrites non-alnum under WT_SESSION', () => {
+  test('AltGr auto mode rewrites non-alnum CJK under WT_SESSION', () => {
     const prevAlt = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
     const prevWt = process.env.WT_SESSION
     delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
     process.env.WT_SESSION = 'test-session'
     try {
-      const [items] = parseMultipleKeypresses(
-        INITIAL_STATE,
-        `\x1b[${FULLWIDTH_COLON_CP};7u`,
-      )
+      const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[20013;7u')
       const key = asKey(items[0])
       expect(key.ctrl).toBe(false)
       expect(key.meta).toBe(false)
-      expect(new InputEvent(key).input).toBe(FULLWIDTH_COLON)
+      expect(new InputEvent(key).input).toBe('中')
     } finally {
       if (prevAlt === undefined) {
         delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT
@@ -281,17 +313,15 @@ describe('unicode CSI u / fullwidth colon (IME)', () => {
     }
   })
 
-  test('AltGr off keeps ctrl+meta on fullwidth colon', () => {
+  test('AltGr off keeps ctrl+meta on CJK', () => {
     const prev = process.env.CLAUDE_CODE_ALTGR_AS_TEXT
     process.env.CLAUDE_CODE_ALTGR_AS_TEXT = '0'
     try {
-      const [items] = parseMultipleKeypresses(
-        INITIAL_STATE,
-        `\x1b[${FULLWIDTH_COLON_CP};7u`,
-      )
+      const [items] = parseMultipleKeypresses(INITIAL_STATE, '\x1b[20013;7u')
       const key = asKey(items[0])
       expect(key.ctrl).toBe(true)
       expect(key.meta).toBe(true)
+      expect(key.name).toBe('中')
     } finally {
       if (prev === undefined) {
         delete process.env.CLAUDE_CODE_ALTGR_AS_TEXT

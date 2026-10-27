@@ -289,11 +289,15 @@ export const FOCUS_OUT = csi('O')
 // See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 
 /**
- * Enable Kitty keyboard protocol with basic modifier reporting
- * CSI > 1 u - pushes mode with flags=1 (disambiguate escape codes)
- * This makes Shift+Enter send CSI 13;2 u instead of just CR
+ * Enable Kitty keyboard protocol.
+ * Gold `Ves` is CSI > 5 u — flags=5 = bit0 disambiguate (1) | bit2
+ * report-alternate-keys (4). Bit1 (2) is report-event-types; it is NOT set.
+ * Gold `qes` (`>1u`) is disambiguate only (legacyKitty worker path).
+ * Alternate-key reports feed `Xy`/`Vy` (printable ASCII or 160≤n<55296).
+ * Fullwidth IME commits (U+FF0C/U+FF1A) arrive as UTF-8 under `>5u`, not
+ * via a widened shifted slot.
  */
-export const ENABLE_KITTY_KEYBOARD = csi('>1u')
+export const ENABLE_KITTY_KEYBOARD = csi('>5u')
 
 /**
  * Disable Kitty keyboard protocol

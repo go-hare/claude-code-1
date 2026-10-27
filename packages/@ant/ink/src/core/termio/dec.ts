@@ -61,7 +61,7 @@ export function enterAltScreenSequence(extendedKeys = false): string {
     ENTER_ALT_SCREEN +
     csi('2J') +
     csi('H') +
-    (extendedKeys ? csi('<u') + csi('>1u') + csi('>4;2m') : '')
+    (extendedKeys ? csi('<u') + csi('>5u') + csi('>4;2m') : '')
   )
 }
 

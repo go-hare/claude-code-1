@@ -168,6 +168,8 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
     expect(hit).toContain('export function cellIsBlankForHover')
     expect(ink).toContain('cellIsBlankForHover')
     expect(ink).toContain('litWhereClicked')
+    expect(hit).toContain("hit?.nodeName === 'ink-text'")
+    expect(hit).toContain('A text hit is not blank')
   })
 })
 
@@ -185,6 +187,36 @@ describe('densable 2.1.289 DualInk hover follow split', () => {
     expect(ink).toContain('hoverFollowStreak')
     expect(ink).toContain('hoverFollowHeldUntil')
     expect(ink).toContain('onHoverLost={this.forgetPointer}')
+  })
+
+  test('Gs blit misses when inherited background changed (gold j.background===M)', () => {
+    const render = readFileSync(
+      join(import.meta.dir, '../render-node-to-output.ts'),
+      'utf8',
+    )
+    expect(render).toContain('cached.background === inheritedBackgroundColor')
+    expect(render).toContain('background: inheritedBackgroundColor')
+    expect(render).toContain('background: boxBackgroundColor')
+    expect(render).toContain('node.cachedLayout = rect')
+    expect(render).toContain('nodeCache.set(node, rect)')
+    expect(render).toContain('leftoverGsBackgroundOk')
+    expect(render).toContain('cached?.background === inheritedBackgroundColor')
+    expect(render).toContain('leftoverGsHint')
+    expect(render).toContain('padBottom === 0')
+    expect(render).toContain('leftoverGsBlitWindow')
+    expect(render).toContain('leftoverGsJr')
+    expect(render).toContain('unclipped: true')
+    expect(render).toContain('leftoverGsStaleWipe')
+    expect(render).toContain('leftoverGsFirstRepaintY')
+    expect(render).toContain('restoreNoSelect: node.style.opaque')
+    expect(render).toContain('restoreNoSelect: cur.style.opaque')
+    expect(render).toContain('leftoverGsSkipBlitMiss')
+    expect(render).toContain('leftoverGsFastPathClipOk')
+    expect(render).toContain('leftoverGsDecstbmOk')
+    expect(render).toContain('leftoverGsAbsPrevInContent')
+    expect(render).toContain('ctx.overlayActive')
+    expect(render).toContain('viewportLeft: Math.floor(x)')
+    expect(render).toContain('output.clearNoSelect')
   })
 
   test('App onHoverLost and lastHoverOnTarget', () => {

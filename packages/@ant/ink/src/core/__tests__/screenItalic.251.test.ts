@@ -59,3 +59,29 @@ describe('italic suppressed for TERM=screen (2.1.251 #36)', () => {
     expect(src).toContain('styles = filterItalicOffTokens(styles)')
   })
 })
+
+describe('densable DualInk QUe leftover DualInkGs inverse', () => {
+  test('QUe inverse is leftover DualInk xY, not chalk.inverse', () => {
+    const src = readFileSync(join(import.meta.dir, '../colorize.ts'), 'utf8')
+    expect(src).toContain('leftoverDualInkXy')
+    expect(src).not.toContain('result = chalk.inverse(result)')
+  })
+
+  test('inverse space is leftover DualInk xY then theme fg', () => {
+    chalk.level = 3
+    const cell = applyTextStyles(' ', {
+      inverse: true,
+      color: 'rgb(0,0,0)',
+    })
+    expect(cell).toContain('\x1b[7m')
+    expect(cell).toContain('\x1b[27m')
+    expect(cell).toContain('38;2;0;0;0')
+    expect(cell).not.toContain('chalk.inverse')
+  })
+
+  test('non-inverse still paints rgb fg', () => {
+    chalk.level = 3
+    const cell = applyTextStyles('T', { color: 'rgb(0,0,0)' })
+    expect(cell).toContain('38;2;0;0;0')
+  })
+})

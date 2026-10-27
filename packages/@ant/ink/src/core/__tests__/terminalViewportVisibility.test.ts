@@ -23,6 +23,7 @@ function fakeNode(opts: {
   const node = {
     yogaNode: yoga as unknown as DOMElement['yogaNode'],
     parentNode: opts.parent,
+    style: {},
     scrollTop: opts.scrollTop,
     scrollHeight: opts.scrollHeight,
     scrollViewportHeight: opts.scrollViewportHeight,
@@ -78,6 +79,21 @@ describe('computeElementViewportVisibility', () => {
     expect(computeElementViewportVisibility(spinner, SIZE)).toBe(false)
 
     scroll.scrollTop = 490
+    expect(computeElementViewportVisibility(spinner, SIZE)).toBe(true)
+  })
+
+  test('overflow scroll without scrollTopRendered is unmeasurable (densable Ze)', () => {
+    const root = fakeNode({ top: 0, height: 24, yogaHeight: 24 })
+    const scroll = fakeNode({
+      top: 0,
+      height: 20,
+      parent: root,
+      scrollTop: 0,
+    })
+    scroll.style = { overflowY: 'scroll' }
+    const spinner = fakeNode({ top: 10, height: 1, parent: scroll })
+    expect(computeElementViewportVisibility(spinner, SIZE)).toBe(null)
+    scroll.scrollTopRendered = 0
     expect(computeElementViewportVisibility(spinner, SIZE)).toBe(true)
   })
 
