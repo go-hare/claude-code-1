@@ -52,7 +52,7 @@ describe('Host park (251 #65 Vd / G$)', () => {
       join(import.meta.dir, '../../screens/REPL.tsx'),
       'utf8',
     )
-    expect(src).toContain("if (inputValue.trim() !== '') return undefined")
+    expect(src).toContain('if (hasDraft) return undefined')
     expect(src).toContain(
       "if (nextHostOffer === 'effort-medium-nudge') return 'effort-callout'",
     )

@@ -236,16 +236,18 @@ describe('REPL densable uQc sync', () => {
     expect(promptSrc).toContain('hostBlocksKeys')
   })
 
-  test('REPL derives zIr same-render (no useSyncExternalStore tear on keystroke)', () => {
-    // Tear: setPromptInputStoreActive inside setInputValue notifies subscribers
-    // before React commits inputValue/isPromptInputActive → one-frame flash.
+  test('REPL derives IW.active from store; controller owns nQt (no keystroke tear)', () => {
+    // densable 289: nQt/active lives in PromptDraftController #y. REPL only
+    // reads store.active — no parallel React timer writing the store, and no
+    // setPromptInputStoreActive inside a keystroke setter (old tear).
     expect(replSrc).not.toContain('useDialogSuppressReason')
     // densable 251 jx: Host park → suppressReason, not 239 typing-only zIr.
     expect(replSrc).toContain('hostParkToSuppressReason(hostParkMode)')
     expect(replSrc).toContain('const modalChrome = hostDialogVisibility')
-    // hyr synced after commit, not inline in setInputValue
-    expect(replSrc).toContain('setPromptInputStoreActive(isPromptInputActive)')
-    // Must not hyr-notify from inside setInputValue (comment may mention the name)
+    expect(replSrc).toContain('getPromptInputCursorState().active')
+    expect(replSrc).not.toContain(
+      'setPromptInputStoreActive(isPromptInputActive)',
+    )
     expect(replSrc).not.toContain('setPromptInputStoreActive(active)')
   })
 })

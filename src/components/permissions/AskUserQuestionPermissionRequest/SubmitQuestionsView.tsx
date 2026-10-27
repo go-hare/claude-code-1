@@ -25,16 +25,17 @@ export function SubmitQuestionsView({
   answers,
   allQuestionsAnswered,
   permissionResult,
-  minContentHeight,
   onFinalResponse,
 }: Props): React.ReactNode {
+  // minContentHeight kept on Props for callers; densable review body has no minHeight.
   return (
     <Box flexDirection="column" marginTop={1}>
       <Divider color="inactive" />
       <Box flexDirection="column" borderTop borderColor="inactive" paddingTop={0}>
         <QuestionNavigationBar questions={questions} currentQuestionIndex={currentQuestionIndex} answers={answers} />
         <PermissionRequestTitle title="Review your answers" color="text" />
-        <Box flexDirection="column" marginTop={1} minHeight={minContentHeight}>
+        {/* densable ZT4/GT4: no minHeight on review body. */}
+        <Box flexDirection="column" marginTop={1}>
           {!allQuestionsAnswered && (
             <Box marginBottom={1}>
               <Text color="warning">{figures.warning} You have not answered all questions</Text>

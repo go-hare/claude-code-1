@@ -19,7 +19,12 @@ import {
   isTopDialogModalLayout,
   shouldOccupyFullscreenModalSlot,
 } from '../DialogHost.js'
-import { PERMISSION_EXIT_PLAN_MODE_V2_KIND } from '../specs/permissionKinds.js'
+import { nhtHidesPromptInput } from '../nhtPrompt.js'
+import { COST_THRESHOLD_KIND } from '../specs/jsuKinds.js'
+import {
+  PERMISSION_ASK_USER_QUESTION_KIND,
+  PERMISSION_EXIT_PLAN_MODE_V2_KIND,
+} from '../specs/permissionKinds.js'
 
 const replSrc = readFileSync(
   join(import.meta.dir, '../../screens/REPL.tsx'),
@@ -205,6 +210,35 @@ describe('REPL densable ozs / RPs wiring', () => {
     expect(replSrc).toContain('useNhtHidesPromptInput()')
     expect(replSrc).not.toContain(
       'nhtHidesPromptInput(dialogStore.getState().open)',
+    )
+  })
+
+  test('gold nP hides PromptInput for permission Ask; soft i_y does not', () => {
+    expect(nhtHidesPromptInput(PERMISSION_ASK_USER_QUESTION_KIND)).toBe(true)
+    expect(nhtHidesPromptInput('permission_prompt')).toBe(true)
+    expect(nhtHidesPromptInput(COST_THRESHOLD_KIND)).toBe(false)
+    expect(nhtHidesPromptInput(undefined)).toBe(false)
+  })
+
+  test('inline NMs is tot.bottom above companion KEEP (not tot.scrollable)', () => {
+    const messages = replSrc.indexOf('cursorNavRef={cursorNavRef}')
+    const totBottom = replSrc.indexOf('densable Iz is tot.bottom')
+    const inlineHost = replSrc.indexOf(
+      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    )
+    expect(messages).toBeGreaterThan(-1)
+    expect(totBottom).toBeGreaterThan(messages)
+    expect(inlineHost).toBeGreaterThan(totBottom)
+    const scrollable = replSrc.slice(messages, totBottom)
+    expect(scrollable).not.toContain(
+      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    )
+    expect(replSrc.slice(inlineHost)).toContain('<CompanionSprite />')
+    expect(replSrc).toContain(
+      '!toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog',
+    )
+    expect(replSrc).not.toContain(
+      '!toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog && !hidePromptForHardNms',
     )
   })
 })

@@ -55,7 +55,7 @@ export function useHasBlockingOpenDialogs(): boolean {
 
 /**
  * Tip PromptInput hide — subscribed open-stack scan (not gold nHt / yMe).
- * Soft / permission / managed stay open; other kinds hide the draft.
+ * Soft i_y keep the draft; permission_* hide PromptInput (gold nP).
  */
 export function useNhtHidesPromptInput(): boolean {
   const store = useDialogStore();

@@ -280,6 +280,14 @@ export function buildAskUserToolResultContent(input: {
   return 'The user did not answer the questions.';
 }
 
+/**
+ * densable `Zh` declined option line.
+ * Gold: `"· "+question+" ("+labels.join(" / ")+")"`.
+ */
+export function leftoverAskDeclinedLine(question: { question: string; options: Array<{ label: string }> }): string {
+  return `· ${question.question} (${question.options.map(option => option.label).join(' / ')})`;
+}
+
 function AskUserQuestionResultMessage({ answers }: { answers: Output['answers'] }): React.ReactNode {
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -383,11 +391,23 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   renderToolResultMessage({ answers }, _toolUseID) {
     return <AskUserQuestionResultMessage answers={answers} />;
   },
-  renderToolUseRejectedMessage() {
+  renderToolUseRejectedMessage({ questions }) {
+    // densable `Zh` @207573135 — title + MessageResponse option summary.
     return (
-      <Box flexDirection="row" marginTop={1}>
-        <Text color={getModeColor('default')}>{BLACK_CIRCLE}&nbsp;</Text>
-        <Text>User declined to answer questions</Text>
+      <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="row">
+          <Text color={getModeColor('default')}>{BLACK_CIRCLE}&nbsp;</Text>
+          <Text>User declined to answer questions</Text>
+        </Box>
+        <MessageResponse>
+          <Box flexDirection="column">
+            {questions.map(question => (
+              <Text key={question.question} color="inactive">
+                {leftoverAskDeclinedLine(question)}
+              </Text>
+            ))}
+          </Box>
+        </MessageResponse>
       </Box>
     );
   },

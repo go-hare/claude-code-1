@@ -283,10 +283,8 @@ export function PreviewQuestionView({
   // 2: help text (marginTop=1 + text)
   const PREVIEW_OVERHEAD = 11;
 
-  // Compute the max lines available for preview content from the parent's
-  // height budget to prevent terminal overflow. We do NOT pad shorter options
-  // to match the tallest — the outer box's minHeight handles cross-question
-  // layout consistency, and within-question shifts are acceptable.
+  // Cap preview lines from the parent height budget. densable MT4/XT4 do not
+  // pin minHeight on this column — only truncate preview content.
   const previewMaxLines = useMemo(() => {
     return minContentHeight ? Math.max(1, minContentHeight - PREVIEW_OVERHEAD) : undefined;
   }, [minContentHeight]);
@@ -303,7 +301,7 @@ export function PreviewQuestionView({
         />
         <PermissionRequestTitle title={question.question} color={'text'} />
 
-        <Box flexDirection="column" minHeight={minContentHeight}>
+        <Box flexDirection="column">
           {/* Side-by-side layout: options on left, preview on right */}
           <Box marginTop={1} flexDirection="row" gap={4}>
             {/* Left panel: vertical option list */}

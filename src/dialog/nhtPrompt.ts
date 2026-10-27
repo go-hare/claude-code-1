@@ -4,23 +4,21 @@
  * Gold nHt = `open.some(d => !i_y.has(d.kind))` — see `useHasBlockingOpenDialogs`
  * (permission / managed_settings count; used for yMe / hasSuppressedDialogs).
  *
- * PromptInput hide is NOT gold nHt: permission_* / managed_settings keep the
- * draft via zIr / focused paths. Soft i_y never hides. Other open kinds
- * (FRr / UOo / Gbt / …) hide the prompt so Select owns Esc.
+ * Gold nP hides PromptInput when WO (engine dialog) is open and not typing,
+ * or when userInvoked T5. Permission Ask is engine-opened → hide PromptInput
+ * so DualInk Select owns Esc (draft stays in the store). Soft i_y never hides.
  *
  * Predicate scans the whole open stack (not just top) so soft-on-blocking
  * still hides the prompt.
  */
 import { isSoftNmsDialogKind } from './specs/jsuKinds.js'
-import { isPermissionDialogKind } from './specs/permissionKinds.js'
 
-/** Kind that should hide PromptInput while Host is visible (not soft / not zIr Host). */
+/** Kind that should hide PromptInput while Host is visible (not soft i_y). */
 export function isHardPromptBlockingDialogKind(
   kind: string | undefined,
 ): boolean {
   if (!kind) return false
   if (isSoftNmsDialogKind(kind)) return false
-  if (isPermissionDialogKind(kind)) return false
   return true
 }
 

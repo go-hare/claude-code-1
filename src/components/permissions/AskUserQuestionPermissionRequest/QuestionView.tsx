@@ -252,7 +252,11 @@ export function QuestionView({
           </Box>
         )}
 
-        <Box flexDirection="column" minHeight={minContentHeight}>
+        {/* densable XT4: no minHeight on the options+footer column. Local
+            minContentHeight forced tall Ask under tot.bottom overflowY:hidden
+            and mid-clipped options into the Chat-about footer when Explore
+            returned. Keep the prop for Preview maxLines only. */}
+        <Box flexDirection="column">
           <Box marginTop={1}>
             {question.multiSelect ? (
               <SelectMulti
