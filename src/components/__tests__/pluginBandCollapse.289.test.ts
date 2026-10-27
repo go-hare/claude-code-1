@@ -355,10 +355,11 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
       join(import.meta.dir, '../../screens/REPL.tsx'),
       'utf8',
     )
-    expect(replInline).toContain('{panesDocked ? null : (')
-    expect(replInline).not.toContain(
-      '{panesDocked ? null : shownPluginPane !== undefined ? (',
+    // densable KEEP: skip empty PluginPaneSite reservation when no pane.
+    expect(replInline).toContain(
+      '{panesDocked || shownPluginPane === undefined ? null : (',
     )
+    expect(replInline).not.toContain('{panesDocked ? null : (')
     // densable yEe Kt/QLt.finally lives in useBandScrollPlace (shared).
     expect(src).toContain('aliveRef')
     expect(src).toContain('.finally(after)')
@@ -374,7 +375,7 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
       join(import.meta.dir, '../../screens/REPL.tsx'),
       'utf8',
     )
-    expect(repl).toContain("promptEmpty={inputValue === ''}")
+    expect(repl).toContain('promptEmpty={promptEmpty}')
     expect(src).toContain("runFunctionHookChain('ui.scroll')")
     expect(src).not.toMatch(/\bexport (?:const|function|class|let|var) Ide\b/)
     expect(src).not.toMatch(/\bexport (?:const|function|class|let|var) Hde\b/)

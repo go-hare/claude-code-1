@@ -237,7 +237,14 @@ export function CompanionSprite(): React.ReactNode {
   );
 
   if (!reaction) {
-    return <Box paddingX={1}>{spriteColumn}</Box>;
+    // flexShrink=0 matches the speaking-path wrapper. DualInk KEEP companion
+    // is a tot.bottom sibling gold Iz does not have; shrinking here lets the
+    // PromptInput leftover pin fight yoga and flash the round ─ borders.
+    return (
+      <Box paddingX={1} flexShrink={0}>
+        {spriteColumn}
+      </Box>
+    );
   }
 
   // Fullscreen: bubble renders separately via CompanionFloatingBubble in
@@ -246,7 +253,11 @@ export function CompanionSprite(): React.ReactNode {
   // Non-fullscreen: bubble sits inline beside the sprite (input shrinks)
   // because floating into Static scrollback can't be cleared.
   if (isFullscreenActive()) {
-    return <Box paddingX={1}>{spriteColumn}</Box>;
+    return (
+      <Box paddingX={1} flexShrink={0}>
+        {spriteColumn}
+      </Box>
+    );
   }
   return (
     <Box flexDirection="row" alignItems="flex-end" paddingX={1} flexShrink={0}>

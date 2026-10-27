@@ -4,6 +4,8 @@ import {
   leftoverLineWindowSlice,
   leftoverMarkerLines,
   leftoverPnWindow,
+  leftoverScrollViewportFrom,
+  leftoverScrollViewportWalk,
   leftoverWindowStartLine,
 } from '../FullscreenLayout.js'
 import OptionMap from './option-map.js'
@@ -61,6 +63,7 @@ type Action<T> =
   | SetFocusAction<T>
   | ScrollToEdgeAction
   | ScrollToAction
+  | ScrollViewportAction
   | ResetAction<T>
 
 type ScrollToEdgeAction = {
@@ -72,6 +75,11 @@ type ScrollToEdgeAction = {
 type ScrollToAction = {
   type: 'scroll-to'
   offset: number
+}
+
+type ScrollViewportAction = {
+  type: 'scroll-viewport'
+  delta: number
 }
 
 type SetFocusAction<T> = {
@@ -342,6 +350,39 @@ const reducer = <T>(state: State<T>, action: Action<T>): State<T> => {
       }
     }
 
+    case 'scroll-viewport': {
+      // densable `sc` `scroll-viewport` @202767262.
+      // Identity when from is unchanged; otherwise walk focus into the window.
+      const size = state.optionMap.size
+      const visibleFromIndex = leftoverScrollViewportFrom(
+        state.visibleFromIndex,
+        action.delta,
+        size,
+        state.visibleOptionCount,
+      )
+      if (visibleFromIndex === state.visibleFromIndex) {
+        return state
+      }
+      const visibleToIndex = Math.min(
+        size,
+        visibleFromIndex + state.visibleOptionCount,
+      )
+      const focusedItem =
+        state.focusedValue === undefined
+          ? undefined
+          : state.optionMap.get(state.focusedValue)
+      return {
+        ...state,
+        focusedValue: leftoverScrollViewportWalk(
+          focusedItem,
+          visibleFromIndex,
+          visibleToIndex,
+        ),
+        visibleFromIndex,
+        visibleToIndex,
+      }
+    }
+
     case 'scroll-to-edge': {
       const size = state.optionMap.size
       const visibleFromIndex =
@@ -549,12 +590,18 @@ export type SelectNavigation<T> = {
   scrollBy: (delta: number) => void
 
   /**
+   * densable `$e` `KMn` `scrollViewport` — gold `FTt` wheel.
+   * Returns whether visibleFromIndex moved (stopImmediatePropagation gate).
+   */
+  scrollViewport: (delta: number) => boolean
+
+  /**
    * densable inner oo `moreRowLines` / bn `markerLines`.
    */
   moreRowLines: boolean
 }
 
-const createDefaultState = <T>({
+export const createDefaultState = <T>({
   visibleOptionCount: customVisibleOptionCount,
   options,
   initialFocusValue,
@@ -576,46 +623,45 @@ const createDefaultState = <T>({
   let visibleFromIndex = 0
   let visibleToIndex = visibleOptionCount
 
-  // When there's a valid focused item, adjust viewport to show it
+  // densable 2.1.289 `tl` — preserve / above / below, then clamp.
   if (focusedItem) {
     const focusedIndex = focusedItem.index
 
     if (currentViewport) {
-      // If focused item is already in the current viewport range, try to preserve it
       if (
         focusedIndex >= currentViewport.visibleFromIndex &&
         focusedIndex < currentViewport.visibleToIndex
       ) {
-        // Keep the same viewport if it's valid
         visibleFromIndex = currentViewport.visibleFromIndex
         visibleToIndex = Math.min(
           optionMap.size,
-          currentViewport.visibleToIndex,
+          visibleFromIndex + visibleOptionCount,
         )
-      } else {
-        // Need to adjust viewport to show focused item
-        // Use minimal scrolling - put item at edge of viewport
-        if (focusedIndex < currentViewport.visibleFromIndex) {
-          // Item is above current viewport - scroll up to put it at the top
-          visibleFromIndex = focusedIndex
-          visibleToIndex = Math.min(
-            optionMap.size,
-            visibleFromIndex + visibleOptionCount,
-          )
-        } else {
-          // Item is below current viewport - scroll down to put it at the bottom
+        if (focusedIndex >= visibleToIndex) {
           visibleToIndex = Math.min(optionMap.size, focusedIndex + 1)
           visibleFromIndex = Math.max(0, visibleToIndex - visibleOptionCount)
         }
+        if (visibleToIndex - visibleFromIndex < visibleOptionCount) {
+          visibleFromIndex = Math.max(0, visibleToIndex - visibleOptionCount)
+        }
+      } else if (focusedIndex < currentViewport.visibleFromIndex) {
+        visibleFromIndex = focusedIndex
+        visibleToIndex = Math.min(
+          optionMap.size,
+          visibleFromIndex + visibleOptionCount,
+        )
+        if (visibleToIndex - visibleFromIndex < visibleOptionCount) {
+          visibleFromIndex = Math.max(0, visibleToIndex - visibleOptionCount)
+        }
+      } else {
+        visibleToIndex = Math.min(optionMap.size, focusedIndex + 1)
+        visibleFromIndex = Math.max(0, visibleToIndex - visibleOptionCount)
       }
     } else if (focusedIndex >= visibleOptionCount) {
-      // No current viewport but focused item is outside default viewport
-      // Scroll to show the focused item at the bottom of the viewport
       visibleToIndex = Math.min(optionMap.size, focusedIndex + 1)
       visibleFromIndex = Math.max(0, visibleToIndex - visibleOptionCount)
     }
 
-    // Ensure viewport bounds are valid
     visibleFromIndex = Math.max(
       0,
       Math.min(visibleFromIndex, optionMap.size - 1),
@@ -671,60 +717,86 @@ export function useSelectNavigation<T>({
   const onFocusRef = useRef(onFocus)
   onFocusRef.current = onFocus
 
-  const [lastOptions, setLastOptions] = useState(options)
+  // densable KMn `u` — last value handed to onFocus (v + render effect).
+  const notifiedFocusRef = useRef<T | undefined>(undefined)
 
-  if (options !== lastOptions && !isDeepStrictEqual(options, lastOptions)) {
+  // densable KMn `v` — dispatch then onFocus from live bag in the same tick.
+  // FTt scroll-viewport and arrows both go through this so parent
+  // defaultFocusValue batches with the window move (no set-focus bounce).
+  const navigate = useCallback(
+    (action: Action<T>) => {
+      dispatch(action)
+      const next = validateFocusedValue(bag.state.focusedValue, options)
+      if (next !== undefined && next !== notifiedFocusRef.current) {
+        notifiedFocusRef.current = next
+        onFocusRef.current?.(next)
+      }
+    },
+    [dispatch, bag, options],
+  )
+
+  const [lastOptions, setLastOptions] = useState(options)
+  const [lastVisibleOptionCount, setLastVisibleOptionCount] =
+    useState(visibleOptionCount)
+
+  // densable KMn `U||q` reset — options identity/deep OR visibleOptionCount.
+  const optionsChanged =
+    options !== lastOptions && !isDeepStrictEqual(options, lastOptions)
+  const visibleCountChanged = visibleOptionCount !== lastVisibleOptionCount
+  if (optionsChanged || visibleCountChanged) {
     dispatch({
       type: 'reset',
       state: createDefaultState({
         visibleOptionCount,
         options,
-        initialFocusValue:
-          focusValue ?? bag.state.focusedValue ?? initialFocusValue,
+        // Gold: options change prefers incoming a; window-size change keeps bag.
+        initialFocusValue: optionsChanged
+          ? (focusValue ?? bag.state.focusedValue ?? initialFocusValue)
+          : (bag.state.focusedValue ?? focusValue ?? initialFocusValue),
         currentViewport: {
           visibleFromIndex: bag.state.visibleFromIndex,
           visibleToIndex: bag.state.visibleToIndex,
         },
       }),
     })
-
-    setLastOptions(options)
+    if (optionsChanged) setLastOptions(options)
+    if (visibleCountChanged) setLastVisibleOptionCount(visibleOptionCount)
   }
 
   const focusNextOption = useCallback(() => {
-    dispatch({
+    navigate({
       type: 'focus-next-option',
     })
-  }, [dispatch])
+  }, [navigate])
 
   const focusPreviousOption = useCallback(() => {
-    dispatch({
+    navigate({
       type: 'focus-previous-option',
     })
-  }, [dispatch])
+  }, [navigate])
 
   const focusNextPage = useCallback(() => {
-    dispatch({
+    navigate({
       type: 'focus-next-page',
     })
-  }, [dispatch])
+  }, [navigate])
 
   const focusPreviousPage = useCallback(() => {
-    dispatch({
+    navigate({
       type: 'focus-previous-page',
     })
-  }, [dispatch])
+  }, [navigate])
 
   const focusOption = useCallback(
     (value: T | undefined) => {
       if (value !== undefined) {
-        dispatch({
+        navigate({
           type: 'set-focus',
           value,
         })
       }
     },
-    [dispatch],
+    [navigate],
   )
 
   const scrollToEdge = useCallback(
@@ -750,15 +822,38 @@ export function useSelectNavigation<T>({
 
   const scrollBy = useCallback(
     (delta: number) => {
-      dispatch({
-        type: 'scroll-to',
-        offset: bag.state.visibleFromIndex + delta,
+      navigate({
+        type: 'scroll-viewport',
+        delta,
       })
     },
-    [dispatch, bag],
+    [navigate],
+  )
+
+  const scrollViewport = useCallback(
+    (delta: number) => {
+      const from = bag.state.visibleFromIndex
+      navigate({
+        type: 'scroll-viewport',
+        delta,
+      })
+      return bag.state.visibleFromIndex !== from
+    },
+    [navigate, bag],
   )
 
   const visibleOptions = useMemo(() => {
+    // Gold Resume `iYt` `je` is option slots (`/3`). leftover `oo` `Oo` is
+    // `lines??1`. Line-window slice is leftover Lo leftover-xor only
+    // (`moreRowLines`). Mixing je-as-options with line occupancy jumps focus.
+    if (!moreRowLines) {
+      const from = state.visibleFromIndex
+      const to = Math.min(options.length, state.visibleToIndex)
+      return options.slice(from, to).map((option, i) => ({
+        ...option,
+        index: from + i,
+      }))
+    }
     const lineStart = leftoverWindowStartLine(options, state.visibleFromIndex)
     const lineEnd =
       lineStart +
@@ -767,7 +862,13 @@ export function useSelectNavigation<T>({
         leftoverMarkerLines(moreRowLines),
       )
     return leftoverLineWindowSlice(options, lineStart, lineEnd)
-  }, [options, state.visibleFromIndex, state.visibleOptionCount, moreRowLines])
+  }, [
+    options,
+    state.visibleFromIndex,
+    state.visibleToIndex,
+    state.visibleOptionCount,
+    moreRowLines,
+  ])
 
   // densable PFm on React snapshot — for render / onFocus
   const validatedFocusedValue = useMemo(
@@ -788,11 +889,14 @@ export function useSelectNavigation<T>({
     return focusedOption?.type === 'input'
   }, [validatedFocusedValue, options])
 
-  // Call onFocus with the validated value (what's actually displayed),
-  // not the internal state value which may be stale if options changed.
-  // Use ref to avoid re-running when callback reference changes.
+  // densable KMn render onFocus: skip if `v` already notified this value.
   useEffect(() => {
-    if (validatedFocusedValue !== undefined) {
+    if (validatedFocusedValue === undefined) {
+      notifiedFocusRef.current = undefined
+      return
+    }
+    if (validatedFocusedValue !== notifiedFocusRef.current) {
+      notifiedFocusRef.current = validatedFocusedValue
       onFocusRef.current?.(validatedFocusedValue)
     }
   }, [validatedFocusedValue])
@@ -832,6 +936,7 @@ export function useSelectNavigation<T>({
     scrollToEdge,
     scrollTo,
     scrollBy,
+    scrollViewport,
     moreRowLines,
     options,
   }

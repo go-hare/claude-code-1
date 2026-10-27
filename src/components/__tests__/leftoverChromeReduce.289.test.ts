@@ -3,7 +3,7 @@
  * Gold @207810241: `SR(El,Hm)=El+Hm.rows()-Hm.owed`.
  */
 import { describe, expect, test } from 'bun:test'
-import type { DOMElement } from '@anthropic/ink'
+import { stringWidth, type DOMElement } from '@anthropic/ink'
 import {
   leftoverChromeLatch,
   leftoverChromeQ,
@@ -16,6 +16,17 @@ import {
   leftoverListVisibleCount,
   leftoverListVisibleCountIdle,
   leftoverListVisibleCountModal,
+  leftoverSelectVisibleCount,
+  leftoverDollarTt,
+  leftoverDollarTtLayout,
+  leftoverGhOn,
+  leftoverGhLine,
+  leftoverSelectArrowOn,
+  leftoverSelectIsLo,
+  leftoverCompactVerticalColumnWidth,
+  leftoverVdeTint,
+  leftoverVdePointer,
+  leftoverVdeInverse,
   leftoverPluginBandBudget,
   leftoverGxtHeight,
   leftoverJePressEnabled,
@@ -29,7 +40,13 @@ import {
   leftoverGxtShowTrack,
   leftoverJeDropsClick,
   leftoverWheelOn,
+  leftoverFttWheelOn,
+  leftoverFttHitMiss,
+  leftoverFttStopImmediate,
+  leftoverScrollViewportFrom,
+  leftoverScrollViewportWalk,
   leftoverNavigableCount,
+  type LeftoverScrollViewportNode,
   leftoverLineCount,
   leftoverLineWindowSlice,
   leftoverWindowStartLine,
@@ -130,6 +147,12 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(leftoverListVisibleCount(10, 8, 5)).toBe(13)
     expect(leftoverListVisibleCount(0, 0, 0)).toBe(1)
     expect(leftoverChromeQ(null)).toBeNull()
+    expect(leftoverChromeQ(yogaEl(0), yogaEl(20))).toBeNull()
+    expect(leftoverChromeQ(yogaEl(8), yogaEl(20))).toBe(12)
+    expect(leftoverChromeQ(yogaEl(0))).toBe(0)
+    const idleUnmeasured = yogaEl(0, yogaEl(24))
+    expect(leftoverChromeQ(idleUnmeasured, null, true)).toBeNull()
+    expect(leftoverChromeQ(yogaEl(10, yogaEl(24)), null, true)).toBe(14)
     expect(leftoverPluginBandBudget(null, null, null, 0, undefined, 24)).toBe(
       24,
     )
@@ -137,6 +160,63 @@ describe('densable 2.1.289 leftover Pe SR', () => {
       18,
     )
     expect(leftoverPluginBandBudget(() => null, null, null, 0, 12, 24)).toBe(12)
+  })
+
+  test('Lo idle/modal Select uses caller visibleOptionCount; leftover xor uses computed H', () => {
+    expect(leftoverSelectVisibleCount(true, 1, 9)).toBe(1)
+    expect(leftoverSelectVisibleCount(false, 1, 9)).toBe(9)
+    expect(leftoverSelectVisibleCount(false, 24, 9)).toBe(9)
+    expect(leftoverSelectVisibleCount(false, 3, 5)).toBe(5)
+  })
+
+  test('$e $Tt is min(requested, max(1, floor((rows-8)/layoutRows)))', () => {
+    expect(leftoverDollarTt(5, 'compact', 24)).toBe(5)
+    expect(leftoverDollarTt(20, 'compact', 24)).toBe(16)
+    expect(leftoverDollarTt(9, 'expanded', 24)).toBe(5)
+    expect(leftoverDollarTt(9, 'compact-vertical', 24)).toBe(8)
+    expect(leftoverDollarTt(5, 'compact', 8)).toBe(1)
+    expect(leftoverDollarTtLayout('compact', false, false, true)).toBe(
+      'compact-vertical',
+    )
+    expect(leftoverDollarTtLayout('compact', true, false, true)).toBe('compact')
+    expect(leftoverDollarTtLayout('compact', false, true, true)).toBe('compact')
+    expect(leftoverDollarTtLayout('expanded', false, false, true)).toBe(
+      'expanded',
+    )
+    expect(leftoverDollarTtLayout('compact-vertical', false, false, true)).toBe(
+      'compact-vertical',
+    )
+  })
+
+  test('$e gh hiddenBelow and $e arrows have no leftover glyph gate', () => {
+    expect(leftoverGhOn(undefined, 0, 5, 9)).toBe(false)
+    expect(leftoverGhOn('line', 0, 5, 9)).toBe(true)
+    expect(leftoverGhOn('line', 0, 9, 9)).toBe(false)
+    expect(leftoverGhLine(3, 'line')).toBe('… +3 lines')
+    expect(leftoverGhLine(1, 'line')).toBe('… +1 line')
+    expect(leftoverGhLine(0, 'line')).toBe('')
+    expect(leftoverSelectArrowOn(false, undefined, true, true)).toBe(true)
+    expect(leftoverSelectArrowOn(false, 'glyph', true, true)).toBe(true)
+    expect(leftoverSelectArrowOn(true, undefined, true, true)).toBe(false)
+    expect(leftoverSelectArrowOn(true, 'glyph', true, true)).toBe(true)
+    expect(leftoverSelectArrowOn(true, 'glyph', true, false)).toBe(false)
+  })
+
+  test('$e VDe tint/pointer/inverse is hover, not keyboard focus', () => {
+    expect(leftoverVdeTint(true, true, 'tint')).toBe(true)
+    expect(leftoverVdeTint(true, false, 'tint')).toBe(false)
+    expect(leftoverVdeTint(false, true, 'tint')).toBe(false)
+    expect(leftoverVdeTint(true, true, 'inverse')).toBe(false)
+    expect(leftoverVdePointer(true, true, 'pointer')).toBe(true)
+    expect(leftoverVdePointer(true, false, 'pointer')).toBe(false)
+    expect(leftoverVdeInverse(true, true, 'inverse')).toBe(true)
+    expect(leftoverVdeInverse(true, false, 'inverse')).toBe(false)
+  })
+
+  test('leftover Select Lo host is visibleCount===void 0, not $e default 5', () => {
+    expect(leftoverSelectIsLo(undefined)).toBe(true)
+    expect(leftoverSelectIsLo(5)).toBe(false)
+    expect(leftoverSelectIsLo(1)).toBe(false)
   })
 
   test('Lo idle H is max(1, min(max(7, floor(rows/2)), q-Q))', () => {
@@ -173,21 +253,41 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(src).toContain('AbovePromptLeftoverContext')
     expect(src).toContain('leftoverAwareVisible')
     expect(src).toContain('leftoverListVisibleCount')
-    expect(src).toContain('leftoverListVisibleCountIdle')
+    expect(src).toContain('leftoverLoOn ? subscribeLayout')
+    expect(src).toContain('leftoverLoOn && leftoverLatchNow.latch')
+    expect(src).toContain('leftoverSelectIsLo')
+    expect(src).toContain('leftoverSelectIsLo(visibleOptionCount)')
+    expect(src).not.toContain('const leftoverLoOn = true')
+    expect(src).toContain('leftoverSelectVisibleCount')
+    expect(src).toContain('leftoverDollarTt')
+    expect(src).toContain('leftoverDollarTtLayout')
+    expect(src).toContain('leftoverGhOn')
+    expect(src).toContain('leftoverGhLine')
+    expect(src).toContain('leftoverSelectArrowOn')
+    expect(src).toContain('leftoverHiddenBelow')
+    expect(src).toContain('fttInner: !leftoverLoOn')
+    expect(src).toContain('leftoverXeFrame')
+    expect(src).toContain('if (leftoverSrRadio)')
+    expect(src).not.toContain('leftoverSrRadio ? leftoverG5Children')
+    expect(src).not.toContain('screenReaderRadio: leftoverSrRadio')
+    expect(src).toContain('if (fttInner)')
+    expect(src).toContain('leftoverDollarWt')
+    expect(src).toContain('leftoverLoFrame')
+    expect(src).toContain('selectedValue')
+    expect(src).toContain('visibleOptionCount: leftoverWindow')
     expect(src).toContain('leftoverChromeLatch')
     expect(src).toContain('leftoverOverflowHint')
     expect(src).toContain('leftoverChromeQ')
     expect(src).toContain('subscribeLayout')
-    expect(src).toContain('leftoverListVisibleCountModal')
     expect(src).toContain('leftoverInnerWindow')
     expect(src).toContain('leftoverInnerOverflowHint')
     expect(src).toContain('LeftoverModalHostContext')
     expect(src).toContain('LeftoverCountHint')
     expect(src).toContain('{count} more')
-    expect(src).toContain("innerHint === 'glyph'")
     expect(src).toContain("innerHint === 'count'")
+    expect(src).toContain('leftoverSelectArrowOn')
     expect(src).toContain('leftoverModal?.box.current')
-    expect(src).toContain('leftoverXor')
+    expect(src).toContain('leftoverLoOn')
     expect(src).toContain('leftoverChromeWalkParents')
     expect(src).toContain('leftoverFHostHeight')
     expect(src).toContain('leftoverLatchRows')
@@ -216,7 +316,7 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(src).toContain('LEFTOVER_FE_REPEAT_MS')
     expect(src).toContain('leftoverGxtHeight')
     expect(src).toContain('leftoverJePressEnabled')
-    expect(src).toContain('leftoverScrollbar')
+    expect(src).toContain('LeftoverScrollbar')
     expect(src).toContain('leftoverScrollbarPointer')
     expect(src).toContain('leftoverGxtPaintBar')
     expect(src).toContain('leftoverGxtShowTrack')
@@ -224,6 +324,27 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(src).toContain('leftoverThumbPointerOn')
     expect(src).toContain('onWheel')
     expect(src).toContain('wheelOn: leftoverWheel')
+    expect(src).toContain('leftoverFttWheelOn')
+    expect(src).toContain('leftoverFttHitMiss')
+    expect(src).toContain('leftoverFttStopImmediate')
+    expect(src).toContain('scrollViewport: state.scrollViewport')
+    expect(src).toContain('shouldDropWheel: leftoverShouldDropWheel')
+    expect(src).toContain('hitTest')
+    const navSrc = await Bun.file(
+      new URL('../CustomSelect/use-select-navigation.ts', import.meta.url),
+    ).text()
+    expect(navSrc).toContain("type: 'scroll-viewport'")
+    expect(navSrc).toContain('leftoverScrollViewportFrom')
+    expect(navSrc).toContain('leftoverScrollViewportWalk')
+    expect(navSrc).toContain('scrollViewport')
+    expect(navSrc).toContain('visibleCountChanged')
+    expect(navSrc).toContain('notifiedFocusRef')
+    expect(navSrc).toContain('navigate')
+    const straySrc = await Bun.file(
+      new URL('../CustomSelect/use-stray-click.ts', import.meta.url),
+    ).text()
+    expect(straySrc).toContain('useShouldDropWheel')
+    expect(straySrc).toContain('isMountSettle')
     expect(src).toContain('leftoverArrowUpOn')
     expect(src).toContain('leftoverBindKeyDown')
     expect(src).toContain('leftoverIheWindowValue')
@@ -260,15 +381,18 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(src).toContain('leftoverG5Headings')
     expect(src).toContain('leftoverG5DrawLabels')
     expect(src).toContain('leftoverRowClip')
+    expect(src).toContain('if (!leftoverLoOn) return node')
     expect(src).toContain('overflow="hidden"')
+    const nav = await Bun.file(
+      new URL('../CustomSelect/use-select-navigation.ts', import.meta.url),
+    ).text()
+    expect(nav).toContain('if (!moreRowLines)')
+    expect(nav).toContain('options.slice(from, to)')
     expect(src).toContain('LeftoverIheHoverTrack')
     expect(src).toContain('leftoverIheHoverOn')
     expect(src).toContain('leftoverIheHoverClear')
     expect(src).toContain('leftoverMarkerLines')
     expect(src).toContain('leftoverPnWindow')
-    const nav = await Bun.file(
-      new URL('../CustomSelect/use-select-navigation.ts', import.meta.url),
-    ).text()
     expect(nav).toContain('leftoverLineWindowSlice')
     expect(nav).toContain('leftoverWindowStartLine')
     expect(nav).toContain('leftoverMarkerLines')
@@ -293,8 +417,11 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(src).toContain('leftoverPin')
     expect(src).toContain('g5CursorActive')
     expect(src).toContain('useDeclaredCursor')
-    expect(src).toContain('inLeftoverXorClaim')
+    expect(src).toContain('leftoverLoOn')
+    expect(src).toContain('useLeftoverChromeClaim')
+    expect(src).not.toContain('inLeftoverXorClaim')
     expect(src).toContain('scrollBar = true')
+    expect(src).toContain('leftoverLoOn && scrollBar')
     expect(src).toContain('onDisabledRowClick')
     expect(src).toContain('aboveCount: state.visibleFromIndex')
     expect(src).toContain('onJePress: leftoverJePress')
@@ -307,6 +434,153 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     )
     expect(src).not.toContain(
       'useLeftoverChromeClaim(leftoverHostRef, visibleOptionCount)',
+    )
+  })
+
+  test('$e SelectOption VDe is per-row hover; ihe only clears on window rotate', async () => {
+    const optionSrc = await Bun.file(
+      new URL('../CustomSelect/select-option.tsx', import.meta.url),
+    ).text()
+    expect(optionSrc).toContain('leftoverVdeTint')
+    expect(optionSrc).toContain('leftoverVdePointer')
+    expect(optionSrc).toContain('leftoverVdeInverse')
+    expect(optionSrc).toContain('LeftoverIheWindowContext')
+    expect(optionSrc).toContain('const [hovered, setHovered] = useState(false)')
+    expect(optionSrc).toContain('leftoverIheRef.current !== leftoverIhe')
+    expect(optionSrc).toContain('isFocused={isFocused}')
+    expect(optionSrc).toContain('hovered={leftoverHoverPointer}')
+    expect(optionSrc).toContain('backgroundColor={leftoverHoverTint}')
+    expect(optionSrc).toContain('if (!nn) return item')
+    expect(optionSrc).not.toContain('width="100%"')
+    expect(optionSrc).not.toContain('hoverFollowsPaint')
+    expect(optionSrc).not.toContain('leftoverIheHoverOn')
+    expect(optionSrc).not.toContain('leftoverIheHoverClear')
+    expect(optionSrc).not.toContain('leftoverVdeExclusiveOn')
+    expect(optionSrc).not.toContain('LeftoverVdeHoverContext')
+    expect(optionSrc).not.toContain('hovered || isFocused')
+    expect(optionSrc).not.toContain('setHoveredId')
+    const listItem = await Bun.file(
+      new URL(
+        '../../../packages/@ant/ink/src/theme/ListItem.tsx',
+        import.meta.url,
+      ),
+    ).text()
+    expect(listItem).not.toContain('hoverFollowsPaint')
+    expect(listItem).not.toContain('width="100%"')
+    expect(listItem).toContain('<Box flexShrink={0}>{renderIndicator()}</Box>')
+    // densable IC: no alignItems/alignSelf stretch on the hover Box.
+    expect(listItem).not.toContain('alignItems="stretch"')
+    expect(listItem).not.toContain('alignSelf="stretch"')
+    const selectSrc = await Bun.file(
+      new URL('../CustomSelect/select.tsx', import.meta.url),
+    ).text()
+    const loStart = selectSrc.indexOf('function leftoverLoFrame')
+    const loEnd = selectSrc.indexOf('function LeftoverCountHint', loStart)
+    const loBody = selectSrc.slice(loStart, loEnd)
+    expect(loBody).not.toContain('screenReaderRadio')
+    expect(loBody).not.toContain('g5Prompt')
+    expect(loBody).not.toContain('g5CursorActive')
+    expect(loBody).not.toContain('g5ShowPrompt')
+    const wtStart = selectSrc.indexOf('function leftoverDollarWt')
+    const wtEnd = selectSrc.indexOf('function leftoverLoFrame', wtStart)
+    const wtBody = selectSrc.slice(wtStart, wtEnd)
+    expect(wtBody).toContain('leftoverIheWindowValue')
+    expect(wtBody).toContain('alignItems="stretch"')
+    expect(wtBody).not.toContain('width="100%"')
+  })
+
+  test('$e compact-vertical description is gold t7 sibling, not inside hover Box', async () => {
+    const src = await Bun.file(
+      new URL('../CustomSelect/select.tsx', import.meta.url),
+    ).text()
+    const compact = src.indexOf("if (layout === 'compact-vertical')")
+    expect(compact).toBeGreaterThan(0)
+    const nextLayout = src.indexOf(
+      '// Check if any visible options have descriptions',
+      compact,
+    )
+    const body = src.slice(compact, nextLayout)
+    expect(body).toContain('</SelectOption>')
+    expect(body).toContain('{!leftoverNn && option.description && (')
+    expect(body).toContain('paddingLeft={hideIndexes ? 4 : maxIndexWidth + 4}')
+    expect(body.indexOf('</SelectOption>')).toBeLessThan(
+      body.indexOf('{!leftoverNn && option.description && ('),
+    )
+    expect(body).not.toContain('flexShrink={0} width="100%"')
+    // DualInk analog: pin option column to longest title/desc (not terminal).
+    expect(body).toContain('width={leftoverColumnWidth}')
+    expect(body).toContain('leftoverCompactVerticalColumnWidth')
+    expect(body).toContain('alignItems="stretch"')
+  })
+
+  test('leftoverCompactVerticalColumnWidth is longest title/desc, not terminal', () => {
+    const w = leftoverCompactVerticalColumnWidth(
+      [
+        { label: '1', description: '第一个选项' },
+        { label: '2', description: '第二个选项' },
+        { label: '3', description: '第三个选项' },
+        { type: 'input', label: 'Other', placeholder: 'Type something.' },
+      ],
+      false,
+      1,
+    )
+    // pointer+gap+`1. `+label vs descPad+CJK, vs input `4. Type something.`
+    expect(w).toBeGreaterThan(6)
+    expect(w).toBeLessThan(40)
+    expect(w).toBe(
+      Math.max(
+        2 + 2 + 1, // ❯ + "1." pad + "1"
+        5 + 5, // padLeft 5 + 第一个选项 (5 cells)
+        2 + 2 + 1,
+        5 + 5,
+        2 + 2 + 1,
+        5 + 5,
+        2 + stringWidth('4. ') + stringWidth('Type something.'),
+      ),
+    )
+  })
+
+  test('Ask QuestionView wraps $e like gold: marginTop 1, no width 100%', async () => {
+    const src = await Bun.file(
+      new URL(
+        '../permissions/AskUserQuestionPermissionRequest/QuestionView.tsx',
+        import.meta.url,
+      ),
+    ).text()
+    expect(src).toContain(
+      '<Box flexDirection="column" marginTop={0} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>',
+    )
+    expect(src).toContain('<Box marginTop={1}>')
+    expect(src).toContain('layout="compact-vertical"')
+    expect(src).not.toContain('width={minContentWidth}')
+    expect(src).not.toContain('width="100%"')
+  })
+
+  test('PromptInput leftover host pins leftover columns, not yoga 100%', async () => {
+    const src = await Bun.file(
+      new URL('../PromptInput/PromptInput.tsx', import.meta.url),
+    ).text()
+    const host = src.indexOf('{...(hostBlocksKeys')
+    expect(host).toBeGreaterThan(0)
+    const hostEnd = src.indexOf('<PromptInputModeIndicator', host)
+    const body = src.slice(host, hostEnd)
+    expect(body).toContain('width={promptInputColumns}')
+    expect(body).toContain('flexShrink={0}')
+    expect(body).not.toContain('width="100%"')
+    expect(src).toContain(
+      'const promptInputColumns = columns - companionReservedColumns(columns, companionSpeaking)',
+    )
+  })
+
+  test('KEEP companion idle wrapper is flexShrink 0 like speaking path', async () => {
+    const src = await Bun.file(
+      new URL('../../buddy/CompanionSprite.tsx', import.meta.url),
+    ).text()
+    expect(src).toContain(
+      '<Box paddingX={1} flexShrink={0}>\n        {spriteColumn}\n      </Box>',
+    )
+    expect(src).toContain(
+      '<Box flexDirection="row" alignItems="flex-end" paddingX={1} flexShrink={0}>',
     )
   })
 
@@ -426,6 +700,29 @@ describe('densable 2.1.289 leftover Pe SR', () => {
     expect(leftoverWheelOn(true, false)).toBe(false)
     expect(leftoverWheelOn(false, true)).toBe(false)
     expect(leftoverWheelOn(false, false)).toBe(true)
+    // densable `$e` `FTt` `if(o||i-t>=a)`
+    expect(leftoverFttWheelOn(true, 0, 5, 50)).toBe(false)
+    expect(leftoverFttWheelOn(false, 0, 50, 50)).toBe(false)
+    expect(leftoverFttWheelOn(false, 0, 8, 50)).toBe(true)
+    expect(leftoverFttHitMiss(null, 1, 2, null)).toBe(false)
+    expect(leftoverFttHitMiss({}, undefined, 2, null)).toBe(false)
+    expect(leftoverFttHitMiss({}, 1, 2, null)).toBe(true)
+    expect(leftoverFttHitMiss({}, 1, 2, {})).toBe(false)
+    expect(leftoverFttStopImmediate(true)).toBe(true)
+    expect(leftoverFttStopImmediate(false)).toBe(false)
+    expect(leftoverScrollViewportFrom(0, 1, 50, 8)).toBe(1)
+    expect(leftoverScrollViewportFrom(0, -1, 50, 8)).toBe(0)
+    expect(leftoverScrollViewportFrom(42, 1, 50, 8)).toBe(42)
+    const a: LeftoverScrollViewportNode<string> = { index: 0, value: 'a' }
+    const b: LeftoverScrollViewportNode<string> = { index: 1, value: 'b' }
+    const c: LeftoverScrollViewportNode<string> = { index: 2, value: 'c' }
+    a.next = b
+    b.previous = a
+    b.next = c
+    c.previous = b
+    expect(leftoverScrollViewportWalk(a, 1, 3)).toBe('b')
+    expect(leftoverScrollViewportWalk(c, 0, 2)).toBe('b')
+    expect(leftoverScrollViewportWalk(b, 0, 2)).toBe('b')
   })
 
   test('$e grab: thumb-inside down skips onScrollTo; up clears', () => {

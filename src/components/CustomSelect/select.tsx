@@ -22,6 +22,7 @@ import {
   type MouseActionEvent,
   type KeyboardEvent,
   type WheelEvent,
+  hitTest,
   useHoverTracked,
   AccessibilityContext,
   useFocusReclaim,
@@ -39,8 +40,13 @@ import {
   leftoverInnerWindow,
   leftoverLatchRows,
   leftoverListVisibleCount,
-  leftoverListVisibleCountIdle,
-  leftoverListVisibleCountModal,
+  leftoverSelectVisibleCount,
+  leftoverDollarTt,
+  leftoverDollarTtLayout,
+  leftoverGhOn,
+  leftoverGhLine,
+  leftoverSelectArrowOn,
+  leftoverSelectIsLo,
   leftoverGxtHeight,
   leftoverGxtClearHover,
   leftoverGxtPaintBar,
@@ -50,6 +56,9 @@ import {
   leftoverArrowUpOn,
   leftoverArrowDownOn,
   leftoverWheelOn,
+  leftoverFttWheelOn,
+  leftoverFttHitMiss,
+  leftoverFttStopImmediate,
   leftoverJeDropsClick,
   leftoverJePressEnabled,
   leftoverMoreRowLines,
@@ -101,7 +110,6 @@ import {
   LEFTOVER_FE_CLICK_MS,
   LEFTOVER_FE_REPEAT_INITIAL_MS,
   LEFTOVER_FE_REPEAT_MS,
-  leftoverXor,
   leftoverNnFacts,
   leftoverNnDtWidth,
   leftoverNnFromOptions,
@@ -109,6 +117,7 @@ import {
   leftoverNnItemLines,
   leftoverNnLiveWidth,
   leftoverVmnRn,
+  leftoverCompactVerticalColumnWidth,
   LeftoverNnDtContext,
   useLeftoverChromeClaim,
   type LeftoverScrollGrab,
@@ -117,10 +126,13 @@ import { count } from '../../utils/array.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { SelectInputOption } from './select-input-option.js';
-import { SelectOption } from './select-option.js';
+import { SelectOption, SelectZiOption } from './select-option.js';
 import { useSelectInput } from './use-select-input.js';
 import { useSelectState } from './use-select-state.js';
-import { useStrayClickGuard } from './use-stray-click.js';
+import { useShouldDropWheel, useStrayClickGuard } from './use-stray-click.js';
+
+const noopSubscribe = (): (() => void) => () => {};
+const emptyLayoutSnapshot = (): string => '';
 
 // Extract text content from ReactNode for width calculation
 function getTextContent(node: ReactNode): string {
@@ -157,7 +169,7 @@ function LeftoverIheHoverTrack({
 /** densable inner `oo` GXt + spareLines `le` + je placement. */
 const LEFTOVER_SCROLLBAR_ARROWS_MIN = 5;
 
-function leftoverScrollbar({
+function LeftoverScrollbar({
   offset,
   visible,
   total,
@@ -267,6 +279,46 @@ function leftoverScrollbar({
   );
 }
 
+/**
+ * densable `$e` `Xe()?g5:Qi` — screen-reader radio is g5, not leftoverListFrame / FTt / leftover Lo.
+ */
+function leftoverXeFrame({
+  hostRef,
+  onKeyDown,
+  emptyMessage,
+  optionCount,
+  g5Prompt,
+  g5CursorActive,
+  g5ShowPrompt = true,
+  children,
+}: {
+  hostRef: React.RefObject<DOMElement | null>;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  emptyMessage?: React.ReactNode;
+  optionCount: number;
+  g5Prompt?: string;
+  g5CursorActive?: boolean;
+  g5ShowPrompt?: boolean;
+  children?: React.ReactNode;
+}): React.ReactNode {
+  useFocusReclaim(hostRef, true);
+  const g5CursorRef = useDeclaredCursor({
+    line: 0,
+    column: leftoverG5PromptColumn(g5Prompt ?? ''),
+    active: Boolean(g5Prompt && g5CursorActive),
+  });
+  return (
+    <Box ref={hostRef} flexDirection="column" tabIndex={0} onKeyDown={onKeyDown}>
+      {optionCount === 0 ? emptyMessage != null ? <Text dimColor>{emptyMessage}</Text> : null : children}
+      {g5ShowPrompt && g5Prompt ? (
+        <Box ref={g5CursorRef}>
+          <Text dimColor>{g5Prompt}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
 function leftoverListFrame({
   hostRef,
   moreRowLines,
@@ -287,14 +339,197 @@ function leftoverListFrame({
   jeDropsRef,
   now,
   wheelOn,
+  shouldDropWheel,
+  scrollViewport,
   onKeyDown,
   windowStart,
   focusOn,
   screenReader,
-  screenReaderRadio,
-  g5Prompt,
-  g5CursorActive,
-  g5ShowPrompt = true,
+  nnDt,
+  hiddenBelow,
+  fttInner,
+  children,
+}: {
+  hostRef: React.RefObject<DOMElement | null>;
+  nnDt: Set<DOMElement>;
+  moreRowLines: boolean;
+  scrollBar: boolean;
+  gxtHeight: number;
+  spare: number;
+  aboveCount: number;
+  belowCount: number;
+  innerHint: 'none' | 'glyph' | 'count' | undefined;
+  onJePress?: (direction: number) => (event: ClickEvent) => void;
+  emptyMessage?: React.ReactNode;
+  optionCount: number;
+  offset: number;
+  visible: number;
+  total: number;
+  onScrollTo: (offset: number) => void;
+  onScrollBy: (delta: number) => void;
+  jeDropsRef: React.RefObject<{ at: number; row: number } | null>;
+  now: () => number;
+  wheelOn: boolean;
+  shouldDropWheel: () => boolean;
+  scrollViewport: (delta: number) => boolean;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  windowStart: number;
+  focusOn: boolean;
+  screenReader: boolean;
+  hiddenBelow?: React.ReactNode;
+  /** densable `$e` `FTt` — wheel ref is inner `ihe`, not the key host. */
+  fttInner?: boolean;
+  children: React.ReactNode;
+}): React.ReactNode {
+  // densable leftover Select `visibleCount===void 0` → `Lo`; else `oo`.
+  // `$e` `wt` is leftoverDollarWt (`fttInner`). leftover Lo host is leftoverLoFrame.
+  // The frames own hooks, so mount them as components rather than calling them.
+  if (fttInner) {
+    return React.createElement(leftoverDollarWt, {
+      hostRef,
+      nnDt,
+      emptyMessage,
+      optionCount,
+      onKeyDown,
+      windowStart,
+      hiddenBelow,
+      wheelOn,
+      shouldDropWheel,
+      scrollViewport,
+      focusOn,
+      children,
+    });
+  }
+  return React.createElement(leftoverLoFrame, {
+    hostRef,
+    moreRowLines,
+    scrollBar,
+    gxtHeight,
+    spare,
+    aboveCount,
+    belowCount,
+    innerHint,
+    onJePress,
+    emptyMessage,
+    optionCount,
+    offset,
+    visible,
+    total,
+    onScrollTo,
+    onScrollBy,
+    jeDropsRef,
+    now,
+    wheelOn,
+    shouldDropWheel,
+    scrollViewport,
+    onKeyDown,
+    windowStart,
+    focusOn,
+    screenReader,
+    nnDt,
+    children,
+  });
+}
+
+/** densable `$e` `wt` — ihe + hiddenBelow. leftover Lo je/spare/GXt stay off. */
+function leftoverDollarWt({
+  hostRef,
+  nnDt,
+  emptyMessage,
+  optionCount,
+  onKeyDown,
+  windowStart,
+  hiddenBelow,
+  wheelOn,
+  shouldDropWheel,
+  scrollViewport,
+  focusOn,
+  children,
+}: {
+  hostRef: React.RefObject<DOMElement | null>;
+  nnDt: Set<DOMElement>;
+  emptyMessage?: React.ReactNode;
+  optionCount: number;
+  onKeyDown?: (event: KeyboardEvent) => void;
+  windowStart: number;
+  hiddenBelow?: React.ReactNode;
+  wheelOn: boolean;
+  shouldDropWheel: () => boolean;
+  scrollViewport: (delta: number) => boolean;
+  focusOn: boolean;
+  children: React.ReactNode;
+}): React.ReactNode {
+  useFocusReclaim(hostRef, focusOn);
+  const fttRef = useRef<DOMElement | null>(null);
+  const leftoverIheValue = leftoverIheWindowValue(
+    windowStart,
+    React.Children.toArray(children)
+      .map(child => (React.isValidElement(child) ? String(child.key ?? '') : ''))
+      .join(),
+  );
+  const leftoverFttWheel = wheelOn
+    ? (event: WheelEvent) => {
+        if (event.deltaY === 0 || shouldDropWheel()) return;
+        const host = fttRef.current;
+        const hit =
+          host !== null && event.col !== undefined && event.row !== undefined
+            ? hitTest(host, event.col, event.row)
+            : undefined;
+        if (leftoverFttHitMiss(host, event.col, event.row, hit)) return;
+        if (leftoverFttStopImmediate(scrollViewport(event.deltaY > 0 ? 1 : -1))) {
+          event.stopImmediatePropagation();
+        }
+      }
+    : undefined;
+  return (
+    <LeftoverIheWindowContext value={leftoverIheValue}>
+      <LeftoverNnDtContext value={nnDt}>
+        <Box ref={hostRef} flexDirection="column" alignItems="stretch" tabIndex={0} onKeyDown={onKeyDown}>
+          {optionCount === 0 ? (
+            emptyMessage != null ? (
+              <Text dimColor>{emptyMessage}</Text>
+            ) : null
+          ) : (
+            <>
+              <Box ref={fttRef} flexDirection="column" alignItems="stretch" onWheel={leftoverFttWheel}>
+                {children}
+              </Box>
+              {hiddenBelow ?? null}
+            </>
+          )}
+        </Box>
+      </LeftoverNnDtContext>
+    </LeftoverIheWindowContext>
+  );
+}
+
+/** densable leftover `Lo` → `oo` — je/spare/GXt. `$e` never enters. */
+function leftoverLoFrame({
+  hostRef,
+  moreRowLines,
+  scrollBar,
+  gxtHeight,
+  spare,
+  aboveCount,
+  belowCount,
+  innerHint,
+  onJePress,
+  emptyMessage,
+  optionCount,
+  offset,
+  visible,
+  total,
+  onScrollTo,
+  onScrollBy,
+  jeDropsRef,
+  now,
+  wheelOn,
+  shouldDropWheel,
+  scrollViewport,
+  onKeyDown,
+  windowStart,
+  focusOn,
+  screenReader,
   nnDt,
   children,
 }: {
@@ -318,23 +553,16 @@ function leftoverListFrame({
   jeDropsRef: React.RefObject<{ at: number; row: number } | null>;
   now: () => number;
   wheelOn: boolean;
+  shouldDropWheel: () => boolean;
+  scrollViewport: (delta: number) => boolean;
   onKeyDown?: (event: KeyboardEvent) => void;
   windowStart: number;
   focusOn: boolean;
   screenReader: boolean;
-  screenReaderRadio: boolean;
-  g5Prompt?: string;
-  g5CursorActive?: boolean;
-  g5ShowPrompt?: boolean;
   children: React.ReactNode;
 }): React.ReactNode {
   const hoverTracked = useHoverTracked();
   useFocusReclaim(hostRef, focusOn);
-  const g5CursorRef = useDeclaredCursor({
-    line: 0,
-    column: leftoverG5PromptColumn(g5Prompt ?? ''),
-    active: Boolean(screenReaderRadio && g5Prompt && g5CursorActive),
-  });
   const dropsClick = (event: ClickEvent) => leftoverJeDropsClick(jeDropsRef.current, event.row, now());
   const leftoverIheValue = leftoverIheWindowValue(
     windowStart,
@@ -342,43 +570,31 @@ function leftoverListFrame({
       .map(child => (React.isValidElement(child) ? String(child.key ?? '') : ''))
       .join(),
   );
+  const leftoverFttWheel = wheelOn
+    ? (event: WheelEvent) => {
+        if (event.deltaY === 0 || shouldDropWheel()) return;
+        const host = hostRef.current;
+        const hit =
+          host !== null && event.col !== undefined && event.row !== undefined
+            ? hitTest(host, event.col, event.row)
+            : undefined;
+        if (leftoverFttHitMiss(host, event.col, event.row, hit)) return;
+        if (leftoverFttStopImmediate(scrollViewport(event.deltaY > 0 ? 1 : -1))) {
+          event.stopImmediatePropagation();
+        }
+      }
+    : undefined;
   const wrap = (node: React.ReactNode) => (
     <LeftoverIheWindowContext value={leftoverIheValue}>
       <LeftoverNnDtContext value={nnDt}>
         <LeftoverJeDropsContext value={dropsClick}>
-          <Box
-            ref={hostRef}
-            flexDirection="column"
-            tabIndex={0}
-            onKeyDown={onKeyDown}
-            onWheel={
-              wheelOn
-                ? (event: WheelEvent) => {
-                    if (event.deltaY === 0) return;
-                    onScrollBy(event.deltaY > 0 ? 1 : -1);
-                    event.stopImmediatePropagation();
-                  }
-                : undefined
-            }
-          >
+          <Box ref={hostRef} flexDirection="column" tabIndex={0} onKeyDown={onKeyDown} onWheel={leftoverFttWheel}>
             {node}
           </Box>
         </LeftoverJeDropsContext>
       </LeftoverNnDtContext>
     </LeftoverIheWindowContext>
   );
-  if (screenReaderRadio) {
-    return wrap(
-      <>
-        {optionCount === 0 ? emptyMessage != null ? <Text dimColor>{emptyMessage}</Text> : null : children}
-        {g5ShowPrompt && g5Prompt ? (
-          <Box ref={g5CursorRef}>
-            <Text dimColor>{g5Prompt}</Text>
-          </Box>
-        ) : null}
-      </>,
-    );
-  }
   const spareBox = spare > 0 ? <Box flexShrink={0} height={spare} /> : null;
   const above =
     innerHint === 'count' ? <LeftoverCountHint direction="above" count={aboveCount} onPress={onJePress?.(-1)} /> : null;
@@ -409,16 +625,16 @@ function leftoverListFrame({
     const paintBar = leftoverGxtPaintBar(hoverTracked, hovered, overflows);
     const bar = showTrack ? (
       paintBar ? (
-        leftoverScrollbar({
-          offset,
-          visible,
-          total,
-          height,
-          arrows: moreRowLines,
-          screenReader,
-          onScrollTo,
-          onScrollBy,
-        })
+        <LeftoverScrollbar
+          offset={offset}
+          visible={visible}
+          total={total}
+          height={height}
+          arrows={moreRowLines}
+          screenReader={screenReader}
+          onScrollTo={onScrollTo}
+          onScrollBy={onScrollBy}
+        />
       ) : (
         <Box width={1} flexShrink={0} />
       )
@@ -631,6 +847,21 @@ export type SelectProps<T> = {
   readonly emptyMessage?: ReactNode;
 
   /**
+   * densable `$e` `hiddenBelowUnit` — `gh` sibling under `FTt`.
+   */
+  readonly hiddenBelowUnit?: string;
+
+  /**
+   * densable `$e` `hoverStyle` — `she` / `Zi` / `t7`.
+   */
+  readonly hoverStyle?: 'tint' | 'inverse' | 'pointer' | 'none';
+
+  /**
+   * densable `$e` `pointerWhileDisabled` — keep onClick when disabled.
+   */
+  readonly pointerWhileDisabled?: boolean;
+
+  /**
    * Highlight text in option labels.
    */
   readonly highlightText?: string;
@@ -644,6 +875,11 @@ export type SelectProps<T> = {
    * Default value.
    */
   readonly defaultValue?: T;
+
+  /**
+   * densable `$e` `ki` `selectedValue` — controlled (`a!==void 0?a:I`).
+   */
+  readonly selectedValue?: T;
 
   /**
    * Callback when cancel is pressed.
@@ -743,9 +979,13 @@ export function Select<T>({
   scrollBar = true,
   onDisabledRowClick,
   emptyMessage,
+  hiddenBelowUnit,
+  hoverStyle,
+  pointerWhileDisabled = false,
   highlightText,
   options,
   defaultValue,
+  selectedValue,
   onCancel,
   onChange,
   onFocus,
@@ -816,7 +1056,12 @@ export function Select<T>({
   const leftoverGet = useContext(AbovePromptLeftoverContext);
   const leftoverModal = useContext(LeftoverModalHostContext);
   const inModal = useIsInsideModal();
-  const inLeftoverXorClaim = leftoverXor(leftoverGet !== null, inModal);
+  // Gold `$e` is never leftover Lo. leftover `Select` `visibleCount===void 0`
+  // → leftover Lo (`Xt` leftover chrome). `$e`/`Qi` (Resume, permission) never
+  // claims leftover chrome — leftover xor claim here was analog extra (extra
+  // tot bottom divider under Ask).
+  // Gold leftover Select `visibleCount===void 0` → Lo. `$e` default 5 is never that host.
+  const leftoverLoOn = leftoverSelectIsLo(visibleOptionCount);
   useLeftoverChromeClaim(
     leftoverHostRef,
     leftoverOwedRows(
@@ -825,29 +1070,31 @@ export function Select<T>({
       options.map(option => option.heading === true),
       emptyMessage,
     ),
-    inLeftoverXorClaim,
+    leftoverLoOn,
   );
   const { subscribeLayout } = useApp();
   const terminalSize = useTerminalSize();
   const { rows: sizeRows } = useModalOrTerminalSize(terminalSize);
-  const leftoverLayoutTick = useSyncExternalStore(
-    subscribeLayout,
-    () => {
-      const n = leftoverHostRef.current;
-      return `${n?.yogaNode?.getComputedHeight() ?? 0}|${n?.yogaNode?.getComputedWidth() ?? 0}|${sizeRows}`;
-    },
-    () => '',
-  );
-  void leftoverLayoutTick;
   const leftoverList = leftoverHostRef.current;
   const leftoverModalBox = leftoverModal?.box.current ?? null;
-  const leftoverXorOn = leftoverXor(leftoverGet !== null, inModal);
+  // leftover Lo window/clip/GXt stay off (`leftoverLoOn` above).
+  const leftoverLayoutTick = useSyncExternalStore(
+    leftoverLoOn ? subscribeLayout : noopSubscribe,
+    leftoverLoOn
+      ? () => {
+          const n = leftoverHostRef.current;
+          return `${n?.yogaNode?.getComputedHeight() ?? 0}|${n?.yogaNode?.getComputedWidth() ?? 0}|${sizeRows}`;
+        }
+      : emptyLayoutSnapshot,
+    emptyLayoutSnapshot,
+  );
+  void leftoverLayoutTick;
   const leftoverHostH = leftoverFHostHeight(leftoverModalBox, leftoverList);
   const leftoverWidth = leftoverList?.yogaNode?.getComputedWidth() ?? 0;
   const leftoverChromeS = leftoverChromeQ(
     leftoverList,
     leftoverModalBox,
-    leftoverChromeWalkParents(leftoverModal != null, leftoverXorOn),
+    leftoverChromeWalkParents(leftoverModal != null, leftoverLoOn),
   );
   const leftoverLatchRowsNow = leftoverLatchRows(inModal, leftoverModal?.rows, sizeRows, terminalSize.rows);
   const [chromeLatch, setChromeLatch] = useState<{
@@ -855,24 +1102,43 @@ export function Select<T>({
     width: number;
     chrome: number;
   } | null>(null);
-  const leftoverLatchNow = leftoverChromeLatch(chromeLatch, leftoverLatchRowsNow, leftoverWidth, leftoverChromeS);
-  if (leftoverLatchNow.latch !== chromeLatch) setChromeLatch(leftoverLatchNow.latch);
-  const leftoverVisible = leftoverXorOn
-    ? leftoverListVisibleCount(leftoverGet?.() ?? null, leftoverHostH, leftoverLatchNow.q)
-    : inModal
-      ? leftoverListVisibleCountModal(leftoverLatchRowsNow, leftoverLatchNow.q)
-      : leftoverListVisibleCountIdle(leftoverLatchRowsNow, leftoverLatchNow.q, leftoverModal?.reserve);
+  const leftoverLatchNow = leftoverLoOn
+    ? leftoverChromeLatch(chromeLatch, leftoverLatchRowsNow, leftoverWidth, leftoverChromeS)
+    : { latch: chromeLatch, q: leftoverChromeS };
+  if (leftoverLoOn && leftoverLatchNow.latch !== chromeLatch) {
+    setChromeLatch(leftoverLatchNow.latch);
+  }
+  const leftoverVisible = leftoverSelectVisibleCount(
+    leftoverLoOn,
+    leftoverListVisibleCount(leftoverGet?.() ?? null, leftoverHostH, leftoverLatchNow.q),
+    visibleOptionCount,
+  );
   const leftoverAwareVisible = leftoverVisible;
   const overflowHint = leftoverOverflowHint(leftoverAwareVisible, overflowHintProp);
-  const leftoverWindow = leftoverInnerWindow(overflowHint, leftoverAwareVisible, options.length);
-  const innerHint = leftoverInnerOverflowHint(overflowHint, leftoverAwareVisible);
-  const moreRowLines = leftoverMoreRowLines(overflowHint, leftoverAwareVisible, options.length);
+  const leftoverTt = leftoverLoOn
+    ? leftoverAwareVisible
+    : leftoverDollarTt(
+        leftoverAwareVisible,
+        leftoverDollarTtLayout(
+          layout,
+          inlineDescriptions,
+          options.some(option => option.type === 'input'),
+          options.some(option => Boolean(option.description)),
+        ),
+        sizeRows,
+      );
+  const leftoverWindow = leftoverLoOn
+    ? leftoverInnerWindow(overflowHint, leftoverAwareVisible, options.length)
+    : leftoverTt;
+  const innerHint = leftoverLoOn ? leftoverInnerOverflowHint(overflowHint, leftoverAwareVisible) : overflowHintProp;
+  const moreRowLines = leftoverLoOn ? leftoverMoreRowLines(overflowHint, leftoverAwareVisible, options.length) : false;
 
   const state = useSelectState({
     visibleOptionCount: leftoverWindow,
     moreRowLines,
     options,
     defaultValue,
+    selectedValue,
     onChange,
     onCancel,
     onFocus,
@@ -891,29 +1157,51 @@ export function Select<T>({
         if (isDisabled) onDisabledRowClick?.(state.focusedIndex);
       }
     : undefined;
-  const leftoverPnRows = leftoverPnWindow(leftoverWindow, leftoverMarkerLines(moreRowLines));
+  const leftoverPnRows = leftoverLoOn
+    ? leftoverPnWindow(leftoverWindow, leftoverMarkerLines(moreRowLines))
+    : leftoverWindow;
   const leftoverFits = leftoverPnFits(leftoverLineCount(options), leftoverPnRows);
-  const leftoverShown = state.visibleOptions.reduce(
-    (acc, option) => acc + (leftoverHeadingOccupiesLine(option.heading) ? 1 : leftoverChildRows(option.lines)),
-    0,
-  );
+  const leftoverShown = leftoverLoOn
+    ? state.visibleOptions.reduce(
+        (acc, option) => acc + (leftoverHeadingOccupiesLine(option.heading) ? 1 : leftoverChildRows(option.lines)),
+        0,
+      )
+    : state.visibleOptions.length;
   const leftoverSpare = leftoverPnSpareLines(leftoverFits, leftoverPnRows, leftoverShown);
   const leftoverLineStart = leftoverWindowStartLine(options, state.visibleFromIndex);
   const leftoverBarVisible = leftoverPnBarVisible(leftoverLineStart, leftoverLineStart + leftoverPnRows, leftoverSpare);
   const leftoverScrollOn = leftoverPnScrollOn(leftoverFits);
-  const leftoverWheel = leftoverWheelOn(isDisabled, leftoverFits);
-  const leftoverNn = leftoverNnFromOptions(
-    leftoverNnLiveWidth(
-      leftoverHostRef.current?.yogaNode?.getComputedWidth() ?? 0,
-      leftoverWidth || terminalSize.columns,
-      leftoverNnDtWidth(leftoverNnDt),
-    ),
-    options.map(option => ({
-      iconWidth: leftoverNnIconWidth(option.icon),
-      name: getTextContent(option.label),
-      facts: leftoverNnFacts(option.meta),
-    })),
-  );
+  // Gold `$e` `FTt` — `if(o||i-t>=a) onWheel:void 0`. leftover inner
+  // `!ee&&!ne.fits` is leftover `oo`/`bn`, not CustomSelect Resume.
+  const leftoverWheel = leftoverLoOn
+    ? leftoverWheelOn(isDisabled, leftoverFits)
+    : leftoverFttWheelOn(isDisabled, state.visibleFromIndex, state.visibleToIndex, options.length);
+  const leftoverShouldDropWheel = useShouldDropWheel();
+  const leftoverArrow = (more: boolean, edge: boolean) => leftoverSelectArrowOn(leftoverLoOn, innerHint, more, edge);
+  const leftoverHiddenBelow = leftoverGhOn(
+    hiddenBelowUnit,
+    state.visibleFromIndex,
+    state.visibleToIndex,
+    options.length,
+  ) ? (
+    <Box paddingLeft={3} height={1}>
+      <Text dimColor>{leftoverGhLine(options.length - state.visibleToIndex, hiddenBelowUnit)}</Text>
+    </Box>
+  ) : null;
+  const leftoverNn = leftoverLoOn
+    ? leftoverNnFromOptions(
+        leftoverNnLiveWidth(
+          leftoverHostRef.current?.yogaNode?.getComputedWidth() ?? 0,
+          leftoverWidth || terminalSize.columns,
+          leftoverNnDtWidth(leftoverNnDt),
+        ),
+        options.map(option => ({
+          iconWidth: leftoverNnIconWidth(option.icon),
+          name: getTextContent(option.label),
+          facts: leftoverNnFacts(option.meta),
+        })),
+      )
+    : undefined;
   const leftoverScreenReader = useContext(AccessibilityContext);
   const leftoverHasKeybinding = useOptionalKeybindingContext() !== null;
   const leftoverSrRadio = leftoverScreenReaderRadio(leftoverScreenReader, onChange !== undefined);
@@ -945,7 +1233,14 @@ export function Select<T>({
     ? `${leftoverG5Prompt(leftoverG5Nav, onCancel !== undefined, leftoverArrowNav)}${leftoverG5Typed ? `: ${leftoverG5Typed}` : ''}${leftoverG5Error ? `\n${leftoverG5Error}` : ''}`
     : undefined;
   const leftoverClip = (option: OptionWithDescription<T>, node: React.ReactNode) => {
-    const height = leftoverRowClip(option.heading, option.lines, leftoverWindow);
+    // Gold `Oo` = `lines??1`. Resume `je` is option count — do not clip
+    // description rows to leftover line occupancy (drops titles, jumps focus).
+    if (!leftoverLoOn) return node;
+    const height = leftoverRowClip(
+      option.heading,
+      option.lines ?? leftoverNnItemLines(option.description),
+      leftoverWindow,
+    );
     if (height === undefined) return node;
     return (
       <Box key={String(option.value)} height={height} overflow="hidden">
@@ -1092,7 +1387,7 @@ export function Select<T>({
     onRowKeyDown?.(event, Math.max(0, state.focusedIndex - 1));
   };
   const optionOnClick = (option: OptionWithDescription<T>) => {
-    if (isDisabled || disableSelection === true || option.disabled === true) {
+    if ((isDisabled && !pointerWhileDisabled) || disableSelection === true || option.disabled === true) {
       return undefined;
     }
     return (event: ClickEvent) => {
@@ -1138,13 +1433,31 @@ export function Select<T>({
     highlightedText: () => ({ bold: true }),
   };
 
+  if (leftoverSrRadio) {
+    return React.createElement(
+      leftoverXeFrame,
+      {
+        hostRef: leftoverHostRef,
+        onKeyDown: leftoverBindKeyDown,
+        emptyMessage,
+        optionCount: options.length,
+        g5Prompt: leftoverG5Text,
+        g5CursorActive: leftoverG5CursorActive,
+        g5ShowPrompt: leftoverShowPrompt,
+      },
+      leftoverG5Children,
+    );
+  }
+
   if (layout === 'expanded') {
     const maxIndexWidth = state.options.length.toString().length;
 
     return leftoverListFrame({
       hostRef: leftoverHostRef,
       moreRowLines,
-      scrollBar,
+      // Gold `$e` has no leftover GXt `$e` track.
+      // leftover inner `oo` `W=!0` only on leftover Lo (this Select is `$e`).
+      scrollBar: leftoverLoOn && scrollBar,
       gxtHeight: leftoverAwareVisible,
       spare: leftoverSpare,
       aboveCount: state.visibleFromIndex,
@@ -1165,145 +1478,160 @@ export function Select<T>({
       jeDropsRef: jePressedRef,
       now: () => clock?.now() ?? Date.now(),
       wheelOn: leftoverWheel,
+      shouldDropWheel: leftoverShouldDropWheel,
+      scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,
-      screenReaderRadio: leftoverSrRadio,
-      g5Prompt: leftoverG5Text,
-      g5CursorActive: leftoverG5CursorActive,
-      g5ShowPrompt: leftoverShowPrompt,
       nnDt: leftoverNnDt,
-      children: leftoverSrRadio
-        ? leftoverG5Children
-        : state.visibleOptions.map((option, index) => {
-            const isFirstVisibleOption = option.index === state.visibleFromIndex;
-            const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-            const areMoreOptionsBelow = state.visibleToIndex < options.length;
-            const areMoreOptionsAbove = state.visibleFromIndex > 0;
+      hiddenBelow: leftoverHiddenBelow,
+      fttInner: !leftoverLoOn,
+      children: state.visibleOptions.map((option, index) => {
+        const isFirstVisibleOption = option.index === state.visibleFromIndex;
+        const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+        const areMoreOptionsBelow = state.visibleToIndex < options.length;
+        const areMoreOptionsAbove = state.visibleFromIndex > 0;
 
-            const i = state.visibleFromIndex + index + 1;
+        const i = state.visibleFromIndex + index + 1;
 
-            const isFocused = !isDisabled && state.focusedValue === option.value;
-            const isSelected = state.value === option.value;
+        const isFocused = !isDisabled && state.focusedValue === option.value;
+        const isSelected = state.value === option.value;
 
-            // Handle input type options
-            if (option.type === 'input') {
-              const inputValue = inputValues.has(option.value)
-                ? inputValues.get(option.value)!
-                : option.initialValue || '';
+        // Handle input type options
+        if (option.type === 'input') {
+          const inputValue = inputValues.has(option.value) ? inputValues.get(option.value)! : option.initialValue || '';
 
-              return (
-                <SelectInputOption
-                  key={String(option.value)}
-                  option={option}
-                  isFocused={isFocused}
-                  isSelected={isSelected}
-                  shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-                  shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-                  maxIndexWidth={maxIndexWidth}
-                  index={i}
-                  inputValue={inputValue}
-                  onInputChange={value => {
-                    setInputValues(prev => {
-                      const next = new Map(prev);
-                      next.set(option.value, value);
-                      return next;
-                    });
-                  }}
-                  onSubmit={(value: string) => {
-                    const hasImageAttachments =
-                      pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
-                    if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
-                      onChange?.(option.value);
-                    } else {
-                      onCancel?.();
-                    }
-                  }}
-                  onExit={onCancel}
-                  layout="expanded"
-                  showLabel={inlineDescriptions}
-                  onOpenEditor={onOpenEditor}
-                  resetCursorOnUpdate={option.resetCursorOnUpdate}
-                  onImagePaste={onImagePaste}
-                  pastedContents={pastedContents}
-                  onRemoveImage={onRemoveImage}
-                  imagesSelected={imagesSelected}
-                  selectedImageIndex={selectedImageIndex}
-                  onImagesSelectedChange={setImagesSelected}
-                  onSelectedImageIndexChange={setSelectedImageIndex}
-                  onClick={optionOnClick(option)}
-                />
-              );
-            }
+          return (
+            <SelectInputOption
+              key={String(option.value)}
+              option={option}
+              isFocused={isFocused}
+              isSelected={isSelected}
+              shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+              shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+              maxIndexWidth={maxIndexWidth}
+              index={i}
+              inputValue={inputValue}
+              onInputChange={value => {
+                setInputValues(prev => {
+                  const next = new Map(prev);
+                  next.set(option.value, value);
+                  return next;
+                });
+              }}
+              onSubmit={(value: string) => {
+                const hasImageAttachments =
+                  pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
+                if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
+                  onChange?.(option.value);
+                } else {
+                  onCancel?.();
+                }
+              }}
+              onExit={onCancel}
+              layout="expanded"
+              showLabel={inlineDescriptions}
+              onOpenEditor={onOpenEditor}
+              resetCursorOnUpdate={option.resetCursorOnUpdate}
+              onImagePaste={onImagePaste}
+              pastedContents={pastedContents}
+              onRemoveImage={onRemoveImage}
+              imagesSelected={imagesSelected}
+              selectedImageIndex={selectedImageIndex}
+              onImagesSelectedChange={setImagesSelected}
+              onSelectedImageIndexChange={setSelectedImageIndex}
+              onClick={optionOnClick(option)}
+              hoverStyle={hoverStyle}
+            />
+          );
+        }
 
-            // Handle text type options
-            let label: ReactNode = option.label;
+        // Handle text type options
+        let label: ReactNode = option.label;
 
-            // Only apply highlight when label is a string
-            if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
-              const labelText = option.label;
-              const index = labelText.indexOf(highlightText);
+        // Only apply highlight when label is a string
+        if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
+          const labelText = option.label;
+          const index = labelText.indexOf(highlightText);
 
-              label = (
-                <>
-                  {labelText.slice(0, index)}
-                  <Text {...styles.highlightedText()}>{highlightText}</Text>
-                  {labelText.slice(index + highlightText.length)}
-                </>
-              );
-            }
+          label = (
+            <>
+              {labelText.slice(0, index)}
+              <Text {...styles.highlightedText()}>{highlightText}</Text>
+              {labelText.slice(index + highlightText.length)}
+            </>
+          );
+        }
 
-            const isOptionDisabled = option.disabled === true;
-            const optionColor = isOptionDisabled
-              ? undefined
-              : isSelected
-                ? 'success'
-                : isFocused
-                  ? 'suggestion'
-                  : undefined;
+        const isOptionDisabled = option.disabled === true;
+        const optionColor = isOptionDisabled
+          ? undefined
+          : isSelected
+            ? 'success'
+            : isFocused
+              ? 'suggestion'
+              : undefined;
 
-            return leftoverClip(
-              option,
-              <Box flexDirection="column" flexShrink={0}>
-                <SelectOption
-                  isFocused={isFocused}
-                  isSelected={isSelected}
-                  shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-                  shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-                  onClick={optionOnClick(option)}
-                  description={leftoverNn ? option.description : undefined}
-                  icon={leftoverNn ? option.icon : undefined}
-                  meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
-                  iconWidth={leftoverNn?.iconWidth}
-                  nameWidth={leftoverNn?.nameWidth}
-                  factsWidth={leftoverNn?.factsWidth}
-                >
-                  <Text dimColor={isOptionDisabled} color={optionColor}>
-                    {label}
-                  </Text>
-                </SelectOption>
-                {!leftoverNn && option.description && (
-                  <Box paddingLeft={2}>
-                    <Text dimColor={isOptionDisabled || option.dimDescription !== false} color={optionColor}>
-                      <Ansi>{option.description}</Ansi>
-                    </Text>
-                  </Box>
-                )}
-                <Text> </Text>
-              </Box>,
-            );
-          }),
+        return leftoverClip(
+          option,
+          <Box key={String(option.value)} flexDirection="column" flexShrink={0}>
+            <SelectOption
+              isFocused={isFocused}
+              isSelected={isSelected}
+              shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+              shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+              onClick={optionOnClick(option)}
+              hoverStyle={hoverStyle}
+              description={leftoverNn ? option.description : undefined}
+              icon={leftoverNn ? option.icon : undefined}
+              meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+              iconWidth={leftoverNn?.iconWidth}
+              nameWidth={leftoverNn?.nameWidth}
+              factsWidth={leftoverNn?.factsWidth}
+            >
+              <Text dimColor={isOptionDisabled} color={optionColor}>
+                {label}
+              </Text>
+            </SelectOption>
+            {!leftoverNn && option.description && (
+              <Box paddingLeft={2}>
+                <Text dimColor={isOptionDisabled || option.dimDescription !== false} color={optionColor}>
+                  <Ansi>{option.description}</Ansi>
+                </Text>
+              </Box>
+            )}
+            <Text> </Text>
+          </Box>,
+        );
+      }),
     });
   }
 
   if (layout === 'compact-vertical') {
     const maxIndexWidth = hideIndexes ? 0 : state.options.length.toString().length;
+    // Gold `$e` option wrap is column+flexShrink:0 only; yoga Stretch fills
+    // IC to the longest sibling. DualInk live Ask stays glyph-tight without
+    // an explicit floor — pin option column to longest title/desc (not
+    // terminal 100%, not ListItem stretch). Official bar ends at
+    // `Type something.`, not the question title row.
+    const leftoverColumnWidth = leftoverCompactVerticalColumnWidth(
+      options.map(option => ({
+        type: option.type,
+        label: option.label,
+        description: option.description,
+        placeholder: option.type === 'input' ? option.placeholder : undefined,
+      })),
+      hideIndexes,
+      maxIndexWidth,
+    );
 
     return leftoverListFrame({
       hostRef: leftoverHostRef,
       moreRowLines,
-      scrollBar,
+      // Gold `$e` has no leftover GXt `$e` track.
+      // leftover inner `oo` `W=!0` only on leftover Lo (this Select is `$e`).
+      scrollBar: leftoverLoOn && scrollBar,
       gxtHeight: leftoverAwareVisible,
       spare: leftoverSpare,
       aboveCount: state.visibleFromIndex,
@@ -1324,140 +1652,147 @@ export function Select<T>({
       jeDropsRef: jePressedRef,
       now: () => clock?.now() ?? Date.now(),
       wheelOn: leftoverWheel,
+      shouldDropWheel: leftoverShouldDropWheel,
+      scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,
-      screenReaderRadio: leftoverSrRadio,
-      g5Prompt: leftoverG5Text,
-      g5CursorActive: leftoverG5CursorActive,
-      g5ShowPrompt: leftoverShowPrompt,
       nnDt: leftoverNnDt,
-      children: leftoverSrRadio
-        ? leftoverG5Children
-        : state.visibleOptions.map((option, index) => {
-            const isFirstVisibleOption = option.index === state.visibleFromIndex;
-            const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-            const areMoreOptionsBelow = state.visibleToIndex < options.length;
-            const areMoreOptionsAbove = state.visibleFromIndex > 0;
+      hiddenBelow: leftoverHiddenBelow,
+      fttInner: !leftoverLoOn,
+      children: state.visibleOptions.map((option, index) => {
+        const isFirstVisibleOption = option.index === state.visibleFromIndex;
+        const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+        const areMoreOptionsBelow = state.visibleToIndex < options.length;
+        const areMoreOptionsAbove = state.visibleFromIndex > 0;
 
-            const i = state.visibleFromIndex + index + 1;
+        const i = state.visibleFromIndex + index + 1;
 
-            const isFocused = !isDisabled && state.focusedValue === option.value;
-            const isSelected = state.value === option.value;
+        const isFocused = !isDisabled && state.focusedValue === option.value;
+        const isSelected = state.value === option.value;
 
-            // Handle input type options
-            if (option.type === 'input') {
-              const inputValue = inputValues.has(option.value)
-                ? inputValues.get(option.value)!
-                : option.initialValue || '';
+        // Handle input type options
+        if (option.type === 'input') {
+          const inputValue = inputValues.has(option.value) ? inputValues.get(option.value)! : option.initialValue || '';
 
-              return (
-                <SelectInputOption
-                  key={String(option.value)}
-                  option={option}
-                  isFocused={isFocused}
-                  isSelected={isSelected}
-                  shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-                  shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-                  maxIndexWidth={maxIndexWidth}
-                  index={i}
-                  inputValue={inputValue}
-                  onInputChange={value => {
-                    setInputValues(prev => {
-                      const next = new Map(prev);
-                      next.set(option.value, value);
-                      return next;
-                    });
-                  }}
-                  onSubmit={(value: string) => {
-                    const hasImageAttachments =
-                      pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
-                    if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
-                      onChange?.(option.value);
-                    } else {
-                      onCancel?.();
-                    }
-                  }}
-                  onExit={onCancel}
-                  layout="compact"
-                  showLabel={inlineDescriptions}
-                  onOpenEditor={onOpenEditor}
-                  resetCursorOnUpdate={option.resetCursorOnUpdate}
-                  onImagePaste={onImagePaste}
-                  pastedContents={pastedContents}
-                  onRemoveImage={onRemoveImage}
-                  imagesSelected={imagesSelected}
-                  selectedImageIndex={selectedImageIndex}
-                  onImagesSelectedChange={setImagesSelected}
-                  onSelectedImageIndexChange={setSelectedImageIndex}
-                  onClick={optionOnClick(option)}
-                />
-              );
-            }
+          return (
+            <Box
+              key={String(option.value)}
+              width={leftoverColumnWidth}
+              flexDirection="column"
+              flexShrink={0}
+              alignItems="stretch"
+            >
+              <SelectInputOption
+                option={option}
+                isFocused={isFocused}
+                isSelected={isSelected}
+                shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+                shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+                maxIndexWidth={maxIndexWidth}
+                index={i}
+                inputValue={inputValue}
+                onInputChange={value => {
+                  setInputValues(prev => {
+                    const next = new Map(prev);
+                    next.set(option.value, value);
+                    return next;
+                  });
+                }}
+                onSubmit={(value: string) => {
+                  const hasImageAttachments =
+                    pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
+                  if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
+                    onChange?.(option.value);
+                  } else {
+                    onCancel?.();
+                  }
+                }}
+                onExit={onCancel}
+                layout="compact"
+                showLabel={inlineDescriptions}
+                onOpenEditor={onOpenEditor}
+                resetCursorOnUpdate={option.resetCursorOnUpdate}
+                onImagePaste={onImagePaste}
+                pastedContents={pastedContents}
+                onRemoveImage={onRemoveImage}
+                imagesSelected={imagesSelected}
+                selectedImageIndex={selectedImageIndex}
+                onImagesSelectedChange={setImagesSelected}
+                onSelectedImageIndexChange={setSelectedImageIndex}
+                onClick={optionOnClick(option)}
+                hoverStyle={hoverStyle}
+              />
+            </Box>
+          );
+        }
 
-            // Handle text type options
-            let label: ReactNode = option.label;
+        // Handle text type options
+        let label: ReactNode = option.label;
 
-            // Only apply highlight when label is a string
-            if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
-              const labelText = option.label;
-              const index = labelText.indexOf(highlightText);
+        // Only apply highlight when label is a string
+        if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
+          const labelText = option.label;
+          const index = labelText.indexOf(highlightText);
 
-              label = (
-                <>
-                  {labelText.slice(0, index)}
-                  <Text {...styles.highlightedText()}>{highlightText}</Text>
-                  {labelText.slice(index + highlightText.length)}
-                </>
-              );
-            }
+          label = (
+            <>
+              {labelText.slice(0, index)}
+              <Text {...styles.highlightedText()}>{highlightText}</Text>
+              {labelText.slice(index + highlightText.length)}
+            </>
+          );
+        }
 
-            const isOptionDisabled = option.disabled === true;
+        const isOptionDisabled = option.disabled === true;
 
-            return leftoverClip(
-              option,
-              <Box flexDirection="column" flexShrink={0}>
-                <SelectOption
-                  isFocused={isFocused}
-                  isSelected={isSelected}
-                  shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-                  shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-                  onClick={optionOnClick(option)}
-                  description={leftoverNn ? option.description : undefined}
-                  icon={leftoverNn ? option.icon : undefined}
-                  meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
-                  iconWidth={leftoverNn?.iconWidth}
-                  nameWidth={leftoverNn?.nameWidth}
-                  factsWidth={leftoverNn?.factsWidth}
+        return leftoverClip(
+          option,
+          <Box
+            key={String(option.value)}
+            width={leftoverColumnWidth}
+            flexDirection="column"
+            flexShrink={0}
+            alignItems="stretch"
+          >
+            <SelectOption
+              isFocused={isFocused}
+              isSelected={isSelected}
+              shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+              shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+              onClick={optionOnClick(option)}
+              hoverStyle={hoverStyle}
+              description={leftoverNn ? option.description : undefined}
+              icon={leftoverNn ? option.icon : undefined}
+              meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+              iconWidth={leftoverNn?.iconWidth}
+              nameWidth={leftoverNn?.nameWidth}
+              factsWidth={leftoverNn?.factsWidth}
+            >
+              <>
+                {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 1)}</Text>}
+                <Text
+                  dimColor={isOptionDisabled}
+                  color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
                 >
-                  <>
-                    {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 1)}</Text>}
-                    <Text
-                      dimColor={isOptionDisabled}
-                      color={
-                        isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined
-                      }
-                    >
-                      {label}
-                    </Text>
-                  </>
-                </SelectOption>
-                {!leftoverNn && option.description && (
-                  <Box paddingLeft={hideIndexes ? 4 : maxIndexWidth + 4}>
-                    <Text
-                      dimColor={isOptionDisabled || option.dimDescription !== false}
-                      color={
-                        isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined
-                      }
-                    >
-                      <Ansi>{option.description}</Ansi>
-                    </Text>
-                  </Box>
-                )}
-              </Box>,
-            );
-          }),
+                  {label}
+                </Text>
+              </>
+            </SelectOption>
+            {!leftoverNn && option.description && (
+              <Box paddingLeft={hideIndexes ? 4 : maxIndexWidth + 4}>
+                <Text
+                  dimColor={isOptionDisabled || option.dimDescription !== false}
+                  color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
+                >
+                  <Ansi>{option.description}</Ansi>
+                </Text>
+              </Box>
+            )}
+          </Box>,
+        );
+      }),
     });
   }
 
@@ -1500,18 +1835,19 @@ export function Select<T>({
       isFocused,
       isSelected,
       isOptionDisabled,
-      shouldShowDownArrow: innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption,
-      shouldShowUpArrow: innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption,
+      shouldShowDownArrow: leftoverArrow(areMoreOptionsBelow, isLastVisibleOption),
+      shouldShowUpArrow: leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption),
     };
   });
 
-  // Calculate max label width for alignment when descriptions exist
+  // densable `$e` Ye two-col → `Zi` @202785693 + inline Ze tick in label column.
+  // Do not wrap with SelectOption/ListItem isSelected (that paints a second tick).
   if (hasDescriptions) {
+    // Gold labelWidth: 2 + indexPad + label + (selected ? 2 : 0)
     const maxLabelWidth = Math.max(
       ...optionData.map(data => {
         if (data.option.type === 'input') return 0;
         const labelText = getTextContent(data.option.label);
-        // Width: indicator (1) + space (1) + index + label + space + checkmark (1)
         const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
         const checkmarkWidth = data.isSelected ? 2 : 0;
         return 2 + indexWidth + stringWidth(labelText) + checkmarkWidth;
@@ -1521,7 +1857,9 @@ export function Select<T>({
     return leftoverListFrame({
       hostRef: leftoverHostRef,
       moreRowLines,
-      scrollBar,
+      // Gold `$e` has no leftover GXt `$e` track.
+      // leftover inner `oo` `W=!0` only on leftover Lo (this Select is `$e`).
+      scrollBar: leftoverLoOn && scrollBar,
       gxtHeight: leftoverAwareVisible,
       spare: leftoverSpare,
       aboveCount: state.visibleFromIndex,
@@ -1542,90 +1880,90 @@ export function Select<T>({
       jeDropsRef: jePressedRef,
       now: () => clock?.now() ?? Date.now(),
       wheelOn: leftoverWheel,
+      shouldDropWheel: leftoverShouldDropWheel,
+      scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,
-      screenReaderRadio: leftoverSrRadio,
-      g5Prompt: leftoverG5Text,
-      g5CursorActive: leftoverG5CursorActive,
-      g5ShowPrompt: leftoverShowPrompt,
       nnDt: leftoverNnDt,
-      children: leftoverSrRadio
-        ? leftoverG5Children
-        : optionData.map(data => {
-            if (data.option.type === 'input') {
-              // Input options not supported in two-column layout
-              return null;
-            }
-            const labelText = getTextContent(data.option.label);
-            const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
-            const checkmarkWidth = data.isSelected ? 2 : 0;
-            const currentLabelWidth = 2 + indexWidth + stringWidth(labelText) + checkmarkWidth;
-            const padding = maxLabelWidth - currentLabelWidth;
+      hiddenBelow: leftoverHiddenBelow,
+      fttInner: !leftoverLoOn,
+      children: optionData.map(data => {
+        if (data.option.type === 'input') {
+          // Input options not supported in two-column layout
+          return null;
+        }
+        const labelText = getTextContent(data.option.label);
+        const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
+        const checkmarkWidth = data.isSelected ? 2 : 0;
+        const currentLabelWidth = 2 + indexWidth + stringWidth(labelText) + checkmarkWidth;
+        const padding = maxLabelWidth - currentLabelWidth;
 
-            return leftoverClip(
-              data.option,
-              <TwoColumnRow isFocused={data.isFocused} onClick={optionOnClick(data.option)}>
-                {/* Label part - no gap, handle spacing explicitly */}
-                <Box flexDirection="row" flexShrink={0}>
-                  {data.isFocused ? (
-                    <Text color="suggestion">{figures.pointer}</Text>
-                  ) : data.shouldShowDownArrow ? (
-                    <Text dimColor>{figures.arrowDown}</Text>
-                  ) : data.shouldShowUpArrow ? (
-                    <Text dimColor>{figures.arrowUp}</Text>
-                  ) : (
-                    <Text> </Text>
-                  )}
-                  <Text> </Text>
-                  <Text
-                    dimColor={data.isOptionDisabled}
-                    color={
-                      data.isOptionDisabled
-                        ? undefined
-                        : data.isSelected
-                          ? 'success'
-                          : data.isFocused
-                            ? 'suggestion'
-                            : undefined
-                    }
-                  >
-                    {!hideIndexes && <Text dimColor>{`${data.index}.`.padEnd(maxIndexWidth + 2)}</Text>}
-                    {data.label}
-                  </Text>
-                  {data.isSelected && <Text color="success"> {figures.tick}</Text>}
-                  {/* Padding to align descriptions */}
-                  {padding > 0 && <Text>{' '.repeat(padding)}</Text>}
-                </Box>
-                {/* Description part */}
-                <Box flexGrow={1} marginLeft={2}>
-                  <Text
-                    wrap="wrap"
-                    dimColor={data.isOptionDisabled || data.option.dimDescription !== false}
-                    color={
-                      data.isOptionDisabled
-                        ? undefined
-                        : data.isSelected
-                          ? 'success'
-                          : data.isFocused
-                            ? 'suggestion'
-                            : undefined
-                    }
-                  >
-                    <Ansi>{data.option.description || ' '}</Ansi>
-                  </Text>
-                </Box>
-              </TwoColumnRow>,
-            );
-          }),
+        return leftoverClip(
+          data.option,
+          <SelectZiOption
+            key={String(data.option.value)}
+            isFocused={data.isFocused}
+            shouldShowDownArrow={data.shouldShowDownArrow}
+            shouldShowUpArrow={data.shouldShowUpArrow}
+            onClick={optionOnClick(data.option)}
+            hoverStyle={hoverStyle}
+          >
+            <Box flexDirection="row" flexShrink={0}>
+              <Text> </Text>
+              <Text
+                dimColor={data.isOptionDisabled}
+                color={
+                  data.isOptionDisabled
+                    ? undefined
+                    : data.isSelected
+                      ? 'success'
+                      : data.isFocused
+                        ? 'suggestion'
+                        : undefined
+                }
+              >
+                {!hideIndexes && <Text dimColor>{`${data.index}.`.padEnd(maxIndexWidth + 2)}</Text>}
+                {data.label}
+              </Text>
+              {data.isSelected && (
+                <Text>
+                  {' '}
+                  <Text color="success">{figures.tick}</Text>
+                </Text>
+              )}
+              {padding > 0 && <Text>{' '.repeat(padding)}</Text>}
+            </Box>
+            <Box flexGrow={1} marginLeft={2}>
+              <Text
+                wrap="wrap"
+                dimColor={data.isOptionDisabled || data.option.dimDescription !== false}
+                color={
+                  data.isOptionDisabled
+                    ? undefined
+                    : data.isSelected
+                      ? 'success'
+                      : data.isFocused
+                        ? 'suggestion'
+                        : undefined
+                }
+              >
+                <Ansi>{data.option.description || ' '}</Ansi>
+              </Text>
+            </Box>
+          </SelectZiOption>,
+        );
+      }),
     });
   }
 
   return leftoverListFrame({
     hostRef: leftoverHostRef,
     moreRowLines,
-    scrollBar,
+    // Gold `$e` has no leftover GXt `$e` track.
+    // leftover inner `oo` `W=!0` only on leftover Lo (this Select is `$e`).
+    scrollBar: leftoverLoOn && scrollBar,
     gxtHeight: leftoverAwareVisible,
     spare: leftoverSpare,
     aboveCount: state.visibleFromIndex,
@@ -1646,171 +1984,134 @@ export function Select<T>({
     jeDropsRef: jePressedRef,
     now: () => clock?.now() ?? Date.now(),
     wheelOn: leftoverWheel,
+    shouldDropWheel: leftoverShouldDropWheel,
+    scrollViewport: state.scrollViewport,
     onKeyDown: leftoverBindKeyDown,
     windowStart: state.visibleFromIndex,
     focusOn: leftoverFocusOn,
     screenReader: leftoverScreenReader,
-    screenReaderRadio: leftoverSrRadio,
-    g5Prompt: leftoverG5Text,
-    g5CursorActive: leftoverG5CursorActive,
-    g5ShowPrompt: leftoverShowPrompt,
     nnDt: leftoverNnDt,
-    children: leftoverSrRadio
-      ? leftoverG5Children
-      : state.visibleOptions.map((option, index) => {
-          // Handle input type options
-          if (option.type === 'input') {
-            const inputValue = inputValues.has(option.value)
-              ? inputValues.get(option.value)!
-              : option.initialValue || '';
+    hiddenBelow: leftoverHiddenBelow,
+    fttInner: !leftoverLoOn,
+    children: state.visibleOptions.map((option, index) => {
+      // Handle input type options
+      if (option.type === 'input') {
+        const inputValue = inputValues.has(option.value) ? inputValues.get(option.value)! : option.initialValue || '';
 
-            const isFirstVisibleOption = option.index === state.visibleFromIndex;
-            const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-            const areMoreOptionsBelow = state.visibleToIndex < options.length;
-            const areMoreOptionsAbove = state.visibleFromIndex > 0;
+        const isFirstVisibleOption = option.index === state.visibleFromIndex;
+        const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+        const areMoreOptionsBelow = state.visibleToIndex < options.length;
+        const areMoreOptionsAbove = state.visibleFromIndex > 0;
 
-            const i = state.visibleFromIndex + index + 1;
+        const i = state.visibleFromIndex + index + 1;
 
-            const isFocused = !isDisabled && state.focusedValue === option.value;
-            const isSelected = state.value === option.value;
+        const isFocused = !isDisabled && state.focusedValue === option.value;
+        const isSelected = state.value === option.value;
 
-            return leftoverClip(
-              option,
-              <SelectInputOption
-                option={option}
-                isFocused={isFocused}
-                isSelected={isSelected}
-                shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-                shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-                maxIndexWidth={maxIndexWidth}
-                index={i}
-                inputValue={inputValue}
-                onInputChange={value => {
-                  setInputValues(prev => {
-                    const next = new Map(prev);
-                    next.set(option.value, value);
-                    return next;
-                  });
-                }}
-                onSubmit={(value: string) => {
-                  const hasImageAttachments =
-                    pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
-                  if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
-                    onChange?.(option.value);
-                  } else {
-                    onCancel?.();
-                  }
-                }}
-                onExit={onCancel}
-                layout="compact"
-                showLabel={inlineDescriptions}
-                onOpenEditor={onOpenEditor}
-                resetCursorOnUpdate={option.resetCursorOnUpdate}
-                onImagePaste={onImagePaste}
-                pastedContents={pastedContents}
-                onRemoveImage={onRemoveImage}
-                imagesSelected={imagesSelected}
-                selectedImageIndex={selectedImageIndex}
-                onImagesSelectedChange={setImagesSelected}
-                onSelectedImageIndexChange={setSelectedImageIndex}
-                onClick={optionOnClick(option)}
-              />,
-            );
-          }
+        return leftoverClip(
+          option,
+          <SelectInputOption
+            key={String(option.value)}
+            option={option}
+            isFocused={isFocused}
+            isSelected={isSelected}
+            shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+            shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+            maxIndexWidth={maxIndexWidth}
+            index={i}
+            inputValue={inputValue}
+            onInputChange={value => {
+              setInputValues(prev => {
+                const next = new Map(prev);
+                next.set(option.value, value);
+                return next;
+              });
+            }}
+            onSubmit={(value: string) => {
+              const hasImageAttachments = pastedContents && Object.values(pastedContents).some(c => c.type === 'image');
+              if (value.trim() || hasImageAttachments || option.allowEmptySubmitToCancel) {
+                onChange?.(option.value);
+              } else {
+                onCancel?.();
+              }
+            }}
+            onExit={onCancel}
+            layout="compact"
+            showLabel={inlineDescriptions}
+            onOpenEditor={onOpenEditor}
+            resetCursorOnUpdate={option.resetCursorOnUpdate}
+            onImagePaste={onImagePaste}
+            pastedContents={pastedContents}
+            onRemoveImage={onRemoveImage}
+            imagesSelected={imagesSelected}
+            selectedImageIndex={selectedImageIndex}
+            onImagesSelectedChange={setImagesSelected}
+            onSelectedImageIndexChange={setSelectedImageIndex}
+            onClick={optionOnClick(option)}
+            hoverStyle={hoverStyle}
+          />,
+        );
+      }
 
-          // Handle text type options
-          let label: ReactNode = option.label;
+      // Handle text type options
+      let label: ReactNode = option.label;
 
-          // Only apply highlight when label is a string
-          if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
-            const labelText = option.label;
-            const index = labelText.indexOf(highlightText);
+      // Only apply highlight when label is a string
+      if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
+        const labelText = option.label;
+        const index = labelText.indexOf(highlightText);
 
-            label = (
-              <>
-                {labelText.slice(0, index)}
-                <Text {...styles.highlightedText()}>{highlightText}</Text>
-                {labelText.slice(index + highlightText.length)}
-              </>
-            );
-          }
+        label = (
+          <>
+            {labelText.slice(0, index)}
+            <Text {...styles.highlightedText()}>{highlightText}</Text>
+            {labelText.slice(index + highlightText.length)}
+          </>
+        );
+      }
 
-          const isFirstVisibleOption = option.index === state.visibleFromIndex;
-          const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-          const areMoreOptionsBelow = state.visibleToIndex < options.length;
-          const areMoreOptionsAbove = state.visibleFromIndex > 0;
+      const isFirstVisibleOption = option.index === state.visibleFromIndex;
+      const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+      const areMoreOptionsBelow = state.visibleToIndex < options.length;
+      const areMoreOptionsAbove = state.visibleFromIndex > 0;
 
-          const i = state.visibleFromIndex + index + 1;
+      const i = state.visibleFromIndex + index + 1;
 
-          const isFocused = !isDisabled && state.focusedValue === option.value;
-          const isSelected = state.value === option.value;
-          const isOptionDisabled = option.disabled === true;
+      const isFocused = !isDisabled && state.focusedValue === option.value;
+      const isSelected = state.value === option.value;
+      const isOptionDisabled = option.disabled === true;
 
-          return leftoverClip(
-            option,
-            <SelectOption
-              isFocused={isFocused}
-              isSelected={isSelected}
-              shouldShowDownArrow={innerHint === 'glyph' && areMoreOptionsBelow && isLastVisibleOption}
-              shouldShowUpArrow={innerHint === 'glyph' && areMoreOptionsAbove && isFirstVisibleOption}
-              onClick={optionOnClick(option)}
-              description={leftoverNn ? option.description : undefined}
-              icon={leftoverNn ? option.icon : undefined}
-              meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
-              iconWidth={leftoverNn?.iconWidth}
-              nameWidth={leftoverNn?.nameWidth}
-              factsWidth={leftoverNn?.factsWidth}
+      return leftoverClip(
+        option,
+        <SelectOption
+          key={String(option.value)}
+          isFocused={isFocused}
+          isSelected={isSelected}
+          shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+          shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+          onClick={optionOnClick(option)}
+          hoverStyle={hoverStyle}
+          description={leftoverNn && !inlineDescriptions ? option.description : undefined}
+          icon={leftoverNn ? option.icon : undefined}
+          meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+          iconWidth={leftoverNn?.iconWidth}
+          nameWidth={leftoverNn?.nameWidth}
+          factsWidth={leftoverNn?.factsWidth}
+        >
+          <Box flexDirection="row" flexShrink={0}>
+            {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
+            <Text
+              dimColor={isOptionDisabled}
+              color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
             >
-              <Box flexDirection="row" flexShrink={0}>
-                {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
-                <Text
-                  dimColor={isOptionDisabled}
-                  color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
-                >
-                  {label}
-                  {inlineDescriptions && option.description && (
-                    <Text dimColor={isOptionDisabled || option.dimDescription !== false}> {option.description}</Text>
-                  )}
-                </Text>
-              </Box>
-              {!leftoverNn && !inlineDescriptions && option.description && (
-                <Box flexShrink={99} marginLeft={2}>
-                  <Text
-                    wrap="wrap-trim"
-                    dimColor={isOptionDisabled || option.dimDescription !== false}
-                    color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
-                  >
-                    <Ansi>{option.description}</Ansi>
-                  </Text>
-                </Box>
+              {label}
+              {inlineDescriptions && option.description && (
+                <Text dimColor={isOptionDisabled || option.dimDescription !== false}> {option.description}</Text>
               )}
-            </SelectOption>,
-          );
-        }),
+            </Text>
+          </Box>
+        </SelectOption>,
+      );
+    }),
   });
-}
-
-// Row container for the two-column (label + description) layout. Unlike
-// the other Select layouts, this one doesn't render through SelectOption →
-// ListItem, so it declares the native cursor directly. Parks the cursor
-// on the pointer indicator so screen readers / magnifiers track focus.
-function TwoColumnRow({
-  isFocused,
-  children,
-  onClick,
-}: {
-  isFocused: boolean;
-  children: ReactNode;
-  onClick?: (event: ClickEvent) => void;
-}): React.ReactNode {
-  const cursorRef = useDeclaredCursor({
-    line: 0,
-    column: 0,
-    active: isFocused,
-  });
-  return (
-    <Box ref={cursorRef} flexDirection="row" onClick={onClick}>
-      {children}
-    </Box>
-  );
 }

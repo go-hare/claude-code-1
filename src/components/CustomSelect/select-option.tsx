@@ -1,15 +1,18 @@
-import React, { type ReactNode, useContext, useState } from 'react';
-import { AccessibilityContext, Box, ListItem, Text, type ClickEvent } from '@anthropic/ink';
+import React, { type ReactNode, useContext, useRef, useState } from 'react';
+import chalk from 'chalk';
+import figures from 'figures';
+import { AccessibilityContext, Box, ListItem, Text, type ClickEvent, useDeclaredCursor } from '@anthropic/ink';
 import {
   LeftoverIheWindowContext,
   LeftoverNnDtContext,
-  leftoverIheHoverClear,
-  leftoverIheHoverOn,
   leftoverNnDtBind,
   leftoverNnFit,
   leftoverNnIconCol,
   leftoverNnNameColor,
   leftoverNnSrLine,
+  leftoverVdeInverse,
+  leftoverVdePointer,
+  leftoverVdeTint,
 } from '../FullscreenLayout.js';
 import type { DOMElement } from '@anthropic/ink';
 
@@ -58,6 +61,13 @@ export type SelectOptionProps = {
   readonly iconWidth?: number;
   readonly nameWidth?: number;
   readonly factsWidth?: number;
+
+  /**
+   * densable `$e` `Zi` `she` — default `tint`.
+   * Color terminals: hover `userMessageBackground`.
+   * `chalk.level===0`: inverse.
+   */
+  readonly hoverStyle?: 'tint' | 'inverse' | 'pointer' | 'none';
 };
 
 export function SelectOption({
@@ -74,14 +84,30 @@ export function SelectOption({
   iconWidth = 0,
   nameWidth,
   factsWidth = 0,
+  hoverStyle: hoverStyleProp,
 }: SelectOptionProps): React.ReactNode {
-  const current = useContext(LeftoverIheWindowContext);
   const leftoverNnDt = useContext(LeftoverNnDtContext);
   const leftoverScreenReader = useContext(AccessibilityContext);
   const leftoverNameColor = leftoverNnNameColor(isFocused);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  if (leftoverIheHoverClear(hoveredId, current)) setHoveredId(null);
-  const hovered = leftoverIheHoverOn(hoveredId, current);
+  // densable `$e` `Zi`/`IC` `VDe` — per-row boolean. leftover Ihe identity
+  // is the whole list; matching it paints every row that ever hovered.
+  // Gold `if(i!==null&&!l)a(null)` clears when ihe window rotates.
+  const leftoverIhe = useContext(LeftoverIheWindowContext);
+  const leftoverIheRef = useRef(leftoverIhe);
+  const [hovered, setHovered] = useState(false);
+  if (leftoverIheRef.current !== leftoverIhe) {
+    leftoverIheRef.current = leftoverIhe;
+    if (hovered) setHovered(false);
+  }
+  const leftoverClickable = onClick !== undefined;
+  // densable `she(o="tint")` — `me.level===0?"inverse":o`.
+  const leftoverHoverStyle = chalk.level === 0 ? 'inverse' : (hoverStyleProp ?? 'tint');
+  // Gold IC: background only when hovered and tint. Keyboard focus does not paint.
+  const leftoverHoverTint = leftoverVdeTint(leftoverClickable, hovered, leftoverHoverStyle)
+    ? ('userMessageBackground' as const)
+    : undefined;
+  const leftoverHoverPointer = leftoverVdePointer(leftoverClickable, hovered, leftoverHoverStyle);
+  const leftoverHoverInverse = leftoverVdeInverse(leftoverClickable, hovered, leftoverHoverStyle);
   const facts = factsWidth > 0 && meta && meta.length > 0 ? leftoverNnFit(meta, factsWidth) : undefined;
   const nn = icon !== undefined || facts !== undefined || nameWidth !== undefined;
   if (leftoverScreenReader && nn) {
@@ -129,24 +155,113 @@ export function SelectOption({
   ) : (
     children
   );
+  // densable `$e` `t7` is IC. leftover Lo Un/Dt bind stays on leftoverNn.
+  const item = (
+    <ListItem
+      isFocused={isFocused}
+      isSelected={isSelected}
+      description={nn ? undefined : description}
+      showScrollDown={shouldShowDownArrow}
+      showScrollUp={shouldShowUpArrow}
+      styled={false}
+      declareCursor={declareCursor}
+      onClick={onClick}
+      hovered={leftoverHoverPointer}
+      inverse={leftoverHoverInverse}
+      backgroundColor={leftoverHoverTint}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {body}
+    </ListItem>
+  );
+  if (!nn) return item;
+  return (
+    <Box ref={(node: DOMElement | null) => leftoverNnDtBind(leftoverNnDt, node)} flexShrink={0} flexDirection="column">
+      {item}
+    </Box>
+  );
+}
+
+export type SelectZiOptionProps = {
+  readonly isFocused: boolean;
+  readonly shouldShowDownArrow?: boolean;
+  readonly shouldShowUpArrow?: boolean;
+  readonly onClick?: (event: ClickEvent) => void;
+  readonly hoverStyle?: 'tint' | 'inverse' | 'pointer' | 'none';
+  readonly children: ReactNode;
+};
+
+/**
+ * densable `$e` `Zi` @202785693 — two-column host.
+ * Focus/hover/arrows only. No `isSelected` tick (tick is inline in the label column).
+ * Row: indicator + children. Do not invent minify `Zi`.
+ */
+export function SelectZiOption({
+  isFocused,
+  shouldShowDownArrow = false,
+  shouldShowUpArrow = false,
+  onClick,
+  hoverStyle: hoverStyleProp,
+  children,
+}: SelectZiOptionProps): React.ReactNode {
+  const leftoverIhe = useContext(LeftoverIheWindowContext);
+  const leftoverIheRef = useRef(leftoverIhe);
+  const [hovered, setHovered] = useState(false);
+  if (leftoverIheRef.current !== leftoverIhe) {
+    leftoverIheRef.current = leftoverIhe;
+    if (hovered) setHovered(false);
+  }
+  const leftoverClickable = onClick !== undefined;
+  const leftoverHoverStyle = chalk.level === 0 ? 'inverse' : (hoverStyleProp ?? 'tint');
+  const leftoverHoverTint = leftoverVdeTint(leftoverClickable, hovered, leftoverHoverStyle)
+    ? ('userMessageBackground' as const)
+    : undefined;
+  const leftoverHoverPointer = leftoverVdePointer(leftoverClickable, hovered, leftoverHoverStyle);
+  const leftoverHoverInverse = leftoverVdeInverse(leftoverClickable, hovered, leftoverHoverStyle);
+  const cursorRef = useDeclaredCursor({
+    line: 0,
+    column: 0,
+    active: isFocused,
+  });
+
+  let indicator: React.ReactNode;
+  if (isFocused) {
+    indicator = (
+      <Text color="suggestion" inverse={leftoverHoverInverse}>
+        {figures.pointer}
+      </Text>
+    );
+  } else if (shouldShowDownArrow) {
+    indicator = (
+      <Text dimColor inverse={leftoverHoverInverse}>
+        {figures.arrowDown}
+      </Text>
+    );
+  } else if (shouldShowUpArrow) {
+    indicator = (
+      <Text dimColor inverse={leftoverHoverInverse}>
+        {figures.arrowUp}
+      </Text>
+    );
+  } else if (leftoverHoverPointer) {
+    indicator = <Text dimColor>{figures.pointer}</Text>;
+  } else {
+    indicator = <Text inverse={leftoverHoverInverse}> </Text>;
+  }
+
   return (
     <Box
-      ref={(node: DOMElement | null) => leftoverNnDtBind(leftoverNnDt, node)}
-      onMouseEnter={() => setHoveredId(current)}
-      onMouseLeave={() => setHoveredId(null)}
+      ref={cursorRef}
+      flexDirection="row"
+      flexShrink={0}
+      backgroundColor={leftoverHoverTint}
+      onClick={onClick}
+      onMouseEnter={leftoverClickable ? () => setHovered(true) : undefined}
+      onMouseLeave={leftoverClickable ? () => setHovered(false) : undefined}
     >
-      <ListItem
-        isFocused={isFocused || hovered}
-        isSelected={isSelected}
-        description={nn ? undefined : description}
-        showScrollDown={shouldShowDownArrow}
-        showScrollUp={shouldShowUpArrow}
-        styled={false}
-        declareCursor={declareCursor}
-        onClick={onClick}
-      >
-        {body}
-      </ListItem>
+      <Box flexShrink={0}>{indicator}</Box>
+      {children}
     </Box>
   );
 }

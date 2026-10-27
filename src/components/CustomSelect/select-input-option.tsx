@@ -81,6 +81,9 @@ type Props<T> = {
 
   /** densable Select option click (yln-guarded by the caller). */
   onClick?: (event: ClickEvent) => void;
+
+  /** densable `$e` `hoverStyle` — passed to `t7`/`SelectOption`. */
+  hoverStyle?: 'tint' | 'inverse' | 'pointer' | 'none';
 };
 
 export function SelectInputOption<T>({
@@ -108,6 +111,7 @@ export function SelectInputOption<T>({
   onImagesSelectedChange,
   onSelectedImageIndexChange,
   onClick,
+  hoverStyle,
 }: Props<T>): React.ReactNode {
   const imageAttachments = pastedContents ? Object.values(pastedContents).filter(c => c.type === 'image') : [];
 
@@ -232,6 +236,7 @@ export function SelectInputOption<T>({
         shouldShowUpArrow={shouldShowUpArrow}
         declareCursor={false}
         onClick={onClick}
+        hoverStyle={hoverStyle}
       >
         <Box flexDirection="row" flexShrink={layout === 'compact' ? 0 : undefined}>
           <Text dimColor>{`${index}.`.padEnd(maxIndexWidth + 2)}</Text>

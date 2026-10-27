@@ -21,6 +21,11 @@ export type UseSelectStateProps<T> = {
   defaultValue?: T
 
   /**
+   * densable `$e` `ki` `selectedValue` — controlled value (`a!==void 0?a:I`).
+   */
+  selectedValue?: T
+
+  /**
    * Callback for selecting an option.
    */
   onChange?: (value: T) => void
@@ -134,6 +139,11 @@ export type SelectState<T> = {
   scrollBy: (delta: number) => void
 
   /**
+   * densable `$e` `KMn` `scrollViewport`.
+   */
+  scrollViewport: (delta: number) => boolean
+
+  /**
    * Select currently focused option.
    */
   selectFocusedOption: () => void
@@ -153,6 +163,7 @@ export function useSelectState<T>({
   visibleOptionCount = 5,
   options,
   defaultValue,
+  selectedValue,
   onChange,
   onCancel,
   onFocus,
@@ -177,7 +188,7 @@ export function useSelectState<T>({
 
   return {
     ...navigation,
-    value,
+    value: selectedValue !== undefined ? selectedValue : value,
     selectFocusedOption,
     onChange,
     onCancel,

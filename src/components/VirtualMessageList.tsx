@@ -395,14 +395,23 @@ function VirtualItem({
     <Box
       ref={measureRef(k)}
       flexDirection="column"
-      backgroundColor={expanded ? 'userMessageBackgroundHover' : undefined}
+      backgroundColor={expanded || hovered ? 'userMessageBackgroundHover' : undefined}
       // bg here masks useVirtualScroll's one-frame offset lag on expand —
       // don't move to the margined Box inside. paddingBottom mirrors the
-      // tinted marginTop.
+      // tinted marginTop. Hover tint is DualInk analog (gold nqe undims
+      // dimColor; ThemedText stays HEAD — Ink does not hot-reload).
       paddingBottom={expanded ? 1 : undefined}
-      onClick={clickable ? e => onClickK(msg, e.cellIsBlank) : undefined}
+      onClick={
+        clickable
+          ? e => {
+              if (e.hyperlinkUrl) return e.allowDefault();
+              onClickK(msg, e.cellIsBlank);
+            }
+          : undefined
+      }
       onMouseEnter={clickable ? () => onEnterK(k) : undefined}
       onMouseLeave={clickable ? () => onLeaveK(k) : undefined}
+      hoverIgnoresBlankCells={!expanded}
     >
       <TextHoverColorContext.Provider value={hovered && !expanded ? 'text' : undefined}>
         {renderItem(msg, idx)}
@@ -1133,7 +1142,7 @@ export function VirtualMessageList({
   handlersRef.current = { onItemClick, setHoveredKey };
   const onClickK = useCallback((msg: RenderableMessage, cellIsBlank: boolean) => {
     const h = handlersRef.current;
-    if (!cellIsBlank && h.onItemClick) h.onItemClick(msg);
+    if (!cellIsBlank) h.onItemClick?.(msg);
   }, []);
   const onEnterK = useCallback((k: string) => {
     handlersRef.current.setHoveredKey(k);

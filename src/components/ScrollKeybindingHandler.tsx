@@ -1179,33 +1179,18 @@ function useDragToScroll(
         return;
       }
       // scrollBy accumulates into pendingScrollDelta; the screen buffer
-      // doesn't update until the next render drains it. If a previous
-      // tick's scroll hasn't drained yet, captureScrolledRows would read
-      // stale content (same rows as last tick → duplicated in the
-      // accumulator AND missing the rows that actually scrolled out).
-      // Skip this tick; the 50ms interval will retry after Ink's 16ms
-      // render catches up. Also prevents shiftAnchor from desyncing.
+      // doesn't update until the next render drains it. Skip this tick until
+      // the previous scroll has been painted so the follow-scroll capture
+      // reads the rows that actually scrolled out.
       if (s.getPendingDelta() !== 0) return;
-      const top = s.getViewportTop();
-      const bottom = top + s.getViewportHeight() - 1;
-      // Clamp anchor within [top, bottom]. Not [0, bottom]: the ScrollBox
-      // padding row at 0 would produce a blank line between scrolledOffAbove
-      // and the on-screen content in getSelectedText. The padding-row
-      // highlight was a minor visual nicety; text correctness wins.
+      // densable oN: scroll only. Ink's follow-scroll pass captures the rows
+      // that scrolled off and shifts the anchor; doing it here as well
+      // shifts the anchor twice and duplicates rows in the copied text.
       if (dir < 0) {
         if (s.getScrollTop() <= 0) {
           stop();
           return;
         }
-        // Scrolling up: content moves down in viewport, so anchor row +N.
-        // Clamp to actual scroll distance so anchor stays in sync when near
-        // the top boundary (renderer clamps scrollTop to 0 on drain).
-        const actual = Math.min(AUTOSCROLL_LINES, s.getScrollTop());
-        // Capture rows about to scroll out the BOTTOM before scrollBy
-        // overwrites them. Only rows inside the selection are captured
-        // (captureScrolledRows intersects with selection bounds).
-        selection.captureScrolledRows(bottom - actual + 1, bottom, 'below');
-        selection.shiftAnchor(actual, 0, bottom);
         s.scrollBy(-AUTOSCROLL_LINES);
       } else {
         const max = Math.max(0, s.getScrollHeight() - s.getViewportHeight());
@@ -1213,13 +1198,6 @@ function useDragToScroll(
           stop();
           return;
         }
-        // Scrolling down: content moves up in viewport, so anchor row -N.
-        // Clamp to actual scroll distance so anchor stays in sync when near
-        // the bottom boundary (renderer clamps scrollTop to max on drain).
-        const actual = Math.min(AUTOSCROLL_LINES, max - s.getScrollTop());
-        // Capture rows about to scroll out the TOP.
-        selection.captureScrolledRows(top, top + actual - 1, 'above');
-        selection.shiftAnchor(-actual, top, bottom);
         s.scrollBy(AUTOSCROLL_LINES);
       }
       onScrollRef.current?.(false, s);

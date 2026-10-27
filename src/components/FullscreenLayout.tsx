@@ -114,6 +114,10 @@ export function leftoverChromeQ(
     while (node.parentNode) node = node.parentNode as DOMElement;
     parent = node;
   }
+  // First yoga pass: list height is still 0 while the modal/root host
+  // already has rows. Latch would freeze Q=parentH and leftover H=1,
+  // clipping Resume (and any 2-line Select) to a blank pane.
+  if (parent !== list && listH === 0) return null;
   const parentH = parent?.yogaNode?.getComputedHeight() ?? 0;
   return parentH - listH;
 }
@@ -168,6 +172,140 @@ export function leftoverListVisibleCountIdle(
 export function leftoverListVisibleCountModal(rows: number, chromeQ: number | null): number {
   if (chromeQ === null) return LEFTOVER_LIST_FALLBACK;
   return Math.max(1, rows - chromeQ);
+}
+
+/**
+ * densable Lo leftover xor uses computed `H` (line budget). Idle/modal
+ * Select keeps the caller window (Resume LogSelector option count) — do not
+ * mix leftover idle/modal H (terminal rows) with option-count.
+ */
+export function leftoverSelectVisibleCount(leftoverXorOn: boolean, computed: number, requested: number): number {
+  if (leftoverXorOn) return computed;
+  return requested;
+}
+
+/** densable `$e` `$Tt` `Nl`. */
+export const LEFTOVER_DOLLAR_TT_CHROME = 8;
+
+export type LeftoverDollarTtLayout = 'compact' | 'expanded' | 'compact-vertical';
+
+/**
+ * densable `$e` `Ye` — compact + descriptions + no input → `$Tt` compact-vertical.
+ */
+export function leftoverDollarTtLayout(
+  layout: LeftoverDollarTtLayout,
+  inlineDescriptions: boolean,
+  hasInput: boolean,
+  hasDescription: boolean,
+): LeftoverDollarTtLayout {
+  return layout === 'compact' && !inlineDescriptions && !hasInput && hasDescription ? 'compact-vertical' : layout;
+}
+
+/**
+ * densable `$e` `$Tt` — `min(o, max(1, floor((rows-8)/layoutRows)))`.
+ * expanded=3, compact=1, else 2.
+ */
+export function leftoverDollarTt(requested: number, layout: LeftoverDollarTtLayout, rows: number): number {
+  const layoutRows = layout === 'expanded' ? 3 : layout === 'compact' ? 1 : 2;
+  const cap = Math.max(1, Math.floor((rows - LEFTOVER_DOLLAR_TT_CHROME) / layoutRows));
+  return Math.min(requested, cap);
+}
+
+/**
+ * densable `$e` `Ut` — `hiddenBelowUnit` and the window does not cover options.
+ */
+export function leftoverGhOn(
+  unit: string | undefined,
+  visibleFrom: number,
+  visibleTo: number,
+  optionCount: number,
+): boolean {
+  return unit !== undefined && visibleTo - visibleFrom < optionCount;
+}
+
+/** densable `AHe` — `… +${e} ${I(e,t)}`. */
+export function leftoverGhLine(count: number, unit = 'line'): string {
+  if (count <= 0) return '';
+  return `… +${count} ${plural(count, unit)}`;
+}
+
+/**
+ * densable `$e` arrows have no overflowHint gate.
+ * leftover Lo `IC` `Z==="glyph"`.
+ */
+export function leftoverSelectArrowOn(
+  leftoverLoOn: boolean,
+  innerHint: 'none' | 'glyph' | 'count' | undefined,
+  more: boolean,
+  edge: boolean,
+): boolean {
+  if (leftoverLoOn) return innerHint === 'glyph' && more && edge;
+  return more && edge;
+}
+
+/**
+ * densable leftover Select `visibleCount===void 0` → `Lo`.
+ * `$e` `Qi` `mt=a===void 0?5:a` is never this host — do not leftoverLoOn=true on `$e`.
+ */
+export function leftoverSelectIsLo(visibleCount: number | undefined): boolean {
+  return visibleCount === undefined;
+}
+
+/** densable `IC`/`Zi` `she` then `E&&N==="tint"`. */
+export function leftoverVdeTint(clickable: boolean, hovered: boolean, style: string): boolean {
+  return clickable && hovered && style === 'tint';
+}
+
+/** densable `IC` `be=E&&N==="pointer"`. */
+export function leftoverVdePointer(clickable: boolean, hovered: boolean, style: string): boolean {
+  return clickable && hovered && style === 'pointer';
+}
+
+/** densable `IC` `Te=E&&N==="inverse"`. */
+export function leftoverVdeInverse(clickable: boolean, hovered: boolean, style: string): boolean {
+  return clickable && hovered && style === 'inverse';
+}
+
+/**
+ * densable `$e` compact-vertical option-column width — longest of
+ * title line (pointer+gap+index+label) and description sibling
+ * (paddingLeft + desc). IC stretch fills this; not terminal 100%.
+ */
+export function leftoverCompactVerticalColumnWidth(
+  options: ReadonlyArray<{
+    type?: string;
+    label?: unknown;
+    description?: string;
+    placeholder?: string;
+  }>,
+  hideIndexes: boolean,
+  maxIndexWidth: number,
+): number {
+  let max = 0;
+  const indexPad = hideIndexes ? 0 : maxIndexWidth + 1;
+  const descPad = hideIndexes ? 4 : maxIndexWidth + 4;
+  for (let i = 0; i < options.length; i++) {
+    const option = options[i]!;
+    if (option.type === 'input') {
+      const indexText = hideIndexes ? '' : `${i + 1}.`.padEnd(maxIndexWidth + 2);
+      const body =
+        typeof option.placeholder === 'string' && option.placeholder.length > 0
+          ? option.placeholder
+          : typeof option.label === 'string'
+            ? option.label
+            : '';
+      // ListItem pointer(1)+gap(1) + index pad + placeholder/label
+      max = Math.max(max, 2 + stringWidth(indexText) + stringWidth(body));
+      continue;
+    }
+    const label =
+      typeof option.label === 'string' ? option.label : typeof option.label === 'number' ? String(option.label) : '';
+    max = Math.max(max, 2 + indexPad + stringWidth(label));
+    if (option.description) {
+      max = Math.max(max, descPad + stringWidth(option.description));
+    }
+  }
+  return max;
 }
 
 /**
@@ -390,6 +528,65 @@ export function leftoverArrowDownOn(offset: number, visible: number, total: numb
 /** densable `onWheel:!ee&&!ne.fits`. */
 export function leftoverWheelOn(disabled: boolean, fits: boolean): boolean {
   return !disabled && !fits;
+}
+
+/**
+ * densable `$e` `FTt` attach — `if(o||i-t>=a) onWheel:void 0`.
+ * Resume `iYt` always passes `visibleOptionCount:je`; gold CustomSelect
+ * wheels this path, not leftover inner oo `fits`.
+ */
+export function leftoverFttWheelOn(
+  disabled: boolean,
+  visibleFromIndex: number,
+  visibleToIndex: number,
+  optionCount: number,
+): boolean {
+  return !(disabled || visibleToIndex - visibleFromIndex >= optionCount);
+}
+
+/**
+ * densable `sc` `scroll-viewport` from-index clamp.
+ * `min(max(0,size-visible), max(0, from+delta))`.
+ */
+export function leftoverScrollViewportFrom(from: number, delta: number, size: number, visible: number): number {
+  return Math.min(Math.max(0, size - visible), Math.max(0, from + delta));
+}
+
+/** densable `sc` `scroll-viewport` focused-row walk into the new window. */
+export type LeftoverScrollViewportNode<T> = {
+  index: number;
+  value: T;
+  next?: LeftoverScrollViewportNode<T>;
+  previous?: LeftoverScrollViewportNode<T>;
+};
+
+export function leftoverScrollViewportWalk<T>(
+  focused: LeftoverScrollViewportNode<T> | undefined,
+  from: number,
+  to: number,
+): T | undefined {
+  let cursor = focused;
+  while (cursor?.next && cursor.index < from) cursor = cursor.next;
+  while (cursor?.previous && cursor.index >= to) cursor = cursor.previous;
+  return cursor?.value;
+}
+
+/**
+ * densable `FTt` R6 miss — `u!==null&&col!==void 0&&row!==void 0&&R6===null`.
+ * Missing col/row skips the hit-test and still scrolls.
+ */
+export function leftoverFttHitMiss(
+  host: unknown,
+  col: number | undefined,
+  row: number | undefined,
+  hit: unknown,
+): boolean {
+  return host !== null && col !== undefined && row !== undefined && hit === null;
+}
+
+/** densable `FTt` `if(l(delta)) stopImmediatePropagation()`. */
+export function leftoverFttStopImmediate(moved: boolean): boolean {
+  return moved;
 }
 
 /** densable heading line occupancy — headings consume a row, not a cursor. */

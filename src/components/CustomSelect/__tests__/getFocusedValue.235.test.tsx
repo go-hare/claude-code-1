@@ -22,14 +22,22 @@ type SelectApi = ReturnType<typeof useSelectState<string>>;
 
 async function mountSelect(opts?: {
   onChange?: (value: string) => void;
+  onFocus?: (value: string) => void;
+  options?: OptionWithDescription<string>[];
+  visibleOptionCount?: number;
+  defaultValue?: string;
+  selectedValue?: string;
 }): Promise<{ api: () => SelectApi; unmount: () => void }> {
   let latest: SelectApi | null = null;
 
   function Probe(): React.ReactNode {
     const state = useSelectState<string>({
-      options: OPTIONS,
-      visibleOptionCount: 5,
+      options: opts?.options ?? OPTIONS,
+      visibleOptionCount: opts?.visibleOptionCount ?? 5,
       onChange: opts?.onChange,
+      onFocus: opts?.onFocus,
+      defaultValue: opts?.defaultValue,
+      selectedValue: opts?.selectedValue,
     });
     latest = state;
     return <Box>{String(state.focusedValue ?? '')}</Box>;
@@ -110,5 +118,63 @@ describe('densable 2.1.235 #16 getFocusedValue', () => {
     api().focusNextOption();
     api().focusNextOption();
     expect(api().getFocusedValue()).toBe('charlie');
+  });
+
+  test('scrollViewport returns false at the top and does not move focus', async () => {
+    const { api, unmount } = await mountSelect();
+    mounts.push(unmount);
+    expect(api().visibleFromIndex).toBe(0);
+    expect(api().scrollViewport(-1)).toBe(false);
+    expect(api().visibleFromIndex).toBe(0);
+    expect(api().getFocusedValue()).toBe('alpha');
+  });
+
+  test('scrollViewport walks focus into the window and returns true when from moves', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      label: `Item ${i}`,
+      value: `v${i}`,
+    }));
+    const { api, unmount } = await mountSelect({
+      options: many,
+      visibleOptionCount: 3,
+    });
+    mounts.push(unmount);
+    expect(api().visibleFromIndex).toBe(0);
+    expect(api().getFocusedValue()).toBe('v0');
+    expect(api().scrollViewport(1)).toBe(true);
+    // densable C4i `d()`: bag is live; FTt gates on from-changed.
+    expect(api().getFocusedValue()).toBe('v1');
+    expect(api().scrollViewport(20)).toBe(true);
+    expect(api().getFocusedValue()).toBe('v9');
+    expect(api().scrollViewport(1)).toBe(false);
+    expect(api().getFocusedValue()).toBe('v9');
+  });
+
+  test('scrollViewport notifies onFocus same tick (gold KMn v)', async () => {
+    const focused: string[] = [];
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      label: `Item ${i}`,
+      value: `v${i}`,
+    }));
+    const { api, unmount } = await mountSelect({
+      options: many,
+      visibleOptionCount: 3,
+      onFocus: v => {
+        focused.push(v);
+      },
+    });
+    mounts.push(unmount);
+    api().scrollViewport(1);
+    expect(api().getFocusedValue()).toBe('v1');
+    expect(focused.at(-1)).toBe('v1');
+  });
+
+  test('ki selectedValue is controlled over internal default', async () => {
+    const { api, unmount } = await mountSelect({
+      defaultValue: 'alpha',
+      selectedValue: 'bravo',
+    });
+    mounts.push(unmount);
+    expect(api().value).toBe('bravo');
   });
 });

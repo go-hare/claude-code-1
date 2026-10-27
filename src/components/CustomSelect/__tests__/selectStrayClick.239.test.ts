@@ -6,7 +6,10 @@ import { describe, expect, test } from 'bun:test'
 
 import { ClickEvent, MOUNT_SETTLE_MS } from '@anthropic/ink'
 
-import { isWindowActivationOrMountSettle } from '../use-stray-click.js'
+import {
+  isMountSettle,
+  isWindowActivationOrMountSettle,
+} from '../use-stray-click.js'
 
 function click(isWindowActivation = false): ClickEvent {
   return new ClickEvent(1, 2, false, undefined, isWindowActivation)
@@ -30,6 +33,11 @@ describe('isWindowActivationOrMountSettle', () => {
   test('_Yn is 300', () => {
     expect(MOUNT_SETTLE_MS).toBe(300)
   })
+
+  test('est c(o,n) is n-o<JDe', () => {
+    expect(isMountSettle(1000, 1299)).toBe(true)
+    expect(isMountSettle(1000, 1300)).toBe(false)
+  })
 })
 
 describe('yln dropAsStray', () => {
@@ -47,5 +55,15 @@ describe('yln dropAsStray', () => {
       event.dropAsStray()
     }
     expect(event.droppedAsStray).toBe(false)
+  })
+
+  test('n_ logs Select dropped stray click and tengu event', async () => {
+    const src = await Bun.file(
+      new URL('../use-stray-click.ts', import.meta.url),
+    ).text()
+    expect(src).toContain('Select: dropped stray click')
+    expect(src).toContain('tengu_select_stray_click_dropped')
+    expect(src).toContain('logForDebugging')
+    expect(src).toContain('logEvent')
   })
 })

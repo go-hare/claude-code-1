@@ -5626,17 +5626,20 @@ export function PluginUserMessageSite({
     contentRows,
   });
   const [userResetKey, setUserResetKey] = useState(0);
+  // densable t7t `ref:u` is stable. A fresh callback ref is a changed host prop
+  // every commit → markDirty; once scrolled above the viewport the row stays
+  // dirty+uncached and skews ScrollBox cull math (rows below vanish).
+  const setCardRef = useCallback(
+    (node: DOMElement | null) => {
+      cardRef.current = node;
+    },
+    [cardRef],
+  );
   const pluginTree = hasHook && hasPluginDrawing(drawn);
   const engine = children;
   const pluginNode = <DrawingNode node={drawn} plugin="" requestId={requestId} index={0} component="UserMessage" />;
   return (
-    <Box
-      ref={node => {
-        cardRef.current = node;
-      }}
-      flexDirection="column"
-      {...(userHeldRows !== undefined && { minHeight: userHeldRows })}
-    >
+    <Box ref={setCardRef} flexDirection="column" {...(userHeldRows !== undefined && { minHeight: userHeldRows })}>
       {pluginTree ? (
         <PaneErrorBoundary
           resetKey={userResetKey}

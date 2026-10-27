@@ -39,4 +39,21 @@ describe('densable 2.1.289 VML reveal host', () => {
     expect(src).toContain('tickReveal(false)')
     expect(src).not.toContain('useLayoutEffect(() => {')
   })
+
+  test('VirtualItem is gold W0 hoverIgnoresBlankCells + hyperlink allowDefault', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../VirtualMessageList.tsx'),
+      'utf8',
+    )
+    const start = src.indexOf('function VirtualItem')
+    const end = src.indexOf('export function VirtualMessageList')
+    expect(start).toBeGreaterThan(0)
+    expect(end).toBeGreaterThan(start)
+    const item = src.slice(start, end)
+    expect(item).toContain('hoverIgnoresBlankCells={!expanded}')
+    expect(item).toContain('e.hyperlinkUrl')
+    expect(item).toContain('e.allowDefault()')
+    expect(item).toContain('onClickK(msg, e.cellIsBlank)')
+    expect(src).toContain('if (!cellIsBlank) h.onItemClick?.(msg)')
+  })
 })
