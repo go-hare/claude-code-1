@@ -45,10 +45,23 @@ describe('jobNeedsInput / isTerminalFleetJob', () => {
     ).toBe(true)
   })
 
-  test('blocked without needs/block → false', () => {
+  test('blocked without needs → needs input (densable L: needs !== f_)', () => {
     expect(
       jobNeedsInput(
         job({ sessionId: 'a', state: 'working', tempo: 'blocked' }),
+      ),
+    ).toBe(true)
+  })
+
+  test('blocked on "send a prompt to start" is idle, not needs-input', () => {
+    expect(
+      jobNeedsInput(
+        job({
+          sessionId: 'a',
+          state: 'working',
+          tempo: 'blocked',
+          needs: 'send a prompt to start',
+        }),
       ),
     ).toBe(false)
   })

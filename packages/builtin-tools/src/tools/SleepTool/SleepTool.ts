@@ -69,6 +69,10 @@ export const SleepTool = buildTool({
     return SLEEP_TOOL_PROMPT
   },
 
+  // densable 2.1.289 ships no Sleep tool; only proactive ticks need it.
+  isEnabled() {
+    return isProactiveAutomationEnabled()
+  },
   isConcurrencySafe() {
     return true
   },

@@ -14,7 +14,11 @@
 
 import { feature } from 'bun:bundle'
 import { getSessionId } from '../bootstrap/state.js'
-import { listAllJobs, type BgJobState } from '../daemon/jobState.js'
+import {
+  EMPTY_PROMPT_NEEDS,
+  listAllJobs,
+  type BgJobState,
+} from '../daemon/jobState.js'
 import { logEvent } from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getIsRemoteMode } from '../bootstrap/state.js'
@@ -71,15 +75,12 @@ function hasOpenPrChild(job: BgJobState): boolean {
 }
 
 /**
- * Official epb: non-terminal + tempo blocked + needs !== empty-sentinel.
- * Local: blocked tempo with needs text or permission block questions.
+ * densable 2.1.289 `L`: `!I(e)&&e.tempo==="blocked"&&e.needs!==f_` — an idle
+ * job parked on "send a prompt to start" is not waiting on the user.
  */
 export function jobNeedsInput(job: BgJobState): boolean {
   if (isTerminalFleetJob(job)) return false
-  if (job.tempo !== 'blocked') return false
-  if (job.needs && job.needs.trim().length > 0) return true
-  if (job.block?.questions && job.block.questions.length > 0) return true
-  return false
+  return job.tempo === 'blocked' && job.needs !== EMPTY_PROMPT_NEEDS
 }
 
 export function jobSucceeded(job: BgJobState): boolean {
