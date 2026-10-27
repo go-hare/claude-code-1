@@ -2,6 +2,7 @@ import { memo, type ReactNode } from 'react';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text, stringWidth } from '@anthropic/ink';
 import { truncatePathMiddle, truncateToWidth } from '../../utils/format.js';
+import { truncateToWidthNoEllipsis } from '../../utils/truncate.js';
 import type { Theme } from '../../utils/theme.js';
 import { QueryHighlightedText } from './QueryHighlightedText.js';
 
@@ -57,10 +58,12 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   item,
   maxColumnWidth,
   isSelected,
+  allowWrap = false,
 }: {
   item: SuggestionItem;
   maxColumnWidth?: number;
   isSelected: boolean;
+  allowWrap?: boolean;
 }): ReactNode {
   const columns = useTerminalSize().columns;
   const isUnified = isUnifiedSuggestion(item.id);
@@ -117,7 +120,8 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
 
   // densable footer (non-unified): selected row blue only; match chars bold via wZt.
   // Cap the command name column at 40% of terminal width to ensure description has space
-  const maxNameWidth = Math.floor(columns * 0.4);
+  const hasTrailing = Boolean(item.description || item.tag || item.kind !== undefined || item.sourceTag);
+  const maxNameWidth = hasTrailing ? Math.floor(columns * 0.4) : columns - 4;
   const displayTextWidth = Math.min(maxColumnWidth ?? stringWidth(item.displayText) + 5, maxNameWidth);
 
   const textColor = item.color || (isSelected ? 'suggestion' : undefined);
@@ -141,17 +145,21 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
 
   const tagText = item.tag ? `[${item.tag}] ` : '';
   const tagWidth = stringWidth(tagText);
-  const descriptionWidth = Math.max(0, columns - displayTextWidth - tagWidth - 4);
+  const { kindLaneText, kindLabel, sourceText } = menuKindLane(item);
+  // densable passes color "skill", which is not a theme key, so it renders in the default color.
+  const laneColor: keyof Theme | undefined = kindLabel === 'agent' ? 'background' : undefined;
+  const laneDim = kindLabel !== 'skill' && kindLabel !== 'agent';
+  const laneWidth = stringWidth(kindLaneText) + stringWidth(sourceText);
+  const descriptionWidth = Math.max(0, columns - displayTextWidth - tagWidth - laneWidth - 4);
   // Skill descriptions can contain newlines (e.g. /claude-api's "TRIGGER
-  // when:" block). A multi-line row grows the overlay past minHeight; when
-  // the filter narrows past that skill, the overlay shrinks and leaves
-  // ghost rows. Flatten to one line before truncating.
-  const truncatedDescription = item.description
-    ? truncateToWidth(item.description.replace(/\s+/g, ' '), descriptionWidth)
-    : '';
+  // when:" block); flatten before measuring so the row is at most two lines.
+  const description = item.description ? item.description.replace(/\s+/g, ' ').trim() : '';
+  const [firstLine, overflow] = allowWrap
+    ? splitDescriptionAtWidth(description, descriptionWidth)
+    : [truncateToWidth(description, descriptionWidth), ''];
   const descriptionColor = isSelected ? 'suggestion' : undefined;
 
-  return (
+  const mainLine = (
     <Text wrap="truncate">
       {emojiPointer ? (
         <Text color={textColor} dimColor={shouldDim} bold={nameBold}>
@@ -169,25 +177,112 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
       <Text color={textColor} dimColor={shouldDim} bold={nameBold}>
         {padSpaces}
       </Text>
-      {tagText ? (
-        <Text color={item.tag === 'local' ? 'ansi:yellow' : undefined} dimColor={item.tag !== 'local'}>
-          {tagText}
+      {kindLaneText ? (
+        <Text color={laneColor} dimColor={laneDim}>
+          {kindLaneText}
         </Text>
       ) : null}
+      {tagText ? <Text dimColor>{tagText}</Text> : null}
+      {sourceText ? <Text dimColor>{sourceText}</Text> : null}
       {/* densable wZt description: contiguousOnly */}
-      {truncatedDescription ? (
+      <QueryHighlightedText
+        text={firstLine}
+        query={item.query}
+        color={descriptionColor}
+        isSelected={isSelected}
+        bold={nameBold}
+        contiguousOnly
+      />
+    </Text>
+  );
+  if (!overflow) return mainLine;
+
+  const indent = displayTextWidth + tagWidth + laneWidth;
+  return (
+    <Box flexDirection="column">
+      {mainLine}
+      <Text wrap="truncate">
+        {' '.repeat(indent)}
         <QueryHighlightedText
-          text={truncatedDescription}
+          text={truncateToWidth(overflow, Math.max(0, columns - indent - 4))}
           query={item.query}
           color={descriptionColor}
           isSelected={isSelected}
           bold={nameBold}
           contiguousOnly
         />
-      ) : null}
-    </Text>
+      </Text>
+    </Box>
   );
 });
+
+function menuKindLane(item: SuggestionItem): { kindLaneText: string; kindLabel: string; sourceText: string } {
+  const kind: string | undefined = item.kind;
+  const kindLabel = kind === undefined || kind === 'action' ? '' : kind === 'info' ? 'config' : kind;
+  const kindLaneText = kind === undefined ? '' : kindLabel + ' '.repeat(Math.max(0, 7 - stringWidth(kindLabel)));
+  const sourceText = item.sourceTag ? `[${item.sourceTag}] ` : '';
+  return { kindLaneText, kindLabel, sourceText };
+}
+
+/** Split at `width` on a word boundary: `[first line, remainder]`. */
+export function splitDescriptionAtWidth(text: string, width: number): [string, string] {
+  if (width <= 0 || stringWidth(text) <= width) return [text, ''];
+  const head = truncateToWidthNoEllipsis(text, width);
+  const tail = text.slice(head.length);
+  if (tail.startsWith(' ')) return [head, tail.trimStart()];
+  const lastSpace = head.lastIndexOf(' ');
+  if (lastSpace > 0) return [head.slice(0, lastSpace), text.slice(lastSpace + 1)];
+  return [head, tail];
+}
+
+/** Rendered height (1 or 2) of a menu row when descriptions may wrap. */
+export function suggestionRowHeight(item: SuggestionItem, columns: number, maxColumnWidth: number): number {
+  if (isUnifiedSuggestion(item.id) || !item.description) return 1;
+  const nameWidth = Math.min(maxColumnWidth, Math.floor(columns * 0.4));
+  const tagWidth = item.tag ? stringWidth(`[${item.tag}] `) : 0;
+  const { kindLaneText, sourceText } = menuKindLane(item);
+  const descriptionWidth = Math.max(
+    0,
+    columns - nameWidth - tagWidth - stringWidth(kindLaneText) - stringWidth(sourceText) - 4,
+  );
+  if (descriptionWidth <= 0) return 1;
+  return stringWidth(item.description.replace(/\s+/g, ' ').trim()) > descriptionWidth ? 2 : 1;
+}
+
+/**
+ * Visible slice for a row budget: grow above the selection up to half the
+ * budget, fill below, then backfill above. `used` is the rendered height.
+ */
+export function suggestionWindow(
+  heights: number[],
+  selected: number,
+  budget: number,
+): { start: number; end: number; used: number } {
+  const sel = Math.max(0, Math.min(selected, heights.length - 1));
+  let start = sel;
+  let end = sel + 1;
+  let used = heights[sel] ?? 1;
+  let above = 0;
+  const half = Math.floor(budget / 2);
+  while (start > 0 && used < budget && above + (heights[start - 1] ?? 1) <= half) {
+    start--;
+    above += heights[start] ?? 1;
+  }
+  used += above;
+  while (end < heights.length && used + (heights[end] ?? 1) <= budget) {
+    used += heights[end] ?? 1;
+    end++;
+  }
+  while (start > 0 && used + (heights[start - 1] ?? 1) <= budget) {
+    start--;
+    used += heights[start] ?? 1;
+  }
+  return { start, end, used };
+}
+
+export function suggestionRowBudget(rows: number, overlay: boolean | undefined): number {
+  return overlay ? OVERLAY_MAX_ITEMS : Math.max(1, Math.min(Math.max(6, Math.floor(rows / 2)), rows - 3));
+}
 
 type Props = {
   suggestions: SuggestionItem[];
@@ -207,11 +302,11 @@ export function PromptInputFooterSuggestions({
   maxColumnWidth: maxColumnWidthProp,
   overlay,
 }: Props): ReactNode {
-  const { rows } = useTerminalSize();
-  // Maximum number of suggestions to show at once (leaving space for prompt).
-  // Overlay mode (fullscreen) uses a fixed 5 — the floating box sits over
-  // the ScrollBox, so terminal height isn't the constraint.
-  const maxVisibleItems = overlay ? OVERLAY_MAX_ITEMS : Math.min(6, Math.max(1, rows - 3));
+  const { rows, columns } = useTerminalSize();
+  // Row budget (leaving space for prompt). Overlay mode (fullscreen) uses a
+  // fixed 5 — the floating box sits over the ScrollBox, so terminal height
+  // isn't the constraint.
+  const budget = suggestionRowBudget(rows, overlay);
 
   // No suggestions to display
   if (suggestions.length === 0) {
@@ -221,21 +316,14 @@ export function PromptInputFooterSuggestions({
   // Use prop if provided (stable width from all commands), otherwise calculate from visible
   const maxColumnWidth = maxColumnWidthProp ?? Math.max(...suggestions.map(item => stringWidth(item.displayText))) + 5;
 
-  // Calculate visible items range based on selected index
-  const startIndex = Math.max(
-    0,
-    Math.min(selectedSuggestion - Math.floor(maxVisibleItems / 2), suggestions.length - maxVisibleItems),
-  );
-  const endIndex = Math.min(startIndex + maxVisibleItems, suggestions.length);
-  const visibleItems = suggestions.slice(startIndex, endIndex);
+  const allowWrap = budget >= 2;
+  const heights = suggestions.map(item => (allowWrap ? suggestionRowHeight(item, columns, maxColumnWidth) : 1));
+  const { start, end, used } = suggestionWindow(heights, selectedSuggestion, budget);
+  const visibleItems = suggestions.slice(start, end);
+  // In overlay mode the parent is position=absolute with bottom='100%', so
+  // padding rows would shift the visible items down into the prompt area.
+  const padRows = overlay ? 0 : Math.max(0, budget - used);
 
-  // In non-overlay (inline) mode, justifyContent keeps suggestions
-  // anchored to the bottom (near the prompt). In overlay mode we omit
-  // both minHeight and flex-end: the parent is position=absolute with
-  // bottom='100%', so its y is clamped to 0 by the renderer when it
-  // would go negative. Adding minHeight + flex-end would create empty
-  // padding rows that shift the visible items down into the prompt area
-  // when the list has fewer items than maxVisibleItems.
   return (
     <Box flexDirection="column" justifyContent={overlay ? undefined : 'flex-end'}>
       {visibleItems.map(item => (
@@ -244,7 +332,11 @@ export function PromptInputFooterSuggestions({
           item={item}
           maxColumnWidth={maxColumnWidth}
           isSelected={item.id === suggestions[selectedSuggestion]?.id}
+          allowWrap={allowWrap}
         />
+      ))}
+      {Array.from({ length: padRows }, (_, i) => (
+        <Text key={`pad-${i}`}> </Text>
       ))}
     </Box>
   );

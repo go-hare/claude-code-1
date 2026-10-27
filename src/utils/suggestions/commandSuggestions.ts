@@ -326,12 +326,42 @@ function createCommandSuggestionItem(
   return item
 }
 
+let shadowedBundledSkills: { input: Command[]; output: Command[] } | undefined
+
+/**
+ * densable `xLt` — a bundled skill yields to an earlier command of the same
+ * name (user/project skills load first). Returns the input array itself when
+ * nothing is dropped so the identity-keyed Fuse index stays warm.
+ */
+export function dropShadowedBundledSkills(commands: Command[]): Command[] {
+  if (shadowedBundledSkills?.input === commands) {
+    return shadowedBundledSkills.output
+  }
+  const seen = new Set<string>()
+  let dropped = false
+  const kept = commands.filter(cmd => {
+    if (
+      cmd.type === 'prompt' &&
+      cmd.source === 'bundled' &&
+      seen.has(cmd.name)
+    ) {
+      dropped = true
+      return false
+    }
+    seen.add(cmd.name)
+    return true
+  })
+  const output = dropped ? kept : commands
+  shadowedBundledSkills = { input: commands, output }
+  return output
+}
+
 /**
  * Generate command suggestions based on input
  */
 export function generateCommandSuggestions(
   input: string,
-  commands: Command[],
+  allCommands: Command[],
 ): SuggestionItem[] {
   // Only process command input
   if (!isCommandInput(input)) {
@@ -342,6 +372,8 @@ export function generateCommandSuggestions(
   if (hasCommandArgs(input)) {
     return []
   }
+
+  const commands = dropShadowedBundledSkills(allCommands)
 
   const query = input.slice(1).toLowerCase().trim()
   const lanesEnabled = isMenuKindLanesEnabled()

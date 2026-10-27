@@ -168,6 +168,14 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
  * Returns a copy to prevent external mutation.
  */
 export function getBundledSkills(): Command[] {
+  if (isBundledSkillKillSwitchOn()) {
+    return bundledSkills.filter(s => bundledSkillKillSwitchSurvivors.has(s))
+  }
+  return [...bundledSkills]
+}
+
+/** densable `Y2` — DISABLE_BUNDLED_SKILLS env or settings.disableBundledSkills. */
+export function isBundledSkillKillSwitchOn(): boolean {
   let settingsDisable = false
   try {
     const { getInitialSettings } =
@@ -181,22 +189,15 @@ export function getBundledSkills(): Command[] {
     const { isBundledSkillsDisabled } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-    if (
-      isBundledSkillsDisabled({
-        settingsDisableBundledSkills: settingsDisable,
-      })
-    ) {
-      return bundledSkills.filter(s => bundledSkillKillSwitchSurvivors.has(s))
-    }
+    return isBundledSkillsDisabled({
+      settingsDisableBundledSkills: settingsDisable,
+    })
   } catch {
-    if (
+    return (
       isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BUNDLED_SKILLS) ||
       settingsDisable
-    ) {
-      return bundledSkills.filter(s => bundledSkillKillSwitchSurvivors.has(s))
-    }
+    )
   }
-  return [...bundledSkills]
 }
 
 /**

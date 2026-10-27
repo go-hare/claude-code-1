@@ -22,6 +22,7 @@ import type { ToolUseContext } from '../Tool.js'
 import { getPrintOutputFormat } from '../bootstrap/state.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { getCachedRepositoryHost } from '../utils/detectRepository.js'
+import { isBundledSkillKillSwitchOn } from '../skills/bundledSkills.js'
 import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -686,6 +687,7 @@ const codeReview = {
   // densable 2.1.223: /review is an alias of /code-review
   aliases: ['review'],
   // densable WJf menuDescription / Ea description
+  menuDescription: 'Review the current diff or a PR for bugs and cleanups',
   description: codeReviewCommandDescription(),
   argumentHint: codeReviewArgumentHint(),
   userInvocable: true,
@@ -695,7 +697,11 @@ const codeReview = {
   background: true,
   // densable sdr: first-arg redirect /code-review ultra → /ultrareview
   subcommands: { ultra: 'ultrareview' },
-  source: 'builtin' as const,
+  // densable registers /code-review as a bundled skill (`ks`), so a user
+  // skill of the same name shadows it in the slash menu (`xLt`).
+  source: 'bundled' as const,
+  loadedFrom: 'bundled' as const,
+  isEnabled: () => !isBundledSkillKillSwitchOn(),
   progressMessage: 'Reviewing code...',
   contentLength: 2000,
   async getPromptForCommand(

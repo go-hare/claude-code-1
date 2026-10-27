@@ -1089,7 +1089,7 @@ export function formatDescriptionWithSource(cmd: Command): string {
   }
 
   if (cmd.kind === 'workflow') {
-    return `${cmd.description} (workflow)`
+    return `${cmd.description} (dynamic workflow)`
   }
 
   // densable 2.1.228 #12 — description already carries `[claude.ai sync]` via $vr
@@ -1105,16 +1105,14 @@ export function formatDescriptionWithSource(cmd: Command): string {
     return `${cmd.description} (plugin)`
   }
 
-  if (cmd.source === 'builtin' || cmd.source === 'mcp') {
+  // densable q9e
+  if (
+    cmd.source === 'builtin' ||
+    cmd.source === 'mcp' ||
+    cmd.source === 'memoryStore' ||
+    cmd.source === 'bundled'
+  ) {
     return cmd.description
-  }
-
-  if (cmd.source === 'bundled') {
-    return `${cmd.description} (bundled)`
-  }
-
-  if (cmd.source === 'memoryStore') {
-    return `${cmd.description} (memory)`
   }
 
   return `${cmd.description} (${getSettingSourceName(cmd.source)})`
