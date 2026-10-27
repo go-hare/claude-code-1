@@ -40,6 +40,8 @@ export function getSystemThemeName(): SystemTheme {
 }
 
 export function setCachedSystemTheme(theme: SystemTheme): void {
+  // densable y0t: if(this.systemTheme===e)return; this.systemTheme=e; emit.
+  if (cachedSystemTheme === theme) return
   cachedSystemTheme = theme
   for (const listener of listeners) listener(theme)
 }

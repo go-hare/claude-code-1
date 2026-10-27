@@ -2,6 +2,8 @@
  * densable 2.1.289 watchSystemTheme — DEC 2031 notify + OSC 11 luminance.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { INITIAL_STATE, parseMultipleKeypresses } from '../parse-keypress.js'
 import { TerminalQuerier } from '../terminal-querier.js'
 import {
@@ -13,6 +15,8 @@ import { watchSystemTheme } from '../../../utils/systemThemeWatcher.js'
 import {
   getSystemThemeName,
   resetSystemThemeForTests,
+  setCachedSystemTheme,
+  subscribeSystemTheme,
   themeFromOscColor,
 } from '../../theme/systemTheme.js'
 
@@ -77,6 +81,37 @@ describe('themeNotify 289', () => {
     expect(themeFromOscColor('rgb:ffff/ffff/ffff')).toBe('light')
     expect(themeFromOscColor('#ffffff')).toBe('light')
     expect(themeFromOscColor('nope')).toBeUndefined()
+  })
+
+  test('y0t skips emit when the cached system theme is unchanged', () => {
+    resetSystemThemeForTests()
+    process.env.COLORFGBG = '15;8'
+    expect(getSystemThemeName()).toBe('dark')
+    let n = 0
+    const stop = subscribeSystemTheme(() => {
+      n += 1
+    })
+    setCachedSystemTheme('dark')
+    expect(n).toBe(0)
+    setCachedSystemTheme('light')
+    expect(n).toBe(1)
+    setCachedSystemTheme('light')
+    expect(n).toBe(1)
+    stop()
+  })
+
+  test('C7t Re/jat: ThemeProvider seeds Zle and subscribes before OSC poll', () => {
+    const src = readFileSync(
+      join(import.meta.dir, '../../theme/ThemeProvider.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('useLayoutEffect')
+    expect(src).toContain('subscribeSystemTheme(setSystemTheme)')
+    expect(src).toContain(
+      "(initialState ?? themeSetting) === 'auto' ? getSystemThemeName() : 'dark'",
+    )
+    expect(src).toContain("if (activeSetting !== 'auto') return")
+    expect(src).toContain('return subscribeSystemTheme(setSystemTheme)')
   })
 
   test('COLORFGBG 8 is dark and unset defaults to dark', () => {

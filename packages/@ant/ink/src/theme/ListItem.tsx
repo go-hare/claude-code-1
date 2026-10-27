@@ -64,28 +64,41 @@ type ListItemProps = {
 
   /** densable Select option click (yln-guarded by the caller). */
   onClick?: (event: ClickEvent) => void;
+
+  /**
+   * densable `IC` `oi` `hovered` — dim pointer when hoverStyle is pointer.
+   */
+  hovered?: boolean;
+
+  /**
+   * densable `IC` `oi` `inverse` — hoverStyle inverse.
+   */
+  inverse?: boolean;
+
+  /**
+   * densable `IC`/`Zi` hover Box — `backgroundColor:q` / `Oe`.
+   */
+  backgroundColor?: 'userMessageBackground';
+
+  /** densable `IC` `onMouseEnter` / `onMouseLeave`. */
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 };
 
 /**
- * A list item component for selection UIs (dropdowns, multi-selects, menus).
+ * A list item component with focus and selection indicators.
  *
- * Handles the common pattern of:
- * - Pointer indicator (❯) for focused items
- * - Checkmark indicator (✓) for selected items
- * - Scroll indicators (↓↑) for truncated lists
- * - Color states for focus/selection
+ * Visual states:
+ * - Focused: Shows ❯ pointer indicator
+ * - Selected: Shows ✓ checkmark
+ * - Both: Shows both indicators
+ * - Scroll hints: Shows ↑/↓ arrows when at list edges
  *
  * @example
- * // Basic usage in a selection list
- * {options.map((option, i) => (
- *   <ListItem
- *     key={option.id}
- *     isFocused={focusIndex === i}
- *     isSelected={selectedId === option.id}
- *   >
- *     {option.label}
- *   </ListItem>
- * ))}
+ * // Basic usage
+ * <ListItem isFocused={index === focusedIndex} isSelected={selected.has(item)}>
+ *   {item.label}
+ * </ListItem>
  *
  * @example
  * // With scroll indicators
@@ -116,26 +129,47 @@ export function ListItem({
   disabled = false,
   declareCursor,
   onClick,
+  hovered = false,
+  inverse = false,
+  backgroundColor,
+  onMouseEnter,
+  onMouseLeave,
 }: ListItemProps): React.ReactNode {
-  // Determine which indicator to show
+  // densable `IC` `oi`.
   function renderIndicator(): ReactNode {
     if (disabled) {
       return <Text> </Text>;
     }
 
     if (isFocused) {
-      return <Text color="suggestion">{figures.pointer}</Text>;
+      return (
+        <Text color="suggestion" inverse={inverse}>
+          {figures.pointer}
+        </Text>
+      );
     }
 
     if (showScrollDown) {
-      return <Text dimColor>{figures.arrowDown}</Text>;
+      return (
+        <Text dimColor inverse={inverse}>
+          {figures.arrowDown}
+        </Text>
+      );
     }
 
     if (showScrollUp) {
-      return <Text dimColor>{figures.arrowUp}</Text>;
+      return (
+        <Text dimColor inverse={inverse}>
+          {figures.arrowUp}
+        </Text>
+      );
     }
 
-    return <Text> </Text>;
+    if (hovered) {
+      return <Text dimColor>{figures.pointer}</Text>;
+    }
+
+    return <Text inverse={inverse}> </Text>;
   }
 
   // Determine text color based on state
@@ -161,6 +195,8 @@ export function ListItem({
 
   const textColor = getTextColor();
 
+  // densable IC → Vb({line:0,column:0,active:ie}) — no visible field;
+  // DualInk Vb defaults visible:u=!1. Do not invent visible:!0.
   // Park the native terminal cursor on the pointer indicator so screen
   // readers / magnifiers track the focused item. (0,0) is the top-left of
   // this Box, where the pointer renders.
@@ -170,10 +206,19 @@ export function ListItem({
     active: isFocused && !disabled && declareCursor !== false,
   });
 
+  // densable IC: `flexDirection:"column", backgroundColor, onClick, enter/leave`
+  // only — no alignItems/alignSelf stretch.
   return (
-    <Box ref={cursorRef} flexDirection="column" onClick={onClick}>
+    <Box
+      ref={cursorRef}
+      flexDirection="column"
+      backgroundColor={backgroundColor}
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       <Box flexDirection="row" gap={1}>
-        {renderIndicator()}
+        <Box flexShrink={0}>{renderIndicator()}</Box>
         {styled ? (
           <Text color={textColor} dimColor={disabled}>
             {children}

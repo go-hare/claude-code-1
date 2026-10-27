@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import useStdin from '../hooks/use-stdin.js';
-import { getSystemThemeName, type SystemTheme } from './systemTheme.js';
+import { getSystemThemeName, subscribeSystemTheme, type SystemTheme } from './systemTheme.js';
 import { isBuiltinThemeName, setCustomThemeOverrides, type ThemeName, type ThemeSetting } from './theme-types.js';
 
 // -- Config persistence injection --
@@ -75,8 +75,11 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
   const [themeSetting, setThemeSetting] = useState(initialState ?? defaultInitialTheme);
   const [previewTheme, setPreviewTheme] = useState<ThemeSetting | null>(null);
 
-  // Track terminal theme for 'auto' resolution. Seeds from $COLORFGBG (or
-  // 'dark' if unset); the OSC 11 watcher corrects it on first poll.
+  // densable C7t: `[ht,V]=g(()=>(i??T)==="auto"?Zle():"dark")` then
+  // `Re=()=>{if(m!=="auto")return; return V(Zle()),jat(()=>V(Zle()))}`.
+  // Seed from Zle (COLORFGBG / OSC cache) on the first render so warning
+  // RGB is already the resolved palette — useLayoutEffect still paints once
+  // before running.
   const [systemTheme, setSystemTheme] = useState<SystemTheme>(() =>
     (initialState ?? themeSetting) === 'auto' ? getSystemThemeName() : 'dark',
   );
@@ -85,6 +88,13 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
   const activeSetting = previewTheme ?? themeSetting;
 
   const { internal_querier } = useStdin();
+
+  // densable C7t Re: if(m!=="auto") return; V(Zle()); return jat(()=>V(Zle())).
+  // Subscribe only — seed is the useState initializer (first render = Zle).
+  useLayoutEffect(() => {
+    if (activeSetting !== 'auto') return;
+    return subscribeSystemTheme(setSystemTheme);
+  }, [activeSetting]);
 
   // Watch for live terminal theme changes while 'auto' is active.
   // Positive feature() pattern so the watcher import is dead-code-eliminated
