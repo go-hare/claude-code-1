@@ -1,0 +1,1 @@
+function bJ(e){switch(!0){case typeof e==="boolean":return e?"1":"0";case typeof e==="bigint":return e.toString(2);case ca.isCelUint(e):return e.value.toString(2);default:throw Cs("format","only integers and bools can be formatted as binary")}}
