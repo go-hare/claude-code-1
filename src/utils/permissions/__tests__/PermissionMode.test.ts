@@ -11,6 +11,8 @@ const {
   isDefaultMode,
   permissionModeShortTitle,
   permissionModeSymbol,
+  permissionModeIndicator,
+  permissionModeFooterLabel,
   getModeColor,
   PERMISSION_MODES,
   EXTERNAL_PERMISSION_MODES,
@@ -103,8 +105,18 @@ describe('permissionModeShortTitle', () => {
 // ─── permissionModeSymbol ──────────────────────────────────────────────
 
 describe('permissionModeSymbol', () => {
-  test('returns empty string for default', () => {
-    expect(permissionModeSymbol('default')).toBe('')
+  test('returns pause glyph for default (gold Rme)', () => {
+    expect(permissionModeSymbol('default').length).toBeGreaterThan(0)
+  })
+
+  test('DL indicator is manual mode / plan mode / auto mode', () => {
+    expect(permissionModeIndicator('default')).toBe('manual mode')
+    expect(permissionModeIndicator('plan')).toBe('plan mode')
+    expect(permissionModeIndicator('acceptEdits')).toBe('accept edits')
+    expect(permissionModeIndicator('auto')).toBe('auto mode')
+    expect(permissionModeIndicator('bypassPermissions')).toBe(
+      'bypass permissions',
+    )
   })
 
   test('returns non-empty for non-default modes', () => {
@@ -116,8 +128,8 @@ describe('permissionModeSymbol', () => {
 // ─── getModeColor ──────────────────────────────────────────────────────
 
 describe('getModeColor', () => {
-  test("returns 'text' for default", () => {
-    expect(getModeColor('default')).toBe('text')
+  test("returns 'inactive' for default (gold pR)", () => {
+    expect(getModeColor('default')).toBe('inactive')
   })
 
   test("returns 'planMode' for plan", () => {
@@ -134,6 +146,19 @@ describe('getModeColor', () => {
 
   test("returns 'autoAccept' for acceptEdits", () => {
     expect(getModeColor('acceptEdits')).toBe('autoAccept')
+  })
+
+  test("returns 'warning' for auto (gold pR)", () => {
+    expect(getModeColor('auto')).toBe('warning')
+  })
+})
+
+describe('permissionModeFooterLabel', () => {
+  test('gold $F is E$(Fc).toLowerCase, not DL auto mode', () => {
+    expect(permissionModeFooterLabel('auto')).toBe('auto')
+    expect(permissionModeFooterLabel('default')).toBe('manual')
+    expect(permissionModeFooterLabel('plan')).toBe('plan')
+    expect(permissionModeFooterLabel('acceptEdits')).toBe('accept edits')
   })
 })
 

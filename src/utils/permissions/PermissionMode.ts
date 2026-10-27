@@ -29,10 +29,13 @@ type ModeColorKey =
   | 'autoAccept'
   | 'error'
   | 'warning'
+  | 'inactive'
 
 type PermissionModeConfig = {
   title: string
   shortTitle: string
+  /** densable `Sr.indicator` — footer copy (`DL`). */
+  indicator: string
   symbol: string
   color: ModeColorKey
   external: ExternalPermissionMode
@@ -45,13 +48,15 @@ const PERMISSION_MODE_CONFIG: Partial<
   default: {
     title: 'Manual',
     shortTitle: 'Manual',
-    symbol: '',
-    color: 'text',
+    indicator: 'manual mode',
+    symbol: PAUSE_ICON,
+    color: 'inactive',
     external: 'default',
   },
   plan: {
     title: 'Plan',
     shortTitle: 'Plan',
+    indicator: 'plan mode',
     symbol: PAUSE_ICON,
     color: 'planMode',
     external: 'plan',
@@ -59,6 +64,7 @@ const PERMISSION_MODE_CONFIG: Partial<
   acceptEdits: {
     title: 'Accept edits',
     shortTitle: 'Accept',
+    indicator: 'accept edits',
     symbol: '⏵⏵',
     color: 'autoAccept',
     external: 'acceptEdits',
@@ -66,6 +72,7 @@ const PERMISSION_MODE_CONFIG: Partial<
   bypassPermissions: {
     title: 'Bypass Permissions',
     shortTitle: 'Bypass',
+    indicator: 'bypass permissions',
     symbol: '⏵⏵',
     color: 'error',
     external: 'bypassPermissions',
@@ -73,6 +80,7 @@ const PERMISSION_MODE_CONFIG: Partial<
   dontAsk: {
     title: "Don't Ask",
     shortTitle: 'DontAsk',
+    indicator: "don't ask",
     symbol: '⏵⏵',
     color: 'error',
     external: 'dontAsk',
@@ -80,6 +88,7 @@ const PERMISSION_MODE_CONFIG: Partial<
   auto: {
     title: 'Auto',
     shortTitle: 'Auto',
+    indicator: 'auto mode',
     symbol: '⏵⏵',
     color: 'warning' as ModeColorKey,
     external: 'auto',
@@ -119,6 +128,11 @@ export function permissionModeTitle(mode: PermissionMode): string {
   return getModeConfig(mode).title
 }
 
+/** densable `DL` — footer indicator (`manual mode` / `plan mode` / …). */
+export function permissionModeIndicator(mode: PermissionMode): string {
+  return getModeConfig(mode).indicator
+}
+
 export function isDefaultMode(mode: PermissionMode | undefined): boolean {
   return mode === 'default' || mode === undefined
 }
@@ -129,6 +143,14 @@ export function permissionModeShortTitle(mode: PermissionMode): string {
 
 export function permissionModeSymbol(mode: PermissionMode): string {
   return getModeConfig(mode).symbol
+}
+
+/**
+ * densable footer `$F` @209064304 — `E$(Fc(h)).toLowerCase()`.
+ * Pill label is the external title, not `DL` (`auto mode`).
+ */
+export function permissionModeFooterLabel(mode: PermissionMode): string {
+  return permissionModeTitle(toExternalPermissionMode(mode)).toLowerCase()
 }
 
 export function getModeColor(mode: PermissionMode): ModeColorKey {

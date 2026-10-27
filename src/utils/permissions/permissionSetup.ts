@@ -1099,7 +1099,7 @@ export async function initializeToolPermissionContext({
   baseToolsCli,
   restricted = false,
   permissionMode,
-  allowDangerouslySkipPermissions: _allowDangerouslySkipPermissions,
+  allowDangerouslySkipPermissions,
   addDirs,
   shouldAvoidPermissionPrompts = false,
 }: {
@@ -1184,8 +1184,16 @@ export async function initializeToolPermissionContext({
     })
   }
 
-  // leftover was always true; official Pe && !o — land only the !restricted bit
-  const isBypassPermissionsModeAvailable = !restricted
+  // densable 2.1.289: bypass joins the shift+tab cycle only when launched in
+  // bypass or with --allow-dangerously-skip-permissions.
+  const bypassDisabledBySettings =
+    getSettings_DEPRECATED()?.permissions?.disableBypassPermissionsMode ===
+    'disable'
+  const isBypassPermissionsModeAvailable =
+    (permissionMode === 'bypassPermissions' ||
+      allowDangerouslySkipPermissions) &&
+    !bypassDisabledBySettings &&
+    !restricted
 
   // Load all permission rules from disk
   const rulesFromDisk = loadAllPermissionRulesFromDisk()

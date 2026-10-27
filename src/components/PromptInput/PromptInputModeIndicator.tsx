@@ -47,16 +47,16 @@ type PromptCharProps = {
  * Teammate color overrides the default color when set.
  */
 function PromptChar({ isLoading, themeColor }: PromptCharProps): React.ReactNode {
-  // Assign to original name for clarity within the function
-  const teammateColor = themeColor;
-  const isAnt = process.env.USER_TYPE === 'ant';
-  const color = teammateColor ?? (isAnt ? 'subtle' : undefined);
-
-  return (
-    <Text color={color} dimColor={isLoading}>
-      {figures.pointer}&nbsp;
-    </Text>
-  );
+  // densable Kx idle: `e(n,{dimColor:!0,children:be})` — no USER_TYPE subtle, not isLoading-gated.
+  // Agent/teammate: color only. Loading dim stays on the colored pointer.
+  if (themeColor) {
+    return (
+      <Text color={themeColor} dimColor={isLoading}>
+        {figures.pointer}&nbsp;
+      </Text>
+    );
+  }
+  return <Text dimColor>{figures.pointer}&nbsp;</Text>;
 }
 
 export function PromptInputModeIndicator({
@@ -68,7 +68,7 @@ export function PromptInputModeIndicator({
   const teammateColor = getTeammateThemeColor();
 
   // Convert viewed teammate's color to theme color
-  // Falls back to PromptChar's default (subtle for ants, undefined for external)
+  // Falls back to PromptChar idle dimColor (gold Kx).
   const viewedTeammateThemeColor = viewingAgentColor ? AGENT_COLOR_TO_THEME_COLOR[viewingAgentColor] : undefined;
 
   return (
@@ -77,9 +77,7 @@ export function PromptInputModeIndicator({
         // Use teammate's color on the standard prompt character, matching established style
         <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} />
       ) : mode === 'bash' ? (
-        <Text color="bashBorder" dimColor={isLoading}>
-          !&nbsp;
-        </Text>
+        <Text color="bashBorder">!&nbsp;</Text>
       ) : (
         <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />
       )}

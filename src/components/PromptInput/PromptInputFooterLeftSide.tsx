@@ -3,16 +3,16 @@ import { feature } from 'bun:bundle';
 import { Box, Text, Link } from '@anthropic/ink';
 import * as React from 'react';
 import figures from 'figures';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { VimMode, PromptInputMode } from '../../types/textInputTypes.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import { isVimModeEnabled } from './utils.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import {
-  isDefaultMode,
+  permissionModeIndicator,
   permissionModeSymbol,
-  permissionModeTitle,
   getModeColor,
+  type PermissionMode,
 } from '../../utils/permissions/PermissionMode.js';
 import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
 import { isBackgroundTask } from '../../tasks/types.js';
@@ -314,6 +314,35 @@ export function PromptInputFooterLeftSide({
   );
 }
 
+/**
+ * densable kx @208947532 / `w(14)`. `pR(mode)` colors `bie`+`DL`+` on`;
+ * gold `children` is `ml` (`r(n,{dimColor:!0,children:[" ",B(cycle,parens)]})`).
+ * Gold ThemedText `P&&!W?inactive:G(c)` — dimColor paints `inactive`, not
+ * ANSI-dim of warning. densable 289 `JFe()` is `return !1` so TK always
+ * mounts dHe/kx, not Jse/xA.
+ */
+const ModePill = memo(function ModePill({
+  mode,
+  cycleShortcut,
+}: {
+  mode: PermissionMode;
+  cycleShortcut?: string;
+}): React.ReactNode {
+  return (
+    <Text color={getModeColor(mode)}>
+      <Text aria-hidden>{permissionModeSymbol(mode)} </Text>
+      {permissionModeIndicator(mode)}
+      {' on'}
+      {cycleShortcut ? (
+        <Text dimColor>
+          {' '}
+          <KeyboardShortcutHint shortcut={cycleShortcut} action="cycle" parens />
+        </Text>
+      ) : null}
+    </Text>
+  );
+});
+
 type ModeIndicatorProps = {
   mode: PromptInputMode;
   toolPermissionContext: ToolPermissionContext;
@@ -427,7 +456,8 @@ function ModeIndicator({
   }
 
   const currentMode = toolPermissionContext?.mode;
-  const hasActiveMode = !isDefaultMode(currentMode);
+  // Gold footer paints default as `manual mode` (`DL`). Do not hide default.
+  const hasActiveMode = currentMode !== undefined;
   const viewedTask = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
   const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';
   const isViewingCompletedTeammate = isViewingTeammate && viewedTask != null && viewedTask.status !== 'running';
@@ -459,8 +489,11 @@ function ModeIndicator({
     primaryItemCount < 2 &&
     (primaryItemCount === 0 || columns >= 80);
 
-  // Hide the shift+tab hint when there are 2 primary items
+  // Hide the shift+tab hint when there are 2 primary items. densable dHe
+  // `bs&&(Gn||as)&&Nt!==""` — manual (default) mode never gets the cycle hint
+  // and falls through to "? for shortcuts".
   const shouldShowModeHint = primaryItemCount < 2;
+  const showModeCycleHint = shouldShowModeHint && currentMode !== 'default' && modeCycleShortcut !== '';
 
   // Check if we have in-process teammates (showing pills)
   // In spinner-tree mode, pills are disabled - teammates appear in the spinner tree instead
@@ -472,17 +505,12 @@ function ModeIndicator({
   // the local permission mode shown here doesn't reflect the agent's state.
   // Rendered before the tasks pill so a long pill label doesn't push the
   // mode indicator off-screen.
+  // densable dHe `es`: `e(s,{flexShrink:0,children:e(kx,{mode:wn,children:ml})},"mode")`.
+  // `ml` is nested in kx so Yoga measures one Text; parent `height:1 overflow:hidden`
+  // clips instead of wrapping `(shift+tab to cycle)` onto a second row.
   const modePart =
-    currentMode && hasActiveMode && !getIsRemoteMode() ? (
-      <Text color={getModeColor(currentMode)} key="mode">
-        {permissionModeSymbol(currentMode)} {permissionModeTitle(currentMode).toLowerCase()} on
-        {shouldShowModeHint && (
-          <Text dimColor>
-            {' '}
-            <KeyboardShortcutHint shortcut={modeCycleShortcut} action="cycle" parens />
-          </Text>
-        )}
-      </Text>
+    currentMode && !getIsRemoteMode() ? (
+      <ModePill key="mode" mode={currentMode} cycleShortcut={showModeCycleHint ? modeCycleShortcut : undefined} />
     ) : null;
 
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
@@ -508,7 +536,6 @@ function ModeIndicator({
       ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />]
       : []),
   ];
-
   // Check if any in-process teammates exist (for hint text cycling)
   const hasAnyInProcessTeammates = Object.values(tasks).some(
     t => t.type === 'in_process_teammate' && t.status === 'running',
@@ -626,10 +653,23 @@ function ModeIndicator({
   // Loading already appended FFe above with interrupt.
   // Note: when idle + tasks, manage wins (official) — no FFe on that row.
   if (!isLoading && showHint && agentsEntryEnabled && !tasksPart && !hasCoordinatorTasks) {
+    if (modePart && !showModeCycleHint && parts.length === 0 && !hasParkedSubagentsHint) {
+      parts.push(
+        <Text dimColor key="shortcuts-hint">
+          ? for shortcuts
+        </Text>,
+      );
+    }
     if (!parts.some(p => React.isValidElement(p) && p.key === 'agents-hint')) {
       parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
     }
-  } else if (parts.length === 0 && !tasksPart && !modePart && showHint && !hasParkedSubagentsHint) {
+  } else if (
+    parts.length === 0 &&
+    !tasksPart &&
+    (!modePart || !showModeCycleHint) &&
+    showHint &&
+    !hasParkedSubagentsHint
+  ) {
     parts.push(
       <Text dimColor key="shortcuts-hint">
         ? for shortcuts
@@ -738,14 +778,13 @@ function ModeIndicator({
     return isFullscreenEnvEnabled() ? <Text> </Text> : null;
   }
 
-  // flexShrink=0 keeps mode + pill at natural width; the remaining parts
-  // truncate at the tail as one string inside the Text wrapper.
+  // Gold dHe: `r(s,{height:1,overflow:"hidden",children:[es, ·, …]})`.
   return (
     <Box height={1} overflow="hidden">
-      {modePart && (
+      {modePart && <Box flexShrink={0}>{modePart}</Box>}
+      {modePart && (tasksPart || parts.length > 0) && (
         <Box flexShrink={0}>
-          {modePart}
-          {(tasksPart || parts.length > 0) && <Text dimColor> · </Text>}
+          <Text dimColor> · </Text>
         </Box>
       )}
       {tasksPart && (

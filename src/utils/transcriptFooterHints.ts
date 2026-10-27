@@ -10,6 +10,8 @@
 
 export const TRANSCRIPT_FOOTER_PADDING_LEFT = 2
 export const TRANSCRIPT_VIRTUAL_SCROLL_SHORT_HINTS = '? for shortcuts'
+/** densable 2.1.289 `pW` — l8 right-side default when no status/search badge. */
+export const TRANSCRIPT_FOOTER_RIGHT_BADGE = 'verbose '
 
 export function pickTranscriptVirtualScrollHints(
   columns: number,
