@@ -15,8 +15,8 @@ import {
   extractTag,
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
-  isInSessionPeerOrObserverOrigin,
   peerOrObserverDisplayName,
+  shouldPaintAgentInboundRow,
 } from '../../utils/messages.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { MessageResponse } from '../MessageResponse.js';
@@ -76,8 +76,8 @@ export function UserTextMessage({
     return null;
   }
 
-  // densable Fg/zX — routed by uM(origin) only; prompt text never decides.
-  if (isInSessionPeerOrObserverOrigin(origin)) {
+  // densable Fg/zX — uM(origin) OR fme envelope (first-frame origin may lag).
+  if (shouldPaintAgentInboundRow(origin, param.text)) {
     return (
       <UserCrossSessionMessage
         addMargin={addMargin}

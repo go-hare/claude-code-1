@@ -43,4 +43,9 @@ describe('densable 2.1.251 #69 hljs six-lang strip', () => {
     }
     expect(api!.supportsLanguage('javascript')).toBe(true)
   })
+
+  test('peekCliHighlight is gold gN sync snapshot', async () => {
+    const { peekCliHighlight } = await import('../cliHighlight.js')
+    expect(peekCliHighlight()).not.toBeNull()
+  })
 })

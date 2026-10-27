@@ -38,10 +38,6 @@ afterAll(() => {
 })
 
 import {
-  getAPIProvider,
-  isFirstPartyAnthropicBaseUrl,
-} from '../model/providers.js'
-import {
   isThinkingDisplay,
   resolveOutgoingThinkingDisplay,
   resolveThinkingDisplay,
@@ -61,6 +57,7 @@ afterEach(() => {
   delete process.env.CLAUDE_CODE_USE_BEDROCK
   delete process.env.CLAUDE_CODE_USE_VERTEX
   delete process.env.CLAUDE_CODE_USE_FOUNDRY
+  delete process.env.ANTHROPIC_BASE_URL
 })
 
 describe('densable 2.1.283 thinking.display outbound', () => {
@@ -140,26 +137,22 @@ describe('densable 2.1.283 thinking.display outbound', () => {
     expect(resolveThinkingDisplayMode(undefined, false)).toBe('none')
   })
 
-  test('connector_text updates gate: firstParty + ISP + no oauth-keyless + no extraBody thinking', () => {
-    const firstPartyOk =
-      getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+  test('connector_text updates gate: gold hh (experimental+ISP), no Hs/oauth-keyless', () => {
     expect(
       shouldSendThinkingDisplayUpdates({
         thinkingType: 'adaptive',
         model: 'claude-opus-4-6',
         extraBodyHasThinking: false,
         simulateProxy: false,
-        oauthWithoutApiKey: false,
         displayUpdatesRejected: false,
       }),
-    ).toBe(firstPartyOk)
+    ).toBe(true)
     expect(
       shouldSendThinkingDisplayUpdates({
         thinkingType: 'adaptive',
         model: 'claude-opus-4-6',
-        extraBodyHasThinking: false,
+        extraBodyHasThinking: true,
         simulateProxy: false,
-        oauthWithoutApiKey: true,
         displayUpdatesRejected: false,
       }),
     ).toBe(false)
@@ -169,10 +162,30 @@ describe('densable 2.1.283 thinking.display outbound', () => {
         model: 'claude-opus-4-6',
         extraBodyHasThinking: false,
         simulateProxy: false,
-        oauthWithoutApiKey: false,
         displayUpdatesRejected: false,
       }),
     ).toBe(false)
+    process.env.ANTHROPIC_BASE_URL = 'https://proxy.example/v1'
+    expect(
+      shouldSendThinkingDisplayUpdates({
+        thinkingType: 'adaptive',
+        model: 'claude-opus-4-6',
+        extraBodyHasThinking: false,
+        simulateProxy: false,
+        displayUpdatesRejected: false,
+      }),
+    ).toBe(true)
+    delete process.env.ANTHROPIC_BASE_URL
+    const thinking = src('src/utils/thinking.ts')
+    const gate = thinking.slice(
+      thinking.indexOf('export function shouldSendThinkingDisplayUpdates'),
+      thinking.indexOf('/** densable `eM`'),
+    )
+    expect(gate).not.toContain('isFirstPartyAnthropicBaseUrl')
+    expect(gate).not.toContain('oauthWithoutApiKey')
+    expect(gate).not.toContain("getAPIProvider() !== 'firstParty'")
+    const claude = src('src/services/api/claude.ts')
+    expect(claude).not.toContain('oauthWithoutApiKey')
   })
 
   test('request/UI path source-lock: display on thinking param when set', () => {

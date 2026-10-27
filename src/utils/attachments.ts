@@ -747,6 +747,11 @@ export type Attachment =
       text: string
     }
   | {
+      /** densable `$pr` — Ltn D2 silent_turn_reminder. */
+      type: 'silent_turn_reminder'
+      text: string
+    }
+  | {
       /**
        * densable batching_reminder — mid-conv toasty-thimble tip inserted
        * after a tool_result user (mXn). Model-facing; C latch → ephemeral.
@@ -1293,6 +1298,35 @@ export async function getAttachments(
             ),
           ),
         ),
+        ...(input === null && options?.isRegularUserPrompt !== true
+          ? [
+              maybe('silent_turn_reminder', () => {
+                try {
+                  /* eslint-disable @typescript-eslint/no-require-imports */
+                  const {
+                    leftoverSilentTurnFocusOff,
+                    leftoverSilentTurnReminder,
+                    leftoverSilentTurnReminderAttachments,
+                  } =
+                    require('./collapseReadSearch.js') as typeof import('./collapseReadSearch.js')
+                  /* eslint-enable @typescript-eslint/no-require-imports */
+                  if (leftoverSilentTurnFocusOff()) return Promise.resolve([])
+                  if (
+                    !leftoverSilentTurnReminder(
+                      toolUseContext.options.mainLoopModel,
+                    )
+                  ) {
+                    return Promise.resolve([])
+                  }
+                  return Promise.resolve(
+                    leftoverSilentTurnReminderAttachments(messages ?? []),
+                  )
+                } catch {
+                  return Promise.resolve([])
+                }
+              }),
+            ]
+          : []),
         maybe('total_tokens_reminder', async () =>
           Promise.resolve(
             getTotalTokensReminderAttachment(

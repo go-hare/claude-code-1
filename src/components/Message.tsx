@@ -28,15 +28,17 @@ import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { logError } from '../utils/log.js';
 import {
   getContentText,
-  isInSessionPeerOrObserverOrigin,
   peerOrObserverDisplayName,
+  shouldPaintAgentInboundRow,
   type buildMessageLookups,
 } from '../utils/messages.js';
 import { CompactSummary } from './CompactSummary.js';
 import { AdvisorMessage } from './messages/AdvisorMessage.js';
 import { AssistantRedactedThinkingMessage } from './messages/AssistantRedactedThinkingMessage.js';
 import { AssistantTextMessage } from './messages/AssistantTextMessage.js';
+import { AssistantNarrationMessage } from './messages/AssistantNarrationMessage.js';
 import { AssistantThinkingMessage } from './messages/AssistantThinkingMessage.js';
+import { leftoverQuizzicalShore, leftoverTut } from '../utils/collapseReadSearch.js';
 import { AssistantToolUseMessage } from './messages/AssistantToolUseMessage.js';
 import { AttachmentMessage } from './messages/AttachmentMessage.js';
 import { CollapsedReadSearchContent } from './messages/CollapsedReadSearchContent.js';
@@ -111,7 +113,7 @@ function MessageImpl({
       const att = message.attachment as import('../utils/attachments.js').Attachment;
       if (att.type === 'queued_command') {
         const promptText = typeof att.prompt === 'string' ? att.prompt : (getContentText(att.prompt) ?? '');
-        if (isInSessionPeerOrObserverOrigin(att.origin)) {
+        if (shouldPaintAgentInboundRow(att.origin, promptText)) {
           return (
             <Box flexDirection="column" width={containerWidth ?? '100%'}>
               <UserCrossSessionMessage
@@ -166,6 +168,7 @@ function MessageImpl({
               thinkingBlockId={`${message.uuid}:${index}`}
               lastThinkingBlockId={lastThinkingBlockId}
               advisorModel={message.advisorModel as string | undefined}
+              model={(message.message as { model?: string }).model}
               apiMessageId={apiMessageId}
               isFirstTextBlock={index === firstTextBlockIndex}
               isApiError={message.isApiErrorMessage === true}
@@ -406,6 +409,7 @@ function AssistantMessageBlock({
   lookups,
   onOpenRateLimitOptions,
   advisorModel,
+  model,
   apiMessageId,
   isFirstTextBlock,
   isApiError,
@@ -437,6 +441,8 @@ function AssistantMessageBlock({
   /** Last thinking block(s); Set = one per turn. null means show all. */
   lastThinkingBlockId?: string | ReadonlySet<string> | null;
   advisorModel?: string;
+  /** densable Za `L$n(p)` — assistant model for quizzical_shore. */
+  model?: string;
   /** densable bFa — API message id for displayedMessageContent lookup */
   apiMessageId?: string;
   /** First text block only receives SFa transformed text (aligns densable Tth) */
@@ -507,15 +513,31 @@ function AssistantMessageBlock({
       }
       return <AssistantRedactedThinkingMessage addMargin={addMargin} />;
     case 'thinking': {
-      // densable: if (!U && !R) return null — hide unless transcript or verbose.
-      // Every thinking block paints; there is no last-block-only transcript filter.
+      // densable `Tut(l)` → Za; else `if(!U&&!R) return null` then Ss.
+      const thinkingParam = param as
+        | ThinkingBlockParam
+        | {
+            type: 'thinking';
+            thinking: string;
+            signature?: string;
+          };
+      if (leftoverTut(thinkingParam)) {
+        return (
+          <AssistantNarrationMessage
+            param={thinkingParam}
+            addMargin={addMargin}
+            shouldShowDot={shouldShowDot}
+            hideSummaryHint={leftoverQuizzicalShore(model)}
+          />
+        );
+      }
       if (!isTranscriptMode && !verbose) {
         return null;
       }
       return (
         <AssistantThinkingMessage
           addMargin={addMargin}
-          param={param as ThinkingBlockParam | { type: 'thinking'; thinking: string }}
+          param={thinkingParam}
           isTranscriptMode={isTranscriptMode}
           verbose={verbose}
         />

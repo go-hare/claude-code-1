@@ -145,6 +145,7 @@ import type { DeepImmutable } from 'src/types/utils.js'
 import { getStrictToolResultPairing } from '../bootstrap/state.js'
 import type { SpinnerMode } from '../components/Spinner.js'
 import {
+  AGENT_MESSAGE_TAG,
   COMMAND_ARGS_TAG,
   COMMAND_MESSAGE_TAG,
   COMMAND_NAME_TAG,
@@ -4665,6 +4666,7 @@ const YET_CONTROL_TYPES = new Set([
   'server_fallback',
   'refusal_no_fallback',
   'fallback_request',
+  'spinner_mode',
 ])
 
 /**
@@ -4808,6 +4810,11 @@ export function handleMessageFromStream(
         case 'fallback_request':
           // query-level events normally consumed before handleMessageFromStream;
           // if they leak, drop (do not onMessage)
+          return
+        case 'spinner_mode':
+          if (typeof m.mode === 'string') {
+            onSetStreamMode(m.mode as SpinnerMode)
+          }
           return
         default:
           return
@@ -6182,6 +6189,13 @@ You have exited auto mode. The user may now want to interact more directly. You 
         }),
       ]
     case 'total_tokens_reminder':
+      return [
+        createUserMessage({
+          content: wrapInSystemReminder(attachment.text),
+          isMeta: true,
+        }),
+      ]
+    case 'silent_turn_reminder':
       return [
         createUserMessage({
           content: wrapInSystemReminder(attachment.text),
@@ -8305,6 +8319,29 @@ export function isInSessionPeerOrObserverOrigin(
 }
 
 /**
+ * densable fme open tag — first-frame placeholder / queued_command may land
+ * before origin is stamped. Envelope is enough to paint Wr instead of a
+ * user bubble (expand-then-collapse flash).
+ */
+export function looksLikeAgentMessageEnvelope(
+  text: string | undefined,
+): boolean {
+  if (!text) return false
+  return text.includes(`<${AGENT_MESSAGE_TAG}`)
+}
+
+/** densable Wr first paint: uM(origin) OR fme envelope. */
+export function shouldPaintAgentInboundRow(
+  origin: { kind?: string; senderTaskId?: unknown } | undefined,
+  text?: string,
+): boolean {
+  return (
+    isInSessionPeerOrObserverOrigin(origin) ||
+    looksLikeAgentMessageEnvelope(text)
+  )
+}
+
+/**
  * densable Messages isItemClickable — queued_command / user-text Wr row.
  * Gold: uM(origin) — the prompt text never makes a row an agent message.
  * Session verbose/transcript (W||J) is the caller's skip; per-item expand
@@ -8325,15 +8362,33 @@ export function isPeerInboundExpandClickable(msg: {
   if (msg.type === 'attachment') {
     const att = msg.attachment
     if (att?.type !== 'queued_command') return false
-    return isInSessionPeerOrObserverOrigin(att.origin)
+    const prompt = att.prompt
+    const promptText =
+      typeof prompt === 'string'
+        ? prompt
+        : Array.isArray(prompt)
+          ? prompt
+              .filter(
+                (block): block is { type?: string; text?: string } =>
+                  typeof block === 'object' &&
+                  block !== null &&
+                  (block as { type?: string }).type === 'text',
+              )
+              .map(block => block.text ?? '')
+              .join('\n')
+          : undefined
+    return shouldPaintAgentInboundRow(att.origin, promptText)
   }
   if (msg.type === 'user') {
     const content = msg.message?.content
-    const block = typeof content === 'string' ? undefined : content?.[0]
-    if (block?.type !== 'text' || typeof block.text !== 'string') {
-      return false
-    }
-    return isInSessionPeerOrObserverOrigin(msg.origin)
+    const text =
+      typeof content === 'string'
+        ? content
+        : content?.[0]?.type === 'text'
+          ? content[0].text
+          : undefined
+    if (typeof text !== 'string') return false
+    return shouldPaintAgentInboundRow(msg.origin, text)
   }
   return false
 }

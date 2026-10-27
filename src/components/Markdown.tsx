@@ -1,9 +1,9 @@
 import { Marked, marked, type Token, type Tokens } from 'marked';
-import React, { Suspense, use, useMemo, useRef, type ReactNode } from 'react';
+import React, { useMemo, useRef, type ReactNode } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, Text, useTheme, type Theme } from '@anthropic/ink';
-import { type CliHighlight, getCliHighlightPromise } from '../utils/cliHighlight.js';
+import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
 import { hashContent } from '../utils/hash.js';
 import { configureMarked, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
@@ -54,6 +54,11 @@ type Props = {
    * settings.maxProseWidth. Assistant/streaming paths pass true.
    */
   capProseWidth?: boolean;
+  /**
+   * densable Or `hint` — append ` · ${hint}` on the last flushed prose/code
+   * (Za `"summary"`). If never consumed, a leftover subtle row.
+   */
+  hint?: string;
 };
 
 // Module-level token cache — marked.lexer is the hot cost on virtual-scroll
@@ -149,20 +154,11 @@ function lexMarkdown(content: string, useCache: boolean, promptMode = false): To
  */
 export function Markdown(props: Props): React.ReactNode {
   const settings = useSettings();
-  if (settings.syntaxHighlightingDisabled) {
-    return <MarkdownBody {...props} highlight={null} />;
-  }
-  // Suspense fallback renders with highlight=null — plain markdown shows
-  // for ~50ms on first ever render while cli-highlight loads.
-  return (
-    <Suspense fallback={<MarkdownBody {...props} highlight={null} />}>
-      <MarkdownWithHighlight {...props} />
-    </Suspense>
-  );
-}
-
-function MarkdownWithHighlight(props: Props): React.ReactNode {
-  const highlight = use(getCliHighlightPromise());
+  // gold oa: gN() is a sync snapshot (null until loaded). Do not Suspense —
+  // fallback→highlight remount DualInk leftoverGs-clears the spinner row
+  // on the first streaming token. Do not subscribe — gold oa does not
+  // re-render markdown when gN later lands.
+  const highlight = settings.syntaxHighlightingDisabled ? null : peekCliHighlight();
   return <MarkdownBody {...props} highlight={highlight} />;
 }
 
@@ -175,6 +171,7 @@ function MarkdownBody({
   skipTokenCache,
   tailWrap,
   capProseWidth,
+  hint,
   highlight,
 }: Props & { highlight: CliHighlight | null }): React.ReactNode {
   const [theme] = useTheme();
@@ -189,21 +186,37 @@ function MarkdownBody({
     const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
+    let leftoverHintConsumed = false;
+    const leftoverHint = hint ? `· ${hint}` : undefined;
+
+    function leftoverHintNode(): React.ReactNode {
+      if (!leftoverHint || leftoverHintConsumed) return null;
+      leftoverHintConsumed = true;
+      return <Text color="subtle"> {leftoverHint}</Text>;
+    }
 
     // densable Sh: only the final non-table flush gets tailWrap
-    function pushAnsiBlock(text: string, wrap?: Props['tailWrap'], kind: 'prose' | 'code' = 'prose'): void {
+    function pushAnsiBlock(
+      text: string,
+      wrap?: Props['tailWrap'],
+      kind: 'prose' | 'code' = 'prose',
+      withHint = false,
+    ): void {
       const ansi = (
         <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
           {text}
         </Ansi>
       );
-      const inner = color ? (
-        <Text key={elements.length} color={color} wrap={wrap}>
-          {ansi}
-        </Text>
-      ) : (
-        ansi
-      );
+      const hintNode = withHint ? leftoverHintNode() : null;
+      const inner =
+        color || hintNode ? (
+          <Text key={elements.length} color={color} wrap={wrap}>
+            {ansi}
+            {hintNode}
+          </Text>
+        ) : (
+          ansi
+        );
       // densable Lr: maxWidth only on prose; tables/code keep full width.
       elements.push(
         kind === 'prose' && maxProseWidth !== undefined ? (
@@ -216,12 +229,12 @@ function MarkdownBody({
       );
     }
 
-    function flushNonTableContent(wrap?: Props['tailWrap']): void {
+    function flushNonTableContent(wrap?: Props['tailWrap'], withHint = false): void {
       if (nonTableContent) {
         const trimmed = nonTableContent.replace(/^\n+/, '').trimEnd();
         nonTableContent = '';
         if (!trimmed) return;
-        pushAnsiBlock(trimmed, wrap, 'prose');
+        pushAnsiBlock(trimmed, wrap, 'prose', withHint);
       }
     }
 
@@ -249,26 +262,43 @@ function MarkdownBody({
       } else if (maxProseWidth !== undefined && token.type === 'code') {
         flushNonTableContent();
         const rendered = formatToken(token, theme, 0, null, null, highlight, promptMode);
-        pushAnsiBlock(rendered.replace(/\n$/, ''), index === lastNonSpaceIndex ? tailWrap : undefined, 'code');
+        const isLast = index === lastNonSpaceIndex;
+        pushAnsiBlock(rendered.replace(/\n$/, ''), isLast ? tailWrap : undefined, 'code', isLast);
       } else {
         nonTableContent += formatToken(token, theme, 0, null, null, highlight, promptMode);
       }
     }
 
-    flushNonTableContent(tailWrap);
+    flushNonTableContent(tailWrap, true);
     // densable w0l: promptMode empty-render fallback → raw source
     if (promptMode && elements.length === 0 && source.trim()) {
       nonTableContent = source;
-      flushNonTableContent(tailWrap);
+      flushNonTableContent(tailWrap, true);
+    }
+    if (leftoverHint && !leftoverHintConsumed) {
+      elements.push(
+        <Text key={elements.length} color="subtle">
+          {leftoverHint}
+        </Text>,
+      );
     }
     return elements;
-  }, [children, color, dimColor, highlight, theme, skipTokenCache, tailWrap, promptMode, shouldStrip, maxProseWidth]);
+  }, [
+    children,
+    color,
+    dimColor,
+    highlight,
+    theme,
+    skipTokenCache,
+    tailWrap,
+    promptMode,
+    shouldStrip,
+    maxProseWidth,
+    hint,
+  ]);
 
-  return (
-    <Box flexDirection="column" gap={1}>
-      {elements}
-    </Box>
-  );
+  // gold oa: e(s,{flexDirection:"column",children:P}) — no gap.
+  return <Box flexDirection="column">{elements}</Box>;
 }
 
 // ─── Official 2.1.207 StreamingMarkdown (ths / isd / dpo / asd) ──────────────
@@ -457,6 +487,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     </Markdown>
   ) : null;
 
+  // gold Ehr: r(s,{flexDirection:"column",gap:1,children:[y&&e(oa,...),R]})
   if (state.chunks.length === 0) {
     return (
       <Box flexDirection="column" gap={1}>

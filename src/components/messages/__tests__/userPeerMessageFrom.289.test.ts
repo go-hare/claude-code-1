@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import {
   isInSessionPeerOrObserverOrigin,
   isPeerInboundExpandClickable,
+  looksLikeAgentMessageEnvelope,
   peerOrObserverDisplayName,
+  shouldPaintAgentInboundRow,
 } from '../../../utils/messages.js'
 import {
   agentMessageBodyFits,
@@ -61,7 +63,7 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
   test('Message.tsx paints Wr on queued_command + uM(origin)', () => {
     const src = readFileSync(join(import.meta.dir, '../../Message.tsx'), 'utf8')
     expect(src).toContain("att.type === 'queued_command'")
-    expect(src).toContain('isInSessionPeerOrObserverOrigin(att.origin)')
+    expect(src).toContain('shouldPaintAgentInboundRow(att.origin, promptText)')
     expect(src).toContain('peerOrObserverDisplayName(att.origin)')
     expect(src).toContain('fallbackLabel="agent"')
     expect(src).toContain("originKind === 'peer'")
@@ -113,17 +115,38 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
     expect(src).toContain("als?.agentType === 'subagent'")
   })
 
-  test('UserTextMessage routes uM origin via BCn, not typeof senderTaskId', () => {
+  test('UserTextMessage routes Wr via shouldPaintAgentInboundRow, not typeof senderTaskId', () => {
     const src = readFileSync(
       join(import.meta.dir, '../UserTextMessage.tsx'),
       'utf8',
     )
-    expect(src).toContain('isInSessionPeerOrObserverOrigin(origin)')
+    expect(src).toContain('shouldPaintAgentInboundRow(origin, param.text)')
     expect(src).toContain('peerOrObserverDisplayName(origin)')
     expect(src).not.toContain('<agent-message')
-    expect(src).not.toContain('looksLikeAgentMessageEnvelope')
     expect(src).toContain('fallbackLabel="agent"')
     expect(src).not.toContain("typeof origin.senderTaskId === 'string'")
+  })
+
+  test('first-frame fme envelope paints Wr without origin (no expand-then-collapse)', () => {
+    const envelope =
+      '<agent-message from="general-purpose">\n[Subagent hand-back] report\n</agent-message>'
+    expect(looksLikeAgentMessageEnvelope(envelope)).toBe(true)
+    expect(looksLikeAgentMessageEnvelope('hello')).toBe(false)
+    expect(shouldPaintAgentInboundRow(undefined, envelope)).toBe(true)
+    expect(shouldPaintAgentInboundRow({ kind: 'peer' }, envelope)).toBe(true)
+    expect(shouldPaintAgentInboundRow(undefined, 'hello')).toBe(false)
+    expect(
+      isPeerInboundExpandClickable({
+        type: 'attachment',
+        attachment: { type: 'queued_command', prompt: envelope },
+      }),
+    ).toBe(true)
+    expect(
+      isPeerInboundExpandClickable({
+        type: 'user',
+        message: { content: [{ type: 'text', text: envelope }] },
+      }),
+    ).toBe(true)
   })
 
   test('collapsed agent copy is Message from @ without body preview', () => {

@@ -246,6 +246,17 @@ describe('createStreamingDisplayStore densable WNf', () => {
     expect(store.getFlags() & STREAM_FLAG_DISPLAYED).toBe(0)
   })
 
+  test('getDerived is gold Apo (Oa Pt subscribe/getDerived)', () => {
+    const store = createStreamingDisplayStore()
+    expect(store.getDerived().displayed).toBeNull()
+    store.setRaw('partial')
+    expect(store.getDerived()).toEqual({
+      displayed: 'partial',
+      hideTrailingLine: true,
+      displayedHasNewline: false,
+    })
+  })
+
   test('a closed line is displayed whole; the open tail is not sliced again', () => {
     const store = createStreamingDisplayStore()
     store.setRaw('line with\nnewline')

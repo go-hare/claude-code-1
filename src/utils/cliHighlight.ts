@@ -8,6 +8,7 @@ import { extname } from 'path'
 // Static import — dynamic import('highlight.js') fails in Bun --compile mode
 // because module resolution points to the internal bunfs binary path.
 import hljs from 'highlight.js'
+import * as cliHighlight from 'cli-highlight'
 import {
   bindDefaultHighlightBudget,
   HighlightBoundError,
@@ -63,23 +64,21 @@ stripDensableRemovedHljsLanguages(hljs as HljsLike)
 // densable 2.1.289 `Se` — same hljs singleton ColorFile binds.
 bindDefaultHighlightBudget(resolveHljsApi(hljs))
 
-// One promise shared by Fallback.tsx, markdown.ts, events.ts, getLanguageName.
-let cliHighlightPromise: Promise<CliHighlight | null> | undefined
-
 let loadedGetLanguage:
   | ((name: string) => { name?: string } | undefined)
   | undefined
 
-async function loadCliHighlight(): Promise<CliHighlight | null> {
+/**
+ * densable oa `gN()` — sync. Official Markdown first-paints with highlight
+ * already resolved. Dynamic import + Suspense remount DualInk leftoverGs-clears
+ * the spinner row on the first streaming token.
+ */
+function loadCliHighlightSync(): CliHighlight | null {
   try {
-    const cliHighlight = await import('cli-highlight')
-    // highlight.js CJS interop: `export =` wraps in .default under ESM
     const hljsMod = hljs as {
       getLanguage?: typeof loadedGetLanguage
       default?: typeof hljs
     } & HljsLike
-    // Re-strip in case another import re-registered (or cli-highlight
-    // resolved a separate hljs copy that we cannot see — still lock ours).
     stripDensableRemovedHljsLanguages(hljsMod)
     bindDefaultHighlightBudget(resolveHljsApi(hljsMod))
     loadedGetLanguage = hljsMod.getLanguage ?? hljsMod.default?.getLanguage
@@ -105,7 +104,6 @@ async function loadCliHighlight(): Promise<CliHighlight | null> {
               lang,
             )
           ) {
-            // densable: no grammar → plain text (cli-highlight without language)
             return cliHighlight.highlight(code, {
               ...options,
               language: undefined,
@@ -124,9 +122,15 @@ async function loadCliHighlight(): Promise<CliHighlight | null> {
   }
 }
 
+const highlightSnapshot: CliHighlight | null = loadCliHighlightSync()
+
 export function getCliHighlightPromise(): Promise<CliHighlight | null> {
-  cliHighlightPromise ??= loadCliHighlight()
-  return cliHighlightPromise
+  return Promise.resolve(highlightSnapshot)
+}
+
+/** densable oa `gN()` */
+export function peekCliHighlight(): CliHighlight | null {
+  return highlightSnapshot
 }
 
 /**

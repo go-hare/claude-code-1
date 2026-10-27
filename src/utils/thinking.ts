@@ -194,29 +194,29 @@ export function resolveThinkingDisplayMode(
 
 /**
  * densable connector_text branch @184957900:
- * adaptive|enabled && $Ln && firstParty && Hs() && !xV() && !thinking-in-extraBody
- * && !$ce sticky-rejected && !SIMULATE_PROXY → display:"updates".
+ * `(Tu adaptive|enabled) && hh && !("thinking" in extraBody) && !Gp(sticky) &&
+ * $M==="idle" && !SIMULATE_PROXY` → display:"updates".
+ * Gold `hh = Dqn = $m() && fCn` ($m = firstParty||anthropicAws||foundry &&
+ * !DISABLE_EXPERIMENTAL_BETAS && !hipaa). No Hs()/api.anthropic.com, no
+ * oauth-without-key. Analog extras there withheld updates on Anthropic
+ * protocol (custom base / Claude.ai OAuth) → full CoT first-paints then
+ * folds into Thought for.
  */
 export function shouldSendThinkingDisplayUpdates({
   thinkingType,
   model,
   extraBodyHasThinking,
   simulateProxy,
-  oauthWithoutApiKey,
   displayUpdatesRejected,
 }: {
   thinkingType: string | undefined
   model: string
   extraBodyHasThinking: boolean
   simulateProxy: boolean
-  oauthWithoutApiKey: boolean
   displayUpdatesRejected: boolean
 }): boolean {
   if (thinkingType !== 'adaptive' && thinkingType !== 'enabled') return false
   if (!supportsThinkingDisplayOnWire(model)) return false
-  if (getAPIProvider() !== 'firstParty') return false
-  if (!isFirstPartyAnthropicBaseUrl()) return false
-  if (oauthWithoutApiKey) return false
   if (extraBodyHasThinking) return false
   if (displayUpdatesRejected) return false
   if (simulateProxy) return false

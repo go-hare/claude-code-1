@@ -51,6 +51,8 @@ export type StreamingDisplayStore = {
   setRewrite: (rewrite: StreamingTextRewrite | null) => void
   setSalvage: (salvage: string | null, exact?: boolean) => void
   getState: () => StreamingDisplayState
+  /** densable Apo getDerived — Oa Pt(subscribe, getDerived). */
+  getDerived: () => StreamingDisplayResolved
   getFlags: () => number
   subscribe: (listener: () => void) => () => void
 }
@@ -190,6 +192,7 @@ export function createStreamingDisplayStore(): StreamingDisplayStore {
       notify()
     },
     getState: () => state,
+    getDerived: () => resolveStreamingDisplay(state),
     getFlags() {
       const { displayed, hideTrailingLine, displayedHasNewline } =
         resolveStreamingDisplay(state)

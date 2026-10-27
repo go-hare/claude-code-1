@@ -37,6 +37,7 @@ const NULL_RENDERING_TYPES = [
   'companion_intro',
   'token_usage',
   'total_tokens_reminder',
+  'silent_turn_reminder',
   // densable batching_reminder / _sent — model/transcript only
   'batching_reminder',
   'batching_reminder_sent',

@@ -2389,8 +2389,6 @@ async function* queryModel(
             model: options.model,
             extraBodyHasThinking,
             simulateProxy: shouldSimulateProxyUsage(),
-            oauthWithoutApiKey:
-              getAnthropicApiKey() === null && isClaudeAISubscriber(),
             displayUpdatesRejected: isStickyBetaRejected(
               THINKING_DISPLAY_UPDATES_BETA_HEADER,
             ),

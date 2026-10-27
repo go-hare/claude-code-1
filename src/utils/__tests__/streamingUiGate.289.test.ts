@@ -209,13 +209,30 @@ describe('REPL wires Skt Ve + spinner yu', () => {
     expect(repl).toContain('resolveFocusFoldHoldsPreview')
     expect(repl).toContain('focusFoldHoldsPreview')
     expect(repl).toContain(
-      'hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview}',
+      'isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview',
     )
-    expect(repl).toContain(
+    expect(repl).not.toContain(
       'isLoading && !viewedAgentTask && showStreamingText && !focusFoldHoldsPreview',
     )
     expect(repl).toContain('isBriefOnly ||')
     expect(repl).toContain('focusFoldHoldsPreview);')
+    expect(repl).toContain('{showSpinner && !liveStateRowMounted && (')
+    expect(repl).toContain('const [liveStateRowMounted] = useState(false)')
+    expect(repl).not.toContain(
+      'const liveStateRowMounted =\n    isLoading && !viewedAgentTask && showStreamingText && !focusFoldHoldsPreview',
+    )
+    expect(repl).toContain('streamingDisplayStore={streamingDisplayStore}')
+    expect(repl).not.toContain('streamingPreview=')
+    const messages = readFileSync(
+      join(ROOT, 'src/components/Messages.tsx'),
+      'utf8',
+    )
+    expect(messages).toContain(
+      '<StreamingTextPreview store={streamingDisplayStore} />',
+    )
+    expect(messages).toContain(
+      'hasStreamingText && !isBriefOnly && streamingDisplayStore',
+    )
   })
 })
 
