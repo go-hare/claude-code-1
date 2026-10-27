@@ -32,7 +32,7 @@ describe('applyNonImmediateNotification', () => {
     const incoming = textNotif({
       key: 'effort-level',
       priority: 'high',
-      text: '⦿ ultracode · xhigh effort + dynamic workflows for maximum thoroughness',
+      text: '◉ ultracode · xhigh effort + dynamic workflows for maximum thoroughness',
     })
 
     const applied = applyNonImmediateNotification(bucket(current), incoming)

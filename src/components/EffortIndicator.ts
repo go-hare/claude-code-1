@@ -17,7 +17,7 @@ import {
 /**
  * densable Z_p — effort-changed notification.
  * Normal: "◐ medium · /effort"
- * Ultracode: "⦿ ultracode · {wire} effort + dynamic workflows for maximum thoroughness"
+ * Ultracode: "◉ ultracode · {wire} effort + dynamic workflows for maximum thoroughness"
  * Wire tier is catalog-driven (Grok → high, Claude 4.7 → xhigh).
  */
 export function getEffortNotificationText(

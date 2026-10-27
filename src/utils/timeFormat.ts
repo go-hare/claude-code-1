@@ -330,11 +330,34 @@ const CLOCK_STAMP: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-/** densable ae.today — turn-duration `done 1:12` (numeric hour, no am/pm). */
-const TURN_DONE_STAMP: Intl.DateTimeFormatOptions = {
-  hour: 'numeric',
-  minute: '2-digit',
-  hourCycle: 'h23',
+type TurnDoneBucket = 'today' | 'week' | 'older'
+
+/** densable 2.1.289 kVe `ae` — locale decides 12h/24h unless timeFormat pins it. */
+const TURN_DONE_STAMP: Record<TurnDoneBucket, Intl.DateTimeFormatOptions> = {
+  today: { hour: 'numeric', minute: '2-digit' },
+  week: { weekday: 'long', hour: 'numeric', minute: '2-digit' },
+  older: {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  },
+}
+
+/** densable 2.1.289 kVe `le` — date prefix ahead of a strftime pattern. */
+const TURN_DONE_DAY: Record<
+  Exclude<TurnDoneBucket, 'today'>,
+  Intl.DateTimeFormatOptions
+> = {
+  week: { weekday: 'long' },
+  older: { weekday: 'long', month: 'short', day: 'numeric' },
+}
+
+const CALENDAR_DAY: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
 }
 
 const FULL_STAMP: Intl.DateTimeFormatOptions = {
@@ -361,22 +384,52 @@ export function formatClockTime(date: Date, timeZoneOverride?: string): string {
   )
 }
 
-/** densable 2.1.289 kVe today — ` · done ${j}` on turn_duration. */
-export function formatTurnDoneAt(
-  date: Date,
-  timeZoneOverride?: string,
-): string {
-  const resolved = resolveTimeFormat()
-  const timeZone = timeZoneOverride ?? resolved.timeZone
-  if (resolved.kind === 'pattern') {
-    return formatPatternTime(resolved.pattern, timeZone, date)
+function calendarDayMs(date: Date, timeZone: string | undefined): number {
+  if (!timeZone) {
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+    ).getTime()
   }
-  return formatPresetTime(
-    { ...resolved, timeZone },
-    TURN_DONE_STAMP,
-    undefined,
-    date,
+  const parts: Record<string, string> = {}
+  for (const part of cachedDateTimeFormat(
+    'en-US',
+    withTimeZone(CALENDAR_DAY, timeZone),
+  ).formatToParts(date)) {
+    parts[part.type] = part.value
+  }
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
   )
+}
+
+/** densable 2.1.289 kVe — ` · done ${j}` on turn_duration (today / week / older). */
+export function formatTurnDoneAt(date: Date, now: Date = new Date()): string {
+  if (Number.isNaN(date.getTime())) return ''
+  const locale = posixLocaleTag()
+  const resolved = resolveTimeFormat()
+  const { timeZone } = resolved
+  const days = Math.round(
+    (calendarDayMs(now, timeZone) - calendarDayMs(date, timeZone)) / 86400000,
+  )
+  const bucket: TurnDoneBucket =
+    days === 0 ? 'today' : days > 0 && days < 7 ? 'week' : 'older'
+  if (resolved.kind === 'preset') {
+    return formatPresetTime(resolved, TURN_DONE_STAMP[bucket], locale, date)
+  }
+  const time = formatStrftime(resolved.pattern, date, {
+    locale,
+    timeZone,
+  }).slice(0, PATTERN_MAX)
+  if (bucket === 'today') return time
+  const day = cachedDateTimeFormat(
+    locale,
+    withTimeZone(TURN_DONE_DAY[bucket], timeZone),
+  ).format(date)
+  return bucket === 'week' ? `${day} ${time}` : `${day}, ${time}`
 }
 
 export function formatFullTimestamp(

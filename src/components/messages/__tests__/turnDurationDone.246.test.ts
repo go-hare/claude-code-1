@@ -14,11 +14,31 @@ describe('turn duration done clock densable 2.1.246 (#3)', () => {
     expect(src).not.toContain('formatResetTime')
   })
 
-  test('kVe today clock is numeric hour without am/pm', () => {
-    const formatted = formatTurnDoneAt(new Date('2026-09-05T18:05:00'))
-    expect(formatted).toBeDefined()
-    expect(formatted).toMatch(/\d{1,2}:\d{2}/)
-    expect(formatted).not.toMatch(/[ap]m/i)
+  test('kVe today clock follows locale (en-US → `6:05 PM`)', () => {
+    const lang = process.env.LANG
+    process.env.LANG = 'en_US.UTF-8'
+    try {
+      const at = new Date('2026-09-05T18:05:00')
+      expect(formatTurnDoneAt(at, at)).toBe('6:05 PM')
+    } finally {
+      process.env.LANG = lang
+    }
+  })
+
+  test('kVe prefixes weekday within a week and date when older', () => {
+    const lang = process.env.LANG
+    process.env.LANG = 'en_US.UTF-8'
+    try {
+      const at = new Date('2026-09-05T18:05:00')
+      expect(formatTurnDoneAt(at, new Date('2026-09-07T09:00:00'))).toBe(
+        'Saturday 6:05 PM',
+      )
+      expect(formatTurnDoneAt(at, new Date('2026-09-20T09:00:00'))).toBe(
+        'Saturday, Sep 5 at 6:05 PM',
+      )
+    } finally {
+      process.env.LANG = lang
+    }
   })
 
   test('away_summary paints recap: prefix', () => {
