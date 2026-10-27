@@ -166,12 +166,39 @@ export async function fetchBootstrapData(): Promise<void> {
 
     // gold Iso @190505174 via QFr setClientDataOverride — merge signed
     // --client-data-url document over bootstrap client_data for this model.
-    let clientData = response.client_data ?? null
+    // Absent / null client_data must not clobber the disk hydrate.
+    let clientData: Record<string, unknown> | null | undefined =
+      response.client_data
     try {
       const { mergeLoadedClientDataInto } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../../cli/clientDataUrl.js') as typeof import('../../cli/clientDataUrl.js')
-      clientData = mergeLoadedClientDataInto(clientData) ?? null
+      clientData = mergeLoadedClientDataInto(clientData)
+    } catch {
+      // isolation — optional
+    }
+    const clientDataUpdate =
+      clientData !== null &&
+      clientData !== undefined &&
+      typeof clientData === 'object' &&
+      !Array.isArray(clientData)
+        ? clientData
+        : undefined
+    try {
+      const {
+        leftoverD2HydrateFromDisk,
+        leftoverD2SetClientData,
+        leftoverQrrInstallCacheKey,
+        leftoverQrrInstallReadGate,
+      } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js')
+      leftoverQrrInstallCacheKey()
+      leftoverQrrInstallReadGate()
+      leftoverD2HydrateFromDisk(getGlobalConfig().clientDataCache)
+      if (clientDataUpdate) {
+        leftoverD2SetClientData(clientDataUpdate)
+      }
     } catch {
       // isolation — optional
     }
@@ -224,7 +251,8 @@ export async function fetchBootstrapData(): Promise<void> {
     // Only persist if data actually changed — avoids a config write on every startup.
     const config = getGlobalConfig()
     if (
-      isEqual(config.clientDataCache, clientData) &&
+      (clientDataUpdate === undefined ||
+        isEqual(config.clientDataCache, clientDataUpdate)) &&
       isEqual(config.additionalModelOptionsCache, additionalModelOptions) &&
       (modelAccessUpdate === undefined ||
         isEqual(config.modelAccessCache ?? [], modelAccessUpdate)) &&
@@ -238,7 +266,9 @@ export async function fetchBootstrapData(): Promise<void> {
     logForDebugging('[Bootstrap] Cache updated, persisting to disk')
     saveGlobalConfig(current => ({
       ...current,
-      clientDataCache: clientData,
+      ...(clientDataUpdate !== undefined
+        ? { clientDataCache: clientDataUpdate }
+        : {}),
       additionalModelOptionsCache: additionalModelOptions,
       ...(modelAccessUpdate !== undefined
         ? { modelAccessCache: modelAccessUpdate }
