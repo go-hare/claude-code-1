@@ -167,6 +167,12 @@ export type FileWriteToolInput = InputSchema
 export const FileWriteTool = buildTool({
   name: FILE_WRITE_TOOL_NAME,
   searchHint: 'create or overwrite files',
+  // densable Hv remoteExecution + backgrounding never
+  remoteExecution: {
+    supported: true,
+    decidingInputFields: ['file_path', 'content'],
+  },
+  backgrounding: 'never',
   maxResultSizeChars: 100_000,
   strict: true,
   async description() {

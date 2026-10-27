@@ -163,6 +163,9 @@ type Output = z.infer<OutputSchema>
 export const GrepTool = buildTool({
   name: GREP_TOOL_NAME,
   searchHint: 'search file contents with regex (ripgrep)',
+  // densable ix remoteExecution + backgrounding never
+  remoteExecution: { supported: true },
+  backgrounding: 'never',
   // 20K chars - tool result persistence threshold
   maxResultSizeChars: 20_000,
   strict: true,

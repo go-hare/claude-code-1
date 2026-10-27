@@ -881,9 +881,20 @@ export type Tool<
   classifierOnly?(): { onBlock: 'flag' | 'block' } | undefined
   /**
    * densable `backgrounding` — spawn/background policy hint (`never` keeps
-   * the tool foreground-only). Gold SubagentHandback sets `never`.
+   * the tool foreground-only). Gold SubagentHandback sets `never`; Bash
+   * sets `self` (tool manages its own backgrounding).
    */
-  readonly backgrounding?: 'never' | 'allow' | 'prefer'
+  readonly backgrounding?: 'never' | 'allow' | 'prefer' | 'self'
+  /**
+   * densable `Dy(tool)` — remote execution may name a machine via input
+   * `_host`. `a9e` gates on `supported`. Gold also carries
+   * `decidingInputFields` / `refusedInputFields` for remote approval shape.
+   */
+  readonly remoteExecution?: {
+    supported?: boolean
+    decidingInputFields?: string[]
+    refusedInputFields?: string[]
+  }
   /**
    * For MCP tools: the server and tool names as received from the MCP server (unnormalized).
    * Present on all MCP tools regardless of whether `name` is prefixed (mcp__server__tool)
@@ -904,6 +915,14 @@ export type Tool<
     scope?: string
     source?: string
     effectiveMaxPermission?: 'allow' | 'ask' | 'blocked'
+    /**
+     * densable `Dn` `...U&&{cliOwned:!0}` — config is in the CLI-owned WeakSet.
+     */
+    cliOwned?: boolean
+    /**
+     * densable `Dn` `...Z&&{accountMemory:!0}` — X2e(server, toolName).
+     */
+    accountMemory?: boolean
   }
   readonly name: string
   /**

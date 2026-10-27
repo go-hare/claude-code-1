@@ -56,6 +56,9 @@ export type Output = z.infer<OutputSchema>
 export const GlobTool = buildTool({
   name: GLOB_TOOL_NAME,
   searchHint: 'find files by name pattern or wildcard',
+  // densable sx remoteExecution + backgrounding never
+  remoteExecution: { supported: true },
+  backgrounding: 'never',
   maxResultSizeChars: 100_000,
   async description() {
     return DESCRIPTION

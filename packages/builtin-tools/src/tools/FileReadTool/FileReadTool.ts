@@ -371,6 +371,12 @@ export type Output = z.infer<OutputSchema>
 export const FileReadTool = buildTool({
   name: FILE_READ_TOOL_NAME,
   searchHint: 'read files, images, PDFs, notebooks',
+  // densable IS remoteExecution + backgrounding never
+  remoteExecution: {
+    supported: true,
+    decidingInputFields: ['file_path', 'offset', 'limit', 'pages'],
+  },
+  backgrounding: 'never',
   // Output is bounded by maxTokens (validateContentTokens). Results exceeding
   // 100KB are persisted to disk (reducing memory pressure in long sessions)
   // rather than kept in the message array indefinitely.

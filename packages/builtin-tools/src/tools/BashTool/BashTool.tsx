@@ -629,6 +629,13 @@ export const BashTool = buildTool({
   searchHint: 'execute shell commands',
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @187127917
   enablesCodeExecution: true,
+  // densable li remoteExecution + backgrounding self
+  remoteExecution: {
+    supported: true,
+    refusedInputFields: ['dangerouslyDisableSandbox', 'run_in_background', '_simulatedSedEdit'],
+    decidingInputFields: ['command', 'run_in_background', 'dangerouslyDisableSandbox'],
+  },
+  backgrounding: 'self',
   // 30K chars - tool result persistence threshold
   maxResultSizeChars: 30_000,
   strict: true,
