@@ -21,7 +21,6 @@ import {
   useTabHeaderFocus,
 } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
-import { getGlobalConfig } from '../utils/config.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
 import { generateHeatmap } from '../utils/heatmap.js';
 import { renderModelName } from '../utils/model/model.js';
@@ -35,6 +34,7 @@ import {
 import { resolveThemeSetting } from '../utils/systemTheme.js';
 import { getTheme, themeColorToAnsi } from '../utils/theme.js';
 import { Spinner } from './Spinner.js';
+import { getThemeSetting } from '../utils/themeSetting.js';
 
 function formatPeakDay(dateStr: string): string {
   const date = new Date(dateStr);
@@ -777,7 +777,7 @@ function generateTokenChart(
   }
 
   // Color palette for different models - use theme colors
-  const theme = getTheme(resolveThemeSetting(getGlobalConfig().theme));
+  const theme = getTheme(resolveThemeSetting(getThemeSetting()));
   const colors = [themeColorToAnsi(theme.suggestion), themeColorToAnsi(theme.success), themeColorToAnsi(theme.warning)];
 
   // Prepare series data for each model
@@ -912,7 +912,7 @@ function renderStatsToAnsi(stats: ClaudeCodeStats, activeTab: 'Overview' | 'Mode
 
 function renderOverviewToAnsi(stats: ClaudeCodeStats): string[] {
   const lines: string[] = [];
-  const theme = getTheme(resolveThemeSetting(getGlobalConfig().theme));
+  const theme = getTheme(resolveThemeSetting(getThemeSetting()));
   const h = (text: string) => applyColor(text, theme.claude as Color);
 
   // Two-column helper with fixed spacing

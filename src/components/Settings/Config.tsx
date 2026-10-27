@@ -76,6 +76,7 @@ import {
 import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import type { ThemeSetting } from '../../utils/theme.js';
+import { getThemeSetting } from '../../utils/themeSetting.js';
 import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
@@ -1911,7 +1912,7 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
     mainLoopModel: r.mainLoopModel,
     currentOutputStyle: (settingsData?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME) as OutputStyle,
     currentLanguage: settingsData?.language,
-    themeSetting: globalConfig.theme,
+    themeSetting: getThemeSetting(),
     storageV5: context.storageV5,
     isConnectedToIde: hasAccessToIDEExtensionDiffFeature(context.options.mcpClients),
     isFileCheckpointingAvailable: !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING),
@@ -2319,8 +2320,8 @@ export function Config({
         value: currentUsingCustomKey as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
     }
-    if (globalConfig.theme !== initialConfig.current.theme) {
-      formattedChanges.push(`Set theme to ${chalk.bold(globalConfig.theme)}`);
+    if (themeSetting !== initialThemeSetting.current) {
+      formattedChanges.push(`Set theme to ${chalk.bold(themeSetting)}`);
     }
     if (globalConfig.preferredNotifChannel !== initialConfig.current.preferredNotifChannel) {
       formattedChanges.push(`Set notifications to ${chalk.bold(globalConfig.preferredNotifChannel)}`);
@@ -2430,6 +2431,7 @@ export function Config({
     currentLanguage,
     settingsData?.autoUpdatesChannel,
     isFastModeEnabled() ? (settingsData as Record<string, unknown> | undefined)?.fastMode : undefined,
+    themeSetting,
     onClose,
   ]);
 

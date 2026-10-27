@@ -56,6 +56,7 @@ import { useAppState } from '../../state/AppState.js';
 import { getEffortSuffix } from '../../utils/effort.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { renderModelSetting } from '../../utils/model/model.js';
+import { getThemeSetting } from '../../utils/themeSetting.js';
 
 const LEFT_PANEL_MAX_WIDTH = 50;
 
@@ -165,7 +166,7 @@ export function LogoV2(): React.ReactNode {
   // Calculate layout and display values
   const layoutMode = getLayoutMode(columns);
 
-  const userTheme = resolveThemeSetting(getGlobalConfig().theme);
+  const userTheme = resolveThemeSetting(getThemeSetting());
   const borderTitle = ` ${color('claude', userTheme)('Claude Code')} ${color('inactive', userTheme)(`v${version}`)} `;
   const compactBorderTitle = color('claude', userTheme)(' Claude Code ');
 

@@ -51,6 +51,7 @@ import {
 import { getBaseRenderOptions } from './utils/renderOptions.js';
 import { isBgSession } from './utils/concurrentSessions.js';
 import { hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
+import { getThemeSetting, saveThemeSetting } from './utils/themeSetting.js';
 
 export function completeOnboarding(): void {
   saveGlobalConfig(current => ({
@@ -111,10 +112,7 @@ export function showSetupDialog<T = void>(
   options?: { onChangeAppState?: typeof onChangeAppState },
 ): Promise<T> {
   return showDialog<T>(root, done => (
-    <ThemeProvider
-      initialState={getGlobalConfig().theme}
-      onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
-    >
+    <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
       <AppStateProvider onChangeAppState={options?.onChangeAppState}>
         <KeybindingSetup>{renderer(done)}</KeybindingSetup>
       </AppStateProvider>

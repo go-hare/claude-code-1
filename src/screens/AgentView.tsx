@@ -235,6 +235,7 @@ import {
   evaluateRespawnTranscriptGate,
 } from '../daemon/transcriptProbe.js';
 import { listAllLiveSessions } from '../utils/udsClient.js';
+import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js';
 
 export { FLEET_FORCE_RESTART_MSG };
 
@@ -4224,10 +4225,7 @@ export async function renderAgentView(options?: {
       // ThemeProvider required: without it useTheme() defaults to 'dark', so
       // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
       root.render(
-        <ThemeProvider
-          initialState={getGlobalConfig().theme}
-          onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
-        >
+        <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
           <AppStateProvider>
             <KeybindingSetup>
               <AgentsSelectionChrome />
@@ -4276,10 +4274,7 @@ export async function renderAgentView(options?: {
       const loginResult = await Promise.race([
         new Promise<boolean>(resolve => {
           root.render(
-            <ThemeProvider
-              initialState={getGlobalConfig().theme}
-              onThemeSave={setting => saveGlobalConfig(current => ({ ...current, theme: setting }))}
-            >
+            <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
               <AppStateProvider>
                 <KeybindingSetup>
                   <Login onDone={success => resolve(success)} startingMessage={getOauthTokenEnvStartingMessage()} />

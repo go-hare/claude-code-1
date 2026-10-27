@@ -1379,6 +1379,14 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Enable automatic conversation compaction. Session/flag settings beat the legacy global config default when set.',
         ),
+      // densable 2.1.289 Yo("theme","dark") / W2("theme") — settings first,
+      // legacy GlobalConfig.theme only as fallback.
+      theme: z
+        .string()
+        .optional()
+        .describe(
+          'Color theme: "auto", a built-in theme name, or "custom:<slug>".',
+        ),
       fastMode: z
         .boolean()
         .optional()

@@ -70,7 +70,7 @@ describe('densable 2.1.239 #27 ZGn custom theme', () => {
     )
     expect(init).toContain('await loadCustomThemes()')
     expect(init).toContain('setCustomThemeOverrides')
-    expect(init).toContain('resolveCustomThemeSetting(getGlobalConfig().theme)')
+    expect(init).toContain('resolveCustomThemeSetting(getThemeSetting())')
   })
 
   test('resolveCustomThemeSetting falls back to dark for unknown slug', () => {

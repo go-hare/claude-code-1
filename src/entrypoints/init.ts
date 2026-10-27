@@ -16,12 +16,7 @@ import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { applyHostCredsFromFileIfManaged } from '../utils/hostCredsFile.js'
-import {
-  enableConfigs,
-  getGlobalConfig,
-  recordFirstStartTime,
-  saveGlobalConfig,
-} from '../utils/config.js'
+import { enableConfigs, recordFirstStartTime } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
 import { detectCurrentRepository } from '../utils/detectRepository.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
@@ -59,6 +54,7 @@ import {
   subscribeSystemTheme,
 } from '@anthropic/ink'
 import { setCachedSystemTheme } from '../utils/systemTheme.js'
+import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js'
 
 // densable Ns()=Ht.of(U().host) and gbo k("tengu_event_loop_stall",!1) live
 // inside Ink. Do not bind host or GB after load.
@@ -88,9 +84,8 @@ export const init = memoize(async (): Promise<void> => {
     // densable I8r — commit user theme cache before first d$e / ThemeProvider.
     await loadCustomThemes()
     setThemeConfigCallbacks({
-      loadTheme: () => getGlobalConfig().theme,
-      saveTheme: setting =>
-        saveGlobalConfig(current => ({ ...current, theme: setting })),
+      loadTheme: () => getThemeSetting(),
+      saveTheme: saveThemeSetting,
       // Mirror resolved overrides into the src-side getTheme() state — Ink's
       // ThemeProvider only writes its own copy (no ink→src import, Ym), but
       // src components calling getTheme() directly must see them too.
@@ -101,7 +96,7 @@ export const init = memoize(async (): Promise<void> => {
       },
     })
     setCustomThemeOverrides(
-      resolveCustomThemeSetting(getGlobalConfig().theme).overrides,
+      resolveCustomThemeSetting(getThemeSetting()).overrides,
     )
     // densable Ym → Ink hasReleasedTerminal (no ink→src import).
     setAppCallbacks({
