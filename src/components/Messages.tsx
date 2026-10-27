@@ -27,7 +27,7 @@ import type {
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { collapseBackgroundBashNotifications } from '../utils/collapseBackgroundBashNotifications.js';
 import { collapseHookSummaries } from '../utils/collapseHookSummaries.js';
-import { collapseReadSearchGroups } from '../utils/collapseReadSearch.js';
+import { collapseReadSearchGroups, LeftoverCollapseCache } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
 import { filterFoldedLoopNoopMessages } from '../utils/loopNoopFold.js';
 import { getGlobalConfig } from '../utils/config.js';
@@ -118,6 +118,8 @@ const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
 
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { VirtualMessageList } from './VirtualMessageList.js';
+import { StreamingTextPreview } from './StreamingTextPreview.js';
+import type { StreamingDisplayStore } from '../utils/streamingTextStore.js';
 
 /**
  * In brief-only mode, filter messages to show ONLY Brief tool_use blocks,
@@ -336,16 +338,12 @@ type Props = {
   /** In transcript mode, hide all thinking blocks except the last one */
   hidePastThinking?: boolean;
   /**
-   * Official preview row (`C && !brief`). Mounted for the whole isLoading
-   * window; gold yi returns null only when displayed is empty. Do not use
-   * truthiness of this prop for collapsed-group past-tense (use hasStreamingText).
-   */
-  streamingPreview?: React.ReactNode;
-  /**
-   * densable hasStreamingText (y / Jbe) — true when preview store has
-   * STREAM_FLAG_DISPLAYED. Gates collapsed_read_search hasContentAfter.
+   * densable hasStreamingText (y / Jbe / Ve). Gates collapsed_read_search
+   * hasContentAfter AND gold bw Oa (`L&&!Me&&M`).
    */
   hasStreamingText?: boolean;
+  /** densable bw `M.stream.previewStore` — gold Oa host. */
+  streamingDisplayStore?: StreamingDisplayStore;
   /** When true, only show Brief tool output (hide everything else) */
   isBriefOnly?: boolean;
   /** Fullscreen-mode "─── N new ───" divider. Renders before the first
@@ -470,8 +468,8 @@ const MessagesImpl = ({
   hideLogo = false,
   isLoading,
   hidePastThinking = false,
-  streamingPreview,
   hasStreamingText,
+  streamingDisplayStore,
   isBriefOnly = false,
   unseenDivider,
   scrollRef,
@@ -581,6 +579,13 @@ const MessagesImpl = ({
   // message content changed during streaming (text/thinking deltas). The key
   // captures only structural info (types, IDs), so content-only deltas skip
   // the rebuild entirely.
+  const collapseCacheRef = useRef<LeftoverCollapseCache | null>(null);
+  let collapseCache = collapseCacheRef.current;
+  if (collapseCache === null) {
+    collapseCache = new LeftoverCollapseCache();
+    collapseCacheRef.current = collapseCache;
+  }
+
   const lookupsCacheRef = useRef<{
     key: string;
     lookups: MessageLookups;
@@ -656,7 +661,14 @@ const MessagesImpl = ({
     // densable sGf — hide messages folded by UXm loop noop-fold fire lines.
     const collapsedBase = filterFoldedLoopNoopMessages(
       collapseBackgroundBashNotifications(
-        collapseHookSummaries(collapseTeammateShutdowns(collapseReadSearchGroups(groupedMessages, tools))),
+        collapseHookSummaries(
+          collapseTeammateShutdowns(
+            collapseReadSearchGroups(groupedMessages, tools, {
+              expandRows: isTranscriptMode && virtualScrollRuntimeGate,
+              cache: collapseCache,
+            }),
+          ),
+        ),
         verbose,
       ),
     );
@@ -1044,8 +1056,10 @@ const MessagesImpl = ({
         renderableMessages.flatMap(renderMessageRow)
       )}
 
-      {/* gold Messages: C && !brief && turn → yi(store). yi returns null if !displayed. */}
-      {!isBriefOnly && streamingPreview}
+      {/* gold bw: L&&!Me&&M ? e(Oa,{store}) : null */}
+      {hasStreamingText && !isBriefOnly && streamingDisplayStore ? (
+        <StreamingTextPreview store={streamingDisplayStore} />
+      ) : null}
     </SentryErrorBoundary>
   );
 };

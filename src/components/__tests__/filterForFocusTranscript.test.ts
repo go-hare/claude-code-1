@@ -540,9 +540,65 @@ describe('filterForFocusTranscript full collapse', () => {
     ]
     const out = collapseFocusTranscript(msgs, undefined, undefined, true)
     const group = out.find(m => m.type === 'collapsed_read_search') as
-      | { pendingText?: string }
+      | { pendingText?: string; isLiveBriefTurn?: boolean }
       | undefined
     expect(group?.pendingText).toBe('partial…')
+    expect(group?.isLiveBriefTurn).toBe(true)
+  })
+
+  test('open-tail keepAllText does not stamp isLiveBriefTurn', () => {
+    const msgs: Msg[] = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        message: { content: [{ type: 'text', text: 'hi' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'bash',
+        message: {
+          content: [{ type: 'tool_use', name: 'Bash', id: 'b1', input: {} }],
+        },
+      },
+    ]
+    const out = collapseFocusTranscript(msgs, undefined, undefined, true, {
+      keepAllText: true,
+    })
+    const group = out.find(m => m.type === 'collapsed_read_search') as
+      | { isLiveBriefTurn?: boolean }
+      | undefined
+    expect(group?.isLiveBriefTurn).toBeUndefined()
+  })
+
+  test('finished turn does not stamp isLiveBriefTurn', () => {
+    const msgs: Msg[] = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        message: { content: [{ type: 'text', text: 'hi' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'bash',
+        message: {
+          content: [{ type: 'tool_use', name: 'Bash', id: 'b1', input: {} }],
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'done',
+        message: {
+          content: [{ type: 'text', text: 'done' }],
+          stop_reason: 'end_turn',
+        },
+      },
+    ]
+    const out = collapseFocusTranscript(msgs, undefined, undefined, true)
+    const group = out.find(m => m.type === 'collapsed_read_search') as
+      | { isLiveBriefTurn?: boolean; pendingText?: string }
+      | undefined
+    expect(group?.isLiveBriefTurn).toBeUndefined()
+    expect(group?.pendingText).toBeUndefined()
   })
 
   test('agent toolStats fold into collapse via getAgentToolStats', () => {

@@ -131,6 +131,7 @@ import {
   isCliOwnedConfig,
   wrapCliOwnedFetch,
 } from './cliOwnedConfigs.js'
+import { isAccountMemoryTool } from './accountMemoryMcp.js'
 import {
   getRegisteredUpstreamProxyEnv,
   subprocessEnv,
@@ -2844,6 +2845,14 @@ export const fetchToolsForClient = memoizeWithLRU(
                 toolPermissions && Object.hasOwn(toolPermissions, tool.name)
                   ? toolPermissions[tool.name]
                   : undefined,
+              // densable Dn — cliOwned / accountMemory (X2e) stamps.
+              ...(isCliOwnedConfig(client.config) ? { cliOwned: true } : {}),
+              ...(isAccountMemoryTool(
+                { name: client.name, config: client.config },
+                tool.name,
+              )
+                ? { accountMemory: true }
+                : {}),
             },
             isMcp: true,
             // Collapse whitespace: _meta is open to external MCP servers, and

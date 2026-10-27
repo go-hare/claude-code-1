@@ -6,6 +6,7 @@
  * - honor briefStandalone (last of each name + tool_result)
  * - fold agent toolStats into the brief summary
  * - hang streaming tail text as pendingText on the last collapse group
+ * - stamp isLiveBriefTurn on the last open-tail brief group (densable `$s`)
  * - stamp briefHiddenCount on system/turn_duration (hidden chrome excludes noise)
  *
  * Edit line counts use newline-span counts (not LCS); FileEdit multi-hunk
@@ -107,6 +108,8 @@ export type FocusTranscriptMessage = {
   isApiErrorMessage?: boolean
   briefHiddenCount?: number
   pendingText?: string
+  /** densable isLiveBriefTurn — open-tail last brief group (`$s` live gate). */
+  isLiveBriefTurn?: boolean
   hookLabel?: string
   /** Origin: task-notification users only when kind matches or unset */
   origin?: { kind?: string; [key: string]: unknown }
@@ -523,6 +526,30 @@ function mergeCollapsed(
     e.teamMemoryWriteCount =
       Number(e.teamMemoryWriteCount ?? 0) + Number(t.teamMemoryWriteCount)
   }
+  if (t.accountMemoryReadKeys?.length) {
+    e.accountMemoryReadKeys = [
+      ...new Set([
+        ...((e.accountMemoryReadKeys as string[] | undefined) ?? []),
+        ...(t.accountMemoryReadKeys as string[]),
+      ]),
+    ]
+  }
+  if (t.accountMemorySearchCount) {
+    e.accountMemorySearchCount =
+      Number(e.accountMemorySearchCount ?? 0) +
+      Number(t.accountMemorySearchCount)
+  }
+  if (t.accountMemoryRecalls?.length) {
+    const prev =
+      (e.accountMemoryRecalls as
+        | { paths: string[]; content: unknown }[]
+        | undefined) ?? []
+    const next = t.accountMemoryRecalls as {
+      paths: string[]
+      content: unknown
+    }[]
+    e.accountMemoryRecalls = [...prev, ...next]
+  }
   if (t.scratchpadWriteCount) {
     e.scratchpadWriteCount =
       Number(e.scratchpadWriteCount ?? 0) + Number(t.scratchpadWriteCount)
@@ -531,6 +558,14 @@ function mergeCollapsed(
     e.scratchpadLinesRemoved =
       Number(e.scratchpadLinesRemoved ?? 0) +
       Number(t.scratchpadLinesRemoved ?? 0)
+  }
+  if (t.workshopWriteCount) {
+    e.workshopWriteCount =
+      Number(e.workshopWriteCount ?? 0) + Number(t.workshopWriteCount)
+    e.workshopLinesAdded =
+      Number(e.workshopLinesAdded ?? 0) + Number(t.workshopLinesAdded ?? 0)
+    e.workshopLinesRemoved =
+      Number(e.workshopLinesRemoved ?? 0) + Number(t.workshopLinesRemoved ?? 0)
   }
   if (t.relevantMemories?.length) {
     e.relevantMemories = [...(e.relevantMemories ?? []), ...t.relevantMemories]
@@ -886,7 +921,11 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
         hookInfos: undefined,
       } as CollapsedReadSearchGroup
       if (pendingText && N === x.at(-1)?.[1]) {
-        ;(brief as { pendingText?: string }).pendingText = pendingText
+        brief.pendingText = pendingText
+      }
+      // densable `$s`: last brief group on open tail, unless keepAllText.
+      if (m && !keepAllText && N === x.at(-1)?.[1]) {
+        brief.isLiveBriefTurn = true
       }
       k.push([O, brief as unknown as FocusTranscriptMessage])
     }

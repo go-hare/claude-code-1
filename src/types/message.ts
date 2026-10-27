@@ -119,7 +119,18 @@ export type CollapsedReadSearchGroup = {
   scratchpadWriteCount?: number
   scratchpadLinesAdded?: number
   scratchpadLinesRemoved?: number
+  workshopWriteCount?: number
+  workshopLinesAdded?: number
+  workshopLinesRemoved?: number
+  accountMemoryReadKeys?: string[]
+  accountMemorySearchCount?: number
+  accountMemoryRecalls?: { paths: string[]; content: unknown }[]
   /** densable pendingText — streaming tail hung on last brief collapse group */
   pendingText?: string
+  /**
+   * densable `isLiveBriefTurn` (`$s` live gate).
+   * Open-tail ySu re-collapse of the last brief group: `C && l.isLiveBriefTurn===true`.
+   */
+  isLiveBriefTurn?: boolean
   [key: string]: unknown
 }

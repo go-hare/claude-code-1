@@ -1,16 +1,28 @@
 import { feature } from 'bun:bundle';
 import { basename } from 'path';
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useInterval } from 'usehooks-ts';
 import { useMinDisplayTime } from '../../hooks/useMinDisplayTime.js';
-import { Ansi, Box, Text, useTheme } from '@anthropic/ink';
+import { Ansi, Box, Text, useTheme, useTerminalSize } from '@anthropic/ink';
 import { findToolByName, type Tools } from '../../Tool.js';
 import { getReplPrimitiveTools } from '@claude-code/builtin-tools/tools/REPLTool/primitiveTools.js';
 import type { CollapsedReadSearchGroup, NormalizedAssistantMessage } from '../../types/message.js';
 import { uniq } from '../../utils/array.js';
-import { getToolUseIdsFromCollapsedGroup } from '../../utils/collapseReadSearch.js';
+import {
+  getToolUseIdsFromCollapsedGroup,
+  leftoverIhrSubscribe,
+  leftoverHx,
+  leftoverLastThinkingAtMs,
+  leftoverZcMs,
+  LEFTOVER_HX_GUTTER,
+  LEFTOVER_HX_MAX_LINES,
+  LEFTOVER_SS_HOLD_MS,
+} from '../../utils/collapseReadSearch.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
+import { leftoverIhrThinkingStartedAt, useLeftoverIhrStore } from '../../state/leftoverIhrStore.js';
+import { getSessionId } from '../../bootstrap/state.js';
 import { interruptedCall, type buildMessageLookups } from '../../utils/messages.js';
 import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
 import type { ThemeName } from '../../utils/theme.js';
@@ -32,6 +44,42 @@ const teamMemCollapsed = feature('TEAMMEM')
 // (bash commands, file reads, search patterns) are actually readable instead
 // of flickering past in a single frame.
 const MIN_HINT_DISPLAY_MS = 700;
+
+/** densable `ES` — `+added -removed`, omitted when both are zero. */
+function LeftoverLineDiff({ added, removed }: { added: number; removed: number }): React.ReactNode {
+  if (added === 0 && removed === 0) return null;
+  return (
+    <Text>
+      {added > 0 && <Text color="diffAddedWord">+{added}</Text>}
+      {added > 0 && removed > 0 ? ' ' : null}
+      {removed > 0 && <Text color="diffRemovedWord">-{removed}</Text>}
+    </Text>
+  );
+}
+
+/**
+ * densable Io `pc(m,l)` — hold `m` while set; when `m` becomes undefined,
+ * keep the last value until `l` ms then clear.
+ */
+function leftoverPcHold(value: string | undefined, minMs: number): string | undefined {
+  const [held, setHeld] = useState(value);
+  const stamped = useRef(value !== undefined ? Date.now() : 0);
+  useEffect(() => {
+    if (value !== undefined) {
+      stamped.current = Date.now();
+      setHeld(value);
+      return;
+    }
+    const remaining = minMs - (Date.now() - stamped.current);
+    if (remaining <= 0) {
+      setHeld(undefined);
+      return;
+    }
+    const timer = setTimeout(() => setHeld(undefined), remaining);
+    return () => clearTimeout(timer);
+  }, [value, minMs]);
+  return held;
+}
 
 type Props = {
   message: CollapsedReadSearchGroup;
@@ -104,6 +152,32 @@ function VerboseToolUse({
   );
 }
 
+/**
+ * densable Io `Zc` — live Thought clock. Folded: `max(1000,baseMs)`.
+ * Gold live is `C&&E&&!$s`. Gold `Zc` `R=Hhr(y)` — session thinkingStartedAt.
+ */
+function LeftoverThoughtClock({
+  baseMs,
+  lastThinkingAtMs,
+  live,
+}: {
+  baseMs: number;
+  lastThinkingAtMs: number;
+  live: boolean;
+}): React.ReactNode {
+  const leftoverIhrSession = getSessionId();
+  useLeftoverIhrStore();
+  const leftoverHhrLive = useSyncExternalStore(
+    leftoverIhrSubscribe,
+    () => leftoverIhrThinkingStartedAt(leftoverIhrSession),
+    () => leftoverIhrThinkingStartedAt(leftoverIhrSession),
+  );
+  const startedAt = live ? leftoverHhrLive : null;
+  const [now, setNow] = useState(() => Date.now());
+  useInterval(() => setNow(Date.now()), startedAt !== null ? 1000 : null);
+  return <Text bold>{formatDuration(leftoverZcMs(baseMs, lastThinkingAtMs, now, startedAt))}</Text>;
+}
+
 export function CollapsedReadSearchContent({
   message,
   inProgressToolUseIDs,
@@ -114,6 +188,7 @@ export function CollapsedReadSearchContent({
   isActiveGroup,
 }: Props): React.ReactNode {
   const bg = useSelectedMessageBg();
+  const { columns } = useTerminalSize();
   const {
     searchCount: rawSearchCount,
     readCount: rawReadCount,
@@ -162,6 +237,11 @@ export function CollapsedReadSearchContent({
   const frameCount = message.frameCount ?? 0;
   const linesAdded = message.linesAdded ?? 0;
   const linesRemoved = message.linesRemoved ?? 0;
+  const scratchpadWriteCount = message.scratchpadWriteCount ?? 0;
+  const workshopWriteCount = message.workshopWriteCount ?? 0;
+  const accountMemoryKeyCount = message.accountMemoryReadKeys?.length ?? 0;
+  const accountMemorySearchCount = message.accountMemorySearchCount ?? 0;
+  const hasAccountMemory = accountMemoryKeyCount > 0 || accountMemorySearchCount > 0;
   const pendingText = message.pendingText;
 
   const hasNonMemoryOps =
@@ -175,9 +255,13 @@ export function CollapsedReadSearchContent({
     agentCount > 0 ||
     editFileCount > 0 ||
     otherToolCount > 0 ||
-    frameCount > 0;
+    frameCount > 0 ||
+    scratchpadWriteCount > 0 ||
+    workshopWriteCount > 0;
 
   const thoughtForMs = message.thoughtForMs ?? 0;
+  // densable Io: `Mo>0||l.latestThinkingSummary!==void 0`. Empty Ss still
+  // stamps thoughtForMs; the collapsed row stays after fold.
   const hasThoughtFor = thoughtForMs > 0 || message.latestThinkingSummary !== undefined;
 
   const readPaths = message.readFilePaths;
@@ -212,13 +296,14 @@ export function CollapsedReadSearchContent({
 
   const displayedHint = useMinDisplayTime(incomingHint, MIN_HINT_DISPLAY_MS);
 
-  // densable 2.1.289 hd: lead is Io "Thinking"|"Thought" for duration. The ⎿
-  // hint is tool display (aB) unless gold has Tr(tn(thinking)) summary, which
-  // paints italic oa — not the raw thinking body. Analog absorb still stores
-  // the body in latestThinkingSummary; feeding that into effectiveHint first-
-  // paints 字 then unmounts on fold (analog markDirty walks ancestors).
-  // Do not prefer latestThinkingSummary over displayedHint.
-  const effectiveHint = displayedHint;
+  // densable `$s` summary hold: `CC=pc(C&&!$s?l.latestThinkingSummary:void 0,Mb)`
+  // then `ka=em?CC:aB`. Gold absorb is `Tr(tn(thinking))`, not the raw body.
+  const leftoverSs = leftoverPcHold(
+    isActiveGroup === true && message.isLiveBriefTurn !== true ? message.latestThinkingSummary : undefined,
+    LEFTOVER_SS_HOLD_MS,
+  );
+  const leftoverEm = leftoverSs !== undefined;
+  const effectiveHint = leftoverEm ? leftoverSs : displayedHint;
 
   // In verbose mode, render each tool use with its 1-line result summary
   if (verbose) {
@@ -312,7 +397,7 @@ export function CollapsedReadSearchContent({
 
   // Defensive: If all counts are 0, don't render the collapsed group
   // This shouldn't happen in normal operation, but handles edge cases
-  if (!hasMemoryOps && !hasTeamMemoryOps && !hasNonMemoryOps && !hasThoughtFor) {
+  if (!hasMemoryOps && !hasTeamMemoryOps && !hasNonMemoryOps && !hasThoughtFor && !hasAccountMemory) {
     return null;
   }
 
@@ -361,12 +446,14 @@ export function CollapsedReadSearchContent({
   }
 
   // densable Io: Thought/Thinking for <duration> leads the collapsed line.
+  // Gold live `C&&E&&!$s` uses `Zc({baseMs,lastThinkingAtMs})`; folded is max(1000,Mo).
   if (hasThoughtFor) {
     const label = isActiveGroup ? 'Thinking' : 'Thought';
-    const durationMs = Math.max(1000, thoughtForMs);
+    const lastThinkingAtMs = leftoverLastThinkingAtMs(groupMessages);
+    const liveClock = isActiveGroup === true && isFullscreenEnvEnabled() && message.isLiveBriefTurn !== true;
     nonMemParts.push(
       <Text key="thought">
-        {label} for <Text bold>{formatDuration(durationMs)}</Text>
+        {label} for <LeftoverThoughtClock baseMs={thoughtForMs} lastThinkingAtMs={lastThinkingAtMs} live={liveClock} />
       </Text>,
     );
   }
@@ -387,6 +474,30 @@ export function CollapsedReadSearchContent({
             <Text color="error">-{linesRemoved}</Text>
           </Text>
         )}
+      </Text>,
+    );
+  }
+
+  // densable Jc: scratchpad then workshop, immediately after file edits.
+  if (scratchpadWriteCount > 0) {
+    const verb = isActiveGroup ? 'making' : 'made';
+    pushPart(
+      'scratchpad',
+      verb,
+      <Text>
+        <Text bold>{scratchpadWriteCount}</Text> scratchpad {scratchpadWriteCount === 1 ? 'edit' : 'edits'}{' '}
+        <LeftoverLineDiff added={message.scratchpadLinesAdded ?? 0} removed={message.scratchpadLinesRemoved ?? 0} />
+      </Text>,
+    );
+  }
+  if (workshopWriteCount > 0) {
+    const verb = isActiveGroup ? 'making' : 'made';
+    pushPart(
+      'workshop',
+      verb,
+      <Text>
+        <Text bold>{workshopWriteCount}</Text> page {workshopWriteCount === 1 ? 'edit' : 'edits'}{' '}
+        <LeftoverLineDiff added={message.workshopLinesAdded ?? 0} removed={message.workshopLinesRemoved ?? 0} />
       </Text>,
     );
   }
@@ -574,7 +685,8 @@ export function CollapsedReadSearchContent({
     }
     memParts.push(
       <Text key="mem-read">
-        {verb} <Text bold>{memoryReadCount}</Text> {memoryReadCount === 1 ? 'memory' : 'memories'}
+        {verb} <Text bold>{memoryReadCount}</Text> {hasAccountMemory ? 'local ' : ''}
+        {memoryReadCount === 1 ? 'memory' : 'memories'}
       </Text>,
     );
   }
@@ -628,12 +740,18 @@ export function CollapsedReadSearchContent({
             <Text dimColor>{'  ⎿  '}</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1}>
-            {effectiveHint.split('\n').map((line, i, arr) => (
-              <Text key={`hint-${i}`} dimColor>
-                {line}
-                {i === arr.length - 1 && shellProgressSuffix}
+            {leftoverEm ? (
+              <Text dimColor italic>
+                {leftoverHx(effectiveHint, columns - LEFTOVER_HX_GUTTER, LEFTOVER_HX_MAX_LINES)}
               </Text>
-            ))}
+            ) : (
+              effectiveHint.split('\n').map((line, i, arr) => (
+                <Text key={`hint-${i}`} dimColor>
+                  {line}
+                  {i === arr.length - 1 && shellProgressSuffix}
+                </Text>
+              ))
+            )}
           </Box>
         </Box>
       )}
