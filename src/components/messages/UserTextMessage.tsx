@@ -148,6 +148,17 @@ export function UserTextMessage({
 
   // Slash commands/
   if (param.text.includes(`<${COMMAND_MESSAGE_TAG}>`)) {
+    // Resume / merge can keep command-message and local-command-stdout in one
+    // text block. Command bubble must not swallow the ANSI stdout grid.
+    const hasLocalOutput = param.text.includes('<local-command-stdout') || param.text.includes('<local-command-stderr');
+    if (hasLocalOutput) {
+      return (
+        <>
+          <UserCommandMessage addMargin={addMargin} param={param} />
+          <UserLocalCommandOutputMessage content={param.text} />
+        </>
+      );
+    }
     return <UserCommandMessage addMargin={addMargin} param={param} />;
   }
 

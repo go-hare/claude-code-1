@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { DIAMOND_FILLED, DIAMOND_OPEN } from '../../constants/figures.js';
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js';
-import { Box, Text } from '@anthropic/ink';
+import { Ansi, Box, Text } from '@anthropic/ink';
 import { extractTag } from '../../utils/messages.js';
 import { unescapeXmlEntities } from '../../utils/xml.js';
 import { Markdown } from '../Markdown.js';
@@ -40,21 +40,31 @@ export function UserLocalCommandOutputMessage({ content }: Props): React.ReactNo
   return lines;
 }
 
+function hasAnsiEscapes(text: string): boolean {
+  return text.includes('\x1b[');
+}
+
 function IndentedContent({ children, isError = false }: { children: string; isError?: boolean }): React.ReactNode {
   if (children.startsWith(`${DIAMOND_OPEN} `) || children.startsWith(`${DIAMOND_FILLED} `)) {
     return <CloudLaunchContent>{children}</CloudLaunchContent>;
   }
+  // densable oa always stripPromptTags:!1. Pre-rendered /context grids are ANSI
+  // (renderToAnsiString) — marked.lexer would eat CSI and the replay would
+  // collapse to the command breadcrumb. Paint via <Ansi> when CSI is present.
+  const body = isError ? (
+    <Text color="error" wrap="wrap">
+      {children}
+    </Text>
+  ) : hasAnsiEscapes(children) ? (
+    <Ansi wrap="wrap">{children}</Ansi>
+  ) : (
+    <Markdown stripPromptTags={false}>{children}</Markdown>
+  );
   return (
     <Box flexDirection="row">
       <Text dimColor>{'  ⎿  '}</Text>
       <Box flexDirection="column" flexGrow={1}>
-        {isError ? (
-          <Text color="error" wrap="wrap">
-            {children}
-          </Text>
-        ) : (
-          <Markdown>{children}</Markdown>
-        )}
+        {body}
       </Box>
     </Box>
   );

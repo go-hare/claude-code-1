@@ -4,7 +4,6 @@ import { FilePathLink } from '../FilePathLink.js';
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useState } from 'react';
-import sample from 'lodash-es/sample.js';
 import { BLACK_CIRCLE, REFERENCE_MARK, TEARDROP_ASTERISK } from '../../constants/figures.js';
 import figures from 'figures';
 import { basename } from 'path';
@@ -14,7 +13,7 @@ import { openPath } from '../../utils/browser.js';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemSaved = feature('TEAMMEM') ? (require('./teamMemSaved.js') as typeof import('./teamMemSaved.js')) : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { TURN_COMPLETION_VERBS } from '../../constants/turnCompletionVerbs.js';
+import { turnCompletionVerbFromUuid } from '../../constants/turnCompletionVerbs.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import type {
   SystemMessage,
@@ -301,7 +300,9 @@ function TurnDurationMessage({
   addMargin: boolean;
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
-  const [verb] = useState(() => sample(TURN_COMPLETION_VERBS) ?? 'Worked');
+  // densable ig(uuid): hash-stable verb; remount must not reshuffle history.
+  const uuid = typeof message.uuid === 'string' ? message.uuid : '';
+  const verb = turnCompletionVerbFromUuid(uuid);
   const pending = message as unknown as { pendingBackgroundAgentCount?: unknown; pendingWorkflowCount?: unknown };
   const pendingAgents =
     typeof pending.pendingBackgroundAgentCount === 'number' ? pending.pendingBackgroundAgentCount : 0;
