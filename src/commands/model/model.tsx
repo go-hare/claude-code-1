@@ -35,6 +35,7 @@ import {
   isOpus1mMergeEnabled,
   parseUserSpecifiedModel,
   renderDefaultModelSetting,
+  renderModelName,
 } from '../../utils/model/model.js';
 import { formatDeniedModelsBlockMessage, isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
@@ -49,9 +50,12 @@ function ModelPickerWrapper({
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
   const isFastMode = useAppState(s => s.fastMode);
   const setAppState = useSetAppState();
+  // densable 2.1.289: Enter → onSetDefault then select; s → select only.
+  const saveAsDefaultRef = React.useRef(false);
   const [pendingFable, setPendingFable] = useState<{
     model: string | null;
     effort: EffortLevel | undefined;
+    persistAsDefault: boolean;
     /** ModelPicker N9/effort apply deferred until accept (not on decline). */
     commitEffort?: () => void;
   } | null>(null);
@@ -66,7 +70,11 @@ function ModelPickerWrapper({
     });
   }
 
-  async function commitModel(model: string | null, effort: EffortLevel | undefined): Promise<void> {
+  async function commitModel(
+    model: string | null,
+    effort: EffortLevel | undefined,
+    persistAsDefault: boolean,
+  ): Promise<void> {
     // densable ye: RH(_y(), "switch") before PreModelSwitch when picking Default.
     if (model === null) {
       const blocked = formatDeniedModelsBlockMessage(getDefaultMainLoopModelSetting(), 'switch');
@@ -105,10 +113,13 @@ function ModelPickerWrapper({
       mainLoopModelForSession: null,
     }));
     saveSessionModel(model);
-    // Persist as default for new sessions (matching upstream 2.1.153 behavior)
-    updateSettingsForSource('userSettings', { model: model ?? undefined });
+    // densable 2.1.289: Enter saves default; s is session-only (Gat vs not).
+    if (persistAsDefault) {
+      updateSettingsForSource('userSettings', { model: model ?? undefined });
+    }
 
     let message = `Set model to ${em(renderModelLabel(model))}`;
+    message += persistAsDefault ? ' and saved as your default for new sessions' : ' for this session only';
     if (effort !== undefined) {
       message += ` with ${em(effort)} effort`;
     }
@@ -147,6 +158,8 @@ function ModelPickerWrapper({
   }
 
   function handleSelect(model: string | null, effort: EffortLevel | undefined, commitEffort?: () => void): void {
+    const persistAsDefault = saveAsDefaultRef.current;
+    saveAsDefaultRef.current = false;
     // Official model_fable_consent densable gate before committing Fable.
     // Pass org/account identity so persisted fableOverageConsentV2 is honored
     // (query.ts already does this; the /model picker previously omitted it).
@@ -159,13 +172,13 @@ function ModelPickerWrapper({
       sessionFallbackConsented: getFableSessionFallbackConsented(),
     });
     if (consentRequired) {
-      setPendingFable({ model, effort, commitEffort });
+      setPendingFable({ model, effort, persistAsDefault, commitEffort });
       return;
     }
     if (shouldApplyDeferredEffortCommit({ consentRequired: false })) {
       commitEffort?.();
     }
-    void commitModel(model, effort);
+    void commitModel(model, effort, persistAsDefault);
   }
 
   if (pendingFable) {
@@ -177,13 +190,13 @@ function ModelPickerWrapper({
         onAccept={({ sessionFallback }) => {
           // Persist key-less latch in bootstrap state so query() honors /model accept.
           if (sessionFallback) setFableSessionFallbackConsented(true);
-          const { model, effort, commitEffort } = pendingFable;
+          const { model, effort, persistAsDefault, commitEffort } = pendingFable;
           setPendingFable(null);
           // Accept only: apply deferred N9 + effort writes after consent.
           if (shouldApplyDeferredEffortCommit({ consentRequired: true, accepted: true })) {
             commitEffort?.();
           }
-          void commitModel(model, effort);
+          void commitModel(model, effort, persistAsDefault);
         }}
         onDecline={() => {
           // Decline: drop deferred commitEffort (no N9 / no effort sticky).
@@ -200,6 +213,9 @@ function ModelPickerWrapper({
       initial={mainLoopModel}
       sessionModel={mainLoopModelForSession}
       onSelect={handleSelect}
+      onSetDefault={() => {
+        saveAsDefaultRef.current = true;
+      }}
       onCancel={handleCancel}
       isStandaloneCommand
       deferEffortApply
@@ -403,6 +419,10 @@ export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
 };
 
 function renderModelLabel(model: string | null): string {
-  const rendered = renderDefaultModelSetting(model ?? getDefaultMainLoopModelSetting());
-  return model === null ? `${rendered} (default)` : rendered;
+  // densable xE: LK(e??Uy()); null → `${o} (default)`. Non-null uses source
+  // spelling so `[1m]` survives em/Jb (do not parse-then-market first).
+  if (model === null) {
+    return `${renderDefaultModelSetting(getDefaultMainLoopModelSetting())} (default)`;
+  }
+  return renderModelName(model);
 }

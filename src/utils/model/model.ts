@@ -730,10 +730,21 @@ function maskModelCodename(baseName: string): string {
   return [masked, ...rest].join('-')
 }
 
+/**
+ * densable $o/Jb path: `[1m]` on the source id must survive display.
+ * Catalog marketing "(1M context)" is not a substitute for the suffix.
+ */
+function keep1mSuffix(display: string, source: string): string {
+  if (!/\[1m\]/i.test(source) || /\[1m\]/i.test(display)) {
+    return display
+  }
+  return `${display.replace(/\s*\((?:with )?1M context\)/gi, '').trim()}[1m]`
+}
+
 export function renderModelName(model: ModelName): string {
   const publicName = getPublicModelDisplayName(model)
   if (publicName) {
-    return publicName
+    return keep1mSuffix(publicName, model)
   }
   if (process.env.USER_TYPE === 'ant') {
     const resolved = parseUserSpecifiedModel(model)
@@ -741,15 +752,15 @@ export function renderModelName(model: ModelName): string {
     if (antModel) {
       const baseName = antModel.model.replace(/\[1m\]$/i, '')
       const masked = maskModelCodename(baseName)
-      const suffix = has1mContext(resolved) ? '[1m]' : ''
+      const suffix = has1mContext(resolved) || has1mContext(model) ? '[1m]' : ''
       return masked + suffix
     }
     if (resolved !== model) {
-      return `${model} (${resolved})`
+      return keep1mSuffix(`${model} (${resolved})`, model)
     }
-    return resolved
+    return keep1mSuffix(resolved, model)
   }
-  return model
+  return keep1mSuffix(model, model)
 }
 
 /**
@@ -911,7 +922,9 @@ export function modelDisplayString(model: ModelSetting): string {
     return `Default (${getDefaultMainLoopModel()})`
   }
   const resolvedModel = parseUserSpecifiedModel(model)
-  return model === resolvedModel ? resolvedModel : `${model} (${resolvedModel})`
+  const display =
+    model === resolvedModel ? resolvedModel : `${model} (${resolvedModel})`
+  return keep1mSuffix(display, model)
 }
 
 // @[MODEL LAUNCH]: Add a marketing name mapping for the new model below.

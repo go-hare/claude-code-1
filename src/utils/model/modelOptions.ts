@@ -519,7 +519,21 @@ function mapVendorPickerRows(
 }
 
 function getGrokModelPickerOptions(): ModelOption[] {
-  return [getDefaultOptionForUser(), ...mapVendorPickerRows(GROK_MODEL_OPTIONS)]
+  const options = [
+    getDefaultOptionForUser(),
+    ...mapVendorPickerRows(GROK_MODEL_OPTIONS),
+  ]
+  const grokEnv = process.env.GROK_MODEL
+  if (grokEnv && !options.some(existing => existing.value === grokEnv)) {
+    options.push({
+      value: grokEnv,
+      label: grokEnv,
+      description: `Custom model (${grokEnv})`,
+    })
+  }
+  // densable 2.1.289 grok picker: env custom rows + Fable (PAYG insert).
+  maybeInsertFablePickerRow(options, { isSubscriber: false })
+  return options
 }
 
 function getOpenAIApiModelPickerOptions(): ModelOption[] {

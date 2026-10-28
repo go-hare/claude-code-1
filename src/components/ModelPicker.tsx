@@ -1,7 +1,6 @@
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import { has1mContext } from '../utils/context.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import {
@@ -64,6 +63,11 @@ export type Props = {
    * must not call `commitEffort`.
    */
   onSelect: (model: string | null, effort: EffortLevel | undefined, commitEffort?: () => void) => void;
+  /**
+   * densable 2.1.289 onSetDefault: Enter latches this before onChange so
+   * confirm persists as default; `s` skips it (session only).
+   */
+  onSetDefault?: (model: string | null) => void;
   onCancel?: () => void;
   isStandaloneCommand?: boolean;
   showFastModeNotice?: boolean;
@@ -100,6 +104,7 @@ export function ModelPicker({
   initial,
   sessionModel,
   onSelect,
+  onSetDefault,
   onCancel,
   isStandaloneCommand,
   showFastModeNotice,
@@ -129,26 +134,7 @@ export function ModelPicker({
 
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
 
-  const [marked1MValues, setMarked1MValues] = useState<Set<string>>(
-    () => new Set(has1mContext(initialValue) ? [initialValue.replace(/\[1m\]/i, '')] : []),
-  );
-
-  const handleToggle1M = useCallback(() => {
-    if (!focusedValue || focusedValue === NO_PREFERENCE) return;
-    // Key on the base value so lookups in handleSelect / is1MMarked match the
-    // initializer — predefined 1M options arrive with a `[1m]` suffix in
-    // `focusedValue`, which would diverge from the base-value key set.
-    const baseKey = focusedValue.replace(/\[1m\]/i, '');
-    setMarked1MValues(prev => {
-      const next = new Set(prev);
-      if (next.has(baseKey)) {
-        next.delete(baseKey);
-      } else {
-        next.add(baseKey);
-      }
-      return next;
-    });
-  }, [focusedValue]);
+  // densable 2.1.289: no Space 1M toggle row; `[1m]` is on the option value.
 
   const [hasToggledEffort, setHasToggledEffort] = useState(false);
   const effortValue = useAppState(s => s.effortValue);
@@ -200,10 +186,6 @@ export function ModelPicker({
 
   const focusedModelName = selectOptions.find(opt => opt.value === focusedValue)?.label;
   const focusedModel = resolveOptionModel(focusedValue);
-  const is1MMarked =
-    focusedValue !== undefined &&
-    focusedValue !== NO_PREFERENCE &&
-    marked1MValues.has(focusedValue.replace(/\[1m\]/i, ''));
   const focusedSupportsEffort = focusedModel ? modelSupportsEffort(focusedModel) : false;
   // densable MDe-shaped ladder (capability ∩ org). Exclusive catalog rows
   // (DeepSeek high|max, Grok low|medium|high, Kimi low|high|max) replace the
@@ -269,12 +251,19 @@ export function ModelPicker({
     {
       'modelPicker:decreaseEffort': () => handleCycleEffort('left'),
       'modelPicker:increaseEffort': () => handleCycleEffort('right'),
-      'modelPicker:toggle1M': () => handleToggle1M(),
+      'modelPicker:thisSessionOnly': () => {
+        const value = focusedValue;
+        if (!value) return;
+        handleSelect(value);
+      },
     },
     { context: 'ModelPicker' },
   );
 
-  function handleSelect(value: string): void {
+  function handleSelect(value: string, persistAsDefault = false): void {
+    if (persistAsDefault) {
+      onSetDefault?.(value === NO_PREFERENCE ? null : value);
+    }
     const selectedModel = resolveOptionModel(value);
     const wantsUltracode = effort === 'ultracode' && selectedModel !== undefined && isUltracodeOfferable(selectedModel);
     const ultracodeWire = wantsUltracode ? getUltracodeEffortForModel(selectedModel) : undefined;
@@ -352,18 +341,9 @@ export function ModelPicker({
         ? effortForModel
         : undefined;
     const deferredCommit = deferEffortApply ? commitEffort : undefined;
-    if (value === NO_PREFERENCE) {
-      onSelect(null, selectedEffort, deferredCommit);
-      return;
-    }
-    // Apply or strip [1m] suffix based on user toggle. marked1MValues is keyed
-    // on the base value (see initializer + handleToggle1M), so look up with the
-    // base form — not `value`, which may carry a `[1m]` suffix from predefined
-    // 1M options and would never match.
-    const baseValue = value.replace(/\[1m\]/i, '');
-    const wants1M = marked1MValues.has(baseValue);
-    const finalValue = wants1M ? `${baseValue}[1m]` : baseValue;
-    onSelect(finalValue, selectedEffort, deferredCommit);
+    // densable 2.1.289: picker values already carry `[1m]` when listed; no Space toggle.
+    const selected = value === NO_PREFERENCE ? null : value;
+    onSelect(selected, selectedEffort, deferredCommit);
   }
 
   const content = (
@@ -375,12 +355,12 @@ export function ModelPicker({
           </Text>
           <Text dimColor>
             {headerText ??
-              'Choose a model for this and future sessions. Use ← → to adjust effort, Space to toggle 1M context.'}
+              'Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.'}
           </Text>
           {sessionModel && (
             <Text dimColor>
-              Currently using {modelDisplayString(sessionModel)} for this session (set by plan mode). Selecting a model
-              will undo this.
+              Currently using {modelDisplayString(sessionModel)} for this session only (base model:{' '}
+              {modelDisplayString(initial)}). Selecting a model here replaces both.
             </Text>
           )}
         </Box>
@@ -391,7 +371,7 @@ export function ModelPicker({
               defaultValue={initialValue}
               defaultFocusValue={initialFocusValue}
               options={selectOptions}
-              onChange={handleSelect}
+              onChange={value => handleSelect(value, true)}
               onFocus={handleFocus}
               onCancel={onCancel ?? (() => {})}
               visibleOptionCount={visibleCount}
@@ -429,18 +409,6 @@ export function ModelPicker({
               {focusedModelName ? ` for ${focusedModelName}` : ''}
             </Text>
           )}
-          {is1MMarked ? (
-            <Text dimColor>
-              <EffortLevelIndicator effort={'high'} /> 1M context on
-              <Text color="subtle"> · Space to toggle</Text>
-            </Text>
-          ) : (
-            <Text color="subtle">
-              <EffortLevelIndicator effort={undefined} /> 1M context off
-              {focusedModelName ? ` for ${focusedModelName}` : ''}
-              <Text color="subtle"> · Space to toggle</Text>
-            </Text>
-          )}
         </Box>
 
         {isFastModeEnabled() ? (
@@ -467,8 +435,9 @@ export function ModelPicker({
             <>Press {exitState.keyName} again to exit</>
           ) : (
             <Byline>
-              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
-              <ConfigurableShortcutHint action="select:cancel" context="Select" fallback="Esc" description="exit" />
+              <KeyboardShortcutHint shortcut="Enter" action="set as default" />
+              <KeyboardShortcutHint shortcut="s" action="use this session only" />
+              <ConfigurableShortcutHint action="select:cancel" context="Select" fallback="Esc" description="cancel" />
             </Byline>
           )}
         </Text>
