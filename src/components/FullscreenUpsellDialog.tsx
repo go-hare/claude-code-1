@@ -87,27 +87,32 @@ export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps):
     onDone('declined');
   }
 
+  // densable 2.1.289 p8 @208494288: ye Dialog + three dimColor · bullets +
+  // qn {confirmLabel:"Yes, try it", cancelLabel:"Not now"}. Ink Dialog has no
+  // confirmLabel — Select stands in for qn. First-bullet second clause is
+  // ze=!hhe(); keep the full sentence (no reduced-motion analog).
   return (
-    <Dialog title="Flicker-free rendering" onCancel={() => handleSelect('decline')}>
-      <Box flexDirection="column">
-        <Text>
-          Claude Code can use flicker-free full-screen rendering. Enable now? Takes effect on the next session start.
-        </Text>
-        <Text dimColor>You can also run /tui on later. To go back: /tui off.</Text>
+    <Dialog title="Try the new fullscreen renderer?" onCancel={() => handleSelect('decline')}>
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Text dimColor>· Flicker-free output — fixes the flashing you see during long responses</Text>
+          <Text dimColor>· Mouse support — click to move your cursor or expand results</Text>
+          <Text dimColor>· Selected text auto-copies to your clipboard</Text>
+        </Box>
+        <Select
+          options={[
+            {
+              label: 'Yes, try it',
+              value: 'accept' as const,
+            },
+            {
+              label: 'Not now',
+              value: 'decline' as const,
+            },
+          ]}
+          onChange={handleSelect}
+        />
       </Box>
-      <Select
-        options={[
-          {
-            label: 'Enable flicker-free rendering',
-            value: 'accept' as const,
-          },
-          {
-            label: 'Not now',
-            value: 'decline' as const,
-          },
-        ]}
-        onChange={handleSelect}
-      />
     </Dialog>
   );
 }
