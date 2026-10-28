@@ -44,4 +44,16 @@ describe('densable 2.1.248 #12 WIN32_INPUT_MODE / Yot', () => {
     expect(src).not.toContain('WIN32_INPUT_MODE')
     expect(src).not.toContain('?9001l')
   })
+
+  test('ads / applyFleetViewHostWindowsEnv is windows || WT_SESSION (gold)', () => {
+    const src = readFileSync(join(SCREENS, 'AgentView.tsx'), 'utf8')
+    const start = src.indexOf('export function applyFleetViewHostWindowsEnv')
+    expect(start).toBeGreaterThan(0)
+    const end = src.indexOf('export async function renderAgentView', start)
+    const ads = src.slice(start, end)
+    expect(ads).toContain("getPlatform() === 'windows'")
+    expect(ads).toContain('process.env.WT_SESSION')
+    expect(ads).toContain("CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1'")
+    expect(src).toContain('applyFleetViewHostWindowsEnv()')
+  })
 })

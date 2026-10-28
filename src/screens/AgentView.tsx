@@ -4152,6 +4152,17 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * densable `ads` / `applyFleetViewHostWindowsEnv`:
+ *   `if(O()==="windows"||a.WT_SESSION)process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT??="1"`
+ * FleetView-only. Main REPL `/resume` does not call this (gold neither).
+ */
+export function applyFleetViewHostWindowsEnv(): void {
+  if (getPlatform() === 'windows' || process.env.WT_SESSION) {
+    process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
+  }
+}
+
 export async function renderAgentView(options?: {
   enteredViaLeftArrow?: boolean;
   dispatchExtraArgs?: string[];
@@ -4168,10 +4179,7 @@ export async function renderAgentView(options?: {
    */
   daemonAlreadyEnsured?: boolean;
 }): Promise<{ resumeHintRequested?: boolean; forkSessionId?: string }> {
-  // Official: applyFleetViewHostWindowsEnv — force full repaint on Windows
-  if (getPlatform() === 'windows') {
-    process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
-  }
+  applyFleetViewHostWindowsEnv();
 
   // Official chO: also accept CLAUDE_AGENTS_SELECT here if not already consumed
   // by agentsMain (in-process remount / left-arrow path).
