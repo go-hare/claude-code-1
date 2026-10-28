@@ -1392,9 +1392,9 @@ export function useLeftoverChromeClaim(hostRef: RefObject<DOMElement | null>, ow
 /**
  * densable `$l(o)` / `useMeasured` — `Pt(subscribeLayout, o)` then
  * `Xt(() => { if (!Object.is(o(), l)) u() })`. Yoga-pass bus, not paint cache.
- * tot `$l(qe)` is `$e` height; ozs hide also `$l`s ScrollBox yoga height so
- * the transcript pane's 2-row peek → full viewport schedules the same second
- * commit gold `$l` uses when `$e` height actually changes.
+ * tot only `$l(qe)` (`$e` / abovePrompt height). Do not `$l` ScrollBox yoga
+ * height — gold tot does not, and a float remainder tick re-renders tot every
+ * yoga pass (spinner clock) then leftoverGs dirty-clears the flexGrow blank.
  */
 function useMeasured(read: () => number): number {
   const { subscribeLayout } = useApp();
@@ -1722,13 +1722,6 @@ export function FullscreenLayout({
     [terminalRows],
   );
   const abovePromptHeight = useYogaHeight(abovePromptRef);
-  // densable `$l` second commit: gold tot only `$l`s `$e`. Empty `$e` stays 0
-  // across ozs hide (display:none → flex, no children). ScrollBox yoga height
-  // is the pane that actually changes (peek → remainder). Same `$l` BODY.
-  const readScrollBoxYogaHeight = useCallback(() => {
-    return scrollRef?.current?.getDomElement()?.yogaNode?.getComputedHeight() ?? 0;
-  }, [scrollRef]);
-  void useMeasured(readScrollBoxYogaHeight);
   // densable `gt=Math.max(0,Ne-pt)` — always, even when T is undefined.
   // Gold always mounts `$e` (abovePrompt wrapper); pt is that box's yoga height.
   const promptMaxHeight = Math.max(0, bottomMaxHeight - abovePromptHeight);

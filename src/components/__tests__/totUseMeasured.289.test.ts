@@ -1,9 +1,8 @@
 /**
  * densable tot `$l` / `useMeasured` — gold `$l(o)` is
  * `Pt(subscribeLayout, o)` then `Xt(() => { if (!Object.is(o(), l)) u() })`.
- * tot `$l(qe)` is `$e` height. ozs hide also `$l`s ScrollBox yoga height so
- * peek → remainder schedules the second commit gold `$l` uses when `$e`
- * height actually changes.
+ * tot `$l(qe)` is `$e` height only. Gold tot does not `$l` ScrollBox yoga
+ * height (float remainder would re-render tot every yoga pass).
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
@@ -22,11 +21,8 @@ describe('densable tot $l / useMeasured (289)', () => {
     expect(src).toContain(
       'const abovePromptHeight = useYogaHeight(abovePromptRef)',
     )
-    expect(src).toContain('readScrollBoxYogaHeight')
-    expect(src).toContain(
-      'scrollRef?.current?.getDomElement()?.yogaNode?.getComputedHeight() ?? 0',
-    )
-    expect(src).toContain('void useMeasured(readScrollBoxYogaHeight)')
+    expect(src).not.toContain('readScrollBoxYogaHeight')
+    expect(src).not.toContain('void useMeasured(readScrollBoxYogaHeight)')
     expect(src).not.toContain('export function $l')
     expect(src).not.toContain('needsViewportWake')
   })
