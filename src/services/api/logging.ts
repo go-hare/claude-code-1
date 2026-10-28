@@ -11,6 +11,7 @@ import {
   getLastApiCompletionTimestamp,
   getTeleportedSessionInfo,
   markFirstTeleportMessageLogged,
+  noteObservedGateway,
   setLastApiCompletionTimestamp,
 } from 'src/bootstrap/state.js'
 import type { QueryChainTracking } from 'src/Tool.js'
@@ -64,6 +65,7 @@ type KnownGateway =
   | 'cloudflare-ai-gateway'
   | 'kong'
   | 'braintrust'
+  | 'bifrost'
   | 'databricks'
 
 // Gateway fingerprints for detecting AI gateways from response headers
@@ -94,6 +96,9 @@ const GATEWAY_FINGERPRINTS: Partial<
   braintrust: {
     prefixes: ['x-bt-'],
   },
+  bifrost: {
+    prefixes: ['x-bifrost-'],
+  },
 }
 
 // Gateways that use provider-owned domains (not self-hosted), so the
@@ -121,7 +126,9 @@ function detectGateway({
     headers.forEach((_, key) => headerNames.push(key))
     for (const [gw, { prefixes }] of Object.entries(GATEWAY_FINGERPRINTS)) {
       if (prefixes.some(p => headerNames.some(h => h.startsWith(p)))) {
-        return gw as KnownGateway
+        const detected = gw as KnownGateway
+        noteObservedGateway(detected)
+        return detected
       }
     }
   }
@@ -131,7 +138,9 @@ function detectGateway({
       const host = new URL(baseUrl).hostname.toLowerCase()
       for (const [gw, suffixes] of Object.entries(GATEWAY_HOST_SUFFIXES)) {
         if (suffixes.some(s => host.endsWith(s))) {
-          return gw as KnownGateway
+          const detected = gw as KnownGateway
+          noteObservedGateway(detected)
+          return detected
         }
       }
     } catch {

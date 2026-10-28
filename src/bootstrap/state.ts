@@ -29,6 +29,11 @@ import {
   getBootstrapSessionHost,
   resetSessionHostForTests,
 } from 'src/utils/sessionHost.js'
+// eslint-disable-next-line custom-rules/bootstrap-isolation
+import type {
+  AutoModeUnavailableResponseRecord,
+  ServerClassifierFallbackChoice,
+} from 'src/utils/sessionSlots.js'
 
 // Union type for registered hooks - can be SDK callbacks or native plugin hooks
 type RegisteredHookMatcher = HookCallbackMatcher | PluginHookMatcher
@@ -1370,6 +1375,160 @@ export function relayStoppedInLastDispatch(): boolean {
 /** densable mark for Zue `qn` */
 export function markRelayStoppedInLastDispatch(): void {
   getBootstrapSessionHost().requestLatches.markRelayStoppedInLastDispatch()
+}
+
+/**
+ * densable `nte` @179330824
+ * `function nte(){return n().host.requestLatches.thirdPartyServerClassifierRefused()}`
+ */
+export function isThirdPartyServerClassifierRefused(): boolean {
+  return getBootstrapSessionHost().requestLatches.thirdPartyServerClassifierRefused()
+}
+
+/**
+ * densable `C5t`
+ * `function C5t(){n().host.requestLatches.markThirdPartyServerClassifierRefused()}`
+ */
+export function markThirdPartyServerClassifierRefused(): void {
+  getBootstrapSessionHost().requestLatches.markThirdPartyServerClassifierRefused()
+}
+
+/**
+ * densable `UPn`
+ * `function UPn(){return n().host.requestLatches.threadsHeldForServerClassifier()}`
+ */
+export function areThreadsHeldForServerClassifier(): boolean {
+  return getBootstrapSessionHost().requestLatches.threadsHeldForServerClassifier()
+}
+
+/**
+ * densable `Kio`
+ * `function Kio(){n().host.requestLatches.markThreadsHeldForServerClassifier()}`
+ */
+export function markThreadsHeldForServerClassifier(): void {
+  getBootstrapSessionHost().requestLatches.markThreadsHeldForServerClassifier()
+}
+
+/**
+ * densable `Yio`
+ * `function Yio(e){return n().host.requestLatches.autoModeUnavailableResponse(e)}`
+ */
+export function getAutoModeUnavailableResponse(
+  request: unknown,
+): AutoModeUnavailableResponseRecord | undefined {
+  return getBootstrapSessionHost().requestLatches.autoModeUnavailableResponse(
+    request,
+  )
+}
+
+/**
+ * densable `ydr`
+ * `function ydr(e){return n().host.requestLatches.autoModeUnavailableResponsesInARow(e)}`
+ */
+export function countAutoModeUnavailableResponsesInARow(
+  runKey: string,
+): number {
+  return getBootstrapSessionHost().requestLatches.autoModeUnavailableResponsesInARow(
+    runKey,
+  )
+}
+
+/**
+ * densable `_dr`
+ * `function _dr(e,t){n().host.requestLatches.noteAutoModeUnavailableResponse(e,t)}`
+ */
+export function noteAutoModeUnavailableResponse(
+  request: unknown,
+  record: AutoModeUnavailableResponseRecord,
+): void {
+  getBootstrapSessionHost().requestLatches.noteAutoModeUnavailableResponse(
+    request,
+    record,
+  )
+}
+
+/**
+ * densable `Sdr`
+ * `function Sdr(e){n().host.requestLatches.clearAutoModeUnavailableResponses(e)}`
+ */
+export function clearAutoModeUnavailableResponses(runKey: string): void {
+  getBootstrapSessionHost().requestLatches.clearAutoModeUnavailableResponses(
+    runKey,
+  )
+}
+
+/**
+ * densable `bdr`
+ * `function bdr(e){n().host.requestLatches.setAutoModeUnavailableStopNotice(e)}`
+ */
+export function setAutoModeUnavailableStopNotice(
+  notice: string | undefined,
+): void {
+  getBootstrapSessionHost().requestLatches.setAutoModeUnavailableStopNotice(
+    notice,
+  )
+}
+
+/**
+ * densable `BPn`
+ * `function BPn(){return n().host.requestLatches.autoModeUnavailableStopNotice()}`
+ */
+export function getAutoModeUnavailableStopNotice(): string | undefined {
+  return getBootstrapSessionHost().requestLatches.autoModeUnavailableStopNotice()
+}
+
+/**
+ * densable `Qio`
+ * `function Qio(){return n().host.requestLatches.observedGateway()}`
+ */
+export function getObservedGateway(): string | undefined {
+  return getBootstrapSessionHost().requestLatches.observedGateway()
+}
+
+/**
+ * densable `Zio`
+ * `function Zio(e){n().host.requestLatches.noteObservedGateway(e)}`
+ */
+export function noteObservedGateway(gateway: string): void {
+  getBootstrapSessionHost().requestLatches.noteObservedGateway(gateway)
+}
+
+/**
+ * densable `jPn`
+ * `function jPn(){return n().host.requestLatches.serverClassifierFallbackChoice()}`
+ */
+export function getServerClassifierFallbackChoice():
+  | ServerClassifierFallbackChoice
+  | undefined {
+  return getBootstrapSessionHost().requestLatches.serverClassifierFallbackChoice()
+}
+
+/**
+ * densable `eao`
+ * `function eao(e){n().host.requestLatches.setServerClassifierFallbackChoice(e)}`
+ */
+export function setServerClassifierFallbackChoice(
+  choice: ServerClassifierFallbackChoice,
+): void {
+  getBootstrapSessionHost().requestLatches.setServerClassifierFallbackChoice(
+    choice,
+  )
+}
+
+/**
+ * densable `wdr`
+ * `function wdr(){n().host.requestLatches.clearServerClassifierFallbackChoice()}`
+ */
+export function clearServerClassifierFallbackChoice(): void {
+  getBootstrapSessionHost().requestLatches.clearServerClassifierFallbackChoice()
+}
+
+/**
+ * densable `tao`
+ * `function tao(){return n().host.requestLatches.takeServerClassifierFallbackAnnouncement()}`
+ */
+export function takeServerClassifierFallbackAnnouncement(): boolean {
+  return getBootstrapSessionHost().requestLatches.takeServerClassifierFallbackAnnouncement()
 }
 
 /**

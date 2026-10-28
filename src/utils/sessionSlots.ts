@@ -2159,6 +2159,21 @@ export class CredentialSlots {
   }
 }
 
+/**
+ * densable `Ke.#C` record — keyed by the in-flight server-classifier
+ * request object (`YOe`), not a string id.
+ */
+export type AutoModeUnavailableResponseRecord = {
+  runKey: string
+  position: number
+  waited: Promise<boolean>
+}
+
+/** densable `Ke.#A` — in-flight classifier billing-notice choice. */
+export type ServerClassifierFallbackChoice = Promise<
+  'continue' | 'interrupt' | 'cancelled' | 'continue_unacknowledged'
+>
+
 /** Official qe @178545454 */
 export class RequestLatches {
   #e: string[] | null = null
@@ -2177,6 +2192,20 @@ export class RequestLatches {
   #u: string | null = null
   /** densable `lq.relayStoppedInLastDispatch` @184980422. */
   #g = false
+  /** densable `Ke.#S` / `nte`. */
+  #S = false
+  /** densable `Ke.#v` / `UPn`. */
+  #v = false
+  /** densable `Ke.#C` / `Yio`. */
+  #C = new Map<unknown, AutoModeUnavailableResponseRecord>()
+  /** densable `Ke.#x` / `BPn`. */
+  #x: string | undefined = undefined
+  /** densable `Ke.#T` / `tao`. */
+  #T = false
+  /** densable `Ke.#w` / `Qio`. */
+  #w: string | undefined = undefined
+  /** densable `Ke.#A` / `jPn`. */
+  #A: ServerClassifierFallbackChoice | undefined = undefined
   promptCache1hAllowlist(): string[] | null {
     return this.#e
   }
@@ -2252,6 +2281,88 @@ export class RequestLatches {
   markRelayStoppedInLastDispatch(): void {
     this.#g = true
   }
+  /** densable `Ke.thirdPartyServerClassifierRefused` / `nte`. */
+  thirdPartyServerClassifierRefused(): boolean {
+    return this.#S
+  }
+  /** densable `Ke.markThirdPartyServerClassifierRefused` / `C5t`. */
+  markThirdPartyServerClassifierRefused(): void {
+    this.#S = true
+  }
+  /** densable `Ke.threadsHeldForServerClassifier` / `UPn`. */
+  threadsHeldForServerClassifier(): boolean {
+    return this.#v
+  }
+  /** densable `Ke.markThreadsHeldForServerClassifier` / `Kio`. */
+  markThreadsHeldForServerClassifier(): void {
+    this.#v = true
+  }
+  /** densable `Ke.autoModeUnavailableResponse` / `Yio`. */
+  autoModeUnavailableResponse(
+    request: unknown,
+  ): AutoModeUnavailableResponseRecord | undefined {
+    return this.#C.get(request)
+  }
+  /** densable `Ke.autoModeUnavailableResponsesInARow` / `ydr`. */
+  autoModeUnavailableResponsesInARow(runKey: string): number {
+    let count = 0
+    for (const record of this.#C.values()) {
+      if (record.runKey === runKey) count++
+    }
+    return count
+  }
+  /** densable `Ke.noteAutoModeUnavailableResponse` / `_dr`. */
+  noteAutoModeUnavailableResponse(
+    request: unknown,
+    record: AutoModeUnavailableResponseRecord,
+  ): void {
+    this.#C.set(request, record)
+  }
+  /** densable `Ke.clearAutoModeUnavailableResponses` / `Sdr`. */
+  clearAutoModeUnavailableResponses(runKey: string): void {
+    for (const [key, record] of this.#C) {
+      if (record.runKey === runKey) this.#C.delete(key)
+    }
+  }
+  /** densable `Ke.setAutoModeUnavailableStopNotice` / `bdr`. */
+  setAutoModeUnavailableStopNotice(notice: string | undefined): void {
+    this.#x = notice
+  }
+  /** densable `Ke.autoModeUnavailableStopNotice` / `BPn`. */
+  autoModeUnavailableStopNotice(): string | undefined {
+    return this.#x
+  }
+  /** densable `Ke.observedGateway` / `Qio`. */
+  observedGateway(): string | undefined {
+    return this.#w
+  }
+  /** densable `Ke.noteObservedGateway` / `Zio` — first write wins. */
+  noteObservedGateway(gateway: string): void {
+    this.#w ??= gateway
+  }
+  /** densable `Ke.serverClassifierFallbackChoice` / `jPn`. */
+  serverClassifierFallbackChoice(): ServerClassifierFallbackChoice | undefined {
+    return this.#A
+  }
+  /** densable `Ke.setServerClassifierFallbackChoice` / `eao`. */
+  setServerClassifierFallbackChoice(
+    choice: ServerClassifierFallbackChoice,
+  ): void {
+    this.#A = choice
+  }
+  /** densable `Ke.clearServerClassifierFallbackChoice` / `wdr`. */
+  clearServerClassifierFallbackChoice(): void {
+    this.#A = undefined
+  }
+  /**
+   * densable `Ke.takeServerClassifierFallbackAnnouncement` / `tao`.
+   * True once after `#S`, then latched off.
+   */
+  takeServerClassifierFallbackAnnouncement(): boolean {
+    if (!this.#S || this.#T) return false
+    this.#T = true
+    return true
+  }
   reset(): void {
     this.#e = null
     this.#t = new Map()
@@ -2266,6 +2377,13 @@ export class RequestLatches {
     this.#c = false
     this.#u = null
     this.#g = false
+    this.#S = false
+    this.#v = false
+    this.#C.clear()
+    this.#x = undefined
+    this.#T = false
+    this.#w = undefined
+    this.#A = undefined
   }
 }
 
