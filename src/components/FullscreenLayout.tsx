@@ -1390,24 +1390,31 @@ export function useLeftoverChromeClaim(hostRef: RefObject<DOMElement | null>, ow
 }
 
 /**
- * densable `$l(o)` — `Pt(subscribeLayout, o)` + layout-effect bump when
- * `!Object.is(o(), snapshot)`. Gold tot `qe` is
- * `$e.current===null?0:Js($e.current).height` — raw yoga height, no Math.round.
- * Rounding spinner/companion sub-pixels rewrote PromptInput maxHeight every
- * frame and flashed the transcript.
+ * densable `$l(o)` / `useMeasured` — `Pt(subscribeLayout, o)` then
+ * `Xt(() => { if (!Object.is(o(), l)) u() })`. Yoga-pass bus, not paint cache.
+ * tot `$l(qe)` is `$e` height; ozs hide also `$l`s ScrollBox yoga height so
+ * the transcript pane's 2-row peek → full viewport schedules the same second
+ * commit gold `$l` uses when `$e` height actually changes.
  */
-function useYogaHeight(ref: RefObject<DOMElement | null>): number {
+function useMeasured(read: () => number): number {
   const { subscribeLayout } = useApp();
-  const read = useCallback(() => {
-    // densable qe: `$e.current===null?0:Js($e.current).height` — no finite gate.
-    return ref.current?.yogaNode?.getComputedHeight() ?? 0;
-  }, [ref]);
   const snapshot = useSyncExternalStore(subscribeLayout, read, read);
   const [, bump] = useReducer((n: number) => n + 1, 0);
   useLayoutEffect(() => {
     if (!Object.is(read(), snapshot)) bump();
   });
   return snapshot;
+}
+
+/**
+ * densable tot `qe` / `$l(qe)` — `$e.current===null?0:Js($e.current).height`.
+ * Raw yoga height, no Math.round (sub-pixel maxHeight flashes the transcript).
+ */
+function useYogaHeight(ref: RefObject<DOMElement | null>): number {
+  const read = useCallback(() => {
+    return ref.current?.yogaNode?.getComputedHeight() ?? 0;
+  }, [ref]);
+  return useMeasured(read);
 }
 
 type Props = {
@@ -1715,6 +1722,13 @@ export function FullscreenLayout({
     [terminalRows],
   );
   const abovePromptHeight = useYogaHeight(abovePromptRef);
+  // densable `$l` second commit: gold tot only `$l`s `$e`. Empty `$e` stays 0
+  // across ozs hide (display:none → flex, no children). ScrollBox yoga height
+  // is the pane that actually changes (peek → remainder). Same `$l` BODY.
+  const readScrollBoxYogaHeight = useCallback(() => {
+    return scrollRef?.current?.getDomElement()?.yogaNode?.getComputedHeight() ?? 0;
+  }, [scrollRef]);
+  void useMeasured(readScrollBoxYogaHeight);
   // densable `gt=Math.max(0,Ne-pt)` — always, even when T is undefined.
   // Gold always mounts `$e` (abovePrompt wrapper); pt is that box's yoga height.
   const promptMaxHeight = Math.max(0, bottomMaxHeight - abovePromptHeight);
