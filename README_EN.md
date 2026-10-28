@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current npm: **`2.7.294`** (densable **2.1.289** DualInk `fullRepaint` live getter + leftoverGs `R` damage + FleetView `ads()` `WT_SESSION` + fullscreen `tot` `$l` measured hook with `ScrollBox` viewport height sync on modal close). `npm i -g @go-hare/claude-code`
+> Current npm: **`2.7.295`** (densable **2.1.289** fullscreen `tot` `$l($e)` only; drop extra `ScrollBox` Yoga `$l` so short-transcript blank space does not flash with the spinner). `npm i -g @go-hare/claude-code`
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -45,9 +45,11 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / telemetry BODY + Ivt default-on**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **Published npm version is whatever `package.json` says** (currently **2.7.294** = 2.1.289 DualInk getter/leftoverGs + FleetView `ads()` `WT_SESSION` + fullscreen `tot` `$l` / `ScrollBox` viewport sync) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / telemetry BODY + Ivt default-on**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **Published npm version is whatever `package.json` says** (currently **2.7.295** = 2.1.289 tot `$l($e)` only; extra `ScrollBox` Yoga `$l` CUT) and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.289 (2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294)
+#### densable 2.1.289 (2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295)
+
+**2.7.295**: fullscreen `tot` matches gold `$l(qe)` only (`$e` / `abovePrompt` height). The 2.7.294 extra `void useMeasured(readScrollBoxYogaHeight)` re-rendered tot on every yoga pass (spinner clock); leftoverGs then dirty-cleared the `flexGrow:1` blank. **Not** minify 1:1.
 
 **2.7.294**: DualInk `fullRepaint` live getter + leftoverGs `R` damage + write-after `prevFrameContaminated=!1`, FleetView `ads()` `WT_SESSION` full repaint, and fullscreen `tot` `$l` (`useMeasured`) hook syncing `ScrollBox` Yoga viewport height when modals (e.g., `/resume`) close. **Not** minify 1:1.
 
