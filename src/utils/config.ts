@@ -257,6 +257,8 @@ export type GlobalConfig = {
    */
   workspaceApiKey?: string
   hasAcknowledgedCostThreshold?: boolean
+  /** densable classifier billing notice ack timestamp (H5t / lcn). */
+  autoModeClassifierBillingNoticeAcknowledgedAt?: number
   hasSeenUndercoverAutoNotice?: boolean // ant-only: whether the one-time auto-undercover explainer has been shown
   hasSeenUltraplanTerms?: boolean // ant-only: whether the one-time CCR terms notice has been shown in the ultraplan launch dialog
   hasResetAutoModeOptInForDefaultOffer?: boolean // ant-only: one-shot migration guard, re-prompts churned auto-mode users

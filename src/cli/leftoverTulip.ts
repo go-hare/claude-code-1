@@ -61,6 +61,17 @@ export function isPolicyEnforced(policy: string): boolean {
 }
 
 /**
+ * densable `dl` — leftover taint store `t().taints.includes(e)`.
+ * Analog is host hintedTaints ∪ complianceTaints (not `isPolicyEnforced`).
+ */
+export function leftoverTaintsInclude(taint: string): boolean {
+  const host = leftoverPolicyLimitsHost()
+  return (
+    host.hintedTaints.includes(taint) || host.complianceTaints.includes(taint)
+  )
+}
+
+/**
  * leftover `C_()` / `bK()` @183094 — firstParty + first-party base URL, then
  * Console API key OR Team/Enterprise OAuth with inference scope.
  */

@@ -96,7 +96,15 @@ import {
   getTotalCacheReadInputTokens,
   getTotalInputTokens,
   getTotalOutputTokens,
+  isThirdPartyServerClassifierRefused,
 } from '../../bootstrap/state.js'
+import { promptAutoModeServerFallbackNotice } from '../../services/api/autoModeServerFallbackNotice.js'
+import { isAutoModeServerEnabled } from '../../services/api/autoModeClassifierTransport.js'
+import {
+  denyAutoModeUnavailableStop,
+  holdOnAutoModeUnavailable,
+  isConsecutiveUnavailableErrorKind,
+} from './autoModeUnavailable.js'
 import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1117,6 +1125,25 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         }
       }
 
+      // densable O7o — billed-classifier notice when 3P latch is on
+      if (isThirdPartyServerClassifierRefused()) {
+        const notice = await promptAutoModeServerFallbackNotice(context)
+        if (notice === 'interrupt') {
+          if (!context.abortController.signal.aborted) {
+            context.abortController.abort()
+          }
+          return {
+            behavior: 'deny',
+            decisionReason: {
+              type: 'classifier',
+              classifier: 'auto-mode',
+              reason: 'Cancelled at the classifier billing notice',
+            },
+            message: 'Cancelled at the classifier billing notice',
+          }
+        }
+      }
+
       // Run the auto mode classifier
       // Official hOg / sameTurnSiblingContext: prepend same-turn prior tool_use
       // messages so the classifier sees concurrent siblings in this assistant turn.
@@ -1375,8 +1402,28 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             },
           }
         }
-        // densable: unavailable always denies. The iron-gate refresh is absent.
+        // densable: unavailable always denies. Y7o+X7o when lut + key + TPt.
         if (classifierResult.unavailable) {
+          const serverClassifierRequest = (
+            assistantMessage as { serverClassifierRequest?: unknown }
+          ).serverClassifierRequest
+          if (
+            isAutoModeServerEnabled(layeredPermissionContext.mode) &&
+            typeof serverClassifierRequest === 'string' &&
+            isConsecutiveUnavailableErrorKind(classifierResult.errorKind, false)
+          ) {
+            const hold = await holdOnAutoModeUnavailable(
+              serverClassifierRequest,
+              context,
+              toolUseID,
+            )
+            if (hold.kind === 'stop') {
+              return denyAutoModeUnavailableStop(tool, context, hold.recorded)
+            }
+            if (hold.interrupted) {
+              throw new AbortError()
+            }
+          }
           logForDebugging(
             classifierResult.retryAfterMs === undefined
               ? 'Auto mode classifier unavailable, denying with retry guidance (fail closed)'

@@ -307,6 +307,11 @@ export type ToolUseContext = {
   promptShellHandOff?: Array<{ tool: string; command: string }>
   abortController: AbortController
   /**
+   * densable permission-context `scheduleTimeout` — Y7o/fpo hold timer.
+   * Defaults to setTimeout/clearTimeout when omitted.
+   */
+  scheduleTimeout?: (fn: () => void, ms: number) => () => void
+  /**
    * densable `wN` — per-session slot map. Subagents share the parent's
    * object. Design grants live at `toolState.get(DesignSessionState)`.
    */

@@ -13,6 +13,7 @@ import { SandboxPermissionRequest } from '../components/permissions/SandboxPermi
 import { It2SetupPrompt } from '../utils/swarm/It2SetupPrompt.js';
 import type { DialogRendererProps } from './DialogHost.js';
 import { AutoDefaultNudgeDialog } from './dialogs/AutoDefaultNudgeDialog.js';
+import { AutoModeServerFallbackNotice } from './dialogs/AutoModeServerFallbackNotice.js';
 import { AutoModeFlaggedAllowDialog, AutoModeSetupReviewDialog } from './dialogs/AutoModeSetupDialogs.js';
 import {
   ChromeInstallSetupDialog,
@@ -26,6 +27,7 @@ import { withSandboxNetworkPersistRow } from './sandboxNetworkAccess.js';
 import {
   AUTO_DEFAULT_NUDGE_KIND,
   AUTO_MODE_FLAGGED_ALLOW_KIND,
+  AUTO_MODE_SERVER_FALLBACK_KIND,
   AUTO_MODE_SETUP_REVIEW_KIND,
   CHROME_INSTALL_SETUP_KIND,
   CHROME_INSTALL_UPSELL_KIND,
@@ -244,10 +246,23 @@ const autoModeFlaggedAllowRenderer: DialogRenderer = ({ payload, answer }) => {
   );
 };
 
+/** densable fme — auto-mode classifier billing notice. */
+const autoModeServerFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
+  const p = (payload ?? {}) as { title?: string; paragraphs?: string[] };
+  return (
+    <AutoModeServerFallbackNotice
+      title={typeof p.title === 'string' ? p.title : ''}
+      paragraphs={Array.isArray(p.paragraphs) ? p.paragraphs : []}
+      onDone={result => answer(result)}
+    />
+  );
+};
+
 /** densable jsu — full pealed non-permission set */
 export const JSU_NON_PERMISSION_COMPONENTS: Record<string, DialogRenderer> = {
   [IT2_SETUP_KIND]: it2SetupRenderer,
   [COST_THRESHOLD_KIND]: costThresholdRenderer,
+  [AUTO_MODE_SERVER_FALLBACK_KIND]: autoModeServerFallbackRenderer,
   [RESUME_RETURN_KIND]: resumeReturnRenderer,
   [IDE_ONBOARDING_KIND]: ideOnboardingRenderer,
   [SANDBOX_NETWORK_ACCESS_KIND]: sandboxNetworkRenderer,

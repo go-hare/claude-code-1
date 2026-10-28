@@ -9,6 +9,8 @@ import { defineDialogSpec } from '../requestDialog.js'
 export const IT2_SETUP_KIND = 'it2_setup' as const
 export const COMPUTER_USE_APPROVAL_KIND = 'computer_use_approval' as const
 export const COST_THRESHOLD_KIND = 'cost_threshold' as const
+export const AUTO_MODE_SERVER_FALLBACK_KIND =
+  'auto_mode_server_fallback' as const
 export const RESUME_RETURN_KIND = 'resume_return' as const
 export const IDE_ONBOARDING_KIND = 'ide_onboarding' as const
 export const SANDBOX_NETWORK_ACCESS_KIND = 'sandbox_network_access' as const
@@ -28,6 +30,7 @@ export const NON_PERMISSION_DIALOG_KINDS = [
   IT2_SETUP_KIND,
   COMPUTER_USE_APPROVAL_KIND,
   COST_THRESHOLD_KIND,
+  AUTO_MODE_SERVER_FALLBACK_KIND,
   RESUME_RETURN_KIND,
   IDE_ONBOARDING_KIND,
   SANDBOX_NETWORK_ACCESS_KIND,
@@ -69,6 +72,22 @@ export const costThresholdSpec = defineDialogSpec({
   kind: COST_THRESHOLD_KIND,
   payload: passthrough,
   result: () => z.union([z.literal('acknowledged'), z.literal('cancelled')]),
+  default: 'cancelled' as const,
+})
+
+/** densable auto-mode classifier billing notice (fme / H5t). */
+export const autoModeServerFallbackSpec = defineDialogSpec({
+  kind: AUTO_MODE_SERVER_FALLBACK_KIND,
+  payload: () =>
+    z
+      .object({
+        gatewayHost: z.string().optional(),
+        title: z.string(),
+        paragraphs: z.array(z.string()),
+        helpUrl: z.string(),
+      })
+      .passthrough(),
+  result: () => z.enum(['continue', 'interrupt', 'cancelled']),
   default: 'cancelled' as const,
 })
 

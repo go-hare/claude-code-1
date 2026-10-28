@@ -1548,6 +1548,37 @@ export async function runHeadless(
     turnInterruptionState,
     printRequestDialog,
   )) {
+    // densable tao — one-shot billed-classifier notice on the drain
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const {
+        isThirdPartyServerClassifierRefused,
+        takeServerClassifierFallbackAnnouncement,
+      } =
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      const {
+        classifierGatewayHostPayload,
+        formatAutoModeClassifierBillingNotice,
+        sdkHostSupportsClassifierBillingNotice,
+        shouldShowAutoModeClassifierBillingNotice,
+      } =
+        require('../services/api/autoModeServerFallbackNotice.js') as typeof import('../services/api/autoModeServerFallbackNotice.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      if (
+        isThirdPartyServerClassifierRefused() &&
+        !sdkHostSupportsClassifierBillingNotice() &&
+        shouldShowAutoModeClassifierBillingNotice() &&
+        takeServerClassifierFallbackAnnouncement()
+      ) {
+        const text = formatAutoModeClassifierBillingNotice(
+          classifierGatewayHostPayload(),
+        )
+        // gold `$t(jr,"warning")` analog missing — else branch is stderr
+        process.stderr.write(`${text}\n`)
+      }
+    } catch {
+      // notice must never break the drain
+    }
     if (transformToStreamlined) {
       // Streamlined mode: transform messages and stream immediately
       const transformed = transformToStreamlined(message)

@@ -43,6 +43,14 @@ export type RetryStatus =
       maxRetries: number
       error: unknown
     }
+  | {
+      /** densable Y7o onWait kind. leftoverZxt already paints this banner. */
+      kind: 'auto_mode_unavailable'
+      attempt: number
+      maxRetries: number
+      retryInMs: number
+      deadline: number
+    }
 
 /**
  * densable:

@@ -294,6 +294,8 @@ export type PermissionDenyDecision = {
    * when the spelling is inside the working-dir set and the landing is not.
    */
   blockedPath?: string
+  /** densable `X7o` `endsTurn` — consecutive-unavailable stop ends the turn. */
+  endsTurn?: boolean
 }
 
 /**
