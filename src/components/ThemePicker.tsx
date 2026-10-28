@@ -1,7 +1,7 @@
-import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
+import figures from 'figures';
 import { Box, Text, usePreviewTheme, useTheme, useThemeSetting } from '@anthropic/ink';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
@@ -27,6 +27,11 @@ export type ThemePickerProps = {
   skipExitHandling?: boolean;
   /** Called when the user cancels (presses Escape). If skipExitHandling is true and this is provided, it will be called instead of just saving the preview. */
   onCancel?: () => void;
+  /**
+   * densable 2.1.289 onCustomTheme: when set, appends `New custom theme…`.
+   * /theme passes a handler so the extra item is listed (create UI may no-op).
+   */
+  onCustomTheme?: (theme?: unknown) => void;
 };
 
 export function ThemePicker({
@@ -37,6 +42,7 @@ export function ThemePicker({
   hideEscToCancel = false,
   skipExitHandling = false,
   onCancel: onCancelProp,
+  onCustomTheme,
 }: ThemePickerProps): React.ReactNode {
   const [theme] = useTheme();
   const themeSetting = useThemeSetting();
@@ -71,8 +77,14 @@ export function ThemePicker({
   // Always call the hook to follow React rules, but conditionally assign the exit handler
   const exitState = useExitOnCtrlCDWithKeybindings(skipExitHandling ? () => {} : undefined);
 
-  const themeOptions: { label: string; value: ThemeSetting }[] = [
-    ...(feature('AUTO_THEME') ? [{ label: 'Auto (match terminal)', value: 'auto' as const }] : []),
+  const NEW_CUSTOM_THEME = '__new_custom_theme__';
+  const withCurrentMark = (label: string, value: string): string =>
+    value === themeSetting ? `${figures.tick} ${label}` : `  ${label}`;
+  const themeOptions: {
+    label: string;
+    value: ThemeSetting | typeof NEW_CUSTOM_THEME;
+  }[] = [
+    { label: 'Auto (match terminal)', value: 'auto' },
     { label: 'Dark mode', value: 'dark' },
     { label: 'Light mode', value: 'light' },
     {
@@ -95,7 +107,13 @@ export function ThemePicker({
       label: t.name,
       value: `${CUSTOM_THEME_PREFIX}${t.slug}` as ThemeSetting,
     })),
-  ];
+    ...(onCustomTheme
+      ? [{ label: 'New custom theme…', value: NEW_CUSTOM_THEME as ThemeSetting | typeof NEW_CUSTOM_THEME }]
+      : []),
+  ].map(opt => ({
+    ...opt,
+    label: withCurrentMark(opt.label, opt.value),
+  })) as { label: string; value: ThemeSetting | typeof NEW_CUSTOM_THEME }[];
 
   const content = (
     <Box flexDirection="column" gap={1}>
@@ -113,10 +131,16 @@ export function ThemePicker({
         </Box>
         <Select
           options={themeOptions}
+          hideIndexes
           onFocus={setting => {
+            if (setting === NEW_CUSTOM_THEME) return;
             setPreviewTheme(setting as ThemeSetting);
           }}
           onChange={(setting: string) => {
+            if (setting === NEW_CUSTOM_THEME) {
+              onCustomTheme?.();
+              return;
+            }
             savePreview();
             onThemeSelect(setting as ThemeSetting);
           }}

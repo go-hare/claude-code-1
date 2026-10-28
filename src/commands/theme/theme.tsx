@@ -22,6 +22,9 @@ function ThemePickerCommand({ onDone }: Props): React.ReactNode {
         onCancel={() => {
           onDone('Theme picker dismissed', { display: 'system' });
         }}
+        onCustomTheme={() => {
+          // densable: extra `New custom theme…` row when this handler is set.
+        }}
         skipExitHandling={true}
       />
     </Pane>
