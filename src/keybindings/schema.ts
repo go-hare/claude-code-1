@@ -193,6 +193,7 @@ export const KEYBINDING_ACTIONS = [
   'historySearch:accept',
   'historySearch:cancel',
   'historySearch:execute',
+  'historySearch:cycleScope',
   // Task/agent actions
   'task:background',
   // Theme picker actions
@@ -232,7 +233,7 @@ export const KEYBINDING_ACTIONS = [
   // Model picker actions (ant-only)
   'modelPicker:decreaseEffort',
   'modelPicker:increaseEffort',
-  'modelPicker:toggle1M',
+  'modelPicker:thisSessionOnly',
   // Effort panel actions (slash /effort without args)
   'effortPanel:decrease',
   'effortPanel:increase',

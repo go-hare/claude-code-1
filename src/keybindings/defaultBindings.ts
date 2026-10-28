@@ -283,6 +283,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       tab: 'historySearch:accept',
       'ctrl+c': 'historySearch:cancel',
       enter: 'historySearch:execute',
+      'ctrl+s': 'historySearch:cycleScope',
     },
   },
   {
@@ -429,7 +430,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
     bindings: {
       left: 'modelPicker:decreaseEffort',
       right: 'modelPicker:increaseEffort',
-      space: 'modelPicker:toggle1M',
+      s: 'modelPicker:thisSessionOnly',
     },
   },
   // densable 2.1.289 CUt EffortSlider (gold Go left/right/tab/s)
