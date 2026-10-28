@@ -19,7 +19,6 @@ import {
   TOKEN_EFFICIENT_TOOLS_BETA_HEADER,
   SEARCH_EXTRA_TOOLS_BETA_HEADER_1P,
   SEARCH_EXTRA_TOOLS_BETA_HEADER_3P,
-  DANGEROUS_TOOL_USE_BETA_HEADER,
   THINKING_BINDING_CONTROLS_BETA_HEADER,
   THINKING_TOKEN_COUNT_BETA_HEADER,
   WEB_SEARCH_BETA_HEADER,
@@ -382,18 +381,8 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(THINKING_TOKEN_COUNT_BETA_HEADER)
   }
 
-  // densable Gv @184956502 — `_N(Ee,Gv)` only when serverClassifier sticky-sends.
-  // Gold `p1e()` is thirdParty ∧ Gv on the request (`gue` unnamed arm).
-  // Local has no serverClassifier compositor; send Gv on 3P so gue can fire.
-  if (
-    provider !== 'firstParty' &&
-    provider !== 'anthropicAws' &&
-    provider !== 'gateway' &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
-    !isHipaaPolicy()
-  ) {
-    betaHeaders.push(DANGEROUS_TOOL_USE_BETA_HEADER)
-  }
+  // Gv is sticky-sent from paramsFromContext `$h` (queryModel), not
+  // always-pushed here.
 
   // Skip the API-side Haiku thinking summarizer — the summary is only used
   // for ctrl+o display, which interactive users rarely open. The API returns

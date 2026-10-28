@@ -7,6 +7,7 @@ import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
 import { firstPartyNameToCanonical } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import {
+  classifyClassifierProviderKind,
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from './model/providers.js'
@@ -15,9 +16,11 @@ import {
   getInferenceProfileBackingModelCached,
   getThinkingResumptionRefused,
   getThinkingTypeOverride,
+  isStickyBetaSentActive,
   markEffortUnsupported,
   markThinkingHighlightsRefused,
   markThinkingResumptionRefused,
+  markThirdPartyServerClassifierRefused,
   setThinkingTypeOverride,
   stickyRejectBeta,
 } from '../bootstrap/state.js'
@@ -36,6 +39,10 @@ import type { AssistantMessage, Message } from '../types/message.js'
 import { logForDebugging } from './debug.js'
 import { getSettingsWithErrors } from './settings/settings.js'
 import { modelSupportsISP } from './betas.js'
+import {
+  extractFoundryUnsupportedFromError,
+  recordFoundryUnsupportedCapabilities,
+} from './foundryCapabilities.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { isHipaaPolicy } from './midConversationSystem.js'
 
@@ -1174,6 +1181,10 @@ export function classifyThinkingRetryExtras(
   const vue = classifyThinkingTokenCountRetry(error, ctx)
   if (vue !== null) return vue
 
+  // densable T6e before gke in onError @189347448.
+  const t6e = classifySafeguardsNamedRetry(error, ctx)
+  if (t6e !== null) return t6e
+
   const dY = classifyThinkingBindingControlsRetry(error, ctx)
   if (dY !== null) return dY
 
@@ -1191,8 +1202,162 @@ export function classifyThinkingRetryExtras(
 }
 
 /**
- * densable `gue` @184948820 — `dY(qn,!0)` then unnamed 400 while Gv is on
- * the request → drop Gv, `retry:safeguards-unclaimed`.
+ * densable `Sto` @188268116 — content-block `safeguards` pydantic path is
+ * not a top-level safeguards 400.
+ */
+const CONTENT_BLOCK_SAFEGUARDS_PATH_RE =
+  /^messages\.\d+\.content\.\d+(?:\.\w+)*\.safeguards\b/
+
+/**
+ * densable `zse` @180676213 — firstParty / anthropicAws / GCP / foundry.
+ */
+function isExperimentalBetaFirstPartyLikeProvider(): boolean {
+  const provider = getAPIProvider()
+  return (
+    provider === 'firstParty' ||
+    provider === 'anthropicAws' ||
+    provider === 'anthropicGoogleCloud' ||
+    provider === 'foundry'
+  )
+}
+
+/**
+ * densable `k6e` — `MV()==="thirdParty" && Aw.includes(fA.header)`.
+ */
+function isThirdPartyDangerousToolUseOnRequest(
+  lastRequestBetas: readonly string[],
+): boolean {
+  return (
+    classifyClassifierProviderKind() === 'thirdParty' &&
+    lastRequestBetas.includes(DANGEROUS_TOOL_USE_BETA_HEADER)
+  )
+}
+
+/**
+ * densable `b6e` — `AT && !zse() && Aw.includes(a$.header)`.
+ */
+function isBindingControlsClaimingInvalidBeta(
+  lastRequestBetas: readonly string[],
+): boolean {
+  return (
+    isStickyBetaSentActive(THINKING_BINDING_CONTROLS_BETA_HEADER) &&
+    !isExperimentalBetaFirstPartyLikeProvider() &&
+    lastRequestBetas.includes(THINKING_BINDING_CONTROLS_BETA_HEADER)
+  )
+}
+
+/**
+ * densable `gMe` @188268116 — inner error message, else first line of
+ * `APIError.message` with the leading HTTP status stripped.
+ */
+function apiErrorHeadline(error: APIError): string {
+  const body = error.error
+  if (body && typeof body === 'object' && 'error' in body) {
+    const inner = (body as { error?: unknown }).error
+    if (
+      inner &&
+      typeof inner === 'object' &&
+      'message' in inner &&
+      typeof (inner as { message?: unknown }).message === 'string'
+    ) {
+      const message = (inner as { message: string }).message
+      const nl = message.indexOf('\n')
+      return nl === -1 ? message : message.slice(0, nl)
+    }
+  }
+  const stripped = error.message.replace(/^\d{3} /, '')
+  const nl = stripped.indexOf('\n')
+  return nl === -1 ? stripped : stripped.slice(0, nl)
+}
+
+/**
+ * densable `Mb`/`FFo` for `fA` — `ifn` (`anthropic[-_]beta`) or
+ * `capability_rejected:beta_header:<header>`.
+ */
+function mentionsDangerousToolUseBeta(message: string): boolean {
+  return (
+    (message.includes(DANGEROUS_TOOL_USE_BETA_HEADER) &&
+      /anthropic[-_]beta/.test(message)) ||
+    messageHasCapabilityRejectedToken(
+      message,
+      `beta_header:${DANGEROUS_TOOL_USE_BETA_HEADER}`,
+    )
+  )
+}
+
+/**
+ * densable `UTt` @188268323 — top-level dangerous-tool-use / safeguards 400.
+ * Content-block `messages.N.content.M.safeguards` does not count.
+ */
+export function isTopLevelSafeguardsRejected(error: unknown): boolean {
+  if (!isHttp400(error)) return false
+  if (mentionsDangerousToolUseBeta(error.message)) return true
+  if (!/\bsafeguards\b/.test(error.message)) return false
+  return !CONTENT_BLOCK_SAFEGUARDS_PATH_RE.test(apiErrorHeadline(error))
+}
+
+/**
+ * densable `T6e` @189304501 — named dangerous-tool-use / safeguards 400.
+ * `Yy(Xe,fA)` required. 3P arm (`k6e`) latches `C5t`; 1P arm is UTt-only.
+ */
+export function classifySafeguardsNamedRetry(
+  error: unknown,
+  ctx: ThinkingRetryContext,
+): ThinkingDisplayRetryToken | null {
+  if (!isStickyBetaSentActive(DANGEROUS_TOOL_USE_BETA_HEADER)) {
+    return null
+  }
+  const onThirdParty = isThirdPartyDangerousToolUseOnRequest(
+    ctx.lastRequestBetas,
+  )
+  const namedHeader =
+    onThirdParty &&
+    isHttp400(error) &&
+    error.message.includes(DANGEROUS_TOOL_USE_BETA_HEADER)
+  const unnamedInvalidBeta =
+    onThirdParty &&
+    !isBindingControlsClaimingInvalidBeta(ctx.lastRequestBetas) &&
+    isInvalidBetaFlagError(error)
+  const foundryFeatures = onThirdParty
+    ? (extractFoundryUnsupportedFromError(error) ?? [])
+    : []
+  const foundryFeature = foundryFeatures.some(
+    cap => cap.includes('dangerous_tool_use') || cap.includes('safeguard'),
+  )
+  if (
+    !namedHeader &&
+    !unnamedInvalidBeta &&
+    !foundryFeature &&
+    !isTopLevelSafeguardsRejected(error)
+  ) {
+    return null
+  }
+  stickyRejectBeta(DANGEROUS_TOOL_USE_BETA_HEADER)
+  if (onThirdParty) {
+    markThirdPartyServerClassifierRefused()
+    if (foundryFeature) {
+      recordFoundryUnsupportedCapabilities(ctx.model, foundryFeatures)
+    }
+  }
+  logForDebugging(
+    onThirdParty
+      ? '[server-classifier] the platform rejected a beta on this request (HTTP 400), most likely dangerous-tool-use, which this deployment does not know yet; it is not sent again this session and auto mode decides with the local classifier'
+      : "[server-classifier] the server rejected the dangerous-tool-use beta header or the safeguards field (HTTP 400); neither is sent again this conversation, so every auto-mode tool use is denied as classifier-unavailable until the conversation's betas reset (/clear or /compact)",
+    { level: 'warn' },
+  )
+  logEvent('tengu_server_classifier_beta_rejected_retry', {
+    provider:
+      getAPIProvider() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    unnamed: unnamedInvalidBeta,
+    foundryFeature,
+    unclaimed: false,
+  })
+  return 'retry:safeguards'
+}
+
+/**
+ * densable `R6e` @189304501 — `gke(Wn,!0)` then unnamed 400 while Gv is
+ * sticky-sent and `k6e()` (3P ∧ header on the request).
  */
 export function classifySafeguardsUnclaimedRetry(
   error: unknown,
@@ -1203,19 +1368,16 @@ export function classifySafeguardsUnclaimedRetry(
     allowUnnamedBindingGuess: true,
   })
   if (named !== null) return named
-  if (!ctx.lastRequestBetas.includes(DANGEROUS_TOOL_USE_BETA_HEADER)) {
+  if (!isStickyBetaSentActive(DANGEROUS_TOOL_USE_BETA_HEADER)) {
     return null
   }
-  // densable `p1e()` @184947750 — unnamed gue only on 3P.
-  if (getAPIProvider() === 'firstParty') {
+  if (!isThirdPartyDangerousToolUseOnRequest(ctx.lastRequestBetas)) {
     return null
   }
   if (
     !isHttp400(error) ||
-    ctx.alreadyClassified ||
     isThinkingSignatureRejected(error) ||
-    isThinkingBoundToOtherConversation(error) ||
-    isThinkingDisplayUpdatesRejected(error)
+    isThinkingBoundToOtherConversation(error)
   ) {
     return null
   }
