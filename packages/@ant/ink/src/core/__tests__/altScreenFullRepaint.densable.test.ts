@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
 import {
   CharPool,
   createScreen,
@@ -8,6 +9,14 @@ import {
 } from '../screen.js'
 
 describe('densable CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ($n9 sentinel)', () => {
+  test('Ink altScreenFullRepaint is a live env getter (gold get, not ctor field)', async () => {
+    const src = await Bun.file(join(import.meta.dir, '../ink.tsx')).text()
+    expect(src).toContain('private get altScreenFullRepaint(): boolean')
+    expect(src).not.toContain(
+      'this.altScreenFullRepaint = isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)',
+    )
+  })
+
   test('fillFullRepaintSentinel sets every cell charId to spacer (1)', () => {
     const styles = new StylePool()
     const chars = new CharPool()

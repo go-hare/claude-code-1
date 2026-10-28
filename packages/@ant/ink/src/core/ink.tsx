@@ -665,12 +665,15 @@ export default class Ink {
   // visible until the new frame is fully ready.
   private needsEraseBeforePaint = false;
   /**
-   * densable `altScreenFullRepaint` — CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT.
-   * AgentView / FleetView sets this on Windows so every alt-screen frame
-   * rewrites all cells (ConPTY incremental-diff corruption). See densable
-   * onRender: full damage + sentinel prev screen + conptyCursorPin.
+   * densable `get altScreenFullRepaint(){return a.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT}`.
+   * Live env — ads() / applyFleetViewHostWindowsEnv may set the flag after
+   * Ink construction. AgentView / FleetView sets this on Windows (and
+   * WT_SESSION) so every alt-screen frame rewrites all cells (ConPTY
+   * incremental-diff). Gold onRender: full damage + sentinel prev + pin.
    */
-  private altScreenFullRepaint = false;
+  private get altScreenFullRepaint(): boolean {
+    return isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT);
+  }
   /** densable `fullRepaintSentinelScreen` — spacer-filled prev for full damage. */
   private fullRepaintSentinelScreen: Screen | null = null;
   // Native cursor positioning: a component (via useDeclaredCursor) declares
@@ -717,9 +720,8 @@ export default class Ink {
     this.liveCountsEnabled = isBenchLiveCountsEnvEnabled();
     // Official: this.accessibilityMode=be.CLAUDE_CODE_ACCESSIBILITY
     this.accessibilityMode = isEnvTruthyLike(process.env.CLAUDE_CODE_ACCESSIBILITY);
-    // densable: this.altScreenFullRepaint=xH(CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)
-    this.altScreenFullRepaint = isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT);
-    // densable: bgWorkerForceShowCursor = altScreenFullRepaint && !nativeCursor && bg && windows
+    // densable: bgWorkerForceShowCursor = this.altScreenFullRepaint && !nativeCursor && bg && windows
+    // (reads the live getter at ctor — gold ctor snapshot of SESSION_KIND/windows)
     this.bgWorkerForceShowCursor =
       this.altScreenFullRepaint &&
       !this.options.nativeCursor &&
@@ -1641,13 +1643,13 @@ export default class Ink {
     // cells at sibling boundaries that per-node damage tracking misses.
     // Selection/highlight overlays write via setCellStyleId which doesn't
     // track damage. prevFrameContaminated covers the cleanup frame.
-    // densable: also force full damage when altScreenFullRepaint (Windows
-    // AgentView / CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT).
+    // densable: T.layoutShifted||F||L||R||this.altScreenFullRepaint&&altScreen
+    // R = leftoverGsContaminated (flag || overlay-sig change), not the raw flag.
     if (
       didLayoutShift() ||
       selActive ||
       hlActive ||
-      this.prevFrameContaminated ||
+      leftoverGsContaminated ||
       (this.altScreenFullRepaint && this.altScreenActive)
     ) {
       frame.screen.damage = {
@@ -1882,11 +1884,10 @@ export default class Ink {
     writeDiffToTerminal(this.terminal, optimized, this.skipSyncMarkers(), terminalRows, this.takeKeptForNextFrame());
     const writeMs = performance.now() - tWrite;
 
-    // Update blit safety for the NEXT frame. The frame just rendered
-    // becomes frontFrame (= next frame's prevScreen). If we applied the
-    // selection overlay, that buffer has inverted cells. selActive/hlActive
-    // are only ever true in alt-screen; in main-screen this is false→false.
-    this.prevFrameContaminated = selActive || hlActive;
+    // densable: this.prevFrameContaminated=!1 then repaintAfterStaleAbsolutePaint.
+    // Gold does not keep selActive/hlActive on the flag — F||L already full-damage
+    // the current frame; next frame re-applies overlays.
+    this.prevFrameContaminated = false;
     this.repaintAfterStaleAbsolutePaint(frame);
 
     // A ScrollBox has pendingScrollDelta left to drain — schedule the next

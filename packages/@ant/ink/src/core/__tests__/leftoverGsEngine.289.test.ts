@@ -198,6 +198,19 @@ describe('leftoverGs Kt overlayActive / Ze wire', () => {
     expect(render).toContain('node,')
   })
 
+  test('gold DualInk onRender: getter + R damage + write clears flag', () => {
+    expect(ink).toContain('private get altScreenFullRepaint(): boolean')
+    expect(ink).toContain(
+      'return isEnvTruthyLike(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT)',
+    )
+    expect(ink).not.toContain('this.altScreenFullRepaint = isEnvTruthyLike')
+    expect(ink).toContain('leftoverGsContaminated ||')
+    expect(ink).toContain('this.prevFrameContaminated = false')
+    expect(ink).not.toContain(
+      'this.prevFrameContaminated = selActive || hlActive',
+    )
+  })
+
   test('raw-ansi inherited bg walks leftoverGsRawAnsiWrite', () => {
     expect(render).toContain('leftoverGsRawAnsiWrite')
     expect(render).toContain('leftoverGsRewriteRawAnsiBg')
