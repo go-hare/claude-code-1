@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前 npm：**`2.7.292`**（densable **2.1.289** leftover wrap：kLo/Co/writeGuard/query analog/Goal cut + spinner Next keep-previous）。`npm i -g @go-hare/claude-code`
+> 当前 npm：**`2.7.293`**（densable **2.1.289** UI 目录/选择器/slash 面 + 思考未闭合时裁掉流式预览孤 ●；官方到 2.1.312 仍会画这颗点）。`npm i -g @go-hare/claude-code`
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,9 +45,11 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.292** = 2.7.289 leftover wrap + spinner Next keep-previous），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.293** = 2.1.289 UI 目录/选择器/slash 面 + 流式预览孤 ● 裁切），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292）
+#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293）
+
+**2.7.293**：289 UI 目录/选择器/slash 面——`/config` Gi/qi + Auto-compact W2 + remoteHomeSettings gcn、Settings Stats、`/agents` 移除向导、slash 隐藏 `/mode` `/monitor`、历史搜索范围、模型选择器 Enter 默认 / `s` 仅会话 / `[1m]`、Effort 面板、Help、主题勾选、全屏 upsell、轮次动词哈希 + 本地命令 ANSI、空框 `?` 与 liveValue 拒绝写入；另加本地流式预览孤 ● 裁切（`●` 绝对定位 + overflow 按列高裁，官方到 2.1.312 仍会画）。**不是** minify 1:1。
 
 **2.7.292**：leftover 289 wrap——Agent kLo + Co `lucky_cerf`、writeGuard 去掉 unique English、refreshTools 后不重建 systemPrompt、Goal 产品拆除、spinner Next keep-previous（`#k` 读失败保上一份 + `Cn` 主会话 trim/`truncate-end`）。**不是** minify 1:1。
 
