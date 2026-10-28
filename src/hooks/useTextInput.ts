@@ -271,7 +271,43 @@ export function useTextInput({
   function killToLineStart(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineStart()
     recordKill(killed, 'prepend')
+    // densable BTt ft(): Ctrl+U yank hint when unmasked kill is ≥3 chars.
+    if (mask === '' && killed.length >= 3) {
+      addNotification({
+        key: 'kill-paste-hint',
+        kind: 'hint',
+        text: 'Ctrl+Y to paste deleted text',
+        priority: 'immediate',
+        timeoutMs: 5000,
+      })
+    }
     return newCursor
+  }
+
+  /**
+   * densable BTt Jt: write live refs only after onChange. PromptInput rejects
+   * empty-box `?` / `!` (help / bash mode) without committing; sharing liveInputRef
+   * then still writing nextCursor.text left the rejected char in the next keystroke.
+   * Owned (non-shared) refs still dual-write — there is no parent to reject.
+   */
+  function commitLiveCursor(next: Cursor): void {
+    const previous = cursor.text
+    if (previous !== next.text) {
+      onChange(next.text)
+    }
+    // Shared liveInputRef: PromptInput onChange may refuse `?` / `!`. If the
+    // parent never dual-wrote, keep the old buffer. Tab→spaces rewrite still
+    // updates live (liveValueRef !== previous) so we must not treat that as reject.
+    if (
+      externalLiveValueRef &&
+      previous !== next.text &&
+      liveValueRef.current === previous
+    ) {
+      return
+    }
+    setOffset(next.offset)
+    liveValueRef.current = next.text
+    liveOffsetRef.current = next.offset
   }
 
   const readline = getKeybindingFlavor() === 'readline'
@@ -618,12 +654,7 @@ export function useTextInput({
 
       // Update state once with the final result
       if (!cursor.equals(currentCursor)) {
-        if (cursor.text !== currentCursor.text) {
-          onChange(currentCursor.text)
-        }
-        setOffset(currentCursor.offset)
-        liveValueRef.current = currentCursor.text
-        liveOffsetRef.current = currentCursor.offset
+        commitLiveCursor(currentCursor)
       }
       resetKillAccumulation()
       resetYankState()
@@ -643,13 +674,7 @@ export function useTextInput({
     const nextCursor = mapKey(key)(filteredInput)
     if (nextCursor) {
       if (!cursor.equals(nextCursor)) {
-        if (cursor.text !== nextCursor.text) {
-          onChange(nextCursor.text)
-        }
-        setOffset(nextCursor.offset)
-        // Keep the next key in this stdin batch on the updated buffer.
-        liveValueRef.current = nextCursor.text
-        liveOffsetRef.current = nextCursor.offset
+        commitLiveCursor(nextCursor)
       }
       // SSH-coalesced Enter: on slow links, "o" + Enter can arrive as one
       // chunk "o\r". parseKeypress only matches s === '\r', so it hit the

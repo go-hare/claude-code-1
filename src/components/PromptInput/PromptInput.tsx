@@ -1890,12 +1890,31 @@ function PromptInput({
     }
   }
 
-  const lazySpaceInputFilter = useCallback((input: string, key: Key): string => {
-    if (!pendingSpaceAfterPillRef.current) return input;
-    pendingSpaceAfterPillRef.current = false;
-    if (isNonSpacePrintable(input, key)) return ' ' + input;
-    return input;
-  }, []);
+  const lazySpaceInputFilter = useCallback(
+    (input: string, key: Key): string => {
+      // densable o6 @209148750: empty-box `?` is help toggle, not insert.
+      // Returning '' makes useTextInput skip insert AND skip live-ref write.
+      const vimInsert = !vimEnabled || vimMode === 'INSERT';
+      if (
+        input === '?' &&
+        liveInputRef.current === '' &&
+        vimInsert &&
+        !key.ctrl &&
+        !key.meta &&
+        !key.return &&
+        !key.escape
+      ) {
+        logEvent('tengu_help_toggled', {});
+        setHelpOpen(v => !v);
+        return '';
+      }
+      if (!pendingSpaceAfterPillRef.current) return input;
+      pendingSpaceAfterPillRef.current = false;
+      if (isNonSpacePrintable(input, key)) return ' ' + input;
+      return input;
+    },
+    [vimEnabled, vimMode, setHelpOpen],
+  );
 
   function insertTextAtCursor(text: string) {
     // densable 2.1.211 N1: Kt(Ct.current, ze.current, ht.current); splice via
@@ -2697,9 +2716,12 @@ function PromptInput({
     }
     addNotification({
       key: 'effort-level',
+      kind: 'feedback',
       text: effortNotificationText,
       priority: 'high',
-      timeoutMs: 12_000,
+      // densable y8 toast: 10s. Queue behind another high toast is why idle
+      // first-paint can miss it until a later panel refresh.
+      timeoutMs: 10_000,
     });
   }, [effortNotificationText, addNotification, removeNotification]);
 
