@@ -182,7 +182,8 @@ export type ApplyFn = (cursor: PanelPosition) => {
 export const ULTRACODE_HINT =
   'Ultracode on (this session only): effort stays at the current level'
 
-export const CANCEL_MESSAGE = 'Effort unchanged.'
+/** densable 2.1.289 EffortSlider Esc: onDone("Cancelled") → ⎿ Cancelled */
+export const CANCEL_MESSAGE = 'Cancelled'
 
 export function computeConfirmOutcome(
   cursor: PanelPosition,

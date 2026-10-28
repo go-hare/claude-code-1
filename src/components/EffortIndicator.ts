@@ -11,7 +11,7 @@ import {
   getDisplayedEffortLevel,
   getUltracodeEffortForModel,
   isUltracodeModeActive,
-  modelSupportsEffort,
+  shouldShowEffortUI,
 } from '../utils/effort.js'
 
 /**
@@ -25,7 +25,9 @@ export function getEffortNotificationText(
   model: string,
   ultracodeFlag?: boolean,
 ): string | undefined {
-  if (!modelSupportsEffort(model)) return undefined
+  // densable y8: show whenever the model (or an explicit session/env override)
+  // has a displayed effort — idle first paint, not only after a panel.
+  if (!shouldShowEffortUI(model, effortValue)) return undefined
   const level = getDisplayedEffortLevel(model, effortValue)
   if (isUltracodeModeActive(model, effortValue, ultracodeFlag)) {
     const wire = getUltracodeEffortForModel(model) ?? level

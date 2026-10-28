@@ -40,7 +40,8 @@ const MIN_SEGMENT = 12;
 
 // densable help row (plain + ripple). densable 2.1.233 #15 — keep full hint
 // visible (do not truncate mid-sentence for narrow panels).
-const HELP_TEXT = '←/→ to adjust · Enter to save · s for this session only · Esc to cancel';
+const HELP_TEXT = '←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel';
+const ULTRACODE_TAB_HINT = 'Ultracode · Tab to toggle';
 
 // 淡入淡出每帧步长：60ms 间隔下 5 帧达到目标 ≈ 300ms 动画时长。
 const FADE_STEP = 0.2;
@@ -260,7 +261,8 @@ export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode 
             positions={positions}
             sublabel={sublabel}
           />
-          <Box marginTop={1} width={panelWidth} flexShrink={0}>
+          <Box marginTop={1} width={panelWidth} flexShrink={0} flexDirection="column">
+            {positions.includes('ultracode') && <Text color="subtle">{ULTRACODE_TAB_HINT}</Text>}
             <Text color="subtle" wrap="wrap">
               {HELP_TEXT}
             </Text>
@@ -402,6 +404,7 @@ function RippleContent({
       <RippleRow segments={renderRow(0, labelOverlays)} />
       <RippleRow segments={renderRow(1, [sublabelOverlay])} />
       <RippleRow segments={renderRow(2, [])} />
+      {positions.includes('ultracode') && <Text color={RIPPLE_LAVENDER as `#${string}`}>{ULTRACODE_TAB_HINT}</Text>}
       <Text color={RIPPLE_LAVENDER as `#${string}`}>{HELP_TEXT}</Text>
     </>
   );
