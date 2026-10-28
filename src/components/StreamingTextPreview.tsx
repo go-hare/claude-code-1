@@ -1,7 +1,7 @@
 /**
  * Streaming preview row (● + markdown).
  *
- * gold Oa @207919407:
+ * gold Oa @207919407 / 2.1.312 `Pl`:
  *   {displayed, hideTrailingLine} = Pt(subscribe, getDerived)
  *   if (!displayed) return null
  *   v = transcriptV2===undefined ? "row" : "column"
@@ -10,6 +10,11 @@
  *   E = Box column Ehr
  *   N = Box row [M, E]
  *   return Box alignItems flex-start / flexDirection v / marginTop 1 / width 100% / children [T, N]
+ *
+ * Official through 2.1.312 still paints a lone ● when wrap-stream (`h1` /
+ * `Odo` hideTrailingLine) pops the only visual row — thinking / short open
+ * sentence. Local clip (`58f3d6d3`): ● is absolute; inner overflow hidden so
+ * leftover-empty column height 0 clips the bullet. Not gold Oa.
  *
  * Prompt (transcriptV2 undefined): T is false. DualInk DA is gold DA.
  */
@@ -34,19 +39,19 @@ export const StreamingTextPreview = memo(function StreamingTextPreview({ store }
   const direction = transcriptV2 === undefined ? 'row' : 'column';
   const speaker = transcriptV2 === 'label' && false;
   const bullet = transcriptV2 === undefined && (
-    <Box minWidth={2}>
+    <Box minWidth={2} position="absolute">
       <Text color="text" aria-label="claude:">
         {BLACK_CIRCLE}
       </Text>
     </Box>
   );
   const column = (
-    <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft={2}>
       <StreamingMarkdown hideTrailingLine={hideTrailingLine}>{displayed}</StreamingMarkdown>
     </Box>
   );
   const inner = (
-    <Box flexDirection="row">
+    <Box flexDirection="row" overflow="hidden" position="relative">
       {bullet}
       {column}
     </Box>

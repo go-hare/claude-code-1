@@ -21,16 +21,19 @@ describe('assistant gold row @202887955', () => {
     expect(completed).not.toContain('justifyContent')
     // gold @202887955: completed has no extra inner row wrapping bullet+column.
     expect(completed).not.toMatch(/<Box flexDirection="row">\s*<NoSelect/)
-    // gold Oa @207919407: children [T, N]; prompt T=false; N=[minWidth 2 ●, column].
+    // gold Oa @207919407 / 2.1.312 Pl: [T, N], getDerived. Local clip
+    // (`58f3d6d3`) keeps ● out of flow so wrap-stream height 0 hides it.
     expect(streaming).not.toMatch(/flexGrow=\{1\}/)
     expect(streaming).toContain('aria-label="claude:"')
-    expect(streaming).toContain('<Box minWidth={2}>')
-    expect(streaming).toContain('<Box flexDirection="column">')
-    expect(streaming).toContain('<Box flexDirection="row">')
     expect(streaming).toContain('store.getDerived')
-    expect(streaming).not.toContain('overflow="hidden"')
-    expect(streaming).not.toContain('position="absolute"')
-    expect(streaming).not.toContain('paddingLeft={2}')
+    expect(streaming).toContain('transcriptV2 === undefined && (')
+    expect(streaming).toContain(
+      '<Box flexDirection="row" overflow="hidden" position="relative">',
+    )
+    expect(streaming).toContain('<Box minWidth={2} position="absolute">')
+    expect(streaming).toContain('<Box flexDirection="column" paddingLeft={2}>')
+    expect(streaming).toContain('position="absolute"')
+    expect(streaming).toContain('paddingLeft={2}')
     const md = readFileSync(join(import.meta.dir, '../../Markdown.tsx'), 'utf8')
     expect(md).toContain('peekCliHighlight')
     expect(md).not.toContain('<Suspense')
@@ -42,6 +45,5 @@ describe('assistant gold row @202887955', () => {
     )
     expect(hl).toContain("import * as cliHighlight from 'cli-highlight'")
     expect(hl).not.toContain("await import('cli-highlight')")
-    expect(streaming).toContain('transcriptV2 === undefined && (')
   })
 })
