@@ -20,6 +20,7 @@ import {
   buildProcessWrapperProperties,
   buildSandboxProperties,
   buildSettingSourcesProperties,
+  buildAutoModeServerProperties,
   buildCrossSessionPeerAddressProperties,
   type Diagnostic,
   getModelDisplayLabel,
@@ -73,12 +74,14 @@ function buildSecondarySection({
   theme,
   context,
   githubWeb,
+  permissionMode,
 }: {
   mainLoopModel: AppState['mainLoopModel'];
   mcp: AppState['mcp'];
   theme: ThemeName;
   context: LocalJSXCommandContext;
   githubWeb: Property | null;
+  permissionMode: AppState['toolPermissionContext']['mode'];
 }): Property[] {
   const modelLabel = getModelDisplayLabel(mainLoopModel);
 
@@ -90,6 +93,7 @@ function buildSecondarySection({
     ...buildSandboxProperties(),
     ...buildProcessWrapperProperties(),
     ...buildSettingSourcesProperties(),
+    ...buildAutoModeServerProperties(permissionMode),
   ];
 }
 
@@ -127,6 +131,7 @@ function PropertyValue({ value }: { value: Property['value'] }): React.ReactNode
 export function Status({ context, diagnosticsPromise }: Props): React.ReactNode {
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mcp = useAppState(s => s.mcp);
+  const permissionMode = useAppState(s => s.toolPermissionContext.mode);
   const [theme] = useTheme();
   const [githubWeb, setGithubWeb] = useState<Property | null>(null);
 
@@ -145,8 +150,11 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
   // per pane invocation instead of re-fetching on every tab switch (Tab
   // unmounts children when not selected, which was causing the flash).
   const sections = React.useMemo(
-    () => [buildPrimarySection(), buildSecondarySection({ mainLoopModel, mcp, theme, context, githubWeb })],
-    [mainLoopModel, mcp, theme, context, githubWeb],
+    () => [
+      buildPrimarySection(),
+      buildSecondarySection({ mainLoopModel, mcp, theme, context, githubWeb, permissionMode }),
+    ],
+    [mainLoopModel, mcp, theme, context, githubWeb, permissionMode],
   );
 
   // flexGrow so the "Esc to cancel" footer pins to the bottom of the
@@ -190,7 +198,7 @@ function Diagnostics({ promise }: { promise: Promise<Diagnostic[]> }): React.Rea
   if (diagnostics.length === 0) return null;
   return (
     <Box flexDirection="column" paddingBottom={1}>
-      <Text bold>System Diagnostics</Text>
+      <Text bold>System diagnostics</Text>
       {diagnostics.map((diagnostic, i) => (
         <Box key={i} flexDirection="row" gap={1} paddingX={1}>
           <Text color="error">{figures.warning}</Text>

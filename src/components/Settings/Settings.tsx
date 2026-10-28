@@ -9,19 +9,20 @@ import { Pane, Tab, Tabs } from '@anthropic/ink';
 import { Status, buildDiagnostics } from './Status.js';
 import { Config } from './Config.js';
 import { Usage } from './Usage.js';
+import { Stats } from '../Stats.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 
 type Props = {
   onClose: (result?: string, options?: { display?: CommandResultDisplay }) => void;
   context: LocalJSXCommandContext;
-  defaultTab: 'Status' | 'Config' | 'Usage';
+  defaultTab: 'Status' | 'Config' | 'Usage' | 'Stats';
 };
 
 export function Settings({ onClose, context, defaultTab }: Props): React.ReactNode {
   const [selectedTab, setSelectedTab] = useState<string>(defaultTab);
   const [tabsHidden, setTabsHidden] = useState(false);
-  // True while Config's own Esc handler is active (search mode with content
-  // focused). Settings must cede Esc so search can clear/exit first.
+  // True while Config content is focused (header unfocused). Settings cedes
+  // Esc so search can clear/exit first; Config confirm:no still closes the pane.
   const [configOwnsEsc, setConfigOwnsEsc] = useState(false);
   // Fixed content height so switching tabs doesn't shift the pane height.
   // Outside modals cap at min(80% viewport, 30). Inside a Modal the modal's
@@ -49,16 +50,15 @@ export function Settings({ onClose, context, defaultTab }: Props): React.ReactNo
     if (tabsHidden) {
       return;
     }
-    // TODO: Update to "Settings" dialog once we define '/settings'.
-    onClose('Status dialog dismissed', { display: 'system' });
+    // densable zae — "Settings dialog dismissed"
+    onClose('Settings dialog dismissed', { display: 'system' });
   };
 
-  // Disable when submenu is open so the submenu's Dialog can handle ESC,
-  // and when Config's search mode is active so its useInput handler
-  // (clear query → exit search) processes Escape first.
+  // densable zae: cede Esc when Config content owns it (header unfocused),
+  // when Stats has its own confirm:no, or when a submenu is open.
   useKeybinding('confirm:no', handleEscape, {
     context: 'Settings',
-    isActive: !tabsHidden && !(selectedTab === 'Config' && configOwnsEsc),
+    isActive: !tabsHidden && !(selectedTab === 'Config' && configOwnsEsc) && selectedTab !== 'Stats',
   });
 
   const tabs = [
@@ -79,11 +79,15 @@ export function Settings({ onClose, context, defaultTab }: Props): React.ReactNo
     <Tab key="usage" title="Usage">
       <Usage />
     </Tab>,
+    <Tab key="stats" title="Stats">
+      <Stats onClose={onClose} />
+    </Tab>,
   ];
 
   return (
     <Pane color="permission">
       <Tabs
+        title="Settings"
         color="permission"
         selectedTab={selectedTab}
         onTabChange={setSelectedTab}

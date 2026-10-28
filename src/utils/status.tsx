@@ -23,7 +23,10 @@ import { getGatewayAuth } from './gatewayEnv.js';
 import { getIdeClientName, type IDEExtensionInstallationStatus, isJetBrainsIde, toIDEDisplayName } from './ide.js';
 import { describeLoadedClientDataStatus } from '../cli/clientDataUrl.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
-import { getAPIProvider, getBedrockMantleOverrideProvider } from './model/providers.js';
+import { getAPIProvider, getBedrockMantleOverrideProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
+import { leftoverPolicyLimitsHost } from '../cli/leftoverTulip.js';
+import { getAutoModeEnabledState } from './permissions/permissionSetup.js';
+import type { PermissionMode } from '../types/permissions.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
 import { formatProcessWrapperStatusLines, PROCESS_WRAPPER_ENV_KEY } from './processWrapper.js';
@@ -228,7 +231,90 @@ export function buildSettingSourcesProperties(): Property[] {
       const clientData = describeLoadedClientDataStatus();
       return clientData !== undefined ? [{ label: 'Client data', value: clientData }] : [];
     })(),
+    ...buildManagedSettingsRemoteProperties(),
+    ...buildOrganizationPolicyProperties(),
   ];
+}
+
+/**
+ * densable Dfo — always-on Auto mode server row (`dcn(permissionMode)`).
+ */
+export function buildAutoModeServerProperties(permissionMode: PermissionMode): Property[] {
+  return [
+    {
+      label: 'Auto mode server',
+      value: isAutoModeServerEnabled(permissionMode) ? 'Enabled' : 'Disabled',
+    },
+  ];
+}
+
+/**
+ * densable dcn: lut(Lj(e)) && !Gp(si(), fA).
+ * Lj returns "off" unless the current mode is auto and the classifier is on.
+ */
+function isAutoModeServerEnabled(permissionMode: PermissionMode): boolean {
+  if (permissionMode !== 'auto') return false;
+  return getAutoModeEnabledState() === 'enabled';
+}
+
+/**
+ * densable Mfo Vxo — Managed settings (remote) when fetch failed / ineligible.
+ * Remote Anthropic managed-settings control plane is product-cut; surface the
+ * gold ineligible copy when the session cannot fetch.
+ */
+function buildManagedSettingsRemoteProperties(): Property[] {
+  const provider = getAPIProvider();
+  if (provider !== 'firstParty') {
+    return [
+      {
+        label: 'Managed settings (remote)',
+        value: 'not fetched — not available on Bedrock/Vertex/third-party providers',
+      },
+    ];
+  }
+  if (!isFirstPartyAnthropicBaseUrl()) {
+    return [
+      {
+        label: 'Managed settings (remote)',
+        value: 'not fetched — not available with a custom ANTHROPIC_BASE_URL',
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * densable Mfo ezo/W_n — Organization policy when ineligible or unsettled.
+ */
+function buildOrganizationPolicyProperties(): Property[] {
+  const provider = getAPIProvider();
+  if (provider !== 'firstParty') {
+    return [
+      {
+        label: 'Organization policy',
+        value:
+          "not fetched: this session doesn't connect to the Anthropic API directly (Bedrock, Vertex, Foundry, or a gateway)",
+      },
+    ];
+  }
+  if (!isFirstPartyAnthropicBaseUrl()) {
+    return [
+      {
+        label: 'Organization policy',
+        value: 'not fetched with a custom ANTHROPIC_BASE_URL',
+      },
+    ];
+  }
+  const host = leftoverPolicyLimitsHost();
+  if (host.sessionCache !== null && !host.sessionFromServerFetch) {
+    return [
+      {
+        label: 'Organization policy',
+        value: 'Using the copy on disk · not refreshed yet this session',
+      },
+    ];
+  }
+  return [];
 }
 
 export async function buildInstallationDiagnostics(): Promise<Diagnostic[]> {
