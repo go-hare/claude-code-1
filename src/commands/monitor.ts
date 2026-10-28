@@ -21,6 +21,8 @@ const monitor = {
   type: 'local-jsx',
   name: 'monitor',
   description: 'Start a background shell monitor (Shift+Down to view)',
+  // densable 2.1.289: no name:"monitor" in slash list (MONITOR_TOOL still gates isEnabled)
+  isHidden: true,
   isEnabled: () => {
     if (feature('MONITOR_TOOL')) {
       return true

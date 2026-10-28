@@ -6,6 +6,8 @@ const mode = {
   description:
     'Switch interaction mode (default, gentle, sharp, workhorse, token-saver, super-ai)',
   isEnabled: () => true,
+  // densable 2.1.289: no name:"mode" in slash list
+  isHidden: true,
   argumentHint: '<mode-slug>',
   load: () => import('./mode.js'),
 } satisfies Command
