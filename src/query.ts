@@ -1516,6 +1516,18 @@ async function* queryLoop(
         : null
 
       const appState = toolUseContext.getAppState()
+      // densable Ya — kickoff qc+Ha in parallel with the rest of query_setup
+      const autoModeServerContextKickoff = (() => {
+        try {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const { kickoffAutoModeServerContext } =
+            require('./services/api/autoModeServerContext.js') as typeof import('./services/api/autoModeServerContext.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          return kickoffAutoModeServerContext(toolUseContext)
+        } catch {
+          return undefined
+        }
+      })()
       // densable bn/qO: sticky permissionLayers last-wins over appState/options
       const {
         getToolPermissionContextFromLayers,
@@ -1892,6 +1904,30 @@ async function* queryLoop(
             // densable clears kr after pass; re-set if hop yields new token
             pendingFallbackCreditCode = undefined
             pendingFallbackCreditMintModel = undefined
+            const autoModeServerContext = await (async () => {
+              try {
+                /* eslint-disable @typescript-eslint/no-require-imports */
+                const { awaitAutoModeServerContext } =
+                  require('./services/api/autoModeServerContext.js') as typeof import('./services/api/autoModeServerContext.js')
+                /* eslint-enable @typescript-eslint/no-require-imports */
+                return await awaitAutoModeServerContext(
+                  autoModeServerContextKickoff,
+                )
+              } catch {
+                return undefined
+              }
+            })()
+            const serverClassifierKickoffActive = (() => {
+              try {
+                /* eslint-disable @typescript-eslint/no-require-imports */
+                const { isServerClassifierKickoffActive } =
+                  require('./services/api/autoModeServerContext.js') as typeof import('./services/api/autoModeServerContext.js')
+                /* eslint-enable @typescript-eslint/no-require-imports */
+                return isServerClassifierKickoffActive(toolUseContext)
+              } catch {
+                return false
+              }
+            })()
             for await (const message of deps.callModel({
               messages: prependUserContext(callMessages, userContext),
               systemPrompt: fullSystemPrompt,
@@ -2011,6 +2047,9 @@ async function* queryLoop(
                   streamingFallbackOccured = true
                 },
                 querySource,
+                autoModeServerContext,
+                ...(autoModeServerContext !== undefined &&
+                  serverClassifierKickoffActive && { serverClassifier: true }),
                 promptTooLongIsHandled: true,
                 agents: toolUseContext.options.agentDefinitions.activeAgents,
                 allowedAgentTypes:

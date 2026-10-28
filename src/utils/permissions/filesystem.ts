@@ -1174,7 +1174,8 @@ export function pathInWorkingPath(
   return !posix.isAbsolute(relative)
 }
 
-function rootPathForSource(source: PermissionRuleSource): string {
+/** densable `kJn` — settings/cwd root for a permission rule source. */
+export function rootPathForSource(source: PermissionRuleSource): string {
   switch (source) {
     case 'cliArg':
     case 'command':

@@ -77,6 +77,7 @@ import {
 import {
   isStickyBetaRejected,
   isStickyBetaSentActive,
+  isThirdPartyServerClassifierRefused,
   stickySendBeta,
   markRelayThinkingStripRecorded,
 } from '../../bootstrap/state.js'
@@ -218,6 +219,24 @@ import {
   onThinkingOnlyRetryCostCredit,
   type StreamCostCreditState,
 } from 'src/services/api/streamCostCredit.js'
+import {
+  filterBetasForClassifierProvider,
+  modelAllowsDangerousToolUseBeta,
+  serverClassifierBetasEligible,
+} from './autoModeClassifierTransport.js'
+import {
+  composeAutoModeClassifierContext,
+  slimClassifierContextForHistory,
+  type AutoModeServerContextResolved,
+} from './autoModeServerContext.js'
+import {
+  createServerClassifierRequest,
+  recordServerClassifierRequest,
+  serverClassifierEnvelope,
+  settleSafeguardOnMessage,
+  settleServerClassifierStreamEnded,
+  type ServerClassifierRequest,
+} from './serverClassifier.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import type { AgentId } from 'src/types/ids.js'
 import {
@@ -1027,6 +1046,8 @@ export type Options = {
    * densable fallbackCreditLaneArmed — visibleModel armed → rkd credit beta.
    */
   fallbackCreditLaneArmed?: boolean
+  autoModeServerContext?: AutoModeServerContextResolved
+  serverClassifier?: boolean
   /**
    * densable Jn — query armed Ba; stream skips FXl so query qa can ask.
    */
@@ -2208,6 +2229,7 @@ async function* queryModel(
   // densable `n2` — log the effort clamp once per queryModel call (retries
   // reuse paramsFromContext).
   let loggedEffortClamp = false
+  let serverClassifierRequest: ServerClassifierRequest | undefined
 
   const paramsFromContext = (retryContext: RetryContext) => {
     let betasParams = [...betas]
@@ -2226,13 +2248,45 @@ async function* queryModel(
         ? [...getBedrockExtraBodyParamsBetas(retryContext.model)]
         : []
     const extraBodyParams = getExtraBodyParams(bedrockBetas)
-    const isBedrock = getAPIProvider() === 'bedrock'
+    const provider = getAPIProvider()
+    const isBedrock = provider === 'bedrock'
     // densable Joe @184955815 / @184955861 / @184956555 / @184957363
     copyBetaHeaderToExtraBody(
       extraBodyParams,
       THINKING_TOKEN_COUNT_BETA_HEADER,
       isBedrock && betasParams.includes(THINKING_TOKEN_COUNT_BETA_HEADER),
     )
+    // densable `$h` — sticky-send Gv when the classifier compositor is on.
+    const allowsDangerousToolUseBeta = modelAllowsDangerousToolUseBeta(
+      provider,
+      resolvedModel,
+    )
+    const classifierContext =
+      options.serverClassifier === true &&
+      options.autoModeServerContext !== undefined
+        ? composeAutoModeClassifierContext({
+            autoModeServerContext: options.autoModeServerContext,
+            priorTurnContext: [],
+            systemReminders: [],
+          })
+        : undefined
+    const stickySendDangerousToolUse =
+      options.serverClassifier === true &&
+      classifierContext !== undefined &&
+      allowsDangerousToolUseBeta &&
+      serverClassifierBetasEligible() &&
+      !isStickyBetaRejected(DANGEROUS_TOOL_USE_BETA_HEADER) &&
+      !isThirdPartyServerClassifierRefused()
+    if (stickySendDangerousToolUse) {
+      stickySendBeta(DANGEROUS_TOOL_USE_BETA_HEADER)
+    }
+    if (
+      allowsDangerousToolUseBeta &&
+      isStickyBetaSentActive(DANGEROUS_TOOL_USE_BETA_HEADER) &&
+      !betasParams.includes(DANGEROUS_TOOL_USE_BETA_HEADER)
+    ) {
+      betasParams.push(DANGEROUS_TOOL_USE_BETA_HEADER)
+    }
     copyBetaHeaderToExtraBody(
       extraBodyParams,
       DANGEROUS_TOOL_USE_BETA_HEADER,
@@ -2649,6 +2703,35 @@ async function* queryModel(
       )
     }
     lastRequestBetas = filteredBetas
+    // densable rke — classifier request bag; JOe previous on params rebuild.
+    const simulateProxyUsageEnv = process.env.CLAUDE_CODE_SIMULATE_PROXY_USAGE
+    const toolsPresent = allTools.length > 0
+    const sendServerClassifier =
+      stickySendDangerousToolUse &&
+      toolsPresent &&
+      !simulateProxyUsageEnv &&
+      filterBetasForClassifierProvider(filteredBetas).includes(
+        DANGEROUS_TOOL_USE_BETA_HEADER,
+      )
+    if (serverClassifierRequest !== undefined) {
+      settleServerClassifierStreamEnded(serverClassifierRequest)
+    }
+    serverClassifierRequest = sendServerClassifier
+      ? createServerClassifierRequest(randomUUID(), {
+          artifacts: classifierContext?.artifacts,
+          thread: false,
+          agentId: options.agentId,
+        })
+      : undefined
+    if (
+      serverClassifierRequest !== undefined &&
+      classifierContext !== undefined
+    ) {
+      recordServerClassifierRequest(
+        serverClassifierRequest.key,
+        slimClassifierContextForHistory(classifierContext),
+      )
+    }
     lastSentThinkingDisplay =
       thinking !== undefined &&
       thinking !== null &&
@@ -2740,6 +2823,15 @@ async function* queryModel(
       // densable Ht.fallbacks + fallback_credit_token stamp
       ...serverFallbackBody,
       ...creditStamp,
+      ...(sendServerClassifier &&
+        classifierContext !== undefined && {
+          safeguards: [
+            {
+              type: 'dangerous_tool_use',
+              classifier_context: classifierContext,
+            },
+          ],
+        }),
     }
   }
 
@@ -3635,6 +3727,8 @@ async function* queryModel(
                   ...(effortLevelForTranscript !== undefined && {
                     effort: effortLevelForTranscript,
                   }),
+                  ...(serverClassifierRequest !== undefined &&
+                    serverClassifierEnvelope(serverClassifierRequest)),
                 }
                 newMessages.push(m)
                 yield m
@@ -3642,6 +3736,18 @@ async function* queryModel(
               }
               case 'message_delta': {
                 usage = updateUsage(usage, part.usage)
+                if (
+                  serverClassifierRequest !== undefined &&
+                  typeof part.delta === 'object' &&
+                  part.delta !== null &&
+                  'safeguard_results' in part.delta
+                ) {
+                  settleSafeguardOnMessage(
+                    serverClassifierRequest,
+                    part.delta,
+                    contentBlocks,
+                  )
+                }
                 // Capture research from message_delta if available (internal only).
                 // Always overwrite with the latest value. Also write back to
                 // already-yielded messages since message_delta arrives after
@@ -4083,6 +4189,16 @@ async function* queryModel(
                       usage as unknown as BetaUsage,
                       options.model,
                       sessionCostAttribution,
+                    )
+                  }
+                  if (serverClassifierRequest !== undefined) {
+                    settleSafeguardOnMessage(
+                      serverClassifierRequest,
+                      {
+                        ...(partialMessage ?? {}),
+                        content: contentBlocks,
+                      },
+                      contentBlocks,
                     )
                   }
                 }
@@ -4783,6 +4899,13 @@ async function* queryModel(
             ),
             tools,
           )
+          if (serverClassifierRequest !== undefined) {
+            settleSafeguardOnMessage(
+              serverClassifierRequest,
+              result,
+              result.content,
+            )
+          }
           const m: AssistantMessage = {
             message: {
               ...result,
@@ -4803,6 +4926,8 @@ async function* queryModel(
             ...(effortLevelForTranscript !== undefined && {
               effort: effortLevelForTranscript,
             }),
+            ...(serverClassifierRequest !== undefined &&
+              serverClassifierEnvelope(serverClassifierRequest)),
           }
           newMessages.push(m)
           fallbackMessage = m
@@ -5024,6 +5149,13 @@ async function* queryModel(
               ),
               tools,
             )
+            if (serverClassifierRequest !== undefined) {
+              settleSafeguardOnMessage(
+                serverClassifierRequest,
+                result,
+                result.content,
+              )
+            }
             const m: AssistantMessage = {
               message: {
                 ...result,
@@ -5040,6 +5172,8 @@ async function* queryModel(
               ...(effortLevelForTranscript !== undefined && {
                 effort: effortLevelForTranscript,
               }),
+              ...(serverClassifierRequest !== undefined &&
+                serverClassifierEnvelope(serverClassifierRequest)),
             }
             newMessages.push(m)
             fallbackMessage = m
