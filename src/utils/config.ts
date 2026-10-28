@@ -6,7 +6,10 @@ import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
 import { getOriginalCwd, getSessionTrustAccepted } from '../bootstrap/state.js'
 import { getAutoMemEntrypoint } from '../memdir/paths.js'
-import { logEvent } from '../services/analytics/index.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from '../services/analytics/index.js'
 import type { McpServerConfig } from '../services/mcp/types.js'
 import type {
   BillingType,
@@ -39,6 +42,7 @@ import { normalizePathForConfigKey } from './path.js'
 import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import type { ThemeSetting } from './theme.js'
+import { isHoverRestOn } from './storageV5/hoverRestPin.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemPaths = feature('TEAMMEM')
@@ -706,6 +710,11 @@ export type GlobalConfig = {
   // Run Remote Control at startup (requires BRIDGE_MODE)
   // undefined = use default (see getRemoteControlAtStartup() for precedence)
   remoteControlAtStartup?: boolean
+  /**
+   * densable 2.1.289 `remoteHomeSettingsMode` — GlobalConfig, not settings.json.
+   * `forward` | `keep_local`. Absent = unanswered (gold `_k` default omits it).
+   */
+  remoteHomeSettingsMode?: 'forward' | 'keep_local'
 
   /**
    * densable multi-env Remote Control server list (OWs / qpn / jpn).
@@ -993,6 +1002,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'permissionExplainerEnabled',
   'prStatusFooterEnabled',
   'remoteControlAtStartup',
+  'remoteHomeSettingsMode',
   'remoteDialogSeen',
 ] as const
 
@@ -1642,6 +1652,179 @@ export function getRemoteControlAtStartup(): boolean {
     if (ccrAutoConnect?.getCcrAutoConnectDefault()) return true
   }
   return false
+}
+
+/** densable `NRn` — stored home-settings consent modes. */
+export const REMOTE_HOME_SETTINGS_MODES = ['forward', 'keep_local'] as const
+export type RemoteHomeSettingsMode = (typeof REMOTE_HOME_SETTINGS_MODES)[number]
+
+/** densable `Nme`. */
+export function parseRemoteHomeSettingsMode(
+  value: unknown,
+): RemoteHomeSettingsMode | undefined {
+  return REMOTE_HOME_SETTINGS_MODES.includes(value as RemoteHomeSettingsMode)
+    ? (value as RemoteHomeSettingsMode)
+    : undefined
+}
+
+/** densable `mcn` — stored GlobalConfig mode. */
+export function getRemoteHomeSettingsMode():
+  | RemoteHomeSettingsMode
+  | undefined {
+  return parseRemoteHomeSettingsMode(getGlobalConfig().remoteHomeSettingsMode)
+}
+
+/**
+ * densable `lZt` / `Gzt` — disk re-read of remoteHomeSettingsMode, not the
+ * memory cache. Missing/unreadable file → null (gold ENOENT → undefined).
+ * Parse failure throws (gold `mt(Fo(n),!1)===null` throw).
+ */
+type StorageV5TextReader = {
+  readText: (reqs: Array<Record<string, unknown>>) => Promise<
+    | {
+        ok: true
+        value: {
+          items: Array<{ found: boolean; value?: string }>
+        }
+      }
+    | { ok: false }
+  >
+}
+
+function asStorageV5TextReader(
+  value: unknown,
+): StorageV5TextReader | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  if (!('readText' in value)) return undefined
+  const readText = (value as { readText?: unknown }).readText
+  return typeof readText === 'function'
+    ? (value as StorageV5TextReader)
+    : undefined
+}
+
+export async function readStoredRemoteHomeSettingsMode(
+  storageV5?: unknown,
+): Promise<{ mode: RemoteHomeSettingsMode | undefined } | null> {
+  if (process.env.NODE_ENV === 'test') {
+    return { mode: getRemoteHomeSettingsMode() }
+  }
+  let raw: string | undefined
+  // densable Gzt: F()&&e → readText([De.globalConfig()]); !found → undefined.
+  const reader = isHoverRestOn() ? asStorageV5TextReader(storageV5) : undefined
+  if (reader) {
+    const s = await reader.readText([{ namespace: 'globalConfig' }])
+    if (!s.ok) throw new Error('global config not readable through storage')
+    const item = s.value.items[0]
+    if (!item?.found) return null
+    raw = item.value
+  } else {
+    try {
+      raw = await getFsImplementation().readFile(getGlobalClaudeFile(), {
+        encoding: 'utf-8',
+      })
+    } catch (error) {
+      if (getErrnoCode(error) === 'ENOENT') return null
+      throw error
+    }
+  }
+  if (raw === undefined) return null
+  const parsed = safeParseJSON(raw)
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('global config not parseable')
+  }
+  const record = parsed as Record<string, unknown>
+  return {
+    mode: parseRemoteHomeSettingsMode(
+      'remoteHomeSettingsMode' in record
+        ? record.remoteHomeSettingsMode
+        : undefined,
+    ),
+  }
+}
+
+/**
+ * densable 2.1.289 `hse` — capability probe. Gold SEA returns `"unsupported"`.
+ * `hZ(e) = hse(e)===null`; DualInk-off `/config` gate is
+ * `hZ(B8()) || mode==="forward"`.
+ */
+export function probeRemoteHomeSettingsCapability(
+  _enabled: boolean,
+): 'unsupported' | null {
+  void _enabled
+  return 'unsupported'
+}
+
+export function isRemoteHomeSettingsCapabilityOpen(enabled = true): boolean {
+  return probeRemoteHomeSettingsCapability(enabled) === null
+}
+
+/** densable `qAr`. */
+export const REMOTE_HOME_SETTINGS_GRANT_BLOCKERS = {
+  unsupported:
+    'Could not turn this on: forwarding settings to cloud sessions is not available in this version',
+  flag_off:
+    'Could not turn this on: forwarding settings to cloud sessions is not enabled for you right now',
+} as const
+
+export type RemoteHomeSettingsGrantBlocker =
+  keyof typeof REMOTE_HOME_SETTINGS_GRANT_BLOCKERS
+
+/** densable `KAr`. */
+const REMOTE_HOME_SETTINGS_NOT_STORED =
+  'Could not save this to the config file, so nothing changed. Check that the file can be written, then try again.'
+
+export type RemoteHomeSettingsPersistResult =
+  | 'written'
+  | 'unconfirmed'
+  | 'not_stored'
+  | 'refused'
+
+/**
+ * densable `gcn` — persist `remoteHomeSettingsMode`. Gold `forward` first
+ * probes `hse(await QD())`; DualInk-off `/config` only withdraws to
+ * `keep_local` (key=value cannot enable).
+ */
+export async function persistRemoteHomeSettingsMode(
+  mode: RemoteHomeSettingsMode,
+  storageV5?: unknown,
+): Promise<RemoteHomeSettingsPersistResult> {
+  if (mode === 'forward') {
+    const blocker = probeRemoteHomeSettingsCapability(true)
+    if (blocker !== null) {
+      logForDebugging(`remote_home_settings_mode refused: ${blocker}`)
+      return 'refused'
+    }
+  }
+  const previous =
+    parseRemoteHomeSettingsMode(getGlobalConfig().remoteHomeSettingsMode) ??
+    'unspecified'
+  // densable mL then lZt. Local saveGlobalConfig is void — confirmation is
+  // always the Gzt/lZt disk (or storageV5) re-read, not the memory cache.
+  saveGlobalConfig(
+    current => ({ ...current, remoteHomeSettingsMode: mode }),
+    storageV5,
+  )
+  const disk = await readStoredRemoteHomeSettingsMode(storageV5).catch(
+    () => undefined,
+  )
+  const persisted = disk !== null && disk !== undefined && disk.mode === mode
+  if (previous !== mode) {
+    logEvent('tengu_home_settings_mode_set', {
+      mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      previous:
+        previous as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      persisted,
+    })
+  }
+  if (persisted) return 'written'
+  if (disk !== null && disk !== undefined && disk.mode !== mode) {
+    return 'not_stored'
+  }
+  return 'unconfirmed'
+}
+
+export function remoteHomeSettingsNotStoredMessage(): string {
+  return REMOTE_HOME_SETTINGS_NOT_STORED
 }
 
 export function getCustomApiKeyStatus(

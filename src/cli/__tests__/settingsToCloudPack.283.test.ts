@@ -24,6 +24,7 @@ describe('settingsToCloudPack 283 leftover gold un wrap', () => {
     expect(body).toContain('gold `un` @202411365')
     expect(body).toContain('gold `Ao` @202411620')
     expect(body).toContain('gold `To` @202411780')
+    expect(body).toContain('getRemoteHomeSettingsMode')
     expect(body).toContain('nothing_to_forward')
     expect(body).toContain('plan_failed')
     expect(body).not.toContain('settings.set(')

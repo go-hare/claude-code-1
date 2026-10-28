@@ -12,6 +12,7 @@
  * `_g` settings.read only — no settings writes. Semantic exports.
  */
 
+import { getRemoteHomeSettingsMode } from '../utils/config.js'
 import { getBootstrapSessionHost } from '../utils/sessionHost.js'
 
 export type SettingsToCloudConsent = 'forward' | 'keep_local'
@@ -76,10 +77,12 @@ export type SettingsToCloudContext = {
 
 /**
  * gold `pQt` / `H0e` @185879805 — stored consent, read-only.
- * LaunchOptions host is `'forward' | null`; keep_local only via seam.
+ * LaunchOptions host is `'forward' | null`; else GlobalConfig
+ * `remoteHomeSettingsMode` (`forward` | `keep_local`).
  */
 export function storedHomeSettingsConsentMode(
-  mode: unknown = getBootstrapSessionHost().launchOptions.homeSettingsHostConsent(),
+  mode: unknown = getBootstrapSessionHost().launchOptions.homeSettingsHostConsent() ??
+    getRemoteHomeSettingsMode(),
 ): SettingsToCloudConsent | undefined {
   return mode === 'forward' || mode === 'keep_local' ? mode : undefined
 }

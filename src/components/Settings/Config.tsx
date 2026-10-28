@@ -21,6 +21,13 @@ import {
   getAutoUpdaterDisabledReason,
   formatAutoUpdaterDisabledReason,
   getRemoteControlAtStartup,
+  getRemoteHomeSettingsMode,
+  persistRemoteHomeSettingsMode,
+  remoteHomeSettingsNotStoredMessage,
+  isRemoteHomeSettingsCapabilityOpen,
+  probeRemoteHomeSettingsCapability,
+  REMOTE_HOME_SETTINGS_GRANT_BLOCKERS,
+  type RemoteHomeSettingsGrantBlocker,
   type AutoUpdaterDisabledReason,
 } from '../../utils/config.js';
 import chalk from 'chalk';
@@ -38,6 +45,7 @@ import {
   transitionPlanAutoMode,
 } from '../../utils/permissions/permissionSetup.js';
 import { logError } from '../../utils/log.js';
+import { errorMessage } from '../../utils/errors.js';
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -81,7 +89,8 @@ import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstr
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
 import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
-import { sortConfigCatalog } from 'src/utils/configCatalog.js';
+import { buildConfigDisplayEntries, displayIndexForSetting, sortConfigCatalog } from 'src/utils/configCatalog.js';
+import { useNotifications } from '../../context/notifications.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import {
@@ -195,15 +204,30 @@ export type ConfigSettingLock = {
   writableWhileLocked?: string[];
 };
 
+export type ConfigSettingChange = {
+  error?: Error | null;
+  messageSuffix?: string;
+};
+
+function asConfigSettingChange(value: unknown): ConfigSettingChange | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  if (!('error' in value) && !('messageSuffix' in value)) return undefined;
+  return value as ConfigSettingChange;
+}
+
 export type Setting =
   | (SettingBase & {
       value: boolean;
-      onChange(value: boolean): void;
+      // DualInk-off: gold minified onChange is untyped. `void | Promise` trips
+      // biome noConfusingVoidType; void-returning rows stay assignable.
+      onChange(value: boolean): unknown;
       type: 'boolean';
       // densable row flag; panel does not consume it (CLI key=value host does).
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      // densable grantBlocker — DualInk-off list shows qAr copy instead of onChange(true).
+      grantBlocker?: RemoteHomeSettingsGrantBlocker;
     })
   | (SettingBase & {
       value: string;
@@ -318,13 +342,13 @@ export async function persistPluginConfigOption(
   return;
 }
 
-/** densable we — core catalog then IRn plugin rows. */
+/** densable we — core catalog then IRn plugin rows, then gold `qi`. */
 export function weConfigPluginRows(
   core: Setting[],
   plugins: readonly LoadedPlugin[],
   opts: PluginConfigSettingsOpts = {},
 ): Setting[] {
-  return [...core, ...pluginConfigSettings(plugins, opts)];
+  return sortConfigCatalog([...core, ...pluginConfigSettings(plugins, opts)]);
 }
 
 /**
@@ -500,13 +524,16 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
     settings: sortConfigCatalog([
       // Global settings
       {
+        // densable 2.1.289: value is t0t `s.autoCompactEnabled` (settings ??
+        // global). Persist is gold W2 → userSettings, then live `w` snapshot.
         id: 'autoCompact',
         label: 'Auto-compact',
-        value: globalConfig.autoCompactEnabled,
+        value: settingsData?.autoCompactEnabled ?? globalConfig.autoCompactEnabled,
         type: 'boolean' as const,
         onChange(autoCompactEnabled: boolean) {
-          W(current => ({ ...current, autoCompactEnabled }));
-          setGlobalConfig({ ...getGlobalConfig(), autoCompactEnabled });
+          B('autoCompactEnabled', autoCompactEnabled);
+          setSettingsData(prev => ({ ...prev, autoCompactEnabled }));
+          setGlobalConfig({ ...globalConfig, autoCompactEnabled });
           logEvent('tengu_auto_compact_setting_changed', {
             enabled: autoCompactEnabled,
           });
@@ -1780,6 +1807,52 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
             },
           ]
         : []),
+      // densable 2.1.289: so(hZ(B8())||s.remoteHomeSettingsMode==="forward")
+      ...(isRemoteHomeSettingsCapabilityOpen() || globalConfig.remoteHomeSettingsMode === 'forward'
+        ? [
+            {
+              id: 'remoteHomeSettings',
+              label: "Use this machine's settings in cloud sessions",
+              value: globalConfig.remoteHomeSettingsMode === 'forward',
+              type: 'boolean' as const,
+              consentGated: true,
+              grantBlocker: probeRemoteHomeSettingsCapability(true) ?? undefined,
+              onChange(enabled: boolean) {
+                if (enabled) {
+                  return {
+                    error: new Error('Turn this on from the /config panel, which shows what will be sent'),
+                  };
+                }
+                const previous = globalConfig.remoteHomeSettingsMode;
+                setGlobalConfig({ ...globalConfig, remoteHomeSettingsMode: 'keep_local' });
+                return persistRemoteHomeSettingsMode('keep_local', storageV5).then(result => {
+                  switch (result) {
+                    case 'written':
+                      return;
+                    case 'unconfirmed':
+                      return {
+                        messageSuffix:
+                          ' (could not confirm it was written to the config file; check /config after restarting Claude Code)',
+                      };
+                    case 'not_stored':
+                      setGlobalConfig({
+                        ...globalConfig,
+                        remoteHomeSettingsMode: getRemoteHomeSettingsMode(),
+                      });
+                      return {
+                        error: new Error(remoteHomeSettingsNotStoredMessage()),
+                      };
+                    case 'refused':
+                      setGlobalConfig({ ...globalConfig, remoteHomeSettingsMode: previous });
+                      return {
+                        error: new Error('Cloud settings forwarding is not available right now; nothing was changed'),
+                      };
+                  }
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
       ...(shouldShowExternalIncludesToggle
         ? [
             {
@@ -1900,9 +1973,8 @@ export function ceFromCommandContext(context: LocalJSXCommandContext): ConfigHke
   /* eslint-enable @typescript-eslint/no-require-imports */
   return {
     globalConfig,
-    setGlobalConfig: next => {
-      saveGlobalConfig(() => next);
-    },
+    // densable `w` — live snapshot only. Persist is W2/`B` (userSettings).
+    setGlobalConfig: () => {},
     settingsData,
     setSettingsData: noopSetSettings,
     verbose: r.verbose,
@@ -2069,6 +2141,43 @@ export function Config({
   const [enumPickerId, setEnumPickerId] = useState<string | null>(null);
   // densable Pe / w0t — tengu_maple_sundial (default false).
   const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
+  const { addNotification } = useNotifications();
+  // densable DualInk-off `Si`/`bo` — remoteHomeSettings paints on the row, not H().
+  const [remoteHomeSettingsNotice, setRemoteHomeSettingsNotice] = useState<string | null>(null);
+  const showConfigChangeResult = useCallback(
+    (settingId: string, result: unknown) => {
+      const change = asConfigSettingChange(result);
+      if (settingId === 'remoteHomeSettings') {
+        if (change?.error) {
+          setRemoteHomeSettingsNotice(change.error.message);
+        } else if (change?.messageSuffix) {
+          setRemoteHomeSettingsNotice(`Saved${change.messageSuffix}`);
+        } else {
+          setRemoteHomeSettingsNotice(null);
+        }
+        return;
+      }
+      if (change?.error) {
+        addNotification({
+          key: 'config-change-refused',
+          kind: 'warning',
+          text: change.error.message,
+          color: 'warning',
+          priority: 'immediate',
+        });
+        return;
+      }
+      if (change?.messageSuffix) {
+        addNotification({
+          key: 'config-change-note',
+          kind: 'feedback',
+          text: change.messageSuffix.replace(/^ · /, ''),
+          priority: 'immediate',
+        });
+      }
+    },
+    [addNotification],
+  );
   // densable w/T — Lf().hasClaudeMdExternalIncludesApproved === true.
   const [externalIncludesApproved, setExternalIncludesApproved] = useState(
     () => getCurrentProjectConfig().hasClaudeMdExternalIncludesApproved === true,
@@ -2094,6 +2203,7 @@ export function Config({
     query: searchQuery,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    handleKeyDown: handleSearchKeyDown,
   } = useSearchInput({
     isActive: isSearchMode && showSubmenu === null && !headerFocused,
     onExit: () => setIsSearchMode(false),
@@ -2103,10 +2213,9 @@ export function Config({
     passthroughCtrlKeys: ['c', 'd'],
   });
 
-  // Tell the parent when Config's own Esc handler is active so Settings cedes
-  // confirm:no. Only true when search mode owns the keyboard — not when the
-  // tab header is focused (then Settings must handle Esc-to-close).
-  const ownsEsc = isSearchMode && !headerFocused;
+  // densable ps Ri=!te — Config owns Esc while the tab header is unfocused
+  // (search first Esc clears/exits via handleKeyDown; list Esc uses confirm:no).
+  const ownsEsc = !headerFocused;
   React.useEffect(() => {
     onIsSearchModeChange?.(ownsEsc);
   }, [ownsEsc, onIsSearchModeChange]);
@@ -2242,6 +2351,12 @@ export function Config({
     });
   }, [settingsItems, searchQuery]);
 
+  // densable DualInk-off `us`/`Ki` — maple headings occupy maxVisible slots.
+  const displayEntries = React.useMemo(
+    () => buildConfigDisplayEntries(filteredSettingsItems, mapleSundial),
+    [filteredSettingsItems, mapleSundial],
+  );
+
   // densable Kr — EnumPicker looks up Ye on the unfiltered settings list (Dt).
   const enumPickerSetting = React.useMemo(() => {
     const found = settingsItems.find(item => item.id === enumPickerId);
@@ -2260,28 +2375,31 @@ export function Config({
     if (selectedIndex >= filteredSettingsItems.length) {
       const newIndex = Math.max(0, filteredSettingsItems.length - 1);
       setSelectedIndex(newIndex);
-      setScrollOffset(Math.max(0, newIndex - maxVisible + 1));
+      const display = displayIndexForSetting(displayEntries, newIndex);
+      setScrollOffset(Math.max(0, display - maxVisible + 1));
       return;
     }
+    const display = displayIndexForSetting(displayEntries, selectedIndex);
     setScrollOffset(prev => {
-      if (selectedIndex < prev) return selectedIndex;
-      if (selectedIndex >= prev + maxVisible) return selectedIndex - maxVisible + 1;
+      if (display < prev) return display;
+      if (display >= prev + maxVisible) return display - maxVisible + 1;
       return prev;
     });
-  }, [filteredSettingsItems.length, selectedIndex, maxVisible]);
+  }, [filteredSettingsItems.length, selectedIndex, maxVisible, displayEntries]);
 
   // Keep the selected item visible within the scroll window.
   // Called synchronously from navigation handlers to avoid a render frame
   // where the selected item falls outside the visible window.
   const adjustScrollOffset = useCallback(
     (newIndex: number) => {
+      const display = displayIndexForSetting(displayEntries, newIndex);
       setScrollOffset(prev => {
-        if (newIndex < prev) return newIndex;
-        if (newIndex >= prev + maxVisible) return newIndex - maxVisible + 1;
+        if (display < prev) return display;
+        if (display >= prev + maxVisible) return display - maxVisible + 1;
         return prev;
       });
     },
-    [maxVisible],
+    [maxVisible, displayEntries],
   );
 
   // Enter: keep all changes (already persisted by onChange handlers), close
@@ -2348,6 +2466,11 @@ export function Config({
     }
     if (globalConfig.autoCompactEnabled !== initialConfig.current.autoCompactEnabled) {
       formattedChanges.push(`${globalConfig.autoCompactEnabled ? 'Enabled' : 'Disabled'} auto-compact`);
+    }
+    if (globalConfig.remoteHomeSettingsMode !== initialConfig.current.remoteHomeSettingsMode) {
+      formattedChanges.push(
+        `${globalConfig.remoteHomeSettingsMode === 'forward' ? 'Enabled' : 'Disabled'} using this machine's settings in cloud sessions`,
+      );
     }
     if (globalConfig.autoScrollEnabled !== initialConfig.current.autoScrollEnabled) {
       formattedChanges.push(`${globalConfig.autoScrollEnabled ? 'Enabled' : 'Disabled'} auto-scroll`);
@@ -2461,6 +2584,7 @@ export function Config({
     const iu = initialUserSettings;
     F({
       alwaysThinkingEnabled: iu?.alwaysThinkingEnabled,
+      autoCompactEnabled: iu?.autoCompactEnabled,
       fastMode: iu?.fastMode,
       promptSuggestionEnabled: iu?.promptSuggestionEnabled,
       autoUpdatesChannel: iu?.autoUpdatesChannel,
@@ -2563,11 +2687,36 @@ export function Config({
     }
 
     if (setting.type === 'boolean') {
+      // densable: off→on with grantBlocker shows qAr copy; do not call onChange(true).
+      if (setting.id === 'remoteHomeSettings' && setting.value === false) {
+        const blocker = setting.grantBlocker;
+        if (blocker !== undefined) {
+          setRemoteHomeSettingsNotice(REMOTE_HOME_SETTINGS_GRANT_BLOCKERS[blocker]);
+          return;
+        }
+      }
       isDirty.current = true;
-      setting.onChange(!setting.value);
+      const next = !setting.value;
+      if (setting.id === 'remoteHomeSettings') {
+        setRemoteHomeSettingsNotice(null);
+      }
+      const pending = setting.onChange(next);
+      void Promise.resolve(pending)
+        .then(result => {
+          showConfigChangeResult(setting.id, result);
+        })
+        .catch((error: unknown) => {
+          logError(error);
+          addNotification({
+            key: 'config-change-refused',
+            kind: 'warning',
+            text: `Setting change failed: ${errorMessage(error)}`,
+            color: 'warning',
+            priority: 'immediate',
+          });
+        });
       if (setting.id === 'thinking') {
-        const newValue = !setting.value;
-        const backToInitial = newValue === initialThinkingEnabled.current;
+        const backToInitial = next === initialThinkingEnabled.current;
         if (backToInitial) {
           setShowThinkingWarning(false);
         } else if (context.messages.some(m => m.type === 'assistant')) {
@@ -2663,11 +2812,14 @@ export function Config({
       return;
     }
   }, [
+    addNotification,
     autoUpdaterDisabledReason,
+    context.messages,
     filteredSettingsItems,
     isMapleJrExternalIncludes,
     settingsData?.autoUpdatesChannel,
     setTabsHidden,
+    showConfigChangeResult,
   ]);
 
   const moveSelection = (delta: -1 | 1): void => {
@@ -2719,8 +2871,14 @@ export function Config({
     (e: KeyboardEvent) => {
       if (showSubmenu !== null) return;
       if (headerFocused) return;
-      // Search mode: Esc clears then exits, Enter/↓ moves to the list.
+      // densable Wl: search — first Esc clears query, second Esc exits search
+      // (`be()` / Ye(!1)). Settings confirm:no stays ceded while header unfocused.
       if (isSearchMode) {
+        if ((e.key === 'return' || e.key === 'down') && filteredSettingsItems.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        handleSearchKeyDown(e);
         if (e.key === 'escape') {
           e.preventDefault();
           if (searchQuery.length > 0) {
@@ -2735,9 +2893,16 @@ export function Config({
           setIsSearchMode(false);
           setSelectedIndex(0);
           setScrollOffset(0);
+          return;
+        }
+        if (e.defaultPrevented) return;
+        if (e.key === 'tab' || e.key === 'left' || e.key === 'right') {
+          e.preventDefault();
+          return;
         }
         return;
       }
+      if (e.defaultPrevented) return;
       // List mode: left/right/tab cycle the selected option's value. These
       // keys used to switch tabs; now they only do so when the tab row is
       // explicitly focused (see headerFocused in Settings.tsx).
@@ -2746,19 +2911,25 @@ export function Config({
         toggleSetting();
         return;
       }
-      // Fallback: printable characters (other than those bound to actions)
-      // enter search mode. Carve out j/k// — useKeybindings (still on the
-      // useInput path) consumes these via stopImmediatePropagation, but
-      // onKeyDown dispatches independently so we must skip them explicitly.
+      // densable: printable chars enter search; `/` opens empty search.
       if (e.ctrl || e.meta) return;
-      if (e.key === 'j' || e.key === 'k' || e.key === '/') return;
+      if (e.key === 'j' || e.key === 'k') return;
       if (e.key.length === 1 && e.key !== ' ') {
         e.preventDefault();
         setIsSearchMode(true);
-        setSearchQuery(e.key);
+        setSearchQuery(e.key === '/' ? '' : e.key);
       }
     },
-    [showSubmenu, headerFocused, isSearchMode, searchQuery, setSearchQuery, toggleSetting],
+    [
+      showSubmenu,
+      headerFocused,
+      isSearchMode,
+      searchQuery,
+      setSearchQuery,
+      toggleSetting,
+      handleSearchKeyDown,
+      filteredSettingsItems.length,
+    ],
   );
 
   return (
@@ -3060,10 +3231,17 @@ export function Config({
                     {figures.arrowUp} {scrollOffset} more above
                   </Text>
                 )}
-                {filteredSettingsItems.slice(scrollOffset, scrollOffset + maxVisible).map((setting, i) => {
-                  const actualIndex = scrollOffset + i;
-                  const isSelected = actualIndex === selectedIndex && !headerFocused && !isSearchMode;
-
+                {displayEntries.slice(scrollOffset, scrollOffset + maxVisible).map(entry => {
+                  if (entry.kind === 'heading') {
+                    return (
+                      <Text key={entry.key} wrap="truncate-end">
+                        <Text bold>{entry.heading.name}</Text>
+                        {entry.heading.note !== undefined ? <Text dimColor>{`  ${entry.heading.note}`}</Text> : null}
+                      </Text>
+                    );
+                  }
+                  const setting = entry.item;
+                  const isSelected = entry.settingIndex === selectedIndex && !headerFocused && !isSearchMode;
                   return (
                     <React.Fragment key={setting.id}>
                       {/* densable sda row: fixed label width + flexGrow value with minWidth:0
@@ -3084,6 +3262,11 @@ export function Config({
                                 <Text color="warning" wrap="truncate-end">
                                   {' '}
                                   Changing thinking mode mid-conversation will increase latency and may reduce quality.
+                                </Text>
+                              )}
+                              {setting.id === 'remoteHomeSettings' && remoteHomeSettingsNotice !== null && (
+                                <Text color="warning" wrap="truncate-end">
+                                  {` ⚠ ${remoteHomeSettingsNotice}`}
                                 </Text>
                               )}
                             </>
@@ -3127,9 +3310,9 @@ export function Config({
                     </React.Fragment>
                   );
                 })}
-                {scrollOffset + maxVisible < filteredSettingsItems.length && (
+                {scrollOffset + maxVisible < displayEntries.length && (
                   <Text dimColor>
-                    {figures.arrowDown} {filteredSettingsItems.length - scrollOffset - maxVisible} more below
+                    {figures.arrowDown} {displayEntries.length - scrollOffset - maxVisible} more below
                   </Text>
                 )}
               </>

@@ -44,11 +44,18 @@ describe('densable 2.1.239 maple-sundial Jr', () => {
 
   test('U_c sorts the existing settingsItems list', () => {
     expect(source).toContain('sortConfigCatalog')
-    expect(source).toContain(
-      'const settingsItems: Setting[] = sortConfigCatalog([',
-    )
+    expect(source).toContain('settings: sortConfigCatalog([')
+    expect(source).toContain('weConfigPluginRows(coreSettings, enabledPlugins')
     expect(source).toContain('function F(patch: SettingsJson)')
     expect(source).toContain('function B<K extends keyof SettingsJson>')
     expect(source).toContain('function W(updater: (current: GlobalConfig)')
+  })
+
+  test('maple DualInk-off list inserts us/Ki section headings that occupy slots', () => {
+    expect(source).toContain('buildConfigDisplayEntries')
+    expect(source).toContain('displayIndexForSetting')
+    expect(source).toContain(
+      'displayEntries.slice(scrollOffset, scrollOffset + maxVisible)',
+    )
   })
 })

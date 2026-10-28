@@ -57,6 +57,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { getRemoteHomeSettingsMode } from '../utils/config.js'
 import { getBootstrapSessionHost } from '../utils/sessionHost.js'
 import {
   isTrustedDeviceActiveForOrg,
@@ -2674,7 +2675,8 @@ const HOME_SETTINGS_MODES = ['forward', 'keep_local'] as const
  * densable `H0e` / `pQt` @185879805 — stored remoteHomeSettingsMode.
  */
 export function storedHomeSettingsConsent(
-  mode: unknown = getBootstrapSessionHost().launchOptions.homeSettingsHostConsent(),
+  mode: unknown = getBootstrapSessionHost().launchOptions.homeSettingsHostConsent() ??
+    getRemoteHomeSettingsMode(),
 ): 'forward' | 'keep_local' | undefined {
   return HOME_SETTINGS_MODES.includes(
     mode as (typeof HOME_SETTINGS_MODES)[number],

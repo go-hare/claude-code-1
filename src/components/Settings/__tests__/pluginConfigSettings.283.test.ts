@@ -39,6 +39,7 @@ const {
   pluginConfigIdAliases,
   pluginConfigSettings,
   persistPluginConfigOption,
+  weConfigPluginRows,
 } = await import('../Config.js')
 
 afterEach(() => {
@@ -203,11 +204,39 @@ describe('pluginConfigSettings (densable IRn)', () => {
 
   test('splices IRn after core catalog; does not invent SettingsJson.instructionFiles', () => {
     expect(configSource).not.toContain("id: 'instructionFiles'")
-    expect(configSource).toContain('pluginConfigSettings(enabledPlugins')
-    expect(configSource).toContain('...sortConfigCatalog([')
+    expect(configSource).toContain('pluginConfigSettings(plugins')
+    expect(configSource).toContain('settings: sortConfigCatalog([')
+    expect(configSource).toContain(
+      'sortConfigCatalog([...core, ...pluginConfigSettings(plugins, opts)])',
+    )
     expect(configSource).toContain(
       'field.sensitive === true || field.multiple === true',
     )
+  })
+
+  test('we() re-sorts IRn plugin rows into Plugins before Advanced', () => {
+    const rows = weConfigPluginRows(
+      [{ id: 'autoUpdatesChannel' }, { id: 'theme' }] as never,
+      [
+        plugin({
+          name: 'agents-md',
+          source: 'agents-md@builtin',
+          userConfig: {
+            instructionFiles: {
+              type: 'string',
+              title: 'Project instructions',
+              description: '',
+              options: ['claude-md'],
+            },
+          },
+        }),
+      ],
+    )
+    expect(rows.map(r => r.id)).toEqual([
+      'theme',
+      'agents-md.instructionFiles',
+      'autoUpdatesChannel',
+    ])
   })
 
   test('PluginOptionsFlow ci is async sst/$Hn via ve() storageV5/credentials', () => {

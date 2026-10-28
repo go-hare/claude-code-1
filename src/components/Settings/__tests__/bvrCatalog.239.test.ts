@@ -39,6 +39,12 @@ describe('densable 2.1.239 bvr persist wrappers', () => {
 
   test('official catalog ids with local hosts are present', () => {
     expect(config).toContain("id: 'autoCompact'")
+    expect(config).toMatch(
+      /id: 'autoCompact'[\s\S]*?B\('autoCompactEnabled', autoCompactEnabled\)/,
+    )
+    expect(config).toContain(
+      'settingsData?.autoCompactEnabled ?? globalConfig.autoCompactEnabled',
+    )
     expect(config).toContain("id: 'tips'")
     expect(config).toContain("id: 'thinking'")
     expect(config).toContain("id: 'fast'")
@@ -58,11 +64,17 @@ describe('densable 2.1.239 bvr persist wrappers', () => {
     expect(config).toContain("id: 'externalEditorContext'")
     expect(config).toContain("id: 'precomputeCompactionEnabled'")
     expect(config).toContain("id: 'timestamps'")
+    expect(config).toContain("id: 'timeFormat'")
+    expect(config).toContain("label: 'Time format'")
     expect(config).toContain("id: 'agentsView'")
     expect(config).toContain("id: 'defaultToAgentsView'")
     // densable 2.1.289 bvr catalog — SEA label "Start in agent view"
     expect(config).toContain("label: 'Start in agent view'")
     expect(config).toContain("id: 'leftArrowOpensAgents'")
+    expect(config).toContain("id: 'remoteHomeSettings'")
+    expect(config).toContain(
+      'label: "Use this machine\'s settings in cloud sessions"',
+    )
     expect(config).toContain('message timestamps')
     expect(config).toContain('precompute compaction')
   })
