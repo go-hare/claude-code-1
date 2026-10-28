@@ -24,6 +24,10 @@ import {
   truncateToWidthNoEllipsis,
 } from '../../../utils/truncate.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../analytics/growthbook.js'
+import {
+  isServerClassifierTransport,
+  resolveAutoModeClassifierTransport,
+} from '../../api/autoModeClassifierTransport.js'
 import { type ArtifactAutoReactStore, un } from '../store.js'
 
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -194,27 +198,9 @@ export function isServedCall(permissions: ToolPermissionContext): boolean {
   return permissions.servedCall === true
 }
 
-export type AutoModeClassifierTransport =
-  | 'arbiter'
-  | 'arbiterWithLocalFallback'
-  | 'off'
+export type { AutoModeClassifierTransport } from '../../api/autoModeClassifierTransport.js'
 
-/**
- * densable `Lj(mode)` — server-side classifier transport. This build has no
- * server-side (arbiter) classifier, so every mode resolves to gold's `"off"`.
- */
-export function resolveAutoModeClassifierTransport(
-  _mode: PermissionMode,
-): AutoModeClassifierTransport {
-  return 'off'
-}
-
-/** densable `lut` */
-export function isServerClassifierTransport(
-  transport: AutoModeClassifierTransport,
-): boolean {
-  return transport === 'arbiter' || transport === 'arbiterWithLocalFallback'
-}
+export { isServerClassifierTransport, resolveAutoModeClassifierTransport }
 
 /** densable `pr` */
 function isServerClassifierForced(): boolean {

@@ -162,3 +162,35 @@ export function isFirstPartyProviderWithFirstPartyBase(
 ): boolean {
   return provider === 'firstParty' && isFirstPartyAnthropicBaseUrl(env)
 }
+
+/**
+ * densable `MV` @188544837 — classifier-facing provider kind.
+ * Cloud / gateway / unix-socket (except ssh-remote) collapse to `"thirdParty"`.
+ * `openai` / `gemini` / `grok` stay as themselves (do not map onto thirdParty).
+ */
+export type ClassifierProviderKind = APIProvider | 'thirdParty'
+
+export function classifyClassifierProviderKind(
+  provider: APIProvider = getAPIProvider(),
+  env: NodeJS.ProcessEnv = process.env,
+): ClassifierProviderKind {
+  switch (provider) {
+    case 'firstParty':
+      if (env.ANTHROPIC_UNIX_SOCKET !== undefined) {
+        return env.CLAUDE_CODE_ENTRYPOINT === 'ssh-remote'
+          ? 'firstParty'
+          : 'thirdParty'
+      }
+      return isFirstPartyAnthropicBaseUrl(env) ? 'firstParty' : 'thirdParty'
+    case 'bedrock':
+    case 'mantle':
+    case 'vertex':
+    case 'foundry':
+    case 'anthropicAws':
+    case 'anthropicGoogleCloud':
+    case 'gateway':
+      return 'thirdParty'
+    default:
+      return provider
+  }
+}

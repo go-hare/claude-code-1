@@ -25,7 +25,7 @@ import { describeLoadedClientDataStatus } from '../cli/clientDataUrl.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
 import { getAPIProvider, getBedrockMantleOverrideProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
 import { leftoverPolicyLimitsHost } from '../cli/leftoverTulip.js';
-import { getAutoModeEnabledState } from './permissions/permissionSetup.js';
+import { isAutoModeServerEnabled } from '../services/api/autoModeClassifierTransport.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
@@ -246,15 +246,6 @@ export function buildAutoModeServerProperties(permissionMode: PermissionMode): P
       value: isAutoModeServerEnabled(permissionMode) ? 'Enabled' : 'Disabled',
     },
   ];
-}
-
-/**
- * densable dcn: lut(Lj(e)) && !Gp(si(), fA).
- * Lj returns "off" unless the current mode is auto and the classifier is on.
- */
-function isAutoModeServerEnabled(permissionMode: PermissionMode): boolean {
-  if (permissionMode !== 'auto') return false;
-  return getAutoModeEnabledState() === 'enabled';
 }
 
 /**
