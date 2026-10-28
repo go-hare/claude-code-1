@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useShortcutDisplay } from 'src/keybindings/useShortcutDisplay.js';
+import { getFeedbackCommandDisabledReason } from 'src/utils/feedbackDrafts/gates.js';
 import {
   builtInCommandNames,
   type Command,
@@ -19,6 +20,9 @@ type Props = {
   commands: Command[];
 };
 
+/** densable 2.1.289 Help `ee=44` — feedback footer when tall enough. */
+const HELP_FEEDBACK_FOOTER_MIN_ROWS = 44;
+
 export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   const { rows, columns } = useTerminalSize();
   const maxHeight = Math.floor(rows / 2);
@@ -31,6 +35,8 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   useKeybinding('help:dismiss', close, { context: 'Help' });
   const exitState = useExitOnCtrlCDWithKeybindings(close);
   const dismissShortcut = useShortcutDisplay('help:dismiss', 'Help', 'esc');
+  // densable QA() — show /feedback line when the command is not disabled.
+  const showFeedbackFooter = rows >= HELP_FEEDBACK_FOOTER_MIN_ROWS && getFeedbackCommandDisabledReason() === null;
 
   const builtinNames = builtInCommandNames();
   let builtinCommands = commands.filter(cmd => builtinNames.has(cmd.name) && !cmd.isHidden);
@@ -46,30 +52,30 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   const customCommands = commands.filter(cmd => !builtinNames.has(cmd.name) && !cmd.isHidden);
 
   const tabs = [
-    <Tab key="general" title="general">
+    <Tab key="general" id="general" title="General">
       <General />
     </Tab>,
   ];
 
   tabs.push(
-    <Tab key="commands" title="commands">
+    <Tab key="commands" id="commands" title="Commands">
       <Commands
         commands={builtinCommands}
         maxHeight={maxHeight}
         columns={columns}
-        title="Browse default commands:"
+        title="Browse default commands"
         onCancel={close}
       />
     </Tab>,
   );
 
   tabs.push(
-    <Tab key="custom" title="custom-commands">
+    <Tab key="custom" id="custom" title="Custom commands">
       <Commands
         commands={customCommands}
         maxHeight={maxHeight}
         columns={columns}
-        title="Browse custom commands:"
+        title="Browse custom commands"
         emptyMessage="No custom commands found"
         onCancel={close}
       />
@@ -78,12 +84,12 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
 
   if (process.env.USER_TYPE === 'ant' && antOnlyCommands.length > 0) {
     tabs.push(
-      <Tab key="ant-only" title="[ant-only]">
+      <Tab key="ant-only" id="ant-only" title="[ant-only]">
         <Commands
           commands={antOnlyCommands}
           maxHeight={maxHeight}
           columns={columns}
-          title="Browse ant-only commands:"
+          title="Browse ant-only commands"
           onCancel={close}
         />
       </Tab>,
@@ -93,19 +99,20 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   return (
     <Box flexDirection="column" height={insideModal ? undefined : maxHeight}>
       <Pane color="professionalBlue">
-        <Tabs
-          title={process.env.USER_TYPE === 'ant' ? '/help' : `Claude Code v${MACRO.VERSION}`}
-          color="professionalBlue"
-          defaultTab="general"
-        >
+        <Tabs title="Help" color="professionalBlue" defaultTab="general" navFromContent>
           {tabs}
         </Tabs>
-        <Box marginTop={1}>
+        <Box marginTop={1} flexShrink={0}>
           <Text>
             For more help: <Link url="https://code.claude.com/docs/en/overview" />
           </Text>
         </Box>
-        <Box marginTop={1}>
+        {showFeedbackFooter && (
+          <Box marginTop={1} flexShrink={0}>
+            <Text dimColor>Something else? Use /feedback to report bugs or request features.</Text>
+          </Box>
+        )}
+        <Box marginTop={1} flexShrink={0}>
           <Text dimColor>
             {exitState.pending ? (
               <>Press {exitState.keyName} again to exit</>
