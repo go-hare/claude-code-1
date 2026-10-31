@@ -319,7 +319,7 @@ function isWorkshopFht(): boolean {
  */
 function workshopGn(): {
   cause: string
-  outcome?: { success: boolean; httpStatus?: number }
+  outcome?: ArtifactPolicyFetchAnswer
 } | null {
   if (isWorkshopQht()) return null
   const sub = getSubscriptionType()
