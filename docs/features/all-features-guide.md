@@ -13,7 +13,7 @@
 5. [Chrome 浏览器控制](#5-chrome-浏览器控制)
 6. [Computer Use 屏幕操控](#6-computer-use-屏幕操控)
 7. [Feature Flags 与 GrowthBook](#7-feature-flags-与-growthbook)
-8. ~~/ultraplan 高级规划~~（已拆除）
+8. [/ultraplan 高级规划](#8-ultraplan-高级规划)
 9. [Daemon 后台守护](#9-daemon-后台守护)
 10. [Pipe IPC 多实例协作](#10-pipe-ipc-多实例协作)
 11. [LAN Pipes 局域网群控](#11-lan-pipes-局域网群控)
@@ -198,10 +198,11 @@ FEATURE_PROACTIVE=1 bun run dev
 
 ---
 
-## 8. /ultraplan 高级规划（已拆除）
+## 8. /ultraplan 高级规划
 
-densable 2.1.222 #21 产品拆除。命令 / 对话框 / ccrSession / AppState 字段已删除，
-不是 `FEATURE_ULTRAPLAN=1` 残留门。详见 [`docs/features/ultraplan.md`](./ultraplan.md)。
+densable 2.1.222 #21 拆除了 `ULTRAPLAN` **编译旗标**。densable 2.1.289 gold `BZt`
+slash HAS BODY：`/ultraplan` 无 `feature('ULTRAPLAN')` 注册，`isEnabled` 是 `jj()`。
+详见 [`docs/features/ultraplan.md`](./ultraplan.md)。
 
 ---
 

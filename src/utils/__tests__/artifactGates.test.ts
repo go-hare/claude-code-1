@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   getArtifactSdkDefaultOffReason,
   isArtifactAutoOpenEnabled,
   isArtifactDirectUploadEnabled,
   isArtifactEnvForceEnabled,
+  isArtifactLhtEnabled,
   isArtifactSdkDefaultAllowed,
   isArtifactToolDisabled,
   isSdkArtifactDefaultOffEntrypoint,
   planArtifactAutoOpenSkip,
 } from '../artifactGates.js'
+
+const SRC = join(import.meta.dir, '../artifactGates.ts')
 
 describe('artifactGates', () => {
   test('disable wins', () => {
@@ -27,6 +32,22 @@ describe('artifactGates', () => {
   test('settings disableArtifact densable', () => {
     expect(isArtifactToolDisabled({}, true)).toBe(true)
     expect(isArtifactToolDisabled({}, false)).toBe(false)
+  })
+
+  test('Lht isolated env only applies env arm', () => {
+    expect(isArtifactLhtEnabled({})).toBe(true)
+    expect(isArtifactLhtEnabled({ CLAUDE_CODE_DISABLE_ARTIFACT: '1' })).toBe(
+      false,
+    )
+    const src = readFileSync(SRC, 'utf8')
+    expect(src).toContain('artifactPolicyEnableCounts')
+    expect(src).toContain('projectSettingsAliasesUserSettings')
+    expect(src).toContain('artifactPolicyAdminTiers')
+    expect(src).toContain('artifactLocalSettingsAsr')
+    expect(src).toContain('artifactPolicyOu')
+    expect(src).toContain('artifactPolicyMee')
+    expect(src).toContain('artifactWeeLocalSettingsPath')
+    expect(src).toContain('collectMachineLocalManagedSettings')
   })
 
   test('auto open defaults ON (207 ou polarity)', () => {

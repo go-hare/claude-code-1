@@ -9,6 +9,9 @@ import { useElapsedTime } from '../../hooks/useElapsedTime.js';
 import { type KeyboardEvent, Box, Link, Text } from '@anthropic/ink';
 import type { RemoteAgentTaskState } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { getRemoteTaskSessionUrl } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
+import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
+import { ASK_USER_QUESTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/prompt.js';
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js';
 import { openBrowser } from '../../utils/browser.js';
 import { errorMessage } from '../../utils/errors.js';
 import { formatDuration, truncateToWidth } from '../../utils/format.js';
@@ -29,6 +32,159 @@ type Props = {
   onBack?: () => void;
   onKill?: () => void;
 };
+
+// Compact one-line summary: tool name + first meaningful string arg.
+export function formatToolUseSummary(name: string, input: unknown): string {
+  if (name === EXIT_PLAN_MODE_V2_TOOL_NAME) {
+    return 'Review the plan in Claude Code on the web';
+  }
+  if (!input || typeof input !== 'object') return name;
+  if (name === ASK_USER_QUESTION_TOOL_NAME && 'questions' in input) {
+    const qs = input.questions;
+    if (Array.isArray(qs) && qs[0] && typeof qs[0] === 'object') {
+      const q =
+        'question' in qs[0] && typeof qs[0].question === 'string' && qs[0].question
+          ? qs[0].question
+          : 'header' in qs[0] && typeof qs[0].header === 'string'
+            ? qs[0].header
+            : null;
+      if (q) {
+        const oneLine = q.replace(/\s+/g, ' ').trim();
+        return `Answer in browser: ${truncateToWidth(oneLine, 50)}`;
+      }
+    }
+  }
+  for (const v of Object.values(input)) {
+    if (typeof v === 'string' && v.trim()) {
+      const oneLine = v.replace(/\s+/g, ' ').trim();
+      return `${name} ${truncateToWidth(oneLine, 60)}`;
+    }
+  }
+  return name;
+}
+
+const PHASE_LABEL = {
+  needs_input: 'input required',
+  plan_ready: 'ready',
+} as const;
+
+const AGENT_VERB = {
+  needs_input: 'waiting',
+  plan_ready: 'done',
+} as const;
+
+function UltraplanSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 'toolUseContext'>): React.ReactNode {
+  const running = session.status === 'running' || session.status === 'pending';
+  const phase = session.ultraplanPhase;
+  const statusText = running ? (phase ? PHASE_LABEL[phase] : 'running') : session.status;
+  const elapsedTime = useElapsedTime(session.startTime, running, 1000, 0, session.endTime);
+
+  const { agentsWorking, toolCalls, lastToolCall } = useMemo(() => {
+    let spawns = 0;
+    let calls = 0;
+    let lastBlock: { name: string; input: unknown } | null = null;
+    for (const msg of session.log) {
+      if (msg.type !== 'assistant') continue;
+      const content = (msg.message as { content?: unknown[] })?.content ?? [];
+      for (const block of content as Array<{ type: string; name: string; input: unknown }>) {
+        if (block.type !== 'tool_use') continue;
+        calls++;
+        lastBlock = block;
+        if (block.name === AGENT_TOOL_NAME || block.name === LEGACY_AGENT_TOOL_NAME) {
+          spawns++;
+        }
+      }
+    }
+    return {
+      agentsWorking: 1 + spawns,
+      toolCalls: calls,
+      lastToolCall: lastBlock ? formatToolUseSummary(lastBlock.name, lastBlock.input) : null,
+    };
+  }, [session.log]);
+
+  const sessionUrl = getRemoteTaskSessionUrl(session.sessionId);
+  const goBackOrClose = onBack ?? (() => onDone('Remote session details dismissed', { display: 'system' }));
+  const [confirmingStop, setConfirmingStop] = useState(false);
+
+  if (confirmingStop) {
+    return (
+      <Dialog title="Stop ultraplan?" onCancel={() => setConfirmingStop(false)} color="background">
+        <Box flexDirection="column" gap={1}>
+          <Text dimColor>This will terminate the Claude Code on the web session.</Text>
+          <Select
+            options={[
+              { label: 'Terminate session', value: 'stop' as const },
+              { label: 'Back', value: 'back' as const },
+            ]}
+            onChange={v => {
+              if (v === 'stop') {
+                onKill?.();
+                goBackOrClose();
+              } else {
+                setConfirmingStop(false);
+              }
+            }}
+          />
+        </Box>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog
+      title={
+        <Text>
+          <Text color="background">{phase === 'plan_ready' ? DIAMOND_FILLED : DIAMOND_OPEN} </Text>
+          <Text bold>ultraplan</Text>
+          <Text dimColor>
+            {' · '}
+            {elapsedTime}
+            {' · '}
+            {statusText}
+          </Text>
+        </Text>
+      }
+      onCancel={goBackOrClose}
+      color="background"
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text>
+          {phase === 'plan_ready' && <Text color="success">{figures.tick} </Text>}
+          {agentsWorking} {plural(agentsWorking, 'agent')} {phase ? AGENT_VERB[phase] : 'working'} · {toolCalls} tool{' '}
+          {plural(toolCalls, 'call')}
+        </Text>
+        {lastToolCall && <Text dimColor>{lastToolCall}</Text>}
+        <Link url={sessionUrl}>
+          <Text dimColor>{sessionUrl}</Text>
+        </Link>
+        <Select
+          options={[
+            {
+              label: 'Review in Claude Code on the web',
+              value: 'open' as const,
+            },
+            ...(onKill && running ? [{ label: 'Stop ultraplan', value: 'stop' as const }] : []),
+            { label: 'Back', value: 'back' as const },
+          ]}
+          onChange={v => {
+            switch (v) {
+              case 'open':
+                void openBrowser(sessionUrl);
+                onDone();
+                return;
+              case 'stop':
+                setConfirmingStop(true);
+                return;
+              case 'back':
+                goBackOrClose();
+                return;
+            }
+          }}
+        />
+      </Box>
+    </Dialog>
+  );
+}
 
 const STAGES = ['finding', 'verifying', 'synthesizing'] as const;
 const STAGE_LABELS: Record<(typeof STAGES)[number], string> = {
@@ -221,7 +377,7 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
   // Placed before the early returns so hook call order is stable (Rules of Hooks).
   // Review sessions never read this — skip the normalize work for them.
   const lastMessages = useMemo(() => {
-    if (session.isRemoteReview) return [];
+    if (session.isUltraplan || session.isRemoteReview) return [];
     return normalizeMessages(toInternalMessages(session.log as SDKMessage[]))
       .filter(_ => _.type !== 'progress')
       .slice(-3);
@@ -229,6 +385,10 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
 
   // Review sessions get the stage-pipeline view; everything else keeps the
   // generic label/value + recent-messages dialog below.
+  if (session.isUltraplan) {
+    return <UltraplanSessionDetail session={session} onDone={onDone} onBack={onBack} onKill={onKill} />;
+  }
+
   if (session.isRemoteReview) {
     return <ReviewSessionDetail session={session} onDone={onDone} onBack={onBack} onKill={onKill} />;
   }

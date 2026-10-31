@@ -7,6 +7,7 @@
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import type { SettingSource } from './settings/constants.js'
 
 /** densable `j$` — SDK host entrypoints. */
 const SDK_ARTIFACT_ENTRYPOINTS = new Set(['sdk-ts', 'sdk-py', 'sdk-cli'])
@@ -109,15 +110,241 @@ export const ARTIFACT_DIRECT_UPLOAD_ENTRYPOINTS = new Set([
 ])
 
 /**
+ * densable `C` catalog for `Lht`/`L()`.
+ */
+const ARTIFACT_LHT_CATALOG = {
+  enableKey: 'enableArtifact' as const,
+  legacyDisableKey: 'disableArtifact' as const,
+  envDisableVar: 'CLAUDE_CODE_DISABLE_ARTIFACT',
+  defaultOn: true,
+}
+
+const ARTIFACT_LHT_ADMIN: SettingSource[] = [
+  'policySettings',
+  'flagSettings',
+  'userSettings',
+]
+const ARTIFACT_LHT_PROJECT: SettingSource[] = [
+  'localSettings',
+  'projectSettings',
+]
+
+type ArtifactLhtOff = { layer: string; via: string }
+
+function artifactSettingsRow(
+  source: SettingSource,
+): { enableArtifact?: boolean; disableArtifact?: boolean } | null {
+  try {
+    const { getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return getSettingsForSource(source)
+  } catch {
+    return null
+  }
+}
+
+function artifactSourceAllowed(source: SettingSource): boolean {
+  try {
+    const { getAllowedSettingSources } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    return getAllowedSettingSources().includes(source)
+  } catch {
+    return true
+  }
+}
+
+/**
+ * densable `YWe` — policySettings slot/admin compose present.
+ */
+function artifactPolicyEnableCounts(): boolean {
+  return artifactSettingsRow('policySettings') !== null
+}
+
+type ArtifactSettingsRow = {
+  enableArtifact?: boolean
+  disableArtifact?: boolean
+} | null
+
+function machineLocalManagedTiers(): {
+  mdm: ArtifactSettingsRow
+  file: ArtifactSettingsRow
+  hkcu: ArtifactSettingsRow
+} {
+  try {
+    const { collectMachineLocalManagedSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return collectMachineLocalManagedSettings()
+  } catch {
+    return { mdm: null, file: null, hkcu: null }
+  }
+}
+
+/**
+ * densable `Ou()`/`DRn`/`B_` — allTiers. No helper/remote: MDM + file, not hkcu.
+ */
+function artifactPolicyOu(): ArtifactSettingsRow[] {
+  const { mdm, file } = machineLocalManagedTiers()
+  return [mdm, file].filter(
+    (row): row is NonNullable<ArtifactSettingsRow> => row != null,
+  )
+}
+
+/**
+ * densable `mee()`/`ZZr`/`W_` — durableTiers. Admin present → MDM/file;
+ * else hkcu. Remote helper still cut.
+ */
+function artifactPolicyMee(): ArtifactSettingsRow[] {
+  const { mdm, file, hkcu } = machineLocalManagedTiers()
+  if (mdm || file) {
+    return [mdm, file].filter(
+      (row): row is NonNullable<ArtifactSettingsRow> => row != null,
+    )
+  }
+  return hkcu != null ? [hkcu] : []
+}
+
+/**
+ * densable `R("policySettings")` then `[...c, ...mee()]`:
+ * `[...Ou(), ge("policySettings"), ...mee()]`.
+ */
+function artifactPolicyAdminTiers(): ArtifactSettingsRow[] {
+  return [
+    ...artifactPolicyOu(),
+    artifactSettingsRow('policySettings'),
+    ...artifactPolicyMee(),
+  ]
+}
+
+/**
+ * densable `wee` — cwd-root localSettings path only when cwd is not the
+ * project/git root. No repoTierFreeze host.
+ */
+function artifactWeeLocalSettingsPath(): string | undefined {
+  try {
+    const { getOriginalCwd, getProjectRoot } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    const { join, resolve } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('path') as typeof import('path')
+    const cwd = resolve(getOriginalCwd())
+    const root = resolve(getProjectRoot())
+    if (cwd === root) return undefined
+    return join(cwd, '.claude', 'settings.local.json')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable `Asr` — freeze.legacy if present, else `C$(wee())`. Leftover has
+ * no freeze host: parse wee path or null.
+ */
+function artifactLocalSettingsAsr(): ArtifactSettingsRow {
+  const wee = artifactWeeLocalSettingsPath()
+  if (!wee) return null
+  try {
+    const { parseSettingsFile } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return parseSettingsFile(wee).settings
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable `hS` — projectSettings path aliases userSettings.
+ */
+function artifactProjectAliasesUser(): boolean {
+  try {
+    const { projectSettingsAliasesUserSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    return projectSettingsAliasesUserSettings()
+  } catch {
+    return false
+  }
+}
+
+function collectArtifactLhtOff(
+  off: ArtifactLhtOff[],
+  layer: string,
+  rows: Array<{ enableArtifact?: boolean; disableArtifact?: boolean } | null>,
+): void {
+  if (rows.some(u => u?.enableArtifact === false)) {
+    off.push({ layer, via: 'enableKey' })
+  }
+  if (rows.some(u => u?.disableArtifact === true)) {
+    off.push({ layer, via: 'legacyDisableKey' })
+  }
+}
+
+/**
+ * densable `Lht`/`L(C)` — env / policy / flag / user / local / project ladder.
+ * `{enabled: offSources.length===0 && (defaultOn || decided enable)}`.
+ */
+export function isArtifactLhtEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const off: ArtifactLhtOff[] = []
+  if (isEnvTruthy(env[ARTIFACT_LHT_CATALOG.envDisableVar])) {
+    off.push({ layer: 'env', via: 'envVar' })
+  }
+  // Isolated env bags (tests) only apply the env arm — gold Lht reads process
+  // settings when `env===process.env`.
+  if (env !== process.env) {
+    return off.length === 0 && ARTIFACT_LHT_CATALOG.defaultOn
+  }
+  let decided: string | undefined
+  for (const layer of ARTIFACT_LHT_ADMIN) {
+    if (!artifactSourceAllowed(layer)) continue
+    const row = artifactSettingsRow(layer)
+    const rRows =
+      layer === 'policySettings' ? [...artifactPolicyOu(), row] : [row]
+    collectArtifactLhtOff(
+      off,
+      layer,
+      layer === 'policySettings' ? artifactPolicyAdminTiers() : rRows,
+    )
+    if (
+      decided === undefined &&
+      rRows.some(p => p?.enableArtifact === true) &&
+      (layer !== 'policySettings' || artifactPolicyEnableCounts())
+    ) {
+      decided = layer
+    }
+  }
+  for (const layer of ARTIFACT_LHT_PROJECT) {
+    if (!artifactSourceAllowed(layer)) continue
+    if (layer === 'projectSettings' && artifactProjectAliasesUser()) continue
+    const row = artifactSettingsRow(layer)
+    collectArtifactLhtOff(
+      off,
+      layer,
+      layer === 'localSettings' ? [row, artifactLocalSettingsAsr()] : [row],
+    )
+  }
+  return (
+    off.length === 0 &&
+    (ARTIFACT_LHT_CATALOG.defaultOn || decided !== undefined)
+  )
+}
+
+/**
  * Official R9i densable — CLAUDE_CODE_DISABLE_ARTIFACT env OR
- * settings.disableArtifact.
+ * settings.disableArtifact. Gold `g()=!Lht().enabled` for M7n switched_off.
+ * Optional `settingsDisableArtifact` still OR-ed (callers that already resolved).
  */
 export function isArtifactToolDisabled(
   env: NodeJS.ProcessEnv = process.env,
   settingsDisableArtifact?: boolean,
 ): boolean {
-  if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_ARTIFACT)) return true
-  return settingsDisableArtifact === true
+  if (settingsDisableArtifact === true) return true
+  return !isArtifactLhtEnabled(env)
 }
 
 /**

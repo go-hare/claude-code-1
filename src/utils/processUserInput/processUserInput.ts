@@ -3,7 +3,6 @@ import type {
   ContentBlockParam,
   ImageBlockParam,
 } from '@anthropic-ai/sdk/resources/messages.mjs'
-import { randomUUID } from 'crypto'
 import type { QuerySource } from 'src/constants/querySource.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { getContentText } from 'src/utils/messages.js'
@@ -39,11 +38,6 @@ import type { PastedContent } from '../config.js'
 import type { EffortValue } from '../effort.js'
 import { toArray } from '../generators.js'
 import {
-  executeUserPromptSubmitHooks,
-  getUserPromptSubmitHookBlockingMessage,
-} from '../hooks.js'
-import { applyHookSessionTitle } from '../sessionStart.js'
-import {
   createImageMetadataText,
   maybeResizeAndDownsampleImageBlock,
 } from '../imageResizer.js'
@@ -56,8 +50,45 @@ import {
 import { logForDebugging } from '../debug.js'
 import { queryCheckpoint } from '../queryProfiler.js'
 import { parseSlashCommand } from '../slashCommandParsing.js'
+import {
+  hasUltraplanKeyword,
+  isUltraplanProductEnabled,
+  replaceUltraplanKeyword,
+} from '../ultraplanKeyword.js'
 import { processTextPrompt } from './processTextPrompt.js'
-export type ProcessUserInputContext = ToolUseContext & LocalJSXCommandContext
+import {
+  originIsTypedOrUnset,
+  resolvePromptSource,
+  resolveTurnOrigin,
+  snapshotThreadState,
+} from './artStamps.js'
+import { isComposerEnter } from './composerEnter.js'
+import {
+  promptScreenNeedsReplay,
+  promptScreenPluginsChanged,
+  runPromptSubmit,
+  runUserPromptSubmit,
+  snapshotPromptScreen,
+  wrapQueuedSettle,
+  type PromptSubmittedStamp,
+} from './promptSubmit.js'
+import {
+  isAheadOfSessionStart,
+  registerPromptSubmitEntry,
+  type PromptSubmitEntries,
+} from './promptSubmitEntries.js'
+import { takePromptSubmitWait } from './promptSubmitWaits.js'
+export type ProcessUserInputContext = ToolUseContext &
+  LocalJSXCommandContext & {
+    /** densable yn slash context `submissionVerifiedSlackHumanTurn`. */
+    submissionVerifiedSlackHumanTurn?: boolean
+    /** densable yn slash context `submittedOnLocalStdin`. */
+    submittedOnLocalStdin?: boolean
+    /** densable yn slash context `submittedBySessionChannelPerson`. */
+    submittedBySessionChannelPerson?: boolean
+    /** densable yn slash context `submittedFromComposer`. */
+    submittedFromComposer?: boolean
+  }
 
 export type ProcessUserInputBaseResult = {
   messages: (
@@ -86,6 +117,11 @@ export type ProcessUserInputBaseResult = {
   // When true, the command started detached work that will finalize its
   // autonomy run after the background work completes.
   deferAutonomyCompletion?: boolean
+  /**
+   * densable ambientAttachmentsOwed — skipAttachments "mentions" deferred
+   * Ys getAttachmentMessages(null, ...) on early-return.
+   */
+  ambientAttachmentsOwed?: boolean
 }
 
 /**
@@ -154,6 +190,22 @@ export function isEndedByModelClearEscape(
   return ENDED_BY_MODEL_ALLOWED_COMMANDS.has(canonical)
 }
 
+/** densable `Ys` @195539942 — splice ambient attachments at index 1. */
+async function deliverOwedAmbientAttachments(
+  result: ProcessUserInputBaseResult,
+  context: ProcessUserInputContext,
+  history: Message[] | undefined,
+  querySource: QuerySource | undefined,
+): Promise<void> {
+  const owed = result.ambientAttachmentsOwed === true
+  delete result.ambientAttachmentsOwed
+  if (!owed) return
+  const ambient = await toArray(
+    getAttachmentMessages(null, context, null, [], history, querySource),
+  )
+  result.messages.splice(1, 0, ...ambient)
+}
+
 export async function processUserInput({
   input,
   preExpansionInput,
@@ -180,6 +232,21 @@ export async function processUserInput({
   autonomy,
   origin,
   suppressWorkflowKeyword,
+  localStdinOrigin,
+  sessionChannelPersonTyped,
+  hostInitiator,
+  artifactCommentTurn,
+  verifiedSlackHumanTurn,
+  inlinedImagePaths,
+  stampThreadState,
+  pollEventDelivery,
+  pollEventProvenance,
+  pollEventDeclared,
+  composerEnter,
+  aheadOfSessionStart,
+  entries,
+  wait,
+  promptSubmitted,
 }: {
   input: string | Array<ContentBlockParam>
   /**
@@ -227,7 +294,7 @@ export async function processUserInput({
    * system-generated prompts.
    */
   isMeta?: boolean
-  skipAttachments?: boolean
+  skipAttachments?: boolean | 'all' | 'mentions'
   /** densable skipSubmissionHooks — attachment-only poll empty prompt. */
   skipSubmissionHooks?: boolean
   /**
@@ -244,7 +311,33 @@ export async function processUserInput({
   origin?: QueuedCommand['origin']
   /** densable suppressWorkflowKeyword — skip p2y for this turn. */
   suppressWorkflowKeyword?: boolean
+  localStdinOrigin?: boolean
+  sessionChannelPersonTyped?: boolean
+  hostInitiator?: unknown
+  artifactCommentTurn?: unknown
+  verifiedSlackHumanTurn?: boolean
+  inlinedImagePaths?: string[]
+  stampThreadState?: boolean
+  pollEventDelivery?: boolean
+  pollEventProvenance?: unknown[]
+  pollEventDeclared?: unknown
+  /** densable Art `composerEnter` — REPL Enter only; print/QE omit. */
+  composerEnter?: unknown
+  /**
+   * densable Art `aheadOfSessionStart` — QE sets when orphanedPermission
+   * is present. Unn skips `jq.get()` for this start input.
+   */
+  aheadOfSessionStart?: boolean
+  /** densable Art `entries` — QE `Cpr` latch. */
+  entries?: PromptSubmitEntries
+  /** densable Art `wait` → Unn `shouldWait`. */
+  wait?: boolean
+  /** densable Art `promptSubmitted` — REPL Enter screening reuse. */
+  promptSubmitted?: PromptSubmittedStamp
 }): Promise<ProcessUserInputBaseResult> {
+  // densable Art `using V=Ios(hss(k))` — wrap the whole turn so a skip-Unn
+  // path still dispose-drops the plugin waiter.
+  using queuedSettle = wrapQueuedSettle(takePromptSubmitWait(uuid))
   const inputString = typeof input === 'string' ? input : null
   // Immediately show the user input prompt while we are still processing the input.
   // Skip for isMeta (system-generated prompts like scheduled tasks) and slash
@@ -278,11 +371,19 @@ export async function processUserInput({
 
   // densable Fe: shouldQuery===false && isMeta && queryHeldForNextTurn!==true
   // → treat as skipAttachments (no turn-level attachment assembly).
-  const effectiveSkipAttachments =
-    skipAttachments === true ||
-    (shouldQueryInput === false &&
-      isMeta === true &&
-      queryHeldForNextTurn !== true)
+  const skipFromCaller: 'all' | 'mentions' | undefined =
+    skipAttachments === true || skipAttachments === 'all'
+      ? 'all'
+      : skipAttachments === 'mentions'
+        ? 'mentions'
+        : undefined
+  const skipFromFe =
+    shouldQueryInput === false &&
+    isMeta === true &&
+    queryHeldForNextTurn !== true
+      ? ('all' as const)
+      : undefined
+  const effectiveSkipAttachments = skipFromFe ?? skipFromCaller
 
   const result = await processUserInputBase(
     input,
@@ -307,8 +408,71 @@ export async function processUserInput({
     origin,
     suppressWorkflowKeyword,
     wakeupSource,
+    inlinedImagePaths,
+    verifiedSlackHumanTurn,
+    localStdinOrigin,
+    sessionChannelPersonTyped,
+    stampThreadState,
+    hostInitiator,
+    artifactCommentTurn,
+    shouldQueryInput,
+    composerEnter,
   )
   queryCheckpoint('query_process_user_input_base_end')
+
+  // densable Art after yn: Fe = e9e unless skip-query meta (gold H===!1 && ue && be!==!0).
+  const promptSource =
+    shouldQueryInput === false &&
+    isMeta === true &&
+    queryHeldForNextTurn !== true
+      ? undefined
+      : resolvePromptSource({
+          isNonInteractive: context.options.isNonInteractiveSession,
+          isMeta,
+          callerSource: originIsTypedOrUnset(origin) ? undefined : 'system',
+        })
+  try {
+    // gold: Fe!==void 0 && shouldQuery && (H!==!1 || be===!0). R9e last-user
+    // index KEEP (needs IX/Rvt/zye host).
+    if (
+      promptSource !== undefined &&
+      result.shouldQuery &&
+      (shouldQueryInput !== false || queryHeldForNextTurn === true)
+    ) {
+      const firstUser = result.messages.find(message => message.type === 'user')
+      if (
+        firstUser?.type === 'user' &&
+        (firstUser as { turnOrigin?: string }).turnOrigin === undefined
+      ) {
+        ;(firstUser as { turnOrigin?: string }).turnOrigin = resolveTurnOrigin({
+          origin,
+          isMeta,
+          wakeupSource,
+          promptSource,
+          hostInitiator,
+        })
+      }
+    }
+  } catch {
+    // gold Art wraps KOo in try/catch
+  }
+
+  // densable Art poll_events value_dispatch marker (not model-facing).
+  if (pollEventDelivery === true && result.messages.length > 0) {
+    result.messages.push(
+      createAttachmentMessage({
+        type: 'poll_events',
+        deliveredVia: 'value_dispatch',
+        envelopes: [],
+        kinds: [],
+        remainingWakeCount: 0,
+        ...(pollEventProvenance !== undefined && {
+          provenance: pollEventProvenance,
+        }),
+        ...(pollEventDeclared !== undefined && { declared: pollEventDeclared }),
+      }),
+    )
+  }
 
   // densable: input shouldQuery===false forces result.shouldQuery=false
   // (override processTextPrompt default true for plain notifications).
@@ -327,95 +491,75 @@ export async function processUserInput({
   }
 
   if (!result.shouldQuery) {
+    await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
 
   if (skipSubmissionHooks) {
+    await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
 
-  // Execute UserPromptSubmit hooks and handle blocking
+  // densable Art Unn / yUn / Pos / $nn. skip jq.get() when ahead of
+  // session start (orphanedPermission or uuid in pG).
   queryCheckpoint('query_hooks_start')
   const inputMessage = getContentText(input) || ''
-  let suppressOriginalPrompt = false
-
-  for await (const hookResult of executeUserPromptSubmitHooks(
-    inputMessage,
-    appState.toolPermissionContext.mode,
-    context,
-    context.requestPrompt,
-  )) {
-    // We only care about the result
-    if (hookResult.message?.type === 'progress') {
-      continue
+  const isStartInput =
+    aheadOfSessionStart === true || isAheadOfSessionStart(uuid)
+  const screenNow = snapshotPromptScreen(context)
+  if (
+    promptSubmitted === undefined ||
+    promptScreenPluginsChanged(promptSubmitted.under, screenNow)
+  ) {
+    const outcome = await runPromptSubmit({
+      text: inputMessage,
+      originalInput: input,
+      result,
+      context,
+      isStartInput,
+      shouldWait: wait === true,
+      promptSource,
+      wakeupSource,
+      entries,
+      queued: queuedSettle,
+      enter: entries
+        ? () => registerPromptSubmitEntry(entries, result.messages)
+        : undefined,
+    })
+    if (outcome.kind === 'return') {
+      queryCheckpoint('query_hooks_end')
+      return outcome.result
     }
-
-    // Official 2.1.x: UPS can set session title
-    if (hookResult.sessionTitle) {
-      applyHookSessionTitle(hookResult.sessionTitle)
-    }
-    if (hookResult.suppressOriginalPrompt) {
-      suppressOriginalPrompt = true
-    }
-
-    // Return only a system-level error message, erasing the original user input
-    if (hookResult.blockingError) {
-      const blockingMessage = getUserPromptSubmitHookBlockingMessage(
-        hookResult.blockingError,
-      )
-      const blockText = suppressOriginalPrompt
-        ? blockingMessage
-        : `${blockingMessage}\n\nOriginal prompt: ${input}`
+  } else if (promptScreenNeedsReplay(promptSubmitted.under, screenNow)) {
+    const replay = await runUserPromptSubmit(
+      promptSubmitted.text,
+      result,
+      context,
+      input,
+    )
+    if (replay.kind === 'blocking') {
+      queryCheckpoint('query_hooks_end')
       return {
-        messages: [
-          // TODO: Make this an attachment message
-          createSystemMessage(blockText, 'warning'),
-        ],
+        messages: replay.messages,
         shouldQuery: false,
-        allowedTools: result.allowedTools,
+        allowedTools: replay.allowedTools,
       }
     }
-
-    // If preventContinuation is set, stop processing but keep the original
-    // prompt in context.
-    if (hookResult.preventContinuation) {
-      const message = hookResult.stopReason
-        ? `Operation stopped by hook: ${hookResult.stopReason}`
-        : 'Operation stopped by hook'
-      result.messages.push(
-        createUserMessage({
-          content: message,
-        }),
-      )
-      result.shouldQuery = false
+    if (replay.kind === 'stop') {
+      queryCheckpoint('query_hooks_end')
       return result
     }
-
-    // Collect additional contexts
-    if (
-      hookResult.additionalContexts &&
-      hookResult.additionalContexts.length > 0
-    ) {
-      result.messages.push(
-        createAttachmentMessage({
-          type: 'hook_additional_context',
-          content: hookResult.additionalContexts,
-          hookName: 'UserPromptSubmit',
-          toolUseID: `hook-${randomUUID()}`,
-          hookEvent: 'UserPromptSubmit',
-        }),
-      )
+    if (entries) {
+      void registerPromptSubmitEntry(entries, result.messages)
     }
-
-    // densable 247 `rWe` — drop an empty hook_success attachment, pass every
-    // other attachment through untouched. Size is already bounded upstream by
-    // persistHookOutput, so there is nothing to truncate here.
-    if (hookResult.message) {
-      const attachment = hookResult.message.attachment!
-      if (attachment.type !== 'hook_success' || attachment.content) {
-        result.messages.push(hookResult.message as AttachmentMessage)
-      }
-    }
+  } else if (promptSubmitted.stopped !== undefined) {
+    result.messages.push(...(promptSubmitted.messages ?? []))
+    result.shouldQuery = false
+    result.resultText = promptSubmitted.stopped
+    queryCheckpoint('query_hooks_end')
+    return result
+  } else if (entries) {
+    void registerPromptSubmitEntry(entries, result.messages)
   }
   queryCheckpoint('query_hooks_end')
 
@@ -462,17 +606,26 @@ async function processUserInputBase(
   bridgeOrigin?: boolean,
   modelScheduledOrigin?: boolean,
   isMeta?: boolean,
-  skipAttachments?: boolean,
+  skipAttachments?: boolean | 'all' | 'mentions',
   preExpansionInput?: string,
   autonomy?: QueuedCommand['autonomy'],
   origin?: QueuedCommand['origin'],
   suppressWorkflowKeyword?: boolean,
   /**
-   * densable 2.1.221: fire stamps wakeupSource through the stack, but Qjt
-   * UserPromptSubmit does not yet expose `source` (`...!1`). Keep the arg so
-   * call-sites stay 1:1; do not invent hook wiring from this param.
+   * densable 2.1.221: fire stamps wakeupSource through the stack. Qjt
+   * UserPromptSubmit still does not expose `source` (`...!1`); ELt/KOo consume
+   * this for telemetry and turnOrigin.
    */
-  _wakeupSource?: string,
+  wakeupSource?: string,
+  inlinedImagePaths?: string[],
+  verifiedSlackHumanTurn?: boolean,
+  localStdinOrigin?: boolean,
+  sessionChannelPersonTyped?: boolean,
+  stampThreadState?: boolean,
+  hostInitiator?: unknown,
+  artifactCommentTurn?: unknown,
+  shouldQuery?: boolean,
+  composerEnter?: unknown,
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -491,7 +644,8 @@ async function processUserInputBase(
     input !== '' &&
     input.trim() === '' &&
     context.options.isNonInteractiveSession &&
-    !isMeta
+    !isMeta &&
+    shouldQuery !== false
   ) {
     const BLANK_PROMPT_MESSAGE =
       'Blank prompt — the message was only whitespace, so nothing was sent to the model.'
@@ -708,16 +862,27 @@ async function processUserInputBase(
   const slashLooksLikeCommand =
     (slashInputForProcess?.startsWith('/') ?? false) ||
     (inputString?.startsWith('/') ?? false)
-  // densable `ddt`: poll-event | task-notification | skipAttachments skip extract
+  // densable yn Le/Pe: L!=="all" && (skipSlash || !startsWith("/")); Pe=L===void 0
+  const skipMode: 'all' | 'mentions' | undefined =
+    skipAttachments === true || skipAttachments === 'all'
+      ? 'all'
+      : skipAttachments === 'mentions'
+        ? 'mentions'
+        : origin?.kind === 'plugin'
+          ? 'all'
+          : undefined
+  const canExtractThisPrompt = effectiveSkipSlash || !slashLooksLikeCommand
   const shouldExtractAttachments =
-    !skipAttachments &&
+    skipMode !== 'all' &&
+    skipMode === undefined &&
+    canExtractThisPrompt &&
     mode !== 'poll-event' &&
     mode !== 'task-notification' &&
-    inputString !== null &&
-    (mode !== 'prompt' || effectiveSkipSlash || !slashLooksLikeCommand)
+    inputString !== null
 
-  // densable: isRegularUserPrompt = !isMeta && prompt mode; isHumanTyped = regular && Wzn(origin).
-  const isRegularUserPrompt = mode === 'prompt' && !isMeta
+  // densable: isRegularUserPrompt = !isMeta && prompt mode && shouldQuery!==false.
+  const isRegularUserPrompt =
+    mode === 'prompt' && !isMeta && shouldQuery !== false
   const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
   queryCheckpoint('query_attachment_loading_start')
   const attachmentMessages = shouldExtractAttachments
@@ -740,6 +905,21 @@ async function processUserInputBase(
     : []
   queryCheckpoint('query_attachment_loading_end')
 
+  const inlinedImageAttachment =
+    inlinedImagePaths && inlinedImagePaths.length > 0
+      ? createAttachmentMessage({
+          type: 'inlined_image_paths',
+          paths: inlinedImagePaths,
+        })
+      : null
+  const threadSnapshot = stampThreadState ? snapshotThreadState() : undefined
+  const threadStateAttachment = threadSnapshot
+    ? createAttachmentMessage({
+        type: 'thread_state',
+        ...threadSnapshot,
+      })
+    : null
+
   // Bash commands
   if (inputString !== null && mode === 'bash') {
     const { processBashCommand } = await import('./processBashCommand.js')
@@ -753,6 +933,43 @@ async function processUserInputBase(
       ),
       imageMetadataTexts,
     )
+  }
+
+  // densable BZt keyword — route through /ultraplan. Detect on the
+  // pre-expansion input so pasted content containing the word cannot
+  // trigger a CCR session; replace with "plan" in the expanded input so
+  // the CCR prompt receives paste contents and stays grammatical.
+  // Interactive prompt mode + non-slash-prefixed only: headless/print
+  // filters local-jsx commands out of context.options.
+  if (
+    isUltraplanProductEnabled() &&
+    mode === 'prompt' &&
+    !context.options.isNonInteractiveSession &&
+    inputString !== null &&
+    !effectiveSkipSlash &&
+    !inputString.startsWith('/') &&
+    !context.getAppState().ultraplanSessionUrl &&
+    !context.getAppState().ultraplanLaunching &&
+    hasUltraplanKeyword(preExpansionInput ?? inputString)
+  ) {
+    logEvent('tengu_ultraplan_keyword', {})
+    const rewritten = replaceUltraplanKeyword(inputString).trim()
+    const { processSlashCommand } = await import('./processSlashCommand.js')
+    const slashResult = await processSlashCommand(
+      `/ultraplan ${rewritten}`,
+      precedingInputBlocks,
+      imageContentBlocks,
+      [],
+      context,
+      setToolJSX,
+      uuid,
+      isAlreadyProcessing,
+      canUseTool,
+      autonomy,
+      modelScheduledOrigin,
+      origin,
+    )
+    return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
 
   // Slash commands
@@ -770,7 +987,13 @@ async function processUserInputBase(
       precedingInputBlocks,
       imageContentBlocks,
       attachmentMessages,
-      context,
+      {
+        ...context,
+        submissionVerifiedSlackHumanTurn: verifiedSlackHumanTurn,
+        submittedOnLocalStdin: localStdinOrigin,
+        submittedBySessionChannelPerson: sessionChannelPersonTyped,
+        submittedFromComposer: isComposerEnter(composerEnter),
+      },
       setToolJSX,
       uuid,
       isAlreadyProcessing,
@@ -778,7 +1001,15 @@ async function processUserInputBase(
       autonomy,
       modelScheduledOrigin,
       origin,
+      wakeupSource,
+      hostInitiator,
     )
+    if (inlinedImageAttachment) {
+      slashResult.messages.push(inlinedImageAttachment)
+    }
+    if (threadStateAttachment) {
+      slashResult.messages.push(threadStateAttachment)
+    }
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
 
@@ -806,19 +1037,34 @@ async function processUserInputBase(
   }
 
   // Regular user prompt
-  return addImageMetadataMessage(
+  const promptAttachments = [...attachmentMessages]
+  if (inlinedImageAttachment) {
+    promptAttachments.push(inlinedImageAttachment)
+  }
+  if (threadStateAttachment) {
+    promptAttachments.push(threadStateAttachment)
+  }
+  const promptResult = addImageMetadataMessage(
     processTextPrompt(
       normalizedInput,
       imageContentBlocks,
       imagePasteIds,
-      attachmentMessages,
+      promptAttachments,
       uuid,
       permissionMode,
       isMeta,
       origin,
+      wakeupSource,
+      hostInitiator,
+      artifactCommentTurn,
     ),
     imageMetadataTexts,
   )
+  // densable Le&&!Pe → ambientAttachmentsOwed
+  if (skipMode === 'mentions' && canExtractThisPrompt) {
+    promptResult.ambientAttachmentsOwed = true
+  }
+  return promptResult
 }
 
 // densable Qt — isMeta + turnCompanion, no origin (cun fills origin later).

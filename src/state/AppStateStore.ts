@@ -254,6 +254,10 @@ export type AppState = DeepImmutable<{
   replBridgeSkipNextArchive: boolean | undefined
   // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
   showRemoteCallout: boolean
+  ultraplanLaunching?: boolean
+  ultraplanSessionUrl?: string
+  ultraplanPendingChoice?: { plan: string; sessionId: string; taskId: string }
+  ultraplanLaunchPending?: { blurb: string }
   // Pipe IPC state — added at runtime when feature('PIPE_IPC') is enabled.
   pipeIpc?: PipeIpcState
 }> & {
@@ -749,6 +753,10 @@ export function getDefaultAppState(): AppState {
     replBridgeSessionGroupingId: undefined,
     replBridgeSkipNextArchive: undefined,
     showRemoteCallout: false,
+    ultraplanLaunching: undefined,
+    ultraplanSessionUrl: undefined,
+    ultraplanPendingChoice: undefined,
+    ultraplanLaunchPending: undefined,
     toolPermissionContext: {
       ...getEmptyToolPermissionContext(),
       mode: initialMode,

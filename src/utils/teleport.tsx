@@ -131,6 +131,7 @@ function buildTeleportCreateEvents(opts: {
   initialMessage: string | null | undefined;
   initialMessageUuid?: string;
   permissionMode?: PermissionMode;
+  ultraplan?: boolean;
 }): TeleportCreateEvent[] {
   const events: TeleportCreateEvent[] = [];
   if (opts.permissionMode) {
@@ -142,6 +143,7 @@ function buildTeleportCreateEvents(opts: {
         request: {
           subtype: 'set_permission_mode',
           mode: opts.permissionMode,
+          ultraplan: opts.ultraplan,
         },
       },
     });
@@ -1067,6 +1069,7 @@ export async function teleportToRemote(options: {
   description?: string;
   model?: string;
   permissionMode?: PermissionMode;
+  ultraplan?: boolean;
   signal: AbortSignal;
   useDefaultEnvironment?: boolean;
   /**
@@ -1385,6 +1388,7 @@ export async function teleportToRemote(options: {
         initialMessage,
         initialMessageUuid: options.initialMessageUuid,
         permissionMode: options.permissionMode,
+        ultraplan: options.ultraplan,
       });
       const requestBody = {
         title: options.title || options.description || 'Remote task',
@@ -1905,10 +1909,11 @@ export async function teleportToRemote(options: {
       initialMessage,
       initialMessageUuid: options.initialMessageUuid,
       permissionMode: options.permissionMode,
+      ultraplan: options.ultraplan,
     });
 
     const requestBody = {
-      title: sessionTitle,
+      title: options.ultraplan ? `ultraplan: ${sessionTitle}` : sessionTitle,
       events,
       session_context: sessionContext,
       ...sessionCreateEnvironmentFields(environmentId),

@@ -2,15 +2,20 @@
 // 1. profileCheckpoint marks entry before heavy module evaluation begins
 // 2. startKeychainPrefetch fires both macOS keychain reads (OAuth + legacy API
 //    key) in parallel with the remaining ~135ms of imports below
+// 3. startMdmRawRead fires MDM subprocesses (plutil/reg query) so they run in
+//    parallel with the remaining imports
 import { profileCheckpoint, profileReport, recordStartupPhase } from './utils/startupProfiler.js';
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 profileCheckpoint('main_tsx_entry');
 
 import { ensureKeychainPrefetchCompleted, startKeychainPrefetch } from './utils/secureStorage/keychainPrefetch.js';
+import { startMdmRawRead } from './utils/settings/mdm/rawRead.js';
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 startKeychainPrefetch();
+// eslint-disable-next-line custom-rules/no-top-level-side-effects
+startMdmRawRead();
 
 import { feature } from 'bun:bundle';
 import { Command as CommanderCommand, Option } from '@commander-js/extra-typings';
@@ -299,6 +304,7 @@ import {
   getSettingsWithErrors,
 } from './utils/settings/settings.js';
 import { resetSettingsCache } from './utils/settings/settingsCache.js';
+import { ensureMdmSettingsLoaded } from './utils/settings/mdm/settings.js';
 import type { ValidationError } from './utils/settings/validation.js';
 import { DEFAULT_TASKS_MODE_TASK_LIST_ID, TASK_STATUSES } from './utils/tasks.js';
 import { logPluginLoadErrors, logPluginsEnabledForSession } from './utils/telemetry/pluginTelemetry.js';
@@ -1348,7 +1354,7 @@ async function run(): Promise<CommanderCommand> {
     }
     // Await async subprocess loads started at module evaluation.
     // Nearly free — subprocesses complete during the ~135ms of imports above.
-    await ensureKeychainPrefetchCompleted();
+    await Promise.all([ensureMdmSettingsLoaded(), ensureKeychainPrefetchCompleted()]);
     profileCheckpoint('preAction_after_keychain');
     await init();
     profileCheckpoint('preAction_after_init');

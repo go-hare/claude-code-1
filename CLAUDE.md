@@ -252,7 +252,7 @@ Feature flags control which functionality is enabled at runtime. 代码中统一
 
 `TREE_SITTER_BASH`、`HISTORY_SNIP`、`CONTEXT_COLLAPSE`（后两者 stub 风险会抑制 proactive autoCompact）、`FORK_SUBAGENT`（289 产品门是 `isForkSubagentProductEnabled()`：交互默认开、headless 默认关、coordinator 关；**不读**这个编译旗标）、`REVIEW_ARTIFACT`、`SKILL_LEARNING`
 
-**已产品拆除（不要复活）**：`ULTRAPLAN`（densable 2.1.222 #21；命令 / 对话框 / ccrSession / AppState 字段已删除，不是 `FEATURE_ULTRAPLAN=1` 残留门。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`）；Anthropic Team/Enterprise 控制面（`remoteManagedSettings`、MDM、org tips、CRI policy webhook、managed-settings security 对话框）。`policyLimits` **已接回**：`src/services/policyLimits/` fetch + leftover `Jt` 评测；Team/Enterprise OAuth 或 Console key 才 eligible。
+**已产品拆除（不要复活）**：`ULTRAPLAN` **编译旗标**（densable 2.1.222 #21；不是 `FEATURE_ULTRAPLAN=1`）。densable 2.1.289 gold `BZt` slash HAS BODY：`/ultraplan` + 对话框 + ccrSession 已接回，`isEnabled` 是 `jj()` / `isUltraplanProductEnabled()`。ultracode / ultrareview keyword 在 `src/utils/workflowKeyword.ts`。Anthropic Team/Enterprise **远程**控制面（`remoteManagedSettings`、org tips、CRI policy webhook、managed-settings security 对话框）仍拆；机器本地 MDM/file/hkcu **已接回**。`policyLimits` **已接回**：`src/services/policyLimits/` fetch + leftover `Jt` 评测；Team/Enterprise OAuth 或 Console key 才 eligible。
 
 **Dev mode 默认**: 全部启用（见 `scripts/dev.ts`）。
 

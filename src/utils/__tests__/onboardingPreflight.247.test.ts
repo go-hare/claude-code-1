@@ -2,7 +2,7 @@
  * densable 2.1.247 #22 — skip first-run Anthropic preflight when managed
  * settings force gateway sign-in (Q$) or admin policy load errors exist (Z$).
  *
- * Product-cut: MDM is gone. Z$ only reads managed-file errors (always empty).
+ * Z$ reads MDM + managed-file errors (not hkcu).
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
@@ -29,14 +29,14 @@ describe('onboarding preflight skip 247 #22', () => {
     expect(forceSrc).toContain('policy?.forceLoginMethod === undefined')
   })
 
-  test('Z$ is non-warning admin load errors (managed file stub, not MDM/hkcu)', () => {
+  test('Z$ is non-warning admin load errors (MDM + managed file, not hkcu)', () => {
     expect(forceSrc).toContain(
       'export function hasNonWarningAdminPolicyLoadErrors',
     )
     expect(forceSrc).toContain('filterNonWarningPolicyLoadErrors')
     expect(forceSrc).toContain("e.severity !== 'warning'")
     expect(forceSrc).toContain('loadManagedFileSettings().errors')
-    expect(forceSrc).not.toContain('getMdmSettings()')
+    expect(forceSrc).toContain('getMdmSettings()')
     expect(forceSrc).not.toContain('getHkcuSettings()')
   })
 

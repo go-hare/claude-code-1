@@ -1,25 +1,28 @@
-# ULTRAPLAN — 已产品拆除
+# ULTRAPLAN
 
-> densable 2.1.222 #21 Removed ultraplan feature.
-> 本仓库跟随官方：**命令 / 对话框 / ccrSession / AppState 字段已删除**，不是
-> `FEATURE_ULTRAPLAN=1` 残留门。
+> densable 2.1.222 #21 removed the `ULTRAPLAN` **compile flag**.
+> densable 2.1.289 gold `BZt` slash HAS BODY — `/ultraplan` is registered
+> without `feature('ULTRAPLAN')`. `isEnabled` is `jj()` /
+> `isUltraplanProductEnabled()`.
 
 <Warning>
-不要复活 `/ultraplan`、不要把 `ULTRAPLAN` 加回 `DEFAULT_BUILD_FEATURES`、不要
-再加 `feature('ULTRAPLAN')` 门。ultracode / ultrareview 关键字检测在
-`src/utils/workflowKeyword.ts`，与 ultraplan 无关。
+不要把 `ULTRAPLAN` 加回 `DEFAULT_BUILD_FEATURES`、不要再加
+`feature('ULTRAPLAN')` 门。产品门是 GrowthBook `tengu_ultraplan_config.enabled`
++ CCR 资格 + 非 remote workspace。ultracode / ultrareview 关键字检测在
+`src/utils/workflowKeyword.ts`。
 </Warning>
 
-## 拆除范围
+## 模块
 
-| 原模块 | 现状 |
+| 模块 | 现状 |
 |------|------|
-| `src/commands/ultraplan.tsx` | 已删 |
-| `src/components/ultraplan/` | 已删 |
-| `src/utils/ultraplan/`（含 ccrSession / prompt / keyword） | 已删 |
-| AppState `ultraplan*` / `isUltraplanMode` | 已删 |
-| `ULTRAPLAN_TAG` | 已删 |
-| ExitPlanMode 「refine with Ultraplan」选项 | 已删 |
-| REPL ultraplan-choice / ultraplan-launch | 已删 |
+| `src/commands/ultraplan.tsx` | BZt slash；`availability: ['claude-ai']` |
+| `src/components/ultraplan/` | Launch / Choice 对话框 |
+| `src/utils/ultraplan/` | ccrSession / prompt |
+| `src/utils/ultraplanKeyword.ts` | jj / C$t screening |
+| AppState `ultraplan*` | launching / sessionUrl / pendingChoice / launchPending |
+| ExitPlanMode 「refine with Ultraplan」 | `isUltraplanProductEnabled()` 时出现 |
+| REPL ultraplan-choice / ultraplan-launch | `_Zt` overlay |
 
-回归锁：`scripts/__tests__/ultraplanProductOff.222.test.ts`。
+回归锁：`scripts/__tests__/ultraplanProductOff.222.test.ts`（旗标仍关）、
+`src/utils/__tests__/ultraplanKeyword.289.test.ts`。

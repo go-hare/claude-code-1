@@ -12,7 +12,8 @@ const srcRoot = join(import.meta.dir, '../../src')
 describe('enterprise product cut', () => {
   test('policyLimits leftover fetch is back; Team/Enterprise control plane is not', () => {
     // densable leftover `Jt` — fetch + eligibility. Not the deleted org
-    // control plane (remoteManagedSettings / MDM / org tips / CRI).
+    // control plane (remoteManagedSettings / org tips / CRI). Machine-local
+    // MDM/file/hkcu is gold HAS BODY.
     expect(existsSync(join(srcRoot, 'services/policyLimits/index.ts'))).toBe(
       true,
     )
@@ -26,7 +27,7 @@ describe('enterprise product cut', () => {
       existsSync(join(srcRoot, 'services/remoteManagedSettings/index.ts')),
     ).toBe(false)
     expect(existsSync(join(srcRoot, 'utils/settings/mdm/settings.ts'))).toBe(
-      false,
+      true,
     )
     expect(existsSync(join(srcRoot, 'services/tips/orgTips.ts'))).toBe(false)
     expect(

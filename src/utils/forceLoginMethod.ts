@@ -24,6 +24,7 @@ import {
   getSettingsForSource,
   loadManagedFileSettings,
 } from './settings/settings.js'
+import { getMdmSettings } from './settings/mdm/settings.js'
 import type { SettingsJson } from './settings/types.js'
 
 export type ForceLoginMethod = 'claudeai' | 'console' | 'gateway'
@@ -226,7 +227,7 @@ export function isManagedSettingsGatewaySignIn(): boolean {
  * Official: V(p()).errors + M().errors + X().errors. Not hkcu (`Re`).
  */
 function getAdminPolicyLoadErrors() {
-  return [...loadManagedFileSettings().errors]
+  return [...getMdmSettings().errors, ...loadManagedFileSettings().errors]
 }
 
 /**

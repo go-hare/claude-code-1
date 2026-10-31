@@ -113,6 +113,12 @@ import type { PromptDraftController } from '../../utils/promptDraftController.js
 import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
 import { Cursor } from '../../utils/Cursor.js';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
+import {
+  findUltraplanTriggerPositions,
+  isUltraplanProductEnabled,
+  stampSlashNameOnlyPastedGaps,
+} from '../../utils/ultraplanKeyword.js';
+
 import { clearHeldClearedDraft, holdCleared, restoreCleared } from '../../utils/clearedDraftHold.js';
 import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
@@ -154,6 +160,7 @@ import { isOpus1mMergeEnabled, modelDisplayString } from '../../utils/model/mode
 import { Dv } from '../../utils/model/modelNoticeCode.js';
 import { cyclePermissionMode, getNextPermissionMode } from '../../utils/permissions/getNextPermissionMode.js';
 import { getPlatform } from '../../utils/platform.js';
+import { mintComposerEnter } from '../../utils/processUserInput/composerEnter.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
 import { editPromptInEditor } from '../../utils/promptEditor.js';
 import { collectLastAssistantTextsForEditor } from '../../utils/messages.js';
@@ -223,6 +230,10 @@ import { getThemeSetting } from '../../utils/themeSetting.js';
 type Props = {
   debug: boolean;
   ideSelection: IDESelection | undefined;
+  /** densable M7e abort — T7e hides send-now when null/aborted. */
+  abortController?: AbortController | null;
+  /** densable pop-to-edit `returnIdeSelection`. */
+  onRestoreIdeSelection?: (selection: IDESelection | undefined) => void;
   toolPermissionContext: ToolPermissionContext;
   setToolPermissionContext: (ctx: ToolPermissionContext) => void;
   apiKeyStatus: VerificationStatus;
@@ -298,6 +309,8 @@ type Props = {
       resumesStaleQuotaWait?: boolean;
       sendNow?: boolean;
       queueSubmit?: boolean;
+      /** densable Vwr — composer Enter only; omitted for sendNow/queueSubmit. */
+      composerEnter?: unknown;
     },
   ) => Promise<void>;
   onAgentSubmit?: (
@@ -334,6 +347,8 @@ const nullDraftSnapshot = (): null => null;
 function PromptInput({
   debug,
   ideSelection,
+  abortController,
+  onRestoreIdeSelection,
   toolPermissionContext,
   setToolPermissionContext,
   apiKeyStatus,
@@ -939,6 +954,16 @@ function PromptInput({
 
   const thinkTriggers = useMemo(() => findThinkingTriggerPositions(displayedValue), [displayedValue]);
 
+  const ultraplanSessionUrl = useAppState(s => s.ultraplanSessionUrl);
+  const ultraplanLaunching = useAppState(s => s.ultraplanLaunching);
+  const ultraplanTriggers = useMemo(
+    () =>
+      isUltraplanProductEnabled() && !ultraplanSessionUrl && !ultraplanLaunching
+        ? findUltraplanTriggerPositions(displayedValue)
+        : [],
+    [displayedValue, ultraplanSessionUrl, ultraplanLaunching],
+  );
+
   const ultrareviewTriggers = useMemo(
     () => (isUltrareviewEnabled() ? findUltrareviewTriggerPositions(displayedValue) : []),
     [displayedValue],
@@ -1149,6 +1174,19 @@ function PromptInput({
       }
     }
 
+    // Same rainbow treatment for the ultraplan keyword
+    for (const trigger of ultraplanTriggers) {
+      for (let i = trigger.start; i < trigger.end; i++) {
+        highlights.push({
+          start: i,
+          end: i + 1,
+          color: getRainbowColor(i - trigger.start),
+          shimmerColor: getRainbowColor(i - trigger.start, true),
+          priority: 10,
+        });
+      }
+    }
+
     // Same rainbow treatment for the ultrareview keyword
     for (const trigger of ultrareviewTriggers) {
       for (let i = trigger.start; i < trigger.end; i++) {
@@ -1192,6 +1230,7 @@ function PromptInput({
     displayedValue,
     voiceInterimRange,
     thinkTriggers,
+    ultraplanTriggers,
     ultrareviewTriggers,
     buddyTriggers,
     spellcheckHighlights,
@@ -1212,6 +1251,19 @@ function PromptInput({
       removeNotification('ultrathink-active');
     }
   }, [addNotification, removeNotification, thinkTriggers.length]);
+
+  useEffect(() => {
+    if (isUltraplanProductEnabled() && ultraplanTriggers.length) {
+      addNotification({
+        key: 'ultraplan-active',
+        text: 'This prompt will launch an ultraplan session in Claude Code on the web',
+        priority: 'immediate',
+        timeoutMs: 5000,
+      });
+    } else {
+      removeNotification('ultraplan-active');
+    }
+  }, [addNotification, removeNotification, ultraplanTriggers.length]);
 
   useEffect(() => {
     if (isUltrareviewEnabled() && ultrareviewTriggers.length) {
@@ -1508,11 +1560,21 @@ function PromptInput({
         return newContents;
       });
     }
+    onRestoreIdeSelection?.(result.ideSelection);
     logEvent('tengu_feature_ok', {
       feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     return true;
-  }, [addNotification, onModeChange, queuedCommands, setPastedContents, setQueueEditIndex, store, trackAndSetInput]);
+  }, [
+    addNotification,
+    onModeChange,
+    onRestoreIdeSelection,
+    queuedCommands,
+    setPastedContents,
+    setQueueEditIndex,
+    store,
+    trackAndSetInput,
+  ]);
 
   const onSubmit = useCallback(
     async (
@@ -1689,6 +1751,8 @@ function PromptInput({
 
       // Normal leader submission — always pass live paste map so parent does not
       // depend on setState having committed (paste then Enter / idle-return continue).
+      // densable `_b=qv||Z_?void 0:Vwr()` — mint only for composer Enter.
+      const composerEnter = submitOptions?.sendNow || submitOptions?.queueSubmit ? undefined : mintComposerEnter();
       await onSubmitProp(
         inputParam,
         {
@@ -1702,6 +1766,7 @@ function PromptInput({
           ...(resumesStaleQuotaWait ? { resumesStaleQuotaWait: true } : {}),
           ...(submitOptions?.sendNow ? { sendNow: true } : {}),
           ...(submitOptions?.queueSubmit ? { queueSubmit: true } : {}),
+          ...(composerEnter ? { composerEnter } : {}),
         },
       );
     },
@@ -1933,6 +1998,13 @@ function PromptInput({
       prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
     );
     trackAndSetInput(newInput);
+    // densable UG on typed insert: stamp slashNameOnly gaps when slash/ultraplan.
+    const visual = vimMode === 'VISUAL' || vimMode === 'VISUAL LINE';
+    const stamped = stampSlashNameOnlyPastedGaps(pastedContentsRef.current, newInput, visual);
+    if (stamped !== pastedContentsRef.current) {
+      setPastedContents(stamped);
+      pastedContentsRef.current = stamped;
+    }
     const newOffset = currentOffset + text.length;
     cursorOffsetRef.current = newOffset;
     setCursorOffset(newOffset);
@@ -1968,12 +2040,13 @@ function PromptInput({
         return newContents;
       });
     }
+    onRestoreIdeSelection?.(result.ideSelection);
 
     logEvent('tengu_feature_ok', {
       feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     return true;
-  }, [trackAndSetInput, onModeChange, setPastedContents, setAppState]);
+  }, [trackAndSetInput, onModeChange, onRestoreIdeSelection, setPastedContents, setAppState]);
 
   // Insert the at-mentioned reference (the file and, optionally, a line range) when
   // we receive an at-mentioned notification the IDE.
@@ -3226,7 +3299,9 @@ function PromptInput({
 
   return (
     <Box flexDirection="column" marginTop={briefOwnsGap ? 0 : 1}>
-      {!isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
+      {!isFullscreenEnvEnabled() && (
+        <PromptInputQueuedCommands abortController={abortController} mcpClients={mcpClients} />
+      )}
       {hasSuppressedDialogs && (
         <Box marginTop={1} marginLeft={2}>
           <Text dimColor>Waiting for permission…</Text>

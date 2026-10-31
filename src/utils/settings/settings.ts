@@ -32,7 +32,11 @@ import {
   type SettingSource,
 } from './constants.js'
 import { markInternalWrite } from './internalWrites.js'
-import { getManagedFilePath } from './managedPath.js'
+import {
+  getManagedFilePath,
+  getManagedSettingsDropInDir,
+} from './managedPath.js'
+import { getHkcuSettings, getMdmSettings } from './mdm/settings.js'
 import {
   getCachedParsedFile,
   getCachedSettingsForSource,
@@ -159,11 +163,52 @@ export function mergeManagedEnvPerKey(
  * densable 2.1.223 #11 — collect machine-local managed env sources under remote.
  * Order: hkcu (lowest) → file → MDM (higher among local), then remote wins keys.
  */
+export function collectMachineLocalManagedSettings(): {
+  mdm: SettingsJson | null
+  file: SettingsJson | null
+  hkcu: SettingsJson | null
+} {
+  const mdmResult = getMdmSettings()
+  const mdm =
+    Object.keys(mdmResult.settings).length > 0 ? mdmResult.settings : null
+  const { settings: fileSettings } = loadManagedFileSettings()
+  const hkcuResult = getHkcuSettings()
+  const hkcu =
+    Object.keys(hkcuResult.settings).length > 0 ? hkcuResult.settings : null
+  return { mdm, file: fileSettings, hkcu }
+}
+
+/**
+ * densable 2.1.223 #11 — first-source-wins for policy fields, env merges per-key.
+ * Remote managed-settings cache is product-cut; machine-local MDM/file/hkcu remain.
+ */
 function resolvePolicySettingsWithEnvMerge(): {
   policySettings: SettingsJson | null
   policyErrors: ValidationError[]
 } {
-  return { policySettings: null, policyErrors: [] }
+  const policyErrors: ValidationError[] = []
+  let winner: SettingsJson | null = null
+  let winnerKind: 'mdm' | 'file' | 'hkcu' | null = null
+
+  const local = collectMachineLocalManagedSettings()
+  if (local.mdm) {
+    winner = local.mdm
+    winnerKind = 'mdm'
+  } else if (local.file) {
+    winner = local.file
+    winnerKind = 'file'
+  } else if (local.hkcu) {
+    winner = local.hkcu
+    winnerKind = 'hkcu'
+  }
+
+  if (winnerKind === 'mdm') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file])
+  } else if (winnerKind === 'file') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu])
+  }
+
+  return { policySettings: winner, policyErrors }
 }
 
 /**
@@ -174,14 +219,55 @@ function getManagedSettingsFilePath(): string {
 }
 
 /**
- * Anthropic managed-settings.json / drop-ins are product-cut.
- * Host overlay still finishes policy via finishPolicySettingsForHost.
+ * Load file-based managed settings: managed-settings.json + managed-settings.d/*.json.
  */
 export function loadManagedFileSettings(): {
   settings: SettingsJson | null
   errors: ValidationError[]
 } {
-  return { settings: null, errors: [] }
+  const errors: ValidationError[] = []
+  let merged: SettingsJson = {}
+  let found = false
+
+  const { settings, errors: baseErrors } = parseSettingsFile(
+    getManagedSettingsFilePath(),
+  )
+  errors.push(...baseErrors)
+  if (settings && Object.keys(settings).length > 0) {
+    merged = mergeWith(merged, settings, settingsMergeCustomizer)
+    found = true
+  }
+
+  const dropInDir = getManagedSettingsDropInDir()
+  try {
+    const entries = getFsImplementation()
+      .readdirSync(dropInDir)
+      .filter(
+        d =>
+          (d.isFile() || d.isSymbolicLink()) &&
+          d.name.endsWith('.json') &&
+          !d.name.startsWith('.'),
+      )
+      .map(d => d.name)
+      .sort()
+    for (const name of entries) {
+      const { settings: dropSettings, errors: fileErrors } = parseSettingsFile(
+        join(dropInDir, name),
+      )
+      errors.push(...fileErrors)
+      if (dropSettings && Object.keys(dropSettings).length > 0) {
+        merged = mergeWith(merged, dropSettings, settingsMergeCustomizer)
+        found = true
+      }
+    }
+  } catch (e) {
+    const code = getErrnoCode(e)
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      logError(e)
+    }
+  }
+
+  return { settings: found ? merged : null, errors }
 }
 
 /**
@@ -501,7 +587,7 @@ export function getAdminManagedPolicyLoadErrors(): ValidationError[] {
     return cached as ValidationError[]
   }
   const { errors: fileErrors } = loadManagedFileSettings()
-  const errors = [...fileErrors]
+  const errors = [...getMdmSettings().errors, ...fileErrors]
   owner.policy.adminLoadErrors = errors
   return errors
 }
@@ -535,7 +621,9 @@ export function hasAdminPolicySurvivor(): boolean {
   if (cached !== undefined) {
     return cached as boolean
   }
-  const survivor = adminSettingsSurvived(loadManagedFileSettings().settings)
+  const local = collectMachineLocalManagedSettings()
+  const survivor =
+    adminSettingsSurvived(local.mdm) || adminSettingsSurvived(local.file)
   owner.policy.adminSurvivor = survivor
   return survivor
 }
@@ -586,7 +674,17 @@ export function getPolicySettingsOrigin():
   | 'parent'
   | null {
   // densable YZn: helper > remote > plist/hklm > file > parent > hkcu.
-  // Anthropic remote/MDM/file/hkcu sources are product-cut.
+  // Remote managed-settings cache is product-cut; MDM/file/hkcu remain.
+  const mdmResult = getMdmSettings()
+  if (Object.keys(mdmResult.settings).length > 0) {
+    return getPlatform() === 'macos' ? 'plist' : 'hklm'
+  }
+
+  const { settings: fileSettings } = loadManagedFileSettings()
+  if (fileSettings) {
+    return 'file'
+  }
+
   // densable: parentSlice || hostModelOverlay → "parent" (before hkcu)
   const { parentSettings, hostModelOverlay } = loadParentManagedAndHostOverlay()
   if (
@@ -594,6 +692,11 @@ export function getPolicySettingsOrigin():
     hostModelOverlay
   ) {
     return 'parent'
+  }
+
+  const hkcu = getHkcuSettings()
+  if (Object.keys(hkcu.settings).length > 0) {
+    return 'hkcu'
   }
 
   return null
@@ -1043,8 +1146,11 @@ function loadSettingsFromDisk(): SettingsWithErrors {
       if (source === 'policySettings') {
         const { policySettings: resolved, policyErrors } =
           resolvePolicySettingsWithEnvMerge()
+        const mdmResult = getMdmSettings()
+        policyErrors.push(...mdmResult.errors)
         const { errors: fileErrors } = loadManagedFileSettings()
         policyErrors.push(...fileErrors)
+        policyErrors.push(...getHkcuSettings().errors)
 
         // densable nfc hostManagedProvider: b6i + hostModelOverlay (Gfg)
         // even when only overlay exists (no admin/hkcu).

@@ -7,6 +7,7 @@ import {
   getTurnOutputTokens,
   getBudgetContinuationCount,
   getIsRemoteMode,
+  getPromptRenderEpoch,
 } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
@@ -147,11 +148,9 @@ import {
 import {
   getRegisteredPluginAgentDefinitions,
   setAgentSpawnHandler,
-  setCommandRunHandler,
   setFunctionHooksAppStateReader,
   setFunctionHooksAppStateWriter,
   setFunctionHooksTurnReader,
-  setPromptSubmitHandler,
   setSessionCompactHandler,
   setToolCallHandler,
   setFunctionHooksToolUseContext,
@@ -165,6 +164,7 @@ import {
   offerPlacement,
   subscribeRasterFrames,
 } from '../utils/plugins/functionHooksModules.js';
+import { getMainThreadTurn } from '../utils/mainThreadTurn.js';
 import { ensurePluginToolRegistrarInstalled } from '../utils/plugins/pluginToolLoopbackRegistrar.js';
 import { setPluginToolSessionHost } from '../utils/plugins/pluginToolSessionHost.js';
 import { getDenyRuleForTool } from '../utils/permissions/permissions.js';
@@ -405,7 +405,7 @@ import { FORK_SUBAGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/f
 import { escapeXml } from '../utils/xml.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
 import { gracefulShutdown, gracefulShutdownSync } from '../utils/gracefulShutdown.js';
-import { handlePromptSubmit, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
+import { handlePromptSubmit, joinHandedBackPrompt, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
 import { useQueueProcessor } from '../hooks/useQueueProcessor.js';
 import { useMailboxBridge } from '../hooks/useMailboxBridge.js';
 import { queryCheckpoint, logQueryProfileReport } from '../utils/queryProfiler.js';
@@ -418,6 +418,7 @@ import type {
 } from '../types/message.js';
 import { query } from '../query.js';
 import type { QueryParams } from '../query.js';
+import { resolveModelFacts } from '../utils/model/modelFacts.js';
 import type { Terminal as QueryTerminal } from '../query/transitions.js';
 import { clearGoalOnUnrecoverableError } from '../services/goal/goalUnrecoverableClear.js';
 import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
@@ -591,6 +592,7 @@ import {
   removeByFilter,
   someInFlightDrainCommand,
   isPoppableEditableCommand,
+  isQueuedCommandEditable,
 } from '../utils/messageQueueManager.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
 import { backgroundForegroundToolCalls, queryForegroundSession } from '../utils/foregroundToolCalls.js';
@@ -695,6 +697,9 @@ import { DevBar } from '../components/DevBar.js';
 // Session manager removed - using AppState now
 import type { RemoteSessionConfig } from '../remote/RemoteSessionManager.js';
 import { REMOTE_SAFE_COMMANDS } from '../commands.js';
+import { launchUltraplan } from '../commands/ultraplan.js';
+import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDialog.js';
+import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
@@ -1525,6 +1530,45 @@ export function REPL({
 
   // IDE integration
   const [ideSelection, setIDESelection] = useState<IDESelection | undefined>(undefined);
+  const ideSelectionConsumedByRef = useRef<{
+    selection: IDESelection;
+    promptUuid: string;
+  } | null>(null);
+  const consumeIdeSelection = useCallback((uuid: string | undefined) => {
+    setIDESelection(current => {
+      if (current && uuid) {
+        ideSelectionConsumedByRef.current = {
+          selection: current,
+          promptUuid: uuid,
+        };
+      }
+      return undefined;
+    });
+  }, []);
+  const recordIdeSelectionConsumedBy = useCallback((uuid: string, selection: IDESelection | undefined) => {
+    if (selection) {
+      ideSelectionConsumedByRef.current = {
+        selection,
+        promptUuid: uuid,
+      };
+    }
+  }, []);
+  const returnIdeSelection = useCallback((selection: IDESelection | undefined) => {
+    if (selection === undefined) {
+      return;
+    }
+    setIDESelection(current => (current?.text || current?.source === 'diff' ? current : selection));
+  }, []);
+  const restoreIdeSelectionConsumedBy = useCallback(
+    (uuid: string, selection: IDESelection | undefined) => {
+      if (selection !== undefined) {
+        returnIdeSelection(selection);
+      } else if (ideSelectionConsumedByRef.current?.promptUuid === uuid) {
+        returnIdeSelection(ideSelectionConsumedByRef.current.selection);
+      }
+    },
+    [returnIdeSelection],
+  );
   const [ideToInstallExtension, setIDEToInstallExtension] = useState<IdeType | null>(null);
   const [ideInstallationStatus, setIDEInstallationStatus] = useState<IDEExtensionInstallationStatus | null>(null);
   // Dead code elimination: model switch callout state (ant-only)
@@ -1536,6 +1580,8 @@ export function REPL({
   });
   const [showEffortCallout, setShowEffortCallout] = useState(() => shouldShowEffortCallout(mainLoopModel));
   const showRemoteCallout = useAppState(s => s.showRemoteCallout);
+  const ultraplanPendingChoice = useAppState(s => s.ultraplanPendingChoice);
+  const ultraplanLaunchPending = useAppState(s => s.ultraplanLaunchPending);
   const [showDesktopUpsellStartup, setShowDesktopUpsellStartup] = useState(() => shouldShowDesktopUpsellStartup());
   // Official Npf densable — fullscreen TUI upsell (after desktop upsell priority).
   const [showFullscreenUpsell, setShowFullscreenUpsell] = useState(() => shouldShowFullscreenUpsell());
@@ -2906,6 +2952,13 @@ export function REPL({
   );
 
   const [inputMode, setInputMode] = useState<PromptInputMode>('prompt');
+  const restoreHandedBackPrompt = useCallback(
+    (text: string) => {
+      setInputMode('prompt');
+      setInputValue(joinHandedBackPrompt(inputValueRef.current, text));
+    },
+    [setInputValue],
+  );
   const [stashedPrompt, setStashedPrompt] = useState<
     | {
         text: string;
@@ -3254,6 +3307,14 @@ export function REPL({
 
   const [vimMode, setVimMode] = useState<VimMode>('INSERT');
   const [showBashesDialog, setShowBashesDialog] = useState<string | boolean>(false);
+  // When ultraplan approval fires while the pill dialog is open, PromptInput
+  // unmounts (focusedInputDialog → 'ultraplan-choice') but this stays true;
+  // (the completed ultraplan task has been filtered out). Close it here.
+  useEffect(() => {
+    if (ultraplanPendingChoice && showBashesDialog) {
+      setShowBashesDialog(false);
+    }
+  }, [ultraplanPendingChoice, showBashesDialog]);
   const [isSearchingHistory, setIsSearchingHistory] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
@@ -4065,6 +4126,8 @@ export function REPL({
     | 'left-arrow-confirm'
     | 'worker-sandbox-permission'
     | 'elicitation'
+    | 'ultraplan-choice'
+    | 'ultraplan-launch'
     | 'remote-callout'
     | 'lsp-recommendation'
     | 'plugin-hint'
@@ -4090,6 +4153,9 @@ export function REPL({
     // densable _Zt elicitation — gold Be.queue overlay (eDo), not NMs Host.
     // Gbt mcp_url_elicitation is a separate print/SDK mailbox kind.
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
+
+    if (allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice) return 'ultraplan-choice';
+    if (allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending) return 'ultraplan-launch';
 
     // densable _Zt remaining gold ids:
     //   if(As()){if(nr&&vr)return"remote-callout";return}
@@ -4938,19 +5004,7 @@ export function REPL({
   }, [getToolUseContext, canUseTool, mainLoopModel]);
 
   useEffect(() => {
-    setCommandRunHandler(slash => {
-      enqueue({ mode: 'prompt', value: String(slash), priority: 'next' });
-      return { queued: true, value: String(slash) };
-    });
-    return () => setCommandRunHandler(undefined);
-  }, []);
-
-  useEffect(() => {
-    setFunctionHooksTurnReader(() => {
-      const ac = abortControllerRef.current;
-      if (!ac || ac.signal.aborted) return undefined;
-      return { turnId: 'running' };
-    });
+    setFunctionHooksTurnReader(() => getMainThreadTurn());
     setTurnAbortHandler(async ({ turnId }) => {
       const ac = abortControllerRef.current;
       if (!ac || ac.signal.aborted) {
@@ -4982,14 +5036,6 @@ export function REPL({
       setSessionCompactHandler(undefined);
     };
   }, [getToolUseContext, mainLoopModel, setMessages]);
-
-  useEffect(() => {
-    setPromptSubmitHandler(async ({ text }) => {
-      enqueue({ mode: 'prompt', value: text, priority: 'next' });
-      return { ok: true };
-    });
-    return () => setPromptSubmitHandler(undefined);
-  }, []);
 
   useEffect(() => {
     // densable XL `$3`: bind session tool-use context so $.tool.call / $.mcp.call
@@ -5448,6 +5494,7 @@ export function REPL({
             // Host/engine owns command_lifecycle; REPL ignores.
           },
         },
+        true, // densable authoringProgressSurface:!0
       );
     },
     [
@@ -5632,6 +5679,13 @@ export function REPL({
         }
       }
 
+      // densable Qo=Tqe then hn=tte(), before context Promise.all.
+      const modelFacts = await resolveModelFacts(mainLoopModelParam, {
+        credentials: toolUseContext.credentials,
+        abortController,
+      });
+      const promptRenderEpoch = getPromptRenderEpoch();
+
       queryCheckpoint('query_context_loading_start');
       const [, , defaultSystemPrompt, baseUserContext, systemContext] = await Promise.all([
         // IMPORTANT: do this after setMessages() above, to avoid UI jank
@@ -5693,6 +5747,8 @@ export function REPL({
         // stop_hook_active=true when this turn was a stop-hook continuation
         // or concurrent re-queue of one.
         stopHookActive,
+        promptRenderEpoch,
+        modelFacts,
       };
       const onAbort = () => {
         void hostEngine.interrupt('user-cancel');
@@ -6405,6 +6461,8 @@ export function REPL({
         sendNow?: boolean;
         /** densable 2.1.283 chat:queueSubmit — always enqueue even if idle. */
         queueSubmit?: boolean;
+        /** densable Vwr — PromptInput composer Enter. print/QE omit. */
+        composerEnter?: unknown;
       },
     ) => {
       // Union paste maps: PromptInput dual-write override backfills lagging parent
@@ -6855,6 +6913,23 @@ export function REPL({
         queuePriority: options?.sendNow ? 'now' : options?.queueSubmit ? 'next' : undefined,
         forceQueue: Boolean(options?.queueSubmit || (options?.sendNow && (isLoading || queryGuard.isActive))),
         resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
+        composerEnter: options?.composerEnter,
+        takeIdeSelectionForQueue:
+          inputMode !== 'bash' &&
+          Boolean(ideSelection?.text || ideSelection?.filePath) &&
+          (ideSelection?.source !== 'diff' || !isSlashCommand)
+            ? () => {
+                if (!submitsNow) {
+                  consumeIdeSelection(undefined);
+                }
+                return ideSelection;
+              }
+            : undefined,
+        recordIdeSelectionConsumedBy,
+        onPromptHandedBack: restoreIdeSelectionConsumedBy,
+        getCurrentInput: () => inputValueRef.current,
+        restoreHandedBackPrompt,
+        awaitSessionStartHooks: awaitPendingHooks,
       });
 
       // Restore stash that was deferred above. Two cases:
@@ -6916,6 +6991,10 @@ export function REPL({
       setMessages,
       awaitPendingHooks,
       repinScroll,
+      consumeIdeSelection,
+      recordIdeSelectionConsumedBy,
+      restoreIdeSelectionConsumedBy,
+      restoreHandedBackPrompt,
     ],
   );
 
@@ -7360,6 +7439,18 @@ export function REPL({
 
   const executeQueuedInput = useCallback(
     async (queuedCommands: QueuedCommand[]) => {
+      const firstEditable = queuedCommands.find(isQueuedCommandEditable);
+      const consumeLive =
+        firstEditable !== undefined &&
+        firstEditable.ideSelection === undefined &&
+        (ideSelection?.source !== 'diff' ||
+          (firstEditable.mode !== 'bash' &&
+            !(typeof firstEditable.value === 'string' && firstEditable.value.trim().startsWith('/'))));
+      if (consumeLive) {
+        consumeIdeSelection(firstEditable.uuid);
+      } else if (firstEditable?.ideSelection && firstEditable.uuid) {
+        recordIdeSelectionConsumedBy(firstEditable.uuid, firstEditable.ideSelection);
+      }
       await handlePromptSubmit({
         helpers: {
           setCursorOffset: () => {},
@@ -7368,13 +7459,12 @@ export function REPL({
         },
         queryGuard,
         commands,
-        onInputChange: () => {},
-        setPastedContents: () => {},
+        setPastedContents,
         setToolJSX,
         getToolUseContext,
         messages,
         mainLoopModel,
-        ideSelection,
+        ideSelection: consumeLive ? ideSelection : undefined,
         setUserInputOnProcessing,
         setAbortController: setAbortControllerForQuery,
         onQuery,
@@ -7385,6 +7475,11 @@ export function REPL({
         addNotification,
         setMessages,
         queuedCommands,
+        onPromptHandedBack: restoreIdeSelectionConsumedBy,
+        onInputChange: setInputValue,
+        getCurrentInput: () => inputValueRef.current,
+        restoreHandedBackPrompt,
+        awaitSessionStartHooks: awaitPendingHooks,
       });
     },
     [
@@ -7402,6 +7497,13 @@ export function REPL({
       addNotification,
       setAppState,
       onBeforeQuery,
+      consumeIdeSelection,
+      recordIdeSelectionConsumedBy,
+      restoreIdeSelectionConsumedBy,
+      restoreHandedBackPrompt,
+      setInputValue,
+      awaitPendingHooks,
+      setPastedContents,
     ],
   );
 
@@ -8659,7 +8761,9 @@ export function REPL({
                     <CompanionSprite />
                   ) : null}
                   <Box flexDirection="column" flexGrow={1}>
-                    {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
+                    {isFullscreenEnvEnabled() && (
+                      <PromptInputQueuedCommands abortController={abortController} mcpClients={mcpClients} />
+                    )}
                     {permissionStickyFooter}
                     {/* Immediate local-jsx commands (/btw, /sandbox, /assistant,
                   /issue) render here, NOT inside scrollable. They stay mounted
@@ -8934,6 +9038,64 @@ export function REPL({
                       <FullscreenUpsellDialog onDone={() => setShowFullscreenUpsell(false)} />
                     )}
 
+                    {focusedInputDialog === 'ultraplan-choice' && ultraplanPendingChoice && (
+                      <UltraplanChoiceDialog
+                        plan={ultraplanPendingChoice.plan}
+                        sessionId={ultraplanPendingChoice.sessionId}
+                        taskId={ultraplanPendingChoice.taskId}
+                        setMessages={setMessages}
+                        readFileState={readFileState.current}
+                        getAppState={() => store.getState()}
+                        setConversationId={setConversationId}
+                      />
+                    )}
+
+                    {focusedInputDialog === 'ultraplan-launch' && ultraplanLaunchPending && (
+                      <UltraplanLaunchDialog
+                        onChoice={(choice, opts) => {
+                          const blurb = ultraplanLaunchPending.blurb;
+                          setAppState(prev =>
+                            prev.ultraplanLaunchPending ? { ...prev, ultraplanLaunchPending: undefined } : prev,
+                          );
+                          if (choice === 'cancel') return;
+                          setMessages(prev => [
+                            ...prev,
+                            createCommandInputMessage(formatCommandInputTags('ultraplan', blurb)),
+                          ]);
+                          const appendStdout = (msg: string) =>
+                            setMessages(prev => [
+                              ...prev,
+                              createCommandInputMessage(
+                                `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(msg)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
+                              ),
+                            ]);
+                          const appendWhenIdle = (msg: string) => {
+                            if (!queryGuard.isActive) {
+                              appendStdout(msg);
+                              return;
+                            }
+                            const unsub = queryGuard.subscribe(() => {
+                              if (queryGuard.isActive) return;
+                              unsub();
+                              if (!store.getState().ultraplanSessionUrl) return;
+                              appendStdout(msg);
+                            });
+                          };
+                          void launchUltraplan({
+                            blurb,
+                            promptIdentifier: opts?.promptIdentifier,
+                            getAppState: () => store.getState(),
+                            setAppState,
+                            signal: createAbortController().signal,
+                            disconnectedBridge: opts?.disconnectedBridge,
+                            onSessionReady: appendWhenIdle,
+                          })
+                            .then(appendStdout)
+                            .catch(logError);
+                        }}
+                      />
+                    )}
+
                     {mrRender()}
 
                     {!toolJSX?.shouldHidePromptInput &&
@@ -9027,6 +9189,8 @@ export function REPL({
                           <PromptInput
                             debug={debug}
                             ideSelection={ideSelection}
+                            abortController={abortController}
+                            onRestoreIdeSelection={returnIdeSelection}
                             hasSuppressedDialogs={!!hasSuppressedDialogs}
                             isLocalJSXCommandActive={isShowingLocalJSXCommand}
                             getToolUseContext={getToolUseContext}

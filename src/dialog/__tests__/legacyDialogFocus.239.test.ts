@@ -65,6 +65,8 @@ describe('legacyFocusForUqc (gold _Zt allowlist)', () => {
       'left-arrow-confirm',
       'worker-sandbox-permission',
       'elicitation',
+      'ultraplan-choice',
+      'ultraplan-launch',
       'remote-callout',
       'fullscreen-upsell',
       'lsp-recommendation',

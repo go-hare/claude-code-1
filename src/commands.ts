@@ -142,6 +142,10 @@ const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
 const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
   ? require('./commands/subscribe-pr.js').default
   : null
+// densable BZt — always registered; isEnabled is jj() / isUltraplanProductEnabled.
+const ultraplan = (
+  require('./commands/ultraplan.js') as typeof import('./commands/ultraplan.js')
+).default
 const daemonCmd =
   feature('DAEMON') || feature('BG_SESSIONS')
     ? require('./commands/daemon/index.js').default
@@ -506,6 +510,7 @@ const COMMANDS = memoize((): Command[] => [
   ...(claimMainCmd ? [claimMainCmd] : []),
   tasks,
   ...(workflowsCmd ? [workflowsCmd] : []),
+  ultraplan,
   ...(daemonCmd ? [daemonCmd] : []),
   ...(jobCmd ? [jobCmd] : []),
   ...(forceSnip ? [forceSnip] : []),

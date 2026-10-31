@@ -37,6 +37,7 @@ import { appendTaskOutput, evictTaskOutput, getTaskOutputPath, initTaskOutput } 
 import { registerTask, updateTaskState } from '../../utils/task/framework.js';
 import { fetchSession } from '../../utils/teleport/api.js';
 import { archiveRemoteSession, pollRemoteSessionEvents } from '../../utils/teleport.js';
+import type { UltraplanPhase } from '../../utils/ultraplan/ccrSession.js';
 import type { TodoList } from '../../utils/todo/types.js';
 
 export type RemoteAgentTaskState = TaskStateBase & {
@@ -78,9 +79,16 @@ export type RemoteAgentTaskState = TaskStateBase & {
     bugsVerified: number;
     bugsRefuted: number;
   };
+  isUltraplan?: boolean;
+  /**
+   * Scanner-derived pill state. Undefined = running. `needs_input` when the
+   * remote asked a clarifying question and is idle; `plan_ready` when
+   * ExitPlanMode is awaiting browser approval.
+   */
+  ultraplanPhase?: Exclude<UltraplanPhase, 'running'>;
 };
 
-const REMOTE_TASK_TYPES = ['remote-agent', 'ultrareview', 'autofix-pr', 'background-pr'] as const;
+const REMOTE_TASK_TYPES = ['remote-agent', 'ultraplan', 'ultrareview', 'autofix-pr', 'background-pr'] as const;
 export type RemoteTaskType = (typeof REMOTE_TASK_TYPES)[number];
 
 function isRemoteTaskType(v: string | undefined): v is RemoteTaskType {
@@ -533,6 +541,7 @@ export function registerRemoteAgentTask(options: {
   applyFixesOnComplete?: boolean;
   /** densable 2.1.218 — prose findings note (not a base branch) */
   reviewInstructions?: string;
+  isUltraplan?: boolean;
   isLongRunning?: boolean;
   remoteTaskMetadata?: RemoteTaskMetadata;
 }): {
@@ -549,6 +558,7 @@ export function registerRemoteAgentTask(options: {
     isRemoteReview,
     applyFixesOnComplete,
     reviewInstructions,
+    isUltraplan,
     isLongRunning,
     remoteTaskMetadata,
   } = options;
@@ -572,6 +582,7 @@ export function registerRemoteAgentTask(options: {
     isRemoteReview,
     applyFixesOnComplete,
     reviewInstructions,
+    isUltraplan,
     isLongRunning,
     pollStartedAt: Date.now(),
     remoteTaskMetadata,
@@ -590,6 +601,7 @@ export function registerRemoteAgentTask(options: {
     command,
     spawnedAt: Date.now(),
     toolUseId,
+    isUltraplan,
     isRemoteReview,
     applyFixesOnComplete,
     reviewInstructions,
@@ -664,6 +676,7 @@ async function restoreRemoteAgentTasksImpl(context: TaskContext): Promise<void> 
       todoList: [],
       log: [],
       isRemoteReview: meta.isRemoteReview,
+      isUltraplan: meta.isUltraplan,
       applyFixesOnComplete: meta.applyFixesOnComplete,
       reviewInstructions: meta.reviewInstructions,
       isLongRunning: meta.isLongRunning,

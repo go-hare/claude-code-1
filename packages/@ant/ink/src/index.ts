@@ -220,6 +220,9 @@ export {
 export {
   default as instances,
   Ns,
+  getDualInkCurrentBag,
+  isDualInkCurrentPresent,
+  ensureDualInkCurrent,
 } from './core/instances.js'
 export { bindNonBlockingStdoutRemoteFlag } from './core/nonBlockingStdout.js'
 export {

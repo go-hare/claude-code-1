@@ -25,6 +25,7 @@ import type { LocalWorkflowTaskState } from 'src/tasks/LocalWorkflowTask/LocalWo
 import type { MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js';
 import { killMonitorWs, type MonitorWsTaskState } from 'src/tasks/MonitorWsTask/MonitorWsTask.js';
 import { RemoteAgentTask, type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
+import { stopUltraplan } from '../../commands/ultraplan.js';
 import { isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { intersperse } from 'src/utils/array.js';
@@ -465,7 +466,11 @@ export function BackgroundTasksDialog({
       } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
         void killAutoModeScanTask(currentSelection.id);
       } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
-        void killRemoteAgentTask(currentSelection.id);
+        if (currentSelection.task.isUltraplan) {
+          void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
+        } else {
+          void killRemoteAgentTask(currentSelection.id);
+        }
       }
     }
 
@@ -631,7 +636,13 @@ export function BackgroundTasksDialog({
             onDone={onDone}
             toolUseContext={toolUseContext}
             onBack={goBackToList}
-            onKill={task.status !== 'running' ? undefined : () => void killRemoteAgentTask(task.id)}
+            onKill={
+              task.status !== 'running'
+                ? undefined
+                : task.isUltraplan
+                  ? () => void stopUltraplan(task.id, task.sessionId, setAppState)
+                  : () => void killRemoteAgentTask(task.id)
+            }
             key={`session-${task.id}`}
           />
         );

@@ -2125,7 +2125,7 @@ CLAUDE.md 记载有 `ci.yml`（lint + 构建 + 测试）、`release-rcs.yml`、
 | `upstream-extract/extract-readable.mjs` | 可读片段格式化 |
 | `extract-ehl-219.py` | 一次性上游提取辅助 |
 | `__tests__/defaultBuildFeatures.teamUds.228.test.ts` | 默认 feature 回归 |
-| `__tests__/ultraplanProductOff.222.test.ts` | 确保 Ultraplan 产品拆除（模块删除，不是残留门） |
+| `__tests__/ultraplanProductOff.222.test.ts` | 确保 ULTRAPLAN 编译旗标拆除；2.1.289 BZt slash 无 feature 门 |
 
 主构建入口是根目录的 `build.ts`（不在 `scripts/` 下）。
 

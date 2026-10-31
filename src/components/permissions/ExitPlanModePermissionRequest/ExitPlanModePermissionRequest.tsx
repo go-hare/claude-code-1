@@ -7,7 +7,10 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { useAppState, useSetAppState } from 'src/state/AppState.js';
+import { useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
+import { enqueuePendingNotification } from 'src/utils/messageQueueManager.js';
+import { isUltraplanProductEnabled } from 'src/utils/ultraplanKeyword.js';
+import { launchUltraplan } from '../../../commands/ultraplan.js';
 import {
   getSdkBetas,
   getSessionId,
@@ -99,6 +102,7 @@ type ResponseValue =
   | 'yes-default-keep-context'
   | 'yes-resume-auto-mode'
   | 'yes-auto-clear-context'
+  | 'ultraplan'
   | 'no';
 
 /**
@@ -191,6 +195,10 @@ export function ExitPlanModePermissionRequest({
   const [pastedContents, setPastedContents] = useState<Record<number, PastedContent>>({});
   const nextPasteIdRef = useRef(0);
 
+  const store = useAppStateStore();
+  const ultraplanSessionUrl = useAppState(s => s.ultraplanSessionUrl);
+  const ultraplanLaunching = useAppState(s => s.ultraplanLaunching);
+  const showUltraplan = isUltraplanProductEnabled() && !ultraplanSessionUrl && !ultraplanLaunching;
   const showClearContext = useAppState(s => s.settings.showClearContextOnPlanAccept) ?? false;
   const usage = toolUseConfirm.assistantMessage.message.usage;
   const { mode, isAutoModeAvailable, isBypassPermissionsModeAvailable } = toolPermissionContext;
@@ -218,9 +226,10 @@ export function ExitPlanModePermissionRequest({
         isAutoModeAvailable,
         isBypassPermissionsModeAvailable,
         keepContext,
+        showUltraplan,
         onFeedbackChange: setPlanFeedback,
       }),
-    [showClearContext, usage, mode, isAutoModeAvailable, isBypassPermissionsModeAvailable, keepContext],
+    [showClearContext, usage, mode, isAutoModeAvailable, isBypassPermissionsModeAvailable, keepContext, showUltraplan],
   );
 
   function onImagePaste(
@@ -350,6 +359,29 @@ export function ExitPlanModePermissionRequest({
   async function handleResponse(value: ResponseValue): Promise<void> {
     const trimmedFeedback = planFeedback.trim();
     const acceptFeedback = trimmedFeedback || undefined;
+
+    // Ultraplan: reject locally, teleport the plan to CCR as a seed draft.
+    if (value === 'ultraplan') {
+      logEvent('tengu_plan_exit', {
+        planLengthChars: currentPlan.length,
+        outcome: 'ultraplan' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        interviewPhaseEnabled: isPlanModeInterviewPhaseEnabled(),
+        planStructureVariant,
+      });
+      onDone();
+      onReject();
+      toolUseConfirm.onReject('Plan being refined via Ultraplan — please wait for the result.');
+      void launchUltraplan({
+        blurb: '',
+        seedPlan: currentPlan,
+        getAppState: store.getState,
+        setAppState: store.setState,
+        signal: new AbortController().signal,
+      })
+        .then(msg => enqueuePendingNotification({ value: msg, mode: 'task-notification' }))
+        .catch(logError);
+      return;
+    }
 
     // V1: pass plan in input. V2: plan is on disk, but if the user edited it
     // via Ctrl+G we pass it through so the tool echoes the edit in tool_result
@@ -831,6 +863,7 @@ export function buildPlanApprovalOptions({
   isAutoModeAvailable,
   isBypassPermissionsModeAvailable,
   keepContext,
+  showUltraplan,
   onFeedbackChange,
 }: {
   showClearContext: boolean;
@@ -838,6 +871,7 @@ export function buildPlanApprovalOptions({
   isAutoModeAvailable: boolean | undefined;
   isBypassPermissionsModeAvailable: boolean | undefined;
   keepContext?: ExitPlanKeepContext;
+  showUltraplan?: boolean;
   onFeedbackChange: (v: string) => void;
 }): OptionWithDescription<ResponseValue>[] {
   const options: OptionWithDescription<ResponseValue>[] = [];
@@ -882,6 +916,13 @@ export function buildPlanApprovalOptions({
     description: 'shift+tab to approve with this feedback',
     onChange: onFeedbackChange,
   });
+
+  if (showUltraplan) {
+    options.push({
+      label: 'No, refine with Ultraplan on Claude Code on the web',
+      value: 'ultraplan',
+    });
+  }
 
   return options;
 }

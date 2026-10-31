@@ -19,6 +19,8 @@ let everMountedFlag = false
  * Standalone Ink tests fall back to a process object when src is unbound.
  */
 const inkDefaultHost: object = {}
+/** densable `U()` fallback when src is unbound — stable so `C.of(U())` keys. */
+const inkDefaultSession: { host: object } = { host: inkDefaultHost }
 let getInkSessionHostOverride: (() => object) | undefined
 
 const overrideSessions = new WeakMap<object, { host: object }>()
@@ -38,7 +40,7 @@ function U(): { host: object } {
       require('../../../../../src/utils/sessionRoot.ts') as typeof import('../../../../../src/utils/sessionRoot.ts')
     return getBootstrapSession()
   } catch {
-    return { host: inkDefaultHost }
+    return inkDefaultSession
   }
 }
 
@@ -148,8 +150,66 @@ export function inkSession(): object {
   return U()
 }
 
+/**
+ * densable DualInk `class f{current=void 0}`. Never export minify `f`.
+ */
+class DualInkCurrentBag {
+  current: Record<string, unknown> | undefined = undefined
+}
+
+/** densable DualInk `C = new Ct(() => new f)`. */
+const dualInkCurrentFactory = new HostKeyedFactory<object, DualInkCurrentBag>(
+  () => new DualInkCurrentBag(),
+)
+
+/**
+ * densable DualInk `a()` — `C.of(U())`. Never `export function a`.
+ */
+export function getDualInkCurrentBag(): {
+  current: Record<string, unknown> | undefined
+} {
+  return dualInkCurrentFactory.of(U())
+}
+
+/**
+ * densable DualInk `FPe()` — `a().current!==void 0`. Never `export function FPe`.
+ */
+export function isDualInkCurrentPresent(): boolean {
+  return getDualInkCurrentBag().current !== undefined
+}
+
+/**
+ * densable DualInk `A()` mint. Gold live/autoReact maps stay unhosted;
+ * liveReplicas DualInk `se`/`also` slots are void 0. Never `export function A`.
+ */
+function mintDualInkCurrent(): Record<string, unknown> {
+  return {
+    liveReplicas: {
+      workingCopyPath: undefined,
+      settleFileChange: undefined,
+      liveFileEnded: undefined,
+      pushHeldSaves: undefined,
+      heldSavesExitCleanup: undefined,
+    },
+  }
+}
+
+/**
+ * densable DualInk `X()` — `e.current??=A()`. Never `export function X`.
+ */
+export function ensureDualInkCurrent(): Record<string, unknown> {
+  const bag = getDualInkCurrentBag()
+  bag.current ??= mintDualInkCurrent()
+  return bag.current
+}
+
 const instances = Ns()
 export default instances
+
+/** Test helper — DualInk `a().current` back to void 0. */
+export function resetDualInkCurrentForTests(): void {
+  getDualInkCurrentBag().current = undefined
+}
 
 /** Test helper — reset densable everMounted process flag. */
 export function resetEverMountedForTests(): void {
@@ -158,4 +218,5 @@ export function resetEverMountedForTests(): void {
   instances.treeRoots.clear()
   instances.clear()
   resetInkSessionHostForTests()
+  resetDualInkCurrentForTests()
 }

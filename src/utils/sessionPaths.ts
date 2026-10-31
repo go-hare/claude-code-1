@@ -521,6 +521,7 @@ export type RemoteAgentMetadata = {
   toolUseId?: string
   isLongRunning?: boolean
   isRemoteReview?: boolean
+  isUltraplan?: boolean
   /** densable 2.1.218 — apply findings locally when review completes */
   applyFixesOnComplete?: boolean
   /** densable 2.1.218 — prose findings note (not a base branch) */

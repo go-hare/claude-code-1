@@ -1,6 +1,6 @@
 /**
  * densable 2.1.251 #18 leftover — `hM` / `o5` policy-error gate.
- * Anthropic MDM/file policy sources are product-cut: no admin errors, no survivor.
+ * Machine-local MDM/file are live; this machine has no admin files so empty.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { resetSettingsCache } from '../settingsCache.js'
