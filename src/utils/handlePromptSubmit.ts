@@ -1,4 +1,5 @@
 import { randomUUID, type UUID } from 'crypto'
+import type { Dispatch, SetStateAction } from 'react'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import {
@@ -9,7 +10,12 @@ import {
   releaseQuotaAutoResumeTurnClaim,
   type QuotaTurnClaim,
 } from 'src/services/quotaAutoResume.js'
-import { type Command, getCommandName, isCommandEnabled } from '../commands.js'
+import {
+  type Command,
+  findCommand,
+  getCommandName,
+  isCommandEnabled,
+} from '../commands.js'
 import { selectableUserMessagesFilter } from '../components/MessageSelector.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
 import type { QuerySource } from '../constants/querySource.js'
@@ -32,7 +38,10 @@ import {
   type QueuedCommand,
   type QueuePriority,
 } from '../types/textInputTypes.js'
-import { createAbortController } from './abortController.js'
+import {
+  createAbortController,
+  getAbortReasonMessage,
+} from './abortController.js'
 import type { PastedContent } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
@@ -42,18 +51,42 @@ import { fileHistoryEnabled, fileHistoryMakeSnapshot } from './fileHistory.js'
 import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { toError } from './errors.js'
 import { logError } from './log.js'
-import { enqueue, isQueuedCommandEditable } from './messageQueueManager.js'
+import {
+  enqueue,
+  enqueueReportingAdmission,
+  extractImagesFromValue,
+  getCommandQueue,
+  isDrainableQueuedCommand,
+  isQueuedCommandEditable,
+  settleScreening,
+  shouldHandBackIdeSelection,
+} from './messageQueueManager.js'
+import {
+  hasUltraplanKeyword,
+  isUltraplanProductEnabled,
+  stampSlashNameOnlyPastedGaps,
+} from './ultraplanKeyword.js'
 import { resolveSkillModelOverride } from './model/model.js'
 import {
   claimConsumableQueuedAutonomyCommands,
   finalizeAutonomyCommandsForTurn,
 } from './autonomyQueueLifecycle.js'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
+import { getMainThreadTurn } from './mainThreadTurn.js'
 import { processUserInput } from './processUserInput/processUserInput.js'
+import {
+  runPromptSubmit,
+  snapshotPromptScreen,
+  type PromptSubmitEnterValue,
+  type PromptSubmittedStamp,
+} from './processUserInput/promptSubmit.js'
+import { createPromptSubmitEntries } from './processUserInput/promptSubmitEntries.js'
+import { batchPromptSubmitWaitGuard } from './processUserInput/promptSubmitWaits.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
 import {
   applyTurnStartOriginFraming,
+  createUserInterruptionMessage,
   isHumanLikeOrigin,
   stampQueueOriginOnUserMessages,
 } from './messages.js'
@@ -63,6 +96,68 @@ import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
   gracefulShutdownSync(0)
+}
+
+/**
+ * densable `ouo` / `Tkr` — idle queue (not screening) drainOnly when UPS
+ * hooks or prompt.submit plugins are present. Fail-open true.
+ */
+function promptSubmitIdleHooksDrainOnly(
+  getToolUseContext: HandlePromptSubmitParams['getToolUseContext'],
+  messages: Message[],
+  mainLoopModel: string,
+): boolean {
+  try {
+    const screen = snapshotPromptScreen(
+      getToolUseContext(messages, [], createAbortController(), mainLoopModel),
+    )
+    return screen.hooks !== '' || screen.plugins !== ''
+  } catch (err) {
+    logForDebugging(
+      `prompt.submit at Enter could not read the hooks: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return true
+  }
+}
+
+/**
+ * densable Enter `wn` — stamp screeningPending after Unn. `under` is the
+ * pre-Unn RNe snapshot. cancelled / missing under → drainOnly, no stamp.
+ */
+function settleEnterScreening(
+  uuid: string,
+  value: PromptSubmitEnterValue | undefined,
+  under: PromptSubmittedStamp['under'] | undefined,
+  messages: PromptSubmittedStamp['messages'],
+): boolean {
+  const cancelled = value?.wasCancelled === true
+  if (value === undefined || under === undefined || cancelled) {
+    return settleScreening(uuid, {
+      promptSubmitted: undefined,
+      drainOnly: true,
+    })
+  }
+  if ('ended' in value) {
+    return settleScreening(uuid, {
+      promptSubmitted: {
+        text: value.text ?? '',
+        under,
+        context: value.context,
+        messages,
+        stopped: value.stopped,
+      },
+      drainOnly: true,
+    })
+  }
+  return settleScreening(uuid, {
+    promptSubmitted: {
+      text: value.proceeds.text,
+      under,
+      context: value.proceeds.context,
+      sessionTitle: value.proceeds.sessionTitle,
+      messages,
+    },
+  })
 }
 
 type BaseExecutionParams = {
@@ -119,6 +214,177 @@ type BaseExecutionParams = {
 type ExecuteUserInputParams = BaseExecutionParams & {
   resetHistory: () => void
   onInputChange: (value: string) => void
+  /**
+   * densable WZe `getCurrentInput` — Rt fallback joins this with the
+   * handed-back prompt when restoreHandedBackPrompt is omitted.
+   */
+  getCurrentInput?: () => string
+  /**
+   * densable WZe `restoreHandedBackPrompt` — idle YH / queue drain both
+   * pass WN (setMode prompt + join). When set, Rt does not join itself.
+   */
+  restoreHandedBackPrompt?: (text: string) => void
+  /**
+   * densable WZe `onPromptHandedBack` / `restoreIdeSelectionConsumedBy`.
+   */
+  onPromptHandedBack?: HandlePromptSubmitParams['onPromptHandedBack']
+  /**
+   * densable WZe `X.awaitSessionStartHooks`. After the wait, aborted
+   * user-cancel restores drainable string cmds via Rt and returns.
+   */
+  awaitSessionStartHooks?: () => Promise<void>
+  /**
+   * densable WZe `h.setPastedContents` — qLr merge on abort restore.
+   */
+  setPastedContents?: Dispatch<SetStateAction<Record<number, PastedContent>>>
+  /**
+   * densable WZe abort lr append host (`hT({})` interrupt marker).
+   */
+  setMessages?: HandlePromptSubmitParams['setMessages']
+}
+
+/**
+ * densable `jN` — join the live composer draft with a handed-back prompt.
+ */
+export function joinHandedBackPrompt(current: string, next: string): string {
+  if (current.trim() === '') return next
+  return `${current}\n${next}`
+}
+
+/**
+ * densable mSe — slash name is the token before the first whitespace.
+ */
+function slashCommandName(value: string): string {
+  const without = value.startsWith('/') ? value.slice(1) : value
+  const space = without.search(/\s/)
+  return space === -1 ? without : without.slice(0, space)
+}
+
+/**
+ * densable WZe `Ln` — wait session-start unless every prompt cmd is a known
+ * local non-prompt slash.
+ */
+export function queuedCommandsNeedSessionStartWait(
+  queued: QueuedCommand[],
+  commands: Command[],
+): boolean {
+  return queued.some(cmd => {
+    if (cmd.mode !== 'prompt') return false
+    if (
+      typeof cmd.value !== 'string' ||
+      cmd.skipSlashCommands ||
+      !cmd.value.trim().startsWith('/')
+    ) {
+      return true
+    }
+    const found = findCommand(slashCommandName(cmd.value.trim()), commands)
+    return found === undefined || found.type === 'prompt'
+  })
+}
+
+/**
+ * densable Stt — paste-expanded when skipSlash or pasteTagged and
+ * preExpansionValue is a nonempty string.
+ */
+export function queuedCommandWasPasteExpanded(cmd: QueuedCommand): boolean {
+  return (
+    (cmd.skipSlashCommands === true || cmd.pasteTagged === true) &&
+    typeof cmd.preExpansionValue === 'string' &&
+    cmd.preExpansionValue.trim() !== ''
+  )
+}
+
+/**
+ * densable fun — restore preExpansionValue when Stt, else the string value.
+ */
+export function queuedCommandRestoreText(cmd: QueuedCommand): string {
+  if (queuedCommandWasPasteExpanded(cmd)) {
+    return cmd.preExpansionValue as string
+  }
+  return typeof cmd.value === 'string' ? cmd.value : ''
+}
+
+/**
+ * densable qLr — image / inline pastes, or all pastes when Stt.
+ */
+export function queuedPastedContentsToRestore(
+  cmd: QueuedCommand,
+): PastedContent[] {
+  if (!cmd.pastedContents) return []
+  const expanded = queuedCommandWasPasteExpanded(cmd)
+  return Object.values(cmd.pastedContents).filter(
+    item => item.type === 'image' || item.inline === true || expanded,
+  )
+}
+
+/**
+ * densable PMt — min integer key (including 0 / negatives), else 0.
+ */
+function nextNegativePasteId(contents: Record<number, PastedContent>): number {
+  const keys = Object.keys(contents)
+    .map(Number)
+    .filter(n => Number.isSafeInteger(n) && n > -4294967296)
+  return keys.length === 0 ? 0 : Math.min(0, ...keys)
+}
+
+/**
+ * densable pde — merge restored pastes into the live composer map.
+ * Inline pastes get a fresh negative id; positive ids keep their key.
+ */
+export function mergeHandedBackPastedContents(
+  current: Record<number, PastedContent>,
+  incoming: PastedContent[],
+): Record<number, PastedContent> {
+  const next = { ...current }
+  let negative = nextNegativePasteId(next)
+  for (const item of incoming) {
+    if (item.inline) {
+      negative -= 1
+      next[negative] = { ...item, id: negative }
+    } else if (Number.isSafeInteger(item.id) && item.id > 0) {
+      next[item.id] = item
+    }
+  }
+  return next
+}
+
+/**
+ * densable WZe abort `lr` map — keep historyEntry, else fun display + XLr
+ * images from a non-string value.
+ */
+export function ensureQueuedCommandHistoryEntry(
+  cmd: QueuedCommand,
+  imageStartId: number = Date.now(),
+): NonNullable<QueuedCommand['historyEntry']> {
+  if (cmd.historyEntry) {
+    return cmd.historyEntry
+  }
+  const pastedContents: Record<number, PastedContent> = {
+    ...(cmd.pastedContents ?? {}),
+  }
+  for (const image of extractImagesFromValue(cmd.value, imageStartId)) {
+    pastedContents[image.id] = image
+  }
+  return {
+    display: queuedCommandRestoreText(cmd),
+    pastedContents,
+  }
+}
+
+/**
+ * densable R1e — flush historyEntry; skip missing. No armUndo host.
+ */
+function flushQueuedHistoryEntries(
+  commands: Array<{ historyEntry?: QueuedCommand['historyEntry'] }>,
+): void {
+  for (const command of commands) {
+    if (!command.historyEntry) continue
+    try {
+      addToHistory(command.historyEntry)
+    } catch (err) {
+      logError(toError(err))
+    }
+  }
 }
 
 export type PromptInputHelpers = {
@@ -134,9 +400,7 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
   pastedContents?: Record<number, PastedContent>
   helpers: PromptInputHelpers
   onInputChange: (value: string) => void
-  setPastedContents: React.Dispatch<
-    React.SetStateAction<Record<number, PastedContent>>
-  >
+  setPastedContents: Dispatch<SetStateAction<Record<number, PastedContent>>>
   abortController?: AbortController | null
   addNotification?: (notification: {
     key: string
@@ -176,6 +440,43 @@ export type HandlePromptSubmitParams = BaseExecutionParams & {
   queuePriority?: QueuePriority
   /** densable chat:queueSubmit — enqueue even when the query is idle. */
   forceQueue?: boolean
+  /**
+   * densable Art `composerEnter` — live composer Enter only. Queued drain
+   * omits this; print/QE omit.
+   */
+  composerEnter?: unknown
+  /**
+   * densable `takeIdeSelectionForQueue` — snapshot live IDE selection at
+   * mid-turn enqueue. Bash / empty selection returns undefined.
+   */
+  takeIdeSelectionForQueue?: () => IDESelection | undefined
+  /**
+   * densable `recordIdeSelectionConsumedBy` — pair uuid with the captured
+   * selection so drop can restore when the stamp was not passed through.
+   */
+  recordIdeSelectionConsumedBy?: (
+    uuid: string,
+    selection: IDESelection | undefined,
+  ) => void
+  /**
+   * densable `onPromptHandedBack` / `restoreIdeSelectionConsumedBy`.
+   */
+  onPromptHandedBack?: (
+    uuid: string,
+    selection: IDESelection | undefined,
+  ) => void
+  /**
+   * densable WZe `getCurrentInput` — live composer text for Rt join.
+   */
+  getCurrentInput?: () => string
+  /**
+   * densable WZe `restoreHandedBackPrompt`.
+   */
+  restoreHandedBackPrompt?: (text: string) => void
+  /**
+   * densable WZe `X.awaitSessionStartHooks`.
+   */
+  awaitSessionStartHooks?: () => Promise<void>
 }
 
 export async function handlePromptSubmit(
@@ -234,6 +535,12 @@ export async function handlePromptSubmit(
       resetHistory,
       canUseTool,
       onInputChange,
+      getCurrentInput: params.getCurrentInput,
+      restoreHandedBackPrompt: params.restoreHandedBackPrompt,
+      onPromptHandedBack: params.onPromptHandedBack,
+      awaitSessionStartHooks: params.awaitSessionStartHooks,
+      setPastedContents: params.setPastedContents,
+      setMessages: params.setMessages,
     })
     return
   }
@@ -443,6 +750,33 @@ export async function handlePromptSubmit(
       onQuotaAutoResumeHumanSubmit(queuedUuid)
     }
 
+    // densable Qo: prompt-mode and not a real slash.
+    // kn=Qo&&jj()&&C$t(...) → drainOnly. bn=Qo&&!kn&&xt.isRunning&&turnId.
+    const isRealSlash = !skipSlashCommands && finalInput.trim().startsWith('/')
+    const promptMode = mode === 'prompt' && !isRealSlash
+    const knPasted =
+      pastedContents === undefined
+        ? pastedContents
+        : stampSlashNameOnlyPastedGaps(pastedContents, input.trim())
+    const kn =
+      promptMode &&
+      isUltraplanProductEnabled() &&
+      hasUltraplanKeyword(input.trim(), knPasted)
+    const screening =
+      promptMode &&
+      !kn &&
+      queryGuard.isRunning &&
+      getMainThreadTurn()?.turnId !== undefined
+    const drainOnlyIdleHooks =
+      promptMode &&
+      !screening &&
+      promptSubmitIdleHooksDrainOnly(getToolUseContext, messages, mainLoopModel)
+    const queuedIdeSelection =
+      mode !== 'bash' ? params.takeIdeSelectionForQueue?.() : undefined
+    if (queuedIdeSelection !== undefined) {
+      params.recordIdeSelectionConsumedBy?.(queuedUuid, queuedIdeSelection)
+    }
+
     // Enqueue with string value + raw pastedContents. Images will be resized
     // at execution time when processUserInput runs (not baked in here).
     enqueue({
@@ -456,7 +790,13 @@ export async function handlePromptSubmit(
       origin: { kind: 'human' },
       uuid: queuedUuid,
       historyEntry,
+      composerEnter: params.composerEnter,
       ...(params.queuePriority ? { priority: params.queuePriority } : {}),
+      ...(queuedIdeSelection !== undefined
+        ? { ideSelection: queuedIdeSelection }
+        : {}),
+      ...(screening ? { screeningPending: true } : {}),
+      ...(kn || drainOnlyIdleHooks ? { drainOnly: true } : {}),
     })
 
     onInputChange('')
@@ -464,6 +804,88 @@ export async function handlePromptSubmit(
     setPastedContents({})
     resetHistory()
     clearBuffer()
+    if (!screening) {
+      return
+    }
+
+    // densable Enter Unn: screen then stamp so Art does not double-run UPS.
+    const screeningResult: {
+      messages: NonNullable<PromptSubmittedStamp['messages']>
+      shouldQuery: boolean
+      resultText?: string
+      allowedTools?: string[]
+    } = { messages: [], shouldQuery: true }
+    let under: PromptSubmittedStamp['under'] | undefined
+    let outcome: Awaited<ReturnType<typeof runPromptSubmit>> | undefined
+    let enterSettled = false
+    try {
+      const abortController = params.abortController ?? createAbortController()
+      const toolUseContext = getToolUseContext(
+        messages,
+        [],
+        abortController,
+        mainLoopModel,
+      )
+      under = snapshotPromptScreen(toolUseContext)
+      outcome = await runPromptSubmit({
+        text: finalInput.trim(),
+        originalInput: finalInput.trim(),
+        result: screeningResult,
+        context: toolUseContext,
+        isStartInput: false,
+        promptSource: 'queued',
+        enter: value => {
+          enterSettled = true
+          settleEnterScreening(
+            queuedUuid,
+            value,
+            under,
+            screeningResult.messages,
+          )
+        },
+      })
+    } catch (err) {
+      logForDebugging(
+        `prompt.submit at Enter failed, leaving it to the drain: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    if (enterSettled) {
+      return
+    }
+    if (
+      outcome !== undefined &&
+      'ended' in outcome.value &&
+      outcome.value.stopped === undefined
+    ) {
+      if (!settleScreening(queuedUuid, { dropped: true })) {
+        logForDebugging(
+          'prompt.submit at Enter dropped a prompt that had left the queue',
+        )
+        return
+      }
+      if (historyEntry) {
+        try {
+          addToHistory(historyEntry)
+        } catch (err) {
+          logError(toError(err))
+        }
+      }
+      if (shouldHandBackIdeSelection(getCommandQueue(), queuedIdeSelection)) {
+        params.onPromptHandedBack?.(queuedUuid, queuedIdeSelection)
+      }
+      params.addNotification?.({
+        key: 'prompt-submit-dropped',
+        text: outcome.value.ended.resultText ?? 'Prompt dropped by a hook',
+        priority: 'immediate',
+      })
+      return
+    }
+    settleEnterScreening(
+      queuedUuid,
+      outcome?.value,
+      under,
+      screeningResult.messages,
+    )
     return
   }
 
@@ -490,6 +912,7 @@ export async function handlePromptSubmit(
     origin: { kind: 'human' },
     uuid: cmdUuid,
     historyEntry,
+    composerEnter: params.composerEnter,
   }
 
   // densable Yqn(O,{dispatching:!0}) — idle-path prompt submit
@@ -515,6 +938,12 @@ export async function handlePromptSubmit(
     resetHistory,
     canUseTool,
     onInputChange,
+    getCurrentInput: params.getCurrentInput,
+    restoreHandedBackPrompt: params.restoreHandedBackPrompt,
+    onPromptHandedBack: params.onPromptHandedBack,
+    awaitSessionStartHooks: params.awaitSessionStartHooks,
+    setPastedContents: params.setPastedContents,
+    setMessages: params.setMessages,
   })
 }
 
@@ -542,7 +971,38 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     resetHistory,
     canUseTool,
     queuedCommands,
+    onPromptHandedBack,
+    restoreHandedBackPrompt,
+    getCurrentInput,
+    awaitSessionStartHooks,
+    setPastedContents,
+    setMessages,
   } = params
+
+  /**
+   * densable WZe `Rt` — restore handed-back prompt text, then zZe ideSelection.
+   */
+  function restoreHandedBack(
+    text: string,
+    cmd: {
+      uuid?: string
+      ideSelection?: QueuedCommand['ideSelection']
+    },
+  ): void {
+    if (restoreHandedBackPrompt) {
+      restoreHandedBackPrompt(text)
+    } else {
+      params.onInputChange(
+        joinHandedBackPrompt(getCurrentInput?.() ?? '', text),
+      )
+    }
+    if (
+      cmd.uuid &&
+      shouldHandBackIdeSelection(getCommandQueue(), cmd.ideSelection)
+    ) {
+      onPromptHandedBack?.(cmd.uuid, cmd.ideSelection)
+    }
+  }
 
   // Note: paste references are already processed before calling this function
   // (either in handlePromptSubmit before queuing, or before initial execution).
@@ -604,15 +1064,74 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       return
     }
 
-    // densable JDr: flush historyEntry on drain — not at mid-turn enqueue (#20)
-    for (const command of commands) {
-      if (!command.historyEntry) continue
+    // densable WZe `Ln` wait then abort Rt. Gold skips known local slash.
+    const drainGeneration = queryGuard.generation
+    const shouldWaitSessionStart = queuedCommandsNeedSessionStartWait(
+      commands,
+      params.commands,
+    )
+    if (shouldWaitSessionStart && awaitSessionStartHooks) {
       try {
-        addToHistory(command.historyEntry)
+        await awaitSessionStartHooks()
       } catch (err) {
         logError(toError(err))
       }
+      if (abortController.signal.aborted) {
+        const generationChanged = queryGuard.generation !== drainGeneration
+        const userCancel =
+          generationChanged &&
+          getAbortReasonMessage(abortController.signal.reason) === 'user-cancel'
+        const historyInterrupted: QueuedCommand[] = []
+        const resurrect: QueuedCommand[] = []
+        for (const cmd of commands) {
+          if (
+            userCancel &&
+            isDrainableQueuedCommand(cmd) &&
+            typeof cmd.value === 'string'
+          ) {
+            restoreHandedBack(queuedCommandRestoreText(cmd), cmd)
+            const restoredPastes = queuedPastedContentsToRestore(cmd)
+            if (restoredPastes.length > 0) {
+              setPastedContents?.(prev =>
+                mergeHandedBackPastedContents(prev, restoredPastes),
+              )
+            }
+          } else if (
+            generationChanged &&
+            cmd.mode === 'prompt' &&
+            isDrainableQueuedCommand(cmd)
+          ) {
+            historyInterrupted.push(cmd)
+          } else {
+            resurrect.push(cmd)
+          }
+        }
+        for (let i = resurrect.length - 1; i >= 0; i--) {
+          const cmd = resurrect[i]
+          if (!cmd) continue
+          enqueueReportingAdmission(
+            { ...cmd, admissionExempt: 'resurrected' },
+            { ahead: true },
+          )
+        }
+        if (historyInterrupted.length > 0) {
+          setMessages?.(prev => [...prev, createUserInterruptionMessage({})])
+          flushQueuedHistoryEntries(
+            historyInterrupted.map(cmd => ({
+              ...cmd,
+              historyEntry: ensureQueuedCommandHistoryEntry(cmd),
+            })),
+          )
+        }
+        if (!generationChanged) {
+          setAbortController(null)
+        }
+        return
+      }
     }
+
+    // densable JDr: flush historyEntry on drain — not at mid-turn enqueue (#20)
+    flushQueuedHistoryEntries(commands)
 
     // Compute the workload tag for this turn. queueProcessor can batch a
     // cron prompt with a same-tick human prompt; only tag when EVERY
@@ -637,10 +1156,12 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     let turnError: unknown
     try {
       await runWithWorkload(turnWorkload, async () => {
+        using _batch = batchPromptSubmitWaitGuard(commands)
         for (let i = 0; i < commands.length; i++) {
           const cmd = commands[i]!
           const isFirst = i === 0
           const runId = cmd.autonomy?.runId
+          using promptSubmitEntries = createPromptSubmitEntries()
           const result = await processUserInput({
             input: cmd.value,
             preExpansionInput: cmd.preExpansionValue,
@@ -656,7 +1177,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
             querySource,
             canUseTool,
             uuid: cmd.uuid,
-            ideSelection: isFirst ? ideSelection : undefined,
+            ideSelection: isFirst
+              ? (cmd.ideSelection ?? ideSelection)
+              : undefined,
             skipSlashCommands: cmd.skipSlashCommands,
             bridgeOrigin: cmd.bridgeOrigin,
             // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
@@ -668,11 +1191,20 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               cmd.mode === 'poll-event' ||
               cmd.mode === 'task-notification' ||
               !isFirst,
+            skipSubmissionHooks: cmd.skipSubmissionHooks,
             autonomy: cmd.autonomy,
             // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
             origin: cmd.origin,
             suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
+            composerEnter: cmd.composerEnter,
+            wait: cmd.wait === true,
+            promptSubmitted: cmd.promptSubmitted as
+              | PromptSubmittedStamp
+              | undefined,
+            aheadOfSessionStart: cmd.orphanedPermission !== undefined,
+            entries: promptSubmitEntries,
           })
+          promptSubmitEntries.handedOff()
           if (runId && result.deferAutonomyCompletion) {
             deferredAutonomyRunIds.add(runId)
           }
@@ -820,12 +1352,12 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           setAbortController(null)
         }
 
-        // Handle nextInput from commands that want to chain (e.g., /discover activation)
+        // densable WZe: submitNextInput enqueues; else Rt(nextInput, cmd).
         if (nextInput) {
           if (submitNextInput) {
             enqueue({ value: nextInput, mode: 'prompt' })
           } else {
-            params.onInputChange(nextInput)
+            restoreHandedBack(nextInput, commands[0] ?? {})
           }
         }
       }) // end runWithWorkload — ALS context naturally scoped, no finally needed

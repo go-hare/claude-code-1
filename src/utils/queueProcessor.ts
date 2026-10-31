@@ -78,9 +78,15 @@ export function processQueueIfReady({
     return { processed: false }
   }
 
+  // densable KJ: first main-thread command still in Enter Unn — do not drain.
+  if (next.screeningPending === true) {
+    return { processed: false }
+  }
+
   // Slash commands and bash-mode commands are processed individually.
   // Bash commands need per-command error isolation, exit codes, and progress UI.
-  if (isSlashCommand(next) || next.mode === 'bash') {
+  // densable btt: drainOnly is taken as a singleton then stop.
+  if (isSlashCommand(next) || next.mode === 'bash' || next.drainOnly === true) {
     const cmd = dequeue(cmd => cmd === next)!
     const batch = [cmd]
     setInFlightDrainBatch(batch)
@@ -90,14 +96,21 @@ export function processQueueIfReady({
 
   // Drain all non-slash-command items with the same mode at once.
   // Official Cuy: skip passive wake/receipt rows (they are not a user turn).
+  // densable btt Pe: stop at screeningPending / later drainOnly — do not
+  // dequeue them or anything after.
   const targetMode = next.mode
-  const commands = dequeueAllMatching(
-    cmd =>
-      isMainThread(cmd) &&
-      !isSlashCommand(cmd) &&
-      cmd.passive !== true &&
-      cmd.mode === targetMode,
-  )
+  let stop = false
+  const commands = dequeueAllMatching(cmd => {
+    if (stop) return false
+    if (!isMainThread(cmd) || isSlashCommand(cmd) || cmd.passive === true) {
+      return false
+    }
+    if (cmd.screeningPending === true || cmd.drainOnly === true) {
+      stop = true
+      return false
+    }
+    return cmd.mode === targetMode
+  })
   if (commands.length === 0) {
     return { processed: false }
   }
