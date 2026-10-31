@@ -145,6 +145,8 @@ describe('densable 2.1.248 leftover Session is official n()', () => {
     expect(host).toContain('requestLatches: new RequestLatches()')
     expect(host).toContain('accountCreditLatches: new AccountCreditLatches()')
     expect(host).toContain('proactivity: new Proactivity()')
+    expect(host).not.toContain('this.authoringProgress = {')
+    expect(host).not.toContain('this.artifactPolicyFetchAnswer = null')
     for (const name of OFFICIAL_CLASS_NAMES) {
       expect(host).not.toContain(name)
     }

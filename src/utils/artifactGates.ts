@@ -224,15 +224,18 @@ function artifactPolicyAdminTiers(): ArtifactSettingsRow[] {
  */
 function artifactWeeLocalSettingsPath(): string | undefined {
   try {
-    const { getOriginalCwd, getProjectRoot } =
+    const { getCwd } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      require('./cwd.js') as typeof import('./cwd.js')
+    const { findCanonicalGitRoot } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./git.js') as typeof import('./git.js')
     const { join, resolve } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('path') as typeof import('path')
-    const cwd = resolve(getOriginalCwd())
-    const root = resolve(getProjectRoot())
-    if (cwd === root) return undefined
+    const cwd = resolve(getCwd())
+    const gitRoot = findCanonicalGitRoot(cwd)
+    if (gitRoot === null || resolve(gitRoot) === cwd) return undefined
     return join(cwd, '.claude', 'settings.local.json')
   } catch {
     return undefined

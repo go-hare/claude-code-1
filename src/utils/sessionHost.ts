@@ -508,29 +508,6 @@ export class ExtensionsConfig {
   }
 }
 
-/** densable `X().authoringProgress` slot. */
-export type AuthoringProgressSlot = {
-  raw: string
-  flushedAt: number
-  matched: boolean | null
-  shown: boolean
-  batch: boolean
-}
-
-/** densable `X().authoringProgress` bag. */
-export type AuthoringProgressBag = {
-  slotsByBlockIndex: Map<number, AuthoringProgressSlot>
-  failureReported: boolean
-}
-
-/** densable `X().artifactPolicyFetchAnswer` — G_n fetch fail stash. */
-export type ArtifactPolicyFetchAnswer = {
-  success: boolean
-  retrying?: boolean
-  errorCode?: string
-  httpStatus?: number | null
-}
-
 export class SessionHost {
   backgroundHousekeeping: BackgroundHousekeeping
   launchOptions: LaunchOptions
@@ -544,15 +521,6 @@ export class SessionHost {
   requestLatches: RequestLatches
   accountCreditLatches: AccountCreditLatches
   proactivity: Proactivity
-  /**
-   * densable `X().authoringProgress` — gold `nt.of(U().host)` field.
-   * `{slotsByBlockIndex:new Map,failureReported:!1}`
-   */
-  authoringProgress: AuthoringProgressBag
-  /**
-   * densable `X().artifactPolicyFetchAnswer`.
-   */
-  artifactPolicyFetchAnswer: ArtifactPolicyFetchAnswer | null
   /** densable qhe @178133390 — process-env change emit (Fc/IE). */
   envChange: Signal = createSignal()
 
@@ -582,11 +550,6 @@ export class SessionHost {
     this.requestLatches = e.requestLatches
     this.accountCreditLatches = e.accountCreditLatches
     this.proactivity = e.proactivity
-    this.authoringProgress = {
-      slotsByBlockIndex: new Map(),
-      failureReported: false,
-    }
-    this.artifactPolicyFetchAnswer = null
   }
 }
 

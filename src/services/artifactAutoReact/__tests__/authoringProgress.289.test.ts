@@ -37,7 +37,7 @@ describe('densable 2.1.289 authoringProgress', () => {
     ).toBe('drawing decision 1 — abc')
   })
 
-  test('source never exports N/U/W/G/Rx/yQ; X().authoringProgress on SessionHost', () => {
+  test('source never exports N/U/W/G/Rx/yQ; DualInk A() hosts authoringProgress', () => {
     const src = readFileSync(SRC, 'utf8')
     expect(src).not.toContain('export function N(')
     expect(src).not.toContain('export function U(')
@@ -49,7 +49,9 @@ describe('densable 2.1.289 authoringProgress', () => {
     expect(src).toContain('getAllBaseTools')
     expect(src).toContain('FileWriteTool')
     expect(src).toContain('FileEditTool')
-    expect(src).toContain('getBootstrapSessionHost().authoringProgress')
+    expect(src).toContain('ensureDualInkCurrent')
+    expect(src).toContain('authoringProgress as AuthoringProgressBag')
+    expect(src).not.toContain('getBootstrapSessionHost().authoringProgress')
     expect(src).toContain('isWorkshopArtifactEligible')
     expect(src).toContain('allow_cobalt_plinth')
     expect(src).toContain('tengu_cobalt_plinth')
@@ -73,11 +75,19 @@ describe('densable 2.1.289 authoringProgress', () => {
     expect(src).toContain('artifactPolicyFetchAnswer')
     expect(src).toContain('leftoverPolicyLimitsIe')
     const host = readFileSync(HOST, 'utf8')
-    expect(host).toContain('authoringProgress: AuthoringProgressBag')
-    expect(host).toContain('artifactPolicyFetchAnswer')
-    expect(host).toContain('this.artifactPolicyFetchAnswer = null')
-    expect(host).toContain('slotsByBlockIndex: new Map()')
-    expect(host).toContain('failureReported: false')
+    expect(host).not.toContain('authoringProgress: AuthoringProgressBag')
+    expect(host).not.toContain('this.artifactPolicyFetchAnswer = null')
+    const dualInk = readFileSync(
+      join(
+        import.meta.dir,
+        '../../../../packages/@ant/ink/src/core/instances.ts',
+      ),
+      'utf8',
+    )
+    expect(dualInk).toContain('authoringProgress:')
+    expect(dualInk).toContain('slotsByBlockIndex: new Map()')
+    expect(dualInk).toContain('failureReported: false')
+    expect(dualInk).toContain('artifactPolicyFetchAnswer: null')
     const messages = readFileSync(MESSAGES, 'utf8')
     expect(messages).toContain('authoringProgressSurface')
     expect(messages).toContain('onToolUseStart')

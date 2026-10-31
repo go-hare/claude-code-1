@@ -37,5 +37,10 @@ describe('densable DualInk a()/FPe on U()', () => {
     expect(
       (minted.liveReplicas as { workingCopyPath: undefined }).workingCopyPath,
     ).toBe(undefined)
+    expect(minted.authoringProgress).toEqual({
+      slotsByBlockIndex: new Map(),
+      failureReported: false,
+    })
+    expect(minted.artifactPolicyFetchAnswer).toBe(null)
   })
 })

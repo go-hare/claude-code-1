@@ -492,7 +492,9 @@ const call: LocalJSXCommandCall = async (onDone, context, args) => {
 export default {
   type: 'local-jsx',
   name: 'ultraplan',
-  description: `~10–30 min · Claude Code on the web drafts an advanced plan you can edit and approve. See ${CCR_TERMS_URL}`,
+  get description() {
+    return `Draft an editable plan in a cloud session (${getDialogConfig().timeEstimate}) · See ${CCR_TERMS_URL}`;
+  },
   argumentHint: '<prompt>',
   availability: ['claude-ai'],
   isEnabled: () => isUltraplanEnabled(),

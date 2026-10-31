@@ -37,10 +37,33 @@ import {
   noteUsingProfileAuth,
 } from '../../utils/anthropicProfile.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
-import { getBootstrapSessionHost } from '../../utils/sessionRoot.js'
 import { truncateToWidth } from '../../utils/truncate.js'
+import { ensureDualInkCurrent } from '@anthropic/ink'
 import { logEvent } from '../analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+
+/** densable DualInk `A().authoringProgress` slot. */
+export type AuthoringProgressSlot = {
+  raw: string
+  flushedAt: number
+  matched: boolean | null
+  shown: boolean
+  batch: boolean
+}
+
+/** densable DualInk `A().authoringProgress` bag. */
+export type AuthoringProgressBag = {
+  slotsByBlockIndex: Map<number, AuthoringProgressSlot>
+  failureReported: boolean
+}
+
+/** densable DualInk `A().artifactPolicyFetchAnswer` — G_n fetch fail stash. */
+export type ArtifactPolicyFetchAnswer = {
+  success: boolean
+  retrying?: boolean
+  errorCode?: string
+  httpStatus?: number | null
+}
 
 const FLUSH_MS = 100
 const MAX_SLOTS = 8
@@ -73,10 +96,17 @@ export function isWorkshopProgressGateOpen(): boolean {
 }
 
 /**
- * densable `X()` — `nt.of(U().host).authoringProgress`.
+ * densable DualInk `X()` — `a().current??=A()`.
  */
-function authoringBag() {
-  return getBootstrapSessionHost().authoringProgress
+function dualInkMint(): Record<string, unknown> {
+  return ensureDualInkCurrent()
+}
+
+/**
+ * densable DualInk `A().authoringProgress`.
+ */
+function authoringBag(): AuthoringProgressBag {
+  return dualInkMint().authoringProgress as AuthoringProgressBag
 }
 
 /**
@@ -295,9 +325,9 @@ function workshopGn(): {
   const sub = getSubscriptionType()
   if (sub !== null && !WORKSHOP_SUBS.has(sub)) return null
   const n = leftoverPolicyLimitsRh('allow_cobalt_plinth')
-  const host = getBootstrapSessionHost()
+  const mint = dualInkMint()
   if (n !== 'cache_miss' && n !== 'route_missing') {
-    host.artifactPolicyFetchAnswer = null
+    mint.artifactPolicyFetchAnswer = null
     return null
   }
   const policyHost = leftoverPolicyLimitsHost()
@@ -312,11 +342,13 @@ function workshopGn(): {
     n === 'route_missing' ? 'policy_route_missing' : 'policy_fetch_failed'
   const outcome = policyHost.lastFetchOutcome
   if (outcome !== null && !outcome.success && leftoverPolicyLimitsIe(outcome)) {
-    host.artifactPolicyFetchAnswer = outcome
+    mint.artifactPolicyFetchAnswer = outcome
     return { cause, outcome }
   }
-  if (host.artifactPolicyFetchAnswer !== null) {
-    return { cause, outcome: host.artifactPolicyFetchAnswer }
+  const stashed =
+    mint.artifactPolicyFetchAnswer as ArtifactPolicyFetchAnswer | null
+  if (stashed !== null) {
+    return { cause, outcome: stashed }
   }
   return { cause }
 }
@@ -376,7 +408,8 @@ function runHook(fn: () => void, label: string): void {
   try {
     fn()
   } catch (err) {
-    logError(err, `workshop authoring-progress hook failed (${label})`)
+    logError(err)
+    void label
     const bag = authoringBag()
     if (!bag.failureReported) {
       bag.failureReported = true

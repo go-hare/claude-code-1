@@ -180,7 +180,9 @@ export function isDualInkCurrentPresent(): boolean {
 
 /**
  * densable DualInk `A()` mint. Gold live/autoReact maps stay unhosted;
- * liveReplicas DualInk `se`/`also` slots are void 0. Never `export function A`.
+ * liveReplicas DualInk `se`/`also` slots are void 0. `authoringProgress` and
+ * `artifactPolicyFetchAnswer` live on this mint (not SessionHost / `nt.of`).
+ * Never `export function A`.
  */
 function mintDualInkCurrent(): Record<string, unknown> {
   return {
@@ -191,6 +193,11 @@ function mintDualInkCurrent(): Record<string, unknown> {
       pushHeldSaves: undefined,
       heldSavesExitCleanup: undefined,
     },
+    authoringProgress: {
+      slotsByBlockIndex: new Map(),
+      failureReported: false,
+    },
+    artifactPolicyFetchAnswer: null,
   }
 }
 

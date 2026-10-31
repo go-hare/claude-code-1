@@ -47,6 +47,7 @@ describe('artifactGates', () => {
     expect(src).toContain('artifactPolicyOu')
     expect(src).toContain('artifactPolicyMee')
     expect(src).toContain('artifactWeeLocalSettingsPath')
+    expect(src).toContain('findCanonicalGitRoot')
     expect(src).toContain('collectMachineLocalManagedSettings')
   })
 
