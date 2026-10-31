@@ -1606,6 +1606,11 @@ export function leftoverBe(model: string): string {
 type LeftoverQrrSlot = {
   data: Record<string, unknown> | null
   model?: string
+  /** densable nWe — slot filled at this timestamp. */
+  at?: number
+  /** densable xE stale-match needle. */
+  entrypoint?: string | null
+  org?: string | null
 }
 
 let leftoverD2ClientData: Record<string, unknown> | null = null
@@ -1616,6 +1621,7 @@ let leftoverQrrWindowSeed: {
   data: Record<string, unknown>
 } | null = null
 let leftoverQrrReadGate: (() => boolean) | null = null
+let leftoverQrrStrictReadGate: (() => boolean) | null = null
 let leftoverQrrCacheKey: ((model?: string) => string) | null = null
 let leftoverQrrOverride:
   | ((
@@ -1623,6 +1629,18 @@ let leftoverQrrOverride:
       model?: string,
     ) => Record<string, unknown> | null)
   | null = null
+let leftoverQrrStaleMatchGetter: (() => LeftoverQrrStaleNeedle | null) | null =
+  null
+
+type LeftoverQrrStaleNeedle = {
+  entrypoint: string | null
+  model?: string
+  org: string | null
+}
+
+/** densable xE window: 7d behind, 5min ahead. */
+const LEFTOVER_QRR_STALE_PAST_MS = 604_800_000
+const LEFTOVER_QRR_STALE_FUTURE_MS = 300_000
 const leftoverD2Logged = new Set<string>()
 
 export function leftoverD2SetClientData(
@@ -1635,7 +1653,19 @@ export function leftoverD2SetClientData(
   leftoverQrrInstallCacheKey()
   leftoverQrrSeedWindow(data)
   const key = leftoverQrrCacheKey?.(model) ?? 'default'
-  leftoverQrrSlots = { default: { data, model }, [key]: { data, model } }
+  const at = Date.now()
+  const identity = leftoverQrrIdentity()
+  const slot: LeftoverQrrSlot = {
+    data,
+    model,
+    at,
+    entrypoint: identity.entrypoint,
+    org: identity.org,
+  }
+  leftoverQrrSlots = {
+    default: slot,
+    [key]: slot,
+  }
 }
 
 export function leftoverQrrSetSlots(
@@ -1652,6 +1682,45 @@ export function leftoverQrrSetWindowSeed(
 
 export function leftoverQrrSetReadGate(gate: (() => boolean) | null): void {
   leftoverQrrReadGate = gate
+}
+
+export function leftoverQrrSetStrictReadGate(
+  gate: (() => boolean) | null,
+): void {
+  leftoverQrrStrictReadGate = gate
+}
+
+export function leftoverQrrSetStaleMatchGetter(
+  getter: (() => LeftoverQrrStaleNeedle | null) | null,
+): void {
+  leftoverQrrStaleMatchGetter = getter
+}
+
+/** densable Cu + le().oauthAccount — kYr/xE needle. */
+function leftoverQrrIdentity(): LeftoverQrrStaleNeedle {
+  const entry = process.env.CLAUDE_CODE_ENTRYPOINT
+  const entrypoint = entry ? entry : null
+  let org: string | null = null
+  let model: string | undefined
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { getGlobalConfig } =
+      require('./config.js') as typeof import('./config.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    org = getGlobalConfig().oauthAccount?.organizationUuid ?? null
+  } catch {
+    // isolation — optional
+  }
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { getMainLoopModel } =
+      require('./model/model.js') as typeof import('./model/model.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    model = getMainLoopModel()
+  } catch {
+    // isolation — optional
+  }
+  return { entrypoint, model, org }
 }
 
 export function leftoverQrrSetCacheKey(
@@ -1711,24 +1780,38 @@ export function leftoverQrrSeedWindow(
   )
 }
 
-/** densable `R()` / `EYr` — firstParty or unscoped anthropicAws. */
+/** densable `R()` — firstParty or unscoped anthropicAws. Throws if He() throws. */
+function leftoverQrrProviderAllowsClientData(): boolean {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { getAPIProvider } =
+    require('./model/providers.js') as typeof import('./model/providers.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const provider = getAPIProvider()
+  if (provider === 'firstParty') return true
+  if (
+    provider === 'anthropicAws' &&
+    process.env.ANTHROPIC_AWS_BASE_URL === undefined
+  ) {
+    return true
+  }
+  return false
+}
+
+/** densable `R()` wrapped for EYr — catch true. */
 function leftoverQrrDefaultReadGate(): boolean {
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getAPIProvider } =
-      require('./model/providers.js') as typeof import('./model/providers.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    const provider = getAPIProvider()
-    if (provider === 'firstParty') return true
-    if (
-      provider === 'anthropicAws' &&
-      process.env.ANTHROPIC_AWS_BASE_URL === undefined
-    ) {
-      return true
-    }
-    return false
+    return leftoverQrrProviderAllowsClientData()
   } catch {
     return true
+  }
+}
+
+/** densable `R()` wrapped for vYr — catch false. */
+function leftoverQrrDefaultStrictReadGate(): boolean {
+  try {
+    return leftoverQrrProviderAllowsClientData()
+  } catch {
+    return false
   }
 }
 
@@ -1736,6 +1819,66 @@ function leftoverQrrDefaultReadGate(): boolean {
 export function leftoverQrrInstallReadGate(): void {
   if (leftoverQrrReadGate !== null) return
   leftoverQrrSetReadGate(() => leftoverQrrDefaultReadGate())
+}
+
+/**
+ * densable `vYr` — same R() as EYr, catch returns false.
+ * No-op if leftoverQrrStrictReadGate already set.
+ */
+export function leftoverQrrInstallStrictReadGate(): void {
+  if (leftoverQrrStrictReadGate !== null) return
+  leftoverQrrSetStrictReadGate(() => leftoverQrrDefaultStrictReadGate())
+}
+
+/**
+ * densable `CYr` — Iso `IAo` merge as leftoverQrr override.
+ * No-op if leftoverQrrOverride already set.
+ */
+export function leftoverQrrInstallOverride(): void {
+  if (leftoverQrrOverride !== null) return
+  leftoverQrrSetOverride((data, model) => {
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { mergeLoadedClientDataInto } =
+        require('../cli/clientDataUrl.js') as typeof import('../cli/clientDataUrl.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const merged = mergeLoadedClientDataInto(data, model)
+      return merged === undefined ? data : merged
+    } catch {
+      return data
+    }
+  })
+}
+
+/**
+ * densable `kYr` — stale-match needle from R() + v() identity.
+ * No-op if leftoverQrrStaleMatchGetter already set.
+ */
+export function leftoverQrrInstallStaleMatch(): void {
+  if (leftoverQrrStaleMatchGetter !== null) return
+  leftoverQrrSetStaleMatchGetter(() => {
+    try {
+      if (!leftoverQrrProviderAllowsClientData()) return null
+      return leftoverQrrIdentity()
+    } catch {
+      return null
+    }
+  })
+}
+
+/**
+ * densable `pUn` — install EYr + vYr + CYr + kYr. Called from bootstrap
+ * (gold Wn) and client-data fetch (gold xos).
+ */
+export function leftoverQrrInstallClientData(): void {
+  try {
+    leftoverQrrInstallReadGate()
+    leftoverQrrInstallStrictReadGate()
+    leftoverQrrInstallOverride()
+    leftoverQrrInstallStaleMatch()
+  } catch {
+    // isolation — gold c(e)
+  }
 }
 
 export function leftoverQrrSetOverride(
@@ -1746,6 +1889,39 @@ export function leftoverQrrSetOverride(
 
 function leftoverQrrSlotLooksValid(slot: LeftoverQrrSlot | undefined): boolean {
   return slot !== undefined && typeof slot === 'object'
+}
+
+/** densable `qbt` — object with data + numeric at. */
+function leftoverQrrSlotHasTimedData(
+  slot: LeftoverQrrSlot | undefined,
+): slot is LeftoverQrrSlot & { at: number } {
+  return (
+    slot !== undefined &&
+    typeof slot === 'object' &&
+    'data' in slot &&
+    'at' in slot &&
+    typeof slot.at === 'number'
+  )
+}
+
+/** densable `xE` — newest timed slot matching entrypoint/model/org in window. */
+function leftoverQrrPickStaleSlot(
+  slots: Record<string, LeftoverQrrSlot>,
+  needle: LeftoverQrrStaleNeedle,
+): LeftoverQrrSlot | null {
+  const now = Date.now()
+  const from = now - LEFTOVER_QRR_STALE_PAST_MS
+  const to = now + LEFTOVER_QRR_STALE_FUTURE_MS
+  let best: LeftoverQrrSlot | null = null
+  for (const slot of Object.values(slots)) {
+    if (!leftoverQrrSlotHasTimedData(slot)) continue
+    if ((slot.entrypoint ?? null) !== needle.entrypoint) continue
+    if (slot.model !== needle.model) continue
+    if (slot.org !== needle.org) continue
+    if (!(slot.at >= from && slot.at <= to)) continue
+    if (best === null || slot.at > (best.at ?? 0)) best = slot
+  }
+  return best
 }
 
 /** densable `Sw` then optional override. */
@@ -1759,22 +1935,105 @@ export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
     resolved = leftoverQrrSlotLooksValid(slot)
       ? { data: slot.data ?? null, model: slot.model }
       : null
-  } else if (
-    leftoverQrrWindowSeed !== null &&
-    leftoverQrrWindowSeed.key === key
-  ) {
-    resolved = { data: leftoverQrrWindowSeed.data }
-  } else if (
-    leftoverD2ClientData !== null &&
-    typeof leftoverD2ClientData === 'object'
-  ) {
-    resolved = { data: leftoverD2ClientData, model: leftoverD2ClientModel }
+  } else {
+    const needle = leftoverQrrStaleMatchGetter?.()
+    if (needle && leftoverQrrSlots != null) {
+      const stale = leftoverQrrPickStaleSlot(leftoverQrrSlots, needle)
+      if (stale) resolved = { data: stale.data ?? null }
+    }
+    if (
+      resolved === null &&
+      leftoverQrrWindowSeed !== null &&
+      leftoverQrrWindowSeed.key === key
+    ) {
+      resolved = { data: leftoverQrrWindowSeed.data }
+    } else if (
+      resolved === null &&
+      leftoverD2ClientData !== null &&
+      typeof leftoverD2ClientData === 'object'
+    ) {
+      resolved = { data: leftoverD2ClientData, model: leftoverD2ClientModel }
+    }
   }
   if (!leftoverQrrOverride) return resolved
   const data = resolved?.data ?? null
   const next = leftoverQrrOverride(data, model)
   if (next === data) return resolved
   return { data: next, model: resolved?.model ?? model }
+}
+
+/**
+ * densable `AYr` / `Lls` — slots[key] under strict read gate. No windowSeed,
+ * no disk fallback, no CYr override. Gold Qbn meadow_lantern reads this.
+ */
+export function leftoverQrrStrict(): Record<string, unknown> | null {
+  leftoverD2HydrateFromDiskOnce()
+  if (!leftoverQrrStrictReadGate || !leftoverQrrStrictReadGate()) return null
+  if (!leftoverQrrCacheKey) return null
+  const key = leftoverQrrCacheKey()
+  if (leftoverQrrSlots == null || !Object.hasOwn(leftoverQrrSlots, key)) {
+    return null
+  }
+  const slot = leftoverQrrSlots[key]
+  if (!leftoverQrrSlotHasTimedData(slot)) return null
+  return slot.data ?? null
+}
+
+/**
+ * densable `yyo` / `Ost` / `eor` / `nWe` — inflight client-data fetch map.
+ * Not a second client_data store; leftoverQrr remains the payload cache.
+ */
+let leftoverFetchesClientData = false
+const leftoverClientDataFetches = new Map<string, Promise<unknown> | 'over'>()
+
+/** densable `yyo`. */
+export function setFetchesClientData(on: boolean): void {
+  leftoverFetchesClientData = on
+}
+
+export function fetchesClientDataEnabled(): boolean {
+  return leftoverFetchesClientData
+}
+
+/** densable logout `clientDataFetches.clear()`. */
+export function clearClientDataFetches(): void {
+  leftoverClientDataFetches.clear()
+}
+
+/** densable `eor`. Does not install the getter. */
+export function leftoverQrrCacheKeyNow(model?: string): string | undefined {
+  return leftoverQrrCacheKey?.(model)
+}
+
+/** densable `nWe` — getter exists and the slot has `data` + numeric `at`. */
+export function leftoverQrrHasTimedSlot(model?: string): boolean {
+  if (leftoverQrrCacheKey === null) return false
+  const key = leftoverQrrCacheKey(model)
+  const slot = leftoverQrrSlots?.[key]
+  return leftoverQrrSlotLooksValid(slot) && typeof slot?.at === 'number'
+}
+
+/** densable `Ost`. */
+export function trackClientDataFetch(promise: Promise<unknown>): void {
+  leftoverQrrInstallCacheKey()
+  const key = leftoverQrrCacheKey?.()
+  if (key === undefined) return
+  const existing = leftoverClientDataFetches.get(key)
+  if (existing instanceof Promise) return
+  const getter = leftoverQrrCacheKey
+  leftoverClientDataFetches.set(key, promise)
+  void promise.finally(() => {
+    if (leftoverClientDataFetches.get(key) !== promise) return
+    if (leftoverQrrCacheKey === getter)
+      leftoverClientDataFetches.set(key, 'over')
+    else leftoverClientDataFetches.delete(key)
+  })
+}
+
+export function peekClientDataFetch(
+  key: string,
+): Promise<unknown> | 'over' | undefined {
+  return leftoverClientDataFetches.get(key)
 }
 
 let leftoverD2DiskHydrated = false

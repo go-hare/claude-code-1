@@ -430,17 +430,46 @@ describe('vscodeIdeBridgeCallbacks densable helpers', () => {
     ).toBe(false)
   })
 
-  test('Qbn: k(harbor_willow, true) miss-default; meadow_lantern ORs', () => {
+  test('Qbn: k(harbor_willow, true) miss-default; meadow_lantern ORs', async () => {
     // gold k miss-default true — analog must not use checkStatsig miss=false
+    // gold AYr meadow is leftoverQrrStrict (vYr + qbt slots), not clientDataCache
+    const {
+      leftoverD2SetClientData,
+      leftoverQrrInstallClientData,
+      leftoverQrrSetCacheKey,
+      leftoverQrrSetOverride,
+      leftoverQrrSetReadGate,
+      leftoverQrrSetSlots,
+      leftoverQrrSetStaleMatchGetter,
+      leftoverQrrSetStrictReadGate,
+      leftoverQrrSetWindowSeed,
+    } = await import('src/utils/collapseReadSearch.js')
+    leftoverQrrSetSlots(null)
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetReadGate(null)
+    leftoverQrrSetStrictReadGate(null)
+    leftoverQrrSetCacheKey(null)
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetStaleMatchGetter(null)
+    leftoverQrrInstallClientData()
+    leftoverD2SetClientData(null)
     delete cachedGb.tengu_harbor_willow
     clientDataCache = null
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
     cachedGb.tengu_harbor_willow = false
     expect(isAutoDefaultLaunchEnabled()).toBe(false)
-    clientDataCache = { meadow_lantern: true }
+    leftoverD2SetClientData({ meadow_lantern: true })
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
-    clientDataCache = { meadow_lantern: 'true' } // SEA === true only
+    leftoverD2SetClientData({ meadow_lantern: 'true' }) // SEA === true only
     expect(isAutoDefaultLaunchEnabled()).toBe(false)
+    leftoverD2SetClientData(null)
+    leftoverQrrSetSlots(null)
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetReadGate(null)
+    leftoverQrrSetStrictReadGate(null)
+    leftoverQrrSetCacheKey(null)
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetStaleMatchGetter(null)
     clientDataCache = null
     cachedGb.tengu_harbor_willow = true
     expect(isAutoDefaultLaunchEnabled()).toBe(true)

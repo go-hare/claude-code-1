@@ -788,6 +788,108 @@ describe('densable Io Zc live Thought clock', () => {
     leftoverQrrSetSlots(null)
   })
 
+  test('pUn leftoverQrrInstallClientData leftoverQrrStrict AYr meadow', async () => {
+    const {
+      leftoverD2SetClientData,
+      leftoverQrr,
+      leftoverQrrInstallClientData,
+      leftoverQrrInstallOverride,
+      leftoverQrrSetCacheKey,
+      leftoverQrrSetOverride,
+      leftoverQrrSetReadGate,
+      leftoverQrrSetSlots,
+      leftoverQrrSetStaleMatchGetter,
+      leftoverQrrSetStrictReadGate,
+      leftoverQrrSetWindowSeed,
+      leftoverQrrStrict,
+    } = await import('../collapseReadSearch.js')
+    leftoverQrrSetSlots(null)
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetReadGate(null)
+    leftoverQrrSetStrictReadGate(null)
+    leftoverQrrSetCacheKey(null)
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetStaleMatchGetter(null)
+    leftoverQrrInstallClientData()
+    leftoverD2SetClientData({ meadow_lantern: true })
+    expect(leftoverQrrStrict()?.meadow_lantern).toBe(true)
+    leftoverD2SetClientData({ meadow_lantern: 'true' })
+    expect(leftoverQrrStrict()?.meadow_lantern).not.toBe(true)
+    leftoverQrrSetStrictReadGate(() => false)
+    expect(leftoverQrrStrict()).toBeNull()
+    leftoverQrrSetStrictReadGate(() => true)
+    leftoverQrrSetCacheKey(() => 'k')
+    leftoverQrrSetSlots({
+      k: { data: { meadow_lantern: true }, model: 'm' },
+    })
+    expect(leftoverQrrStrict()).toBeNull()
+    leftoverQrrSetSlots({
+      k: { data: { meadow_lantern: true }, model: 'm', at: Date.now() },
+    })
+    expect(leftoverQrrStrict()?.meadow_lantern).toBe(true)
+    leftoverQrrSetReadGate(() => true)
+    leftoverQrrSetOverride(() => ({ quizzical_shore: 99 }))
+    leftoverQrrInstallOverride()
+    leftoverQrrSetSlots({
+      k: { data: { quizzical_shore: 1 }, model: 'm' },
+    })
+    expect(leftoverQrr('m')?.data?.quizzical_shore).toBe(99)
+    leftoverQrrSetReadGate(null)
+    leftoverQrrSetStrictReadGate(null)
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetCacheKey(null)
+    leftoverQrrSetSlots(null)
+    leftoverQrrSetStaleMatchGetter(null)
+    leftoverD2SetClientData(null)
+  })
+
+  test('kYr leftoverQrr stale xE match newest timed slot', async () => {
+    const {
+      leftoverD2SetClientData,
+      leftoverQrr,
+      leftoverQrrSetCacheKey,
+      leftoverQrrSetOverride,
+      leftoverQrrSetReadGate,
+      leftoverQrrSetSlots,
+      leftoverQrrSetStaleMatchGetter,
+      leftoverQrrSetWindowSeed,
+    } = await import('../collapseReadSearch.js')
+    leftoverD2SetClientData({ quizzical_shore: false })
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetReadGate(() => true)
+    leftoverQrrSetCacheKey(() => 'missing')
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetSlots({
+      other: {
+        data: { quizzical_shore: true },
+        model: 'm',
+        at: Date.now(),
+        entrypoint: null,
+        org: null,
+      },
+    })
+    leftoverQrrSetStaleMatchGetter(() => ({
+      entrypoint: null,
+      model: 'm',
+      org: null,
+    }))
+    expect(leftoverQrr('m')?.data?.quizzical_shore).toBe(true)
+    leftoverQrrSetStaleMatchGetter(() => ({
+      entrypoint: null,
+      model: 'other',
+      org: null,
+    }))
+    expect(leftoverQrr('m')?.data?.quizzical_shore).toBe(false)
+    leftoverQrrSetStaleMatchGetter(null)
+    leftoverQrrSetReadGate(null)
+    leftoverQrrSetOverride(null)
+    leftoverQrrSetWindowSeed(null)
+    leftoverQrrSetCacheKey(null)
+    leftoverQrrSetSlots(null)
+    leftoverD2SetClientData(null)
+  })
+
   test('Grr cache key is bi1- sha256 prefix', async () => {
     const { leftoverGrr, leftoverQrrInstallCacheKey, leftoverQrrSetCacheKey } =
       await import('../collapseReadSearch.js')

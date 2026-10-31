@@ -159,7 +159,20 @@ async function fetchBootstrapAPI(): Promise<BootstrapResponse | null> {
 /**
  * Fetch bootstrap data from the API and persist to disk cache.
  */
-export async function fetchBootstrapData(): Promise<void> {
+export function fetchBootstrapData(): Promise<void> {
+  const run = fetchBootstrapDataBody()
+  try {
+    const { trackClientDataFetch } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js')
+    trackClientDataFetch(run)
+  } catch {
+    // isolation — optional
+  }
+  return run
+}
+
+async function fetchBootstrapDataBody(): Promise<void> {
   try {
     const response = await fetchBootstrapAPI()
     if (!response) return
@@ -189,12 +202,12 @@ export async function fetchBootstrapData(): Promise<void> {
         leftoverD2HydrateFromDisk,
         leftoverD2SetClientData,
         leftoverQrrInstallCacheKey,
-        leftoverQrrInstallReadGate,
+        leftoverQrrInstallClientData,
       } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js')
       leftoverQrrInstallCacheKey()
-      leftoverQrrInstallReadGate()
+      leftoverQrrInstallClientData()
       leftoverD2HydrateFromDisk(getGlobalConfig().clientDataCache)
       if (clientDataUpdate) {
         leftoverD2SetClientData(clientDataUpdate)

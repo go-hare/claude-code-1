@@ -203,6 +203,16 @@ export function runStartupPrefetches(options: {
     (bgRefreshThrottleMs > 0 &&
       currentTime - lastPrefetched < bgRefreshThrottleMs)
 
+  try {
+    const { setFetchesClientData } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js')
+    // densable yyo(!Or()) — even when the prefetch itself is skipped.
+    setFetchesClientData(!bareMode)
+  } catch {
+    // isolation — optional
+  }
+
   if (!skipStartupPrefetches) {
     const lastPrefetchedInfo =
       lastPrefetched > 0

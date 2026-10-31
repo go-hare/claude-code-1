@@ -107,6 +107,15 @@ export async function clearAuthRelatedCaches(): Promise<void> {
   // Clear Grove config cache
   getGroveNoticeConfig.cache?.clear?.();
   getGroveSettings.cache?.clear?.();
+
+  try {
+    const { clearClientDataFetches } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js');
+    clearClientDataFetches();
+  } catch {
+    // isolation — optional
+  }
 }
 
 export async function call(): Promise<React.ReactNode> {

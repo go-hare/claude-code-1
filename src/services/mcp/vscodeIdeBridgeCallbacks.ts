@@ -10,7 +10,6 @@
  * - `hUe` → `isClaudeVscodeHostSession`
  */
 
-import { readMergedClientData } from 'src/cli/clientDataUrl.js'
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isModelAllowed } from 'src/utils/model/modelAllowlist.js'
@@ -43,18 +42,17 @@ export function isRefusalFallbackLaneEnabled(
 }
 
 /**
- * densable `sZs()?.meadow_lantern === true` data half of `HIn`.
- *
- * SEA `sZs` reads `clientDataCacheSlots[key]` under a strict gate. Local
- * bootstrap persists flat `clientDataCache` (same object shape; see
- * `coral_reef_sonnet` readers). Read meadow from that cache — boolean `true`
- * only (SEA `===!0`). Do not invent a GrowthBook `meadow_lantern` gate.
+ * densable `AYr()?.meadow_lantern === true` data half of `HIn`/`Qbn`.
+ * Gold AYr is slots[key] under vYr strict gate — leftoverQrrStrict.
+ * Boolean `true` only (SEA `===!0`). Do not invent a GrowthBook meadow gate.
  */
 function readClientDataMeadowLantern(): boolean {
   try {
-    const cache = readMergedClientData()
-    if (!cache || typeof cache !== 'object') return false
-    return cache.meadow_lantern === true
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { leftoverQrrStrict } =
+      require('../../utils/collapseReadSearch.js') as typeof import('../../utils/collapseReadSearch.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return leftoverQrrStrict()?.meadow_lantern === true
   } catch {
     return false
   }

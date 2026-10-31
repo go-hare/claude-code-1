@@ -77,6 +77,14 @@ export const init = memoize(async (): Promise<void> => {
   try {
     const configsStart = Date.now()
     enableConfigs()
+    try {
+      const { leftoverQrrInstallClientData } = await import(
+        '../utils/collapseReadSearch.js'
+      )
+      leftoverQrrInstallClientData()
+    } catch {
+      // isolation — optional
+    }
     const { loadCustomThemes, resolveCustomThemeSetting } = await import(
       'src/utils/customThemes.js'
     )
