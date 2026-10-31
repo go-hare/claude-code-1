@@ -1,8 +1,7 @@
 /**
  * densable `Aa` — permission preview clip box.
  * Gold @207522107: dashed (solid when screen-reader) top/bottom border,
- * `overflow:"hidden"`, no left/right border. Bash wraps the command preview
- * in this so Select stays on screen; plan wraps the markdown body.
+ * `overflow:"hidden"`, no left/right border. No flexGrow/flexShrink/minHeight.
  */
 import React, { type ReactNode } from 'react';
 import { Box } from '@anthropic/ink';

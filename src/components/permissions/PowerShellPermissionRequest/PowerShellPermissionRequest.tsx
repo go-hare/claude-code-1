@@ -18,6 +18,7 @@ import { PermissionDecisionDebugInfo } from '../PermissionDecisionDebugInfo.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import { PermissionExplainerContent, usePermissionExplainerUI } from '../PermissionExplanation.js';
 import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
 import { useShellPermissionFeedback } from '../useShellPermissionFeedback.js';
@@ -217,18 +218,18 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
   }
 
   return (
-    <PermissionDialog workerBadge={workerBadge} title="PowerShell command">
+    <PermissionDialog workerBadge={workerBadge} title="PowerShell command" innerPaddingX={0}>
       {toolUseConfirm.description ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor wrap="wrap">
-            {toolUseConfirm.description}
-          </Text>
+          <Text dimColor>{toolUseConfirm.description}</Text>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
-        <Text dimColor={explainerState.visible} wrap="wrap">
-          {PowerShellTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
-        </Text>
+        <PermissionPreviewGutter multiline={command.includes('\n')}>
+          <Text dimColor={explainerState.visible}>
+            {PowerShellTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
+          </Text>
+        </PermissionPreviewGutter>
       </PermissionOverflowBox>
       <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       {showPermissionDebug ? (

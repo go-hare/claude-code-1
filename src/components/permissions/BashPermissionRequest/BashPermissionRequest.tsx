@@ -35,6 +35,7 @@ import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDecisionDebugInfo } from '../PermissionDecisionDebugInfo.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionExplainerContent, usePermissionExplainerUI } from '../PermissionExplanation.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
@@ -508,18 +509,19 @@ function BashPermissionRequestInner({
       workerBadge={workerBadge}
       title={sandboxingEnabled && !isSandboxed ? 'Bash command (unsandboxed)' : 'Bash command'}
       subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
+      innerPaddingX={0}
     >
       {toolUseConfirm.description ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor wrap="wrap">
-            {toolUseConfirm.description}
-          </Text>
+          <Text dimColor>{toolUseConfirm.description}</Text>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
-        <Text dimColor={explainerState.visible} wrap="wrap">
-          {BashTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
-        </Text>
+        <PermissionPreviewGutter multiline={command.includes('\n')}>
+          <Text dimColor={explainerState.visible}>
+            {BashTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
+          </Text>
+        </PermissionPreviewGutter>
       </PermissionOverflowBox>
       <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       {showPermissionDebug ? (

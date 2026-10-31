@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
 import {
   PermissionExplainerContent,
   usePermissionExplainerUI,
@@ -24,7 +25,6 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/gr
 import { getCompoundCommandPrefixesStatic } from '../../utils/bash/prefix.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
-import { type UrlPreview } from '../permissionBrowser.js';
 import { sanitizeEditablePrefix } from '../consentRow.js';
 import {
   BASH_PREFIX_PLACEHOLDER,
@@ -50,17 +50,6 @@ import {
   workflowAutoModeSelectOption,
   WORKFLOW_PERMISSION_PROMPT_TRIGGER,
 } from '../permissionAutoMode.js';
-
-function previewNode(preview: UrlPreview): React.ReactNode {
-  if (preview.kind === 'withheld') {
-    return <Text dimColor>{preview.marker}</Text>;
-  }
-  return (
-    <Box flexDirection={preview.needsGutter ? 'column' : 'row'}>
-      <Text>{preview.text}</Text>
-    </Box>
-  );
-}
 
 export function PermissionBashDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
   const p = payload as BashPermissionPayload;
@@ -179,20 +168,23 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
       title={bashCommandTitle(p)}
       subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
       requestSource={p.requestSource}
+      innerPaddingX={0}
     >
       {description !== '' ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor wrap="wrap">
-            {description}
-          </Text>
+          <Text dimColor>{description}</Text>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
-        {explainerState.visible ? (
-          <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
-        ) : (
-          previewNode(preview)
-        )}
+        <PermissionPreviewGutter multiline={preview.kind === 'full' && preview.needsGutter}>
+          {explainerState.visible ? (
+            <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
+          ) : preview.kind === 'withheld' ? (
+            <Text dimColor>{preview.marker}</Text>
+          ) : (
+            <Text>{preview.text}</Text>
+          )}
+        </PermissionPreviewGutter>
       </PermissionOverflowBox>
       <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       <Box flexDirection="column">
