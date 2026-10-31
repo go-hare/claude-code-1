@@ -97,6 +97,8 @@ afterEach(() => {
   leftoverPolicyLimitsHost().oauthPrincipalMemo = null
   leftoverPolicyLimitsHost().wifAccountDiverged = false
   leftoverPolicyLimitsHost().principalFromOAuthBearer = false
+  leftoverPolicyLimitsHost().diskAdoptionSuppressed = false
+  leftoverPolicyLimitsHost().lastFetchOutcome = null
 })
 
 describe('leftoverTulip 283 leftover _o BODY', () => {
@@ -147,6 +149,18 @@ describe('leftoverTulip 283 leftover _o BODY', () => {
     expect(src).toContain('tengu_validated_clover')
     expect(src).toContain('tengu_tranquil_crescent')
     expect(src).toContain('ANTHROPIC_UNIX_SOCKET')
+    expect(src).toContain('leftoverPolicyLimitsDs')
+    expect(src).toContain('leftoverPolicyLimitsDu')
+    expect(src).toContain('leftoverPolicyLimitsRh')
+    expect(src).toContain('leftoverPolicyLimitsIe')
+    expect(src).toContain('leftoverPolicyLimitsQzn')
+    expect(src).toContain('diskAdoptionSuppressed')
+    expect(src).toContain('lastFetchOutcome')
+    expect(src).not.toMatch(/^export function dS\b/m)
+    expect(src).not.toMatch(/^export function DU\b/m)
+    expect(src).not.toMatch(/^export function Rh\b/m)
+    expect(src).not.toMatch(/^export function ie\b/m)
+    expect(src).not.toMatch(/^export function QZn\b/m)
     expect(src).not.toMatch(/^export function oe\b/m)
     expect(src).not.toMatch(/^export function WDr\b/m)
     expect(src).not.toMatch(/^export function UX\b/m)

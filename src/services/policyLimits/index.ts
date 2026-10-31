@@ -42,12 +42,17 @@ import {
   isPolicyLimitsAllowed,
   isPolicyLimitsEligible,
   leftoverPolicyLimitsHost,
+  type PolicyLimitsFetchOutcome,
 } from '../../cli/leftoverTulip.js'
 
 export { isPolicyLimitsEligible }
 
 function isNodeError(e: unknown): e is NodeJS.ErrnoException {
   return e instanceof Error
+}
+
+function stampPolicyLimitsFetchOutcome(e: PolicyLimitsFetchOutcome): void {
+  leftoverPolicyLimitsHost().lastFetchOutcome = e
 }
 
 // Constants
@@ -311,6 +316,14 @@ async function fetchWithRetry(
       return lastResult
     }
 
+    const outcome = leftoverPolicyLimitsHost().lastFetchOutcome
+    if (outcome !== null && !outcome.success) {
+      leftoverPolicyLimitsHost().lastFetchOutcome = {
+        ...outcome,
+        retrying: true,
+      }
+    }
+
     const delayMs = getRetryDelay(attempt)
     logForDebugging(
       `Policy limits: Retry ${attempt}/${DEFAULT_MAX_RETRIES} after ${delayMs}ms`,
@@ -332,6 +345,12 @@ async function fetchPolicyLimits(
 
     const authHeaders = getAuthHeaders()
     if (authHeaders.error) {
+      stampPolicyLimitsFetchOutcome({
+        success: false,
+        errorCode: 'auth_failed',
+        retrying: false,
+        httpStatus: null,
+      })
       return {
         success: false,
         error: 'Authentication required for policy limits',
@@ -358,21 +377,34 @@ async function fetchPolicyLimits(
 
     // Handle 304 Not Modified - cached version is still valid
     if (response.status === 304) {
+      stampPolicyLimitsFetchOutcome({
+        success: true,
+        httpStatus: 304,
+      })
       logForDebugging('Policy limits: Using cached restrictions (304)')
       return {
         success: true,
         restrictions: null, // Signal that cache is valid
         etag: cachedChecksum,
+        httpStatus: 304,
       }
     }
 
-    // Handle 404 Not Found - no policy limits exist or feature not enabled
+    // Handle 404 Not Found - no policy limits exist or feature not enabled.
+    // densable `J()` is unsuccessful 404; still adopt empty restrictions.
     if (response.status === 404) {
+      stampPolicyLimitsFetchOutcome({
+        success: false,
+        httpStatus: 404,
+        errorCode: 'request_failed',
+        retrying: false,
+      })
       logForDebugging('Policy limits: No restrictions found (404)')
       return {
         success: true,
         restrictions: {},
         etag: undefined,
+        httpStatus: 404,
       }
     }
 
@@ -381,20 +413,47 @@ async function fetchPolicyLimits(
       logForDebugging(
         `Policy limits: Invalid response format - ${parsed.error.message}`,
       )
+      stampPolicyLimitsFetchOutcome({
+        success: false,
+        httpStatus: response.status,
+        errorCode: 'request_failed',
+        retrying: false,
+      })
       return {
         success: false,
         error: 'Invalid policy limits format',
+        httpStatus: response.status,
       }
     }
 
+    stampPolicyLimitsFetchOutcome({
+      success: true,
+      httpStatus: 200,
+    })
     logForDebugging('Policy limits: Fetched successfully')
     return {
       success: true,
       restrictions: parsed.data.restrictions,
+      httpStatus: 200,
     }
   } catch (error) {
     // 404 is handled above via validateStatus, so it won't reach here
-    const { kind, message } = classifyAxiosError(error)
+    const { kind, status, message } = classifyAxiosError(error)
+    const httpStatus = status ?? null
+    const errorCode =
+      kind === 'auth'
+        ? 'auth_failed'
+        : kind === 'timeout'
+          ? 'timeout'
+          : kind === 'network'
+            ? 'network_error'
+            : 'request_failed'
+    stampPolicyLimitsFetchOutcome({
+      success: false,
+      httpStatus,
+      errorCode,
+      retrying: false,
+    })
     switch (kind) {
       case 'auth':
         return {

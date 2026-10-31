@@ -24,4 +24,6 @@ export type PolicyLimitsFetchResult = {
   etag?: string
   error?: string
   skipRetry?: boolean // If true, don't retry on failure (e.g., auth errors)
+  /** densable `lastFetchOutcome.httpStatus` for `J()`. */
+  httpStatus?: number
 }

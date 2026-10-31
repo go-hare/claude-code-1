@@ -40,6 +40,7 @@ import {
   constants as fsConstants,
   fstatSync,
   openSync,
+  readFileSync,
   readSync,
 } from 'fs'
 import { unlink, writeFile } from 'fs/promises'
@@ -1412,6 +1413,16 @@ export function isEnforceOrRequirePolicyKey(e: string): boolean {
 }
 
 /**
+ * densable `p().lastFetchOutcome` object used by `J()` / `ie()` / `QZn()`.
+ */
+export type PolicyLimitsFetchOutcome = {
+  success: boolean
+  retrying?: boolean
+  errorCode?: string
+  httpStatus?: number | null
+}
+
+/**
  * leftover `VIo` / leftover `h()` @179070612
  * `function h(){return tGo.of(j().host)}`
  */
@@ -1429,6 +1440,12 @@ export type PolicyLimitsHostCache = {
   attributedBearerDigest: string | null
   evidenceRereadForBearer: string | null
   failOpenVerdict: boolean
+  /** densable `diskAdoptionSuppressed` — skip `b6t` disk cache in `dS`. */
+  diskAdoptionSuppressed: boolean
+  /**
+   * densable `lastFetchOutcome` for `J()` / `ie()` / `QZn()`.
+   */
+  lastFetchOutcome: PolicyLimitsFetchOutcome | null
   settledWithoutVerdictFor: string | null
   principalFromOAuthBearer: boolean
   tunnelSocket: string | null | undefined
@@ -1464,6 +1481,8 @@ const policyLimitsHost: PolicyLimitsHostCache = {
   attributedBearerDigest: null,
   evidenceRereadForBearer: null,
   failOpenVerdict: false,
+  diskAdoptionSuppressed: false,
+  lastFetchOutcome: null,
   settledWithoutVerdictFor: null,
   principalFromOAuthBearer: false,
   tunnelSocket: undefined,
@@ -1477,6 +1496,148 @@ const policyLimitsHost: PolicyLimitsHostCache = {
 /** leftover `h()` @179070612 */
 export function leftoverPolicyLimitsHost(): PolicyLimitsHostCache {
   return policyLimitsHost
+}
+
+/**
+ * densable `b6t` — disk `policy-limits.json` restrictions, or null.
+ */
+function leftoverAdoptDiskPolicyCache(): Record<
+  string,
+  { allowed: boolean }
+> | null {
+  try {
+    const content = readFileSync(leftoverPolicyLimitsCachePath(), 'utf-8')
+    const data = safeParseJSON(content, false)
+    if (!data || typeof data !== 'object') return null
+    const restrictions = (data as { restrictions?: unknown }).restrictions
+    if (!restrictions || typeof restrictions !== 'object') return null
+    return restrictions as Record<string, { allowed: boolean }>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * densable `dS` — session cache, else disk adopt unless suppressed.
+ * `if(!C_())return null; if(e.sessionCache)return e.sessionCache;
+ *  if(e.diskAdoptionSuppressed)return null; let n=b6t(); if(n)return B_t(n),n`
+ */
+export function leftoverPolicyLimitsDs(): Record<
+  string,
+  { allowed: boolean }
+> | null {
+  if (!isPolicyLimitsEligible()) return null
+  const e = leftoverPolicyLimitsHost()
+  if (e.sessionCache) return e.sessionCache
+  if (e.diskAdoptionSuppressed) return null
+  const n = leftoverAdoptDiskPolicyCache()
+  if (n) {
+    e.sessionCache = n
+    e.sessionAttributed = true
+    return n
+  }
+  return null
+}
+
+/**
+ * densable `DU` — `if(!C_())return !1; return dS()===null||p().failOpenVerdict`.
+ */
+export function leftoverPolicyLimitsDu(): boolean {
+  if (!isPolicyLimitsEligible()) return false
+  return (
+    leftoverPolicyLimitsDs() === null ||
+    leftoverPolicyLimitsHost().failOpenVerdict
+  )
+}
+
+/**
+ * densable `J` — last fetch unsuccessful 404.
+ */
+function leftoverPolicyLimitsJ(): boolean {
+  const e = leftoverPolicyLimitsHost().lastFetchOutcome
+  return e !== null && !e.success && e.httpStatus === 404
+}
+
+/**
+ * densable `UIe` — eligible, no dS, J().
+ */
+function leftoverPolicyLimitsUie(): boolean {
+  if (!isPolicyLimitsEligible() || leftoverPolicyLimitsDs() !== null) {
+    return false
+  }
+  return leftoverPolicyLimitsJ()
+}
+
+/**
+ * densable `cEn` — taint-latched while cache empty / not explicitly denied.
+ */
+function leftoverPolicyLimitsCen(e: string): boolean {
+  if (!leftoverTaintsInclude(e)) return false
+  if (leftoverPolicyLimitsDs() === null) return true
+  return leftoverPolicyLimitsHost().sessionCache?.[e]?.allowed !== false
+}
+
+/**
+ * densable `Rh` — null when `sn`; else latched / route_missing / cache_miss / org_denied.
+ */
+export function leftoverPolicyLimitsRh(e: string): string | null {
+  if (isPolicyLimitsAllowed(e)) return null
+  if (leftoverPolicyLimitsCen(e)) return 'latched'
+  const n = leftoverPolicyLimitsDs()
+  const routeMissing = leftoverPolicyLimitsJ()
+  if (n !== null) {
+    if (leftoverPolicyLimitsDu()) {
+      return routeMissing ? 'route_missing' : 'cache_miss'
+    }
+    return 'org_denied'
+  }
+  return leftoverPolicyLimitsUie() ? 'route_missing' : 'cache_miss'
+}
+
+/**
+ * densable `dze` — 4xx except 408/409/429.
+ */
+function leftoverPolicyLimitsDze(n: number | null | undefined): boolean {
+  return (
+    n !== undefined &&
+    n !== null &&
+    n >= 400 &&
+    n < 500 &&
+    n !== 408 &&
+    n !== 409 &&
+    n !== 429
+  )
+}
+
+/**
+ * densable `QZn` — transient fetch fail.
+ */
+export function leftoverPolicyLimitsQzn(e: PolicyLimitsFetchOutcome): boolean {
+  if (e.errorCode === 'network_error' || e.errorCode === 'timeout') return true
+  if (e.errorCode !== 'request_failed') return false
+  const status = e.httpStatus ?? null
+  return (
+    status === null ||
+    status >= 500 ||
+    (status >= 400 && !leftoverPolicyLimitsDze(status))
+  )
+}
+
+/**
+ * densable `ie` — G_n should stash this outcome.
+ * `if(!e.retrying)return !0;
+ *  if(auth_failed&&401||spurious_304)return !1;
+ *  return !QZn(e)`
+ */
+export function leftoverPolicyLimitsIe(e: PolicyLimitsFetchOutcome): boolean {
+  if (!e.retrying) return true
+  if (
+    (e.errorCode === 'auth_failed' && e.httpStatus === 401) ||
+    e.errorCode === 'spurious_304'
+  ) {
+    return false
+  }
+  return !leftoverPolicyLimitsQzn(e)
 }
 
 /** leftover `dropHintedTaints` @179069387 */
