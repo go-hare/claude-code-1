@@ -22,5 +22,18 @@ describe('extractInboundMessageFields client_platform', () => {
     } as unknown as SDKMessage
     const fields = extractInboundMessageFields(msg)
     expect(fields?.clientPlatform).toBeUndefined()
+    expect(fields?.fileAttachments).toEqual([])
+  })
+
+  test('extracts D7 file_attachments', () => {
+    const msg = {
+      type: 'user',
+      message: { role: 'user', content: 'with file' },
+      file_attachments: [{ file_uuid: 'u', file_name: 'a.png' }],
+    } as unknown as SDKMessage
+    const fields = extractInboundMessageFields(msg)
+    expect(fields?.fileAttachments).toEqual([
+      { file_uuid: 'u', file_name: 'a.png' },
+    ])
   })
 })

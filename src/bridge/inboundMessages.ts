@@ -6,6 +6,7 @@ import type {
 import type { UUID } from 'crypto'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import { detectImageFormatFromBase64 } from '../utils/imageResizer.js'
+import { parseInboundFileAttachments } from '../utils/processUserInput/inboundFileAttachments.js'
 
 /**
  * Process an inbound user message from the bridge, extracting content
@@ -18,12 +19,15 @@ import { detectImageFormatFromBase64 } from '../utils/imageResizer.js'
  * Returns the extracted fields, or undefined if the message should be
  * skipped (non-user type, missing/empty content).
  */
+
 export function extractInboundMessageFields(msg: SDKMessage):
   | {
       content: string | Array<ContentBlockParam>
       uuid: UUID | undefined
       /** Official: `client_platform` on inbound user → QueuedCommand.clientPlatform. */
       clientPlatform: string | undefined
+      /** densable D7 — inbound `file_attachments` stamp. */
+      fileAttachments: ReturnType<typeof parseInboundFileAttachments>
     }
   | undefined {
   if (msg.type !== 'user') return undefined
@@ -48,6 +52,7 @@ export function extractInboundMessageFields(msg: SDKMessage):
     content: Array.isArray(content) ? normalizeImageBlocks(content) : content,
     uuid,
     clientPlatform,
+    fileAttachments: parseInboundFileAttachments(msg),
   }
 }
 

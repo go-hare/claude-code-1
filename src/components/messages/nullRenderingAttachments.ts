@@ -59,6 +59,9 @@ const NULL_RENDERING_TYPES = [
   'read_truncation_notice',
   // densable poll_events — model-facing (HZe / z3); UI null
   'poll_events',
+  // densable inlined_image_paths / thread_state — model-facing; UI null
+  'inlined_image_paths',
+  'thread_state',
   // densable thinking_stripped — compact KEEP / retry marker; UI null
   'thinking_stripped',
   // densable advisor_stripped — compact KEEP / retry marker; UI null

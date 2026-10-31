@@ -640,7 +640,7 @@ export function useReplBridge(
               const fields = extractInboundMessageFields(msg);
               if (!fields) return;
 
-              const { uuid, clientPlatform } = fields;
+              const { uuid, clientPlatform, fileAttachments } = fields;
 
               // Dynamic import keeps the bridge code out of non-BRIDGE_MODE builds.
               const { resolveAndPrepend } = await import('../bridge/inboundAttachments.js');
@@ -676,6 +676,7 @@ export function useReplBridge(
                 // Official: client_platform → QueuedCommand.clientPlatform for
                 // concurrent onQuery re-queue + drain round-trip.
                 ...(clientPlatform !== undefined ? { clientPlatform } : {}),
+                ...(fileAttachments.length > 0 ? { fileAttachments } : {}),
               });
             } catch (e) {
               logForDebugging(`[bridge:repl] handleInboundMessage failed: ${e}`, { level: 'error' });

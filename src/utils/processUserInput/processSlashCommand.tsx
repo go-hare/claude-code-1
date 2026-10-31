@@ -74,6 +74,7 @@ import {
 } from '../messages.js';
 import type { ModelAlias } from '../model/aliases.js';
 import { parseToolListFromCLI } from '../permissions/permissionSetup.js';
+import { inputPromptStampTelemetry } from './artStamps.js';
 import { hasPermissionsToUseTool } from '../permissions/permissions.js';
 import { isOfficialMarketplaceName, parsePluginIdentifier } from '../plugins/pluginIdentifier.js';
 import { resolveTrustedSkillAllowedTools } from '../permissions/skillAllowedToolsTrust.js';
@@ -98,6 +99,7 @@ import { getAssistantMessageContentLength } from '../tokens.js';
 import { createAgentId } from '../uuid.js';
 import { finalizeAutonomyRunCompleted, finalizeAutonomyRunFailed } from '../autonomyRuns.js';
 import { getWorkload } from '../workloadContext.js';
+import { takeCommandRunWait, wrapCommandRunWait } from './commandRunWaits.js';
 import type { ProcessUserInputBaseResult, ProcessUserInputContext } from './processUserInput.js';
 import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT } from './stackedSlashExpansion.js';
 
@@ -604,7 +606,7 @@ function logCmdHookBlocked(commandName: string): void {
   });
 }
 
-export async function processSlashCommand(
+async function processSlashCommandBody(
   inputString: string,
   precedingInputBlocks: ContentBlockParam[],
   imageContentBlocks: ContentBlockParam[],
@@ -619,6 +621,10 @@ export async function processSlashCommand(
   modelScheduledOrigin?: boolean,
   /** densable `g` — WGw `submissionOrigin`. */
   submissionOrigin?: { kind?: string },
+  /** densable yn st — ELt wakeup_source on tengu_input_command. */
+  wakeupSource?: string,
+  /** densable yn pt — ELt host_initiator on tengu_input_command. */
+  hostInitiator?: unknown,
 ): Promise<ProcessUserInputBaseResult> {
   const parsed = parseSlashCommand(inputString);
   if (!parsed) {
@@ -804,6 +810,7 @@ export async function processSlashCommand(
 
     logEvent('tengu_input_command', {
       ...eventData,
+      ...inputPromptStampTelemetry({ wakeupSource, hostInitiator }),
       invocation_trigger: 'user-slash' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       ...(process.env.USER_TYPE === 'ant' && {
         skill_name: commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -918,6 +925,52 @@ export async function processSlashCommand(
     submitNextInput,
     deferAutonomyCompletion,
   };
+}
+
+/** densable `Ess` around ops — take the command.run waiter and settle. */
+export async function processSlashCommand(
+  inputString: string,
+  precedingInputBlocks: ContentBlockParam[],
+  imageContentBlocks: ContentBlockParam[],
+  attachmentMessages: AttachmentMessage[],
+  context: ProcessUserInputContext,
+  setToolJSX: SetToolJSXFn,
+  uuid?: string,
+  isAlreadyProcessing?: boolean,
+  canUseTool?: CanUseToolFn,
+  autonomy?: QueuedCommand['autonomy'],
+  modelScheduledOrigin?: boolean,
+  submissionOrigin?: { kind?: string },
+  wakeupSource?: string,
+  hostInitiator?: unknown,
+): Promise<ProcessUserInputBaseResult> {
+  using commandRun = wrapCommandRunWait(takeCommandRunWait(uuid));
+  try {
+    const result = await processSlashCommandBody(
+      inputString,
+      precedingInputBlocks,
+      imageContentBlocks,
+      attachmentMessages,
+      context,
+      setToolJSX,
+      uuid,
+      isAlreadyProcessing,
+      canUseTool,
+      autonomy,
+      modelScheduledOrigin,
+      submissionOrigin,
+      wakeupSource,
+      hostInitiator,
+    );
+    commandRun.settle({
+      text: result.resultText,
+      shouldQuery: result.shouldQuery,
+    });
+    return result;
+  } catch (err) {
+    commandRun.fail(err instanceof Error ? err : new Error(String(err)));
+    throw err;
+  }
 }
 
 /**

@@ -1536,7 +1536,7 @@ export const SDKAssistantMessageErrorSchema = lazySchema(() =>
 )
 
 export const SDKStatusSchema = lazySchema(() =>
-  z.union([z.literal('compacting'), z.null()]),
+  z.union([z.literal('compacting'), z.literal('requesting'), z.null()]),
 )
 
 /**
@@ -1596,6 +1596,7 @@ export const SDKUserMessageReplaySchema = lazySchema(() =>
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
     isReplay: z.literal(true),
+    file_attachments: z.array(z.unknown()).optional(),
   }),
 )
 

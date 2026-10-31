@@ -16,6 +16,7 @@ import {
   matchesKeepGoingKeyword,
   matchesNegativeKeyword,
 } from '../userPromptKeywords.js'
+import { inputPromptStampTelemetry } from './artStamps.js'
 
 export function processTextPrompt(
   input: string | Array<ContentBlockParam>,
@@ -26,6 +27,9 @@ export function processTextPrompt(
   permissionMode?: PermissionMode,
   isMeta?: boolean,
   origin?: MessageOrigin,
+  wakeupSource?: string,
+  hostInitiator?: unknown,
+  artifactCommentTurn?: unknown,
 ): {
   messages: (UserMessage | AttachmentMessage | SystemMessage)[]
   shouldQuery: boolean
@@ -65,9 +69,15 @@ export function processTextPrompt(
 
   const isNegative = matchesNegativeKeyword(userPromptText)
   const isKeepGoing = matchesKeepGoingKeyword(userPromptText)
+  const stampTelemetry = inputPromptStampTelemetry({
+    wakeupSource,
+    hostInitiator,
+    artifactCommentTurn,
+  })
   logEvent('tengu_input_prompt', {
     is_negative: isNegative,
     is_keep_going: isKeepGoing,
+    ...stampTelemetry,
   })
 
   // If we have pasted images, create a message with image content

@@ -16,6 +16,7 @@ import {
   TASK_NOTIFICATION_DISCLAIMER_PREFIX,
   wrapCommandText,
   wrapPeerOriginText,
+  wrapPluginOriginText,
   wrapResumePromptOrigin,
   wrapScheduledTaskDisclaimer,
   wrapTaskNotificationDisclaimer,
@@ -563,6 +564,49 @@ describe('wrapCommandText mid-turn framing parity (queued_command path)', () => 
       'After completing your current task, decide whether/how to respond.',
     )
   })
+
+  test('plugin asUser uses Iyn human mid-turn frame', () => {
+    const out = wrapCommandText('hi from plugin', {
+      kind: 'plugin',
+      name: 'demo',
+      asUser: true,
+    } as never)
+    expect(out).toContain('The user sent a new message while you were working:')
+    expect(out).toContain('hi from plugin')
+    expect(out).toContain('surfaces messages the user sends mid-turn')
+    expect(out).not.toContain('The demo plugin sent a message')
+  })
+
+  test('plugin !asUser uses VLr midTurn:true', () => {
+    const out = wrapCommandText('hi from plugin', {
+      kind: 'plugin',
+      name: 'demo',
+    } as never)
+    expect(out).toContain(
+      'The demo plugin sent a message while you were working:',
+    )
+    expect(out).toContain('hi from plugin')
+    expect(out).toContain('prompts a plugin submits mid-turn')
+    expect(out).toContain('as you continue this turn')
+    expect(out).not.toContain('The user sent a new message')
+  })
+
+  test('plugin name sanitizes then unnamed fallback', () => {
+    expect(
+      wrapCommandText('x', { kind: 'plugin', name: 'ok_name' } as never),
+    ).toContain('The ok_name plugin sent a message')
+    expect(
+      wrapCommandText('x', { kind: 'plugin', name: 12 } as never),
+    ).toContain('The unnamed plugin sent a message')
+  })
+
+  test('VLr midTurn:false is the between-turns frame', () => {
+    const out = wrapPluginOriginText('body', 'demo', { midTurn: false })
+    expect(out).toContain('The demo plugin sent a message:')
+    expect(out).toContain('between turns')
+    expect(out).toContain("it starts this turn in the user's place")
+    expect(out).not.toContain('while you were working')
+  })
 })
 
 describe('wrapResumePromptOrigin task-notification disclaimer', () => {
@@ -603,11 +647,13 @@ describe('applyTurnStartOriginFraming densable Fws', () => {
     expect(content).toContain('one-way advisory')
   })
 
-  test('channel / coordinator are no-ops (densable Fws)', () => {
+  test('channel / coordinator / plugin are no-ops (densable Fws)', () => {
     const msg = createUserMessage({ content: 'plain' })
     applyTurnStartOriginFraming(msg, { kind: 'channel' })
     expect(msg.message.content).toBe('plain')
     applyTurnStartOriginFraming(msg, { kind: 'coordinator' })
+    expect(msg.message.content).toBe('plain')
+    applyTurnStartOriginFraming(msg, { kind: 'plugin' })
     expect(msg.message.content).toBe('plain')
   })
 

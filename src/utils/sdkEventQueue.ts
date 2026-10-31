@@ -184,8 +184,8 @@ type BackgroundTasksChangedSdkEvent = {
 type SdkStatusEvent = {
   type: 'system'
   subtype: 'status'
-  /** densable $Oi / SDKStatusSchema — only compacting is a known status value */
-  status: 'compacting' | null
+  /** densable $Oi / nF — compacting | requesting | null */
+  status: 'compacting' | 'requesting' | null
   uuid?: string
   session_id?: string
 }

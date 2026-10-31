@@ -888,10 +888,28 @@ export type Attachment =
       envelopes: string[]
       kinds: string[]
       remainingWakeCount: number
-      provenance: unknown[]
+      provenance?: unknown[]
       timestamp?: string
       /** densable `KXe` media blocks. */
       media?: unknown[][]
+      /**
+       * densable Art stamp `deliveredVia:"value_dispatch"` — transcript marker
+       * only; normalizeAttachmentForAPI returns [] when set.
+       */
+      deliveredVia?: string
+      /** densable `VXe` declared rows. */
+      declared?: unknown
+    }
+  | {
+      /** densable `g_n` inlined_image_paths — model-facing, UI null. */
+      type: 'inlined_image_paths'
+      paths: string[]
+    }
+  | {
+      /** densable `KJe` thread_state — model-facing, UI null. */
+      type: 'thread_state'
+      sinceUser: string
+      repliesSinceUser: number
     }
   | {
       type: 'goal_status'

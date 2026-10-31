@@ -78,6 +78,9 @@ import * as debug from '../debug.js'
 import { executePreToolHooks } from '../hooks.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { getIsInteractive, setIsInteractive } from '../../bootstrap/state.js'
+import { getCommandQueue, resetCommandQueue } from '../messageQueueManager.js'
+import { takeCommandRunWait } from '../processUserInput/commandRunWaits.js'
+import { takePromptSubmitWait } from '../processUserInput/promptSubmitWaits.js'
 
 const hookStoreHome = mkdtempSync(join(tmpdir(), 'fh-store-'))
 const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -102,6 +105,7 @@ afterEach(async () => {
   setFunctionHooksTurnReader(undefined)
   setToolCallHandler(undefined)
   setFunctionHooksToolUseContext(undefined)
+  resetCommandQueue()
   await stopFunctionHooksWorker()
 })
 
@@ -853,16 +857,33 @@ describe('function-hooks classic pattern', () => {
     expect(await handleHostOp('command.list', [{}])).toEqual([
       { command: 'ship', description: 'ship it', argumentHint: '[env]' },
     ])
-    expect(
-      await callPluginInterface('demo', { name: 'command', method: 'run' }, [
-        { command: 'ship' },
-      ]),
-    ).toEqual({ queued: true, value: '/ship' })
-    expect(
-      await callPluginInterface('demo', { name: 'command', method: 'run' }, [
-        { command: 'ship', args: 'prod' },
-      ]),
-    ).toEqual({ queued: true, value: '/ship prod' })
+    const ship = callPluginInterface(
+      'demo',
+      { name: 'command', method: 'run' },
+      [{ command: 'ship' }],
+    )
+    const queuedShip = getCommandQueue().find(cmd => cmd.value === '/ship')
+    expect(queuedShip?.priority).toBe('later')
+    takeCommandRunWait(queuedShip?.uuid)?.settle({
+      queued: true,
+      value: '/ship',
+    })
+    await expect(ship).resolves.toEqual({ queued: true, value: '/ship' })
+    const shipProd = callPluginInterface(
+      'demo',
+      { name: 'command', method: 'run' },
+      [{ command: 'ship', args: 'prod' }],
+    )
+    const queuedProd = getCommandQueue().find(cmd => cmd.value === '/ship prod')
+    expect(queuedProd?.priority).toBe('later')
+    takeCommandRunWait(queuedProd?.uuid)?.settle({
+      queued: true,
+      value: '/ship prod',
+    })
+    await expect(shipProd).resolves.toEqual({
+      queued: true,
+      value: '/ship prod',
+    })
   })
 
   test('register name reject', async () => {
@@ -977,11 +998,16 @@ describe('function-hooks classic pattern', () => {
     expect(
       await callPluginInterface('demo', { name: 'prompt', method: 'read' }, []),
     ).toEqual({ text: 'draft' })
-    expect(
-      await callPluginInterface('demo', { name: 'prompt', method: 'submit' }, [
-        { text: 'go' },
-      ]),
-    ).toEqual({ ok: true })
+    const submitted = callPluginInterface(
+      'demo',
+      { name: 'prompt', method: 'submit' },
+      [{ text: 'go' }],
+    )
+    await Promise.resolve()
+    const queuedGo = getCommandQueue().find(cmd => cmd.value === 'go')
+    expect(queuedGo?.priority).toBe('later')
+    takePromptSubmitWait(queuedGo?.uuid)?.settle({ ok: true })
+    await expect(submitted).resolves.toEqual({ ok: true })
     await expect(
       callPluginInterface('demo', { name: 'prompt', method: 'submit' }, [
         { text: 'go', attachments: [{}] },

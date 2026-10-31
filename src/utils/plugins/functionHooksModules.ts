@@ -100,6 +100,14 @@ import {
   type HopFloor,
   type HopHandler,
 } from './functionHooksHop.js'
+import { getMainThreadTurn } from '../mainThreadTurn.js'
+
+/** densable rootEvent ALS for Loe/Noe — outer hook name is kept. */
+const hookDispatch = new AsyncLocalStorage<{ event: string }>()
+
+export function getLiveHookEvent(): string | undefined {
+  return hookDispatch.getStore()?.event
+}
 
 export type FunctionHookHandler = (
   api: Record<string, unknown>,
@@ -674,6 +682,11 @@ export async function runFunctionHookChain(
   only?: string,
   environments?: readonly string[],
 ): Promise<unknown> {
+  if (hookDispatch.getStore() === undefined) {
+    return hookDispatch.run({ event }, () =>
+      runFunctionHookChain(event, payload, tail, only, environments),
+    )
+  }
   // densable F0/r1: classic events are `classic.<HookEvent>`; yOt
   // function events (`plugin.register`, `tool.call`, …) are the dotted name.
   const needle = event.includes('.') ? event : `classic.${event}`
@@ -4425,7 +4438,35 @@ async function runPluginCommand(
   }
   const slash = args === '' ? `/${command}` : `/${command} ${args}`
   if (commandRunHandler) return commandRunHandler(slash)
-  return { queued: true, value: slash }
+  // densable W0n / Loe / Noe / Nv later.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomUUID } = require('crypto') as typeof import('crypto')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { enqueue, getCommandQueue } =
+    require('../messageQueueManager.js') as typeof import('../messageQueueManager.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { recordCommandRunWait } =
+    require('../processUserInput/commandRunWaits.js') as typeof import('../processUserInput/commandRunWaits.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { markAheadOfSessionStart } =
+    require('../processUserInput/promptSubmitEntries.js') as typeof import('../processUserInput/promptSubmitEntries.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { markTurnHookQueuedPrompt } =
+    require('../processUserInput/turnHookQueuedPrompts.js') as typeof import('../processUserInput/turnHookQueuedPrompts.js')
+  const uuid = randomUUID()
+  const origin = { kind: 'plugin' as const, name: plugin ?? '' }
+  const wait = recordCommandRunWait(uuid, origin)
+  const rootEvent = getLiveHookEvent()
+  markAheadOfSessionStart(uuid, rootEvent)
+  markTurnHookQueuedPrompt(uuid, rootEvent, getCommandQueue())
+  enqueue({
+    mode: 'prompt',
+    value: slash,
+    uuid,
+    origin,
+    priority: 'later',
+  })
+  return wait
 }
 
 type SessionListedTool = {
@@ -9563,20 +9604,71 @@ function runTurnAbort(
   plugin?: string,
 ): Promise<unknown> {
   const turnId = typeof input.turnId === 'string' ? input.turnId : ''
-  if (turnAbortHandler) return turnAbortHandler({ turnId })
   const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
-  return Promise.reject(
-    new Error(`${who}$.turn.abort: no turn is running (asked for ${turnId})`),
-  )
+  const running = getMainThreadTurn()
+  if (!running) {
+    if (turnAbortHandler) return turnAbortHandler({ turnId })
+    return Promise.reject(
+      new Error(`${who}$.turn.abort: no turn is running (asked for ${turnId})`),
+    )
+  }
+  if (running.turnId !== turnId) {
+    return Promise.reject(
+      new Error(
+        `${who}$.turn.abort: ${turnId} is not the running turn (${running.turnId}); a hook ends the turn turn.start told it about`,
+      ),
+    )
+  }
+  if (running.cancelled()) {
+    return Promise.reject(
+      new Error(`${who}$.turn.abort: ${turnId} is already ending`),
+    )
+  }
+  running.cancel()
+  return Promise.resolve()
 }
 
 function runPromptSubmit(
   input: Record<string, unknown>,
-  _plugin?: string,
+  plugin?: string,
 ): Promise<unknown> {
   const text = typeof input.text === 'string' ? input.text : ''
   if (promptSubmitHandler) return promptSubmitHandler({ text })
-  return Promise.resolve({ ok: true })
+  // densable Boo / LBn: record waiter then enqueue. Art Ios(hss) settles it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomUUID } = require('crypto') as typeof import('crypto')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { enqueue } =
+    require('../messageQueueManager.js') as typeof import('../messageQueueManager.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { recordPromptSubmitWait } =
+    require('../processUserInput/promptSubmitWaits.js') as typeof import('../processUserInput/promptSubmitWaits.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { markAheadOfSessionStart } =
+    require('../processUserInput/promptSubmitEntries.js') as typeof import('../processUserInput/promptSubmitEntries.js')
+  const uuid = randomUUID()
+  const asUser = input.asUser === true
+  const origin = asUser
+    ? { kind: 'plugin' as const, name: plugin ?? '', asUser: true as const }
+    : { kind: 'plugin' as const, name: plugin ?? '' }
+  const wait = recordPromptSubmitWait(uuid, origin)
+  const rootEvent = getLiveHookEvent()
+  markAheadOfSessionStart(uuid, rootEvent)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getCommandQueue } =
+    require('../messageQueueManager.js') as typeof import('../messageQueueManager.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { markTurnHookQueuedPrompt } =
+    require('../processUserInput/turnHookQueuedPrompts.js') as typeof import('../processUserInput/turnHookQueuedPrompts.js')
+  markTurnHookQueuedPrompt(uuid, rootEvent, getCommandQueue())
+  enqueue({
+    mode: 'prompt',
+    value: text,
+    uuid,
+    origin,
+    priority: 'later',
+  })
+  return wait
 }
 
 function pluginStoreRoot(): string {
@@ -9653,7 +9745,7 @@ function runSessionCompact(
       ),
     )
   }
-  const running = turnRunningReader?.()
+  const running = turnRunningReader?.() ?? getMainThreadTurn()
   if (running !== undefined) {
     return Promise.reject(
       new Error(

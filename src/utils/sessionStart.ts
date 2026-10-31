@@ -91,10 +91,25 @@ export async function processSessionStartHooks(
     forceSyncExecution,
   }: SessionStartHooksOptions = {},
 ): Promise<HookResultMessage[]> {
+  // densable ipr — Unn awaits this latch unless the uuid is ahead of
+  // session start. Compact is not a session (re)start.
+  let sessionStart: { complete: () => void } | undefined
+  if (source !== 'compact') {
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { beginSessionStartLatch } =
+        require('./processUserInput/promptSubmitEntries.js') as typeof import('./processUserInput/promptSubmitEntries.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      sessionStart = beginSessionStartLatch()
+    } catch {
+      // isolation — optional
+    }
+  }
   // --bare skips all hooks. executeHooks already early-returns under --bare
   // (hooks.ts:1861), but this skips the loadPluginHooks() await below too —
   // no point loading plugin hooks that'll never run.
   if (isBareMode()) {
+    sessionStart?.complete()
     return []
   }
   try {
@@ -281,6 +296,7 @@ export async function processSessionStartHooks(
     } catch {
       // isolation — optional
     }
+    sessionStart?.complete()
   }
 }
 

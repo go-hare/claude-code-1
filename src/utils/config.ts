@@ -67,6 +67,15 @@ export type PastedContent = {
   id: number // Sequential numeric ID
   type: 'text' | 'image'
   content: string
+  /**
+   * densable qLr/pde `inline` — untitled paste; pde assigns a negative id.
+   */
+  inline?: boolean
+  /**
+   * densable `k1e` `slashNameOnly` — command-name paste; skipped unless
+   * `k1e(e, true)`.
+   */
+  slashNameOnly?: boolean
   mediaType?: string // e.g., 'image/png', 'image/jpeg'
   filename?: string // Display name for images in attachment slot
   dimensions?: ImageDimensions

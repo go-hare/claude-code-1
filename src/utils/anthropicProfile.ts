@@ -327,6 +327,16 @@ const infoUsingProfileAuth = memoize((): void => {
   )
 })
 
+/** densable `YH` — implicit profile skipped because stored claude.ai login. */
+export function noteImplicitProfileSkippedStoredLogin(): void {
+  warnImplicitProfileSkipped()
+}
+
+/** densable `qH` — using profile auth log. */
+export function noteUsingProfileAuth(): void {
+  infoUsingProfileAuth()
+}
+
 /**
  * densable Aqt — `qH(e?.scopes)&&!!e?.accessToken`.
  * qH is `Array.isArray(e)&&e.includes(Ny)` (user:inference).
