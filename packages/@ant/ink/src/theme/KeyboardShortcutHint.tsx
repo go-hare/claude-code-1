@@ -1,5 +1,6 @@
 import React from 'react';
 import Text from '../components/Text.js';
+import { formatShortcutString, shortcutFormatPlatform, type ShortcutFormat } from '../keybindings/formatChord.js';
 
 type Props = {
   /** The key or chord to display (e.g., "ctrl+o", "Enter", "↑/↓") */
@@ -10,33 +11,35 @@ type Props = {
   parens?: boolean;
   /** Whether to render the shortcut in bold. Default: false */
   bold?: boolean;
+  /**
+   * densable DualInk `B` `format`. Gold send-now is `{keyCase:"lower"}`.
+   * When set, DualInk `R` paints the chord; omit keeps the preformatted string.
+   */
+  format?: ShortcutFormat;
 };
 
 /**
- * Renders a keyboard shortcut hint like "ctrl+o to expand" or "(tab to toggle)"
+ * densable DualInk `B`. Gold: `v(chord, format)` then `{chord} to {action}`.
+ * Never `export function B`.
  *
  * Wrap in <Text dimColor> for the common dim styling.
- *
- * @example
- * // Simple hint wrapped in dim Text
- * <Text dimColor><KeyboardShortcutHint shortcut="esc" action="cancel" /></Text>
- *
- * // With parentheses: "(ctrl+o to expand)"
- * <Text dimColor><KeyboardShortcutHint shortcut="ctrl+o" action="expand" parens /></Text>
- *
- * // With bold shortcut: "Enter to confirm" (Enter is bold)
- * <Text dimColor><KeyboardShortcutHint shortcut="Enter" action="confirm" bold /></Text>
- *
- * // Multiple hints with middot separator - use Byline
- * <Text dimColor>
- *   <Byline>
- *     <KeyboardShortcutHint shortcut="Enter" action="confirm" />
- *     <KeyboardShortcutHint shortcut="Esc" action="cancel" />
- *   </Byline>
- * </Text>
  */
-export function KeyboardShortcutHint({ shortcut, action, parens = false, bold = false }: Props): React.ReactNode {
-  const shortcutText = bold ? <Text bold>{shortcut}</Text> : shortcut;
+export function KeyboardShortcutHint({
+  shortcut,
+  action,
+  parens = false,
+  bold = false,
+  format,
+}: Props): React.ReactNode {
+  const painted =
+    format === undefined
+      ? shortcut
+      : formatShortcutString(shortcut, {
+          ...format,
+          platform: format.platform ?? shortcutFormatPlatform(),
+        });
+  if (!painted) return null;
+  const shortcutText = bold ? <Text bold>{painted}</Text> : painted;
 
   if (parens) {
     return (

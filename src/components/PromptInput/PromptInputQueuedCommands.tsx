@@ -1,16 +1,75 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useMemo } from 'react';
-import { Box } from '@anthropic/ink';
+import { Box, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { useAppState } from 'src/state/AppState.js';
 import { STATUS_TAG, SUMMARY_TAG, TASK_NOTIFICATION_TAG } from '../../constants/xml.js';
 import { QueuedMessageProvider } from '../../context/QueuedMessageContext.js';
 import { useCommandQueue } from '../../hooks/useCommandQueue.js';
+import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
+import { formatSendNowHint } from '../../keybindings/shortcutFormat.js';
+import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { QueuedCommand } from '../../types/textInputTypes.js';
-import { isQueuedCommandEditable, isQueuedCommandVisible } from '../../utils/messageQueueManager.js';
+import {
+  canShowQueueSendNowHint,
+  isQueuedCommandEditable,
+  isQueuedCommandVisible,
+} from '../../utils/messageQueueManager.js';
 import { createUserMessage, EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
 import { jsonParse } from '../../utils/slowOperations.js';
 import { Message } from '../Message.js';
+
+/** densable `Dx` — Uye / CA prefix (U+29C9 + space). */
+export const QUEUED_IDE_SELECTION_PREFIX = '⧉ ';
+
+function selectionFileBasename(filePath: string): string {
+  const slash = filePath.lastIndexOf('/');
+  const back = filePath.lastIndexOf('\\');
+  const i = slash >= 0 ? slash : back;
+  return filePath.slice(i + 1);
+}
+
+/**
+ * densable `$5` — hide Uye for verified Slack human turns and non-human
+ * origins (plugin / peer / channel / …). undefined / human / slack-ping show.
+ */
+export function shouldHideQueuedIdeSelectionPreview(cmd: QueuedCommand): boolean {
+  if (cmd.verifiedSlackHumanTurn === true) return true;
+  switch (cmd.origin?.kind) {
+    case undefined:
+    case 'human':
+    case 'slack-ping':
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
+ * densable `CA` — queue-row ideSelection preview. Diff source paints even
+ * when IDE is not connected; file/line selections need status `"connected"`.
+ */
+export function formatQueuedIdeSelection(
+  ideStatus: string | null | undefined,
+  selection: QueuedCommand['ideSelection'] | undefined,
+): string | null {
+  if (!selection) return null;
+  const isDiff = selection.source === 'diff';
+  if (!isDiff && ideStatus !== 'connected') return null;
+  if (selection.text && selection.lineCount > 0) {
+    const from =
+      isDiff && selection.filePath
+        ? `from ${selectionFileBasename(selection.filePath)}`
+        : isDiff
+          ? 'from diff'
+          : 'selected';
+    return `${QUEUED_IDE_SELECTION_PREFIX}${selection.lineCount} ${selection.lineCount === 1 ? 'line' : 'lines'} ${from}`;
+  }
+  if (!isDiff && selection.filePath) {
+    return `${QUEUED_IDE_SELECTION_PREFIX}In ${selectionFileBasename(selection.filePath)}`;
+  }
+  return null;
+}
 
 const EMPTY_SET = new Set<string>();
 
@@ -73,8 +132,15 @@ function processQueuedCommands(queuedCommands: QueuedCommand[]): QueuedCommand[]
   return [...otherCommands, ...visibleNotifications, overflowCommand];
 }
 
-function PromptInputQueuedCommandsImpl(): React.ReactNode {
+function PromptInputQueuedCommandsImpl({
+  abortController,
+  mcpClients,
+}: {
+  abortController?: AbortController | null;
+  mcpClients?: MCPServerConnection[];
+}): React.ReactNode {
   const queuedCommands = useCommandQueue();
+  const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const viewingAgent = useAppState(s => !!s.viewingAgentTaskId);
   // Brief layout: dim queue items + skip the paddingX (brief messages
@@ -126,31 +192,58 @@ function PromptInputQueuedCommandsImpl(): React.ReactNode {
   const highlightRow = selectedCmd ? prepared.processedCommands.indexOf(selectedCmd) : -1;
   const selecting = highlightRow !== -1;
 
+  const sendNowChord = formatSendNowHint();
+  const sendNowHint =
+    sendNowChord !== '' && canShowQueueSendNowHint(queuedCommands, abortController) ? (
+      <Box paddingLeft={2}>
+        <Text dimColor>
+          <KeyboardShortcutHint shortcut={sendNowChord} action="send now" format={{ keyCase: 'lower' }} />
+        </Text>
+      </Box>
+    ) : null;
+
   return (
     <Box marginTop={1} flexDirection="column">
-      {prepared.messages.map((message, i) => (
-        <QueuedMessageProvider
-          key={i}
-          isFirst={i === 0}
-          useBriefLayout={useBriefLayout}
-          selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
-        >
-          <Message
-            message={message}
-            lookups={EMPTY_LOOKUPS}
-            addMargin={false}
-            tools={[]}
-            commands={[]}
-            verbose={false}
-            inProgressToolUseIDs={EMPTY_SET}
-            progressMessagesForMessage={[]}
-            shouldAnimate={false}
-            shouldShowDot={false}
-            isTranscriptMode={false}
-            isStatic={true}
-          />
-        </QueuedMessageProvider>
-      ))}
+      {prepared.messages.map((message, i) => {
+        const cmd = prepared.processedCommands[i];
+        const nextCmd = prepared.processedCommands[i + 1];
+        const preview =
+          cmd?.ideSelection !== undefined && !shouldHideQueuedIdeSelectionPreview(cmd) && nextCmd !== cmd
+            ? formatQueuedIdeSelection(ideStatus, cmd.ideSelection)
+            : null;
+        return (
+          <QueuedMessageProvider
+            key={i}
+            isFirst={i === 0}
+            useBriefLayout={useBriefLayout}
+            selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
+          >
+            <Message
+              message={message}
+              lookups={EMPTY_LOOKUPS}
+              addMargin={false}
+              tools={[]}
+              commands={[]}
+              verbose={false}
+              inProgressToolUseIDs={EMPTY_SET}
+              progressMessagesForMessage={[]}
+              shouldAnimate={false}
+              shouldShowDot={false}
+              isTranscriptMode={false}
+              isStatic={true}
+            />
+            {preview !== null ? (
+              <Box paddingLeft={2}>
+                <Text dimColor wrap="truncate-end">
+                  <Text aria-hidden>{QUEUED_IDE_SELECTION_PREFIX}</Text>
+                  {preview.slice(QUEUED_IDE_SELECTION_PREFIX.length)}
+                </Text>
+              </Box>
+            ) : null}
+          </QueuedMessageProvider>
+        );
+      })}
+      {sendNowHint}
     </Box>
   );
 }

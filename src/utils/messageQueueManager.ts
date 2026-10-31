@@ -26,6 +26,17 @@ import {
   getPeerAdmissionLimits,
 } from './peerAdmission.js'
 import { type PeerReceiptDropReason, sendPeerReceipt } from './peerReceipts.js'
+import {
+  COMMAND_LEFT_QUEUE_AS_TEXT,
+  COMMAND_REMOVED_BEFORE_RUN,
+  failCommandRunWaits,
+  resetCommandRunWaits,
+} from './processUserInput/commandRunWaits.js'
+import {
+  resetPromptSubmitWaits,
+  settlePromptSubmitWaitsRemoved,
+} from './processUserInput/promptSubmitWaits.js'
+import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPrompts.js'
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
 import { recordHandbackDelivery } from './subagentHandback.js'
@@ -65,6 +76,13 @@ const commandQueue: QueuedCommand[] = []
 /** Frozen snapshot — recreated on every mutation for useSyncExternalStore. */
 let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
+/** densable `Ibe().commandsConsumed` / `$X`. */
+const commandsConsumed = createSignal<[QueuedCommand[]]>()
+/** densable `Ibe().commandsDiscarded` / `Ept`. */
+const commandsDiscarded = createSignal<[QueuedCommand[]]>()
+
+export const subscribeCommandsConsumed = commandsConsumed.subscribe
+export const subscribeCommandsDiscarded = commandsDiscarded.subscribe
 
 /**
  * Official Ntl `w` / Cuy — commands already dequeued but still executing.
@@ -643,6 +661,35 @@ export function peek(
 }
 
 /**
+ * densable `Xe` / `bt` — stamp or drop a screeningPending queue row after
+ * Enter Unn. dropped → remove (gold `os` `dropped_by_hook`). Else clear
+ * pending and write promptSubmitted / drainOnly.
+ */
+export function settleScreening(
+  uuid: string,
+  update:
+    | { dropped: true }
+    | {
+        promptSubmitted?: QueuedCommand['promptSubmitted']
+        drainOnly?: boolean
+      },
+): boolean {
+  const command = commandQueue.find(
+    cmd => cmd.uuid === uuid && cmd.screeningPending === true,
+  )
+  if (command === undefined) return false
+  if ('dropped' in update) {
+    remove([command])
+    return true
+  }
+  delete command.screeningPending
+  command.promptSubmitted = update.promptSubmitted
+  command.drainOnly = update.drainOnly
+  notifySubscribers()
+  return true
+}
+
+/**
  * Remove and return all commands matching a predicate, preserving priority order.
  * Non-matching commands stay in the queue.
  */
@@ -670,28 +717,52 @@ export function dequeueAllMatching(
   return matched
 }
 
-/**
- * Remove specific commands from the queue by reference identity.
- * Callers must pass the same object references that are in the queue
- * (e.g. from getCommandsByMaxPriority). Logs a 'remove' operation for each.
- */
-export function remove(commandsToRemove: QueuedCommand[]): void {
-  if (commandsToRemove.length === 0) {
-    return
-  }
-
+function spliceQueuedCommands(commandsToRemove: QueuedCommand[]): void {
+  if (commandsToRemove.length === 0) return
   const before = commandQueue.length
   for (let i = commandQueue.length - 1; i >= 0; i--) {
     if (commandsToRemove.includes(commandQueue[i]!)) {
       commandQueue.splice(i, 1)
     }
   }
-
   if (commandQueue.length !== before) {
     notifySubscribers()
   }
+}
 
+/**
+ * densable `os` / `xi` discarded — remove by identity and fail waiters as
+ * discarded. Callers must pass the same object references that are in the
+ * queue (e.g. from getCommandsByMaxPriority).
+ */
+export function remove(commandsToRemove: QueuedCommand[]): void {
+  if (commandsToRemove.length === 0) {
+    return
+  }
+
+  spliceQueuedCommands(commandsToRemove)
+  settlePromptSubmitWaitsRemoved(commandsToRemove)
+  failCommandRunWaits(commandsToRemove, COMMAND_REMOVED_BEFORE_RUN)
+  commandsDiscarded.emit(commandsToRemove)
   for (const _cmd of commandsToRemove) {
+    logOperation('remove')
+  }
+}
+
+/**
+ * densable `ir` / `xi` consumed — mid-turn drain to the model as text.
+ * Does not settle prompt.submit as "removed"; Art already took those
+ * waiters. command.run waiters fail as left-as-text.
+ */
+export function consume(commandsToConsume: QueuedCommand[]): void {
+  if (commandsToConsume.length === 0) {
+    return
+  }
+
+  spliceQueuedCommands(commandsToConsume)
+  failCommandRunWaits(commandsToConsume, COMMAND_LEFT_QUEUE_AS_TEXT)
+  commandsConsumed.emit(commandsToConsume)
+  for (const _cmd of commandsToConsume) {
     logOperation('remove')
   }
 }
@@ -712,6 +783,9 @@ export function removeByFilter(
 
   if (removed.length > 0) {
     notifySubscribers()
+    settlePromptSubmitWaitsRemoved(removed)
+    failCommandRunWaits(removed, COMMAND_REMOVED_BEFORE_RUN)
+    commandsDiscarded.emit(removed)
     for (const _cmd of removed) {
       logOperation('remove')
     }
@@ -728,6 +802,10 @@ export function clearCommandQueue(): void {
   if (commandQueue.length === 0) {
     return
   }
+  const discarded = [...commandQueue]
+  settlePromptSubmitWaitsRemoved(discarded)
+  failCommandRunWaits(discarded, COMMAND_REMOVED_BEFORE_RUN)
+  commandsDiscarded.emit(discarded)
   commandQueue.length = 0
   notifySubscribers()
 }
@@ -742,6 +820,11 @@ export function resetCommandQueue(): void {
   inFlightDrainBatch = null
   cancelPending.clear()
   cancelPendingAcked.clear()
+  resetPromptSubmitWaits()
+  resetCommandRunWaits()
+  resetTurnHookQueuedPrompts()
+  commandsConsumed.clear()
+  commandsDiscarded.clear()
 }
 
 /**
@@ -848,6 +931,43 @@ export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
   )
 }
 
+/** densable `tp && uf` — main-thread editable, for T7e / zZe. */
+export function isDrainableQueuedCommand(cmd: QueuedCommand): boolean {
+  return isMainThreadQueuedCommand(cmd) && isQueuedCommandEditable(cmd)
+}
+
+/**
+ * densable `T7e` — show the send-now hint under the queue preview.
+ * Abort missing/aborted → hide. Else main-thread editables exist and none
+ * are still in Enter Unn screening.
+ */
+export function canShowQueueSendNowHint(
+  queue: readonly QueuedCommand[],
+  abort: AbortController | null | undefined,
+): boolean {
+  if (abort == null || abort.signal.aborted) return false
+  const drainable = queue.filter(isDrainableQueuedCommand)
+  return (
+    drainable.length > 0 &&
+    !drainable.some(cmd => cmd.screeningPending === true)
+  )
+}
+
+/**
+ * densable 2-arg `zZe` @209635919 — restore IDE selection after Enter Unn
+ * drop / cancel when no remaining drainable row still needs it.
+ */
+export function shouldHandBackIdeSelection(
+  queue: readonly QueuedCommand[],
+  captured: QueuedCommand['ideSelection'] | undefined,
+): boolean {
+  return !queue.some(
+    cmd =>
+      isDrainableQueuedCommand(cmd) &&
+      (captured === undefined || cmd.ideSelection === undefined),
+  )
+}
+
 /**
  * densable U4i — queue preview under the prompt.
  * Visible for: channel | task-notification | auto-continuation | observer |
@@ -888,10 +1008,10 @@ function extractTextFromValue(value: string | ContentBlockParam[]): string {
 }
 
 /**
- * Extract images from ContentBlockParam[] and convert to PastedContent format.
- * Returns empty array for string values or if no images found.
+ * densable XLr — image blocks in a queued value become PastedContent.
+ * String values return [].
  */
-function extractImagesFromValue(
+export function extractImagesFromValue(
   value: string | ContentBlockParam[],
   startId: number,
 ): PastedContent[] {
@@ -922,6 +1042,8 @@ export type PopAllEditableResult = {
   images: PastedContent[]
   /** densable ve: bash iff every popped editable cmd is bash; else prompt */
   mode: 'bash' | 'prompt'
+  /** densable pop-to-edit `returnIdeSelection`. */
+  ideSelection?: QueuedCommand['ideSelection']
 }
 
 /**
@@ -1015,8 +1137,12 @@ export function popAllEditable(
   commandQueue.length = 0
   commandQueue.push(...remaining)
   notifySubscribers()
+  settlePromptSubmitWaitsRemoved(editable)
 
-  return { text: newInput, cursorOffset, images, mode }
+  const ideSelection = editable.findLast(
+    cmd => cmd.ideSelection !== undefined,
+  )?.ideSelection
+  return { text: newInput, cursorOffset, images, mode, ideSelection }
 }
 
 export type PopEditableAtResult = PopAllEditableResult
@@ -1059,6 +1185,7 @@ export function popEditableAt(
   if (gr !== -1) {
     commandQueue.splice(gr, 1)
     notifySubscribers()
+    settlePromptSubmitWaitsRemoved([cmd])
   }
 
   return {
@@ -1066,6 +1193,7 @@ export function popEditableAt(
     cursorOffset,
     images,
     mode: cmd.mode === 'bash' ? 'bash' : 'prompt',
+    ideSelection: cmd.ideSelection,
   }
 }
 

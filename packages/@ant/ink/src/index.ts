@@ -48,6 +48,14 @@ export {
   parseBindings,
 } from './keybindings/parser.js'
 export {
+  formatChords,
+  formatShortcutString,
+  shortcutFormatPlatform,
+  type ShortcutFormat,
+  type ShortcutFormatPlatform,
+  type ShortcutFormatStyle,
+} from './keybindings/formatChord.js'
+export {
   getKeyName,
   matchesKeystroke,
   matchesBinding,

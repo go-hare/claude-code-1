@@ -372,6 +372,16 @@ export type QueuedCommand = {
    */
   skipSlashCommands?: boolean
   /**
+   * densable Stt `pasteTagged` — paste expansion tagged this command, so
+   * restore uses preExpansionValue (with skipSlashCommands).
+   */
+  pasteTagged?: boolean
+  /**
+   * densable WZe abort `admissionExempt:"resurrected"` — re-enqueue ahead
+   * after a generation-changed abort; peer hop guard skips.
+   */
+  admissionExempt?: string
+  /**
    * When true, slash commands are dispatched but filtered through
    * isBridgeSafeCommand() — 'local-jsx' and terminal-only commands return
    * a helpful error instead of executing. Set by the Remote Control bridge
@@ -486,6 +496,8 @@ export type QueuedCommand = {
     envelope: string
     wake: boolean
     provenance?: unknown
+    /** densable `VXe` declared row, spread onto pollEventDeclared. */
+    declared?: unknown
     /** densable `V3` settleDropped callback. */
     settleDropped?: (error: Error) => void
     media?: unknown[]
@@ -537,6 +549,40 @@ export type QueuedCommand = {
   sessionChannelPersonTyped?: boolean
   projectsUserTurn?: boolean
   fileAttachments?: unknown[]
+  /** densable Vwr token — live composer Enter only. */
+  composerEnter?: unknown
+  /** densable Unn `shouldWait` — plugin prompt.submit wait. */
+  wait?: boolean
+  /**
+   * densable Enter Unn — mid-turn prompt is in the queue but Unn is still
+   * running. Drain must not dequeue this head (gold KJ / btt Pe stop).
+   */
+  screeningPending?: boolean
+  /**
+   * densable YH `takeIdeSelectionForQueue` — stamped at mid-turn enqueue so
+   * drain uses the selection captured at Enter, not the live IDE cursor.
+   */
+  ideSelection?: {
+    lineCount: number
+    lineStart?: number
+    text?: string
+    filePath?: string
+    source?: 'diff' | string
+  }
+  /** densable Art `promptSubmitted` — Enter screening reuse. */
+  promptSubmitted?: {
+    text: string
+    under: {
+      permissionMode: string
+      hooks: string
+      plugins: string
+      hooksSkippedByTrust: boolean
+    }
+    context?: string[]
+    sessionTitle?: string
+    stopped?: string
+    messages?: unknown[]
+  }
   ccrTurnId?: unknown
   traceContext?: { traceparent: string }
   linkedTraceContexts?: Array<{ traceparent: string }>
@@ -547,6 +593,11 @@ export type QueuedCommand = {
   stampThreadState?: boolean
   attachmentSourceUuid?: unknown
   deliveryId?: unknown
+  /**
+   * densable print drain `artifactCommentTurn` — ELt allowlist
+   * handoff|handback|seeded|unmarked. No local producer; threaded 1:1.
+   */
+  artifactCommentTurn?: unknown
 }
 
 /**

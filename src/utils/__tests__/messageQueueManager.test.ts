@@ -15,6 +15,11 @@ import {
   isQueuedCommandEditable,
   isQueuedCommandVisible,
   isSlashCommand,
+  canShowQueueSendNowHint,
+  shouldHandBackIdeSelection,
+  getCommandQueue,
+  popAllEditable,
+  popEditableAt,
   peek,
   resetCommandQueue,
   markCancelPending,
@@ -650,5 +655,95 @@ describe('densable 2.1.289 print Kc cancel-pending (he/ye/ke/Se)', () => {
     expect(hasCancelPendingAcked('u2')).toBe(true)
     expect(consumeCancelPendingAcked('u2')).toBe(true)
     expect(hasCancelPendingAcked('u2')).toBe(false)
+  })
+})
+
+describe('densable T7e / zZe ideSelection queue helpers', () => {
+  test('canShowQueueSendNowHint hides when abort is missing or aborted', () => {
+    enqueue({ value: 'hi', mode: 'prompt', origin: { kind: 'human' } } as any)
+    const live = new AbortController()
+    expect(canShowQueueSendNowHint(getCommandQueue(), live)).toBe(true)
+    expect(canShowQueueSendNowHint(getCommandQueue(), null)).toBe(false)
+    expect(canShowQueueSendNowHint(getCommandQueue(), undefined)).toBe(false)
+    live.abort()
+    expect(canShowQueueSendNowHint(getCommandQueue(), live)).toBe(false)
+  })
+
+  test('canShowQueueSendNowHint hides while a drainable row is screening', () => {
+    enqueue({
+      value: 'hi',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+      screeningPending: true,
+    } as any)
+    expect(
+      canShowQueueSendNowHint(getCommandQueue(), new AbortController()),
+    ).toBe(false)
+  })
+
+  test('canShowQueueSendNowHint still shows queue rows when screening is settled', () => {
+    enqueue({ value: 'hi', mode: 'prompt', origin: { kind: 'human' } } as any)
+    expect(
+      canShowQueueSendNowHint(getCommandQueue(), new AbortController()),
+    ).toBe(true)
+  })
+
+  test('shouldHandBackIdeSelection is true only when no drainable still needs it', () => {
+    expect(shouldHandBackIdeSelection([], { lineCount: 1, text: 'x' })).toBe(
+      true,
+    )
+    enqueue({ value: 'hi', mode: 'prompt', origin: { kind: 'human' } } as any)
+    expect(
+      shouldHandBackIdeSelection(getCommandQueue(), {
+        lineCount: 1,
+        text: 'x',
+      }),
+    ).toBe(false)
+    expect(shouldHandBackIdeSelection(getCommandQueue(), undefined)).toBe(false)
+    resetCommandQueue()
+    enqueue({
+      value: 'hi',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+      ideSelection: { lineCount: 1, text: 'x' },
+    } as any)
+    expect(
+      shouldHandBackIdeSelection(getCommandQueue(), {
+        lineCount: 1,
+        text: 'x',
+      }),
+    ).toBe(true)
+  })
+
+  test('popEditableAt and popAllEditable return the stamped ideSelection', () => {
+    const sel = { lineCount: 2, text: 'picked', filePath: '/a.ts' }
+    enqueue({
+      value: 'first',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+      ideSelection: sel,
+    } as any)
+    enqueue({
+      value: 'second',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+    } as any)
+    const one = popEditableAt(0, '', 0)
+    expect(one?.ideSelection).toEqual(sel)
+    resetCommandQueue()
+    enqueue({
+      value: 'a',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+      ideSelection: { lineCount: 1, text: 'old' },
+    } as any)
+    enqueue({
+      value: 'b',
+      mode: 'prompt',
+      origin: { kind: 'human' },
+      ideSelection: sel,
+    } as any)
+    const all = popAllEditable('', 0)
+    expect(all?.ideSelection).toEqual(sel)
   })
 })
