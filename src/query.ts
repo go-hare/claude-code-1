@@ -102,9 +102,14 @@ import { messagesEndWithSuccessfulTerminalMcpTool } from './utils/residualUiEnvG
 import {
   enqueue,
   remove as removeFromQueue,
+  consume as consumeFromQueue,
   getCommandsByMaxPriority,
   isSlashCommand,
 } from './utils/messageQueueManager.js'
+import {
+  bindMainThreadTurn,
+  releaseMainThreadTurn,
+} from './utils/mainThreadTurn.js'
 import {
   type AutonomyTurnOutcome,
   claimConsumableQueuedAutonomyCommands,
@@ -116,6 +121,12 @@ import {
   getRuntimeMainLoopModel,
   renderModelName,
 } from './utils/model/model.js'
+import {
+  getModelFacts,
+  isSmallerContextWindow,
+  resolveModelFacts,
+  type ModelFacts,
+} from './utils/model/modelFacts.js'
 import {
   doesMostRecentAssistantMessageExceed200k,
   finalContextTokensFromLastResponse,
@@ -160,6 +171,7 @@ import {
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
   getSessionId,
+  getPromptRenderEpoch,
 } from './bootstrap/state.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
@@ -512,6 +524,15 @@ export type QueryParams = {
    * see stop_hook_active=true. Undefined on normal keyboard turns.
    */
   stopHookActive?: boolean
+  /**
+   * densable `tte` snapshot captured before system-prompt render.
+   * queryLoop falls back to getPromptRenderEpoch() when omitted.
+   */
+  promptRenderEpoch?: number
+  /**
+   * densable `zu` snapshot. queryLoop reuses when model matches, else Tqe.
+   */
+  modelFacts?: ModelFacts
   // API task_budget (output_config.task_budget, beta task-budgets-2026-03-13).
   // Distinct from the tokenBudget +500k auto-continue feature. `total` is the
   // budget for the whole agentic turn; `remaining` is computed per iteration
@@ -699,6 +720,28 @@ export async function* query(
         toolUseContext: { ...params.toolUseContext, langfuseTrace },
       }
     : params
+
+  let boundMainThreadTurnId: string | undefined
+  if (querySourceFamilyOf(paramsWithTrace.querySource) === 'main') {
+    boundMainThreadTurnId = randomUUID()
+    let personStarted = false
+    for (let i = paramsWithTrace.messages.length - 1; i >= 0; i--) {
+      const message = paramsWithTrace.messages[i]
+      if (message?.type !== 'user') continue
+      personStarted = isHumanLikeOrigin(
+        (message as { origin?: { kind?: string } }).origin,
+      )
+      break
+    }
+    bindMainThreadTurn({
+      turnId: boundMainThreadTurnId,
+      abort: () => {
+        const ac = paramsWithTrace.toolUseContext.abortController
+        if (ac && !ac.signal.aborted) ac.abort('user-cancel')
+      },
+      startedBy: personStarted ? 'person' : 'automatic',
+    })
+  }
 
   // Official queryWithObserverTap densable — capture stream activity for armed
   // observer pairings (JOu). Lazy require keeps observer optional for cold paths.
@@ -900,6 +943,9 @@ export async function* query(
     }
     throw error
   } finally {
+    if (boundMainThreadTurnId !== undefined) {
+      releaseMainThreadTurn(boundMainThreadTurnId)
+    }
     await finalizeAutonomyCommandsForTurn({
       commands: consumedAutonomyCommands,
       outcome: getAutonomyTurnOutcome({
@@ -993,6 +1039,9 @@ async function* queryLoop(
     advisorStripPlan,
   } = params
   const deps = params.deps ?? productionDeps()
+  // densable `ht=e.promptRenderEpoch??tte()`, `mo=e.modelFacts` — once per query.
+  const promptRenderEpoch = params.promptRenderEpoch ?? getPromptRenderEpoch()
+  let pendingModelFacts = params.modelFacts
 
   // Mutable cross-iteration state. The loop body destructures this at the top
   // of each iteration so reads stay bare-name (`messages`, `toolUseContext`).
@@ -1567,6 +1616,23 @@ async function* queryLoop(
           permissionMode === 'plan' &&
           doesMostRecentAssistantMessageExceed200k(messagesForQuery),
       })
+      // densable qs: reuse mo when model matches, else Tqe; Ase → Tqe(fallback).
+      const factsCtx = {
+        credentials: toolUseContext.credentials,
+        abortController: toolUseContext.abortController,
+      }
+      const reusedFacts = pendingModelFacts
+      pendingModelFacts = undefined
+      let modelFacts =
+        reusedFacts?.model === currentModel
+          ? reusedFacts
+          : await resolveModelFacts(currentModel, factsCtx)
+      if (
+        fallbackModel !== undefined &&
+        isSmallerContextWindow(currentModel, fallbackModel)
+      ) {
+        await resolveModelFacts(fallbackModel, factsCtx)
+      }
 
       // Official model_fable_consent densable at query_setup (X6e + ORu).
       // Full ExtraUsageDialog 3DS purchase remains denser.
@@ -1647,6 +1713,7 @@ async function* queryLoop(
             flow.fallbackModel
           ) {
             currentModel = flow.fallbackModel
+            modelFacts = getModelFacts(currentModel)
             leftoverStampTurnEffort(flow.fallbackModel)
             toolUseContext = {
               ...toolUseContext,
@@ -1940,6 +2007,8 @@ async function* queryLoop(
                   return getToolPermissionContextFromLayers(toolUseContext)
                 },
                 model: currentModel,
+                modelFacts,
+                promptRenderEpoch,
                 ...(config.gates.fastModeEnabled && {
                   fastMode: appState.fastMode,
                 }),
@@ -2786,6 +2855,7 @@ async function* queryLoop(
                     ? innerError.fallbackModel
                     : fallbackModel
                 currentModel = switchTo
+                modelFacts = getModelFacts(currentModel)
                 leftoverStampTurnEffort(switchTo)
                 attemptWithFallback = true
 
@@ -4423,18 +4493,27 @@ async function* queryLoop(
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { isMainThreadQueuedCommand } =
         require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+      const { keepQueuedCommandsUntilFirstDroppedPrompt, latchPromptScreen } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./utils/processUserInput/promptSubmit.js') as typeof import('./utils/processUserInput/promptSubmit.js')
       const queuedCommandsSnapshot = getCommandsByMaxPriority(
         sleepRan ? 'later' : 'next',
-      ).filter(cmd => {
-        if (isSlashCommand(cmd)) return false
-        if (isMainThread) return isMainThreadQueuedCommand(cmd)
-        // Subagents drain task-notifications and poll-events addressed to them —
-        // never user prompts, even if someone stamps an agentId on one.
-        return (
-          (cmd.mode === 'task-notification' || cmd.mode === 'poll-event') &&
-          cmd.agentId === currentAgentId
+      )
+        .filter(cmd => {
+          if (isSlashCommand(cmd)) return false
+          if (isMainThread) return isMainThreadQueuedCommand(cmd)
+          // Subagents drain task-notifications and poll-events addressed to them —
+          // never user prompts, even if someone stamps an agentId on one.
+          return (
+            (cmd.mode === 'task-notification' || cmd.mode === 'poll-event') &&
+            cmd.agentId === currentAgentId
+          )
+        })
+        .filter(
+          keepQueuedCommandsUntilFirstDroppedPrompt(
+            latchPromptScreen(() => updatedToolUseContext, { latch: true }),
+          ),
         )
-      })
       const queuedAutonomyClaim = await claimConsumableQueuedAutonomyCommands(
         queuedCommandsSnapshot,
       )
@@ -4457,7 +4536,7 @@ async function* queryLoop(
             notifyCommandLifecycle(cmd.uuid, 'started')
           }
         }
-        removeFromQueue(claimedConsumedCommands)
+        consumeFromQueue(claimedConsumedCommands)
         // densable 2.1.246 d9n — main-thread mid-turn human prompt resets the
         // idle check-in burst (Js=isMainThread && OY(origin)).
         if (
@@ -4571,7 +4650,7 @@ async function* queryLoop(
             notifyCommandLifecycle(cmd.uuid, 'started')
           }
         }
-        removeFromQueue(consumedCommands)
+        consumeFromQueue(consumedCommands)
       }
 
       // Instrumentation: Track file change attachments after they're added

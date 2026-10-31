@@ -2951,6 +2951,14 @@ export function clearSystemPromptSectionState(): void {
   pa.noteInvalidation()
 }
 
+/**
+ * Official `tte` @179328951 — `n().promptAssembly.epoch()`.
+ * Capture before fetchSystemPromptParts / REPL context Promise.all.
+ */
+export function getPromptRenderEpoch(): number {
+  return getBootstrapSession().promptAssembly.epoch()
+}
+
 // Last emitted date accessors (for detecting midnight date changes)
 
 export function getLastEmittedDate(): string | null {

@@ -225,6 +225,7 @@ import {
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { fromArray } from 'src/utils/generators.js'
 import { ask } from 'src/QueryEngine.js'
+import { pollEventDeclaredFromCommands } from 'src/utils/processUserInput/artStamps.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
 import {
   createFileStateCacheWithSizeLimit,
@@ -277,6 +278,8 @@ import { getRemoteSessionUrl } from 'src/constants/product.js'
 import { buildBridgeConnectUrl } from 'src/bridge/bridgeStatusUtil.js'
 import { extractInboundMessageFields } from 'src/bridge/inboundMessages.js'
 import { resolveAndPrepend } from 'src/bridge/inboundAttachments.js'
+import { parseInboundFileAttachments } from 'src/utils/processUserInput/inboundFileAttachments.js'
+import { setProjectsThreadStateSource } from 'src/utils/processUserInput/projectsThreadState.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
 import { buildMcpToolName } from 'src/services/mcp/mcpStringUtils.js'
@@ -1952,6 +1955,15 @@ function runHeadlessStreaming(
   // include Assistant, User, Attachment, and Progress messages.
   // TODO: Clean up this code to avoid passing around a mutable array.
   const mutableMessages: Message[] = initialMessages
+  // densable print `uDo` — projects pDo source. GB + isProjectsSession still
+  // default off; snapshotThreadState stays no-op until those gates pass.
+  setProjectsThreadStateSource({
+    messages: () => mutableMessages,
+    isProjectsSession: () => false,
+    isThread: () => false,
+    isOverview: () => false,
+    ownerRowsWrittenAt: () => undefined,
+  })
 
   // densable T.current=P after loadInitialMessages — live array for W4g/lVr
   void import('../utils/sandbox/sandboxNetworkHeadlessRefs.js').then(m => {
@@ -3763,14 +3775,42 @@ function runHeadlessStreaming(
                   skipAttachments:
                     cmd.skipAttachments === true ||
                     cmd.mode === 'poll-event' ||
-                    cmd.mode === 'task-notification',
+                    cmd.mode === 'task-notification' ||
+                    undefined,
+                  pollEventDelivery: cmd.mode === 'poll-event' || undefined,
+                  pollEventProvenance:
+                    cmd.mode === 'poll-event'
+                      ? [cmd.pollEvent?.provenance ?? null]
+                      : undefined,
+                  pollEventDeclared: pollEventDeclaredFromCommands([cmd]),
+                  skipSkillPermissionReset:
+                    cmd.mode === 'poll-event' ||
+                    cmd.pollEmptyDispatch === true ||
+                    undefined,
+                  pollEmptyDispatch:
+                    cmd.pollEmptyDispatch === true || undefined,
+                  stopHookActive: cmd.stopHookActive,
                   skipSubmissionHooks:
                     cmd.skipSubmissionHooks === true ||
                     cmd.mode === 'poll-event',
+                  fileAttachments: cmd.fileAttachments,
+                  inlinedImagePaths: cmd.inlinedImagePaths,
+                  stampThreadState: cmd.stampThreadState,
+                  frameTiming: cmd.frameTiming,
                   bridgeOrigin: cmd.bridgeOrigin,
+                  localStdinOrigin: cmd.localStdinOrigin,
+                  sessionChannelPersonTyped: cmd.sessionChannelPersonTyped,
+                  hostInitiator: cmd.hostInitiator,
                   modelScheduledOrigin: cmd.modelScheduledOrigin,
                   wakeupSource: cmd.wakeupSource,
+                  artifactCommentTurn: cmd.artifactCommentTurn,
                   origin: cmd.origin,
+                  clientPlatform: cmd.clientPlatform,
+                  verifiedSlackHumanTurn: cmd.verifiedSlackHumanTurn,
+                  projectsUserTurn: cmd.projectsUserTurn,
+                  hearthRelayRows: cmd.hearthRelayRows,
+                  hearthRelayThreadTs: cmd.hearthRelayThreadTs,
+                  hearthRelayMessageIds: cmd.hearthRelayMessageIds,
                   shouldQuery: cmd.shouldQuery,
                   queryHeldForNextTurn: cmd.queryHeldForNextTurn,
                   cwd: getCwd(),
@@ -3812,6 +3852,20 @@ function runHeadlessStreaming(
                   abortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
+                  replayAcksAtRequestDispatch:
+                    structuredIO instanceof RemoteIO
+                      ? () =>
+                          getFeatureValue_CACHED_MAY_BE_STALE(
+                            'tengu_ccr_replay_acks_at_request_dispatch',
+                            false,
+                          )
+                      : undefined,
+                  refreshTools: () => buildAllTools(getAppState()),
+                  refreshMcpClients: () => [
+                    ...getAppState().mcp.clients,
+                    ...sdkClients,
+                    ...dynamicMcpState.clients,
+                  ],
                   forwardSubagentText: options.forwardSubagentText,
                   handleElicitation: (serverName, params, elicitSignal) =>
                     structuredIO.handleElicitation(
@@ -7452,7 +7506,8 @@ function runHeadlessStreaming(
                     onInboundMessage(msg) {
                       const fields = extractInboundMessageFields(msg)
                       if (!fields) return
-                      const { content, uuid, clientPlatform } = fields
+                      const { content, uuid, clientPlatform, fileAttachments } =
+                        fields
                       enqueue({
                         value: content,
                         mode: 'prompt' as const,
@@ -7462,6 +7517,9 @@ function runHeadlessStreaming(
                         // and drain can round-trip remote platform identity.
                         ...(clientPlatform !== undefined
                           ? { clientPlatform }
+                          : {}),
+                        ...(fileAttachments.length > 0
+                          ? { fileAttachments }
                           : {}),
                       })
                       void run()
@@ -8598,6 +8656,8 @@ function runHeadlessStreaming(
         uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
         priority: (userMsg as { priority?: string })
           .priority as import('src/types/textInputTypes.js').QueuePriority,
+        // densable D7 — stamp inbound file_attachments onto the queued command.
+        fileAttachments: parseInboundFileAttachments(userMsg),
         // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
         // seeded_summon → skipAttachments.
         ...(userMsg.client_composed === true

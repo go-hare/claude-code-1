@@ -22,7 +22,7 @@ describe('QueryEngine session bag', () => {
     const bag = engine.match(/toolState: this\.sessionToolState/g) ?? []
     const creds =
       engine.match(
-        /credentials: headlessCredentials\(this\.config\.credentials\)/g,
+        /toolState: this\.sessionToolState,\n {6}credentials: headlessCredentials\(this\.config\.credentials\)/g,
       ) ?? []
     expect(bag).toHaveLength(2)
     expect(creds).toHaveLength(2)

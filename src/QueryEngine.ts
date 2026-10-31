@@ -3,6 +3,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import { randomUUID } from 'crypto'
 import last from 'lodash-es/last.js'
 import {
+  getPromptRenderEpoch,
   getSessionId,
   isSessionPersistenceDisabled,
 } from 'src/bootstrap/state.js'
@@ -68,7 +69,7 @@ import {
 } from './utils/fileStateCache.js'
 import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
-import { getInMemoryErrors } from './utils/log.js'
+import { getInMemoryErrors, logError } from './utils/log.js'
 import {
   applyTurnStartOriginFraming,
   countToolCalls,
@@ -80,11 +81,20 @@ import {
   getMainLoopModel,
   parseUserSpecifiedModel,
 } from './utils/model/model.js'
+import { resolveModelFacts } from './utils/model/modelFacts.js'
 import { loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.js'
 import {
   type ProcessUserInputContext,
   processUserInput,
 } from './utils/processUserInput/processUserInput.js'
+import {
+  hasHearthRelayStamps,
+  resolveQueuedMessageUuid,
+  stampHearthRelay,
+  stampQueueSkipAttachments,
+  stampVerifiedSlackHumanTurn,
+} from './utils/processUserInput/artStamps.js'
+import { createPromptSubmitEntries } from './utils/processUserInput/promptSubmitEntries.js'
 import { fetchSystemPromptParts } from './utils/queryContext.js'
 import {
   credentialsStoreFor,
@@ -198,6 +208,19 @@ export type QueryEngineConfig = {
    */
   requestDialog?: ToolUseContext['requestDialog']
   includePartialMessages?: boolean
+  /**
+   * densable `replayAcksAtRequestDispatch`. Print sets this only for CCR
+   * `jV` transport + GB `tengu_ccr_replay_acks_at_request_dispatch`.
+   * `Fi = includePartialMessages && (getter() ?? false)`.
+   */
+  replayAcksAtRequestDispatch?: () => boolean
+  /**
+   * densable print `refreshTools:Wi`. After Art, QE may rebuild the
+   * system prompt when the live tool list identity changes.
+   */
+  refreshTools?: () => Tools
+  /** densable print `refreshMcpClients:Mo`. */
+  refreshMcpClients?: () => MCPServerConnection[]
   /** densable 2.1.219 #6 — nested subagent text/thinking on stream-json */
   forwardSubagentText?: boolean
   setSDKStatus?: (status: SDKStatus) => void
@@ -297,6 +320,8 @@ export class QueryEngine {
       skipSlashCommands?: boolean
       skipAttachments?: boolean
       skipSubmissionHooks?: boolean
+      /** Official drain: seed query() stopHookActive from the SDK host. */
+      stopHookActive?: boolean
       bridgeOrigin?: boolean
       /** densable 2.1.221 modelScheduledOrigin fire stamp */
       modelScheduledOrigin?: boolean
@@ -306,13 +331,32 @@ export class QueryEngine {
       shouldQuery?: boolean
       /** densable 2.1.289 print task-notification coalesce hold stamp */
       queryHeldForNextTurn?: boolean
+      localStdinOrigin?: boolean
+      sessionChannelPersonTyped?: boolean
+      hostInitiator?: unknown
+      artifactCommentTurn?: unknown
+      verifiedSlackHumanTurn?: boolean
+      projectsUserTurn?: boolean
+      hearthRelayRows?: unknown
+      hearthRelayThreadTs?: unknown
+      hearthRelayMessageIds?: unknown
+      inlinedImagePaths?: string[]
+      stampThreadState?: boolean
+      pollEventDelivery?: boolean
+      pollEventProvenance?: unknown[]
+      pollEventDeclared?: unknown
+      skipSkillPermissionReset?: boolean
+      pollEmptyDispatch?: boolean
+      fileAttachments?: unknown[]
+      frameTiming?: { enqueuedWallMs: number }
+      clientPlatform?: string
     },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
       cwd,
       commands,
-      tools,
-      mcpClients,
+      tools: initialTools,
+      mcpClients: initialMcpClients,
       verbose = false,
       thinkingConfig,
       maxTurns,
@@ -329,13 +373,20 @@ export class QueryEngine {
       setAppState,
       replayUserMessages = false,
       includePartialMessages = false,
+      replayAcksAtRequestDispatch,
       forwardSubagentText = false,
       agents = [],
       setSDKStatus,
       orphanedPermission,
       deferredToolUse: configDeferredToolUse,
       toolAliases,
+      refreshTools,
+      refreshMcpClients,
     } = this.config
+    let tools = initialTools
+    let mcpClients = initialMcpClients
+    const replayRequestingStatus =
+      includePartialMessages && (replayAcksAtRequestDispatch?.() ?? false)
 
     this.discoveredSkillNames.clear()
     this.permissionDenials = []
@@ -385,6 +436,16 @@ export class QueryEngine {
         ? { type: 'adaptive' }
         : { type: 'disabled' }
 
+    // densable Aa=Tqe then Ss=tte(), before fetchSystemPromptParts.
+    const modelFacts =
+      options?.shouldQuery === false
+        ? undefined
+        : await resolveModelFacts(initialMainLoopModel, {
+            credentials: headlessCredentials(this.config.credentials),
+            abortController: this.abortController,
+          })
+    const promptRenderEpoch = getPromptRenderEpoch()
+
     headlessProfilerCheckpoint('before_getSystemPrompt')
     // Narrow once so TS tracks the type through the conditionals below.
     const customPrompt =
@@ -392,7 +453,7 @@ export class QueryEngine {
     const {
       defaultSystemPrompt,
       userContext: baseUserContext,
-      systemContext,
+      systemContext: initialSystemContext,
     } = await fetchSystemPromptParts({
       tools,
       mainLoopModel: initialMainLoopModel,
@@ -403,14 +464,7 @@ export class QueryEngine {
       customSystemPrompt: customPrompt,
     })
     headlessProfilerCheckpoint('after_getSystemPrompt')
-    const userContext = {
-      ...baseUserContext,
-      ...getCoordinatorUserContext(
-        mcpClients,
-        isScratchpadEnabled() ? getScratchpadDir() : undefined,
-        tools,
-      ),
-    }
+    let systemContext = initialSystemContext
 
     // When an SDK caller provides a custom system prompt AND has set
     // CLAUDE_COWORK_MEMORY_PATH_OVERRIDE, inject the memory-mechanics prompt.
@@ -425,11 +479,19 @@ export class QueryEngine {
 
     const chromeResolvedAppend =
       resolveChromeAppendSystemPrompt(appendSystemPrompt)
-    const systemPrompt = asSystemPrompt([
+    let systemPrompt = asSystemPrompt([
       ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
       ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
       ...(chromeResolvedAppend ? [chromeResolvedAppend] : []),
     ])
+    let userContext = {
+      ...baseUserContext,
+      ...getCoordinatorUserContext(
+        mcpClients,
+        isScratchpadEnabled() ? getScratchpadDir() : undefined,
+        tools,
+      ),
+    }
 
     // Register function hook for structured output enforcement
     const hasStructuredOutputTool = tools.some(t =>
@@ -502,6 +564,7 @@ export class QueryEngine {
         // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
         forwardSubagentText,
         toolAliases,
+        messageClientPlatform: options?.clientPlatform,
       },
       getAppState,
       setAppState,
@@ -616,6 +679,14 @@ export class QueryEngine {
       }
     }
 
+    // densable X9t: generate uuid when Slack/hearth identity stamps need a key.
+    const hearthRelay = hasHearthRelayStamps(options ?? {})
+    const identityUuid = resolveQueuedMessageUuid(
+      options?.uuid,
+      options?.verifiedSlackHumanTurn === true || hearthRelay,
+    )
+
+    using promptSubmitEntries = createPromptSubmitEntries()
     let {
       messages: messagesFromUserInput,
       shouldQuery,
@@ -632,11 +703,15 @@ export class QueryEngine {
         messages: this.mutableMessages,
       },
       messages: this.mutableMessages,
-      uuid: options?.uuid,
+      uuid: identityUuid,
       isMeta: options?.isMeta,
       // densable 2.1.221: headless cron fire stamps thread through ask → submitMessage
       skipSlashCommands: options?.skipSlashCommands,
-      skipAttachments: options?.skipAttachments,
+      skipAttachments: options?.skipAttachments
+        ? options.shouldQuery === false
+          ? 'all'
+          : 'mentions'
+        : undefined,
       skipSubmissionHooks: options?.skipSubmissionHooks,
       bridgeOrigin: options?.bridgeOrigin,
       modelScheduledOrigin: options?.modelScheduledOrigin,
@@ -645,6 +720,18 @@ export class QueryEngine {
       shouldQuery: options?.shouldQuery,
       queryHeldForNextTurn: options?.queryHeldForNextTurn,
       querySource: 'sdk',
+      localStdinOrigin: options?.localStdinOrigin,
+      sessionChannelPersonTyped: options?.sessionChannelPersonTyped,
+      hostInitiator: options?.hostInitiator,
+      artifactCommentTurn: options?.artifactCommentTurn,
+      verifiedSlackHumanTurn: options?.verifiedSlackHumanTurn,
+      inlinedImagePaths: options?.inlinedImagePaths,
+      stampThreadState: options?.stampThreadState,
+      pollEventDelivery: options?.pollEventDelivery,
+      pollEventProvenance: options?.pollEventProvenance,
+      pollEventDeclared: options?.pollEventDeclared,
+      aheadOfSessionStart: this.config.orphanedPermission !== undefined,
+      entries: promptSubmitEntries,
     })
 
     // densable: coalesce/hold may force shouldQuery:false even when
@@ -672,6 +759,26 @@ export class QueryEngine {
         }
       }
     }
+
+    // densable dun: Me.skipAttachments===true stamps queueSkipAttachments.
+    if (options?.skipAttachments === true) {
+      stampQueueSkipAttachments(messagesFromUserInput)
+    }
+
+    // densable Y9t / $8o after Art — rrr Object.assign onto the matching uuid.
+    if (options?.verifiedSlackHumanTurn && identityUuid) {
+      stampVerifiedSlackHumanTurn(messagesFromUserInput, identityUuid, {
+        projectsUserTurn: options.projectsUserTurn === true,
+      })
+    }
+    if (hearthRelay && identityUuid) {
+      stampHearthRelay(messagesFromUserInput, identityUuid, {
+        messageIds: options?.hearthRelayMessageIds,
+        rows: options?.hearthRelayRows,
+        threadTs: options?.hearthRelayThreadTs,
+      })
+    }
+    promptSubmitEntries.handedOff()
 
     // Push new messages, including user input and any attachments
     this.mutableMessages.push(...messagesFromUserInput)
@@ -720,7 +827,10 @@ export class QueryEngine {
     // union only when length>0; empty does NOT clear (sticky session harden).
     // Contrast alwaysAllowRules.command which is replaced each turn.
     setAppState(prev => {
-      const denyExtra = disallowedTools ?? []
+      const denyExtra =
+        options?.skipSkillPermissionReset === true
+          ? []
+          : (disallowedTools ?? [])
       const curDeny = prev.toolPermissionContext.alwaysDenyRules.command ?? []
       const nextDeny =
         denyExtra.length === 0
@@ -743,6 +853,54 @@ export class QueryEngine {
     })
 
     const mainLoopModel = modelFromUserInput ?? initialMainLoopModel
+
+    // densable after-Art refreshTools:Wi — rebuild system prompt when the
+    // live tool-name list identity changes (Km analog).
+    const toolsBeforeRefresh = tools
+    try {
+      const refreshed = refreshTools?.() ?? tools
+      tools =
+        refreshed.length === tools.length &&
+        refreshed.every((tool, index) => tool.name === tools[index]?.name)
+          ? tools
+          : refreshed
+      mcpClients = refreshMcpClients?.() ?? mcpClients
+    } catch (err) {
+      logError(err)
+    }
+    if (tools !== toolsBeforeRefresh) {
+      try {
+        const {
+          defaultSystemPrompt: rebuiltDefault,
+          userContext: rebuiltBase,
+          systemContext: rebuiltSystem,
+        } = await fetchSystemPromptParts({
+          tools,
+          mainLoopModel: initialMainLoopModel,
+          additionalWorkingDirectories: Array.from(
+            initialAppState.toolPermissionContext.additionalWorkingDirectories.keys(),
+          ),
+          mcpClients,
+          customSystemPrompt: customPrompt,
+        })
+        systemPrompt = asSystemPrompt([
+          ...(customPrompt !== undefined ? [customPrompt] : rebuiltDefault),
+          ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
+          ...(chromeResolvedAppend ? [chromeResolvedAppend] : []),
+        ])
+        userContext = {
+          ...rebuiltBase,
+          ...getCoordinatorUserContext(
+            mcpClients,
+            isScratchpadEnabled() ? getScratchpadDir() : undefined,
+            tools,
+          ),
+        }
+        systemContext = rebuiltSystem
+      } catch (err) {
+        logError(err)
+      }
+    }
 
     // Recreate after processing the prompt to pick up updated messages and
     // model (from slash commands).
@@ -772,6 +930,7 @@ export class QueryEngine {
         // densable 2.1.219 #6
         forwardSubagentText,
         toolAliases,
+        messageClientPlatform: options?.clientPlatform,
       },
       getAppState,
       setAppState,
@@ -994,6 +1153,9 @@ export class QueryEngine {
       querySource: 'sdk',
       maxTurns,
       taskBudget,
+      promptRenderEpoch,
+      modelFacts,
+      stopHookActive: options?.stopHookActive,
     })) {
       // densable CLI host / SDK: set_expanded_view is a tool-bridge control
       // event, not a transcript message. Skip it here (HWf also drops it).
@@ -1082,6 +1244,9 @@ export class QueryEngine {
                 uuid: msgToAck.uuid,
                 timestamp: msgToAck.timestamp,
                 isReplay: true,
+                ...(options?.fileAttachments?.length
+                  ? { file_attachments: options.fileAttachments }
+                  : {}),
               } as unknown as SDKUserMessageReplay
             }
           }
@@ -1308,9 +1473,43 @@ export class QueryEngine {
           }
           break
         }
-        case 'stream_request_start':
-          // Don't yield stream request start messages
+        case 'stream_request_start': {
+          // densable Hze/Qe: map to system/status/requesting. Fi acks even
+          // when Py withholds the SDK yield (includePartialMessages).
+          if (
+            replayRequestingStatus &&
+            !hasAcknowledgedInitialMessages &&
+            messagesToAck.length > 0
+          ) {
+            hasAcknowledgedInitialMessages = true
+            for (const msgToAck of messagesToAck) {
+              if (msgToAck.type === 'user') {
+                yield {
+                  type: 'user',
+                  message: msgToAck.message,
+                  session_id: getSessionId(),
+                  parent_tool_use_id: null,
+                  uuid: msgToAck.uuid,
+                  timestamp: msgToAck.timestamp,
+                  isReplay: true,
+                  ...(options?.fileAttachments?.length
+                    ? { file_attachments: options.fileAttachments }
+                    : {}),
+                } as unknown as SDKUserMessageReplay
+              }
+            }
+          }
+          if (includePartialMessages) {
+            yield {
+              type: 'system',
+              subtype: 'status',
+              status: 'requesting',
+              session_id: getSessionId(),
+              uuid: randomUUID(),
+            }
+          }
           break
+        }
         case 'system': {
           const msg = message as Message
           // Snip boundary: replay on our store to remove zombie messages and
@@ -1360,6 +1559,37 @@ export class QueryEngine {
               ...(logicalParentUuid !== undefined && {
                 logical_parent_uuid: logicalParentUuid,
               }),
+            }
+          }
+          // densable Fi: includePartialMessages + replayAcksAtRequestDispatch
+          // also acks on system/status/requesting (CCR request-dispatch).
+          const requestingStatus = msg as {
+            subtype?: string
+            status?: string
+          }
+          if (
+            replayRequestingStatus &&
+            !hasAcknowledgedInitialMessages &&
+            messagesToAck.length > 0 &&
+            requestingStatus.subtype === 'status' &&
+            requestingStatus.status === 'requesting'
+          ) {
+            hasAcknowledgedInitialMessages = true
+            for (const msgToAck of messagesToAck) {
+              if (msgToAck.type === 'user') {
+                yield {
+                  type: 'user',
+                  message: msgToAck.message,
+                  session_id: getSessionId(),
+                  parent_tool_use_id: null,
+                  uuid: msgToAck.uuid,
+                  timestamp: msgToAck.timestamp,
+                  isReplay: true,
+                  ...(options?.fileAttachments?.length
+                    ? { file_attachments: options.fileAttachments }
+                    : {}),
+                } as unknown as SDKUserMessageReplay
+              }
             }
           }
           if (msg.subtype === 'api_error') {
@@ -1694,12 +1924,32 @@ export async function* ask({
   skipSlashCommands,
   skipAttachments,
   skipSubmissionHooks,
+  stopHookActive,
   bridgeOrigin,
   modelScheduledOrigin,
   wakeupSource,
   origin,
   shouldQuery,
   queryHeldForNextTurn,
+  localStdinOrigin,
+  sessionChannelPersonTyped,
+  hostInitiator,
+  artifactCommentTurn,
+  verifiedSlackHumanTurn,
+  projectsUserTurn,
+  hearthRelayRows,
+  hearthRelayThreadTs,
+  hearthRelayMessageIds,
+  inlinedImagePaths,
+  stampThreadState,
+  pollEventDelivery,
+  pollEventProvenance,
+  pollEventDeclared,
+  skipSkillPermissionReset,
+  pollEmptyDispatch,
+  fileAttachments,
+  frameTiming,
+  clientPlatform,
   toolState,
   credentials,
   cwd,
@@ -1725,6 +1975,9 @@ export async function* ask({
   abortController,
   replayUserMessages = false,
   includePartialMessages = false,
+  replayAcksAtRequestDispatch,
+  refreshTools,
+  refreshMcpClients,
   forwardSubagentText = false,
   handleElicitation,
   requestDialog,
@@ -1741,6 +1994,7 @@ export async function* ask({
   skipSlashCommands?: boolean
   skipAttachments?: boolean
   skipSubmissionHooks?: boolean
+  stopHookActive?: boolean
   bridgeOrigin?: boolean
   modelScheduledOrigin?: boolean
   wakeupSource?: string
@@ -1748,6 +2002,25 @@ export async function* ask({
   /** densable 2.1.289 print task-notification coalesce */
   shouldQuery?: boolean
   queryHeldForNextTurn?: boolean
+  localStdinOrigin?: boolean
+  sessionChannelPersonTyped?: boolean
+  hostInitiator?: unknown
+  artifactCommentTurn?: unknown
+  verifiedSlackHumanTurn?: boolean
+  projectsUserTurn?: boolean
+  hearthRelayRows?: unknown
+  hearthRelayThreadTs?: unknown
+  hearthRelayMessageIds?: unknown
+  inlinedImagePaths?: string[]
+  stampThreadState?: boolean
+  pollEventDelivery?: boolean
+  pollEventProvenance?: unknown[]
+  pollEventDeclared?: unknown
+  skipSkillPermissionReset?: boolean
+  pollEmptyDispatch?: boolean
+  fileAttachments?: unknown[]
+  frameTiming?: { enqueuedWallMs: number }
+  clientPlatform?: string
   /** densable `wN` shared across print's per-command engines. */
   toolState?: ToolStateSlots
   credentials?: ToolUseContext['credentials']
@@ -1774,6 +2047,9 @@ export async function* ask({
   abortController?: AbortController
   replayUserMessages?: boolean
   includePartialMessages?: boolean
+  replayAcksAtRequestDispatch?: () => boolean
+  refreshTools?: () => Tools
+  refreshMcpClients?: () => MCPServerConnection[]
   forwardSubagentText?: boolean
   handleElicitation?: ToolUseContext['handleElicitation']
   requestDialog?: ToolUseContext['requestDialog']
@@ -1808,6 +2084,9 @@ export async function* ask({
     requestDialog,
     replayUserMessages,
     includePartialMessages,
+    replayAcksAtRequestDispatch,
+    refreshTools,
+    refreshMcpClients,
     forwardSubagentText,
     setSDKStatus,
     abortController,
@@ -1833,12 +2112,32 @@ export async function* ask({
       skipSlashCommands,
       skipAttachments,
       skipSubmissionHooks,
+      stopHookActive,
       bridgeOrigin,
       modelScheduledOrigin,
       wakeupSource,
       origin,
       shouldQuery,
       queryHeldForNextTurn,
+      localStdinOrigin,
+      sessionChannelPersonTyped,
+      hostInitiator,
+      artifactCommentTurn,
+      verifiedSlackHumanTurn,
+      projectsUserTurn,
+      hearthRelayRows,
+      hearthRelayThreadTs,
+      hearthRelayMessageIds,
+      inlinedImagePaths,
+      stampThreadState,
+      pollEventDelivery,
+      pollEventProvenance,
+      pollEventDeclared,
+      skipSkillPermissionReset,
+      pollEmptyDispatch,
+      fileAttachments,
+      frameTiming,
+      clientPlatform,
     })
   } finally {
     setReadFileCache(engine.getReadFileState())

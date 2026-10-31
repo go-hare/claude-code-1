@@ -298,6 +298,11 @@ export type ToolUseContext = {
      * worker delegation summary.
      */
     activeSkill?: string
+    /**
+     * densable `messageClientPlatform` — remote/SDK client platform string
+     * from QueuedCommand.clientPlatform.
+     */
+    messageClientPlatform?: string
   }
   /**
    * densable `promptShellHandOff` collector on the context root

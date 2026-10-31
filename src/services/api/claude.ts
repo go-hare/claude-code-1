@@ -26,6 +26,11 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
 import {
+  getModelFacts,
+  querySourceSkipsModelFactsReuse,
+  type ModelFacts,
+} from 'src/utils/model/modelFacts.js'
+import {
   getAttributionHeader,
   getCLISyspromptPrefix,
 } from '../../constants/system.js'
@@ -57,6 +62,10 @@ import {
   splitSysPromptPrefix,
   toolToAPISchema,
 } from '../../utils/api.js'
+import {
+  announcePrefixLedger,
+  prefixLedgerNotice,
+} from '../../utils/processUserInput/prefixLedger.js'
 import { getOauthAccountInfo } from '../../utils/auth.js'
 import {
   clearBetasCaches,
@@ -1100,6 +1109,15 @@ export type Options = {
    * Title `B` does not pass this field.
    */
   storageV5?: unknown
+  /**
+   * densable `zu` snapshot. queryModel reuses when model matches and
+   * querySource is not auto_mode / auto_mode_investigator (`$z`).
+   */
+  modelFacts?: ModelFacts
+  /**
+   * densable `tte` epoch. Threaded on Options (gold Uwt `promptEpoch`).
+   */
+  promptRenderEpoch?: number
 }
 
 export async function queryModelWithoutStreaming({
@@ -1456,6 +1474,14 @@ async function* queryModel(
         options.model)
       : options.model
 
+  // densable jqt yt: reuse h when h.model===qe && !$z(querySource), else zu(qe).
+  const modelFacts =
+    options.modelFacts?.model === resolvedModel &&
+    !querySourceSkipsModelFactsReuse(options.querySource)
+      ? options.modelFacts
+      : getModelFacts(resolvedModel)
+  void modelFacts
+
   // densable 2.1.233 #16 FRi — print stderr [claude-code:unrecognized_model]
   // once per stripped model id (before tool schema build).
   try {
@@ -1721,6 +1747,19 @@ async function* queryModel(
   })
 
   queryCheckpoint('query_message_normalization_start')
+  // densable Uwt / ks — empty body; apply overlay if a ledger ever returns one.
+  const prefixOverlay = announcePrefixLedger(
+    messages,
+    { messages, tools: filteredTools },
+    {
+      querySource: options.querySource,
+      promptEpoch: options.promptRenderEpoch,
+    },
+  )
+  if (prefixOverlay?.tools !== undefined) {
+    // gold replaces eke / Wn.tools; gZn()==='off' never reaches
+    void prefixOverlay.tools
+  }
   // densable Ydy / eN: pass model so J8t can inject api_system after user turns.
   // When o3 is sticky-rejected, omit model so mid-conv path stays off.
   const midConvLatchedOff = isStickyBetaRejected(
@@ -2010,6 +2049,26 @@ async function* queryModel(
     } as unknown as BetaToolUnion)
   }
   const allTools = [...toolSchemasForApi, ...extraToolSchemas]
+
+  // densable Bwt after assemble. gZn()==='off' returns void — no prefix_delta.
+  const prefixNotice = prefixLedgerNotice(
+    messages,
+    {
+      model: options.model,
+      tools: allTools,
+      system,
+      messages: messagesForAPI,
+    },
+    {
+      querySource: options.querySource,
+      retryCause: undefined,
+      promptEpoch: options.promptRenderEpoch,
+    },
+  )
+  if (prefixNotice !== undefined) {
+    // gold yields prefix_delta then re-assembles; off-mode never reaches
+    void prefixNotice
+  }
 
   const isFastMode =
     isFastModeEnabled() &&
