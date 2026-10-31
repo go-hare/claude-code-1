@@ -1,18 +1,18 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  mock,
-  test,
-} from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   bunBundleMock,
   pushFeatureOverride,
 } from '../../../../tests/mocks/bunBundle.js'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+
+mock.module('bun:bundle', bunBundleMock)
+const popYoloFeature = pushFeatureOverride(
+  (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
+)
+afterAll(() => {
+  popYoloFeature()
+})
 
 const PROMPTS_DIR = join(import.meta.dir, '../yolo-classifier-prompts')
 
@@ -32,8 +32,8 @@ describe('getClassifierTemperature (CLAUDE_CODE_AUTO_MODE_TEMPERATURE)', () => {
   })
 })
 
-describe('hard_deny / soft_deny classifier prompts (2.1.205)', () => {
-  test('external permissions template splits soft vs hard deny', () => {
+describe('hard_deny / soft_deny classifier prompts (2.1.289)', () => {
+  test('external permissions template matches official 17/72/1 defaults', () => {
     const external = readFileSync(
       join(PROMPTS_DIR, 'permissions_external.txt'),
       'utf8',
@@ -42,19 +42,32 @@ describe('hard_deny / soft_deny classifier prompts (2.1.205)', () => {
     expect(external).toContain('## Hard Deny Rules')
     expect(external).toContain('<user_soft_deny_rules_to_replace>')
     expect(external).toContain('<user_hard_deny_rules_to_replace>')
-    expect(external).toContain('Session Transcript Tampering')
     expect(external).toContain('user intent does not clear')
-    // soft section must not still hold transcript tampering
+    const allowBlock = external.match(
+      /<user_allow_rules_to_replace>([\s\S]*?)<\/user_allow_rules_to_replace>/,
+    )?.[1]
     const softBlock = external.match(
       /<user_soft_deny_rules_to_replace>([\s\S]*?)<\/user_soft_deny_rules_to_replace>/,
     )?.[1]
-    expect(softBlock).toBeDefined()
-    expect(softBlock).not.toContain('Session Transcript Tampering')
     const hardBlock = external.match(
       /<user_hard_deny_rules_to_replace>([\s\S]*?)<\/user_hard_deny_rules_to_replace>/,
     )?.[1]
+    const envBlock = external.match(
+      /<user_environment_to_replace>([\s\S]*?)<\/user_environment_to_replace>/,
+    )?.[1]
+    expect(allowBlock).toBeDefined()
+    expect(softBlock).toBeDefined()
     expect(hardBlock).toBeDefined()
-    expect(hardBlock).toContain('Session Transcript Tampering')
+    expect(envBlock).toBeDefined()
+    const countDashes = (block: string) =>
+      block.split('\n').filter(l => l.startsWith('- ')).length
+    expect(countDashes(allowBlock!)).toBe(17)
+    expect(countDashes(softBlock!)).toBe(72)
+    expect(countDashes(hardBlock!)).toBe(1)
+    expect(countDashes(envBlock!)).toBe(21)
+    expect(softBlock).toContain('Session Transcript Tampering')
+    expect(hardBlock).not.toContain('Session Transcript Tampering')
+    expect(hardBlock).toContain('Data Exfiltration')
   })
 
   test('anthropic permissions template has hard_deny replace tags', () => {
@@ -67,6 +80,28 @@ describe('hard_deny / soft_deny classifier prompts (2.1.205)', () => {
     expect(anthropic).toContain('<user_soft_deny_rules_to_replace>')
     expect(anthropic).toContain('<user_hard_deny_rules_to_replace>')
     expect(anthropic).toContain('Session Transcript Tampering')
+    expect(anthropic).toContain('Data Exfiltration')
+    const hardSection = anthropic.slice(anthropic.indexOf('## Hard Deny Rules'))
+    expect(hardSection).toContain('Data Exfiltration')
+    expect(hardSection).not.toContain('Session Transcript Tampering')
+  })
+
+  test('runtime system prompt is the official security-monitor rHe body', () => {
+    const prompt = readFileSync(
+      join(PROMPTS_DIR, 'auto_mode_system_prompt.txt'),
+      'utf8',
+    )
+    expect(prompt.startsWith('You are a security monitor for autonomous')).toBe(
+      true,
+    )
+    expect(prompt).toContain('HARD BLOCK')
+    expect(prompt).toContain('SOFT BLOCK')
+    expect(prompt).toContain('<permissions_template>')
+    expect(prompt).toContain('<cross_session_messages_rule>')
+    expect(prompt).not.toContain('BLOCK — Always require confirmation')
+    expect(prompt).not.toContain(
+      'Use the classify_result tool to report your classification.',
+    )
   })
 })
 
@@ -84,17 +119,6 @@ const getSettingsForSourceMock = mock(
     null as ReturnType<typeof realSettings.getSettingsForSource>,
 )
 const settingsSnap = snapshotModuleExports(realSettings)
-
-mock.module('bun:bundle', bunBundleMock)
-let popYoloFeature: (() => void) | undefined
-beforeAll(() => {
-  popYoloFeature = pushFeatureOverride(
-    (name: string) => name === 'TRANSCRIPT_CLASSIFIER',
-  )
-})
-afterAll(() => {
-  popYoloFeature?.()
-})
 
 function mockGetAutoModeConfig() {
   const allow: string[] = []
@@ -178,5 +202,52 @@ describe('getAutoModeConfig hard_deny merge', () => {
     const cfg = getAutoModeConfig()
     expect(cfg?.hard_deny).toEqual(['Block transcript writes'])
     expect(cfg?.soft_deny).toEqual(['Ask before rm -rf'])
+  })
+})
+
+describe('efe continuation parse of official 17/72/1/21', () => {
+  // bun:test DCE: `feature('TRANSCRIPT_CLASSIFIER')` is false, so
+  // getDefaultExternalAutoModeRules() sees an empty template. Mirror densable
+  // `efe` against the on-disk external file instead.
+  function efe(template: string, tag: string): string[] {
+    const match = template.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))
+    if (!match) return []
+    const items: string[] = []
+    for (const line of (match[1] ?? '').split('\n')) {
+      const g = line.replace(/\r$/, '').trimEnd()
+      if (g.startsWith('- ')) {
+        items.push(g.slice(2))
+      } else if (items.length > 0 && g.trim().length > 0) {
+        items[items.length - 1] += `\n${g}`
+      }
+    }
+    return items
+  }
+
+  test('joins multi-line Data Exfiltration; Transcript Tampering is soft', () => {
+    const template = readFileSync(
+      join(PROMPTS_DIR, 'permissions_external.txt'),
+      'utf8',
+    )
+    const allow = efe(template, 'user_allow_rules_to_replace')
+    const soft = efe(template, 'user_soft_deny_rules_to_replace')
+    const hard = efe(template, 'user_hard_deny_rules_to_replace')
+    const env = efe(template, 'user_environment_to_replace')
+    expect(allow).toHaveLength(17)
+    expect(soft).toHaveLength(72)
+    expect(hard).toHaveLength(1)
+    expect(env).toHaveLength(21)
+    expect(allow[0]).toMatch(/^Security Discussion:/)
+    expect(soft.some(r => r.startsWith('Session Transcript Tampering'))).toBe(
+      true,
+    )
+    expect(hard[0]).toMatch(/^Data Exfiltration:/)
+    expect(hard[0]).toContain('**What is being sent?**')
+    expect(hard[0]).toContain(
+      'Is the final destination confirmed external or public?',
+    )
+    expect(hard.some(r => r.includes('Session Transcript Tampering'))).toBe(
+      false,
+    )
   })
 })

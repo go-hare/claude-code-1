@@ -202,7 +202,8 @@ export function getClassifierTemperature(
  *
  * soft_deny: blocked unless user intent clears them.
  * hard_deny: security-boundary blocks user intent cannot clear (official
- * 2.1.205 Session Transcript Tampering lives here).
+ * 2.1.289 Data Exfiltration lives here; Session Transcript Tampering is
+ * soft_deny).
  */
 export type AutoModeRules = {
   allow: string[]
@@ -215,8 +216,9 @@ export type AutoModeRules = {
  * Parses the external permissions template into the settings.autoMode schema
  * shape. The external template wraps each section's defaults in
  * <user_*_to_replace> tags (user settings REPLACE these defaults), so the
- * captured tag contents ARE the defaults. Bullet items are single-line in the
- * template; each line starting with `- ` becomes one array entry.
+ * captured tag contents ARE the defaults. densable `efe`: a line starting
+ * with `- ` opens an entry; non-empty continuations (indented sub-bullets,
+ * wrapped paragraphs) append with a newline — 2.1.289 bodies are multi-line.
  * Used by `claude auto-mode defaults`. Always returns external defaults,
  * never the Anthropic-internal template.
  *
@@ -239,22 +241,36 @@ function extractTaggedBullets(tagName: string): string[] {
     new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`),
   )
   if (!match) return []
-  return (match[1] ?? '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.startsWith('- '))
-    .map(line => line.slice(2))
+  const items: string[] = []
+  for (const line of (match[1] ?? '').split('\n')) {
+    const g = line.replace(/\r$/, '').trimEnd()
+    if (g.startsWith('- ')) {
+      items.push(g.slice(2))
+    } else if (items.length > 0 && g.trim().length > 0) {
+      items[items.length - 1] += `\n${g}`
+    }
+  }
+  return items
+}
+
+/**
+ * densable `sHe` — wrap the permissions template for the classifier prompt.
+ */
+function wrapAutomodePermissions(template: string): string {
+  return `<cc_automode_permissions>\n${template}\n</cc_automode_permissions>`
 }
 
 /**
  * Returns the full external classifier system prompt with default rules (no user
  * overrides). Used by `claude auto-mode critique` to show the model how the
  * classifier sees its instructions.
+ *
+ * densable `MOo`: insert `sHe(LHe())` at `<permissions_template>`, unwrap the
+ * replace tags to their defaults, then drop `<cross_session_messages_rule>`.
  */
 export function buildDefaultExternalSystemPrompt(): string {
-  return BASE_PROMPT.replace(
-    '<permissions_template>',
-    () => EXTERNAL_PERMISSIONS_TEMPLATE,
+  return BASE_PROMPT.replace('<permissions_template>', () =>
+    wrapAutomodePermissions(EXTERNAL_PERMISSIONS_TEMPLATE),
   )
     .replace(
       /<user_allow_rules_to_replace>([\s\S]*?)<\/user_allow_rules_to_replace>/,
@@ -277,6 +293,7 @@ export function buildDefaultExternalSystemPrompt(): string {
       /<user_environment_to_replace>([\s\S]*?)<\/user_environment_to_replace>/,
       (_m, defaults: string) => defaults,
     )
+    .replace('<cross_session_messages_rule>', () => '')
 }
 
 function getAutoModeDumpDir(): string {
@@ -659,9 +676,11 @@ export async function buildYoloSystemPrompt(
 ): Promise<string> {
   const usingExternal = isUsingExternalPermissions()
   const systemPrompt = BASE_PROMPT.replace('<permissions_template>', () =>
-    usingExternal
-      ? EXTERNAL_PERMISSIONS_TEMPLATE
-      : ANTHROPIC_PERMISSIONS_TEMPLATE,
+    wrapAutomodePermissions(
+      usingExternal
+        ? EXTERNAL_PERMISSIONS_TEMPLATE
+        : ANTHROPIC_PERMISSIONS_TEMPLATE,
+    ),
   )
 
   const autoMode = getAutoModeConfig()
@@ -720,6 +739,7 @@ export async function buildYoloSystemPrompt(
       /<user_environment_to_replace>([\s\S]*?)<\/user_environment_to_replace>/,
       (_m, defaults: string) => userEnvironment ?? defaults,
     )
+    .replace('<cross_session_messages_rule>', () => '')
 }
 // ============================================================================
 // 2-Stage XML Classifier
