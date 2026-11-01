@@ -222,9 +222,14 @@ const POLICY_HINT_CAP = 256
 
 export type PolicyLimitsOnCacheMiss = 'allow' | 'deny' | 'hold'
 
+/** densable `onFailOpenVerdict:"deny"` — leftover `g4o` set. */
+export type PolicyLimitsOnFailOpenVerdict = 'deny'
+
 export type PolicyLimitsCatalogEntry = {
   deniedUnder: readonly string[]
   onCacheMiss: PolicyLimitsOnCacheMiss
+  /** densable `g4o` — only `"deny"` is present in gold YKr. */
+  onFailOpenVerdict?: PolicyLimitsOnFailOpenVerdict
   label: string
   verb: string
   requirementId: string
@@ -352,6 +357,13 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
     verb: 'are',
     requirementId: 'HIPAA-R36',
   },
+  allow_repo_visibility_probe: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'hold',
+    label: 'Repository visibility checks',
+    verb: 'are',
+    requirementId: 'HIPAA-R36',
+  },
   allow_send_file: {
     deniedUnder: ['hipaa', 'zdr'],
     onCacheMiss: 'deny',
@@ -383,6 +395,7 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
   allow_plugin_directory_search: {
     deniedUnder: ['hipaa'],
     onCacheMiss: 'deny',
+    onFailOpenVerdict: 'deny',
     label: 'The plugin directory',
     verb: 'is',
     requirementId: 'HIPAA-R35',
@@ -390,9 +403,17 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
   allow_connector_suggest: {
     deniedUnder: ['hipaa'],
     onCacheMiss: 'deny',
+    onFailOpenVerdict: 'deny',
     label: 'Connector suggestions',
     verb: 'are',
     requirementId: 'HIPAA-R43',
+  },
+  allow_mcp_task_worker_wake: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'deny',
+    label: 'Restarting a worker for a background task',
+    verb: 'is',
+    requirementId: 'HIPAA-R57',
   },
   allow_account_skills_sync: {
     deniedUnder: ['hipaa'],
@@ -409,6 +430,13 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
     label: 'Account plugins sync',
     verb: 'is',
     requirementId: 'HIPAA-R30',
+  },
+  allow_bundled_skills: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'allow',
+    label: 'Bundled skills',
+    verb: 'are',
+    requirementId: 'HIPAA-R56',
   },
   allow_mycelium: {
     deniedUnder: ['hipaa', 'zdr'],
@@ -477,6 +505,20 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
     label: 'Linking a new conversation to the one it replaces',
     verb: 'is',
     requirementId: 'HIPAA-R58',
+  },
+  allow_api_auth_warm: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'deny',
+    label: 'Warming the API credential cache',
+    verb: 'is',
+    requirementId: 'HIPAA-R59',
+  },
+  allow_cache_keepalive: {
+    deniedUnder: ['hipaa'],
+    onCacheMiss: 'deny',
+    label: 'Renewing the prompt cache lifetime',
+    verb: 'is',
+    requirementId: 'HIPAA-R65',
   },
 }
 
@@ -1569,27 +1611,90 @@ function leftoverPolicyLimitsUie(): boolean {
 }
 
 /**
- * densable `cEn` — taint-latched while cache empty / not explicitly denied.
+ * densable `cEn` — `if(!M(e,dsr())||M(e,oie()))return !1`.
+ * Analog: hintedTaints = `dsr`, complianceTaints = `oie`.
  */
 function leftoverPolicyLimitsCen(e: string): boolean {
-  if (!leftoverTaintsInclude(e)) return false
+  const host = leftoverPolicyLimitsHost()
+  if (
+    !policyDeniedByTaints(e, host.hintedTaints) ||
+    policyDeniedByTaints(e, host.complianceTaints)
+  ) {
+    return false
+  }
   if (leftoverPolicyLimitsDs() === null) return true
   return leftoverPolicyLimitsHost().sessionCache?.[e]?.allowed !== false
 }
 
 /**
- * densable `Rh` — null when `sn`; else latched / route_missing / cache_miss / org_denied.
+ * densable `QKr` — `new Set(x().filter(e=>KJe(e)?.onCacheMiss==="hold"))`.
+ * NEVER `export function QKr`.
+ */
+function leftoverPolicyLimitsQkrHas(e: string): boolean {
+  return lookupPolicyLimitsEntry(e)?.onCacheMiss === 'hold'
+}
+
+/**
+ * densable `g4o` — `new Set(x().filter(e=>KJe(e)?.onFailOpenVerdict==="deny"))`.
+ * NEVER `export function g4o`. Gold minify `g4o(` @189639109 is glob, not this Set.
+ */
+function leftoverPolicyLimitsG4oHas(e: string): boolean {
+  return lookupPolicyLimitsEntry(e)?.onFailOpenVerdict === 'deny'
+}
+
+/**
+ * densable `Ue` — hinted deny, else `!v6t` (`evaluatePolicyLimitsAgainst`).
+ * NEVER `export function Ue`.
+ */
+function leftoverPolicyLimitsUe(
+  e: string,
+  n: Record<string, { allowed: boolean }>,
+): boolean {
+  const i = leftoverPolicyLimitsHost()
+  if (n[e] === undefined && i.hintedDeniedKeys.includes(e)) return true
+  const r = i.sessionFromServerFetch
+  return !evaluatePolicyLimitsAgainst(
+    {
+      restrictions: n,
+      compliance_taints: r ? i.complianceTaints : [],
+    },
+    e,
+    [...i.hintedTaints, ...(r ? [] : i.complianceTaints)],
+  )
+}
+
+/**
+ * densable `E6t` — leftover `oe` / `leftoverHipaaEvidenceBlocks` (`wn`).
+ * Gold `fas` principalRung arms stay unhosted. NEVER `export function E6t`.
+ */
+function leftoverPolicyLimitsE6t(e: string): boolean {
+  return leftoverHipaaEvidenceBlocks(e)
+}
+
+/**
+ * densable `Rh` @183114224:
+ * `if(sn(e))return null; if(cEn(e))return"latched"; let n=dS();
+ *  if(n!==null){ if((QKr.has(e)||g4o.has(e)&&!Ue(e,n))&&DU())
+ *    return J()?"route_missing":"cache_miss";
+ *    if(!E6t(e))return"org_denied";
+ *    return J()?"route_missing":"cache_miss"}
+ *  return UIe()?"route_missing":"cache_miss"`
+ * NEVER `export function Rh`.
  */
 export function leftoverPolicyLimitsRh(e: string): string | null {
   if (isPolicyLimitsAllowed(e)) return null
   if (leftoverPolicyLimitsCen(e)) return 'latched'
   const n = leftoverPolicyLimitsDs()
-  const routeMissing = leftoverPolicyLimitsJ()
   if (n !== null) {
-    if (leftoverPolicyLimitsDu()) {
-      return routeMissing ? 'route_missing' : 'cache_miss'
+    if (
+      (leftoverPolicyLimitsQkrHas(e) ||
+        (leftoverPolicyLimitsG4oHas(e) && !leftoverPolicyLimitsUe(e, n))) &&
+      leftoverPolicyLimitsDu()
+    ) {
+      return leftoverPolicyLimitsJ() ? 'route_missing' : 'cache_miss'
     }
-    return 'org_denied'
+    if (!leftoverPolicyLimitsE6t(e)) return 'org_denied'
+    return leftoverPolicyLimitsJ() ? 'route_missing' : 'cache_miss'
   }
   return leftoverPolicyLimitsUie() ? 'route_missing' : 'cache_miss'
 }

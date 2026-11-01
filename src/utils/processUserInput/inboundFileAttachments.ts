@@ -1,8 +1,9 @@
 /**
- * densable 2.1.289 `D7` / `NGn` — stdin/bridge inbound user JSON stamps.
+ * densable 2.1.289 inbound `D7` @202257989 / `NGn` — stdin/bridge user JSON stamps.
  *
- * `D7` parses `file_attachments` off the user frame. `NGn` parses
- * `turn_id` only when the caller already classified a relay human.
+ * This `D7` parses `file_attachments` off the user frame. Gold
+ * `function D7(` @187578359 is a path sanitizer — do not bind that offset.
+ * `NGn` parses `turn_id` only when the caller already classified a relay human.
  * Never export densable ids.
  */
 

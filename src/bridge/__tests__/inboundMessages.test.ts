@@ -25,7 +25,7 @@ describe('extractInboundMessageFields client_platform', () => {
     expect(fields?.fileAttachments).toEqual([])
   })
 
-  test('extracts D7 file_attachments', () => {
+  test('extracts inbound D7@202257989 file_attachments', () => {
     const msg = {
       type: 'user',
       message: { role: 'user', content: 'with file' },

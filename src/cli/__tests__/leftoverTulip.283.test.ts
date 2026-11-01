@@ -99,6 +99,13 @@ afterEach(() => {
   leftoverPolicyLimitsHost().principalFromOAuthBearer = false
   leftoverPolicyLimitsHost().diskAdoptionSuppressed = false
   leftoverPolicyLimitsHost().lastFetchOutcome = null
+  leftoverPolicyLimitsHost().sessionCache = null
+  leftoverPolicyLimitsHost().sessionAttributed = false
+  leftoverPolicyLimitsHost().sessionFromServerFetch = false
+  leftoverPolicyLimitsHost().failOpenVerdict = false
+  leftoverPolicyLimitsHost().hintedDeniedKeys = []
+  leftoverPolicyLimitsHost().hintedTaints = []
+  leftoverPolicyLimitsHost().complianceTaints = []
 })
 
 describe('leftoverTulip 283 leftover _o BODY', () => {
@@ -159,8 +166,23 @@ describe('leftoverTulip 283 leftover _o BODY', () => {
     expect(src).not.toMatch(/^export function dS\b/m)
     expect(src).not.toMatch(/^export function DU\b/m)
     expect(src).not.toMatch(/^export function Rh\b/m)
+    expect(src).not.toMatch(/^export function QKr\b/m)
+    expect(src).not.toMatch(/^export function g4o\b/m)
+    expect(src).not.toMatch(/^export function E6t\b/m)
+    expect(src).not.toMatch(/^export function Ue\b/m)
     expect(src).not.toMatch(/^export function ie\b/m)
     expect(src).not.toMatch(/^export function QZn\b/m)
+    expect(src).toContain('densable `QKr`')
+    expect(src).toContain('densable `g4o`')
+    expect(src).toContain('densable `Ue`')
+    expect(src).toContain('densable `E6t`')
+    expect(src).toContain('densable `Rh` @183114224')
+    expect(src).toContain("onFailOpenVerdict: 'deny'")
+    expect(src).toContain('allow_repo_visibility_probe')
+    expect(src).toContain('allow_mcp_task_worker_wake')
+    expect(src).toContain('allow_bundled_skills')
+    expect(src).toContain('allow_api_auth_warm')
+    expect(src).toContain('allow_cache_keepalive')
     expect(src).not.toMatch(/^export function oe\b/m)
     expect(src).not.toMatch(/^export function WDr\b/m)
     expect(src).not.toMatch(/^export function UX\b/m)
@@ -488,7 +510,7 @@ describe('leftoverTulip 283 leftover _o BODY', () => {
           taint === 'hipaa' && policy === 'allow_memory_sync',
       ),
     ).toBe(true)
-    expect(Object.keys(POLICY_LIMITS_CATALOG)).toHaveLength(32)
+    expect(Object.keys(POLICY_LIMITS_CATALOG)).toHaveLength(37)
 
     expect(isServerPopulatedPolicyKey('allow_web_fetch')).toBe(true)
     expect(isTranscriptScanPolicyKey('allow_usage_transcript_scan')).toBe(true)
@@ -679,5 +701,43 @@ describe('leftoverTulip 283 leftover _o BODY', () => {
       else process.env.CLAUDE_CONFIG_DIR = prev
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  test('gold YKr hold / fail-open sets match leftover catalog fields', () => {
+    expect(lookupPolicyLimitsEntry('allow_projects_tool')?.onCacheMiss).toBe(
+      'hold',
+    )
+    expect(lookupPolicyLimitsEntry('allow_team_onboarding')?.onCacheMiss).toBe(
+      'hold',
+    )
+    expect(
+      lookupPolicyLimitsEntry('allow_repo_visibility_probe')?.onCacheMiss,
+    ).toBe('hold')
+    expect(
+      lookupPolicyLimitsEntry('allow_plugin_directory_search')
+        ?.onFailOpenVerdict,
+    ).toBe('deny')
+    expect(
+      lookupPolicyLimitsEntry('allow_connector_suggest')?.onFailOpenVerdict,
+    ).toBe('deny')
+    expect(lookupPolicyLimitsEntry('allow_bundled_skills')?.onCacheMiss).toBe(
+      'allow',
+    )
+    expect(lookupPolicyLimitsEntry('allow_api_auth_warm')?.requirementId).toBe(
+      'HIPAA-R59',
+    )
+    expect(
+      lookupPolicyLimitsEntry('allow_cache_keepalive')?.requirementId,
+    ).toBe('HIPAA-R65')
+  })
+
+  test('Rh body uses QKr/g4o/Ue/E6t arms not blanket DU', () => {
+    expect(src).toContain('leftoverPolicyLimitsQkrHas(e)')
+    expect(src).toContain('leftoverPolicyLimitsG4oHas(e)')
+    expect(src).toContain('leftoverPolicyLimitsUe(e, n)')
+    expect(src).toContain('leftoverPolicyLimitsE6t(e)')
+    expect(src).toContain(
+      "if (!leftoverPolicyLimitsE6t(e)) return 'org_denied'",
+    )
   })
 })

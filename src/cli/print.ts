@@ -8656,7 +8656,7 @@ function runHeadlessStreaming(
         uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
         priority: (userMsg as { priority?: string })
           .priority as import('src/types/textInputTypes.js').QueuePriority,
-        // densable D7 — stamp inbound file_attachments onto the queued command.
+        // densable inbound D7 @202257989 — stamp file_attachments onto the queued command.
         fileAttachments: parseInboundFileAttachments(userMsg),
         // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
         // seeded_summon → skipAttachments.

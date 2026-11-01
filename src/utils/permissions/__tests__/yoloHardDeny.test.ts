@@ -86,7 +86,7 @@ describe('hard_deny / soft_deny classifier prompts (2.1.289)', () => {
     expect(hardSection).not.toContain('Session Transcript Tampering')
   })
 
-  test('runtime system prompt is the official security-monitor rHe body', () => {
+  test('runtime system prompt is the official security-monitor body', () => {
     const prompt = readFileSync(
       join(PROMPTS_DIR, 'auto_mode_system_prompt.txt'),
       'utf8',

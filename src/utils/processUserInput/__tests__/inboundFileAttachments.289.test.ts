@@ -5,8 +5,8 @@ import {
   relayHumanIdentityStamps,
 } from '../inboundFileAttachments.js'
 
-describe('densable 2.1.289 D7/NGn/cBn inbound stamps', () => {
-  test('D7 parses file_attachments and drops bad entries', () => {
+describe('densable 2.1.289 inbound D7@202257989 / NGn / cBn stamps', () => {
+  test('inbound D7 parses file_attachments and drops bad entries', () => {
     expect(parseInboundFileAttachments(null)).toEqual([])
     expect(parseInboundFileAttachments({})).toEqual([])
     expect(parseInboundFileAttachments({ file_attachments: 'nope' })).toEqual(

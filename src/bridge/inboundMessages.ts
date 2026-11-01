@@ -26,7 +26,7 @@ export function extractInboundMessageFields(msg: SDKMessage):
       uuid: UUID | undefined
       /** Official: `client_platform` on inbound user → QueuedCommand.clientPlatform. */
       clientPlatform: string | undefined
-      /** densable D7 — inbound `file_attachments` stamp. */
+      /** densable inbound D7 @202257989 — `file_attachments` stamp. */
       fileAttachments: ReturnType<typeof parseInboundFileAttachments>
     }
   | undefined {

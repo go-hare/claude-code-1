@@ -202,8 +202,9 @@ export function getClassifierTemperature(
  *
  * soft_deny: blocked unless user intent clears them.
  * hard_deny: security-boundary blocks user intent cannot clear (official
- * 2.1.289 Data Exfiltration lives here; Session Transcript Tampering is
- * soft_deny).
+ * 2.1.289 Data Exfiltration lives here). leftover template names
+ * Session Transcript Tampering as a soft_deny rule; that string is SEA
+ * plaintext 0 — not gold unique English.
  */
 export type AutoModeRules = {
   allow: string[]
@@ -216,9 +217,10 @@ export type AutoModeRules = {
  * Parses the external permissions template into the settings.autoMode schema
  * shape. The external template wraps each section's defaults in
  * <user_*_to_replace> tags (user settings REPLACE these defaults), so the
- * captured tag contents ARE the defaults. densable `efe`: a line starting
- * with `- ` opens an entry; non-empty continuations (indented sub-bullets,
- * wrapped paragraphs) append with a newline — 2.1.289 bodies are multi-line.
+ * captured tag contents ARE the defaults. A line starting with `- ` opens
+ * an entry; non-empty continuations (indented sub-bullets, wrapped
+ * paragraphs) append with a newline — 2.1.289 bodies are multi-line.
+ * Gold minify `efe` is not this helper.
  * Used by `claude auto-mode defaults`. Always returns external defaults,
  * never the Anthropic-internal template.
  *
@@ -254,7 +256,8 @@ function extractTaggedBullets(tagName: string): string[] {
 }
 
 /**
- * densable `sHe` — wrap the permissions template for the classifier prompt.
+ * Wrap the permissions template for the classifier prompt.
+ * Gold minify `sHe` is not this helper.
  */
 function wrapAutomodePermissions(template: string): string {
   return `<cc_automode_permissions>\n${template}\n</cc_automode_permissions>`
@@ -265,8 +268,9 @@ function wrapAutomodePermissions(template: string): string {
  * overrides). Used by `claude auto-mode critique` to show the model how the
  * classifier sees its instructions.
  *
- * densable `MOo`: insert `sHe(LHe())` at `<permissions_template>`, unwrap the
- * replace tags to their defaults, then drop `<cross_session_messages_rule>`.
+ * densable `MOo`: insert the wrapped permissions template at
+ * `<permissions_template>`, unwrap the replace tags to their defaults,
+ * then drop `<cross_session_messages_rule>`.
  */
 export function buildDefaultExternalSystemPrompt(): string {
   return BASE_PROMPT.replace('<permissions_template>', () =>
