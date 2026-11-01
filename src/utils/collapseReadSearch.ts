@@ -1600,8 +1600,8 @@ export function leftoverBe(model: string): string {
 
 /**
  * densable `Qrr` / `Sw` client_data.
- * Gold: ReadGate → CacheKey → slots[key] → windowSeed → clientDataCache,
- * then clientDataOverride(data, model).
+ * Gold: ReadGate (`ne()`) → CacheKey → `le().clientDataCacheSlots[key]` →
+ * windowSeed → `le().clientDataCache`, then clientDataOverride(data, model).
  */
 type LeftoverQrrSlot = {
   data: Record<string, unknown> | null
@@ -1615,7 +1615,8 @@ type LeftoverQrrSlot = {
 
 let leftoverD2ClientData: Record<string, unknown> | null = null
 let leftoverD2ClientModel: string | undefined
-let leftoverQrrSlots: Record<string, LeftoverQrrSlot> | null = null
+/** Isolation fallback when `le()` / config is unbound. Gold slots live on `le()`. */
+let leftoverQrrSlotsIsolation: Record<string, LeftoverQrrSlot> | null = null
 let leftoverQrrWindowSeed: {
   key: string
   data: Record<string, unknown>
@@ -1643,6 +1644,58 @@ const LEFTOVER_QRR_STALE_PAST_MS = 604_800_000
 const LEFTOVER_QRR_STALE_FUTURE_MS = 300_000
 const leftoverD2Logged = new Set<string>()
 
+function leftoverQrrLeConfig(): {
+  getGlobalConfig: () => {
+    clientDataCache?: Record<string, unknown> | null
+    clientDataCacheSlots?: Record<string, LeftoverQrrSlot> | null
+  }
+  saveGlobalConfig: (
+    updater: (current: {
+      clientDataCache?: Record<string, unknown> | null
+      clientDataCacheSlots?: Record<string, LeftoverQrrSlot> | null
+    }) => typeof current,
+  ) => void
+} | null {
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    return require('./config.js') as typeof import('./config.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+  } catch {
+    return null
+  }
+}
+
+/** densable `le().clientDataCacheSlots`. Isolation only when `le()` is unbound. */
+function leftoverQrrReadSlots(): Record<string, LeftoverQrrSlot> | null {
+  const cfg = leftoverQrrLeConfig()
+  if (cfg === null) return leftoverQrrSlotsIsolation
+  return cfg.getGlobalConfig().clientDataCacheSlots ?? null
+}
+
+/** densable persist `le().clientDataCacheSlots`. */
+function leftoverQrrWriteSlots(
+  slots: Record<string, LeftoverQrrSlot> | null,
+): void {
+  leftoverQrrSlotsIsolation = slots
+  const cfg = leftoverQrrLeConfig()
+  if (cfg === null) return
+  cfg.saveGlobalConfig(current => ({
+    ...current,
+    clientDataCacheSlots: slots ?? undefined,
+  }))
+}
+
+/** densable `le().clientDataCache` fallback for `Sw`. */
+function leftoverQrrReadLegacyCache(): Record<string, unknown> | null {
+  const cfg = leftoverQrrLeConfig()
+  if (cfg === null) return leftoverD2ClientData
+  const cache = cfg.getGlobalConfig().clientDataCache
+  if (cache !== null && cache !== undefined && typeof cache === 'object') {
+    return cache
+  }
+  return leftoverD2ClientData
+}
+
 export function leftoverD2SetClientData(
   data: Record<string, unknown> | null,
   model?: string,
@@ -1662,16 +1715,24 @@ export function leftoverD2SetClientData(
     entrypoint: identity.entrypoint,
     org: identity.org,
   }
-  leftoverQrrSlots = {
+  leftoverQrrSlotsIsolation = {
     default: slot,
     [key]: slot,
+  }
+  const cfg = leftoverQrrLeConfig()
+  if (cfg !== null) {
+    cfg.saveGlobalConfig(current => ({
+      ...current,
+      clientDataCache: data ?? undefined,
+      clientDataCacheSlots: leftoverQrrSlotsIsolation ?? undefined,
+    }))
   }
 }
 
 export function leftoverQrrSetSlots(
   slots: Record<string, LeftoverQrrSlot> | null,
 ): void {
-  leftoverQrrSlots = slots
+  leftoverQrrWriteSlots(slots)
 }
 
 export function leftoverQrrSetWindowSeed(
@@ -1929,16 +1990,17 @@ export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
   leftoverD2HydrateFromDiskOnce()
   if (leftoverQrrReadGate && !leftoverQrrReadGate()) return null
   const key = leftoverQrrCacheKey?.(model) ?? 'default'
+  const slots = leftoverQrrReadSlots()
   let resolved: LeftoverQrrSlot | null = null
-  if (leftoverQrrSlots != null && Object.hasOwn(leftoverQrrSlots, key)) {
-    const slot = leftoverQrrSlots[key]
+  if (slots != null && Object.hasOwn(slots, key)) {
+    const slot = slots[key]
     resolved = leftoverQrrSlotLooksValid(slot)
       ? { data: slot.data ?? null, model: slot.model }
       : null
   } else {
     const needle = leftoverQrrStaleMatchGetter?.()
-    if (needle && leftoverQrrSlots != null) {
-      const stale = leftoverQrrPickStaleSlot(leftoverQrrSlots, needle)
+    if (needle && slots != null) {
+      const stale = leftoverQrrPickStaleSlot(slots, needle)
       if (stale) resolved = { data: stale.data ?? null }
     }
     if (
@@ -1947,12 +2009,11 @@ export function leftoverQrr(model?: string): LeftoverQrrSlot | null {
       leftoverQrrWindowSeed.key === key
     ) {
       resolved = { data: leftoverQrrWindowSeed.data }
-    } else if (
-      resolved === null &&
-      leftoverD2ClientData !== null &&
-      typeof leftoverD2ClientData === 'object'
-    ) {
-      resolved = { data: leftoverD2ClientData, model: leftoverD2ClientModel }
+    } else if (resolved === null) {
+      const legacy = leftoverQrrReadLegacyCache()
+      if (legacy !== null && typeof legacy === 'object') {
+        resolved = { data: legacy, model: leftoverD2ClientModel }
+      }
     }
   }
   if (!leftoverQrrOverride) return resolved
@@ -1971,10 +2032,11 @@ export function leftoverQrrStrict(): Record<string, unknown> | null {
   if (!leftoverQrrStrictReadGate || !leftoverQrrStrictReadGate()) return null
   if (!leftoverQrrCacheKey) return null
   const key = leftoverQrrCacheKey()
-  if (leftoverQrrSlots == null || !Object.hasOwn(leftoverQrrSlots, key)) {
+  const slots = leftoverQrrReadSlots()
+  if (slots == null || !Object.hasOwn(slots, key)) {
     return null
   }
-  const slot = leftoverQrrSlots[key]
+  const slot = slots[key]
   if (!leftoverQrrSlotHasTimedData(slot)) return null
   return slot.data ?? null
 }
@@ -2009,7 +2071,7 @@ export function leftoverQrrCacheKeyNow(model?: string): string | undefined {
 export function leftoverQrrHasTimedSlot(model?: string): boolean {
   if (leftoverQrrCacheKey === null) return false
   const key = leftoverQrrCacheKey(model)
-  const slot = leftoverQrrSlots?.[key]
+  const slot = leftoverQrrReadSlots()?.[key]
   return leftoverQrrSlotLooksValid(slot) && typeof slot?.at === 'number'
 }
 
@@ -2042,25 +2104,29 @@ function leftoverD2HydrateFromDiskOnce(): void {
   if (leftoverQrrCacheKey === null) leftoverQrrInstallCacheKey()
   if (leftoverD2DiskHydrated) return
   leftoverD2DiskHydrated = true
-  try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const { getGlobalConfig } =
-      require('./config.js') as typeof import('./config.js')
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    leftoverD2HydrateFromDisk(getGlobalConfig().clientDataCache)
-  } catch {
-    // isolation — optional
+  const cfg = leftoverQrrLeConfig()
+  if (cfg === null) return
+  const g = cfg.getGlobalConfig()
+  leftoverQrrSlotsIsolation =
+    g.clientDataCacheSlots ?? leftoverQrrSlotsIsolation
+  const cache = g.clientDataCache
+  if (cache !== null && cache !== undefined && typeof cache === 'object') {
+    leftoverD2ClientData = cache
   }
 }
 
-/** densable disk `clientDataCache` cold start. */
+/**
+ * densable disk `clientDataCache` cold start — fills `le().clientDataCache`
+ * fallback only. Does not mint slots (`Sw` reads slots first).
+ */
 export function leftoverD2HydrateFromDisk(
   cache: unknown,
   model?: string,
 ): void {
   leftoverD2DiskHydrated = true
   if (cache !== null && typeof cache === 'object' && !Array.isArray(cache)) {
-    leftoverD2SetClientData(cache as Record<string, unknown>, model)
+    leftoverD2ClientData = cache as Record<string, unknown>
+    leftoverD2ClientModel = model
   }
 }
 

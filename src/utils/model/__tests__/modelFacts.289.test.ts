@@ -133,7 +133,8 @@ describe('densable 2.1.289 Syo leftoverQrr fetch map', () => {
     expect(collapse).toContain('trackClientDataFetch')
     expect(collapse).toContain('leftoverQrrHasTimedSlot')
     expect(collapse).toContain('const at = Date.now()')
-    expect(collapse).toContain('{ data, model, at }')
+    expect(collapse).toContain('leftoverQrrWriteSlots')
+    expect(collapse).toContain('clientDataCacheSlots')
     const leftoverQrrStart = collapse.indexOf(
       'export function leftoverQrr(model?: string)',
     )

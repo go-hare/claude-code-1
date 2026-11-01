@@ -844,6 +844,18 @@ describe('densable Io Zc live Thought clock', () => {
     leftoverD2SetClientData(null)
   })
 
+  test('leftoverQrr slots persist on le() GlobalConfig', async () => {
+    const { leftoverD2SetClientData, leftoverQrr, leftoverQrrSetSlots } =
+      await import('../collapseReadSearch.js')
+    const { getGlobalConfig } = await import('../config.js')
+    leftoverD2SetClientData({ meadow_lantern: true })
+    expect(getGlobalConfig().clientDataCacheSlots).toBeDefined()
+    expect(leftoverQrr()?.data?.meadow_lantern).toBe(true)
+    leftoverD2SetClientData(null)
+    leftoverQrrSetSlots(null)
+    expect(getGlobalConfig().clientDataCacheSlots).toBeUndefined()
+  })
+
   test('kYr leftoverQrr stale xE match newest timed slot', async () => {
     const {
       leftoverD2SetClientData,

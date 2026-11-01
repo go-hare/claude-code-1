@@ -56,6 +56,7 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
     updated.lastSeenOrgDefaultUpdatedAt = undefined;
     updated.additionalModelOptionsCache = undefined;
     updated.clientDataCache = undefined;
+    updated.clientDataCacheSlots = undefined;
     return updated;
   });
   // Drop session-level org default + Fable key-less consent latch so the next

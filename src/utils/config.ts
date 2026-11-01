@@ -822,6 +822,20 @@ export type GlobalConfig = {
 
   // Client data for server-side experiments (fetched during bootstrap).
   clientDataCache?: Record<string, unknown> | null
+  /**
+   * densable `le().clientDataCacheSlots` — keyed leftoverQrr slots (`nWe` / `Sw`).
+   * Gold persist is `oXo` merge on bootstrap; logout clears (`TZt`).
+   */
+  clientDataCacheSlots?: Record<
+    string,
+    {
+      data: Record<string, unknown> | null
+      model?: string
+      at?: number
+      entrypoint?: string | null
+      org?: string | null
+    }
+  > | null
 
   // Additional model options for the model picker (fetched during bootstrap).
   additionalModelOptionsCache?: ModelOption[]

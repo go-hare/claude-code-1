@@ -54,6 +54,7 @@ const cachedSg: Record<string, boolean> = {}
 let hasSeenAutoDefaultNudge = false
 let feedbackLastShown: number | undefined
 let clientDataCache: Record<string, unknown> | null = null
+let clientDataCacheSlots: Record<string, unknown> | null = null
 let modelAllowed = true
 
 function configMock() {
@@ -65,6 +66,7 @@ function configMock() {
       cachedStatsigGates: cachedSg,
       hasSeenAutoDefaultNudge,
       clientDataCache,
+      clientDataCacheSlots,
       feedbackSurveyState:
         feedbackLastShown !== undefined
           ? { lastShownTime: feedbackLastShown }
@@ -76,6 +78,7 @@ function configMock() {
       const next = updater({
         hasSeenAutoDefaultNudge,
         clientDataCache,
+        clientDataCacheSlots,
         feedbackSurveyState:
           feedbackLastShown !== undefined
             ? { lastShownTime: feedbackLastShown }
@@ -87,6 +90,10 @@ function configMock() {
       if ('clientDataCache' in next) {
         clientDataCache =
           (next.clientDataCache as Record<string, unknown> | null) ?? null
+      }
+      if ('clientDataCacheSlots' in next) {
+        clientDataCacheSlots =
+          (next.clientDataCacheSlots as Record<string, unknown> | null) ?? null
       }
       const fs = next.feedbackSurveyState as
         | { lastShownTime?: number }
@@ -455,6 +462,7 @@ describe('vscodeIdeBridgeCallbacks densable helpers', () => {
     leftoverD2SetClientData(null)
     delete cachedGb.tengu_harbor_willow
     clientDataCache = null
+    clientDataCacheSlots = null
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
     cachedGb.tengu_harbor_willow = false
     expect(isAutoDefaultLaunchEnabled()).toBe(false)
@@ -471,6 +479,7 @@ describe('vscodeIdeBridgeCallbacks densable helpers', () => {
     leftoverQrrSetOverride(null)
     leftoverQrrSetStaleMatchGetter(null)
     clientDataCache = null
+    clientDataCacheSlots = null
     cachedGb.tengu_harbor_willow = true
     expect(isAutoDefaultLaunchEnabled()).toBe(true)
   })
