@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import figures from 'figures';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.js';
 import {
@@ -445,7 +445,6 @@ function BashPermissionRequestInner({
       case 'yes': {
         const trimmedFeedback = acceptFeedback.trim();
         logUnaryPermissionEvent('tool_use_single', toolUseConfirm, 'accept');
-        // Log accept submission with feedback context
         logEvent('tengu_accept_submitted', {
           toolName: toolNameForAnalytics,
           isMcp: toolUseConfirm.tool.isMcp ?? false,
@@ -459,7 +458,6 @@ function BashPermissionRequestInner({
       }
       case 'yes-apply-suggestions': {
         logUnaryPermissionEvent('tool_use_single', toolUseConfirm, 'accept');
-        // Extract suggestions if present (works for both 'ask' and 'passthrough' behaviors)
         const permissionUpdates =
           'suggestions' in toolUseConfirm.permissionResult ? toolUseConfirm.permissionResult.suggestions || [] : [];
         toolUseConfirm.onAllow(toolUseConfirm.input, permissionUpdates);
@@ -468,8 +466,6 @@ function BashPermissionRequestInner({
       }
       case 'no': {
         const trimmedFeedback = rejectFeedback.trim();
-
-        // Log reject submission with feedback context
         logEvent('tengu_reject_submitted', {
           toolName: toolNameForAnalytics,
           isMcp: toolUseConfirm.tool.isMcp ?? false,
@@ -477,8 +473,6 @@ function BashPermissionRequestInner({
           instructions_length: trimmedFeedback.length,
           entered_feedback_mode: noFeedbackModeEntered,
         });
-
-        // Process rejection (with or without feedback)
         handleReject(trimmedFeedback || undefined);
         break;
       }
@@ -535,7 +529,7 @@ function BashPermissionRequestInner({
         </>
       ) : (
         <>
-          <Box flexDirection="column">
+          <Box flexDirection="column" paddingX={1}>
             <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="command" />
             {destructiveWarning && (
               <Box marginBottom={1}>
@@ -552,26 +546,35 @@ function BashPermissionRequestInner({
             </Text>
             <Select
               options={
-                feature('BASH_CLASSIFIER')
-                  ? toolUseConfirm.classifierAutoApproved
-                    ? options.map(o => ({ ...o, disabled: true }))
-                    : options
+                feature('BASH_CLASSIFIER') && toolUseConfirm.classifierAutoApproved
+                  ? options.map(o => ({ ...o, disabled: true }))
                   : options
               }
-              isDisabled={feature('BASH_CLASSIFIER') ? toolUseConfirm.classifierAutoApproved : false}
+              isDisabled={feature('BASH_CLASSIFIER') ? !!toolUseConfirm.classifierAutoApproved : false}
               inlineDescriptions
-              onChange={onSelect}
+              onChange={value => {
+                if (feature('BASH_CLASSIFIER') && toolUseConfirm.classifierAutoApproved) return;
+                onSelect(value);
+              }}
               onCancel={() => handleReject()}
               onFocus={handleFocus}
               onInputModeToggle={handleInputModeToggle}
             />
           </Box>
-          <Box justifyContent="space-between" marginTop={1}>
+          <Box justifyContent="space-between" marginTop={1} paddingX={1}>
             <Text dimColor>
-              Esc to reject
-              {((focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode)) &&
-                ' · Tab to add feedback'}
-              {explainerState.enabled && ` · ${explainerState.chord} to ${explainerState.visible ? 'hide' : 'explain'}`}
+              <Byline>
+                <KeyboardShortcutHint shortcut="escape" action="cancel" />
+                {(focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode) ? (
+                  <KeyboardShortcutHint shortcut="tab" action="amend" />
+                ) : null}
+                {explainerState.enabled ? (
+                  <KeyboardShortcutHint
+                    shortcut={explainerState.chord}
+                    action={explainerState.visible ? 'hide' : 'explain'}
+                  />
+                ) : null}
+              </Byline>
             </Text>
             {toolUseContext.options.debug && <Text dimColor>Ctrl+d to show debug info</Text>}
           </Box>

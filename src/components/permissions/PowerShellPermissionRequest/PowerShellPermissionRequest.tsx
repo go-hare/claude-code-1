@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.js';
 import {
@@ -177,7 +177,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
       case 'yes': {
         const trimmedFeedback = acceptFeedback.trim();
         logUnaryPermissionEvent('tool_use_single', toolUseConfirm, 'accept');
-        // Log accept submission with feedback context
         logEvent('tengu_accept_submitted', {
           toolName: toolNameForAnalytics,
           isMcp: toolUseConfirm.tool.isMcp ?? false,
@@ -191,7 +190,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
       }
       case 'yes-apply-suggestions': {
         logUnaryPermissionEvent('tool_use_single', toolUseConfirm, 'accept');
-        // Extract suggestions if present (works for both 'ask' and 'passthrough' behaviors)
         const permissionUpdates =
           'suggestions' in toolUseConfirm.permissionResult ? toolUseConfirm.permissionResult.suggestions || [] : [];
         toolUseConfirm.onAllow(toolUseConfirm.input, permissionUpdates);
@@ -200,8 +198,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
       }
       case 'no': {
         const trimmedFeedback = rejectFeedback.trim();
-
-        // Log reject submission with feedback context
         logEvent('tengu_reject_submitted', {
           toolName: toolNameForAnalytics,
           isMcp: toolUseConfirm.tool.isMcp ?? false,
@@ -209,8 +205,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
           instructions_length: trimmedFeedback.length,
           entered_feedback_mode: noFeedbackModeEntered,
         });
-
-        // Process rejection (with or without feedback)
         handleReject(trimmedFeedback || undefined);
         break;
       }
@@ -243,7 +237,7 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
         </>
       ) : (
         <>
-          <Box flexDirection="column">
+          <Box flexDirection="column" paddingX={1}>
             <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="command" />
             {destructiveWarning && (
               <Box marginBottom={1}>
@@ -260,12 +254,20 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
               onInputModeToggle={handleInputModeToggle}
             />
           </Box>
-          <Box justifyContent="space-between" marginTop={1}>
+          <Box justifyContent="space-between" marginTop={1} paddingX={1}>
             <Text dimColor>
-              Esc to cancel
-              {((focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode)) &&
-                ' · Tab to amend'}
-              {explainerState.enabled && ` · ${explainerState.chord} to ${explainerState.visible ? 'hide' : 'explain'}`}
+              <Byline>
+                <KeyboardShortcutHint shortcut="escape" action="cancel" />
+                {(focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode) ? (
+                  <KeyboardShortcutHint shortcut="tab" action="amend" />
+                ) : null}
+                {explainerState.enabled ? (
+                  <KeyboardShortcutHint
+                    shortcut={explainerState.chord}
+                    action={explainerState.visible ? 'hide' : 'explain'}
+                  />
+                ) : null}
+              </Byline>
             </Text>
             {toolUseContext.options.debug && <Text dimColor>Ctrl+d to show debug info</Text>}
           </Box>

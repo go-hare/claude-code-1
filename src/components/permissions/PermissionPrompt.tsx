@@ -47,7 +47,11 @@ export type PermissionPromptProps<T extends string> = {
   options: PermissionPromptOption<T>[];
   onSelect: (value: T, feedback?: string) => void;
   onCancel?: () => void;
-  question?: string | ReactNode;
+  /**
+   * densable o5 question. Host Cmy/tyy paint proceed + `$e` Select
+   * themselves (not this o5). `null` skips the default question.
+   */
+  question?: string | ReactNode | null;
   toolAnalyticsContext?: ToolAnalyticsContext;
   /** densable sVc `SYg` — measure the Select container for DAA maxLabelWidth. */
   selectRef?: Ref<DOMElement>;
@@ -346,7 +350,11 @@ export function PermissionPrompt<T extends string>({
 
   return (
     <Box flexDirection="column">
-      {typeof question === 'string' ? <Text dimColor={isDisabled}>{question}</Text> : question}
+      {question == null || question === '' ? null : typeof question === 'string' ? (
+        <Text dimColor={isDisabled}>{question}</Text>
+      ) : (
+        question
+      )}
       {selectRef ? (
         <Box ref={selectRef} width="100%">
           {select}

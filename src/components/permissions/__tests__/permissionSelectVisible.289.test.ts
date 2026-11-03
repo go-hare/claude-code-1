@@ -47,6 +47,10 @@ describe('Aa overflow clip on bash/powershell command preview', () => {
     )
     expect(src).toContain('<PermissionOverflowBox')
     expect(src).toContain('Do you want to proceed?')
+    expect(src).toContain('<Select')
+    expect(src).toContain('inlineDescriptions')
+    expect(src).not.toContain('PermissionPrompt')
+    expect(src.split('Do you want to proceed?').length - 1).toBe(1)
   })
 
   test('powershell Host wraps command preview in PermissionOverflowBox', () => {
@@ -55,6 +59,11 @@ describe('Aa overflow clip on bash/powershell command preview', () => {
       'utf8',
     )
     expect(src).toContain('<PermissionOverflowBox')
+    expect(src).toContain('Do you want to proceed?')
+    expect(src).toContain('<Select')
+    expect(src).toContain('inlineDescriptions')
+    expect(src).not.toContain('PermissionPrompt')
+    expect(src.split('Do you want to proceed?').length - 1).toBe(1)
   })
 
   test('leftover PowerShellPermissionRequest wraps command preview in PermissionOverflowBox', () => {
@@ -67,6 +76,23 @@ describe('Aa overflow clip on bash/powershell command preview', () => {
     )
     expect(src).toContain('<PermissionOverflowBox')
     expect(src).toContain('Do you want to proceed?')
+    expect(src).toContain('<Select')
+    expect(src).toContain('inlineDescriptions')
+    expect(src).not.toContain('PermissionPrompt')
+    expect(src.split('Do you want to proceed?').length - 1).toBe(1)
+  })
+
+  test('leftover BashPermissionRequest wraps command preview in PermissionOverflowBox', () => {
+    const src = readFileSync(
+      join(dir, '../BashPermissionRequest/BashPermissionRequest.tsx'),
+      'utf8',
+    )
+    expect(src).toContain('<PermissionOverflowBox')
+    expect(src).toContain('Do you want to proceed?')
+    expect(src).toContain('<Select')
+    expect(src).toContain('inlineDescriptions')
+    expect(src).not.toContain('PermissionPrompt')
+    expect(src.split('Do you want to proceed?').length - 1).toBe(1)
   })
 
   test('OverflowBox is gold Aa overflow:hidden only (no flexGrow/minHeight)', () => {

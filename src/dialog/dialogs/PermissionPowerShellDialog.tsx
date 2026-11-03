@@ -4,7 +4,8 @@
  * Gold 2.1.239: jsu `vM($no,tyy)`. Title `"PowerShell command"` (± unsandboxed).
  * Esc/onCancel → `{behavior:"deny"}`. lUA S3 + Z0s. EMs prefix is
  * Xxs(YAe seed, edited). Qgy async `YAe(\`${p} *\`)`. IOo + Mut
- * tab-amend footer. destructive GB. Host answer; no dequeue.
+ * tab-amend footer. Gold `$e` Select (not o5). destructive GB.
+ * Host answer; no dequeue.
  */
 import { getDestructiveCommandWarning } from '@claude-code/builtin-tools/tools/PowerShellTool/destructiveCommandWarning.js';
 import { isAllowlistedCommand } from '@claude-code/builtin-tools/tools/PowerShellTool/readOnlyValidation.js';
@@ -17,13 +18,14 @@ import {
   PermissionExplainerContent,
   usePermissionExplainerUI,
 } from '../../components/permissions/PermissionExplanation.js';
-import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
+import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { getCompoundCommandPrefixesStatic } from '../../utils/powershell/staticPrefix.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import { sanitizeEditablePrefix } from '../consentRow.js';
+import { usePermissionSelectFeedback } from '../permissionSelectFeedback.js';
 import {
   buildPowerShellSuggestionsRow,
   POWERSHELL_PREFIX_PLACEHOLDER,
@@ -55,7 +57,22 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
   const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
     ? getDestructiveCommandWarning(command)
     : null;
-  const [showAmendHint, setShowAmendHint] = useState(false);
+  const {
+    acceptFeedback,
+    rejectFeedback,
+    setAcceptFeedback,
+    setRejectFeedback,
+    yesInputMode,
+    noInputMode,
+    showAmendHint,
+    handleInputModeToggle,
+    handleFocus,
+    logSubmitted,
+    logEscape,
+  } = usePermissionSelectFeedback({
+    toolName: p.toolName,
+    isMcp: p.isMcp === true,
+  });
   const [editablePrefix, setEditablePrefix] = useState<string | undefined>(() => seedPowerShellEditablePrefix(p));
   const prefixSeedRef = useRef<string | undefined>(undefined);
   const seedPaintedRef = useRef(false);
@@ -86,25 +103,34 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
     };
   }, [command]);
 
-  const options: PermissionPromptOption<PowerShellPermissionChoice>[] = [
-    { label: 'Yes', value: 'yes', feedbackConfig: { type: 'accept' } },
-  ];
+  const options: OptionWithDescription<PowerShellPermissionChoice>[] = [];
+  if (yesInputMode) {
+    options.push({
+      type: 'input',
+      label: 'Yes',
+      value: 'yes',
+      placeholder: 'and tell Claude what to do next',
+      onChange: setAcceptFeedback,
+      allowEmptySubmitToCancel: true,
+    });
+  } else {
+    options.push({ label: 'Yes', value: 'yes' });
+  }
   if (row !== null) {
     const suggestions = row.applies;
     const canEditPrefix = editablePrefix !== undefined && !powerShellSuggestionsHaveNonShell(suggestions);
     if (canEditPrefix) {
       options.push({
+        type: 'input',
         label: 'Yes, and don’t ask again for',
         value: 'yes-prefix-edited',
-        inputConfig: {
-          placeholder: POWERSHELL_PREFIX_PLACEHOLDER,
-          initialValue: editablePrefix,
-          onChange: onEditablePrefixChange,
-          allowEmptySubmitToCancel: true,
-          showLabelWithValue: true,
-          labelValueSeparator: ': ',
-          resetCursorOnUpdate: true,
-        },
+        placeholder: POWERSHELL_PREFIX_PLACEHOLDER,
+        initialValue: editablePrefix,
+        onChange: onEditablePrefixChange,
+        allowEmptySubmitToCancel: true,
+        showLabelWithValue: true,
+        labelValueSeparator: ': ',
+        resetCursorOnUpdate: true,
       });
     } else {
       options.push({
@@ -113,11 +139,18 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
       });
     }
   }
-  options.push({
-    label: 'No',
-    value: 'no',
-    feedbackConfig: { type: 'reject' },
-  });
+  if (noInputMode) {
+    options.push({
+      type: 'input',
+      label: 'No',
+      value: 'no',
+      placeholder: 'and tell Claude what to do differently',
+      onChange: setRejectFeedback,
+      allowEmptySubmitToCancel: true,
+    });
+  } else {
+    options.push({ label: 'No', value: 'no' });
+  }
 
   return (
     <PermissionDialog title={powerShellCommandTitle(p)} requestSource={p.requestSource} innerPaddingX={0}>
@@ -138,7 +171,7 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
         </PermissionPreviewGutter>
       </PermissionOverflowBox>
       <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={1}>
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="command" />
         {destructiveWarning ? (
           <Box marginBottom={1}>
@@ -146,29 +179,48 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
           </Box>
         ) : null}
         <Text>Do you want to proceed?</Text>
-        <PermissionPrompt
-          hostChrome
-          onAmendHintChange={setShowAmendHint}
+        <Select
           options={options}
-          onSelect={(choice, feedback) => {
+          inlineDescriptions
+          onChange={choice => {
+            if (choice === 'yes') {
+              const feedback = acceptFeedback.trim();
+              logSubmitted('accept', feedback);
+              answer(
+                resolvePowerShellPermissionAnswer(choice, p, row, {
+                  feedback: feedback || undefined,
+                  editablePrefix,
+                  editablePrefixSeed: prefixSeedRef.current,
+                }),
+              );
+              return;
+            }
+            if (choice === 'no') {
+              const feedback = rejectFeedback.trim();
+              logSubmitted('reject', feedback);
+              answer(
+                resolvePowerShellPermissionAnswer(choice, p, row, {
+                  feedback: feedback || undefined,
+                }),
+              );
+              return;
+            }
             answer(
               resolvePowerShellPermissionAnswer(choice, p, row, {
-                feedback,
                 editablePrefix,
                 editablePrefixSeed: prefixSeedRef.current,
               }),
             );
           }}
           onCancel={() => {
+            logEscape();
             answer({ behavior: 'deny' });
           }}
-          toolAnalyticsContext={{
-            toolName: p.toolName,
-            isMcp: p.isMcp === true,
-          }}
+          onFocus={handleFocus}
+          onInputModeToggle={handleInputModeToggle}
         />
       </Box>
-      <Box justifyContent="space-between" marginTop={1}>
+      <Box justifyContent="space-between" marginTop={1} paddingX={1}>
         <Text dimColor>
           <Byline>
             <KeyboardShortcutHint shortcut="escape" action="cancel" />

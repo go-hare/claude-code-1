@@ -4,8 +4,8 @@
  * Gold 2.1.239: jsu `vM(Byr,Cmy)`. Title `"Bash command"` (± unsandboxed).
  * Esc/onCancel → `{behavior:"deny"}`. jNA S3 + Z0s label. $Oo prefix is
  * Xxs(YAe seed, edited). Qgy async seed `YAe(\`${p} *\`)`. IOo +
- * Mut tab-amend footer. destructive GB. m0n workflow auto-mode.
- * Host answer; no dequeue.
+ * Mut tab-amend footer. Gold `$e` Select (not o5). destructive GB.
+ * m0n workflow auto-mode. Host answer; no dequeue.
  */
 import { getDestructiveCommandWarning } from '@claude-code/builtin-tools/tools/BashTool/destructiveCommandWarning.js';
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js';
@@ -19,13 +19,14 @@ import {
   PermissionExplainerContent,
   usePermissionExplainerUI,
 } from '../../components/permissions/PermissionExplanation.js';
-import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
+import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { getCompoundCommandPrefixesStatic } from '../../utils/bash/prefix.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import { sanitizeEditablePrefix } from '../consentRow.js';
+import { usePermissionSelectFeedback } from '../permissionSelectFeedback.js';
 import {
   BASH_PREFIX_PLACEHOLDER,
   bashCommandPreview,
@@ -81,7 +82,22 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
   const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
     ? getDestructiveCommandWarning(command)
     : null;
-  const [showAmendHint, setShowAmendHint] = useState(false);
+  const {
+    acceptFeedback,
+    rejectFeedback,
+    setAcceptFeedback,
+    setRejectFeedback,
+    yesInputMode,
+    noInputMode,
+    showAmendHint,
+    handleInputModeToggle,
+    handleFocus,
+    logSubmitted,
+    logEscape,
+  } = usePermissionSelectFeedback({
+    toolName: p.toolName,
+    isMcp: p.isMcp === true,
+  });
   const [editablePrefix, setEditablePrefix] = useState<string | undefined>(() => seedBashEditablePrefix(p));
   const prefixSeedRef = useRef<string | undefined>(undefined);
   const seedPaintedRef = useRef(false);
@@ -126,26 +142,35 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
     <Text dimColor>Attempting to auto-approve{'\u2026'}</Text>
   ) : undefined;
 
-  const options: PermissionPromptOption<BashPermissionChoice>[] = [
-    { label: 'Yes', value: 'yes', feedbackConfig: { type: 'accept' } },
-  ];
+  const options: OptionWithDescription<BashPermissionChoice>[] = [];
+  if (yesInputMode) {
+    options.push({
+      type: 'input',
+      label: 'Yes',
+      value: 'yes',
+      placeholder: 'and tell Claude what to do next',
+      onChange: setAcceptFeedback,
+      allowEmptySubmitToCancel: true,
+    });
+  } else {
+    options.push({ label: 'Yes', value: 'yes' });
+  }
   if (row !== null) {
     const suggestions = row.applies;
     const canEditPrefix =
       editablePrefix !== undefined && !bashSuggestionsHaveNonBash(suggestions) && suggestions.length > 0;
     if (canEditPrefix) {
       options.push({
+        type: 'input',
         label: 'Yes, and don’t ask again for',
         value: 'yes-prefix-edited',
-        inputConfig: {
-          placeholder: BASH_PREFIX_PLACEHOLDER,
-          initialValue: editablePrefix,
-          onChange: onEditablePrefixChange,
-          allowEmptySubmitToCancel: true,
-          showLabelWithValue: true,
-          labelValueSeparator: ': ',
-          resetCursorOnUpdate: true,
-        },
+        placeholder: BASH_PREFIX_PLACEHOLDER,
+        initialValue: editablePrefix,
+        onChange: onEditablePrefixChange,
+        allowEmptySubmitToCancel: true,
+        showLabelWithValue: true,
+        labelValueSeparator: ': ',
+        resetCursorOnUpdate: true,
       });
     } else {
       options.push({
@@ -157,11 +182,18 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
   if (autoModeRow !== null) {
     options.push(autoModeRow);
   }
-  options.push({
-    label: 'No',
-    value: 'no',
-    feedbackConfig: { type: 'reject' },
-  });
+  if (noInputMode) {
+    options.push({
+      type: 'input',
+      label: 'No',
+      value: 'no',
+      placeholder: 'and tell Claude what to do differently',
+      onChange: setRejectFeedback,
+      allowEmptySubmitToCancel: true,
+    });
+  } else {
+    options.push({ label: 'No', value: 'no' });
+  }
 
   return (
     <PermissionDialog
@@ -187,7 +219,7 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
         </PermissionPreviewGutter>
       </PermissionOverflowBox>
       <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={1}>
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="command" />
         {destructiveWarning ? (
           <Box marginBottom={1}>
@@ -197,19 +229,39 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
           </Box>
         ) : null}
         <Text dimColor={classifierApproved}>Do you want to proceed?</Text>
-        <PermissionPrompt
-          hostChrome
-          isDisabled={classifierApproved}
-          onAmendHintChange={setShowAmendHint}
+        <Select
           options={options}
-          onSelect={(choice, feedback) => {
+          inlineDescriptions
+          isDisabled={classifierApproved}
+          onChange={choice => {
             if (classifierApproved) return;
             if (choice === 'yes-enable-auto-mode') {
               enableAutoMode(offered ? WORKFLOW_PERMISSION_PROMPT_TRIGGER : BASH_PERMISSION_PROMPT_UPSELL_TRIGGER);
             }
+            if (choice === 'yes') {
+              const feedback = acceptFeedback.trim();
+              logSubmitted('accept', feedback);
+              answer(
+                resolveBashPermissionAnswer(choice, p, row, {
+                  feedback: feedback || undefined,
+                  editablePrefix,
+                  editablePrefixSeed: prefixSeedRef.current,
+                }),
+              );
+              return;
+            }
+            if (choice === 'no') {
+              const feedback = rejectFeedback.trim();
+              logSubmitted('reject', feedback);
+              answer(
+                resolveBashPermissionAnswer(choice, p, row, {
+                  feedback: feedback || undefined,
+                }),
+              );
+              return;
+            }
             answer(
               resolveBashPermissionAnswer(choice, p, row, {
-                feedback,
                 editablePrefix,
                 editablePrefixSeed: prefixSeedRef.current,
               }),
@@ -217,15 +269,14 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
           }}
           onCancel={() => {
             if (classifierApproved) return;
+            logEscape();
             answer({ behavior: 'deny' });
           }}
-          toolAnalyticsContext={{
-            toolName: p.toolName,
-            isMcp: p.isMcp === true,
-          }}
+          onFocus={handleFocus}
+          onInputModeToggle={handleInputModeToggle}
         />
       </Box>
-      <Box justifyContent="space-between" marginTop={1}>
+      <Box justifyContent="space-between" marginTop={1} paddingX={1}>
         <Text dimColor>
           <Byline>
             <KeyboardShortcutHint shortcut="escape" action="cancel" />
