@@ -18,6 +18,14 @@ export type OpenDialogEntry = {
   payload: unknown
   queueBehind?: boolean
   swappedAt?: number
+  /** densable place — "under" prepends below engine stack. */
+  place?: 'under' | 'queue'
+  /** densable holdsTop — engine top keeps the stack unless succeeds. */
+  holdsTop?: boolean
+  /** densable userInvoked — slash/local_jsx vs engine. */
+  userInvoked?: boolean
+  /** densable succeeds — wne may steal holdsTop. */
+  succeeds?: boolean
 }
 
 export type DialogStoreState = {
@@ -54,6 +62,24 @@ function removeOpenEntry(store: Store<DialogStoreState>, id: string): boolean {
   return removed
 }
 
+/** densable WO — last engine (non-userInvoked) dialog. */
+function leftoverEngineTop(
+  open: readonly OpenDialogEntry[],
+): OpenDialogEntry | undefined {
+  for (let i = open.length - 1; i >= 0; i--) {
+    if (open[i]!.userInvoked !== true) return open[i]
+  }
+  return undefined
+}
+
+/** densable m — same userInvoked bucket. */
+function leftoverSameDialogBucket(
+  a: OpenDialogEntry,
+  b: OpenDialogEntry,
+): boolean {
+  return (a.userInvoked === true) === (b.userInvoked === true)
+}
+
 /** densable bGl */
 export function createDialogStore(): DialogStore {
   const store = createStore<DialogStoreState>({ open: [] })
@@ -65,6 +91,15 @@ export function createDialogStore(): DialogStore {
     onClosed: closed.subscribe,
     open(entry) {
       store.setState(state => {
+        const engineTop = leftoverEngineTop(state.open)
+        const holdsTopBlock =
+          engineTop?.holdsTop === true &&
+          leftoverSameDialogBucket(engineTop, entry) &&
+          entry.succeeds !== true
+        const hasEngine = state.open.some(open => open.userInvoked !== true)
+        if ((entry.place === 'under' || holdsTopBlock) && hasEngine) {
+          return { open: [entry, ...state.open] }
+        }
         if (entry.queueBehind && state.open.length > 0) {
           return { open: [entry, ...state.open] }
         }

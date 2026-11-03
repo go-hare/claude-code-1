@@ -16,6 +16,10 @@ export const IDE_ONBOARDING_KIND = 'ide_onboarding' as const
 export const SANDBOX_NETWORK_ACCESS_KIND = 'sandbox_network_access' as const
 export const AUTO_DEFAULT_NUDGE_KIND = 'auto_default_nudge' as const
 export const MCP_URL_ELICITATION_KIND = 'mcp_url_elicitation' as const
+/** densable W7 */
+export const MCP_ELICITATION_KIND = 'mcp_elicitation' as const
+/** densable wne */
+export const MCP_ELICITATION_WAITING_KIND = 'mcp_elicitation_waiting' as const
 export const REFUSAL_FALLBACK_PROMPT_KIND = 'refusal_fallback_prompt' as const
 export const FABLE_OVERAGE_CONSENT_PROMPT_KIND =
   'fable_overage_consent_prompt' as const
@@ -36,6 +40,8 @@ export const NON_PERMISSION_DIALOG_KINDS = [
   SANDBOX_NETWORK_ACCESS_KIND,
   AUTO_DEFAULT_NUDGE_KIND,
   MCP_URL_ELICITATION_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
@@ -141,12 +147,29 @@ export const autoDefaultNudgeSpec = defineDialogSpec({
   default: 'cancelled' as const,
 })
 
-/** densable Gbt */
+/** densable Gbt / $7 */
 export const mcpUrlElicitationSpec = defineDialogSpec({
   kind: MCP_URL_ELICITATION_KIND,
   payload: passthrough,
   result: () => z.unknown(),
   default: { action: 'cancel' as const },
+})
+
+/** densable W7 — elicitation/create Host (form + url). */
+export const mcpElicitationSpec = defineDialogSpec({
+  kind: MCP_ELICITATION_KIND,
+  payload: passthrough,
+  result: () => z.unknown(),
+  default: { action: 'cancel' as const },
+  holdsTop: true,
+})
+
+/** densable wne — URL waiting after W7 accept. */
+export const mcpElicitationWaitingSpec = defineDialogSpec({
+  kind: MCP_ELICITATION_WAITING_KIND,
+  payload: passthrough,
+  result: () => z.enum(['dismiss', 'retry', 'cancel', 'cancelled']),
+  default: 'cancelled' as const,
 })
 
 /** densable $ne */

@@ -1217,8 +1217,8 @@ function ElicitationURLDialog({
   const href = hrefForOpen(url);
   const exact = isExactShowableUrl(url, href);
   const oneClick = canOneClickOpen(href, exact);
-  const [phase, setPhase] = useState<'prompt' | 'waiting'>('prompt');
-  const phaseRef = useRef<'prompt' | 'waiting'>('prompt');
+  const [phase, setPhase] = useState<'prompt' | 'waiting'>(event.startWaiting === true ? 'waiting' : 'prompt');
+  const phaseRef = useRef<'prompt' | 'waiting'>(event.startWaiting === true ? 'waiting' : 'prompt');
   const showCancel = waitingState?.showCancel ?? false;
 
   useNotifyAfterTimeout('Claude Code needs your input', 'elicitation_url_dialog');

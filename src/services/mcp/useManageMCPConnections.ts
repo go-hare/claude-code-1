@@ -94,7 +94,10 @@ import {
   clearClaudeAIMcpConfigsCache,
   fetchClaudeAIMcpConfigsIfEligible,
 } from './claudeai.js'
-import { DialogStoreContext } from '../../dialog/DialogStoreContext.js'
+import {
+  DialogStoreContext,
+  RequestDialogContext,
+} from '../../dialog/DialogStoreContext.js'
 import { registerElicitationHandler } from './elicitationHandler.js'
 import { getMcpPrefix } from './mcpStringUtils.js'
 import { commandBelongsToServer, excludeStalePluginClients } from './utils.js'
@@ -168,6 +171,7 @@ export function useManageMCPConnections(
   const _pluginReconnectKey = useAppState(s => s.mcp.pluginReconnectKey)
   const setAppState = useSetAppState()
   const dialogStore = useContext(DialogStoreContext)
+  const requestDialog = useContext(RequestDialogContext)
 
   // Track active reconnection attempts to allow cancellation
   const reconnectTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
@@ -400,15 +404,14 @@ export function useManageMCPConnections(
       // Handle side effects based on client state
       switch (client.type) {
         case 'connected': {
-          // Overwrite the default elicitation handler registered in connectToServer
-          // with the real one (queues elicitation in AppState for UI). Registering
-          // here (once per connect) instead of in a [mcpClients] effect avoids
-          // re-running for every already-connected server on each state change.
+          // Overwrite the default elicitation handler registered in connectToServer.
+          // Gold pct: requestDialog(W7) Host; Be.queue only when mailbox is absent.
           registerElicitationHandler(
             client.client,
             client.name,
             setAppState,
             dialogStore,
+            requestDialog as Parameters<typeof registerElicitationHandler>[4],
           )
 
           client.client.onclose = () => {
@@ -993,7 +996,7 @@ export function useManageMCPConnections(
           break
       }
     },
-    [updateServer],
+    [updateServer, dialogStore, requestDialog, setAppState],
   )
 
   // Initialize all servers to pending state if they don't exist in appState.

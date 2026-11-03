@@ -410,7 +410,12 @@ export type ToolUseContext = {
       }
     },
     payload: unknown,
-    options?: { signal?: AbortSignal; queueBehind?: boolean },
+    options?: {
+      signal?: AbortSignal
+      queueBehind?: boolean
+      place?: 'under' | 'queue'
+      succeeds?: boolean
+    },
   ) => Promise<unknown>
   /**
    * densable Iby — Chrome install mounts claude-in-chrome MCP.

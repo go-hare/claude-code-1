@@ -4,9 +4,13 @@
 import React, { createContext, useContext, useSyncExternalStore } from 'react';
 import { createDialogStore, type DialogStore, type OpenDialogEntry } from './dialogStore.js';
 import { nhtHidesPromptInput } from './nhtPrompt.js';
+import type { RequestDialog } from './requestDialog.js';
 import { isSoftNmsDialogKind } from './specs/jsuKinds.js';
 
 export const DialogStoreContext = createContext<DialogStore | null>(null);
+
+/** densable pct deps.requestDialog — REPL mailbox, not AppState. */
+export const RequestDialogContext = createContext<RequestDialog | null>(null);
 
 type Props = {
   children: React.ReactNode;

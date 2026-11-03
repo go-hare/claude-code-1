@@ -37,6 +37,8 @@ import {
   GOAL_PROPOSAL_KIND,
   IDE_ONBOARDING_KIND,
   IT2_SETUP_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
   MCP_URL_ELICITATION_KIND,
   PEER_INBOUND_APPROVAL_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
@@ -143,44 +145,130 @@ const it2SetupRenderer: DialogRenderer = ({ payload, answer }) => {
   return <It2SetupPrompt tmuxAvailable={p.tmuxAvailable === true} onDone={result => answer(result)} />;
 };
 
-/** densable g2A / Gbt */
-function McpUrlElicitationRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
+type LeftoverMcpElicitationParams = {
+  message?: string;
+  mode?: 'form' | 'url';
+  url?: string;
+  elicitationId?: string;
+};
+
+function leftoverMcpElicitationEvent(
+  payload: unknown,
+  signal: AbortSignal,
+  waitingState: { actionLabel: string; showCancel?: boolean } | undefined,
+  startWaiting: boolean,
+): {
+  params: LeftoverMcpElicitationParams;
+  userConfirmsCompletion: boolean;
+  event: {
+    serverName: string;
+    requestId: string;
+    params: never;
+    signal: AbortSignal;
+    waitingState: { actionLabel: string; showCancel?: boolean } | undefined;
+    startWaiting: boolean;
+    respond: () => void;
+  };
+} | null {
   const p = payload as {
     serverName?: string;
-    params?: {
-      message?: string;
-      mode?: 'form' | 'url';
-      url?: string;
-      elicitationId?: string;
-    };
+    params?: LeftoverMcpElicitationParams;
+    waitingState?: { actionLabel?: string; showCancel?: boolean };
+    userConfirmsCompletion?: boolean;
   };
-  const signal = useMemo(() => new AbortController().signal, []);
+  if (!p?.serverName || !p.params) return null;
+  const elicitationId = p.params.elicitationId ?? 'dialog';
+  const fromPayload =
+    p.waitingState && typeof p.waitingState.actionLabel === 'string'
+      ? {
+          actionLabel: p.waitingState.actionLabel,
+          ...(p.waitingState.showCancel !== undefined ? { showCancel: p.waitingState.showCancel } : {}),
+        }
+      : undefined;
+  return {
+    params: p.params,
+    userConfirmsCompletion: p.userConfirmsCompletion === true,
+    event: {
+      serverName: p.serverName,
+      requestId: `dialog-${elicitationId}`,
+      params: p.params as never,
+      signal,
+      waitingState: fromPayload ?? waitingState,
+      startWaiting,
+      respond: () => {},
+    },
+  };
+}
 
-  if (!p?.serverName || !p.params) {
+/** densable g2A / $7 — URL retry in one Host (userConfirmsCompletion). */
+function McpUrlElicitationRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
+  const signal = useMemo(() => new AbortController().signal, []);
+  const built = leftoverMcpElicitationEvent(payload, signal, { actionLabel: 'Retry now', showCancel: true }, false);
+  if (!built) {
     answer({ action: 'cancel' });
     return null;
   }
 
-  const elicitationId = p.params.elicitationId ?? 'dialog';
-  const event = {
-    serverName: p.serverName,
-    requestId: `dialog-${elicitationId}`,
-    params: p.params as never,
-    signal,
-    waitingState: { actionLabel: 'Retry now', showCancel: true },
-    respond: () => {},
-  };
-
   return (
     <ElicitationDialog
-      event={event}
+      event={built.event}
       onResponse={(action, content) => {
-        if (action === 'accept' && p.params?.mode === 'url') return;
+        if (action === 'accept' && built.params.mode === 'url') return;
         answer({ action, content });
       }}
       onWaitingDismiss={action => {
         if (action === 'cancel') answer({ action: 'cancel' });
         if (action === 'retry') answer({ action: 'accept' });
+      }}
+    />
+  );
+}
+
+/** densable W7 — elicitation/create Host. Waiting is wne, not this dialog. */
+function leftoverMcpElicitationRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
+  const signal = useMemo(() => new AbortController().signal, []);
+  const built = leftoverMcpElicitationEvent(payload, signal, undefined, false);
+  if (!built) {
+    answer({ action: 'cancel' });
+    return null;
+  }
+
+  return (
+    <ElicitationDialog
+      event={built.event}
+      onResponse={(action, content) => {
+        if (action === 'accept' && built.params.mode === 'url' && built.userConfirmsCompletion) return;
+        answer({ action, content });
+      }}
+      onWaitingDismiss={action => {
+        if (built.userConfirmsCompletion) {
+          if (action === 'cancel') answer({ action: 'cancel' });
+          if (action === 'retry') answer({ action: 'accept' });
+          return;
+        }
+        if (action === 'cancel') answer({ action: 'cancel' });
+      }}
+    />
+  );
+}
+
+/** densable wne — URL waiting after W7 accept. */
+function leftoverMcpElicitationWaitingRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
+  const signal = useMemo(() => new AbortController().signal, []);
+  const built = leftoverMcpElicitationEvent(payload, signal, { actionLabel: 'Skip confirmation' }, true);
+  if (!built) {
+    answer('cancelled');
+    return null;
+  }
+
+  return (
+    <ElicitationDialog
+      event={built.event}
+      onResponse={(action, content) => {
+        answer({ action, content });
+      }}
+      onWaitingDismiss={action => {
+        answer(action);
       }}
     />
   );
@@ -269,6 +357,8 @@ export const JSU_NON_PERMISSION_COMPONENTS: Record<string, DialogRenderer> = {
   [COMPUTER_USE_APPROVAL_KIND]: computerUseRenderer,
   [AUTO_DEFAULT_NUDGE_KIND]: autoDefaultNudgeRenderer,
   [MCP_URL_ELICITATION_KIND]: McpUrlElicitationRenderer,
+  [MCP_ELICITATION_KIND]: leftoverMcpElicitationRenderer,
+  [MCP_ELICITATION_WAITING_KIND]: leftoverMcpElicitationWaitingRenderer,
   [REFUSAL_FALLBACK_PROMPT_KIND]: refusalFallbackRenderer,
   [FABLE_OVERAGE_CONSENT_PROMPT_KIND]: fableOverageRenderer,
   [GOAL_PROPOSAL_KIND]: goalProposalRenderer,

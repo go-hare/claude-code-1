@@ -1,6 +1,11 @@
 import type { Client } from '@modelcontextprotocol/client'
 import type { DialogStore } from '../../dialog/dialogStore.js'
 import { answerMcpUrlElicitationComplete } from '../../dialog/mcpUrlElicitationComplete.js'
+import type { RequestDialog } from '../../dialog/requestDialog.js'
+import {
+  mcpElicitationSpec,
+  mcpElicitationWaitingSpec,
+} from '../../dialog/specs/jsuKinds.js'
 import type { ElicitRequestParams, ElicitResult } from './types.js'
 import type { AppState } from '../../state/AppState.js'
 import {
@@ -41,10 +46,201 @@ export type ElicitationRequestEvent = {
   onWaitingDismiss?: (action: 'dismiss' | 'retry' | 'cancel') => void
   /** Set to true by the completion notification handler when the server confirms completion. */
   completed?: boolean
+  /** densable wne — start URL dialog in waiting phase. */
+  startWaiting?: boolean
 }
 
 function getElicitationMode(params: ElicitRequestParams): 'form' | 'url' {
   return params.mode === 'url' ? 'url' : 'form'
+}
+
+function leftoverHasCompletionChannel(client: Client): boolean {
+  const era = (client as { getProtocolEra?: () => string }).getProtocolEra?.()
+  return era !== 'modern'
+}
+
+type LeftoverMcpElicitationFlow = {
+  completed: boolean
+  closeWaiting?: () => void
+}
+
+type LeftoverMcpElicitationDeps = {
+  serverName: string
+  requestDialog: RequestDialog
+}
+
+type LeftoverMcpElicitationHost = {
+  rebind: (deps: LeftoverMcpElicitationDeps) => void
+  handle: (
+    request: { params: ElicitRequestParams },
+    extra: { signal: AbortSignal },
+  ) => Promise<ElicitResult>
+  complete: (elicitationId: string) => boolean
+}
+
+const leftoverMcpElicitationHosts = new WeakMap<
+  Client,
+  LeftoverMcpElicitationHost
+>()
+
+function leftoverBindMcpElicitationHost(
+  client: Client,
+  deps: LeftoverMcpElicitationDeps,
+): LeftoverMcpElicitationHost {
+  const existing = leftoverMcpElicitationHosts.get(client)
+  if (existing) {
+    existing.rebind(deps)
+    return existing
+  }
+  let bound = deps
+  const urlFlows = new Map<string, Set<LeftoverMcpElicitationFlow>>()
+  const forget = (
+    id: string | undefined,
+    flow: LeftoverMcpElicitationFlow | undefined,
+  ) => {
+    if (id === undefined || flow === undefined) return
+    const set = urlFlows.get(id)
+    if (!set) return
+    set.delete(flow)
+    if (set.size === 0) urlFlows.delete(id)
+  }
+  const host: LeftoverMcpElicitationHost = {
+    rebind(next) {
+      bound = next
+    },
+    complete(elicitationId) {
+      const set = urlFlows.get(elicitationId)
+      if (!set || set.size === 0) return false
+      for (const flow of set) {
+        flow.completed = true
+        flow.closeWaiting?.()
+      }
+      return true
+    },
+    async handle(request, extra) {
+      const { signal } = extra
+      const { serverName, requestDialog } = bound
+      const params = request.params
+      const mode = getElicitationMode(params)
+      logMCPDebug(
+        serverName,
+        `Received elicitation request: ${jsonStringify(request)}`,
+      )
+      logEvent('tengu_mcp_elicitation_shown', {
+        mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      try {
+        const hookResponse = await runElicitationHooks(
+          serverName,
+          params,
+          signal,
+        )
+        if (hookResponse) {
+          logMCPDebug(
+            serverName,
+            `Elicitation resolved by hook: ${jsonStringify(hookResponse)}`,
+          )
+          logEvent('tengu_mcp_elicitation_response', {
+            mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            action:
+              hookResponse.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            byHook: true,
+          })
+          return hookResponse
+        }
+        const rawElicitationId = (params as { elicitationId?: unknown })
+          .elicitationId
+        const elicitationId =
+          params.mode === 'url' &&
+          leftoverHasCompletionChannel(client) &&
+          typeof rawElicitationId === 'string'
+            ? rawElicitationId
+            : undefined
+        if (signal.aborted) return { action: 'cancel' }
+        let flow: LeftoverMcpElicitationFlow | undefined
+        if (elicitationId !== undefined) {
+          flow = { completed: false }
+          const set = urlFlows.get(elicitationId)
+          if (set) set.add(flow)
+          else urlFlows.set(elicitationId, new Set([flow]))
+        }
+        const result = (await requestDialog(
+          mcpElicitationSpec,
+          {
+            serverName,
+            params,
+            ...(params.mode === 'url' &&
+              elicitationId === undefined && { userConfirmsCompletion: true }),
+          },
+          { signal, place: 'under' },
+        )) as ElicitResult
+        if (!signal.aborted) {
+          logEvent('tengu_mcp_elicitation_response', {
+            mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            action:
+              result.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        }
+        if (params.mode === 'url' && result.action === 'accept' && flow) {
+          if (flow.completed) forget(elicitationId, flow)
+          else {
+            const waitingAbort = new AbortController()
+            flow.closeWaiting = () => waitingAbort.abort()
+            try {
+              await requestDialog(
+                mcpElicitationWaitingSpec,
+                {
+                  serverName,
+                  params,
+                  waitingState: { actionLabel: 'Skip confirmation' },
+                },
+                {
+                  signal: AbortSignal.any([waitingAbort.signal, signal]),
+                  succeeds: true,
+                },
+              )
+            } finally {
+              forget(elicitationId, flow)
+            }
+          }
+        } else {
+          forget(elicitationId, flow)
+        }
+        logMCPDebug(
+          serverName,
+          `Elicitation response: ${jsonStringify(result)}`,
+        )
+        const hooked = await runElicitationResultHooks(
+          serverName,
+          result,
+          signal,
+          mode,
+          elicitationId,
+        )
+        if (hooked.action !== result.action) {
+          logEvent('tengu_mcp_elicitation_result_hook', {
+            mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            action:
+              hooked.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+        }
+        if (
+          params.mode === 'url' &&
+          result.action === 'accept' &&
+          hooked.action !== 'accept'
+        ) {
+          flow?.closeWaiting?.()
+          forget(elicitationId, flow)
+        }
+        return hooked
+      } catch (error) {
+        logMCPError(serverName, `Elicitation error: ${error}`)
+        return { action: 'cancel' as const }
+      }
+    },
+  }
+  leftoverMcpElicitationHosts.set(client, host)
+  return host
 }
 
 /** Find a queued elicitation event by server name and elicitationId. */
@@ -67,11 +263,61 @@ export function registerElicitationHandler(
   serverName: string,
   setAppState: (f: (prevState: AppState) => AppState) => void,
   dialogStore?: DialogStore | null,
+  requestDialog?: RequestDialog | null,
 ): void {
   // Register the elicitation request handler.
   // Wrapped in try/catch because setRequestHandler throws if the client wasn't
   // created with elicitation capability declared.
   try {
+    if (requestDialog) {
+      const leftoverHost = leftoverBindMcpElicitationHost(client, {
+        serverName,
+        requestDialog,
+      })
+      client.setRequestHandler('elicitation/create', async (request, ctx) =>
+        leftoverHost.handle(request, { signal: ctx.mcpReq.signal }),
+      )
+      client.setNotificationHandler(
+        'notifications/elicitation/complete',
+        notification => {
+          const params = (
+            notification as { params?: { elicitationId?: string } }
+          ).params
+          const elicitationId = params?.elicitationId
+          if (typeof elicitationId !== 'string') {
+            logMCPDebug(
+              serverName,
+              `Ignoring elicitation completion notification without elicitationId`,
+            )
+            return
+          }
+          logMCPDebug(
+            serverName,
+            `Received elicitation completion notification: ${elicitationId}`,
+          )
+          void executeNotificationHooks({
+            message: `MCP server "${serverName}" confirmed elicitation ${elicitationId} complete`,
+            notificationType: 'elicitation_complete',
+          })
+          if (leftoverHost.complete(elicitationId)) return
+          if (
+            dialogStore &&
+            answerMcpUrlElicitationComplete(
+              dialogStore,
+              serverName,
+              elicitationId,
+            )
+          ) {
+            return
+          }
+          logMCPDebug(
+            serverName,
+            `Ignoring completion notification for unknown elicitation: ${elicitationId}`,
+          )
+        },
+      )
+      return
+    }
     // densable: setRequestHandler("elicitation/create", ...)
     // v2 BaseContext: signal/id live on ctx.mcpReq (not top-level extra).
     client.setRequestHandler('elicitation/create', async (request, ctx) => {

@@ -61,6 +61,10 @@ describe('resolveHostWaitingFor (densable y2A)', () => {
     expect(resolveHostWaitingFor('mcp_url_elicitation', {})).toBe(
       'input needed',
     )
+    expect(resolveHostWaitingFor('mcp_elicitation', {})).toBe('input needed')
+    expect(resolveHostWaitingFor('mcp_elicitation_waiting', {})).toBe(
+      'input needed',
+    )
   })
 
   test('soft NMs → dialog open; GSn kind is product-cut', () => {

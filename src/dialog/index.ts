@@ -19,6 +19,7 @@ export {
 } from './requestDialog.js'
 export {
   DialogStoreContext,
+  RequestDialogContext,
   DialogStoreProvider,
   useDialogStore,
   useTopDialog,
@@ -113,6 +114,8 @@ export {
   SANDBOX_NETWORK_ACCESS_KIND,
   AUTO_DEFAULT_NUDGE_KIND,
   MCP_URL_ELICITATION_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
@@ -132,6 +135,9 @@ export {
   peerInboundApprovalSpec,
   autoDefaultNudgeSpec,
   sandboxNetworkAccessSpec,
+  mcpUrlElicitationSpec,
+  mcpElicitationSpec,
+  mcpElicitationWaitingSpec,
   chromeInstallSetupSpec,
   chromeInstallUpsellSpec,
 } from './specs/jsuKinds.js'

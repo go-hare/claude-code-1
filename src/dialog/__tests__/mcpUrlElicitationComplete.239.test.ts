@@ -107,18 +107,29 @@ describe('Gbt complete / opener source lock', () => {
     )
   })
 
-  test('interactive elicitation/create still AppState Be.queue, not NMs Host', () => {
+  test('interactive elicitation/create is gold W7 requestDialog Host, not Be.queue', () => {
     const src = readFileSync(
       join(import.meta.dir, '../../services/mcp/elicitationHandler.ts'),
       'utf8',
     )
-    const create = src.slice(
-      src.indexOf("setRequestHandler('elicitation/create'"),
+    expect(src).toContain('mcpElicitationSpec')
+    expect(src).toContain('mcpElicitationWaitingSpec')
+    expect(src).toContain('leftoverBindMcpElicitationHost')
+    const hostArm = src.slice(src.indexOf('if (requestDialog)'))
+    expect(hostArm).toContain('leftoverBindMcpElicitationHost')
+    expect(hostArm).toContain("setRequestHandler('elicitation/create'")
+    expect(src).toContain("place: 'under'")
+    expect(src).toContain('succeeds: true')
+    const spec = readFileSync(
+      join(import.meta.dir, '../specs/jsuKinds.ts'),
+      'utf8',
     )
-    expect(create).toContain('setAppState(prev => ({')
-    expect(create).toContain('elicitation:')
-    expect(create).toContain('queue:')
-    expect(create).not.toContain('mcpUrlElicitationSpec')
-    expect(create).not.toContain('requestDialog(')
+    expect(spec).toContain('holdsTop: true')
+    const queueArm = src.slice(
+      src.lastIndexOf("setRequestHandler('elicitation/create'"),
+    )
+    expect(queueArm).toContain('setAppState(prev => ({')
+    expect(queueArm).toContain('elicitation:')
+    expect(queueArm).toContain('queue:')
   })
 })

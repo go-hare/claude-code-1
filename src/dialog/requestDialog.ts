@@ -9,6 +9,10 @@ export type DialogKindSpec<TPayload, TResult> = {
   payload: () => z.ZodType<TPayload>
   result: () => z.ZodType<TResult>
   default: TResult
+  /** densable holdsTop — W7 engine top. */
+  holdsTop?: boolean
+  /** densable userInvoked — slash/local_jsx. */
+  userInvoked?: boolean
 }
 
 /** densable Qg — identity */
@@ -41,7 +45,14 @@ async function requestOnce<TPayload, TResult>(
   if (!parsed.success) return spec.default
   try {
     const { replied } = mailbox.request(
-      { kind: spec.kind, payload: parsed.data },
+      {
+        kind: spec.kind,
+        payload: parsed.data,
+        ...(spec.holdsTop !== undefined ? { holdsTop: spec.holdsTop } : {}),
+        ...(spec.userInvoked !== undefined
+          ? { userInvoked: spec.userInvoked }
+          : {}),
+      },
       options,
     )
     const answer = await replied
@@ -77,8 +88,22 @@ async function requestStreaming<TPayload, TResult>(
   }
 
   const { replied, update } = mailbox.request(
-    { kind: spec.kind, payload: parsed.data },
-    { signal: abort.signal, queueBehind: options?.queueBehind },
+    {
+      kind: spec.kind,
+      payload: parsed.data,
+      ...(spec.holdsTop !== undefined ? { holdsTop: spec.holdsTop } : {}),
+      ...(spec.userInvoked !== undefined
+        ? { userInvoked: spec.userInvoked }
+        : {}),
+    },
+    {
+      signal: abort.signal,
+      queueBehind: options?.queueBehind,
+      ...(options?.place !== undefined ? { place: options.place } : {}),
+      ...(options?.succeeds !== undefined
+        ? { succeeds: options.succeeds }
+        : {}),
+    },
   )
 
   let pumpError: unknown

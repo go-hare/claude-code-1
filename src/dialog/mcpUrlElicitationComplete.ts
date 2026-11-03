@@ -4,7 +4,11 @@
  * way ElicitationDialog waiting + Retry does (`action: 'accept'`).
  */
 import type { DialogStore } from './dialogStore.js'
-import { MCP_URL_ELICITATION_KIND } from './specs/jsuKinds.js'
+import {
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
+  MCP_URL_ELICITATION_KIND,
+} from './specs/jsuKinds.js'
 
 export function answerMcpUrlElicitationComplete(
   store: DialogStore,
@@ -12,7 +16,13 @@ export function answerMcpUrlElicitationComplete(
   elicitationId: string,
 ): boolean {
   const match = store.getState().open.find(entry => {
-    if (entry.kind !== MCP_URL_ELICITATION_KIND) return false
+    if (
+      entry.kind !== MCP_URL_ELICITATION_KIND &&
+      entry.kind !== MCP_ELICITATION_KIND &&
+      entry.kind !== MCP_ELICITATION_WAITING_KIND
+    ) {
+      return false
+    }
     const payload = entry.payload as {
       serverName?: unknown
       params?: { elicitationId?: unknown }

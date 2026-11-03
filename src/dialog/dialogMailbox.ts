@@ -13,6 +13,10 @@ export type DialogMailboxUpdate = { id: string; payload: unknown }
 export type DialogRequestOptions = {
   signal?: AbortSignal
   queueBehind?: boolean
+  /** densable place — W7 `{place:"under"}`. */
+  place?: 'under' | 'queue'
+  /** densable succeeds — wne `{succeeds:!0}` may steal holdsTop. */
+  succeeds?: boolean
 }
 
 export type DialogMailbox = {
@@ -21,7 +25,12 @@ export type DialogMailbox = {
   onUpdate: (listener: (update: DialogMailboxUpdate) => void) => () => void
   reply: (msg: DialogMailboxReply) => void
   request: (
-    input: { kind: string; payload: unknown },
+    input: {
+      kind: string
+      payload: unknown
+      holdsTop?: boolean
+      userInvoked?: boolean
+    },
     options?: DialogRequestOptions,
   ) => {
     id: string
@@ -48,7 +57,7 @@ export function createDialogMailbox(): DialogMailbox {
       pending.delete(msg.id)
       resolve(msg)
     },
-    request({ kind, payload }, options) {
+    request({ kind, payload, holdsTop, userInvoked }, options) {
       seq += 1
       const id = `dialog-${seq}`
       const { promise, resolve } = Promise.withResolvers<DialogMailboxReply>()
@@ -76,6 +85,12 @@ export function createDialogMailbox(): DialogMailbox {
         kind,
         payload,
         queueBehind: options?.queueBehind,
+        ...(options?.place !== undefined ? { place: options.place } : {}),
+        ...(holdsTop !== undefined ? { holdsTop } : {}),
+        ...(userInvoked !== undefined ? { userInvoked } : {}),
+        ...(options?.succeeds !== undefined
+          ? { succeeds: options.succeeds }
+          : {}),
       })
       return {
         id,

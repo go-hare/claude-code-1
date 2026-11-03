@@ -245,6 +245,6 @@ describe('permission + jsu kind registry', () => {
     for (const kind of JSU_NON_PERMISSION_KIND_LIST) {
       expect(DIALOG_COMPONENTS_KINDS_FOR_TEST).toContain(kind)
     }
-    expect(JSU_NON_PERMISSION_KIND_LIST).toHaveLength(16)
+    expect(JSU_NON_PERMISSION_KIND_LIST).toHaveLength(19)
   })
 })
