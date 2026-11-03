@@ -36,18 +36,21 @@ const MIN_CONTENT_WIDTH = 40;
 const CONTENT_CHROME_OVERHEAD = 15;
 
 export function AskUserQuestionPermissionRequest(props: PermissionRequestProps): React.ReactNode {
+  const choiceState = useMultipleChoiceState();
   const settings = useSettings();
   if (settings.syntaxHighlightingDisabled) {
-    return <AskUserQuestionPermissionRequestBody {...props} highlight={null} />;
+    return <AskUserQuestionPermissionRequestBody {...props} highlight={null} choiceState={choiceState} />;
   }
   return (
-    <Suspense fallback={<AskUserQuestionPermissionRequestBody {...props} highlight={null} />}>
-      <AskUserQuestionWithHighlight {...props} />
+    <Suspense fallback={<AskUserQuestionPermissionRequestBody {...props} highlight={null} choiceState={choiceState} />}>
+      <AskUserQuestionWithHighlight {...props} choiceState={choiceState} />
     </Suspense>
   );
 }
 
-function AskUserQuestionWithHighlight(props: PermissionRequestProps): React.ReactNode {
+function AskUserQuestionWithHighlight(
+  props: PermissionRequestProps & { choiceState: ReturnType<typeof useMultipleChoiceState> },
+): React.ReactNode {
   const highlight = use(getCliHighlightPromise());
   return <AskUserQuestionPermissionRequestBody {...props} highlight={highlight} />;
 }
@@ -57,8 +60,10 @@ function AskUserQuestionPermissionRequestBody({
   onDone,
   onReject,
   highlight,
+  choiceState,
 }: PermissionRequestProps & {
   highlight: CliHighlight | null;
+  choiceState: ReturnType<typeof useMultipleChoiceState>;
 }): React.ReactNode {
   // Memoize parse result: safeParse returns a new object (and new `questions`
   // array) on every call. Without this, the render-body ref writes below make
@@ -199,7 +204,6 @@ function AskUserQuestionPermissionRequestBody({
   const isInPlanMode = toolPermissionContextMode === 'plan';
   const planFilePath = isInPlanMode ? getPlanFilePath() : undefined;
 
-  const state = useMultipleChoiceState();
   const {
     currentQuestionIndex,
     answers,
@@ -210,7 +214,7 @@ function AskUserQuestionPermissionRequestBody({
     updateQuestionState,
     setAnswer,
     setTextInputMode,
-  } = state;
+  } = choiceState;
 
   const currentQuestion = currentQuestionIndex < (questions?.length || 0) ? questions?.[currentQuestionIndex] : null;
 

@@ -30,4 +30,27 @@ describe('AskUserQuestion densable no minHeight on content column', () => {
     expect(src).not.toContain('minHeight={minContentHeight}')
     expect(src).toContain('densable ZT4/GT4: no minHeight')
   })
+
+  test('Host and leftover Request keep fge() outside highlight Suspense', async () => {
+    const leftover = await Bun.file(
+      new URL('../AskUserQuestionPermissionRequest.tsx', import.meta.url),
+    ).text()
+    const leftoverHook = leftover.indexOf('useMultipleChoiceState()')
+    const leftoverSuspense = leftover.indexOf('<Suspense')
+    expect(leftoverHook).toBeGreaterThan(0)
+    expect(leftoverSuspense).toBeGreaterThan(leftoverHook)
+    expect(leftover).toContain('choiceState={choiceState}')
+
+    const host = await Bun.file(
+      new URL(
+        '../../../../dialog/dialogs/PermissionAskUserQuestionDialog.tsx',
+        import.meta.url,
+      ),
+    ).text()
+    const hostHook = host.indexOf('useMultipleChoiceState()')
+    const hostSuspense = host.indexOf('<Suspense')
+    expect(hostHook).toBeGreaterThan(0)
+    expect(hostSuspense).toBeGreaterThan(hostHook)
+    expect(host).toContain('choiceState={choiceState}')
+  })
 })

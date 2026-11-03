@@ -60,18 +60,24 @@ function coercePermissionDecision(raw: unknown): PermissionDecision {
 }
 
 export function PermissionAskUserQuestionDialog(props: DialogRendererProps): React.ReactNode {
+  // Gold Qge keeps fge() on the Host, not inside highlight Suspense.
+  // Fallback Body vs resolved Body must share this bag or Enter on page 1
+  // remounts at currentQuestionIndex 0 (flash back to 第一页).
+  const choiceState = useMultipleChoiceState();
   const settings = useSettings();
   if (settings.syntaxHighlightingDisabled) {
-    return <PermissionAskUserQuestionDialogBody {...props} highlight={null} />;
+    return <PermissionAskUserQuestionDialogBody {...props} highlight={null} choiceState={choiceState} />;
   }
   return (
-    <Suspense fallback={<PermissionAskUserQuestionDialogBody {...props} highlight={null} />}>
-      <PermissionAskUserQuestionWithHighlight {...props} />
+    <Suspense fallback={<PermissionAskUserQuestionDialogBody {...props} highlight={null} choiceState={choiceState} />}>
+      <PermissionAskUserQuestionWithHighlight {...props} choiceState={choiceState} />
     </Suspense>
   );
 }
 
-function PermissionAskUserQuestionWithHighlight(props: DialogRendererProps): React.ReactNode {
+function PermissionAskUserQuestionWithHighlight(
+  props: DialogRendererProps & { choiceState: ReturnType<typeof useMultipleChoiceState> },
+): React.ReactNode {
   const highlight = use(getCliHighlightPromise());
   return <PermissionAskUserQuestionDialogBody {...props} highlight={highlight} />;
 }
@@ -80,7 +86,11 @@ function PermissionAskUserQuestionDialogBody({
   payload,
   answer,
   highlight,
-}: DialogRendererProps & { highlight: CliHighlight | null }): React.ReactNode {
+  choiceState,
+}: DialogRendererProps & {
+  highlight: CliHighlight | null;
+  choiceState: ReturnType<typeof useMultipleChoiceState>;
+}): React.ReactNode {
   const p = payload as AskUserQuestionPermissionPayload;
   const hostQuestions = useMemo(
     () => applyEngineConfirmDisplay(normalizeAskQuestions(p.questions), p.isEngineConfirm === true),
@@ -189,7 +199,7 @@ function PermissionAskUserQuestionDialogBody({
     updateQuestionState,
     setAnswer,
     setTextInputMode,
-  } = useMultipleChoiceState();
+  } = choiceState;
 
   const currentQuestion = currentQuestionIndex < (questions?.length || 0) ? questions?.[currentQuestionIndex] : null;
   const isInSubmitView = currentQuestionIndex === (questions?.length || 0);
