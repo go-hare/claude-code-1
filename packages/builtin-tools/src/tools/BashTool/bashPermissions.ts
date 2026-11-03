@@ -2537,11 +2537,15 @@ function dangerousRemovalAsk(
 }
 
 /**
- * Heuristic bare-`&` detector used when AST parse is unavailable.
- * Strips digraphs (`&&`, `||`, `&>`, `<&`, `>&`, `&>>`) then looks for leftover `&`.
+ * Heuristic bare-`&` detector used when AST parse is unavailable
+ * (`TREE_SITTER_BASH` product-off). Gold Lon always has AST `s6t`.
+ * Strip POSIX quotes first so URL query `&` is not a background operator,
+ * then strip digraphs (`&&`, `||`, `&>`, `<&`, `>&`, `&>>`).
  */
-function hasBareBackgroundOperatorHeuristic(command: string): boolean {
+export function hasBareBackgroundOperatorHeuristic(command: string): boolean {
   const stripped = command
+    .replace(/'[^']*'/g, ' ')
+    .replace(/"(?:\\.|[^"\\])*"/g, ' ')
     .replace(/&&/g, ' ')
     .replace(/\|\|/g, ' ')
     .replace(/&>>/g, ' ')
