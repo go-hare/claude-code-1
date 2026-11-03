@@ -25,11 +25,15 @@ import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
 import type { DialogSuppressReason } from './legacyDialogFocus.js';
 import {
   AUTO_MODE_FLAGGED_ALLOW_KIND,
+  AUTO_MODE_SERVER_FALLBACK_KIND,
   AUTO_MODE_SETUP_REVIEW_KIND,
   CHROME_INSTALL_SETUP_KIND,
   CHROME_INSTALL_UPSELL_KIND,
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
+  MCP_URL_ELICITATION_KIND,
   PEER_INBOUND_APPROVAL_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
 } from './specs/jsuKinds.js';
@@ -53,7 +57,7 @@ import { resolveHostWaitingFor } from './permissionWaiting.js';
 /** densable c_y */
 export const DIALOG_ANSWER_SWAP_DEBOUNCE_MS = 150;
 
-export type DialogHostVariant = 'inline' | 'modal';
+export type DialogHostVariant = 'inline' | 'modal' | 'bottom';
 
 export type DialogRendererProps = {
   payload: unknown;
@@ -62,9 +66,17 @@ export type DialogRendererProps = {
 
 type DialogRenderer = (props: DialogRendererProps) => React.ReactNode;
 
-/** densable mLo — only EQr (exit-plan v2) forces modal; GSn / bEt default inline. */
+/**
+ * densable mLo / ig.layout:
+ * EQr exit-plan v2 → modal; Gbt $7 / W7 / wne elicitation + m$e
+ * classifier billing → bottom (tot.abovePrompt vh); GSn / bEt default inline (bJ).
+ */
 const DIALOG_LAYOUTS: Record<string, DialogHostVariant> = {
   [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: 'modal',
+  [MCP_URL_ELICITATION_KIND]: 'bottom',
+  [MCP_ELICITATION_KIND]: 'bottom',
+  [MCP_ELICITATION_WAITING_KIND]: 'bottom',
+  [AUTO_MODE_SERVER_FALLBACK_KIND]: 'bottom',
 };
 
 /** @internal test — densable mLo map */

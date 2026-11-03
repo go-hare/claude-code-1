@@ -7,7 +7,7 @@
  * FullscreenLayout (Tyn): zkr=fCt?.visible; pane display:zkr?"flex":"none";
  * bottom chrome display:zkr?"none":"flex".
  *
- * Gold mLo only maps EQr (permission_exit_plan_mode_v2) → modal.
+ * Gold mLo: EQr → modal; Gbt/m$e → bottom; else inline.
  */
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
@@ -20,7 +20,13 @@ import {
   shouldOccupyFullscreenModalSlot,
 } from '../DialogHost.js'
 import { nhtHidesPromptInput } from '../nhtPrompt.js'
-import { COST_THRESHOLD_KIND } from '../specs/jsuKinds.js'
+import {
+  AUTO_MODE_SERVER_FALLBACK_KIND,
+  COST_THRESHOLD_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
+  MCP_URL_ELICITATION_KIND,
+} from '../specs/jsuKinds.js'
 import {
   PERMISSION_ASK_USER_QUESTION_KIND,
   PERMISSION_EXIT_PLAN_MODE_V2_KIND,
@@ -96,6 +102,20 @@ describe('shouldOccupyFullscreenModalSlot / KA', () => {
       shouldOccupyFullscreenModalSlot({
         toolJsxCentered: false,
         topDialogKind: 'permission_prompt',
+      }),
+    ).toBe(false)
+  })
+
+  test('Gbt/m$e layout bottom (tot.abovePrompt yv), not modal', () => {
+    expect(getDialogHostLayout(MCP_URL_ELICITATION_KIND)).toBe('bottom')
+    expect(getDialogHostLayout(MCP_ELICITATION_KIND)).toBe('bottom')
+    expect(getDialogHostLayout(MCP_ELICITATION_WAITING_KIND)).toBe('bottom')
+    expect(getDialogHostLayout(AUTO_MODE_SERVER_FALLBACK_KIND)).toBe('bottom')
+    expect(isTopDialogModalLayout(MCP_URL_ELICITATION_KIND)).toBe(false)
+    expect(
+      shouldOccupyFullscreenModalSlot({
+        toolJsxCentered: false,
+        topDialogKind: MCP_URL_ELICITATION_KIND,
       }),
     ).toBe(false)
   })
@@ -220,24 +240,32 @@ describe('REPL densable ozs / RPs wiring', () => {
     expect(nhtHidesPromptInput(undefined)).toBe(false)
   })
 
-  test('inline NMs is tot.bottom above companion KEEP (not tot.scrollable)', () => {
-    const messages = replSrc.indexOf('cursorNavRef={cursorNavRef}')
-    const totBottom = replSrc.indexOf('densable Iz is tot.bottom')
+  test('inline NMs is tot.scrollable bJ (gold e(yv,{}) before flexGrow), not Qv/vh', () => {
+    const scrollable = replSrc.lastIndexOf('scrollable={')
+    const above = replSrc.lastIndexOf('abovePrompt={')
+    const totBottom = replSrc.lastIndexOf('bottom={')
     const inlineHost = replSrc.indexOf(
       '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
     )
-    expect(messages).toBeGreaterThan(-1)
-    expect(totBottom).toBeGreaterThan(messages)
-    expect(inlineHost).toBeGreaterThan(totBottom)
-    const scrollable = replSrc.slice(messages, totBottom)
-    expect(scrollable).not.toContain(
+    const grow = replSrc.lastIndexOf('<Box flexGrow={1} />')
+    expect(scrollable).toBeGreaterThan(-1)
+    expect(above).toBeGreaterThan(scrollable)
+    expect(totBottom).toBeGreaterThan(above)
+    expect(inlineHost).toBeGreaterThan(scrollable)
+    expect(inlineHost).toBeLessThan(grow)
+    expect(grow).toBeLessThan(above)
+    expect(replSrc.slice(above, totBottom)).not.toContain(
       '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
     )
-    expect(replSrc.slice(inlineHost)).toContain('<CompanionSprite />')
-    expect(replSrc).toContain(
-      '!toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog',
+    expect(replSrc.slice(above, totBottom)).toContain(
+      '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
     )
-    expect(replSrc).not.toContain(
+    expect(replSrc.slice(totBottom)).not.toContain(
+      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    )
+    expect(replSrc.slice(totBottom)).not.toContain('<DialogHost')
+    expect(replSrc.slice(totBottom)).toContain('<CompanionSprite />')
+    expect(replSrc).toContain(
       '!toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog && !hidePromptForHardNms',
     )
   })

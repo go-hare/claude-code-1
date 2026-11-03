@@ -82,7 +82,19 @@ describe('densable 2.1.289 tot Ne bottom chrome', () => {
     expect(scrollChunk).not.toContain('!hasRunningTeammates &&')
     expect(src.slice(above, bottom)).toContain('<PluginAbovePromptSite')
     expect(src.slice(above, bottom)).toContain('<TaskListV2')
-    expect(src.slice(bottom)).toContain('<DialogHost')
+    expect(src.slice(above, bottom)).toContain(
+      '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
+    )
+    expect(src.slice(above, bottom)).not.toContain(
+      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    )
+    expect(src.slice(scrollable, above)).toContain(
+      '<DialogHost variant="inline" suppressReason={dialogSuppressReason} />',
+    )
+    expect(src.slice(scrollable, above)).not.toContain(
+      '<DialogHost variant="bottom" suppressReason={dialogSuppressReason} />',
+    )
+    expect(src.slice(bottom)).not.toContain('<DialogHost')
     expect(src.slice(bottom)).not.toContain('<SpinnerWithVerb')
     expect(src.slice(bottom)).not.toContain('<BriefIdleStatus')
     expect(src.slice(bottom)).not.toContain('<PluginAbovePromptSite')

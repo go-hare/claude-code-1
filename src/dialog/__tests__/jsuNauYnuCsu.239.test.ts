@@ -50,6 +50,7 @@ import { selectPermissionDialogFwl } from '../selectPermissionDialog.js'
 import {
   AUTO_DEFAULT_NUDGE_KIND,
   AUTO_MODE_FLAGGED_ALLOW_KIND,
+  AUTO_MODE_SERVER_FALLBACK_KIND,
   AUTO_MODE_SETUP_REVIEW_KIND,
   CHROME_INSTALL_SETUP_KIND,
   CHROME_INSTALL_UPSELL_KIND,
@@ -59,6 +60,8 @@ import {
   GOAL_PROPOSAL_KIND,
   IDE_ONBOARDING_KIND,
   IT2_SETUP_KIND,
+  MCP_ELICITATION_KIND,
+  MCP_ELICITATION_WAITING_KIND,
   MCP_URL_ELICITATION_KIND,
   PEER_INBOUND_APPROVAL_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
@@ -166,6 +169,8 @@ describe('Usu (DIALOG_NOTIFICATIONS)', () => {
       AUTO_DEFAULT_NUDGE_KIND,
       IT2_SETUP_KIND,
       MCP_URL_ELICITATION_KIND,
+      MCP_ELICITATION_KIND,
+      MCP_ELICITATION_WAITING_KIND,
     ]) {
       expect(DIALOG_NOTIFICATIONS_FOR_TEST[kind]).toBeUndefined()
     }
@@ -431,6 +436,10 @@ describe('source-lock Ynu / csu / nau / Iiu notify', () => {
     expect(host).not.toContain('dequeue(')
     expect(DIALOG_LAYOUTS_FOR_TEST).toEqual({
       [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: 'modal',
+      [MCP_URL_ELICITATION_KIND]: 'bottom',
+      [MCP_ELICITATION_KIND]: 'bottom',
+      [MCP_ELICITATION_WAITING_KIND]: 'bottom',
+      [AUTO_MODE_SERVER_FALLBACK_KIND]: 'bottom',
     })
 
     const perm = readFileSync(
