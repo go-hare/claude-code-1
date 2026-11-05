@@ -5,6 +5,7 @@ import {
   setSessionSettingsCache,
 } from 'src/utils/settings/settingsCache.js'
 import { GROK_MODEL_OPTIONS } from '../grokModels.js'
+import { GEMINI_MODEL_OPTIONS } from '../geminiModels.js'
 import { getModelOptions } from '../modelOptions.js'
 
 const envKeys = [
@@ -82,6 +83,27 @@ describe('getModelOptions per-provider catalogs', () => {
     })
     const values = getModelOptions().map(opt => opt.value)
     expect(values[0]).toBeNull()
+    expect(values).not.toContain('grok-4.7')
+    expect(values).not.toContain('gpt-5.6-sol')
+    expect(values).not.toContain('kimi-k3')
+    expect(values).not.toContain('gemini-4-argon')
+  })
+
+  test('gemini provider lists catalogued Gemini ids, not Claude family aliases', () => {
+    setSessionSettingsCache({
+      settings: { modelType: 'gemini' },
+      errors: [],
+    })
+    const values = getModelOptions().map(opt => opt.value)
+    expect(values[0]).toBeNull()
+    for (const row of GEMINI_MODEL_OPTIONS) {
+      expect(values).toContain(row.value)
+    }
+    expect(values).toContain('gemini-4-argon')
+    expect(values).toContain('gemini-3.8-flash')
+    expect(values).not.toContain('sonnet')
+    expect(values).not.toContain('opus')
+    expect(values).not.toContain('haiku')
     expect(values).not.toContain('grok-4.7')
     expect(values).not.toContain('gpt-5.6-sol')
     expect(values).not.toContain('kimi-k3')

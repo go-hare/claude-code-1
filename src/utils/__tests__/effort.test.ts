@@ -885,6 +885,38 @@ describe('densable effort catalog matrix', () => {
     )
   })
 
+  test('gemini-4-argon: low/medium/high only, default medium', () => {
+    const m = 'gemini-4-argon'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('medium')
+    expect(getSupportedEffortLevels(m)).toEqual(['low', 'medium', 'high'])
+    expect(modelSupportsMaxEffort(m)).toBe(false)
+    expect(modelSupportsXhighEffort(m)).toBe(false)
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(clampEffortForModel('xhigh', m)).toBe('high')
+    expect(clampEffortForModel('low', m)).toBe('low')
+    expect(resolveAppliedEffort(m, 'xhigh')).toBe('high')
+    expect(resolveAppliedEffort(m, 'max')).toBe('high')
+  })
+
+  test('gemini-3.8-flash: low/medium/high only, default medium', () => {
+    const m = 'gemini-3.8-flash'
+    expect(modelSupportsEffort(m)).toBe(true)
+    expect(getDefaultEffortForModel(m)).toBe('medium')
+    expect(getSupportedEffortLevels(m)).toEqual(['low', 'medium', 'high'])
+    expect(modelSupportsMaxEffort(m)).toBe(false)
+    expect(modelSupportsXhighEffort(m)).toBe(false)
+    expect(clampEffortForModel('max', m)).toBe('high')
+    expect(clampEffortForModel('xhigh', m)).toBe('high')
+    expect(resolveAppliedEffort(m, 'xhigh')).toBe('high')
+    expect(resolveAppliedEffort(m, 'max')).toBe('high')
+  })
+
+  test('getUltracodeEffortForModel: gemini tops at high (no xhigh)', () => {
+    expect(getUltracodeEffortForModel('gemini-4-argon')).toBe('high')
+    expect(getUltracodeEffortForModel('gemini-3.8-flash')).toBe('high')
+  })
+
   test('getUltracodeEffortForModel: prefer xhigh when present', () => {
     expect(getUltracodeEffortForModel('claude-opus-4-7')).toBe('xhigh')
     expect(getUltracodeEffortForModel('gpt-5.6-sol')).toBe('xhigh')

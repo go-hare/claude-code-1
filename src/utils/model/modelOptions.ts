@@ -60,6 +60,7 @@ import {
   isChatGPTAuthMode,
 } from './chatgptModels.js'
 import { GROK_MODEL_OPTIONS } from './grokModels.js'
+import { GEMINI_MODEL_OPTIONS } from './geminiModels.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -71,6 +72,17 @@ export type ModelOption = {
 }
 
 export function getDefaultOptionForUser(fastMode = false): ModelOption {
+  if (getAPIProvider() === 'gemini') {
+    const currentModel = renderDefaultModelSetting(
+      getDefaultMainLoopModelSetting(),
+    )
+    return {
+      value: null,
+      label: 'Default (recommended)',
+      description: `Use the default Gemini model (currently ${currentModel})`,
+      descriptionForModel: `Default Gemini model (currently ${currentModel})`,
+    }
+  }
   // densable idt/aRn: org → env (ANTHROPIC_DEFAULT_MODEL) → tier badge.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const {
@@ -536,6 +548,22 @@ function getGrokModelPickerOptions(): ModelOption[] {
   return options
 }
 
+function getGeminiModelPickerOptions(): ModelOption[] {
+  const options = [
+    getDefaultOptionForUser(),
+    ...mapVendorPickerRows(GEMINI_MODEL_OPTIONS),
+  ]
+  const geminiEnv = process.env.GEMINI_MODEL
+  if (geminiEnv && !options.some(existing => existing.value === geminiEnv)) {
+    options.push({
+      value: geminiEnv,
+      label: geminiEnv,
+      description: `Custom model (${geminiEnv})`,
+    })
+  }
+  return options
+}
+
 function getOpenAIApiModelPickerOptions(): ModelOption[] {
   return [
     getDefaultOptionForUser(),
@@ -572,6 +600,10 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
   if (getAPIProvider() === 'grok') {
     return getGrokModelPickerOptions()
+  }
+
+  if (getAPIProvider() === 'gemini') {
+    return getGeminiModelPickerOptions()
   }
 
   if (getAPIProvider() === 'openai') {

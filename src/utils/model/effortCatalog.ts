@@ -33,7 +33,11 @@ export type EffortCatalogEntry = {
  * Per-model rules. Prefer more specific match strings (longer wins).
  * Example: `gpt-5.6-sol` beats bare `gpt-5.6`.
  */
-const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
+const CATALOG: Array<{
+  match: string
+  boundary?: boolean
+  entry: EffortCatalogEntry
+}> = [
   // ── densable Claude ───────────────────────────────────────────────────
   {
     match: 'claude-sonnet-4-6',
@@ -402,7 +406,44 @@ const CATALOG: Array<{ match: string; entry: EffortCatalogEntry }> = [
       levels: ['high', 'max'],
     },
   },
+
+  // ── Google Gemini ──────────────────────────────────────────────────────
+  // Official thinking_level: low | medium | high, default medium.
+  // https://ai.google.dev/gemini-api/docs/thinking
+  // https://ai.google.dev/gemini-api/docs/models/gemini-4-argon
+  // https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
+  // Per-model rows (longest-substring on id). gemini-3.8-flash does not
+  // contain "gemini-4-argon" — add a row, do not invent a vendor heuristic.
+  {
+    match: 'gemini-4-argon',
+    boundary: true,
+    entry: {
+      defaultEffort: 'medium',
+      effort: true,
+      maxEffort: false,
+      xhighEffort: false,
+      levels: ['low', 'medium', 'high'],
+    },
+  },
+  {
+    match: 'gemini-3.8-flash',
+    boundary: true,
+    entry: {
+      defaultEffort: 'medium',
+      effort: true,
+      maxEffort: false,
+      xhighEffort: false,
+      levels: ['low', 'medium', 'high'],
+    },
+  },
 ]
+
+const GEMINI_NON_TEXT_ENTRY: EffortCatalogEntry = {
+  defaultEffort: 'medium',
+  effort: false,
+  maxEffort: false,
+  xhighEffort: false,
+}
 
 /**
  * densable kk denylist — no effort param.
@@ -457,6 +498,23 @@ function matchesDenyList(
   return includes.some(p => id.includes(p) || id === p)
 }
 
+function lastModelSegment(id: string): string {
+  const trimmed = id.trim()
+  const slash = trimmed.lastIndexOf('/')
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1)
+}
+
+function matchesCatalogRow(
+  id: string,
+  row: { match: string; boundary?: boolean },
+): boolean {
+  if (row.boundary) {
+    const seg = lastModelSegment(id)
+    return seg === row.match || seg.startsWith(`${row.match}-`)
+  }
+  return id.includes(row.match) || id === row.match
+}
+
 /**
  * Longest-match lookup on one or more id strings (canonical + raw).
  * Example: raw `gpt-5.6-sol` matches sol row even if canonical is odd.
@@ -464,15 +522,23 @@ function matchesDenyList(
 function lookupCatalogFromIds(
   ids: readonly string[],
 ): EffortCatalogEntry | undefined {
+  for (const id of ids) {
+    if (!id) continue
+    const seg = lastModelSegment(id)
+    if (
+      seg.startsWith('gemini-') &&
+      (seg.includes('-tts') || seg.includes('-live'))
+    ) {
+      return GEMINI_NON_TEXT_ENTRY
+    }
+  }
+
   let best: EffortCatalogEntry | undefined
   let bestLen = -1
   for (const id of ids) {
     if (!id) continue
     for (const row of CATALOG) {
-      if (
-        (id.includes(row.match) || id === row.match) &&
-        row.match.length > bestLen
-      ) {
+      if (matchesCatalogRow(id, row) && row.match.length > bestLen) {
         best = row.entry
         bestLen = row.match.length
       }

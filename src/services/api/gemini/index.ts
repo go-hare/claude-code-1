@@ -19,6 +19,7 @@ import {
 } from '../../../utils/messages.js'
 import type { SystemPrompt } from '../../../utils/systemPromptType.js'
 import type { ThinkingConfig } from '../../../utils/thinking.js'
+import { resolveAppliedEffort } from '../../../utils/effort.js'
 import type { Options } from '../claude.js'
 import { recordLLMObservation } from '../../../services/langfuse/tracing.js'
 import {
@@ -49,6 +50,10 @@ export async function* queryModelGemini(
 > {
   try {
     const geminiModel = resolveGeminiModel(options.model)
+    // Clamp against the *mapped* Gemini id so a Claude alias (opus →
+    // gemini-4-argon) does not send xhigh/max that Gemini rejects. Official
+    // thinking_level is low|medium|high — anything else is omitted.
+    const appliedEffort = resolveAppliedEffort(geminiModel, options.effortValue)
     // No model arg → densable eN mid-conv off; filter keeps converter User|Assistant only
     const messagesForAPI = normalizeMessagesForAPI(messages, tools).filter(
       (m): m is UserMessage | AssistantMessage =>
@@ -102,12 +107,20 @@ export async function* queryModelGemini(
             temperature: options.temperatureOverride,
           }),
           ...(thinkingConfig.type !== 'disabled' && {
-            thinkingConfig: {
-              includeThoughts: true,
-              ...(thinkingConfig.type === 'enabled' && {
-                thinkingBudget: thinkingConfig.budgetTokens,
-              }),
-            },
+            thinkingConfig:
+              appliedEffort === 'low' ||
+              appliedEffort === 'medium' ||
+              appliedEffort === 'high'
+                ? {
+                    includeThoughts: true,
+                    thinkingLevel: appliedEffort,
+                  }
+                : {
+                    includeThoughts: true,
+                    ...(thinkingConfig.type === 'enabled' && {
+                      thinkingBudget: thinkingConfig.budgetTokens,
+                    }),
+                  },
           }),
         },
       },

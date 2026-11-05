@@ -12,6 +12,7 @@ import {
 } from './model/chatgptModels.js'
 import { getDeepSeekModelContextWindow } from './model/deepseekModels.js'
 import { getGrokModelContextWindow } from './model/grokModels.js'
+import { getGeminiModelContextWindow } from './model/geminiModels.js'
 import { getKimiModelContextWindow } from './model/kimiModels.js'
 import { getModelCapability } from './model/modelCapabilities.js'
 import {
@@ -134,6 +135,8 @@ export function isRecognizedModelForWindowEnforcement(model: string): boolean {
   if (getChatGPTModelContextWindow(raw) !== undefined) return true
   // Current-spec Grok ids have their own window table
   if (getGrokModelContextWindow(raw) !== undefined) return true
+  // Current-spec Gemini chat/text ids (effortCatalog: gemini-4-argon / gemini-3.8-flash)
+  if (getGeminiModelContextWindow(raw) !== undefined) return true
   // Current-spec Kimi ids (effortCatalog: kimi-k3 / kimi-k2.7)
   if (getKimiModelContextWindow(raw) !== undefined) return true
   // Current-spec DeepSeek V4 ids (effortCatalog: deepseek-v4*)
@@ -274,6 +277,13 @@ export function getContextWindowForModel(
       }
     }
     return MODEL_CONTEXT_WINDOW_DEFAULT
+  }
+
+  // Current-spec Gemini chat/text: gemini-4-argon / gemini-3.8-flash = 1M (1,048,576).
+  // Checked before generic [1m] 1_000_000 fallback so gemini-*[1m] keeps exact 1,048,576.
+  const geminiContextWindow = getGeminiModelContextWindow(model)
+  if (geminiContextWindow !== undefined) {
+    return applyDisable1mClamp(geminiContextWindow)
   }
 
   // [1m] suffix — explicit client-side opt-in, respected over all detection

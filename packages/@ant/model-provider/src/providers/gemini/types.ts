@@ -59,6 +59,8 @@ export type GeminiGenerateContentRequest = {
     thinkingConfig?: {
       includeThoughts?: boolean
       thinkingBudget?: number
+      /** Official thinking_level: low | medium | high (default medium). */
+      thinkingLevel?: 'low' | 'medium' | 'high'
     }
   }
 }
