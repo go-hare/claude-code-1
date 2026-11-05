@@ -474,12 +474,16 @@ export function createSkillCommand({
       }
 
       try {
-        const { replaceDevModsPlaceholder } = await import(
+        // densable mIo.get() — expand only when bOn pinned the expander.
+        const { leftoverDevModsExpanderSlot } = await import(
           '../utils/plugins/pluginDevMods.js'
         )
-        finalContent = await replaceDevModsPlaceholder(finalContent, {
-          isPreload: toolUseContext.options?.isSkillPreload === true,
-        })
+        const expand = leftoverDevModsExpanderSlot()
+        if (expand !== undefined) {
+          finalContent = await expand(finalContent, {
+            isPreload: toolUseContext.options?.isSkillPreload === true,
+          })
+        }
       } catch {
         // densable wfr optional when plugin_dev_mods host is absent
       }

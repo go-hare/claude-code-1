@@ -27,6 +27,7 @@ export type TranscriptWriteSource =
   | 'materialize'
   | 'adopt'
   | 'append'
+  | 'dev_mods'
   | 'other'
 
 const ALWAYS_DEGRADE_CODES = new Set([
@@ -40,7 +41,6 @@ const TRACKED_SOURCES = new Set<TranscriptWriteSource>([
   'drain',
   'materialize',
   'adopt',
-  'append',
 ])
 
 const CONSECUTIVE_THRESHOLD = 3

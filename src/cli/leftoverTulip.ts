@@ -73,6 +73,34 @@ export function leftoverTaintsInclude(taint: string): boolean {
 }
 
 /**
+ * densable PJo — `t().registerVerdict(e)`. Gold init pins leftoverGas /
+ * leftoverVk / leftoverMas / leftoverVkr / leftoverCer.
+ */
+export function leftoverRegisterPolicyLimitsVerdict(): void {
+  leftoverPolicyLimitsHost().verdict = {
+    isPolicyAllowed: (e: string) => isPolicyLimitsAllowed(e),
+    commandPolicyGateAllows: leftoverGas,
+    policyDenyKind: (e: string) => leftoverPolicyLimitsRh(e),
+    policyDeniedReason: leftoverPolicyLimitsDp,
+    complianceTaintsSettled: leftoverCer,
+    policyLimitsCacheLoaded: leftoverVk,
+    autoDefaultVerdictState: leftoverMas,
+    policyVerdictAbsent: () => leftoverPolicyLimitsDu(),
+    principalSeenUnderHipaa: leftoverVkr,
+    coreSkills: leftoverHas,
+    rememberedCoreSkills: leftoverYas,
+  }
+}
+
+/**
+ * densable sTn — `t().verdict?.complianceTaintsSettled()??!1`.
+ * Gold does not auto-PJo.
+ */
+export function leftoverComplianceTaintsSettled(): boolean {
+  return leftoverPolicyLimitsHost().verdict?.complianceTaintsSettled() ?? false
+}
+
+/**
  * leftover `C_()` / `bK()` @183094 — firstParty + first-party base URL, then
  * Console API key OR Team/Enterprise OAuth with inference scope.
  */
@@ -1484,10 +1512,32 @@ export type PolicyLimitsHostCache = {
   failOpenVerdict: boolean
   /** densable `diskAdoptionSuppressed` — skip `b6t` disk cache in `dS`. */
   diskAdoptionSuppressed: boolean
+  /** densable `p().lastServedCoreSkills` — yas fallback. */
+  lastServedCoreSkills: unknown[] | null
+  /** densable `dS()?.core_skills` analog. */
+  sessionCoreSkills: unknown[] | null
+  /** densable `p().verdictEnvBearerDigest` — XZn. */
+  verdictEnvBearerDigest: string | null
   /**
    * densable `lastFetchOutcome` for `J()` / `ie()` / `QZn()`.
    */
   lastFetchOutcome: PolicyLimitsFetchOutcome | null
+  /**
+   * densable `t().verdict` — gold `PJo` / `registerVerdict`.
+   */
+  verdict?: {
+    isPolicyAllowed: (e: string) => boolean
+    commandPolicyGateAllows: (e: string) => boolean
+    policyDenyKind: (e: string) => string | null
+    policyDeniedReason: (e: string, n?: unknown, i?: unknown) => string | null
+    complianceTaintsSettled: () => boolean
+    policyLimitsCacheLoaded: () => boolean
+    autoDefaultVerdictState: () => string
+    policyVerdictAbsent: () => boolean
+    principalSeenUnderHipaa: () => boolean
+    coreSkills: () => unknown[]
+    rememberedCoreSkills: () => unknown[]
+  }
   settledWithoutVerdictFor: string | null
   principalFromOAuthBearer: boolean
   tunnelSocket: string | null | undefined
@@ -1524,6 +1574,9 @@ const policyLimitsHost: PolicyLimitsHostCache = {
   evidenceRereadForBearer: null,
   failOpenVerdict: false,
   diskAdoptionSuppressed: false,
+  lastServedCoreSkills: null,
+  sessionCoreSkills: null,
+  verdictEnvBearerDigest: null,
   lastFetchOutcome: null,
   settledWithoutVerdictFor: null,
   principalFromOAuthBearer: false,
@@ -1540,6 +1593,9 @@ export function leftoverPolicyLimitsHost(): PolicyLimitsHostCache {
   return policyLimitsHost
 }
 
+// densable PJo({...}) at module init — gold pins the full verdict once.
+leftoverRegisterPolicyLimitsVerdict()
+
 /**
  * densable `b6t` — disk `policy-limits.json` restrictions, or null.
  */
@@ -1553,6 +1609,10 @@ function leftoverAdoptDiskPolicyCache(): Record<
     if (!data || typeof data !== 'object') return null
     const restrictions = (data as { restrictions?: unknown }).restrictions
     if (!restrictions || typeof restrictions !== 'object') return null
+    const core = (data as { core_skills?: unknown }).core_skills
+    leftoverPolicyLimitsHost().sessionCoreSkills = Array.isArray(core)
+      ? core
+      : null
     return restrictions as Record<string, { allowed: boolean }>
   } catch {
     return null
@@ -1589,6 +1649,573 @@ export function leftoverPolicyLimitsDu(): boolean {
   return (
     leftoverPolicyLimitsDs() === null ||
     leftoverPolicyLimitsHost().failOpenVerdict
+  )
+}
+
+/**
+ * densable has — `dS()?.core_skills??[]`. dS is restrictions-only, so
+ * leftoverHas reads sessionCoreSkills after leftoverPolicyLimitsDs().
+ * Never export minify `has`.
+ */
+function leftoverHas(): unknown[] {
+  leftoverPolicyLimitsDs()
+  return (
+    leftoverPolicyLimitsHost().sessionCoreSkills ??
+    leftoverPolicyLimitsHost().lastServedCoreSkills ??
+    []
+  )
+}
+
+/**
+ * densable yas — `if(!C_())return[]; return dS()?.core_skills??p().lastServedCoreSkills`.
+ * Never export minify `yas`.
+ */
+function leftoverYas(): unknown[] {
+  if (!isPolicyLimitsEligible()) return []
+  leftoverPolicyLimitsDs()
+  return (
+    leftoverPolicyLimitsHost().sessionCoreSkills ??
+    leftoverPolicyLimitsHost().lastServedCoreSkills ??
+    []
+  )
+}
+
+/** densable oie — `t().current` analog complianceTaints. Never export minify `oie`. */
+function leftoverOie(): string[] {
+  return leftoverPolicyLimitsHost().complianceTaints
+}
+
+/** densable NZe. Never export minify `NZe`. */
+function leftoverNze(n: unknown): string {
+  const topic = typeof n === 'string' ? n.toLowerCase() : 'this'
+  return `Couldn't load your organization's policy, which governs ${topic}. The request for /api/claude_code/policy_limits got a 404, which usually means a proxy or gateway between you and the API isn't forwarding that path. Ask your network admin to allow it; \`claude doctor\` (or /status in a session) shows which host was asked.`
+}
+
+/** densable Yse. Never export minify `Yse`. */
+function leftoverYse(n: unknown): string {
+  const topic = typeof n === 'string' ? n.toLowerCase() : 'this'
+  return `Couldn't verify your organization's policy for ${topic}. Check your network connection and try again.`
+}
+
+/** densable EEe. Never export minify `EEe`. */
+function leftoverEee(n: unknown, i: unknown): string {
+  return `${n} ${i} disabled for the rest of this session because an organization with a restricted policy was signed in earlier`
+}
+
+/** densable pwt. Never export minify `pwt`. */
+function leftoverPwt(
+  n: unknown,
+  i: unknown,
+  taints: string[],
+  r?: unknown,
+): string {
+  if (taints.length > 0) {
+    return `${n} ${i} disabled by your organization's policy.`
+  }
+  if (typeof r === 'string') return r
+  const them = i === 'are' ? 'them' : 'it'
+  return `${n} ${i} disabled by your organization's policy. Contact your organization admin to enable ${them}.`
+}
+
+/**
+ * densable dp(e,n,i,r). Never export minify `dp`.
+ */
+function leftoverPolicyLimitsDp(
+  e: string,
+  n?: unknown,
+  i?: unknown,
+  r?: unknown,
+): string | null {
+  if (isPolicyLimitsAllowed(e)) return null
+  if (leftoverPolicyLimitsUie()) return leftoverNze(n)
+  switch (leftoverPolicyLimitsRh(e)) {
+    case 'route_missing':
+      return leftoverNze(n)
+    case 'cache_miss':
+      return leftoverYse(n)
+    case 'latched':
+      return leftoverEee(n, i)
+    case 'org_denied':
+    case null:
+    default:
+      return leftoverPwt(n, i, leftoverOie(), r)
+  }
+}
+
+/** densable ei / oR / mXo — ANTHROPIC_CUSTOM_HEADERS. Never export minify `oR`/`mXo`. */
+function leftoverCustomHeaderHas(name: string): boolean {
+  const env = process.env.ANTHROPIC_CUSTOM_HEADERS
+  if (!env) return false
+  return env.split(/\n|\r\n/).some(line => {
+    const colon = line.indexOf(':')
+    if (colon === -1) return false
+    return line.slice(0, colon).trim().toLowerCase() === name
+  })
+}
+
+function leftoverOrHeader(): boolean {
+  return leftoverCustomHeaderHas('x-api-key')
+}
+
+function leftoverMxo(): boolean {
+  return leftoverCustomHeaderHas('authorization')
+}
+
+/** densable cv — gold Ub() is always false, so ANTHROPIC_AUTH_TOKEN. Never export minify `cv`. */
+function leftoverCv(): string | undefined {
+  return process.env.ANTHROPIC_AUTH_TOKEN
+}
+
+/** densable nEn({anthropicAuthEnabled, oauthScopes}). Never export minify `nEn`. */
+function leftoverNen(opts: {
+  anthropicAuthEnabled: boolean
+  oauthScopes?: readonly string[]
+}): boolean {
+  const { CLAUDE_AI_INFERENCE_SCOPE } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../constants/oauth.js') as typeof import('../constants/oauth.js')
+  return (
+    opts.anthropicAuthEnabled &&
+    Boolean(opts.oauthScopes?.includes(CLAUDE_AI_INFERENCE_SCOPE))
+  )
+}
+
+/**
+ * densable `_d` — ENTRYPOINT in claude-desktop / claude-desktop-3p / local-agent.
+ * Never export minify `_d`.
+ */
+const leftoverDesktopEntrypoints = new Set([
+  'claude-desktop',
+  'claude-desktop-3p',
+  'local-agent',
+])
+
+function leftoverDesktopEntrypoint(): boolean {
+  const e = process.env.CLAUDE_CODE_ENTRYPOINT
+  return e !== undefined && leftoverDesktopEntrypoints.has(e)
+}
+
+/**
+ * densable pr in the Hnr/gd/Rl/VGt chunk — CLAUDE_CODE_REMOTE || `_d`.
+ * Not the AWS_REGION `pr` in another chunk. Never export minify `pr`.
+ */
+function leftoverPr(): boolean {
+  return Boolean(process.env.CLAUDE_CODE_REMOTE) || leftoverDesktopEntrypoint()
+}
+
+/**
+ * densable VGt — pr() && !CLAUDE_CODE_HOST_AUTH_ENV_VAR &&
+ * ENTRYPOINT !== claude-desktop-3p. Never export minify `VGt`.
+ */
+function leftoverVgt(): boolean {
+  return (
+    leftoverPr() &&
+    !process.env.CLAUDE_CODE_HOST_AUTH_ENV_VAR &&
+    process.env.CLAUDE_CODE_ENTRYPOINT !== 'claude-desktop-3p'
+  )
+}
+
+/**
+ * densable Rl — oW / unix / gd / !Jn / (cv||key)&&!VGt / (Ph||s4)&&!pr.
+ * Never export minify `Rl`.
+ */
+function leftoverRl(): boolean {
+  try {
+    const { isBareMode } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/envUtils.js') as typeof import('../utils/envUtils.js')
+    if (isBareMode()) return false
+  } catch {
+    // continue
+  }
+  if (process.env.ANTHROPIC_UNIX_SOCKET) {
+    return Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+  }
+  if (leftoverGd()) return false
+  const { getAPIProvider } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
+  const { getAnthropicApiKeyWithSource } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/auth.js') as typeof import('../utils/auth.js')
+  const e = getAPIProvider() !== 'firstParty'
+  // densable `r=Or()?Ph():n.apiKeyHelper`. oW()===Or() already returned, so nr().
+  let n: { apiKeyHelper?: string } = {}
+  try {
+    const { getSettings_DEPRECATED } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js')
+    n = getSettings_DEPRECATED() ?? {}
+  } catch {
+    n = {}
+  }
+  const r = n.apiKeyHelper
+  const s = leftoverCv()
+  let g: string
+  try {
+    g = getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    }).source
+  } catch {
+    return false
+  }
+  const h = g === 'ANTHROPIC_API_KEY' || g === 'apiKeyHelper'
+  const b =
+    (process.env.CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR?.trim() ?? '') !== ''
+  const v =
+    (Boolean(s || h) && !leftoverVgt()) || (Boolean(r || b) && !leftoverPr())
+  return !(e || v)
+}
+
+/** densable nJo — mw()!==null analog. Never export minify `nJo`. */
+function leftoverNjo(): boolean {
+  try {
+    const { hasAnthropicProfileAuth } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/anthropicProfile.js') as typeof import('../utils/anthropicProfile.js')
+    return hasAnthropicProfileAuth()
+  } catch {
+    return false
+  }
+}
+
+/** densable dw — qZ() API key, catch null. Never export minify `dw`. */
+function leftoverDw(): string | null {
+  try {
+    const { getAnthropicApiKeyWithSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/auth.js') as typeof import('../utils/auth.js')
+    const { key } = getAnthropicApiKeyWithSource()
+    return key ?? null
+  } catch {
+    return null
+  }
+}
+
+/** densable QT / qk / Xk. Never export minify `QT`. */
+function leftoverQt(): string {
+  const { getClaudeAIOAuthTokens } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/auth.js') as typeof import('../utils/auth.js')
+  const tokens = getClaudeAIOAuthTokens()
+  if (!tokens?.accessToken) return 'none'
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return 'env'
+  const { getOAuthTokenFromFileDescriptor } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/authFileDescriptor.js') as typeof import('../utils/authFileDescriptor.js')
+  const { isOauthTokenFromBgSnapshot } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+  const fd = getOAuthTokenFromFileDescriptor()
+  const providerManaged = Boolean(
+    process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,
+  )
+  if (fd && (!isOauthTokenFromBgSnapshot() || providerManaged)) return 'fd'
+  const { getSecureStorage } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/secureStorage/index.js') as typeof import('../utils/secureStorage/index.js')
+  const stored = getSecureStorage().read()?.claudeAiOauth?.accessToken
+  if (stored && stored === tokens.accessToken) return 'store'
+  if (fd && tokens.accessToken === fd) return 'fd'
+  return 'none'
+}
+
+/** densable gas. Never export minify `gas`. */
+function leftoverGas(e: string): boolean {
+  if (lookupPolicyLimitsEntry(e) === undefined) {
+    logForDebugging(
+      `[policy] policyGate names unknown policy key "${e}"; denying`,
+      { level: 'warn' },
+    )
+    return false
+  }
+  return isPolicyLimitsAllowed(e)
+}
+
+/** densable vK. Never export minify `vK`. */
+function leftoverVk(): boolean {
+  if (!isPolicyLimitsEligible()) return true
+  return leftoverPolicyLimitsDs() !== null
+}
+
+/** densable vwe. Never export minify `vwe`. */
+function leftoverVwe(): boolean {
+  if (!leftoverPolicyLimitsDu()) return false
+  const e = leftoverPolicyLimitsHost()
+  if (e.settledWithoutVerdictFor === null) return false
+  let n: string | null
+  try {
+    const principal = leftoverPolicyLimitsPrincipal()
+    n =
+      principal === null
+        ? null
+        : leftoverHashPrincipalDescriptor(principal.descriptor)
+  } catch {
+    return false
+  }
+  return e.settledWithoutVerdictFor === (n ?? '')
+}
+
+/** densable On. Never export minify `On`. */
+function leftoverOn(): boolean {
+  let e: PolicyLimitsPrincipal
+  try {
+    e = leftoverPolicyLimitsPrincipal()
+  } catch {
+    return false
+  }
+  if (e === null || e.unclassified === true || e.storedLoginOrgless === true) {
+    return false
+  }
+  return leftoverHipaaEvidence().seen.includes(
+    leftoverHashPrincipalDescriptor(e.descriptor),
+  )
+}
+
+/** densable mas. Never export minify `mas`. */
+function leftoverMas(): string {
+  if (!leftoverPolicyLimitsDu()) return 'loaded'
+  if (leftoverVwe()) {
+    return leftoverOn() ? 'unobtainable_seen_hipaa' : 'unobtainable'
+  }
+  return 'pending'
+}
+
+/**
+ * densable VKr — leftoverPolicyLimitsPrincipal + leftoverHipaaEvidence.
+ * Never leftoverTaintsInclude('hipaa') only. Never export minify `VKr`.
+ */
+function leftoverVkr(): boolean {
+  return leftoverHipaaEvidenceHitsPrincipal()
+}
+
+/** densable Ph. Never export minify `Ph`. */
+function leftoverPh(): string | undefined {
+  try {
+    const { isBareMode } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/envUtils.js') as typeof import('../utils/envUtils.js')
+    const { getSettings_DEPRECATED, getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/settings/settings.js') as typeof import('../utils/settings/settings.js')
+    if (isBareMode()) return getSettingsForSource('flagSettings')?.apiKeyHelper
+    if (process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) return undefined
+    return getSettings_DEPRECATED()?.apiKeyHelper
+  } catch {
+    return undefined
+  }
+}
+
+/** densable _zt — tengu_copper_kite. Never export minify `_zt`. */
+function leftoverCopperKite(): boolean {
+  return leftoverServedTrue('tengu_copper_kite')
+}
+
+/**
+ * densable Hnr — bare / unix / pr / nc / AUTH_TOKEN / OAUTH / mO / Ph / !Jn.
+ * Never export minify `Hnr`.
+ */
+function leftoverHnr(opts?: { skipApiKeyHelper?: boolean }): boolean {
+  try {
+    const { isBareMode } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/envUtils.js') as typeof import('../utils/envUtils.js')
+    if (isBareMode()) return true
+  } catch {
+    // continue
+  }
+  if (process.env.ANTHROPIC_UNIX_SOCKET) return true
+  if (leftoverPr()) return true
+  if (process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) return true
+  if (process.env.ANTHROPIC_AUTH_TOKEN) return true
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return true
+  try {
+    const { getOAuthTokenFromFileDescriptor } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/authFileDescriptor.js') as typeof import('../utils/authFileDescriptor.js')
+    if (getOAuthTokenFromFileDescriptor()) return true
+  } catch {
+    // continue
+  }
+  if (opts?.skipApiKeyHelper !== true && leftoverPh()) return true
+  try {
+    const { getAPIProvider } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
+    if (getAPIProvider() !== 'firstParty') return true
+  } catch {
+    return true
+  }
+  return false
+}
+
+/**
+ * densable sls — once flags for YH / qH. Never export minify `sls`.
+ */
+const leftoverSls = {
+  implicitProfileSkippedLogged: false,
+  profileAuthSelectedLogged: false,
+}
+
+/**
+ * densable YH — warn profile skipped because claude.ai login, once.
+ * Never export minify `YH`.
+ */
+function leftoverYh(host: {
+  implicitProfileSkippedLogged: boolean
+  profileAuthSelectedLogged: boolean
+}): void {
+  if (host.implicitProfileSkippedLogged) return
+  logForDebugging(
+    'An Anthropic profile (~/.config/anthropic) is configured, but a claude.ai login exists — using the claude.ai login. Set ANTHROPIC_PROFILE=<name> to use the profile instead.',
+    { level: 'warn' },
+  )
+  queueMicrotask(() => {
+    logEvent('tengu_wif_implicit_profile_skipped_stored_login', {})
+  })
+  host.implicitProfileSkippedLogged = true
+}
+
+/**
+ * densable qH — info Using Anthropic profile auth, once.
+ * Never export minify `qH`.
+ */
+function leftoverQh(host: {
+  implicitProfileSkippedLogged: boolean
+  profileAuthSelectedLogged: boolean
+}): void {
+  if (host.profileAuthSelectedLogged) return
+  const { getAnthropicProfileSource, isProfileImplicitUserOauth } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/anthropicProfile.js') as typeof import('../utils/anthropicProfile.js')
+  const e = getAnthropicProfileSource() ?? 'profile'
+  logForDebugging(
+    `Using Anthropic profile auth (${e}); ${
+      isProfileImplicitUserOauth()
+        ? 'a claude.ai login (/login) would take precedence over it'
+        : 'this takes precedence over any stored claude.ai login'
+    }`,
+    { level: 'info' },
+  )
+  host.profileAuthSelectedLogged = true
+}
+
+/**
+ * densable gd — nJo / Hnr / sls YH/qH / profile-implicit szt+eqt.
+ * skipApiKeyHelper skips sls. Never export minify `gd`.
+ */
+function leftoverGd(opts?: { skipApiKeyHelper?: boolean }): boolean {
+  if (!leftoverNjo()) return false
+  if (leftoverHnr(opts)) return false
+  const sls = opts?.skipApiKeyHelper ? undefined : leftoverSls
+  const { getAnthropicProfileSource, isProfileImplicitUserOauth } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/anthropicProfile.js') as typeof import('../utils/anthropicProfile.js')
+  const { getClaudeAIOAuthTokens } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/auth.js') as typeof import('../utils/auth.js')
+  const { CLAUDE_AI_INFERENCE_SCOPE } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../constants/oauth.js') as typeof import('../constants/oauth.js')
+  if (getAnthropicProfileSource() === 'profile-implicit') {
+    const tokens = getClaudeAIOAuthTokens()
+    if (
+      Array.isArray(tokens?.scopes) &&
+      tokens.scopes.includes(CLAUDE_AI_INFERENCE_SCOPE) &&
+      Boolean(tokens?.accessToken) &&
+      isProfileImplicitUserOauth()
+    ) {
+      if (sls) leftoverYh(sls)
+      return false
+    }
+  }
+  if (sls) leftoverQh(sls)
+  return true
+}
+
+/**
+ * densable XZn. Never export minify `XZn`.
+ */
+function leftoverXZn(): boolean | null {
+  const e = leftoverPolicyLimitsHost().verdictEnvBearerDigest
+  if (e === null) return null
+  if (leftoverCopperKite()) return false
+  const n = leftoverCv()
+  let scopes: readonly string[] | undefined
+  try {
+    const { getClaudeAIOAuthTokens } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/auth.js') as typeof import('../utils/auth.js')
+    scopes = getClaudeAIOAuthTokens()?.scopes
+  } catch {
+    scopes = undefined
+  }
+  return (
+    n !== undefined &&
+    leftoverHashPrincipalShort(n) === e &&
+    !leftoverNen({
+      anthropicAuthEnabled: leftoverRl(),
+      oauthScopes: scopes,
+    }) &&
+    leftoverDw() === null
+  )
+}
+
+/**
+ * densable cer — XZn / oR / mXo / !ag / firstParty / unix / Ph / cv+nEn / dS
+ * / pro-max store / !Or / !key / !gd.
+ * NEVER `export function cer`.
+ */
+function leftoverCer(): boolean {
+  const e = leftoverXZn()
+  if (e === false) return false
+  const { getAPIProvider, isFirstPartyAnthropicBaseUrl } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/model/providers.js') as typeof import('../utils/model/providers.js')
+  const { isBareMode } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/envUtils.js') as typeof import('../utils/envUtils.js')
+  const { CLAUDE_AI_INFERENCE_SCOPE } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../constants/oauth.js') as typeof import('../constants/oauth.js')
+  const { getAnthropicApiKeyWithSource, getClaudeAIOAuthTokens } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../utils/auth.js') as typeof import('../utils/auth.js')
+  const tokens = getClaudeAIOAuthTokens()
+  if (
+    leftoverOrHeader() ||
+    leftoverMxo() ||
+    !isFirstPartyAnthropicBaseUrl() ||
+    getAPIProvider() !== 'firstParty' ||
+    process.env.ANTHROPIC_UNIX_SOCKET !== undefined ||
+    leftoverPh() !== undefined ||
+    (leftoverCv() !== undefined &&
+      !leftoverNen({
+        anthropicAuthEnabled: leftoverRl(),
+        oauthScopes: tokens?.scopes,
+      }) &&
+      !(e === true && leftoverPolicyLimitsDs() !== null))
+  ) {
+    return false
+  }
+  if (leftoverPolicyLimitsDs() !== null) return true
+  let key: string | undefined
+  try {
+    key =
+      getAnthropicApiKeyWithSource({
+        skipRetrievingKeyFromApiKeyHelper: true,
+      }).key ?? undefined
+  } catch {
+    key = undefined
+  }
+  return (
+    (tokens?.subscriptionType === 'pro' ||
+      tokens?.subscriptionType === 'max') &&
+    tokens.scopes?.includes(CLAUDE_AI_INFERENCE_SCOPE) === true &&
+    leftoverQt() === 'store' &&
+    !isBareMode() &&
+    !key &&
+    !leftoverGd()
   )
 }
 

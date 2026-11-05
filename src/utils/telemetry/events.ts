@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import {
   type Attributes,
+  type AttributeValue,
   type Context,
   context as otelContext,
   defaultTextMapGetter,
@@ -13,6 +15,8 @@ import {
 } from 'src/bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { errorMessage } from '../errors.js'
+import { withDeadline } from '../sleep.js'
 import { getTelemetryAttributes } from '../telemetryAttributes.js'
 import { getActiveInteractionOTelContext } from './interactionOtelContext.js'
 
@@ -154,29 +158,419 @@ export function formatAssistantResponseForOTel(
   return truncateOTelContent(content).content
 }
 
-export async function logOTelEvent(
-  eventName: string,
-  metadata: { [key: string]: string | undefined } = {},
-): Promise<void> {
-  const eventLogger = getEventLogger()
-  if (!eventLogger) {
-    if (!hasWarnedNoEventLogger) {
-      hasWarnedNoEventLogger = true
-      logForDebugging(
-        `[3P telemetry] Event dropped (no event logger initialized): ${eventName}`,
-        { level: 'warn' },
-      )
+export type OTelCollectorAttributeValue = string | number | boolean | string[]
+
+export type OTelCollectorSpan = {
+  traceId: string
+  spanId: string
+  traceFlags: number
+}
+
+export type OTelCollectorLogEntry = {
+  to: 'collector'
+  event: string
+  attributes: Record<string, OTelCollectorAttributeValue>
+  loggedAt: string
+  span?: OTelCollectorSpan
+}
+
+export type OTelCollectorLogRecord = {
+  timestamp: Date
+  observedTimestamp: Date
+  body: string
+  attributes: Attributes
+  context?: Context
+}
+
+export type CollectorTelemetryRoadEndpoint = {
+  send: (entry: OTelCollectorLogEntry, signal: AbortSignal) => Promise<unknown>
+  /**
+   * Optional predicate for the default function-hooks road:
+   * returns true when at least one loaded function hook matches
+   * `telemetry.log` `{ to: 'collector' }` and we are not already
+   * inside a collector `telemetry.log` dispatch.
+   */
+  isCollectorHooked?: () => boolean
+}
+
+export type CollectorTelemetryRoad = {
+  setRoad: (road: CollectorTelemetryRoadEndpoint | null) => void
+  getRoad: () => CollectorTelemetryRoadEndpoint | null
+  isWaitingForRoad: () => boolean
+  route: (
+    buildEntry: () => OTelCollectorLogEntry,
+    parentContext?: Context,
+  ) => Promise<void>
+  settled: () => Promise<void>
+  settledWithin: (ms: number) => Promise<void>
+}
+
+type ActiveCollectorCallContext = {
+  parentContext: Context | undefined
+  initialSpan: OTelCollectorSpan | undefined
+}
+
+const collectorParentContextAls =
+  new AsyncLocalStorage<ActiveCollectorCallContext>()
+
+const MAX_WAITING_COLLECTOR_RECORDS = 100
+
+function createDeferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+/** densable Q — deliver one collector entry on the road unless aborted. */
+function sendCollectorEntryOnRoad(
+  road: CollectorTelemetryRoadEndpoint,
+  item: {
+    entry: OTelCollectorLogEntry
+    signal: AbortSignal
+    parentContext?: Context
+    initialSpan?: OTelCollectorSpan
+  },
+): Promise<void> | void {
+  const logDropped = () =>
+    logForDebugging(
+      `[3P telemetry] Event record dropped (${item.entry.event}): still on the collector road when a flush stopped waiting`,
+    )
+  const logLost = (err: unknown) =>
+    logForDebugging(
+      `[3P telemetry] Event record lost (${item.entry.event}): its raise failed: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+  if (item.signal.aborted) {
+    logDropped()
+    return
+  }
+  return collectorParentContextAls
+    .run(
+      {
+        parentContext: item.parentContext,
+        initialSpan: item.initialSpan,
+      },
+      () => road.send(item.entry, item.signal),
+    )
+    .then(
+      () => {
+        return
+      },
+      (err: unknown) => {
+        if (item.signal.aborted) logDropped()
+        else logLost(err)
+      },
+    )
+}
+
+/**
+ * densable Z / Xue — serialized 3P collector road (`telemetry.log` `{ to: "collector" }`).
+ */
+export function createCollectorTelemetryRoad(): CollectorTelemetryRoad {
+  let currentRoad: CollectorTelemetryRoadEndpoint | null = null
+  let waitingForRoad = false
+  let pendingRoad = createDeferred<CollectorTelemetryRoadEndpoint>()
+  let inFlight: Promise<void> | null = null
+  let abortController = new AbortController()
+  let waitingCount = 0
+
+  async function settled(): Promise<void> {
+    while (inFlight !== null) {
+      await inFlight
     }
-    return
   }
 
-  // Skip logging in test environment
-  if (process.env.NODE_ENV === 'test') {
-    return
+  function stopWaitingOnFlush(): void {
+    if (inFlight === null) return
+    logForDebugging(
+      '[3P telemetry] A flush stopped waiting for the collector road; records still on it are dropped',
+    )
+    abortController.abort()
+    abortController = new AbortController()
+    inFlight = null
   }
 
+  return {
+    setRoad: (road: CollectorTelemetryRoadEndpoint | null) => {
+      currentRoad = road
+      if (road === null) {
+        waitingForRoad = true
+        pendingRoad = createDeferred<CollectorTelemetryRoadEndpoint>()
+      } else {
+        waitingForRoad = false
+        waitingCount = 0
+        pendingRoad.resolve(road)
+      }
+    },
+    getRoad: () => currentRoad,
+    isWaitingForRoad: () => waitingForRoad,
+    route: (
+      buildEntry: () => OTelCollectorLogEntry,
+      parentContext?: Context,
+    ) => {
+      const roadMissing = currentRoad === null
+      if (roadMissing && waitingCount >= MAX_WAITING_COLLECTOR_RECORDS) {
+        logForDebugging(
+          '[3P telemetry] Event record dropped: no road installed and too many already waiting for one',
+          { level: 'warn' },
+        )
+        return Promise.resolve()
+      }
+      waitingCount += roadMissing ? 1 : 0
+      const entry = buildEntry()
+      const initialSpan = entry.span ? { ...entry.span } : undefined
+      const item = {
+        entry,
+        signal: abortController.signal,
+        parentContext,
+        initialSpan,
+      }
+      const next = (inFlight ?? Promise.resolve())
+        .then(() => currentRoad ?? pendingRoad.promise)
+        .then(road => sendCollectorEntryOnRoad(road, item))
+        .catch((err: unknown) =>
+          logForDebugging(
+            `[3P telemetry] Event record dropped: ${errorMessage(err)}`,
+            { level: 'warn' },
+          ),
+        )
+      inFlight = next
+      void next.then(() => {
+        if (inFlight === next) inFlight = null
+      })
+      return next
+    },
+    settled,
+    settledWithin: (ms: number) =>
+      withDeadline(settled(), ms).then(stopWaitingOnFlush),
+  }
+}
+
+export const collectorTelemetryRoad: CollectorTelemetryRoad =
+  createCollectorTelemetryRoad()
+
+function isCollectorAttributeValue(
+  value: unknown,
+): value is OTelCollectorAttributeValue {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    (Array.isArray(value) && value.every(item => typeof item === 'string'))
+  )
+}
+
+/** densable Me — build `{ to: "collector", event, attributes, loggedAt, span? }`. */
+export function buildOTelCollectorEntry(params: {
+  event: string
+  attributes: Attributes
+  loggedAt: Date
+  eventContext?: Context
+}): OTelCollectorLogEntry {
+  const ctx = params.eventContext ?? otelContext.active()
+  const spanCtx = trace.getSpanContext(ctx) ?? trace.getSpan(ctx)?.spanContext()
+  const validSpan = spanCtx !== undefined && trace.isSpanContextValid(spanCtx)
+  const picked: Record<string, OTelCollectorAttributeValue> = {}
+  for (const [key, value] of Object.entries(params.attributes)) {
+    if (isCollectorAttributeValue(value)) {
+      picked[key] = value
+    }
+  }
+  return {
+    to: 'collector',
+    event: params.event,
+    attributes: picked,
+    loggedAt: params.loggedAt.toISOString(),
+    ...(validSpan && {
+      span: {
+        traceId: spanCtx.traceId,
+        spanId: spanCtx.spanId,
+        traceFlags: spanCtx.traceFlags,
+      },
+    }),
+  }
+}
+
+/** densable h2o — build OTEL LogRecord payload. */
+export function buildOTelCollectorLogRecord(
+  eventName: string,
+  attributes: Attributes,
+  timestamp: Date,
+  eventContext?: Context,
+): OTelCollectorLogRecord {
+  return {
+    timestamp,
+    observedTimestamp: timestamp,
+    body: `claude_code.${eventName}`,
+    attributes,
+    ...(eventContext && { context: eventContext }),
+  }
+}
+
+/** densable y2o — emit OTEL LogRecord to eventLogger, or warn once if absent. */
+export function emitOTelCollectorLogRecord(
+  record: OTelCollectorLogRecord,
+  eventName: string,
+): void {
+  const eventLogger = getEventLogger()
+  if (eventLogger) {
+    eventLogger.emit(record)
+    return
+  }
+  if (!hasWarnedNoEventLogger) {
+    hasWarnedNoEventLogger = true
+    logForDebugging(
+      `[3P telemetry] Event dropped (no event logger initialized): ${eventName}`,
+      {
+        level: isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)
+          ? 'warn'
+          : 'debug',
+      },
+    )
+  }
+}
+
+function coerceCollectorAttributeValue(
+  value: unknown,
+): AttributeValue | undefined {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+  if (typeof value === 'object' && value !== null) {
+    const arr = Array.from(Object(value) as ArrayLike<unknown>)
+    if (arr.every(item => typeof item === 'string')) {
+      return arr as string[]
+    }
+    if (arr.every(item => typeof item === 'number')) {
+      return arr as number[]
+    }
+    if (arr.every(item => typeof item === 'boolean')) {
+      return arr as boolean[]
+    }
+  }
+  return undefined
+}
+
+function parseCollectorLoggedAt(raw: unknown): Date {
+  const date =
+    typeof raw === 'string' || typeof raw === 'number' || raw instanceof Date
+      ? new Date(raw)
+      : new Date(Number.NaN)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+function isCollectorSpanRecord(value: unknown): value is OTelCollectorSpan {
+  if (typeof value !== 'object' || value === null) return false
+  const rec = value as Record<string, unknown>
+  return (
+    typeof rec.traceId === 'string' &&
+    typeof rec.spanId === 'string' &&
+    typeof rec.traceFlags === 'number'
+  )
+}
+
+/** densable M$n + y2o — core tail sink for `telemetry.log` when `to === "collector"`. */
+export function emitCollectorTelemetryEntry(
+  entry: Record<string, unknown>,
+): void {
+  const eventName = typeof entry.event === 'string' ? entry.event : ''
+  const attributes: Attributes = {}
+  if (
+    typeof entry.attributes === 'object' &&
+    entry.attributes !== null &&
+    !Array.isArray(entry.attributes)
+  ) {
+    for (const [key, rawValue] of Object.entries(
+      entry.attributes as Record<string, unknown>,
+    )) {
+      const coerced = coerceCollectorAttributeValue(rawValue)
+      if (coerced !== undefined) {
+        attributes[key] = coerced
+      }
+    }
+  }
+  const carried = collectorParentContextAls.getStore()
+  const span = entry.span
+  let eventContext: Context | undefined
+  if (isCollectorSpanRecord(span)) {
+    const unchanged =
+      carried?.initialSpan !== undefined &&
+      carried.initialSpan.traceId === span.traceId &&
+      carried.initialSpan.spanId === span.spanId &&
+      carried.initialSpan.traceFlags === span.traceFlags
+    eventContext = unchanged
+      ? (carried?.parentContext ??
+        trace.setSpanContext(otelContext.active(), {
+          traceId: span.traceId,
+          spanId: span.spanId,
+          traceFlags: span.traceFlags,
+          isRemote: false,
+        }))
+      : trace.setSpanContext(carried?.parentContext ?? otelContext.active(), {
+          traceId: span.traceId,
+          spanId: span.spanId,
+          traceFlags: span.traceFlags,
+          isRemote: false,
+        })
+  } else if (carried !== undefined && carried.initialSpan === undefined) {
+    eventContext = carried.parentContext
+  }
+  emitOTelCollectorLogRecord(
+    buildOTelCollectorLogRecord(
+      eventName,
+      attributes,
+      parseCollectorLoggedAt(entry.loggedAt),
+      eventContext,
+    ),
+    eventName,
+  )
+}
+
+function safeGetTelemetryAttributes(): Attributes {
+  try {
+    return getTelemetryAttributes()
+  } catch {
+    return {}
+  }
+}
+
+function hasExplicitCollectorTelemetryHook(): boolean {
+  try {
+    const { getLoadedFunctionHooksModules, hasMatchingFunctionHook } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../plugins/functionHooksModules.js') as typeof import('../plugins/functionHooksModules.js')
+    const customMods = getLoadedFunctionHooksModules().filter(
+      mod =>
+        mod.name !== 'builtin:cc-plugin-telemetry' &&
+        mod.name !== 'cc-plugin-telemetry' &&
+        mod.status !== 'unloaded',
+    )
+    if (customMods.length === 0) return false
+    return hasMatchingFunctionHook(
+      'telemetry.log',
+      { to: 'collector' },
+      customMods,
+    )
+  } catch {
+    return false
+  }
+}
+
+function buildHostOTelAttributes(
+  eventName: string,
+  metadata: { [key: string]: string | undefined },
+): Attributes {
   const attributes: Attributes = {
-    ...getTelemetryAttributes(),
+    ...safeGetTelemetryAttributes(),
     'event.name': eventName,
     'event.timestamp': new Date().toISOString(),
     'event.sequence': eventSequence++,
@@ -203,13 +597,61 @@ export async function logOTelEvent(
     }
   }
 
-  // densable gu: ...a&&{context:a} so exporters stamp trace_id/span_id
+  return attributes
+}
+
+export async function logOTelEvent(
+  eventName: string,
+  metadata: { [key: string]: string | undefined } = {},
+): Promise<void> {
+  const road = collectorTelemetryRoad.getRoad()
+  const useCollectorRoad =
+    road !== null
+      ? road.isCollectorHooked === undefined ||
+        (road.isCollectorHooked() && hasExplicitCollectorTelemetryHook())
+      : collectorTelemetryRoad.isWaitingForRoad()
+
+  if (!useCollectorRoad) {
+    const eventLogger = getEventLogger()
+    if (!eventLogger) {
+      if (!hasWarnedNoEventLogger) {
+        hasWarnedNoEventLogger = true
+        logForDebugging(
+          `[3P telemetry] Event dropped (no event logger initialized): ${eventName}`,
+          {
+            level: isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY)
+              ? 'warn'
+              : 'debug',
+          },
+        )
+      }
+      return
+    }
+    const attributes = buildHostOTelAttributes(eventName, metadata)
+    const loggedAt = new Date()
+    const parentContext = getOTelEventParentContext()
+    eventLogger.emit(
+      buildOTelCollectorLogRecord(
+        eventName,
+        attributes,
+        loggedAt,
+        parentContext,
+      ),
+    )
+    return
+  }
+
+  const attributes = buildHostOTelAttributes(eventName, metadata)
+  const loggedAt = new Date()
   const parentContext = getOTelEventParentContext()
-  eventLogger.emit({
-    body: `claude_code.${eventName}`,
-    attributes,
-    timestamp: new Date(),
-    observedTimestamp: new Date(),
-    ...(parentContext && { context: parentContext }),
-  })
+  await collectorTelemetryRoad.route(
+    () =>
+      buildOTelCollectorEntry({
+        event: eventName,
+        attributes,
+        loggedAt,
+        eventContext: parentContext,
+      }),
+    parentContext,
+  )
 }

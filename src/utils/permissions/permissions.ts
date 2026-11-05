@@ -76,6 +76,8 @@ import {
   shouldOfferBlockOutsideReads,
 } from './outsideReads.js'
 import { isEvalConfined } from './evalConfined.js'
+import type { FunctionHookHopSite } from '../plugins/functionHooksModules.js'
+import { pinValue, restorePinnedKeys } from '../plugins/functionHooksHop.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
@@ -679,14 +681,355 @@ async function runPermissionRequestHooksForHeadlessAgent(
   return null
 }
 
+type EvaluatedToolCheckEntry = {
+  override?: { decision: 'allow' | 'ask' | 'deny'; reason?: string }
+}
+
+const evaluatedToolChecks = new WeakMap<
+  object,
+  Map<string, EvaluatedToolCheckEntry>
+>()
+
+function canonicalizeForInputFingerprint(
+  value: unknown,
+  seen: Set<object>,
+): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+  if (seen.has(value)) {
+    return '[Circular]'
+  }
+  seen.add(value)
+  if (Array.isArray(value)) {
+    return value.map(item => canonicalizeForInputFingerprint(item, seen))
+  }
+  const sorted: Record<string, unknown> = {}
+  const record = value as Record<string, unknown>
+  for (const key of Object.keys(record).sort()) {
+    sorted[key] = canonicalizeForInputFingerprint(record[key], seen)
+  }
+  return sorted
+}
+
+function stableInputFingerprint(input: unknown): string {
+  try {
+    return (
+      JSON.stringify(canonicalizeForInputFingerprint(input, new Set())) ?? ''
+    )
+  } catch {
+    return pinValue(input)
+  }
+}
+
+function toolCheckCallKey(
+  toolUseID: string,
+  input: Record<string, unknown>,
+): string {
+  return `${toolUseID}\0${stableInputFingerprint(input)}`
+}
+
+let functionHooksModCache:
+  | typeof import('../plugins/functionHooksModules.js')
+  | undefined
+
+function getFunctionHooksMod(): typeof import('../plugins/functionHooksModules.js') {
+  if (!functionHooksModCache) {
+    // Lazy require avoids pulling the 13k-line functionHooksModules graph
+    // (telemetry/ink/plugins) at permissions.ts module load time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    functionHooksModCache =
+      require('../plugins/functionHooksModules.js') as typeof import('../plugins/functionHooksModules.js')
+  }
+  return functionHooksModCache
+}
+
+export function hasEvaluatedToolCheckForCall(
+  context: ToolUseContext,
+  toolUseID: string | undefined,
+  input?: Record<string, unknown>,
+): boolean {
+  if (!toolUseID || !context.abortController) return false
+  const seen = evaluatedToolChecks.get(context.abortController)
+  if (!seen) return false
+  if (input !== undefined) {
+    return seen.has(toolCheckCallKey(toolUseID, input))
+  }
+  const prefix = `${toolUseID}\0`
+  for (const key of seen.keys()) {
+    if (key.startsWith(prefix)) return true
+  }
+  return false
+}
+
+function getEvaluatedToolCheckEntry(
+  context: ToolUseContext,
+  toolUseID: string | undefined,
+  input: Record<string, unknown>,
+): EvaluatedToolCheckEntry | undefined {
+  if (!toolUseID || !context.abortController) return undefined
+  return evaluatedToolChecks
+    .get(context.abortController)
+    ?.get(toolCheckCallKey(toolUseID, input))
+}
+
+function markToolCheckEvaluatedForCall(
+  context: ToolUseContext,
+  toolUseID: string | undefined,
+  input: Record<string, unknown>,
+  entry: EvaluatedToolCheckEntry = {},
+): void {
+  if (!toolUseID || !context.abortController) return
+  let seen = evaluatedToolChecks.get(context.abortController)
+  if (!seen) {
+    seen = new Map<string, EvaluatedToolCheckEntry>()
+    evaluatedToolChecks.set(context.abortController, seen)
+  }
+  seen.set(toolCheckCallKey(toolUseID, input), entry)
+}
+
+const toolCheckSite: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    restorePinnedKeys(['tool_use_id'], passed, original),
+  checkArgument: (passed, original) => {
+    if (
+      passed.tool !== original.tool ||
+      pinValue(passed.input) !== pinValue(original.input) ||
+      passed.tool_use_id !== original.tool_use_id
+    ) {
+      return 'the tool, its input and the call are the question and are pinned; a hook answers { decision }, it does not ask about another call'
+    }
+    return undefined
+  },
+}
+
+function findMatchedRuleInReason(
+  reason: PermissionDecisionReason | undefined,
+  behavior: PermissionDecision['behavior'],
+): PermissionRule | undefined {
+  if (!reason) return undefined
+  if (reason.type === 'rule') return reason.rule
+  if (reason.type !== 'subcommandResults') return undefined
+  for (const subResult of reason.reasons.values()) {
+    if (subResult.behavior !== behavior) continue
+    const subReason = subResult.decisionReason
+    const found =
+      subReason?.type === 'rule'
+        ? subReason.rule
+        : findMatchedRuleInReason(subReason, behavior)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function permissionDecisionToToolCheckRecord(
+  decided: PermissionDecision,
+  hookFloor: string | undefined,
+): Record<string, unknown> {
+  const decisionReason = decided.decisionReason
+  const reason =
+    decided.behavior === 'allow'
+      ? decisionReason && 'reason' in decisionReason
+        ? decisionReason.reason
+        : undefined
+      : decided.message
+  const matchedRule =
+    findMatchedRuleInReason(decisionReason, decided.behavior) ??
+    (decided.behavior === 'ask' ? decided.matchedAskRule : undefined)
+  const hook =
+    (decisionReason?.type === 'hook' && decisionReason.hookName !== 'tool.check'
+      ? decisionReason.hookName.split(':').at(0)
+      : undefined) || hookFloor
+  return {
+    decision: decided.behavior,
+    ...(reason ? { reason } : {}),
+    ...(matchedRule
+      ? { rule: permissionRuleValueToString(matchedRule.ruleValue) }
+      : {}),
+    ...(hook ? { hook } : {}),
+  }
+}
+
+function isToolCheckDecisionValue(
+  value: unknown,
+): value is 'allow' | 'ask' | 'deny' {
+  return value === 'allow' || value === 'ask' || value === 'deny'
+}
+
+function applyToolCheckHookResult<Input extends Record<string, unknown>>(
+  rawResult: { decision: 'allow' | 'ask' | 'deny'; reason?: string },
+  decided: PermissionDecision<Input> | undefined,
+  toolName: string,
+  input: Input,
+  toolUseID: string | undefined,
+): PermissionDecision<Input> {
+  if (decided?.behavior === rawResult.decision) {
+    if (decided.behavior === 'allow') return decided
+    return rawResult.reason
+      ? { ...decided, message: rawResult.reason }
+      : decided
+  }
+  const { getLoadedFunctionHooksModules, hasMatchingFunctionHook } =
+    getFunctionHooksMod()
+  const hookedModules = getLoadedFunctionHooksModules()
+    .filter(
+      mod =>
+        mod.status !== 'unloaded' &&
+        hasMatchingFunctionHook('tool.check', { tool: toolName }, [mod]),
+    )
+    .map(mod => mod.name)
+  const hooked = hookedModules.length > 0 ? hookedModules : ['plugin']
+  const who = `${hooked.length === 1 ? 'plugin' : 'plugins'} ${hooked.join(', ')}`
+  const reasonSuffix =
+    rawResult.reason === undefined ? '' : `: ${rawResult.reason}`
+  const message =
+    rawResult.decision === 'deny'
+      ? `Permission to use ${toolName} denied by ${who}${reasonSuffix}`
+      : `${toolName} needs approval (asked by ${who}${reasonSuffix})`
+  const decisionReason: PermissionDecisionReason = {
+    type: 'hook',
+    hookName: 'tool.check',
+    hookSource: `plugin:${hooked.join('+')}`,
+    reason: rawResult.reason,
+  }
+  const updatedInput: Input =
+    decided?.behavior === 'deny'
+      ? input
+      : decided?.updatedInput !== undefined
+        ? decided.updatedInput
+        : input
+  logForDebugging(
+    `tool.check ${toolName} ${toolUseID ?? ''}: ${decided?.behavior ?? 'unevaluated'} -> ${rawResult.decision} by ${who}${reasonSuffix}`,
+  )
+  switch (rawResult.decision) {
+    case 'allow':
+      return { behavior: 'allow', updatedInput, decisionReason }
+    case 'deny':
+      return { behavior: 'deny', message, decisionReason }
+    case 'ask':
+      return { behavior: 'ask', message, updatedInput, decisionReason }
+  }
+}
+
+export async function evaluatePermissionWithToolCheck<
+  Input extends Record<string, unknown> = Record<string, unknown>,
+>({
+  tool,
+  input,
+  context,
+  toolUseID,
+  evaluate,
+}: {
+  tool: Tool
+  input: Input
+  context: ToolUseContext
+  toolUseID?: string
+  evaluate: () => Promise<PermissionDecision<Input>>
+}): Promise<PermissionDecision<Input>> {
+  const { hasMatchingFunctionHook, runFunctionHookChain } =
+    getFunctionHooksMod()
+  if (!hasMatchingFunctionHook('tool.check', { tool: tool.name })) {
+    return evaluate()
+  }
+  if (hasEvaluatedToolCheckForCall(context, toolUseID, input)) {
+    const prior = getEvaluatedToolCheckEntry(context, toolUseID, input)
+    const baseDecision = await evaluate()
+    if (prior?.override?.decision === 'deny') {
+      return applyToolCheckHookResult(
+        prior.override,
+        baseDecision,
+        tool.name,
+        input,
+        toolUseID,
+      )
+    }
+    return baseDecision
+  }
+  markToolCheckEvaluatedForCall(context, toolUseID, input)
+  let decided: PermissionDecision<Input> | undefined
+  const hookFloor = context.hookAskFloor === true ? 'PreToolUse' : undefined
+  const payload: Record<string, unknown> = {
+    tool: tool.name,
+    input,
+    ...(toolUseID !== undefined && { tool_use_id: toolUseID }),
+  }
+  let rawOut: unknown
+  try {
+    rawOut = await runFunctionHookChain(
+      'tool.check',
+      payload,
+      async () => {
+        decided = await evaluate()
+        return permissionDecisionToToolCheckRecord(decided, hookFloor)
+      },
+      undefined,
+      undefined,
+      {
+        signal: context.abortController.signal,
+        site: toolCheckSite,
+      },
+    )
+  } catch (err) {
+    if (
+      err instanceof AbortError ||
+      err instanceof APIUserAbortError ||
+      context.abortController.signal.aborted
+    ) {
+      throw err
+    }
+    logForDebugging(
+      `tool.check ${tool.name}: hook dispatch threw (${toError(err).message}); keeping permission check`,
+    )
+    return decided ?? evaluate()
+  }
+  if (
+    rawOut !== null &&
+    typeof rawOut === 'object' &&
+    'decision' in rawOut &&
+    isToolCheckDecisionValue((rawOut as Record<string, unknown>).decision)
+  ) {
+    const rec = rawOut as {
+      decision: 'allow' | 'ask' | 'deny'
+      reason?: unknown
+    }
+    const normalizedResult = {
+      decision: rec.decision,
+      reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+    }
+    if (normalizedResult.decision === 'deny') {
+      markToolCheckEvaluatedForCall(context, toolUseID, input, {
+        override: normalizedResult,
+      })
+    }
+    return applyToolCheckHookResult(
+      normalizedResult,
+      decided,
+      tool.name,
+      input,
+      toolUseID,
+    )
+  }
+  return decided ?? evaluate()
+}
+
 export const hasPermissionsToUseTool: CanUseToolFn = async (
   tool,
   input,
   context,
   assistantMessage,
   toolUseID,
+  forceDecision,
 ): Promise<PermissionDecision> => {
-  const result = await hasPermissionsToUseToolInner(tool, input, context)
+  const result =
+    forceDecision !== undefined
+      ? forceDecision
+      : await evaluatePermissionWithToolCheck({
+          tool,
+          input,
+          context,
+          toolUseID,
+          evaluate: () => hasPermissionsToUseToolInner(tool, input, context),
+        })
 
   // Reset consecutive denials on any allowed tool use in auto mode.
   // This ensures that a successful tool use (even one auto-allowed by rules)

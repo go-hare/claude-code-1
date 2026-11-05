@@ -9,7 +9,11 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isHipaaPolicy } from '../../utils/midConversationSystem.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+import {
+  type BundledSkillDefinition,
+  getBundledSkillExtractDir,
+  registerBundledSkill,
+} from '../bundledSkills.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
 import { isArtifactToolEligible } from '../../utils/artifactUrl.js'
 import { applyDatavizCallout } from './datavizCallout.js'
@@ -500,26 +504,66 @@ async function fetchArtifactCapabilityFiles(): Promise<Record<string, string>> {
   }
 }
 
-export function registerPluginAuthoringSkill(): void {
-  registerBundledSkill({
+const PLUGIN_AUTHORING_SKILL_DIR_PLACEHOLDER = '${CLAUDE_SKILL_DIR}'
+
+/** densable m(e) — note prepended when bundled skill extraction failed. */
+export function pluginAuthoringSkillFilesMissingNoteOf(dir: string): string {
+  return `The engine could not write this skill's folder, ${dir}, this time, so the files named below under it are absent; once the engine has loaded the mod from its folder the same declarations are in its \`.claude-plugin/types/claude-code/index.d.ts\`.\n\n`
+}
+
+function toPosixSkillDir(dir: string): string {
+  return process.platform === 'win32' ? dir.replaceAll('\\', '/') : dir
+}
+
+/** densable f — plugin-authoring skill; gold hangs it on cc-plugin-plugin-authoring. */
+export function createPluginAuthoringSkill(): BundledSkillDefinition {
+  return {
     name: 'plugin-authoring',
     menuDescription:
       'Write a mod: a live pane, view or behaviour change in Claude Code',
     description:
       'Make a mod: a live pane, band, status line, toast or hook inside Claude Code (terminal or desktop Code tab), written as a plugin of function hooks that hot-reloads in this session. Load before writing or debugging a hooks module.',
     userInvocable: true,
-    files: PLUGIN_AUTHORING_FILES,
-    async getPromptForCommand(args, ctx) {
-      const { restorePluginDevModsHost, replaceDevModsPlaceholder } =
-        await import('../../utils/plugins/pluginDevMods.js')
-      restorePluginDevModsHost()
-      const text = await replaceDevModsPlaceholder(
-        withUserRequest(skillBody(PLUGIN_AUTHORING_MD), args),
-        { isPreload: ctx.options?.isSkillPreload === true },
+    files: async ctx =>
+      ctx?.options?.isSkillPreload === true ? {} : PLUGIN_AUTHORING_FILES,
+    async getPromptForCommand(args, ctx, extractedDir) {
+      const isPreload = ctx.options?.isSkillPreload === true
+      const {
+        leftoverDevModsExpanderSlot,
+        restorePluginDevModsHost,
+        replaceDevModsPlaceholder,
+      } = await import('../../utils/plugins/pluginDevMods.js')
+      if (!isPreload) {
+        restorePluginDevModsHost()
+      }
+      const dir = toPosixSkillDir(
+        extractedDir ?? getBundledSkillExtractDir('plugin-authoring'),
       )
+      const expand = leftoverDevModsExpanderSlot() ?? replaceDevModsPlaceholder
+      const expanded = await expand(
+        PLUGIN_AUTHORING_MD.replaceAll(
+          PLUGIN_AUTHORING_SKILL_DIR_PLACEHOLDER,
+          () => dir,
+        ),
+        { isPreload },
+      )
+      const missingNote =
+        !isPreload && extractedDir === null
+          ? pluginAuthoringSkillFilesMissingNoteOf(dir)
+          : ''
+      const text =
+        missingNote +
+        withUserRequest(
+          skillBody(expanded).trim(),
+          args.trim() === '' ? '' : args,
+        )
       return [{ type: 'text' as const, text }]
     },
-  })
+  }
+}
+
+export function registerPluginAuthoringSkill(): void {
+  registerBundledSkill(createPluginAuthoringSkill())
 }
 
 /** Gold `sz` / `Est` — `userInvocable:!1`, `isEnabled:OT`. */
@@ -775,7 +819,8 @@ export function registerRunSkillGeneratorSkill(): void {
 }
 
 export function registerGoldOfficialMissingSkills(): void {
-  registerPluginAuthoringSkill()
+  // plugin-authoring hangs on cc-plugin-plugin-authoring (gold uS skills:[f]),
+  // not a standalone bundled skill.
   registerArtifactDesignSkill()
   registerArtifactDiagrammingSkill()
   registerArtifactComponentsSkill()

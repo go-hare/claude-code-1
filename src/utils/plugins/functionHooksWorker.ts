@@ -1,28 +1,29 @@
 /**
  * densable hooks-worker.
  *
- * Frames: load / unload / dispatch / next / ping / build / resolve / call / press.
+ * Frames: load / unload / dispatch / dispatch_stream / engine_create / next / ping / build / resolve / call / press.
  * Replies: loaded / load_error / result / error / pong / built / resolved / call_result / press_result.
  * Each plugin is an environmentId. Load carries a MessagePort. A dead worker
  * sets died on the host, which aborts inFlight.
  */
-import { parentPort, workerData, type MessagePort } from 'worker_threads'
+import { type MessagePort, parentPort, workerData } from 'worker_threads'
+import type { HopFloor } from './functionHooksHop.js'
 import {
   bindHostOpPort,
   callPluginInterface,
+  type FunctionHookPlugin,
   finalizeOwnedTable,
-  handleHostOp,
   invokePress,
   loadFunctionHooksInProcess,
   recordPress,
   releasePresses,
   retireFunctionHooksModule,
+  runEngineCreateLocalInProcess,
   runFunctionHookChain,
+  runFunctionHookStreamChain,
   setFunctionHooksHost,
-  setOwnedTable,
   storeResolvedTables,
   unbindHostOpPort,
-  type FunctionHookPlugin,
 } from './functionHooksModules.js'
 
 type LoadMessage = {
@@ -43,6 +44,12 @@ type DispatchMessage = {
   environments: string[]
   /** densable u8e `{only}` — owning plugin alone (N1t / dO). */
   only?: string
+  origin?: { readonly plugin: string; readonly tier: string }
+  hookOrigin?: readonly (
+    | string
+    | { readonly plugin: string; readonly registration: number }
+  )[]
+  floors?: readonly HopFloor[]
 }
 type NextResult = {
   type: 'next_result'
@@ -50,6 +57,18 @@ type NextResult = {
   nextId: number
   value?: unknown
   result?: unknown
+}
+type NextError = {
+  type: 'next_error'
+  id: number
+  nextId: number
+  error?: string
+}
+type NextStep = {
+  type: 'next_step'
+  id: number
+  nextId: number
+  step: { done: boolean; value: unknown }
 }
 type PingMessage = { type: 'ping'; n: number }
 type BuildMessage = {
@@ -85,13 +104,24 @@ type PressReleaseMessage = {
 }
 type FlushMessage = { type: 'flush'; flushId: number }
 type OpAbortMessage = { type: 'op_abort'; opId: number; reason?: string }
+type AbortMessage = { type: 'abort'; id: number; reason?: string }
 type DispatchStreamMessage = {
   type: 'dispatch_stream'
   id: number
   event?: string
   payload?: Record<string, unknown>
+  environments?: string[]
+  only?: string
+  hasTail?: boolean
 }
 type StreamPullMessage = { type: 'stream_pull'; id: number }
+type StreamCloseMessage = { type: 'stream_close'; id: number }
+type EngineCreateMessage = {
+  type: 'engine_create'
+  id: number
+  payload?: Record<string, unknown>
+  environments?: string[]
+}
 
 const stamp =
   workerData?.stamp instanceof SharedArrayBuffer
@@ -102,12 +132,6 @@ function bumpStamp(): void {
   if (stamp) Atomics.add(stamp, 0, 1)
 }
 
-function isTable(
-  value: unknown,
-): value is Record<string, Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 if (parentPort) {
   const port = parentPort
   setFunctionHooksHost({
@@ -115,7 +139,17 @@ if (parentPort) {
     hookFailed: report => port.postMessage({ type: 'hook_failed', ...report }),
   })
   const environments = new Map<string, { port?: MessagePort }>()
-  const tails = new Map<string, (value: unknown) => void>()
+  const tails = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (err: Error) => void }
+  >()
+  const streamTails = new Map<
+    string,
+    {
+      resolve: (step: { done: boolean; value: unknown }) => void
+      reject: (err: Error) => void
+    }
+  >()
   const inFlight = new Map<number, AbortController>()
   const streams = new Map<number, AsyncIterator<unknown>>()
   const pendingOps = new Map<number, AbortController>()
@@ -125,6 +159,8 @@ if (parentPort) {
     | UnloadMessage
     | DispatchMessage
     | NextResult
+    | NextError
+    | NextStep
     | PingMessage
     | BuildMessage
     | ResolveMessage
@@ -133,8 +169,11 @@ if (parentPort) {
     | PressReleaseMessage
     | FlushMessage
     | OpAbortMessage
+    | AbortMessage
     | DispatchStreamMessage
     | StreamPullMessage
+    | StreamCloseMessage
+    | EngineCreateMessage
 
   port.on('message', (message: Frame) => {
     bumpStamp()
@@ -151,11 +190,32 @@ if (parentPort) {
       pendingOps.delete(message.opId)
       return
     }
-    if (message.type === 'next_result') {
-      tails.get(`${message.id}:${message.nextId}`)?.(
-        message.result ?? message.value,
-      )
-      tails.delete(`${message.id}:${message.nextId}`)
+    if (message.type === 'abort') {
+      inFlight
+        .get(message.id)
+        ?.abort(new Error(message.reason ?? 'hooks dispatch aborted'))
+      return
+    }
+    if (message.type === 'next_result' || message.type === 'next_error') {
+      const key = `${message.id}:${message.nextId}`
+      const pending = tails.get(key)
+      tails.delete(key)
+      if (message.type === 'next_error') {
+        const err = new Error(message.error ?? 'next_error')
+        pending?.reject(err)
+        const pendingStream = streamTails.get(key)
+        streamTails.delete(key)
+        pendingStream?.reject(err)
+      } else {
+        pending?.resolve(message.result ?? message.value)
+      }
+      return
+    }
+    if (message.type === 'next_step') {
+      const key = `${message.id}:${message.nextId}`
+      const pendingStream = streamTails.get(key)
+      streamTails.delete(key)
+      pendingStream?.resolve(message.step)
       return
     }
     void handle(message).catch((err: unknown) => {
@@ -192,9 +252,6 @@ if (parentPort) {
     }
     if (message.type === 'load') {
       try {
-        const loaded = await sameThread(() =>
-          loadFunctionHooksInProcess([message.args]),
-        )
         if (message.port) {
           message.port.start()
           bindHostOpPort(message.environmentId, {
@@ -204,6 +261,9 @@ if (parentPort) {
             },
           })
         }
+        const loaded = await sameThread(() =>
+          loadFunctionHooksInProcess([message.args]),
+        )
         environments.set(message.environmentId, { port: message.port })
         port.postMessage({
           type: 'loaded',
@@ -212,6 +272,9 @@ if (parentPort) {
             name: mod.name,
             root: mod.root,
             patterns: mod.patterns,
+            ...(mod.surfaceModules !== undefined && {
+              surfaceModules: mod.surfaceModules,
+            }),
             hooks: (mod.hooks ?? []).map(hook => ({
               pattern: hook.pattern,
               matcher: hook.matcher,
@@ -219,6 +282,7 @@ if (parentPort) {
           })),
         })
       } catch (err) {
+        unbindHostOpPort(message.environmentId)
         message.port?.close()
         port.postMessage({
           type: 'load_error',
@@ -314,18 +378,70 @@ if (parentPort) {
       releasePresses(message.environmentId, message.handles ?? [])
       return
     }
+    if (message.type === 'engine_create') {
+      const abort = new AbortController()
+      inFlight.set(message.id, abort)
+      try {
+        const summary = await runEngineCreateLocalInProcess(
+          message.payload ?? {},
+          message.environments,
+        )
+        port.postMessage({
+          type: 'result',
+          id: message.id,
+          returned: summary,
+        })
+      } finally {
+        inFlight.delete(message.id)
+      }
+      return
+    }
     if (message.type === 'dispatch_stream') {
       const abort = new AbortController()
       inFlight.set(message.id, abort)
-      const iterator = (async function* () {
-        const value = await runFunctionHookChain(
-          message.event ?? '',
-          message.payload ?? {},
-          async event => event,
-        )
-        yield value
-      })()
+      let nextStreamId = 0
+      const hasTail = message.hasTail === true
+      const iterator = runFunctionHookStreamChain<unknown, unknown>(
+        message.event ?? '',
+        message.payload ?? {},
+        async function* (event) {
+          if (!hasTail) {
+            yield event
+            return event
+          }
+          const streamId = ++nextStreamId
+          let opened = false
+          while (true) {
+            const step = await new Promise<{ done: boolean; value: unknown }>(
+              (resolve, reject) => {
+                streamTails.set(`${message.id}:${streamId}`, {
+                  resolve,
+                  reject,
+                })
+                port.postMessage({
+                  type: 'next_pull',
+                  id: message.id,
+                  nextId: streamId,
+                  ...(!opened && { open: { argument: event } }),
+                })
+                opened = true
+              },
+            )
+            if (step.done) return step.value
+            yield step.value
+          }
+        },
+        message.only,
+        message.environments,
+      )
       streams.set(message.id, iterator)
+      return
+    }
+    if (message.type === 'stream_close') {
+      const iterator = streams.get(message.id)
+      streams.delete(message.id)
+      inFlight.delete(message.id)
+      await iterator?.return?.(undefined).catch(() => undefined)
       return
     }
     if (message.type === 'stream_pull') {
@@ -338,16 +454,26 @@ if (parentPort) {
         })
         return
       }
-      const step = await iterator.next()
-      if (step.done) {
+      try {
+        const step = await iterator.next()
+        if (step.done) {
+          streams.delete(message.id)
+          inFlight.delete(message.id)
+        }
+        port.postMessage({
+          type: 'stream_step',
+          id: message.id,
+          step: { done: step.done === true, value: step.value },
+        })
+      } catch (err) {
         streams.delete(message.id)
         inFlight.delete(message.id)
+        port.postMessage({
+          type: 'error',
+          id: message.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
       }
-      port.postMessage({
-        type: 'stream_step',
-        id: message.id,
-        step: { done: step.done === true, value: step.value },
-      })
       return
     }
     if (message.type !== 'dispatch') return
@@ -358,19 +484,28 @@ if (parentPort) {
       const value = await runFunctionHookChain(
         message.event,
         message.payload,
-        event =>
-          new Promise(resolve => {
+        (event, floors) =>
+          new Promise((resolve, reject) => {
             const id = ++nextId
-            tails.set(`${message.id}:${id}`, resolve)
+            tails.set(`${message.id}:${id}`, { resolve, reject })
             port.postMessage({
               type: 'next',
               id: message.id,
               nextId: id,
               argument: event,
+              ...(floors !== undefined && floors.length > 0 && { floors }),
             })
           }),
         message.only,
         message.environments,
+        {
+          ...(message.origin !== undefined && { origin: message.origin }),
+          ...(message.hookOrigin !== undefined && {
+            hookOrigin: message.hookOrigin,
+          }),
+          ...(message.floors !== undefined && { floors: message.floors }),
+          signal: abort.signal,
+        },
       )
       port.postMessage({ type: 'result', id: message.id, returned: value })
     } finally {

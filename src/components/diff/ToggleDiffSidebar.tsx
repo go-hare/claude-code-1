@@ -8,6 +8,7 @@ import {
   DIFF_SIDEBAR_NO_GIT_MESSAGE,
   diffSidebarHasGitRepo,
   getReplDiffHost,
+  isDiffSidebarOwnedByPlugin,
   toggleReplDiffTab,
 } from '../../utils/replDiffTab.js';
 import { isDiffPanelEnabled } from '../../utils/willowCrate.js';
@@ -34,7 +35,7 @@ export function ToggleDiffSidebar({ onDone }: Props): null {
     }
     ran.current = true;
     if (replTab !== 'diff') {
-      if (!isDiffPanelEnabled()) {
+      if (!isDiffPanelEnabled() || isDiffSidebarOwnedByPlugin()) {
         onDone(DIFF_PANEL_UNAVAILABLE_MESSAGE, { display: 'system' });
         return;
       }

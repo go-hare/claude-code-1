@@ -417,6 +417,200 @@ function getModePersonaSection(): string | null {
   return mode.systemPrompt
 }
 
+type PromptComposeScope = 'shared' | 'session'
+
+export type PromptComposeSectionEntry = {
+  id: string
+  text: string
+  scope: PromptComposeScope
+}
+
+type PromptComposeTrait =
+  | 'bare'
+  | 'lean'
+  | 'sdk-preset'
+  | 'teammate'
+  | 'analysis'
+  | 'print'
+  | 'skills'
+  | 'send-user-message'
+
+function getPromptFunctionHooks():
+  | typeof import('../utils/plugins/functionHooksModules.js')
+  | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('../utils/plugins/functionHooksModules.js') as typeof import('../utils/plugins/functionHooksModules.js')
+  } catch {
+    return null
+  }
+}
+
+const PROMPT_SECTION_SITE = {
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined => {
+    if (typeof passed.name !== 'string') return 'no { name }'
+    if (passed.name !== original.name) {
+      return 'a changed name (the engine caches the section by it)'
+    }
+    if (passed.text === null) return undefined
+    return typeof passed.text === 'string'
+      ? undefined
+      : 'a text that is neither a string nor null'
+  },
+}
+
+const PROMPT_COMPOSE_SITE = {
+  restoreArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): Record<string, unknown> =>
+    !Object.hasOwn(passed, 'model') && Object.hasOwn(original, 'model')
+      ? { ...passed, model: original.model }
+      : passed,
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined =>
+    passed.model === original.model ? undefined : 'a changed model (pinned)',
+}
+
+async function dispatchPromptSectionHook(
+  hooks: typeof import('../utils/plugins/functionHooksModules.js'),
+  name: string,
+  baseText: string | null,
+): Promise<string | null> {
+  const payload: Record<string, unknown> = { name, text: baseText }
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ text: string | null }> => ({
+    text:
+      event.text === null || typeof event.text === 'string'
+        ? event.text
+        : baseText,
+  })
+  try {
+    const result = await hooks.runFunctionHookChain(
+      'prompt.section',
+      payload,
+      tail,
+      undefined,
+      undefined,
+      { site: PROMPT_SECTION_SITE },
+    )
+    if (result !== null && typeof result === 'object' && 'text' in result) {
+      const nextText = (result as { text?: unknown }).text
+      if (nextText === null || typeof nextText === 'string') {
+        return nextText
+      }
+    }
+  } catch (err) {
+    logForDebugging(
+      `prompt.section (${name}): ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+  }
+  return baseText
+}
+
+function buildNamedPromptComposeSections(
+  scope: PromptComposeScope,
+  entries: ReadonlyArray<readonly [string, string | null]>,
+): PromptComposeSectionEntry[] {
+  const out: PromptComposeSectionEntry[] = []
+  for (const [id, text] of entries) {
+    if (text === null) continue
+    out.push({ id, text, scope })
+  }
+  return out
+}
+
+function validateComposedSections(
+  raw: unknown,
+): PromptComposeSectionEntry[] | null {
+  if (!Array.isArray(raw)) return null
+  const seenIds = new Set<string>()
+  let sawSession = false
+  const validated: PromptComposeSectionEntry[] = []
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') return null
+    const candidate = item as Record<string, unknown>
+    if (typeof candidate.id !== 'string' || candidate.id === '') return null
+    if (typeof candidate.text !== 'string') return null
+    if (candidate.scope !== 'shared' && candidate.scope !== 'session') {
+      return null
+    }
+    if (seenIds.has(candidate.id)) return null
+    seenIds.add(candidate.id)
+    if (candidate.scope === 'session') {
+      sawSession = true
+    } else if (sawSession) {
+      return null
+    }
+    validated.push({
+      id: candidate.id,
+      text: candidate.text,
+      scope: candidate.scope,
+    })
+  }
+  return validated
+}
+
+function flattenComposedSections(
+  sections: readonly PromptComposeSectionEntry[],
+  boundary: string | null,
+): string[] {
+  const filtered = sections.filter(s => s.text !== boundary)
+  const shared = filtered.filter(s => s.scope === 'shared')
+  const session = filtered.filter(s => s.scope === 'session')
+  const includeBoundary = boundary !== null && shared.length > 0
+  return [
+    ...shared.map(s => s.text),
+    ...(includeBoundary ? [boundary] : []),
+    ...session.map(s => s.text),
+  ]
+}
+
+async function dispatchPromptComposeHook(
+  hooks: typeof import('../utils/plugins/functionHooksModules.js'),
+  input: Record<string, unknown>,
+  composeCore: (
+    event?: Record<string, unknown>,
+  ) => Promise<PromptComposeSectionEntry[]>,
+): Promise<PromptComposeSectionEntry[]> {
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ sections: PromptComposeSectionEntry[] }> => ({
+    sections: await composeCore(event),
+  })
+  try {
+    const result = await hooks.runFunctionHookChain(
+      'prompt.compose',
+      input,
+      tail,
+      undefined,
+      undefined,
+      { site: PROMPT_COMPOSE_SITE },
+    )
+    if (result !== null && typeof result === 'object' && 'sections' in result) {
+      const checked = validateComposedSections(
+        (result as { sections?: unknown }).sections,
+      )
+      if (checked !== null) {
+        return checked
+      }
+    }
+  } catch (err) {
+    logForDebugging(
+      `prompt.compose: the dispatch failed, the engine composes the prompt itself: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+  }
+  return composeCore()
+}
+
 export async function getSystemPrompt(
   tools: Tools,
   model: string,
@@ -433,10 +627,41 @@ export async function getSystemPrompt(
   } catch {
     // keep raw env fallback
   }
+  const promptHooks = getPromptFunctionHooks()
+  const hasSectionHook =
+    promptHooks?.hasMatchingFunctionHook('prompt.section') === true
+  const hasComposeHook =
+    promptHooks?.hasMatchingFunctionHook('prompt.compose') === true
+
   if (simpleMode) {
-    return [
-      `You are Claude Code, Anthropic's official CLI for Claude.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
+    const bareSection = `You are Claude Code, Anthropic's official CLI for Claude.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`
+    if (!hasComposeHook || promptHooks === null) {
+      return [bareSection]
+    }
+    const bareSectionText = promptHooks.hasMatchingFunctionHook(
+      'prompt.section',
+      { name: 'bare' },
+    )
+      ? await dispatchPromptSectionHook(promptHooks, 'bare', bareSection)
+      : bareSection
+    const traits: PromptComposeTrait[] = [
+      'bare',
+      ...(getIsNonInteractiveSession() ? (['print'] as const) : []),
     ]
+    const sections = await dispatchPromptComposeHook(
+      promptHooks,
+      {
+        model,
+        promptModel: model,
+        surfaces: getIsNonInteractiveSession() ? [] : ['terminal'],
+        tools: tools.map(_ => _.name),
+        outputStyle: null,
+        traits,
+      },
+      async () =>
+        buildNamedPromptComposeSections('session', [['bare', bareSectionText]]),
+    )
+    return flattenComposedSections(sections, null)
   }
 
   const cwd = getCwd()
@@ -476,143 +701,340 @@ ${CYBER_RISK_INSTRUCTION}`,
     ].filter(s => s !== null)
   }
 
-  const dynamicSections = [
-    systemPromptSection('communication', () =>
-      getCommunicationSection({ lean: useSimpleSystemPrompt, model }),
-    ),
-    systemPromptSection('pronouns', () => PRONOUNS_BODY),
-    systemPromptSection('task_continuity', () => TASK_CONTINUITY_BODY),
-    systemPromptSection('tool_param_json', () => TOOL_PARAM_JSON_BODY),
-    systemPromptSection('fable_identity', () => getFableIdentitySection(model)),
-    systemPromptSection('mode_persona', () => getModePersonaSection()),
-    systemPromptSection('session_guidance', () =>
-      getSessionSpecificGuidanceSection(enabledTools, skillToolCommands),
-    ),
-    systemPromptSection('memory', () => loadMemoryPrompt()),
-    systemPromptSection('ant_model_override', () =>
-      getAntModelOverrideSection(),
-    ),
-    systemPromptSection('env_info_simple', () =>
-      computeSimpleEnvInfo(model, additionalWorkingDirectories),
-    ),
-    systemPromptSection('language', () =>
-      getLanguageSection(settings.language),
-    ),
-    systemPromptSection('output_style', () =>
-      getOutputStyleSection(outputStyleConfig),
-    ),
+  const dynamicSectionSpecs: Array<
+    readonly [string, ReturnType<typeof systemPromptSection>]
+  > = [
+    [
+      'communication',
+      systemPromptSection('communication', () =>
+        getCommunicationSection({ lean: useSimpleSystemPrompt, model }),
+      ),
+    ],
+    ['pronouns', systemPromptSection('pronouns', () => PRONOUNS_BODY)],
+    [
+      'task_continuity',
+      systemPromptSection('task_continuity', () => TASK_CONTINUITY_BODY),
+    ],
+    [
+      'tool_param_json',
+      systemPromptSection('tool_param_json', () => TOOL_PARAM_JSON_BODY),
+    ],
+    [
+      'fable_identity',
+      systemPromptSection('fable_identity', () =>
+        getFableIdentitySection(model),
+      ),
+    ],
+    [
+      'mode_persona',
+      systemPromptSection('mode_persona', () => getModePersonaSection()),
+    ],
+    [
+      'session_guidance',
+      systemPromptSection('session_guidance', () =>
+        getSessionSpecificGuidanceSection(enabledTools, skillToolCommands),
+      ),
+    ],
+    ['memory', systemPromptSection('memory', () => loadMemoryPrompt())],
+    [
+      'ant_model_override',
+      systemPromptSection('ant_model_override', () =>
+        getAntModelOverrideSection(),
+      ),
+    ],
+    [
+      'env_info_simple',
+      systemPromptSection('env_info_simple', () =>
+        computeSimpleEnvInfo(model, additionalWorkingDirectories),
+      ),
+    ],
+    [
+      'language',
+      systemPromptSection('language', () =>
+        getLanguageSection(settings.language),
+      ),
+    ],
+    [
+      'output_style',
+      systemPromptSection('output_style', () =>
+        getOutputStyleSection(outputStyleConfig),
+      ),
+    ],
     // When delta enabled, instructions are announced via persisted
     // mcp_instructions_delta attachments (attachments.ts) instead of this
     // per-turn recompute, which busts the prompt cache on late MCP connect.
     // Gate check inside compute (not selecting between section variants)
     // so a mid-session gate flip doesn't read a stale cached value.
-    DANGEROUS_uncachedSystemPromptSection(
+    [
       'mcp_instructions',
-      () =>
-        isMcpInstructionsDeltaEnabled()
-          ? null
-          : getMcpInstructionsSection(mcpClients),
-      'MCP servers connect/disconnect between turns',
-    ),
-    systemPromptSection('scratchpad', () => getScratchpadInstructions()),
+      DANGEROUS_uncachedSystemPromptSection(
+        'mcp_instructions',
+        () =>
+          isMcpInstructionsDeltaEnabled()
+            ? null
+            : getMcpInstructionsSection(mcpClients),
+        'MCP servers connect/disconnect between turns',
+      ),
+    ],
+    [
+      'scratchpad',
+      systemPromptSection('scratchpad', () => getScratchpadInstructions()),
+    ],
     // densable 2.1.221 #28 — Background Session shipping policy (hIb).
     // Uncached: job dir / isolation mode can change via env + EnterWorktree.
-    DANGEROUS_uncachedSystemPromptSection(
+    [
       'background_session',
-      () => getBackgroundSessionInstructions(),
-      'bg session env / isolation mode may change mid-session',
-    ),
-    systemPromptSection('context_management', () => CONTEXT_MANAGEMENT_SECTION),
+      DANGEROUS_uncachedSystemPromptSection(
+        'background_session',
+        () => getBackgroundSessionInstructions(),
+        'bg session env / isolation mode may change mid-session',
+      ),
+    ],
+    [
+      'context_management',
+      systemPromptSection(
+        'context_management',
+        () => CONTEXT_MANAGEMENT_SECTION,
+      ),
+    ],
     // Official seu — <total_tokens>N tokens left</total_tokens> system section.
     // Skipped under CLAUDE_CODE_SIMPLE / DISABLE_ATTACHMENTS (early return above
     // already covers SIMPLE). Mode off → null. Official also forces off under Jb.
-    systemPromptSection('total_tokens_reminder', () => {
-      let attachmentsDisabled = isEnvTruthy(
-        process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
-      )
-      try {
-        const { isAttachmentsDisabled } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-        attachmentsDisabled = isAttachmentsDisabled()
-      } catch {
-        // keep raw env fallback
-      }
-      // Official CLAUDE_CODE_SIMPLE densable (same path as getSystemPrompt).
-      let simpleModeEnv = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
-      try {
-        const { isSimpleModeEnvEnabled } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-        simpleModeEnv = isSimpleModeEnvEnabled()
-      } catch {
-        // keep raw env fallback
-      }
-      return buildTotalTokensSystemPromptSection({
-        contextWindowTokens: getEffectiveContextWindowSize(model),
-        simpleMode:
-          useSimpleSystemPrompt || simpleModeEnv || attachmentsDisabled,
-      })
-    }),
+    [
+      'total_tokens_reminder',
+      systemPromptSection('total_tokens_reminder', () => {
+        let attachmentsDisabled = isEnvTruthy(
+          process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS,
+        )
+        try {
+          const { isAttachmentsDisabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          attachmentsDisabled = isAttachmentsDisabled()
+        } catch {
+          // keep raw env fallback
+        }
+        // Official CLAUDE_CODE_SIMPLE densable (same path as getSystemPrompt).
+        let simpleModeEnv = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
+        try {
+          const { isSimpleModeEnvEnabled } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
+          simpleModeEnv = isSimpleModeEnvEnabled()
+        } catch {
+          // keep raw env fallback
+        }
+        return buildTotalTokensSystemPromptSection({
+          contextWindowTokens: getEffectiveContextWindowSize(model),
+          simpleMode:
+            useSimpleSystemPrompt || simpleModeEnv || attachmentsDisabled,
+        })
+      }),
+    ],
     // Official act_dont_rederive / ownership_frame / investigate_first arms.
-    systemPromptSection('act_dont_rederive', () => getActDontRederiveSection()),
-    systemPromptSection('delivering_work', () => getDeliveringWorkSection()),
-    systemPromptSection('overcorrection', () => getCorrectionsSection()),
-    systemPromptSection('autonomy_append', () => getAutonomyAppendSection()),
-    systemPromptSection('willow_tern', () => getWillowTernSection()),
-    systemPromptSection('opus5_reduced_delegation', () =>
-      getOpus5ReducedDelegationSection(model),
-    ),
+    [
+      'act_dont_rederive',
+      systemPromptSection('act_dont_rederive', () =>
+        getActDontRederiveSection(),
+      ),
+    ],
+    [
+      'delivering_work',
+      systemPromptSection('delivering_work', () => getDeliveringWorkSection()),
+    ],
+    [
+      'overcorrection',
+      systemPromptSection('overcorrection', () => getCorrectionsSection()),
+    ],
+    [
+      'autonomy_append',
+      systemPromptSection('autonomy_append', () => getAutonomyAppendSection()),
+    ],
+    [
+      'willow_tern',
+      systemPromptSection('willow_tern', () => getWillowTernSection()),
+    ],
+    [
+      'opus5_reduced_delegation',
+      systemPromptSection('opus5_reduced_delegation', () =>
+        getOpus5ReducedDelegationSection(model),
+      ),
+    ],
     // When lean simple path is active, ownership is folded into wrg intro —
     // skip the separate arm section to avoid double ownership framing.
-    systemPromptSection('ownership_frame', () =>
-      useSimpleSystemPrompt ? null : getOwnershipFrameSection(),
-    ),
+    [
+      'ownership_frame',
+      systemPromptSection('ownership_frame', () =>
+        useSimpleSystemPrompt ? null : getOwnershipFrameSection(),
+      ),
+    ],
     // Official arg(e) — action_caution only under Jb lean path.
-    systemPromptSection('action_caution', () =>
-      useSimpleSystemPrompt
-        ? getLeanActionCautionSection({
-            ownershipFrame: isOwnershipFrameEnabled(),
-          })
-        : null,
-    ),
-    systemPromptSection('investigate_first', () =>
-      getInvestigateFirstSection({
-        model,
-        simpleSystemPrompt: useSimpleSystemPrompt,
-      }),
-    ),
+    [
+      'action_caution',
+      systemPromptSection('action_caution', () =>
+        useSimpleSystemPrompt
+          ? getLeanActionCautionSection({
+              ownershipFrame: isOwnershipFrameEnabled(),
+            })
+          : null,
+      ),
+    ],
+    [
+      'investigate_first',
+      systemPromptSection('investigate_first', () =>
+        getInvestigateFirstSection({
+          model,
+          simpleSystemPrompt: useSimpleSystemPrompt,
+        }),
+      ),
+    ],
     ...(feature('KAIROS') || feature('KAIROS_BRIEF')
-      ? [systemPromptSection('brief', () => getBriefSection())]
+      ? [
+          [
+            'brief',
+            systemPromptSection('brief', () => getBriefSection()),
+          ] as const,
+        ]
       : []),
     // densable CNy / focus_mode system section (J7t-gated).
     // Use uncached so /focus mid-session updates model-facing guidance.
-    DANGEROUS_uncachedSystemPromptSection(
+    [
       'focus_mode',
-      () => getFocusModeSection({ model }),
-      'focus view toggled mid-session via /focus or apply_flag_settings',
-    ),
+      DANGEROUS_uncachedSystemPromptSection(
+        'focus_mode',
+        () => getFocusModeSection({ model }),
+        'focus view toggled mid-session via /focus or apply_flag_settings',
+      ),
+    ],
     // densable 2.1.214 endconv_deferred_hint — one-liner when EndConversation
     // is enabled + deferred tool search is on + tool is in the pool.
-    systemPromptSection('endconv_deferred_hint', () => {
-      try {
-        const gate =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js')
-        const { END_CONVERSATION_TOOL_NAME } =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
-        // densable: d.has(END_CONVERSATION_TOOL_NAME) && model !== void 0
-        if (!enabledTools.has(END_CONVERSATION_TOOL_NAME)) return null
-        return gate.getEndConversationDeferredHintSection(model)
-      } catch {
-        return null
-      }
-    }),
+    [
+      'endconv_deferred_hint',
+      systemPromptSection('endconv_deferred_hint', () => {
+        try {
+          const gate =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/endConversationGate.js')
+          const { END_CONVERSATION_TOOL_NAME } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js') as typeof import('@claude-code/builtin-tools/tools/EndConversationTool/prompt.js')
+          // densable: d.has(END_CONVERSATION_TOOL_NAME) && model !== void 0
+          if (!enabledTools.has(END_CONVERSATION_TOOL_NAME)) return null
+          return gate.getEndConversationDeferredHintSection(model)
+        } catch {
+          return null
+        }
+      }),
+    ],
   ]
 
+  const dynamicSections = dynamicSectionSpecs.map(([, entry]) => entry)
+  const baseDynamicSections = await resolveSystemPromptSections(dynamicSections)
   const resolvedDynamicSections =
-    await resolveSystemPromptSections(dynamicSections)
+    hasSectionHook &&
+    promptHooks !== null &&
+    baseDynamicSections.length === dynamicSectionSpecs.length
+      ? await Promise.all(
+          baseDynamicSections.map((baseText, idx) => {
+            const name = dynamicSectionSpecs[idx]![0]
+            if (
+              !promptHooks.hasMatchingFunctionHook('prompt.section', { name })
+            ) {
+              return baseText
+            }
+            return dispatchPromptSectionHook(promptHooks, name, baseText)
+          }),
+        )
+      : baseDynamicSections
+
+  if (hasComposeHook && promptHooks !== null) {
+    const boundary = shouldUseGlobalCacheScope()
+      ? SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+      : null
+    const traits: PromptComposeTrait[] = [
+      ...(useSimpleSystemPrompt ? (['lean'] as const) : []),
+      ...(getIsNonInteractiveSession() ? (['print'] as const) : []),
+      ...(skillToolCommands.length > 0 ? (['skills'] as const) : []),
+      ...(getBriefToolModule()?.isBriefEnabled()
+        ? (['send-user-message'] as const)
+        : []),
+    ]
+    const composeInput: Record<string, unknown> = {
+      model,
+      promptModel: model,
+      surfaces: getIsNonInteractiveSession() ? [] : ['terminal'],
+      tools: tools.map(_ => _.name),
+      outputStyle:
+        outputStyleConfig === null
+          ? null
+          : {
+              name: outputStyleConfig.name,
+              isKeepingCodingInstructions:
+                outputStyleConfig.keepCodingInstructions === true,
+            },
+      traits,
+    }
+    const composed = await dispatchPromptComposeHook(
+      promptHooks,
+      composeInput,
+      async event => {
+        const effectiveEnabledTools =
+          event !== undefined && Array.isArray(event.tools)
+            ? new Set(
+                event.tools.filter(
+                  (name): name is string =>
+                    typeof name === 'string' && enabledTools.has(name),
+                ),
+              )
+            : enabledTools
+        const effectiveLean =
+          event !== undefined && Array.isArray(event.traits)
+            ? event.traits.includes('lean')
+            : useSimpleSystemPrompt
+        const sharedSections = effectiveLean
+          ? buildNamedPromptComposeSections('shared', [
+              [
+                'lean_body',
+                buildLeanSimpleSystemPrompt({
+                  outputStyleActive: outputStyleConfig !== null,
+                  ownershipFrame: isOwnershipFrameEnabled(),
+                  cyberRiskInstruction: CYBER_RISK_INSTRUCTION,
+                }),
+              ],
+            ])
+          : buildNamedPromptComposeSections('shared', [
+              ['intro', getSimpleIntroSection(outputStyleConfig)],
+              ['system', getSimpleSystemSection()],
+              [
+                'doing_tasks',
+                outputStyleConfig === null ||
+                outputStyleConfig.keepCodingInstructions === true
+                  ? getSimpleDoingTasksSection()
+                  : null,
+              ],
+              ['actions', getActionsSection()],
+              ['tools', getUsingYourToolsSection(effectiveEnabledTools)],
+              ['tone', getOutputEfficiencySection()],
+            ])
+        const sessionPairs: Array<readonly [string, string | null]> =
+          resolvedDynamicSections.length === dynamicSectionSpecs.length
+            ? dynamicSectionSpecs.map(([id], idx) => [
+                id,
+                resolvedDynamicSections[idx] ?? null,
+              ])
+            : resolvedDynamicSections.map((text, idx) => [
+                `section_${idx}`,
+                text,
+              ])
+        const sessionSections = buildNamedPromptComposeSections(
+          'session',
+          sessionPairs,
+        )
+        return [...sharedSections, ...sessionSections]
+      },
+    )
+    return flattenComposedSections(composed, boundary)
+  }
 
   // Official l$ / Jb: lean wrg static body replaces dense intro/system/tasks stack.
   if (useSimpleSystemPrompt) {

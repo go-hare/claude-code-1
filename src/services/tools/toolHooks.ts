@@ -27,8 +27,13 @@ import {
   type PermissionDecisionReason,
   type PermissionResult,
 } from '../../utils/permissions/PermissionResult.js'
-import { checkRuleBasedPermissions } from '../../utils/permissions/permissions.js'
+import {
+  checkRuleBasedPermissions,
+  evaluatePermissionWithToolCheck,
+  hasEvaluatedToolCheckForCall,
+} from '../../utils/permissions/permissions.js'
 import { stripEvalConfinedHookAllow } from '../../utils/permissions/evalConfined.js'
+import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js'
 import { formatError } from '../../utils/toolErrors.js'
 import { isMcpTool } from '../mcp/utils.js'
 import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
@@ -338,6 +343,100 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
  * Shared by toolExecution.ts (main query loop) and REPLTool/toolWrappers.ts
  * (REPL inner calls) so the permission semantics stay in lockstep.
  */
+async function settleResolvedDecisionWithToolCheck(
+  decided: PermissionDecision,
+  opts: {
+    tool: Tool
+    input: Record<string, unknown>
+    toolUseContext: ToolUseContext
+    canUseTool: CanUseToolFn
+    assistantMessage: AssistantMessage
+    toolUseID: string
+  },
+): Promise<{ decision: PermissionDecision; input: Record<string, unknown> }> {
+  if (!hasMatchingFunctionHook('tool.check', { tool: opts.tool.name })) {
+    if (decided.behavior !== 'ask') {
+      return { decision: decided, input: opts.input }
+    }
+    return {
+      decision: await opts.canUseTool(
+        opts.tool,
+        opts.input,
+        opts.toolUseContext,
+        opts.assistantMessage,
+        opts.toolUseID,
+        decided,
+      ),
+      input: opts.input,
+    }
+  }
+  const checked = await evaluatePermissionWithToolCheck({
+    tool: opts.tool,
+    input: opts.input,
+    context: opts.toolUseContext,
+    toolUseID: opts.toolUseID,
+    evaluate: () => Promise.resolve(decided),
+  })
+  if (checked.behavior === 'allow' && opts.toolUseContext.requireCanUseTool) {
+    return {
+      decision: await opts.canUseTool(
+        opts.tool,
+        opts.input,
+        opts.toolUseContext,
+        opts.assistantMessage,
+        opts.toolUseID,
+      ),
+      input: opts.input,
+    }
+  }
+  if (checked.behavior !== 'ask') {
+    return { decision: checked, input: opts.input }
+  }
+  return {
+    decision: await opts.canUseTool(
+      opts.tool,
+      opts.input,
+      opts.toolUseContext,
+      opts.assistantMessage,
+      opts.toolUseID,
+      checked,
+    ),
+    input: opts.input,
+  }
+}
+
+async function runCanUseToolWithToolCheckFallback(
+  tool: Tool,
+  input: Record<string, unknown>,
+  toolUseContext: ToolUseContext,
+  canUseTool: CanUseToolFn,
+  assistantMessage: AssistantMessage,
+  toolUseID: string,
+  forceDecision?: PermissionDecision,
+): Promise<PermissionDecision> {
+  const rawDecision = await canUseTool(
+    tool,
+    input,
+    toolUseContext,
+    assistantMessage,
+    toolUseID,
+    forceDecision,
+  )
+  if (
+    !hasMatchingFunctionHook('tool.check', { tool: tool.name }) ||
+    hasEvaluatedToolCheckForCall(toolUseContext, toolUseID, input)
+  ) {
+    return rawDecision
+  }
+  return evaluatePermissionWithToolCheck({
+    tool,
+    input,
+    context: toolUseContext,
+    toolUseID,
+    evaluate: () => Promise.resolve(rawDecision),
+  })
+}
+
 export async function resolveHookPermissionDecision(
   hookPermissionResult: PermissionResult | undefined,
   tool: Tool,
@@ -367,10 +466,11 @@ export async function resolveHookPermissionDecision(
         `Hook approved tool use for ${tool.name}, but canUseTool is required`,
       )
       return {
-        decision: await canUseTool(
+        decision: await runCanUseToolWithToolCheckFallback(
           tool,
           hookInput,
           toolUseContext,
+          canUseTool,
           assistantMessage,
           toolUseID,
         ),
@@ -390,13 +490,27 @@ export async function resolveHookPermissionDecision(
           ? `Hook satisfied user interaction for ${tool.name} via updatedInput`
           : `Hook approved tool use for ${tool.name}, bypassing permission prompt`,
       )
-      return { decision: hookPermissionResult, input: hookInput }
+      return settleResolvedDecisionWithToolCheck(hookPermissionResult, {
+        tool,
+        input: hookInput,
+        toolUseContext,
+        canUseTool,
+        assistantMessage,
+        toolUseID,
+      })
     }
     if (ruleCheck.behavior === 'deny') {
       logForDebugging(
         `Hook approved tool use for ${tool.name}, but deny rule overrides: ${ruleCheck.message}`,
       )
-      return { decision: ruleCheck, input: hookInput }
+      return settleResolvedDecisionWithToolCheck(ruleCheck, {
+        tool,
+        input: hookInput,
+        toolUseContext,
+        canUseTool,
+        assistantMessage,
+        toolUseID,
+      })
     }
     // ask rule — dialog required despite hook approval. Gold ge=D==="ask"
     // is false on hook-allow, so this is not hookAskFloor.
@@ -404,10 +518,11 @@ export async function resolveHookPermissionDecision(
       `Hook returned 'allow' for ${tool.name}, but ask rule/safety check requires full permission pipeline`,
     )
     return {
-      decision: await canUseTool(
+      decision: await runCanUseToolWithToolCheckFallback(
         tool,
         hookInput,
         toolUseContext,
+        canUseTool,
         assistantMessage,
         toolUseID,
       ),
@@ -417,7 +532,14 @@ export async function resolveHookPermissionDecision(
 
   if (hookPermissionResult?.behavior === 'deny') {
     logForDebugging(`Hook denied tool use for ${tool.name}`)
-    return { decision: hookPermissionResult, input }
+    return settleResolvedDecisionWithToolCheck(hookPermissionResult, {
+      tool,
+      input,
+      toolUseContext,
+      canUseTool,
+      assistantMessage,
+      toolUseID,
+    })
   }
 
   // Hook ask (or no decision). Gold EQn runs FR then, when both hook and
@@ -437,35 +559,49 @@ export async function resolveHookPermissionDecision(
       logForDebugging(
         `Hook returned 'ask' for ${tool.name}, but deny rule overrides: ${ruleCheck.message}`,
       )
-      return { decision: ruleCheck, input: askInput }
+      return settleResolvedDecisionWithToolCheck(ruleCheck, {
+        tool,
+        input: askInput,
+        toolUseContext,
+        canUseTool,
+        assistantMessage,
+        toolUseID,
+      })
     }
     if (ruleCheck?.behavior === 'ask') {
       logForDebugging(
         `Hook returned 'ask' for ${tool.name}, but ask rule/safety check requires full permission pipeline (hookAskFloor — a classifier allow re-surfaces as this ask)`,
       )
       return {
-        decision: await canUseTool(
+        decision: await runCanUseToolWithToolCheckFallback(
           tool,
           askInput,
           { ...toolUseContext, hookAskFloor: true },
+          canUseTool,
           assistantMessage,
           toolUseID,
         ),
         input: askInput,
       }
     }
+    return settleResolvedDecisionWithToolCheck(hookPermissionResult, {
+      tool,
+      input: askInput,
+      toolUseContext,
+      canUseTool,
+      assistantMessage,
+      toolUseID,
+    })
   }
 
-  const forceDecision =
-    hookPermissionResult?.behavior === 'ask' ? hookPermissionResult : undefined
   return {
-    decision: await canUseTool(
+    decision: await runCanUseToolWithToolCheckFallback(
       tool,
       askInput,
       toolUseContext,
+      canUseTool,
       assistantMessage,
       toolUseID,
-      forceDecision,
     ),
     input: askInput,
   }

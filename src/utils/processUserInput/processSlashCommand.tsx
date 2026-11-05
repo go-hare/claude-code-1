@@ -92,6 +92,13 @@ import { parseSlashCommand } from '../slashCommandParsing.js';
 import { slashCommandEditDistance, suggestSlashCommand } from '../slashCommandSuggest.js';
 import { sleep } from '../sleep.js';
 import { incrementPluginUsage } from '../plugins/pluginUsagePending.js';
+import {
+  type FunctionHookHopSite,
+  getPanesTerminalSize,
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from '../plugins/functionHooksModules.js';
+import { pinValue, restorePinnedKeys } from '../plugins/functionHooksHop.js';
 import { recordSkillUsage } from '../suggestions/skillUsageTracking.js';
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js';
 import { buildPluginCommandTelemetryFields } from '../telemetry/pluginTelemetry.js';
@@ -105,7 +112,201 @@ import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT
 
 type SlashCommandResult = ProcessUserInputBaseResult & {
   command: Command;
+  metaTexts?: readonly string[];
 };
+
+const DEFAULT_COMMAND_PRESENTATION_COLUMNS = 80;
+
+const commandRunSite: FunctionHookHopSite = {
+  restoreArgument: (passed, original) => restorePinnedKeys(['presentation'], passed, original),
+  checkArgument: (passed, original) => {
+    if (passed.command !== original.command) {
+      return 'a changed command (the engine runs the one it resolved)';
+    }
+    if (pinValue(passed.presentation) !== pinValue(original.presentation)) {
+      return 'a changed presentation (pinned: where the answer shows is a fact)';
+    }
+    if (typeof passed.args !== 'string') {
+      return 'no { args } (a string)';
+    }
+    return undefined;
+  },
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function withSafeSessionHooksContext(context: ProcessUserInputContext): ProcessUserInputContext {
+  type SessionHooksMap = ReturnType<ProcessUserInputContext['getAppState']>['sessionHooks'];
+  const state = context.getAppState() as Partial<ReturnType<ProcessUserInputContext['getAppState']>> | undefined;
+  if (!state || state.sessionHooks !== undefined) {
+    return context;
+  }
+  const emptySessionHooks: SessionHooksMap = new Map();
+  return {
+    ...context,
+    getAppState: () => {
+      const current = context.getAppState();
+      if (!current || (current as { sessionHooks?: SessionHooksMap }).sessionHooks !== undefined) {
+        return current;
+      }
+      return { ...current, sessionHooks: emptySessionHooks };
+    },
+  };
+}
+
+function resolveCommandRunOrigin(
+  context: ProcessUserInputContext,
+  submissionOrigin: { kind?: string } | undefined,
+  modelScheduledOrigin: boolean | undefined,
+): { kind: string } {
+  if (modelScheduledOrigin) {
+    return { kind: 'scheduled-trigger' };
+  }
+  if (submissionOrigin?.kind === 'task-notification') {
+    return { kind: 'task-notification' };
+  }
+  const bridgeOrigin =
+    submissionOrigin?.kind === 'bridge' ||
+    (context as { dispatchedOverBridge?: boolean }).dispatchedOverBridge === true;
+  if (bridgeOrigin) {
+    return { kind: 'bridge' };
+  }
+  return { kind: 'composer' };
+}
+
+function resolveCommandRunPresentation(context: ProcessUserInputContext): {
+  isFullscreen: boolean;
+  columns: number;
+} {
+  const isFullscreen =
+    context.presentation !== undefined ? context.presentation === 'fullscreen' : isFullscreenEnvEnabled();
+  const paneColumns = getPanesTerminalSize()?.columns;
+  const stdoutColumns = process.stdout?.columns;
+  const columns =
+    paneColumns ??
+    (typeof stdoutColumns === 'number' && stdoutColumns > 0 ? stdoutColumns : DEFAULT_COMMAND_PRESENTATION_COLUMNS);
+  return { isFullscreen, columns };
+}
+
+function buildShortCircuitedSlashCommandResult(
+  text: string | undefined,
+  metaContext: readonly string[],
+  opts: {
+    command: Command;
+    args: string;
+    precedingInputBlocks: ContentBlockParam[];
+    uuid?: string;
+    isNonInteractiveSession: boolean;
+  },
+): SlashCommandResult {
+  const { command, args, precedingInputBlocks, uuid, isNonInteractiveSession } = opts;
+  const useUserInputMessage = isNonInteractiveSession || precedingInputBlocks.length > 0;
+  if (text === undefined && metaContext.length === 0 && !useUserInputMessage) {
+    return {
+      messages: [],
+      shouldQuery: false,
+      command,
+    };
+  }
+  const displayArgs = command.isSensitive && args.trim() ? '***' : args;
+  const formattedInput = formatCommandInput(command, displayArgs);
+  const inputMessage = useUserInputMessage
+    ? createUserMessage({
+        content: prepareUserContent({
+          inputString: formattedInput,
+          precedingInputBlocks,
+        }),
+        uuid,
+      })
+    : createCommandInputMessage(formattedInput);
+  return {
+    messages: [
+      inputMessage,
+      ...(text === undefined
+        ? []
+        : [createCommandInputMessage(`<local-command-stdout>${text}</local-command-stdout>`)]),
+      ...metaContext.map(entry => createUserMessage({ content: entry, isMeta: true })),
+    ],
+    shouldQuery: false,
+    command,
+    resultText: text,
+    ...(metaContext.length > 0 && { metaTexts: metaContext }),
+  };
+}
+
+function getLocalCommandTagFromMessage(msg: Message): 'local-command-stdout' | 'local-command-stderr' | undefined {
+  if (isSystemLocalCommandMessage(msg) && typeof msg.content === 'string') {
+    if (msg.content.startsWith('<local-command-stdout>')) return 'local-command-stdout';
+    if (msg.content.startsWith('<local-command-stderr>')) return 'local-command-stderr';
+  }
+  const userContent = msg.type === 'user' && !msg.isMeta ? msg.message?.content : undefined;
+  if (typeof userContent === 'string') {
+    if (userContent.startsWith('<local-command-stdout>')) return 'local-command-stdout';
+    if (userContent.startsWith('<local-command-stderr>')) return 'local-command-stderr';
+  }
+  return undefined;
+}
+
+function retellSlashCommandResult(
+  ran: SlashCommandResult,
+  rewritten: { text?: string; context?: readonly string[] },
+): SlashCommandResult | undefined {
+  if (ran.shouldQuery || ran.nextInput !== undefined) {
+    return undefined;
+  }
+  const isPluginRegisteredLocal = ran.command.type === 'local' && ran.command.loadedFrom === 'plugin';
+  let messages = ran.messages;
+  if (rewritten.text !== undefined) {
+    const idx =
+      ran.resultText === undefined && !isPluginRegisteredLocal
+        ? -1
+        : messages.findIndex(msg => getLocalCommandTagFromMessage(msg) !== undefined);
+    if (idx === -1) {
+      return undefined;
+    }
+    const existing = messages[idx]!;
+    const tag = getLocalCommandTagFromMessage(existing) ?? 'local-command-stdout';
+    const replacement = isSystemLocalCommandMessage(existing)
+      ? createCommandInputMessage(`<${tag}>${rewritten.text}</${tag}>`)
+      : createUserMessage({ content: `<${tag}>${rewritten.text}</${tag}>` });
+    messages = messages.with(idx, replacement);
+  }
+  if (rewritten.context !== undefined) {
+    const hasStdoutOrMeta =
+      ran.metaTexts !== undefined ||
+      isPluginRegisteredLocal ||
+      messages.some(msg => getLocalCommandTagFromMessage(msg) !== undefined);
+    if (!hasStdoutOrMeta) {
+      return undefined;
+    }
+    const priorCounts = new Map<string, number>();
+    for (const entry of ran.metaTexts ?? []) {
+      priorCounts.set(entry, (priorCounts.get(entry) ?? 0) + 1);
+    }
+    messages = [
+      ...messages.filter(msg => {
+        const content =
+          msg.type === 'user' && msg.isMeta && typeof msg.message.content === 'string'
+            ? msg.message.content
+            : undefined;
+        const count = content === undefined ? 0 : (priorCounts.get(content) ?? 0);
+        if (content === undefined || count === 0) return true;
+        priorCounts.set(content, count - 1);
+        return false;
+      }),
+      ...rewritten.context.map(entry => createUserMessage({ content: entry, isMeta: true })),
+    ];
+  }
+  const finalMetaTexts = rewritten.context ?? ran.metaTexts;
+  return {
+    ...ran,
+    messages,
+    resultText: rewritten.text ?? ran.resultText,
+    ...(finalMetaTexts !== undefined && { metaTexts: finalMetaTexts }),
+  };
+}
 
 // Poll interval and deadline for MCP settle before launching a background
 // forked subagent. MCP servers typically connect within 1-3s of startup;
@@ -155,6 +356,18 @@ async function executeForkedSlashCommand(
   });
 
   const appState = await context.getAppState();
+  const allowBackgroundForkedSlashCommands = context.options.allowBackgroundForkedSlashCommands === true;
+  if (allowBackgroundForkedSlashCommands) {
+    assertBackgroundForkedSlashCommandTestOverrideAllowed();
+  }
+  let canRunBackgroundForkedSlashCommand = false;
+  if (appState.kairosEnabled) {
+    if (feature('KAIROS')) {
+      canRunBackgroundForkedSlashCommand = true;
+    } else if (allowBackgroundForkedSlashCommands) {
+      canRunBackgroundForkedSlashCommand = true;
+    }
+  }
   const forceSyncFork =
     // Non-interactive / disable-bg handled inside shouldBackgroundForkedSkill
     false;
@@ -172,10 +385,10 @@ async function executeForkedSlashCommand(
   } = await prepareForkedCommandContext(command, args, context, {
     replaceCommandRules: true,
     replaceDenyRules: !background,
-    deferInvocationRecording: background,
+    deferInvocationRecording: background || canRunBackgroundForkedSlashCommand,
     // Gold sNt `g?.extractAttachments && !Lje` — slash passes collector when
     // the caller waits in-line; background fork skips (SkillTool omits it).
-    ...(!background
+    ...(!background && !canRunBackgroundForkedSlashCommand
       ? {
           extractAttachments: (skillContent, ctx) =>
             getAttachmentMessages(skillContent, ctx, null, [], ctx.messages, 'repl_main_thread', {
@@ -201,7 +414,7 @@ async function executeForkedSlashCommand(
   if (
     background &&
     // KAIROS path owns autonomy re-enqueue; skip double-bg when that wins.
-    !(appState.kairosEnabled && (feature('KAIROS') || context.options.allowBackgroundForkedSlashCommands === true))
+    !canRunBackgroundForkedSlashCommand
   ) {
     const setAppState = context.setAppStateForTasks ?? context.setAppState;
     try {
@@ -298,18 +511,6 @@ async function executeForkedSlashCommand(
   // isMeta prompts are hidden. Outside assistant mode, context:fork commands
   // are user-invoked skills that default to densable bg above; KAIROS keeps
   // the scheduled-task re-enqueue path.
-  const allowBackgroundForkedSlashCommands = context.options.allowBackgroundForkedSlashCommands === true;
-  if (allowBackgroundForkedSlashCommands) {
-    assertBackgroundForkedSlashCommandTestOverrideAllowed();
-  }
-  let canRunBackgroundForkedSlashCommand = false;
-  if (appState.kairosEnabled) {
-    if (feature('KAIROS')) {
-      canRunBackgroundForkedSlashCommand = true;
-    } else if (allowBackgroundForkedSlashCommands) {
-      canRunBackgroundForkedSlashCommand = true;
-    }
-  }
   if (canRunBackgroundForkedSlashCommand) {
     recordInvocation();
     // Standalone abortController — background subagents survive main-thread
@@ -751,6 +952,144 @@ async function processSlashCommandBody(
 
   // Track slash command usage for feature discovery
 
+  const runCoreSlashCommand = (argsToRun: string): Promise<SlashCommandResult> =>
+    getMessagesForSlashCommand(
+      commandName,
+      argsToRun,
+      setToolJSX,
+      context,
+      precedingInputBlocks,
+      imageContentBlocks,
+      isAlreadyProcessing,
+      canUseTool,
+      uuid,
+      autonomy,
+      modelScheduledOrigin,
+      submissionOrigin,
+    );
+
+  const canonicalCommandName = getCommandName(resolvedCommand);
+  const hasCommandRunHook =
+    hasMatchingFunctionHook('command.run', { command: canonicalCommandName }) ||
+    (canonicalCommandName !== commandName && hasMatchingFunctionHook('command.run', { command: commandName }));
+
+  const slashResult: SlashCommandResult = hasCommandRunHook
+    ? await (async (): Promise<SlashCommandResult> => {
+        type CoreCommandRunEntry = {
+          args: string;
+          ran: SlashCommandResult;
+          text: string | undefined;
+          context: readonly string[] | undefined;
+        };
+        const coreRuns: CoreCommandRunEntry[] = [];
+        let coreThrown: { error: unknown } | undefined;
+        const commandRunInput: Record<string, unknown> = {
+          command: canonicalCommandName,
+          args: parsedArgs,
+          origin: resolveCommandRunOrigin(context, submissionOrigin, modelScheduledOrigin),
+          presentation: resolveCommandRunPresentation(context),
+        };
+        let chainOut: unknown;
+        try {
+          chainOut = await runFunctionHookChain(
+            'command.run',
+            commandRunInput,
+            async event => {
+              const nextArgs = typeof event.args === 'string' ? event.args : parsedArgs;
+              try {
+                const ran = await runCoreSlashCommand(nextArgs);
+                const text = ran.resultText;
+                const metaContext = ran.metaTexts;
+                const ref = coreRuns.push({
+                  args: nextArgs,
+                  ran,
+                  text,
+                  context: metaContext,
+                });
+                return {
+                  ref,
+                  text: text ?? '',
+                  ...(metaContext !== undefined && { context: metaContext }),
+                };
+              } catch (err) {
+                coreThrown = { error: err };
+                throw err;
+              }
+            },
+            undefined,
+            undefined,
+            {
+              signal: context.abortController.signal,
+              site: commandRunSite,
+            },
+          );
+        } catch (err) {
+          if (coreThrown !== undefined || err instanceof AbortError || context.abortController.signal.aborted) {
+            throw err;
+          }
+          logForDebugging(
+            `command.run /${canonicalCommandName}: hook dispatch threw (${errorMessage(err)}); running command`,
+          );
+          return coreRuns.at(-1)?.ran ?? runCoreSlashCommand(parsedArgs);
+        }
+
+        const outRecord = isPlainRecord(chainOut) ? chainOut : {};
+        const answeredText = typeof outRecord.text === 'string' ? outRecord.text : undefined;
+        const hasAnsweredContext = Array.isArray(outRecord.context);
+        const answeredContext = hasAnsweredContext
+          ? (outRecord.context as unknown[]).filter((item): item is string => typeof item === 'string' && item !== '')
+          : [];
+        const matchedByRef = typeof outRecord.ref === 'number' ? coreRuns[outRecord.ref - 1] : undefined;
+        const coreEntry = matchedByRef ?? coreRuns.at(-1);
+
+        if (!coreEntry) {
+          return buildShortCircuitedSlashCommandResult(answeredText, answeredContext, {
+            command: resolvedCommand,
+            args: parsedArgs,
+            precedingInputBlocks,
+            uuid,
+            isNonInteractiveSession: context.options.isNonInteractiveSession === true,
+          });
+        }
+
+        const textUnchanged =
+          answeredText === undefined || (matchedByRef !== undefined && answeredText === (matchedByRef.text ?? ''));
+        const contextUnchanged = !hasAnsweredContext || pinValue(answeredContext) === pinValue(coreEntry.context ?? []);
+        if (textUnchanged && contextUnchanged) {
+          return coreEntry.ran;
+        }
+        const retold = retellSlashCommandResult(coreEntry.ran, {
+          text: textUnchanged ? undefined : answeredText,
+          context: contextUnchanged ? undefined : answeredContext,
+        });
+        if (!retold) {
+          if (
+            resolvedCommand.type === 'local' &&
+            resolvedCommand.loadedFrom === 'plugin' &&
+            !coreEntry.ran.shouldQuery &&
+            coreEntry.ran.nextInput === undefined
+          ) {
+            return buildShortCircuitedSlashCommandResult(
+              textUnchanged ? coreEntry.text : answeredText,
+              contextUnchanged ? [...(coreEntry.context ?? [])] : answeredContext,
+              {
+                command: resolvedCommand,
+                args: coreEntry.args,
+                precedingInputBlocks,
+                uuid,
+                isNonInteractiveSession: context.options.isNonInteractiveSession === true,
+              },
+            );
+          }
+          logForDebugging(
+            `command.run /${canonicalCommandName}: a hook's own answer after next() dropped; the command ran and its effect is not a record the answer can stand on`,
+          );
+          return coreEntry.ran;
+        }
+        return retold;
+      })()
+    : await runCoreSlashCommand(parsedArgs);
+
   const {
     messages: newMessages,
     shouldQuery: messageShouldQuery,
@@ -762,20 +1101,7 @@ async function processSlashCommandBody(
     nextInput,
     submitNextInput,
     deferAutonomyCompletion,
-  } = await getMessagesForSlashCommand(
-    commandName,
-    parsedArgs,
-    setToolJSX,
-    context,
-    precedingInputBlocks,
-    imageContentBlocks,
-    isAlreadyProcessing,
-    canUseTool,
-    uuid,
-    autonomy,
-    modelScheduledOrigin,
-    submissionOrigin,
-  );
+  } = slashResult;
 
   // Local slash commands that skip messages
   if (newMessages.length === 0) {
@@ -830,6 +1156,7 @@ async function processSlashCommandBody(
       shouldQuery: false,
 
       model,
+      resultText,
       nextInput,
       submitNextInput,
       deferAutonomyCompletion,
@@ -1169,8 +1496,10 @@ async function getMessagesForSlashCommand(
                     ],
               shouldQuery: options?.shouldQuery ?? false,
               command,
+              resultText: result,
               nextInput: options?.nextInput,
               submitNextInput: options?.submitNextInput,
+              ...(metaMessages.length > 0 && { metaTexts: options?.metaMessages }),
             });
           };
 
@@ -1363,7 +1692,8 @@ async function getMessagesForSlashCommand(
             });
           }
           // densable Ze @208164542 — UserPromptExpansion before effort / fork / Le.
-          const expansion = await runUserPromptExpansionHook(command, trailingArgs, context);
+          const expansionContext = withSafeSessionHooksContext(context);
+          const expansion = await runUserPromptExpansionHook(command, trailingArgs, expansionContext);
           if ('blocked' in expansion) {
             logCmdHookBlocked(command.name);
             return { ...expansion.blocked, command };
@@ -1424,7 +1754,7 @@ async function getMessagesForSlashCommand(
           for (const stackedCommand of stackedCommands) {
             try {
               // densable Ze on each stacked skill; blocked → warning + continue.
-              const stackedExpansion = await runUserPromptExpansionHook(stackedCommand, trailingArgs, context);
+              const stackedExpansion = await runUserPromptExpansionHook(stackedCommand, trailingArgs, expansionContext);
               if ('blocked' in stackedExpansion) {
                 loaded.messages.push(
                   createSystemMessage(

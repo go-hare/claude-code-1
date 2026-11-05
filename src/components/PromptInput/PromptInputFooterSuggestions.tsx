@@ -342,4 +342,36 @@ export function PromptInputFooterSuggestions({
   );
 }
 
+const PROMPT_HINT_MAX_CHARS = 4096;
+
+/** densable 2.1.289 `Lk.clean` (`Kw`): collapse whitespace and cap at 4096 chars. */
+export function cleanPromptHintText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, PROMPT_HINT_MAX_CHARS);
+}
+
+/**
+ * densable 2.1.289 `tailOf` (`Bx`) / `PromptHintSite` (`IK`): extract the
+ * active `tail` or rewritten `hint` only when `isDraft` and `isWorking` match
+ * the current prompt reading.
+ */
+export function resolvePromptHintText(input: {
+  isDraft: boolean;
+  isWorking: boolean;
+  defaultHint: string;
+  settledIsDraft: boolean;
+  settledIsWorking: boolean;
+  settledHint?: string;
+  settledTail?: string;
+}): string {
+  if (input.settledIsDraft !== input.isDraft || input.settledIsWorking !== input.isWorking) {
+    return '';
+  }
+  const tail = cleanPromptHintText(input.settledTail ?? '');
+  if (tail !== '') return tail;
+  if (input.settledHint !== undefined && input.settledHint !== input.defaultHint) {
+    return cleanPromptHintText(input.settledHint);
+  }
+  return '';
+}
+
 export default memo(PromptInputFooterSuggestions);

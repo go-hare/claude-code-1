@@ -79,8 +79,18 @@ export type AnalyticsSink = {
   ) => Promise<void>
 }
 
-// Event queue for events logged before sink is attached
+// Event queue for events logged before sink is attached (densable u = 1000)
+const MAX_EVENT_QUEUE_SIZE = 1000
 const eventQueue: QueuedEvent[] = []
+let droppedEventCount = 0
+
+function enqueueEvent(entry: QueuedEvent): void {
+  if (eventQueue.length >= MAX_EVENT_QUEUE_SIZE) {
+    eventQueue.shift()
+    droppedEventCount++
+  }
+  eventQueue.push(entry)
+}
 
 // Sink - initialized during app startup
 let sink: AnalyticsSink | null = null
@@ -132,7 +142,7 @@ export function logEvent(
   metadata: LogEventMetadata,
 ): void {
   if (sink === null) {
-    eventQueue.push({ eventName, metadata, async: false })
+    enqueueEvent({ eventName, metadata, async: false })
     return
   }
   sink.logEvent(eventName, metadata)
@@ -152,7 +162,7 @@ export async function logEventAsync(
   metadata: LogEventMetadata,
 ): Promise<void> {
   if (sink === null) {
-    eventQueue.push({ eventName, metadata, async: true })
+    enqueueEvent({ eventName, metadata, async: true })
     return
   }
   await sink.logEventAsync(eventName, metadata)
@@ -165,4 +175,6 @@ export async function logEventAsync(
 export function _resetForTesting(): void {
   sink = null
   eventQueue.length = 0
+  droppedEventCount = 0
+  void droppedEventCount
 }

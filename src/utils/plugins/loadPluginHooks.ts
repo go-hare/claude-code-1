@@ -5,6 +5,18 @@ import {
   getRegisteredHooks,
   registerHookCallbacks,
 } from '../../bootstrap/state.js'
+import {
+  BUILTIN_MARKETPLACE_NAME,
+  isBuiltinPluginId,
+  normalizeCanonicalBuiltinPluginId,
+} from '../../plugins/builtinPlugins.js'
+import {
+  computePluginHookOrderRank,
+  computePluginHookTier,
+  getManagedEnabledPluginIds,
+  type PluginHookTierOrder,
+  resolvePluginHookTierOrder,
+} from '../../plugins/bundled/secDefault.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
 import { settingsChangeDetector } from '../settings/changeDetector.js'
@@ -16,8 +28,10 @@ import type { PluginHookMatcher } from '../settings/types.js'
 import { jsonStringify } from '../slowOperations.js'
 import { clearPluginCache, loadAllPluginsCacheOnly } from './pluginLoader.js'
 import {
+  type FunctionHookPlugin,
   listBuiltinFunctionHookPlugins,
   loadFunctionHooksModules,
+  runEngineCreateFold,
 } from './functionHooksModules.js'
 import { ensurePluginToolRegistrarInstalled } from './pluginToolLoopbackRegistrar.js'
 
@@ -26,6 +40,94 @@ let hotReloadSubscribed = false
 
 // Snapshot of enabledPlugins for change detection in hot reload
 let lastPluginSettingsSnapshot: string | undefined
+let lastPluginTierSnapshot: string | undefined
+
+const warnedShadowedTierKeys = new Set<string>()
+
+function foldCanonicalSourceId(id: string): string {
+  return normalizeCanonicalBuiltinPluginId(
+    id.trim().normalize('NFC').toLowerCase(),
+  )
+}
+
+/**
+ * densable `yqn(e, n, r)` — log tier diagnostics, sort by `MEt`, and stamp `ZEn` tier.
+ */
+function orderFunctionHookModules(
+  plugins: readonly FunctionHookPlugin[],
+  managedIds: ReadonlySet<string> | null,
+  order: PluginHookTierOrder,
+): FunctionHookPlugin[] {
+  if (order.seat !== undefined) {
+    logForDebugging(order.seat)
+  }
+  for (const id of order.append.filter(item => order.prepend.includes(item))) {
+    logForDebugging(
+      `managed plugin ${id} is named in both prependPlugins and appendPlugins; it is prepended`,
+      { level: 'warn' },
+    )
+  }
+  for (const key of order.shadowed) {
+    if (warnedShadowedTierKeys.has(key)) continue
+    warnedShadowedTierKeys.add(key)
+    logForDebugging(
+      order.shadowedBy === 'seat'
+        ? `${key} in user settings ignored: your organization's plan seats ${order.outermost.join(', ')} here, so neither tier key is yours to set`
+        : `${key} in user settings ignored: set by managed policy (this machine has managed settings, so both tier keys are the policy's)`,
+    )
+  }
+  const tierLists = {
+    prependPlugins: { ids: order.prepend, from: order.from.prepend },
+    appendPlugins: { ids: order.append, from: order.from.append },
+  }
+  const foldedManaged = new Set(
+    [...(managedIds ?? [])].map(foldCanonicalSourceId),
+  )
+  for (const [key, { ids, from }] of Object.entries(tierLists)) {
+    if (from !== 'none') {
+      logForDebugging(
+        `${key} from ${from === 'policy' ? 'managed policy' : 'user settings'}: ${ids.join(', ') || '(none)'}`,
+      )
+    }
+    for (const id of ids) {
+      if (order.outermost.includes(id)) continue
+      const isManaged = foldedManaged.has(id)
+      if (from === 'user' && isManaged) {
+        logForDebugging(
+          `${key} in user settings names ${id}, a managed plugin; ignored: a user key seats only the person's own plugins`,
+          { level: 'warn' },
+        )
+        continue
+      }
+      if (
+        !(
+          (from === 'user' || isManaged) &&
+          !isBuiltinPluginId(id) &&
+          plugins.some(
+            plugin =>
+              foldCanonicalSourceId(plugin.source ?? plugin.name) === id,
+          )
+        )
+      ) {
+        logForDebugging(
+          `${key} names ${id}, which is not an enabled ${from === 'user' ? '' : 'managed '}plugin with a hooks module; skipped`,
+        )
+      }
+    }
+  }
+  const rankOf = (plugin: FunctionHookPlugin): number =>
+    computePluginHookOrderRank(plugin.source ?? plugin.name, managedIds, order)
+  return plugins
+    .toSorted((a, b) => rankOf(a) - rankOf(b))
+    .map(plugin => ({
+      ...plugin,
+      tier: computePluginHookTier(
+        plugin.source ?? plugin.name,
+        managedIds,
+        order,
+      ),
+    }))
+}
 
 /**
  * Convert plugin hooks configuration to native matchers with plugin context
@@ -186,17 +288,61 @@ async function registerPluginHooksOnce(): Promise<void> {
   // atomic — old hooks stay valid until this point, new hooks take over.
   clearRegisteredPluginHooks()
   registerHookCallbacks(allPluginHooks)
-  await loadFunctionHooksModules([
-    ...listBuiltinFunctionHookPlugins(),
-    ...enabled.map(plugin => ({
+  const seenHookSources = new Set<string>()
+  const dedupedBuiltinHookPlugins: FunctionHookPlugin[] = []
+  for (const builtinPlugin of listBuiltinFunctionHookPlugins()) {
+    const key = foldCanonicalSourceId(
+      builtinPlugin.source ?? builtinPlugin.name,
+    )
+    if (seenHookSources.has(key)) continue
+    seenHookSources.add(key)
+    dedupedBuiltinHookPlugins.push(builtinPlugin)
+  }
+  const installedHookPlugins: FunctionHookPlugin[] = []
+  for (const plugin of enabled) {
+    const key = foldCanonicalSourceId(plugin.source)
+    if (
+      plugin.isBuiltin === true ||
+      isBuiltinPluginId(key) ||
+      plugin.path === BUILTIN_MARKETPLACE_NAME ||
+      seenHookSources.has(key)
+    ) {
+      continue
+    }
+    seenHookSources.add(key)
+    installedHookPlugins.push({
       name: plugin.name,
       path: plugin.path,
       source: plugin.source,
       // densable `Gue` — user-installed copy (`link !== undefined`).
       link: plugin.source,
       tier: 'user' as const,
-    })),
-  ])
+    })
+  }
+  const managedIds = getManagedEnabledPluginIds()
+  const tierOrder = resolvePluginHookTierOrder()
+  await loadFunctionHooksModules(
+    orderFunctionHookModules(
+      [...dedupedBuiltinHookPlugins, ...installedHookPlugins],
+      managedIds,
+      tierOrder,
+    ),
+  )
+  try {
+    await runEngineCreateFold()
+  } catch (err) {
+    logForDebugging(
+      `engine.create failed: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+  }
+  try {
+    // densable Kpn.get()?.() after hook swap (jt path).
+    const { leftoverDevModsCatchUpSlot } = await import('./pluginDevMods.js')
+    leftoverDevModsCatchUpSlot()?.()
+  } catch {
+    // densable Kpn optional when plugin_dev_mods host is absent
+  }
 
   const totalHooks = Object.values(allPluginHooks).reduce(
     (sum, matchers) => sum + matchers.reduce((s, m) => s + m.hooks.length, 0),
@@ -240,6 +386,7 @@ export function resetPluginHookRegistrationForTests(): void {
   pluginHookRegistration.hookRegistrationFailed = false
   pluginHookRegistration.hookRegistrationRetried = false
   pluginHookRegistration.hookRegistrationArgs = undefined
+  warnedShadowedTierKeys.clear()
   loadPluginHooks.cache?.clear?.()
 }
 
@@ -299,6 +446,8 @@ export async function pruneRemovedPluginHooks(): Promise<void> {
 export function resetHotReloadState(): void {
   hotReloadSubscribed = false
   lastPluginSettingsSnapshot = undefined
+  lastPluginTierSnapshot = undefined
+  warnedShadowedTierKeys.clear()
 }
 
 /**
@@ -320,6 +469,7 @@ export function resetHotReloadState(): void {
 export function getPluginAffectingSettingsSnapshot(): string {
   const merged = getSettings_DEPRECATED()
   const policy = getSettingsForSource('policySettings')
+  const tierOrder = resolvePluginHookTierOrder()
   // Key-sort the two Record fields so insertion order doesn't flap the hash.
   // Array fields (strictKnownMarketplaces, blockedMarketplaces) have
   // schema-stable order.
@@ -330,6 +480,9 @@ export function getPluginAffectingSettingsSnapshot(): string {
     extraKnownMarketplaces: sortKeys(merged.extraKnownMarketplaces),
     strictKnownMarketplaces: policy?.strictKnownMarketplaces ?? [],
     blockedMarketplaces: policy?.blockedMarketplaces ?? [],
+    prependPlugins: tierOrder.prepend,
+    appendPlugins: tierOrder.append,
+    outermost: tierOrder.outermost,
   })
 }
 
@@ -347,9 +500,15 @@ export function setupPluginHookHotReload(): void {
 
   // Capture the initial snapshot so the first policySettings change can compare
   lastPluginSettingsSnapshot = getPluginAffectingSettingsSnapshot()
+  lastPluginTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
 
   settingsChangeDetector.subscribe(source => {
-    if (source === 'policySettings') {
+    const newTierSnapshot = jsonStringify(resolvePluginHookTierOrder())
+    const tierChanged = newTierSnapshot !== lastPluginTierSnapshot
+    if (
+      source === 'policySettings' ||
+      (source === 'userSettings' && tierChanged)
+    ) {
       const newSnapshot = getPluginAffectingSettingsSnapshot()
       if (newSnapshot === lastPluginSettingsSnapshot) {
         logForDebugging(
@@ -359,6 +518,7 @@ export function setupPluginHookHotReload(): void {
       }
 
       lastPluginSettingsSnapshot = newSnapshot
+      lastPluginTierSnapshot = newTierSnapshot
       logForDebugging(
         'Plugin hooks: reloading due to plugin-affecting settings change',
       )

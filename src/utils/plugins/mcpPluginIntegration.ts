@@ -1,4 +1,6 @@
 import { join } from 'path'
+import { getProjectRoot } from '../../bootstrap/state.js'
+import { externalBuiltinNamespaceName } from '../../plugins/builtinPlugins.js'
 import { expandEnvVarsInString } from '../../services/mcp/envExpansion.js'
 import {
   type McpServerConfig,
@@ -6,6 +8,7 @@ import {
   type ScopedMcpServerConfig,
 } from '../../services/mcp/types.js'
 import type { LoadedPlugin, PluginError } from '../../types/plugin.js'
+import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, isENOENT } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
@@ -360,10 +363,11 @@ export function addPluginScopeToServers(
   pluginPath?: string,
 ): Record<string, ScopedMcpServerConfig> {
   const scopedServers: Record<string, ScopedMcpServerConfig> = {}
+  const namespace = externalBuiltinNamespaceName(pluginName, pluginSource)
 
   for (const [name, config] of Object.entries(servers)) {
     // Add plugin prefix to server name to avoid conflicts
-    const scopedName = `plugin:${pluginName}:${name}`
+    const scopedName = `plugin:${namespace}:${name}`
     const scoped: ScopedMcpServerConfig = {
       ...config,
       scope: 'dynamic', // Use dynamic scope for plugin servers
@@ -497,10 +501,15 @@ export function resolvePluginMcpEnvironment(
   serverName?: string,
 ): McpServerConfig {
   const allMissingVars: string[] = []
+  const expandProjectDir = (str: string): string =>
+    str.replace(/\$\{CLAUDE_PROJECT_DIR\}/g, () => {
+      const dir = getProjectRoot() || getCwd()
+      return process.platform === 'win32' ? dir.replace(/\\/g, '/') : dir
+    })
 
   const resolveValue = (value: string): string => {
-    // First substitute plugin-specific variables
-    let resolved = substitutePluginVariables(value, plugin)
+    // First substitute plugin-specific and project directory variables
+    let resolved = expandProjectDir(substitutePluginVariables(value, plugin))
 
     // Then substitute user config variables if provided
     if (userConfig) {
@@ -588,9 +597,8 @@ export function resolvePluginMcpEnvironment(
             })
           }
         } else {
-          const withPluginVars = substitutePluginVariables(
-            remoteConfig.headersHelper,
-            plugin,
+          const withPluginVars = expandProjectDir(
+            substitutePluginVariables(remoteConfig.headersHelper, plugin),
           )
           const { expanded, missingVars } =
             expandEnvVarsInString(withPluginVars)

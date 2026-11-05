@@ -47,6 +47,7 @@ import {
   evaluateUiRender,
   getLastUiRenderPlugin,
   hasMatchingFunctionHook,
+  runFunctionHookChain,
   focusPane,
   getPaneRemountGeneration,
   getPanesState,
@@ -100,6 +101,7 @@ import TextInput from './TextInput.js';
 import { HighlightedCode } from './HighlightedCode.js';
 import { Markdown } from './Markdown.js';
 import { PluginImage, PluginRaster } from './PluginRaster.js';
+import { cleanPromptHintText, resolvePromptHintText } from './PromptInput/PromptInputFooterSuggestions.js';
 import { encodePluginLinkHref, encodePluginLinkLabel } from '../utils/plugins/pluginLinkHref.js';
 import { Jmn, L1t, tellerOf, tellerOfPlugin } from '../utils/plugins/pluginDrawError.js';
 import {
@@ -1542,6 +1544,8 @@ function reportDrawWhileDrawn(
 }
 
 function stampedPlugin(node: Record<string, unknown>, fallback: string): string {
+  if (typeof node.__plugin === 'string' && node.__plugin !== '') return node.__plugin;
+  if (typeof node.plugin === 'string' && node.plugin !== '') return node.plugin;
   const raster = isRecord(node.raster) ? node.raster : undefined;
   if (typeof raster?.plugin === 'string' && raster.plugin !== '') return raster.plugin;
   const image = isRecord(node.image) ? node.image : undefined;
@@ -1551,10 +1555,55 @@ function stampedPlugin(node: Record<string, unknown>, fallback: string): string 
   return fallback;
 }
 
-function pressOf(node: Record<string, unknown>): { plugin: string; handle: unknown } | undefined {
+function flattenDrawingChildren(raw: unknown, out: unknown[] = []): unknown[] {
+  if (raw === undefined || raw === null || typeof raw === 'boolean') return out;
+  if (Array.isArray(raw)) {
+    for (const item of raw) flattenDrawingChildren(item, out);
+    return out;
+  }
+  out.push(typeof raw === 'number' ? String(raw) : raw);
+  return out;
+}
+
+export function extractDrawnPlugin(node: unknown, component?: string, requestId?: string): string | undefined {
+  const walk = (item: unknown): string | undefined => {
+    if (Array.isArray(item)) {
+      for (const child of item) {
+        const hit = walk(child);
+        if (hit !== undefined) return hit;
+      }
+      return undefined;
+    }
+    if (!isRecord(item)) return undefined;
+    const direct = stampedPlugin(item, '');
+    if (direct !== '') return direct;
+    const press = isRecord(item.press) ? item.press : undefined;
+    if (typeof press?.plugin === 'string' && press.plugin !== '') return press.plugin;
+    const group = isRecord(item.group) ? item.group : undefined;
+    if (typeof group?.plugin === 'string' && group.plugin !== '') return group.plugin;
+    const props = isRecord(item.props) ? item.props : {};
+    for (const child of childList(item, props)) {
+      const hit = walk(child);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  };
+  const found = walk(node);
+  if (found !== undefined) return found;
+  if (component !== undefined) {
+    const stored = getPluginDrawingTrees().find(
+      drawing => drawing.component === component && (requestId === undefined || drawing.requestId === requestId),
+    )?.plugin;
+    if (typeof stored === 'string' && stored !== '') return stored;
+  }
+  return undefined;
+}
+
+function pressOf(node: Record<string, unknown>, fallbackPlugin = ''): { plugin: string; handle: unknown } | undefined {
   const press = isRecord(node.press) ? node.press : undefined;
   if (press === undefined || typeof press.plugin !== 'string') return undefined;
-  return { plugin: press.plugin, handle: press.handle };
+  const plugin = press.plugin !== '' ? press.plugin : stampedPlugin(node, fallbackPlugin);
+  return { plugin, handle: press.handle };
 }
 
 /** densable `xze` focusable drawn node (Button / Input / Select). */
@@ -1571,10 +1620,11 @@ export type DrawingFocusable = {
 /**
  * densable `xze(e)` focusablesOfDrawing — walk drawing tree; Button/Input/Select
  * → `{tag, plugin, handle, element: props.key, isAutoFocus, value?, options?}`
- * via `e.press`; else flatMap children.
+ * via `e.press`; else flatMap children (including nested arrays).
  */
 export function focusablesOfDrawing(drawn: unknown): DrawingFocusable[] {
-  if (drawn === undefined || typeof drawn === 'string') return [];
+  if (drawn === undefined || drawn === null || typeof drawn === 'string' || typeof drawn === 'boolean') return [];
+  if (Array.isArray(drawn)) return flattenDrawingChildren(drawn).flatMap(focusablesOfDrawing);
   if (!isRecord(drawn)) return [];
   if (drawn.type === 'engine') return [];
   const type = drawn.type;
@@ -1593,11 +1643,8 @@ export function focusablesOfDrawing(drawn: unknown): DrawingFocusable[] {
     if (type === 'Select') base.options = props.options;
     return [base];
   }
-  const kids = Array.isArray(drawn.children) ? drawn.children : drawn.children === undefined ? [] : [drawn.children];
-  const fromProps = isRecord(drawn.props) ? drawn.props.children : undefined;
-  const list =
-    kids.length > 0 ? kids : fromProps === undefined ? [] : Array.isArray(fromProps) ? fromProps : [fromProps];
-  return list.flatMap(focusablesOfDrawing);
+  const props = isRecord(drawn.props) ? drawn.props : {};
+  return childList(drawn, props).flatMap(focusablesOfDrawing);
 }
 
 /**
@@ -2696,6 +2743,12 @@ function boolProp(props: Record<string, unknown>, key: string): boolean | undefi
 type BoxLayout = {
   -readonly [K in keyof Pick<
     ComponentProps<typeof Box>,
+    | 'display'
+    | 'position'
+    | 'top'
+    | 'left'
+    | 'right'
+    | 'bottom'
     | 'flexDirection'
     | 'flexGrow'
     | 'flexShrink'
@@ -2716,17 +2769,37 @@ type BoxLayout = {
     | 'padding'
     | 'paddingX'
     | 'paddingY'
+    | 'paddingTop'
+    | 'paddingBottom'
+    | 'paddingLeft'
+    | 'paddingRight'
     | 'margin'
     | 'marginX'
     | 'marginY'
     | 'marginTop'
+    | 'marginBottom'
+    | 'marginLeft'
+    | 'marginRight'
     | 'borderStyle'
+    | 'borderColor'
+    | 'borderDimColor'
+    | 'backgroundColor'
   >]: ComponentProps<typeof Box>[K];
 };
 
 function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   if (props === undefined) return {};
   const out: BoxLayout = {};
+  if (props.display === 'flex' || props.display === 'none') {
+    out.display = props.display;
+  }
+  if (props.position === 'absolute' || props.position === 'relative') {
+    out.position = props.position;
+  }
+  if (typeof props.top === 'number') out.top = props.top;
+  if (typeof props.left === 'number') out.left = props.left;
+  if (typeof props.right === 'number') out.right = props.right;
+  if (typeof props.bottom === 'number') out.bottom = props.bottom;
   const flexDirection = props.flexDirection;
   if (
     flexDirection === 'row' ||
@@ -2785,12 +2858,28 @@ function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   if (typeof props.padding === 'number') out.padding = props.padding;
   if (typeof props.paddingX === 'number') out.paddingX = props.paddingX;
   if (typeof props.paddingY === 'number') out.paddingY = props.paddingY;
+  if (typeof props.paddingTop === 'number') out.paddingTop = props.paddingTop;
+  if (typeof props.paddingBottom === 'number') out.paddingBottom = props.paddingBottom;
+  if (typeof props.paddingLeft === 'number') out.paddingLeft = props.paddingLeft;
+  if (typeof props.paddingRight === 'number') out.paddingRight = props.paddingRight;
   if (typeof props.margin === 'number') out.margin = props.margin;
   if (typeof props.marginX === 'number') out.marginX = props.marginX;
   if (typeof props.marginY === 'number') out.marginY = props.marginY;
   if (typeof props.marginTop === 'number') out.marginTop = props.marginTop;
+  if (typeof props.marginBottom === 'number') out.marginBottom = props.marginBottom;
+  if (typeof props.marginLeft === 'number') out.marginLeft = props.marginLeft;
+  if (typeof props.marginRight === 'number') out.marginRight = props.marginRight;
   if (typeof props.borderStyle === 'string') {
     out.borderStyle = props.borderStyle as BoxLayout['borderStyle'];
+  }
+  if (typeof props.borderColor === 'string') {
+    out.borderColor = props.borderColor as BoxLayout['borderColor'];
+  }
+  if (typeof props.borderDimColor === 'boolean') {
+    out.borderDimColor = props.borderDimColor;
+  }
+  if (typeof props.backgroundColor === 'string') {
+    out.backgroundColor = props.backgroundColor as BoxLayout['backgroundColor'];
   }
   return out;
 }
@@ -2855,7 +2944,7 @@ function PluginPressButton({
     >
       <Button tabIndex={-1} flexShrink={0} alignSelf="flex-start" onAction={() => firePress(plugin, handle)}>
         {state => {
-          const inverse = state.focused || state.hovered;
+          const inverse = state.focused || state.hovered || hasKeyboardFocus;
           const dim = dimColor === true && !inverse;
           if (plain === true) {
             return (
@@ -3101,6 +3190,7 @@ function PluginPressInput({
     focus.focused.handle === handle;
   const hasKeyboardFocus =
     focused || (focusedPress !== null && focusedPress.plugin === plugin && focusedPress.handle === handle);
+  const isInputFocused = focused || (fields !== null && hasKeyboardFocus);
   /** densable `Wt` `h` — `Xjt.textOf(plugin, element) ?? value ?? ""`. */
   const shown = (fields !== null && fieldKey !== '' ? fields.textOf(plugin, fieldKey) : undefined) ?? value ?? '';
   const [cursor, setCursor] = useState(shown.length);
@@ -3109,8 +3199,8 @@ function PluginPressInput({
   const bodyColumns = useContext(PaneBodyColumnsContext);
   const columns = bodyColumns ?? terminalColumns;
   useEffect(() => {
-    if (focused) setCursor(Number.MAX_SAFE_INTEGER);
-  }, [focused]);
+    if (isInputFocused) setCursor(Number.MAX_SAFE_INTEGER);
+  }, [isInputFocused]);
   const empty = shown === '';
   const prefix = label === undefined ? '' : `${label}: `;
   const submit = ` ⏎ ${submitLabel ?? 'submit'}`;
@@ -3127,11 +3217,10 @@ function PluginPressInput({
         if (fieldKey !== '') {
           focus?.setFocused({ plugin, handle, element: fieldKey, value });
         }
-        firePress(plugin, handle);
       }}
     >
-      {prefix !== '' && <Text bold={focused}>{prefix}</Text>}
-      {focused ? (
+      {prefix !== '' && <Text bold={isInputFocused}>{prefix}</Text>}
+      {isInputFocused ? (
         <TextInput
           value={shown}
           onChange={next => {
@@ -3163,7 +3252,7 @@ function PluginPressInput({
           {empty ? (placeholder ?? '') : shown}
         </Text>
       )}
-      {focused && <Text dimColor>{submit}</Text>}
+      {isInputFocused && <Text dimColor>{submit}</Text>}
     </Box>
   );
 }
@@ -3211,7 +3300,13 @@ function PluginPressSelect({
           fields.toggle({ plugin, handle, element: fieldKey, options, value });
           return;
         }
-        firePress(plugin, handle);
+        if (options.length > 0) {
+          const curIdx = options.findIndex(option => option.value === shown);
+          const nextOpt = options[(curIdx + 1) % options.length];
+          if (nextOpt !== undefined) {
+            firePress(plugin, handle, { value: nextOpt.value });
+          }
+        }
       }}
     >
       <Text wrap="truncate-end">
@@ -3567,11 +3662,15 @@ function HoverBox({
   isInline,
   props,
   hover,
+  elementKey,
+  elementPlugin,
   children,
 }: {
   isInline: boolean;
   props: Record<string, unknown>;
   hover: Record<string, unknown>;
+  elementKey?: string;
+  elementPlugin?: string;
   children: ReactNode;
 }): ReactNode {
   const [hot, setHot] = useState(false);
@@ -3579,6 +3678,8 @@ function HoverBox({
   return (
     <Box
       {...layout}
+      {...(elementKey !== undefined && { elementKey })}
+      {...(elementPlugin !== undefined && { elementPlugin })}
       flexDirection={isInline ? 'row' : (layout.flexDirection ?? 'column')}
       onMouseEnter={() => setHot(true)}
       onMouseLeave={() => setHot(false)}
@@ -3590,8 +3691,7 @@ function HoverBox({
 
 function childList(node: Record<string, unknown>, props: Record<string, unknown>): unknown[] {
   const raw = props.children ?? node.children;
-  if (raw === undefined) return [];
-  return Array.isArray(raw) ? raw : [raw];
+  return flattenDrawingChildren(raw);
 }
 
 /**
@@ -3619,7 +3719,7 @@ export function DrawingNode({
 }): ReactNode {
   if (typeof node === 'string') return <Text>{node}</Text>;
   if (Array.isArray(node)) {
-    return node.map((child, i) => (
+    return flattenDrawingChildren(node).map((child, i) => (
       <DrawingNode
         key={i}
         node={child}
@@ -3653,14 +3753,17 @@ export function DrawingNode({
     return <PluginImage plugin={owner} requestId={req} elementKey={key} columns={columns} rows={rows} alt={alt} />;
   }
   if (type === 'Button') {
-    const press = pressOf(node);
+    const press = pressOf(node, owner);
     if (press === undefined) return null;
+    const childLabel = childList(node, props)
+      .filter((child): child is string => typeof child === 'string')
+      .join('');
     return (
       <PluginPressButton
         plugin={press.plugin}
         handle={press.handle}
         element={key}
-        label={stringProp(props, node, 'label') ?? ''}
+        label={stringProp(props, node, 'label') ?? childLabel}
         hotkey={stringProp(props, node, 'hotkey')}
         plain={boolProp(props, 'plain')}
         dimColor={boolProp(props, 'dimColor')}
@@ -3669,7 +3772,7 @@ export function DrawingNode({
     );
   }
   if (type === 'Input') {
-    const press = pressOf(node);
+    const press = pressOf(node, owner);
     if (press === undefined) return null;
     return (
       <PluginPressInput
@@ -3684,7 +3787,7 @@ export function DrawingNode({
     );
   }
   if (type === 'Select') {
-    const press = pressOf(node);
+    const press = pressOf(node, owner);
     if (press === undefined) return null;
     const rawOptions = props.options;
     const options = Array.isArray(rawOptions)
@@ -3718,7 +3821,7 @@ export function DrawingNode({
       <PluginMarkdown
         text={text}
         dimColor={boolProp(props, 'dimColor')}
-        press={'press' in node ? pressOf(node) : undefined}
+        press={'press' in node ? pressOf(node, owner) : undefined}
         pressableLinks={props.pressableLinks}
       />
     );
@@ -3780,12 +3883,26 @@ export function DrawingNode({
       </Link>
     );
   }
-  const hover = isRecord(node.hover) ? node.hover : undefined;
+  const hover = isRecord(node.hover) ? node.hover : isRecord(props.hover) ? props.hover : undefined;
   if (type === 'Box' && key !== undefined) {
     const live = seenKeys === undefined || !seenKeys.has(key);
     if (seenKeys !== undefined) seenKeys.add(key);
     const layoutProps = { ...props };
     delete layoutProps.key;
+    if (hover !== undefined) {
+      return (
+        <HoverBox
+          key={live ? String(key) : undefined}
+          isInline={false}
+          props={layoutProps}
+          hover={hover}
+          elementKey={String(key)}
+          elementPlugin={owner}
+        >
+          {mapped}
+        </HoverBox>
+      );
+    }
     return (
       <Box
         key={live ? String(key) : undefined}
@@ -3807,14 +3924,31 @@ export function DrawingNode({
           : mapped.length === 0
             ? null
             : undefined;
+    const textProps: Partial<ComponentProps<typeof Text>> = {
+      ...(boolProp(props, 'bold') !== undefined && { bold: boolProp(props, 'bold') }),
+      ...(boolProp(props, 'dimColor') !== undefined && { dimColor: boolProp(props, 'dimColor') }),
+      ...(boolProp(props, 'italic') !== undefined && { italic: boolProp(props, 'italic') }),
+      ...(boolProp(props, 'underline') !== undefined && { underline: boolProp(props, 'underline') }),
+      ...(boolProp(props, 'strikethrough') !== undefined && { strikethrough: boolProp(props, 'strikethrough') }),
+      ...(boolProp(props, 'inverse') !== undefined && { inverse: boolProp(props, 'inverse') }),
+      ...(typeof props.color === 'string' && { color: props.color as ComponentProps<typeof Text>['color'] }),
+      ...(typeof props.backgroundColor === 'string' && {
+        backgroundColor: props.backgroundColor as ComponentProps<typeof Text>['backgroundColor'],
+      }),
+      ...((props.wrap === 'wrap' ||
+        props.wrap === 'truncate' ||
+        props.wrap === 'truncate-start' ||
+        props.wrap === 'truncate-middle' ||
+        props.wrap === 'truncate-end') && { wrap: props.wrap }),
+    };
     if (hover !== undefined) {
       return (
         <HoverBox isInline props={props} hover={hover}>
-          {text !== undefined ? text : mapped}
+          <Text {...textProps}>{text !== undefined ? text : mapped}</Text>
         </HoverBox>
       );
     }
-    return <Text>{text !== undefined ? text : mapped}</Text>;
+    return <Text {...textProps}>{text !== undefined ? text : mapped}</Text>;
   }
   if (hover !== undefined) {
     return (
@@ -3837,8 +3971,9 @@ export function DrawingNode({
 function useRenderDrawing(
   input: Record<string, unknown> | null,
   inputKey: string,
-): { drawn: unknown; markThrown: () => void } {
+): { drawn: unknown; drawnPlugin: string; markThrown: () => void } {
   const [drawn, setDrawn] = useState<unknown>(undefined);
+  const [drawnPlugin, setDrawnPlugin] = useState('');
   const inputRef = useRef(input);
   inputRef.current = input;
   const version = useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
@@ -3847,12 +3982,19 @@ function useRenderDrawing(
     const current = inputRef.current;
     if (current === null) {
       setDrawn(undefined);
+      setDrawnPlugin('');
       return;
     }
     const abort = new AbortController();
     void evaluateUiRender(current, abort.signal).then(
       tree => {
-        if (!abort.signal.aborted) setDrawn(isEngineDrawing(tree) ? RZ : tree);
+        if (!abort.signal.aborted) {
+          const owner =
+            extractDrawnPlugin(tree, String(current.component ?? ''), String(current.requestId ?? '')) ??
+            getLastUiRenderPlugin();
+          setDrawnPlugin(owner);
+          setDrawn(isEngineDrawing(tree) ? RZ : tree);
+        }
       },
       err => {
         // densable `mr` — site failed log then engine fallback (`RZ`).
@@ -3870,7 +4012,7 @@ function useRenderDrawing(
   const markThrown = useCallback(() => {
     setDrawn(RZ);
   }, []);
-  return { drawn, markThrown };
+  return { drawn, drawnPlugin, markThrown };
 }
 
 function PluginSiteFields({
@@ -4503,12 +4645,22 @@ function PluginPaneSiteBody({
     focusPane(null);
   }, [paneHost, clearPaneFocusLocal]);
   const clickedPress = useMemo(() => clickFocusByPress(paneFocusables, focusByPerson), [paneFocusables, focusByPerson]);
+  const paneInputRef = useRef<PluginInputMapApi | null>(null);
   const paneRing = useMemo(() => {
     const base = bandRingHandlers({
       focusables: paneFocusables,
       focusIndexNow: () => paneFocusIndexRef.current,
       focusByPerson,
       leave: leavePaneRing,
+      submit: focusable => {
+        if (typeof focusable.element !== 'string' || focusable.element === '') return;
+        paneInputRef.current?.submit({
+          plugin: focusable.plugin,
+          handle: focusable.handle,
+          element: focusable.element,
+          ...(typeof focusable.value === 'string' && { value: focusable.value }),
+        });
+      },
     });
     return wrapPluginFocusActs(
       paneHost,
@@ -4546,7 +4698,7 @@ function PluginPaneSiteBody({
   });
   useKeybinding('abovePrompt:press', paneRing['abovePrompt:press'], {
     context: paneRingContext,
-    isActive: paneHeld && (paneFocusIndex !== null || engineHeld !== null),
+    isActive: paneHeld && (paneFocusIndex !== null || engineHeld !== null) && !selectFocused,
   });
   useKeybinding('abovePrompt:leave', paneRing['abovePrompt:leave'], {
     context: paneRingContext,
@@ -4571,6 +4723,25 @@ function PluginPaneSiteBody({
     working: isWorking,
   });
   const paneInput = usePluginInputSeat(paneFocusables, 'Pane', pane.id);
+  paneInputRef.current = paneInput;
+  useKeybinding('abovePrompt:highlightNext', paneSelect.handlers['abovePrompt:highlightNext'], {
+    context: 'AbovePromptSelect',
+    isActive: selectFocused,
+  });
+  useKeybinding('abovePrompt:highlightPrevious', paneSelect.handlers['abovePrompt:highlightPrevious'], {
+    context: 'AbovePromptSelect',
+    isActive: selectFocused,
+  });
+  useKeybinding('abovePrompt:press', paneSelect.handlers['abovePrompt:press'], {
+    context: 'AbovePromptSelect',
+    isActive: selectFocused,
+  });
+  useInput(
+    (inputChar, key, event) => {
+      if (paneSelect.intercept(inputChar, key)) event.stopImmediatePropagation();
+    },
+    { isActive: selectFocused, prepend: true },
+  );
   const paneKeysBag = useMemo<PluginBandKeysBag>(
     () => ({
       // densable pee `bn()!==N||Ln()!==eo||dn()!==hn`
@@ -5012,7 +5183,7 @@ export function PluginAbovePromptSite({
 
   const viewingAgentView = useViewingAgentView();
   const aboveBodyColumns = Math.max(0, columns - COLLAPSE_HANDLE_COLUMNS);
-  const { drawn, markThrown } = useRenderDrawing(
+  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(
     {
       surface: 'terminal',
       component: 'AbovePrompt',
@@ -5270,7 +5441,7 @@ export function PluginAbovePromptSite({
   });
   useKeybinding('abovePrompt:press', ring['abovePrompt:press'], {
     context: ringContext,
-    isActive: ringActive && focusIndex !== null,
+    isActive: ringActive && focusIndex !== null && !selectFocused,
   });
   useKeybinding('abovePrompt:leave', ring['abovePrompt:leave'], {
     context: ringContext,
@@ -5509,7 +5680,8 @@ export function PluginAbovePromptSite({
   const onAboveDrawError = (error: Error): void => {
     // densable L1t + Jmn/NBr/Ymn.AbovePrompt; markThrown settles RZ for pr.
     markThrown();
-    reportDrawWhileDrawn('AbovePrompt', [getLastUiRenderPlugin() || scrollOwner], error, addNotification);
+    const owner = extractDrawnPlugin(drawn, 'AbovePrompt', BAND_REQUEST_ID) ?? (drawnPlugin || scrollOwner);
+    reportDrawWhileDrawn('AbovePrompt', [owner], error, addNotification);
     setAboveResetKey(n => n + 1);
   };
   return (
@@ -5561,6 +5733,333 @@ export function PluginAbovePromptSite({
         </FocusedPressContext.Provider>
       </ClickedPressContext.Provider>
     </PaneErrorBoundary>
+  );
+}
+
+/**
+ * Render an already-evaluated plugin `ui.render` tree with an `engine` slot
+ * (`{ type: "engine", ref: 0 }`) and live `ui.blit` frame subscription.
+ */
+export function PluginRenderedTree({
+  node,
+  plugin,
+  requestId,
+  component,
+  engine,
+}: {
+  node: unknown;
+  plugin?: string;
+  requestId?: string;
+  component: string;
+  engine?: ReactNode;
+}): ReactNode {
+  useSyncExternalStore(subscribeRasterFrames, snapshot, snapshot);
+  const [resetKey, setResetKey] = useState(0);
+  const [failedNode, setFailedNode] = useState<unknown>(undefined);
+  const focusables = useMemo(() => focusablesOfDrawing(node), [node]);
+  const owner = useMemo(
+    () => extractDrawnPlugin(node, component, requestId) ?? (plugin || getLastUiRenderPlugin()),
+    [node, component, requestId, plugin],
+  );
+  if (!hasPluginDrawing(node) || node === failedNode) return engine ?? null;
+  const hasInteractiveFields = focusables.some(row => row.tag === 'Input' || row.tag === 'Select');
+  const renderedBody = (
+    <DrawingNode node={node} plugin={owner} requestId={requestId} index={0} engine={engine} component={component} />
+  );
+  return (
+    <PaneErrorBoundary
+      resetKey={resetKey}
+      fallback={engine ?? null}
+      onError={error => {
+        logForDebugging(`ui.render (${component} ${requestId ?? ''}): draw failed: ${error.message}`, {
+          level: 'error',
+        });
+        setFailedNode(() => node);
+        setResetKey(n => n + 1);
+      }}
+    >
+      {hasInteractiveFields ? (
+        <PluginSiteFieldsOwned requestId={requestId} focusables={focusables}>
+          {renderedBody}
+        </PluginSiteFieldsOwned>
+      ) : (
+        renderedBody
+      )}
+    </PaneErrorBoundary>
+  );
+}
+
+/**
+ * densable 2.1.289 `AskUserQuestion` `ui.render` site (`cc-plugin-mods-guide`
+ * Clawd cooking `Raster` header + `{ type: "engine", ref: 0 }` slot).
+ * Synchronous pass-through with zero wrapper layout when no hook matches.
+ */
+export function PluginAskUserQuestionSite({
+  requestId,
+  toolName,
+  questions,
+  metadataSource,
+  children,
+}: {
+  requestId: string;
+  toolName: string;
+  questions: readonly unknown[];
+  metadataSource?: string;
+  children: ReactNode;
+}): ReactNode {
+  useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
+  const askProps = useMemo(
+    () => ({
+      tool: toolName,
+      questions,
+      ...(metadataSource !== undefined && { metadataSource }),
+    }),
+    [toolName, questions, metadataSource],
+  );
+  const hasHook = hasMatchingFunctionHook('ui.render', {
+    surface: 'terminal',
+    component: 'AskUserQuestion',
+    requestId,
+    props: askProps,
+  });
+  if (!hasHook) {
+    return children;
+  }
+  return (
+    <PluginAskUserQuestionActiveSite requestId={requestId} askProps={askProps}>
+      {children}
+    </PluginAskUserQuestionActiveSite>
+  );
+}
+
+function PluginAskUserQuestionActiveSite({
+  requestId,
+  askProps,
+  children,
+}: {
+  requestId: string;
+  askProps: Record<string, unknown>;
+  children: ReactNode;
+}): ReactNode {
+  const { addNotification } = useNotifications();
+  const { columns, rows } = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const renderInput = useMemo(
+    () => ({
+      surface: 'terminal',
+      component: 'AskUserQuestion',
+      requestId,
+      viewport: { columns, rows, isFullscreen },
+      props: askProps,
+    }),
+    [requestId, columns, rows, isFullscreen, askProps],
+  );
+  const inputKey = useMemo(
+    () => `${requestId}\0${columns}\0${rows}\0${String(isFullscreen)}\0${JSON.stringify(askProps)}`,
+    [requestId, columns, rows, isFullscreen, askProps],
+  );
+  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(renderInput, inputKey);
+  const ownerPlugin = useMemo(
+    () => extractDrawnPlugin(drawn, 'AskUserQuestion', requestId) ?? drawnPlugin,
+    [drawn, drawnPlugin, requestId],
+  );
+  const [resetKey, setResetKey] = useState(0);
+  if (!hasPluginDrawing(drawn)) {
+    return children;
+  }
+  return (
+    <PaneErrorBoundary
+      resetKey={resetKey}
+      fallback={children}
+      onError={error => {
+        markThrown();
+        reportDrawWhileDrawn('AskUserQuestion', [ownerPlugin], error, addNotification);
+        setResetKey(n => n + 1);
+      }}
+    >
+      <DrawingNode
+        node={drawn}
+        plugin={ownerPlugin}
+        requestId={requestId}
+        index={0}
+        engine={children}
+        component="AskUserQuestion"
+      />
+    </PaneErrorBoundary>
+  );
+}
+
+type SettledPromptHint = {
+  isDraft: boolean;
+  isWorking: boolean;
+  hint: string;
+  tail: string;
+  pluginTree?: unknown;
+  pluginName?: string;
+};
+
+/**
+ * densable 2.1.289 `PromptHint` (`PromptHintPart` / `PromptHintSite`) `ui.render`
+ * site (`cc-plugin-responsive-mode` draft-while-working `tail` / `hint`, plus
+ * `diff` viewport reader). Renders `null` synchronously when no hook matches.
+ */
+export function PluginPromptHintSite({
+  isDraft,
+  isWorking,
+  isInteractive,
+  onSuppressDefaultHint,
+}: {
+  isDraft: boolean;
+  isWorking: boolean;
+  isInteractive: boolean;
+  onSuppressDefaultHint?: (suppress: boolean) => void;
+}): ReactNode {
+  const ver = useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
+  const hasHook = !isInteractive && hasMatchingFunctionHook('ui.render', { component: 'PromptHint' });
+  if (!hasHook) {
+    return null;
+  }
+  return (
+    <PluginPromptHintActiveSite
+      isDraft={isDraft}
+      isWorking={isWorking}
+      renderVer={ver}
+      onSuppressDefaultHint={onSuppressDefaultHint}
+    />
+  );
+}
+
+function PluginPromptHintActiveSite({
+  isDraft,
+  isWorking,
+  renderVer,
+  onSuppressDefaultHint,
+}: {
+  isDraft: boolean;
+  isWorking: boolean;
+  renderVer: number;
+  onSuppressDefaultHint?: (suppress: boolean) => void;
+}): ReactNode {
+  const { columns, rows } = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const defaultHint = isDraft ? '' : isWorking ? 'esc to interrupt' : '? for shortcuts';
+  const [settled, setSettled] = useState<SettledPromptHint | undefined>(undefined);
+  const evalKey = `${columns}\0${rows}\0${String(isFullscreen)}\0${isDraft ? '1' : '0'}\0${isWorking ? '1' : '0'}\0${renderVer}\0${defaultHint}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    const eventPayload: Record<string, unknown> = {
+      surface: 'terminal',
+      component: 'PromptHint',
+      requestId: 'prompt-hint',
+      viewport: { columns, rows, isFullscreen },
+      props: {
+        isDraft,
+        isWorking,
+        hint: defaultHint,
+      },
+    };
+    void runFunctionHookChain('ui.render', eventPayload, async ev => {
+      const nextProps = isRecord(ev) && isRecord(ev.props) ? ev.props : eventPayload.props;
+      return { type: 'engine', ref: 0, props: nextProps };
+    }).then(
+      answer => {
+        if (cancelled) return;
+        if (isRecord(answer) && answer.type === 'engine') {
+          const props = isRecord(answer.props) ? answer.props : undefined;
+          setSettled({
+            isDraft: typeof props?.isDraft === 'boolean' ? props.isDraft : isDraft,
+            isWorking: typeof props?.isWorking === 'boolean' ? props.isWorking : isWorking,
+            hint: typeof props?.hint === 'string' ? cleanPromptHintText(props.hint) : defaultHint,
+            tail: typeof props?.tail === 'string' ? cleanPromptHintText(props.tail) : '',
+          });
+          return;
+        }
+        if (isRecord(answer) && typeof answer.type === 'string' && hasPluginDrawing(answer)) {
+          const owner =
+            extractDrawnPlugin(answer, 'PromptHint', 'prompt-hint') ?? (getLastUiRenderPlugin() || undefined);
+          setSettled({
+            isDraft,
+            isWorking,
+            hint: defaultHint,
+            tail: '',
+            pluginTree: answer,
+            pluginName: owner,
+          });
+          return;
+        }
+        if (isRecord(answer)) {
+          setSettled({
+            isDraft: typeof answer.isDraft === 'boolean' ? answer.isDraft : isDraft,
+            isWorking: typeof answer.isWorking === 'boolean' ? answer.isWorking : isWorking,
+            hint: typeof answer.hint === 'string' ? cleanPromptHintText(answer.hint) : defaultHint,
+            tail: typeof answer.tail === 'string' ? cleanPromptHintText(answer.tail) : '',
+          });
+          return;
+        }
+        setSettled({ isDraft, isWorking, hint: defaultHint, tail: '' });
+      },
+      err => {
+        logForDebugging(
+          `ui.render (PromptHint prompt-hint): site failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        );
+        if (!cancelled) {
+          setSettled({ isDraft, isWorking, hint: defaultHint, tail: '' });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [evalKey, columns, rows, isFullscreen, isDraft, isWorking, defaultHint]);
+
+  const suppressesDefault =
+    !isDraft &&
+    settled !== undefined &&
+    settled.isDraft === isDraft &&
+    settled.isWorking === isWorking &&
+    (settled.pluginTree !== undefined || settled.hint !== defaultHint || settled.tail !== '');
+
+  useLayoutEffect(() => {
+    onSuppressDefaultHint?.(suppressesDefault);
+  }, [onSuppressDefaultHint, suppressesDefault]);
+
+  useLayoutEffect(() => {
+    return () => {
+      onSuppressDefaultHint?.(false);
+    };
+  }, [onSuppressDefaultHint]);
+
+  if (settled === undefined) return null;
+  if (settled.pluginTree !== undefined && settled.isDraft === isDraft && settled.isWorking === isWorking) {
+    return (
+      <Box paddingX={2}>
+        <PluginRenderedTree
+          node={settled.pluginTree}
+          plugin={settled.pluginName}
+          requestId="prompt-hint"
+          component="PromptHint"
+        />
+      </Box>
+    );
+  }
+  const shownText = resolvePromptHintText({
+    isDraft,
+    isWorking,
+    defaultHint,
+    settledIsDraft: settled.isDraft,
+    settledIsWorking: settled.isWorking,
+    settledHint: settled.hint,
+    settledTail: settled.tail,
+  });
+  if (shownText === '') return null;
+  return (
+    <Box paddingX={2}>
+      <Text dimColor wrap="truncate">
+        {shownText}
+      </Text>
+    </Box>
   );
 }
 
@@ -5616,7 +6115,11 @@ export function PluginUserMessageSite({
     },
   };
   const userInputKey = `${requestId}\0${text}\0${origin?.kind ?? ''}\0${String(isExpanded ?? '')}`;
-  const { drawn, markThrown } = useRenderDrawing(userInput, userInputKey);
+  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(userInput, userInputKey);
+  const ownerPlugin = useMemo(
+    () => extractDrawnPlugin(drawn, 'UserMessage', requestId) ?? drawnPlugin,
+    [drawn, drawnPlugin, requestId],
+  );
   const userHeldRows = useHeldSiteRows({
     isOff: siteIsOff(hasHook, userInput),
     input: userInputKey,
@@ -5637,7 +6140,9 @@ export function PluginUserMessageSite({
   );
   const pluginTree = hasHook && hasPluginDrawing(drawn);
   const engine = children;
-  const pluginNode = <DrawingNode node={drawn} plugin="" requestId={requestId} index={0} component="UserMessage" />;
+  const pluginNode = (
+    <DrawingNode node={drawn} plugin={ownerPlugin} requestId={requestId} index={0} component="UserMessage" />
+  );
   return (
     <Box ref={setCardRef} flexDirection="column" {...(userHeldRows !== undefined && { minHeight: userHeldRows })}>
       {pluginTree ? (
@@ -5646,7 +6151,7 @@ export function PluginUserMessageSite({
           fallback={engine}
           onError={error => {
             markThrown();
-            reportDrawWhileDrawn('UserMessage', [getLastUiRenderPlugin()], error, addNotification);
+            reportDrawWhileDrawn('UserMessage', [ownerPlugin], error, addNotification);
             setUserResetKey(n => n + 1);
           }}
         >

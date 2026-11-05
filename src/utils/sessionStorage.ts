@@ -5,7 +5,14 @@ import { createSignal } from './signal.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
-import { closeSync, fstatSync, openSync, readSync } from 'fs'
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  openSync,
+  readSync,
+  writeSync,
+} from 'fs'
 import {
   appendFile as fsAppendFile,
   copyFile as fsCopyFile,
@@ -21,7 +28,15 @@ import {
   utimes as fsUtimes,
   writeFile,
 } from 'fs/promises'
-import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -78,12 +93,13 @@ import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
-import { isEnvTruthy } from './envUtils.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import {
   jobIdHasJsonlSegment,
   isValidStoragePathSegment,
 } from './sessionNameJobSidecar.js'
 import { isHoverRestOn } from './storageV5/hoverRestPin.js'
+import { getPinnedStorageV5 } from './storageV5/index.js'
 import { isPrecompactSkipDisabled } from './residualFinalEnvGates.js'
 import {
   getPersistenceSuppressCause,
@@ -512,6 +528,15 @@ type InternalEventReader = (afterEventId?: string) => Promise<
 >
 
 /**
+ * densable Project.internalAgentEventReader — `fetchAgentTranscriptOnce(s,e,n,r,g)`
+ * calls `e(n,s)` (agentId, AbortSignal). Distinct from session CCR reader.
+ */
+type LeftoverInternalAgentEventReader = (
+  agentId: string,
+  signal?: AbortSignal,
+) => Promise<unknown>
+
+/**
  * Prefetch triple from densable RemoteIO hydratePrefetch:
  * [foregroundRead, subagentRead, tipValidation]
  */
@@ -855,6 +880,41 @@ export function setRemoteIngressUrlForTesting(url: string): void {
 
 const REMOTE_FLUSH_INTERVAL_MS = 10
 
+type LeftoverParkedAppend = {
+  entry: Entry
+  storageV5?: unknown
+  opts?: { tornTailEntry?: Entry; onlyIfExists?: boolean }
+  resolve: () => void
+  reject: (error: unknown) => void
+}
+
+/** densable Ig — per-path serial then-chain. Never export minify `Ig`. */
+function leftoverSerialByPath(): {
+  run: (path: string, job: () => Promise<void>) => Promise<void>
+  settle: () => Promise<void>
+} {
+  const tails = new Map<string, Promise<void>>()
+  return {
+    run(path, job) {
+      const next = (tails.get(path) ?? Promise.resolve()).then(() => job())
+      const swallowed = next.then(
+        () => {},
+        () => {},
+      )
+      tails.set(path, swallowed)
+      void swallowed.then(() => {
+        if (tails.get(path) === swallowed) tails.delete(path)
+      })
+      return next
+    },
+    async settle() {
+      await Promise.all([...tails.values()])
+    },
+  }
+}
+
+const leftoverAppendSerial = leftoverSerialByPath()
+
 // Limit the number of cached session-file lookups to prevent unbounded Map growth
 // in long-running daemon / swarm sessions that spawn many sub-agents.
 const MAX_CACHED_SESSION_FILES = 200
@@ -871,6 +931,8 @@ class Project {
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
   currentSessionModel: string | undefined
+  /** densable `currentSessionDevModsFolder` — consented mods folder (`iLr`). */
+  currentSessionDevModsFolder: string | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
   // object = currently in worktree. reAppendSessionMetadata writes null so
   // --resume knows the session exited (vs. crashed while inside).
@@ -915,10 +977,24 @@ class Project {
    */
   private relocationBuffer: Array<{ entry: Entry; sessionId: UUID }> | null =
     null
+  /**
+   * densable `relocationParkedAppends` / `relocationParkedPath` — gold KC
+   * parks `{entry,storageV5,opts,resolve,reject}` until Skn replay.
+   */
+  private relocationParkedAppends: LeftoverParkedAppend[] | null = null
+  private relocationParkedPath: string | null = null
+  /** densable `tornTailToSeal` — single-slot path for the next append/sync seal. */
+  private tornTailToSeal: string | null = null
   private remoteIngressUrl: string | null = null
   private internalEventWriter: InternalEventWriter | null = null
   private internalEventReader: InternalEventReader | null = null
   private internalSubagentEventReader: InternalEventReader | null = null
+  /**
+   * densable `internalAgentEventReader` — lazy agent-transcript hydrate, not
+   * the session CCR `internalEventReader`. PNt is `!== null`.
+   */
+  private internalAgentEventReader: LeftoverInternalAgentEventReader | null =
+    null
   private pendingWriteCount: number = 0
   private flushResolvers: Array<() => void> = []
   // Per-file write queues. Each entry carries a resolve callback so
@@ -929,6 +1005,7 @@ class Project {
   >()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private activeDrain: Promise<void> | null = null
+  private drainChain: Promise<void> = Promise.resolve()
   private FLUSH_INTERVAL_MS = 100
   private readonly MAX_CHUNK_BYTES = 100 * 1024 * 1024
   /** densable Project.mirrors — SessionStore transcript_mirror callbacks. */
@@ -943,10 +1020,12 @@ class Project {
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = null
     this.activeDrain = null
+    this.drainChain = Promise.resolve()
     this.writeQueues = new Map()
     this.existingSessionFiles = new Map()
     // densable _resetFlushState also clears mirrors[]
     this.mirrors = []
+    this.tornTailToSeal = null
   }
 
   addMirror(cb: (filePath: string, entries: Entry[]) => void): void {
@@ -1029,25 +1108,24 @@ class Project {
 
   private async appendToFile(filePath: string, data: string): Promise<void> {
     try {
-      await fsAppendFile(filePath, data, { mode: 0o600 })
-      // densable 2.1.217 #2 — successful drain clears writer degraded state
+      // densable drain pye third arg is storageV5 (hover-rest backend).
+      await leftoverAppendSerial.run(filePath, async () => {
+        await leftoverPye(filePath, data, getPinnedStorageV5())
+      })
       recordTranscriptWriteSuccess(filePath)
-    } catch (firstErr) {
-      // Directory may not exist — some NFS-like filesystems return
-      // unexpected error codes, so don't discriminate on code.
-      try {
-        await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
-        await fsAppendFile(filePath, data, { mode: 0o600 })
-        recordTranscriptWriteSuccess(filePath)
-      } catch (secondErr) {
-        // densable iNt — record write failure for user-visible degraded warning
-        recordTranscriptWriteFailure('drain', secondErr ?? firstErr, filePath)
-        throw secondErr
-      }
+    } catch (err) {
+      recordTranscriptWriteFailure('drain', err, filePath)
+      throw err
     }
   }
 
-  private async drainWriteQueue(): Promise<void> {
+  private drainWriteQueue(): Promise<void> {
+    const next = this.drainChain.then(() => this.drainQueuesOnce())
+    this.drainChain = next.catch(() => {})
+    return next
+  }
+
+  private async drainQueuesOnce(): Promise<void> {
     for (const [filePath, queue] of this.writeQueues) {
       if (queue.length === 0) {
         continue
@@ -1119,12 +1197,72 @@ class Project {
     return this.relocationBuffer !== null
   }
 
-  /** densable `beginTranscriptRelocation` */
+  /** densable kkn — open KC park. Not folded into beginTranscriptRelocation. */
+  openAppendRelocationBracket(path: string): void {
+    this.relocationParkedAppends ??= []
+    this.relocationParkedPath = path
+  }
+
+  /** densable closeAppendRelocationBracket — return parked, dest is Skn's. */
+  closeAppendRelocationBracket(): LeftoverParkedAppend[] | null {
+    const parked = this.relocationParkedAppends
+    this.relocationParkedAppends = null
+    this.relocationParkedPath = null
+    return parked
+  }
+
+  leftoverRelocationPark(): {
+    appends: LeftoverParkedAppend[] | null
+    path: string | null
+  } {
+    return {
+      appends: this.relocationParkedAppends,
+      path: this.relocationParkedPath,
+    }
+  }
+
+  /** densable `sealTornTailOnNextAppend` — pin the path leftoverPye prefixes. */
+  sealTornTailOnNextAppend(path: string): void {
+    this.tornTailToSeal = path
+  }
+
+  /**
+   * densable `sealTornTailSync` — O_WRONLY|O_APPEND write `\n` when size>0, then
+   * clear the slot. Skip when the slot is a different path or persistence is
+   * suppressed (`$a`).
+   */
+  sealTornTailSync(path: string): void {
+    if (this.tornTailToSeal !== path) return
+    if (isPersistenceSuppressed()) return
+    let fd: number
+    try {
+      fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_APPEND)
+    } catch {
+      return
+    }
+    try {
+      const { size } = fstatSync(fd)
+      if (size > 0) writeSync(fd, '\n')
+    } finally {
+      closeSync(fd)
+    }
+    this.tornTailToSeal = null
+  }
+
+  tornTailSealPending(path: string): boolean {
+    return this.tornTailToSeal === path
+  }
+
+  tornTailSealLanded(path: string): void {
+    if (this.tornTailToSeal === path) this.tornTailToSeal = null
+  }
+
+  /** densable `beginTranscriptRelocation` — buffer only. */
   beginTranscriptRelocation(): void {
     this.relocationBuffer ??= []
   }
 
-  /** densable `endTranscriptRelocation` — flush buffered entries to the new file. */
+  /** densable `endTranscriptRelocation` — flush `relocationBuffer` only. */
   async endTranscriptRelocation(): Promise<void> {
     const buffered = this.relocationBuffer
     this.relocationBuffer = null
@@ -1215,11 +1353,13 @@ class Project {
       this.currentSessionRelocatedCwd ??= relocatedFromTail
     }
 
+    const entries: Array<Record<string, unknown>> = []
+
     // lastPrompt is re-appended so readLiteMetadata can show what the
     // user was most recently doing. Written first so customTitle/tag/etc
     // land closer to EOF (they're the more critical fields for tail reads).
     if (this.currentSessionLastPrompt) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'last-prompt',
         lastPrompt: this.currentSessionLastPrompt,
         sessionId,
@@ -1228,14 +1368,14 @@ class Project {
     // Unconditional: cache was refreshed from tail above; re-append keeps
     // the entry at EOF so compaction-pushed content doesn't evict it.
     if (this.currentSessionTitle) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'custom-title',
         customTitle: this.currentSessionTitle,
         sessionId,
       })
     }
     if (this.currentSessionTag) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'tag',
         tag: this.currentSessionTag,
         sessionId,
@@ -1244,51 +1384,58 @@ class Project {
     // densable 2.1.223 #8 — keep relocated stamp in tail window after compaction
     // so resume lite reads still see the post-/cd cwd (SEA: e !== "").
     if (this.currentSessionRelocatedCwd && this.sessionFile !== '') {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'relocated',
         relocatedCwd: this.currentSessionRelocatedCwd,
         sessionId,
       })
     }
     if (this.currentSessionAgentName) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'agent-name',
         agentName: this.currentSessionAgentName,
         sessionId,
       })
     }
     if (this.currentSessionAgentColor) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'agent-color',
         agentColor: this.currentSessionAgentColor,
         sessionId,
       })
     }
     if (this.currentSessionAgentSetting) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'agent-setting',
         agentSetting: this.currentSessionAgentSetting,
         sessionId,
       })
     }
     if (this.currentSessionMode) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'mode',
         mode: this.currentSessionMode,
         sessionId,
       })
     }
     if (this.currentSessionModel) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'session-model',
         model: this.currentSessionModel,
         sessionId,
       })
     }
     if (this.currentSessionWorktree !== undefined) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'worktree-state',
         worktreeSession: this.currentSessionWorktree,
+        sessionId,
+      })
+    }
+    if (this.currentSessionDevModsFolder) {
+      entries.push({
+        type: 'dev-mods',
+        folder: this.currentSessionDevModsFolder,
         sessionId,
       })
     }
@@ -1297,7 +1444,7 @@ class Project {
       this.currentSessionPrUrl &&
       this.currentSessionPrRepository
     ) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'pr-link',
         sessionId,
         prNumber: this.currentSessionPrNumber,
@@ -1307,7 +1454,7 @@ class Project {
       })
     }
     if (this.currentSessionHistorySuppressed) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'history-suppression',
         sessionId,
         cause: 'migration',
@@ -1318,7 +1465,7 @@ class Project {
     // Tombstones (empty id) are not re-appended — clearBridgeSession already
     // wrote the empty marker and cleared cache.
     if (this.currentSessionBridgeId) {
-      appendEntryToFile(this.sessionFile, {
+      entries.push({
         type: 'bridge-session',
         sessionId,
         bridgeSessionId: this.currentSessionBridgeId,
@@ -1343,6 +1490,13 @@ class Project {
           : {}),
       })
     }
+
+    if (entries.length > 0) {
+      this.sealTornTailSync(this.sessionFile)
+      for (const entry of entries) {
+        appendEntryToFile(this.sessionFile, entry)
+      }
+    }
   }
 
   async flush(): Promise<void> {
@@ -1365,12 +1519,13 @@ class Project {
     await this.drainWriteQueue()
 
     // Wait for non-queue tracked operations (e.g. removeMessageByUuid)
-    if (this.pendingWriteCount === 0) {
-      return
+    while (this.pendingWriteCount > 0) {
+      await new Promise<void>(resolve => {
+        this.flushResolvers.push(resolve)
+      })
+      await this.drainWriteQueue()
     }
-    return new Promise<void>(resolve => {
-      this.flushResolvers.push(resolve)
-    })
+    await leftoverAppendSerial.settle()
   }
 
   /**
@@ -1715,6 +1870,8 @@ class Project {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'worktree-state') {
       void this.enqueueWrite(sessionFile, entry)
+    } else if (entry.type === 'dev-mods') {
+      void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'bridge-session') {
       // densable Bkn/EGt — always append (last-wins; empty id = clear tombstone)
       void this.enqueueWrite(sessionFile, entry)
@@ -1952,6 +2109,19 @@ class Project {
 
   getInternalSubagentEventReader(): InternalEventReader | null {
     return this.internalSubagentEventReader
+  }
+
+  /**
+   * densable setInternalAgentEventReader — pin the lazy agent-transcript
+   * reader. Session CCR reader stays on setInternalEventReader.
+   */
+  setInternalAgentEventReader(reader: LeftoverInternalAgentEventReader): void {
+    this.internalAgentEventReader = reader
+  }
+
+  /** densable hasInternalAgentEventReader — `this.internalAgentEventReader!==null`. */
+  hasInternalAgentEventReader(): boolean {
+    return this.internalAgentEventReader !== null
   }
 }
 
@@ -2230,17 +2400,20 @@ export async function relocateSessionTranscript(): Promise<void> {
         relocatedCwd: cwd,
       }
       project.beginTranscriptRelocation()
+      project.openAppendRelocationBracket(currentFile)
       try {
         await project.flush()
+        await leftoverAppendSerial.settle()
         const line = jsonStringify(stamp) + '\n'
         if (await tryAppendRaw(currentFile, line)) {
-          // best-effort stamp only
+          project.fireMirror(currentFile, [stamp])
         }
       } catch (e) {
         logForDebugging(
           `relocateSessionTranscript: same-target relocated stamp failed: ${e}`,
         )
       } finally {
+        leftoverSkn(currentFile)
         await project.endTranscriptRelocation()
       }
     }
@@ -2249,8 +2422,10 @@ export async function relocateSessionTranscript(): Promise<void> {
 
   // Real move: buffer mid-rehome writes, flush, rename jsonl + session sidecar dir
   project.beginTranscriptRelocation()
+  project.openAppendRelocationBracket(currentFile)
   try {
     await project.flush()
+    await leftoverAppendSerial.settle()
     await mkdir(targetProjectDir, { recursive: true, mode: 0o700 })
 
     // densable S0e: Promise.all(ly(Mg(d), {bigint:!0}), ly(o, {bigint:!0}))
@@ -2338,6 +2513,7 @@ export async function relocateSessionTranscript(): Promise<void> {
       }
     }
   } finally {
+    leftoverSkn(project.sessionFile ?? currentFile)
     await project.endTranscriptRelocation()
   }
 }
@@ -2365,8 +2541,30 @@ export async function relocateSessionTranscript(): Promise<void> {
  */
 export function adoptResumedSessionFile(): void {
   const project = getProject()
-  project.setSessionFile(getTranscriptPath())
-  project.reAppendSessionMetadata(true)
+  const sessionFile = getTranscriptPath()
+  project.setSessionFile(sessionFile)
+  if (hasTornTailSync(sessionFile)) {
+    leftoverWdr(sessionFile)
+  }
+  const now = new Date()
+  fsUtimes(sessionFile, now, now).catch(() => {})
+  try {
+    project.reAppendSessionMetadata(true)
+  } catch (error) {
+    if (isFsInaccessible(error)) {
+      logForDebugging(
+        `Resume re-append failed (${error.code}): ${errorMessage(error)}`,
+        { level: 'error' },
+      )
+    } else {
+      logError(error)
+    }
+    recordTranscriptWriteFailure(
+      'adopt',
+      error,
+      project.sessionFile ?? sessionFile,
+    )
+  }
 }
 
 /**
@@ -3345,6 +3543,7 @@ export async function loadTranscriptFromFile(
       leafUuids,
       contentReplacements,
       worktreeStates,
+      devModsFolders,
       endedByModelSessions,
       relocatedCwds,
       bridgeSessionIds,
@@ -3402,6 +3601,7 @@ export async function loadTranscriptFromFile(
       worktreeSession: worktreeStates.has(sessionId)
         ? worktreeStates.get(sessionId)
         : undefined,
+      devModsFolder: devModsFolders.get(sessionId),
       // densable OGe({}, sessionId ? endedSet.has(sessionId) : false)
       endedByModel: endedByModelSessions.has(sessionId),
       // densable 2.1.224 #30 — non-empty bridge-session only (tombstone deleted map)
@@ -4195,6 +4395,8 @@ export function restoreSessionMetadata(meta: {
   bridgeOwnerOrganizationUuid?: string
   /** densable e.sessionHistorySuppressed → currentSessionHistorySuppressed + QJe. */
   sessionHistorySuppressed?: boolean
+  /** densable e.devModsFolder → currentSessionDevModsFolder when eln matches. */
+  devModsFolder?: string
 }): void {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
@@ -4221,6 +4423,18 @@ export function restoreSessionMetadata(meta: {
   if (meta.sessionModel) project.currentSessionModel = meta.sessionModel
   if (meta.worktreeSession !== undefined)
     project.currentSessionWorktree = meta.worktreeSession
+  if (meta.devModsFolder) {
+    const folder = meta.devModsFolder
+    const sessionId = getSessionId()
+    // densable eln — sessionId charset + resolve(folder)===resolve(join(rft(), id))
+    if (leftoverDevModsFolderMatches(folder, sessionId)) {
+      project.currentSessionDevModsFolder = folder
+    } else {
+      logForDebugging(
+        "dev mods: dropped a restored dev-mods folder not this session's",
+      )
+    }
+  }
   if (meta.prNumber !== undefined)
     project.currentSessionPrNumber = meta.prNumber
   if (meta.prUrl) project.currentSessionPrUrl = meta.prUrl
@@ -4269,6 +4483,7 @@ export function clearSessionMetadata(
   project.currentSessionMode = undefined
   project.currentSessionModel = undefined
   project.currentSessionWorktree = undefined
+  project.currentSessionDevModsFolder = undefined
   project.currentSessionPrNumber = undefined
   project.currentSessionPrUrl = undefined
   project.currentSessionPrRepository = undefined
@@ -4843,6 +5058,316 @@ export function saveSessionModel(model: string | null): void {
  * reAppendSessionMetadata on exit. Pass null when exiting a worktree
  * so --resume knows not to cd back into it.
  */
+/**
+ * densable eln — `/^[A-Za-z0-9_-]+$/.test(n) && resolve(e)===resolve(join(rft(), n))`.
+ */
+function leftoverDevModsFolderMatches(
+  folder: string,
+  sessionId: string,
+): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return false
+  const expected = join(getClaudeConfigHomeDir(), 'dev-mods', sessionId)
+  return resolve(folder) === resolve(expected)
+}
+
+type LeftoverStorageV5Append = {
+  append: (
+    key: unknown,
+    records: Array<{ data: string | Uint8Array; recordId?: string }>,
+    opts?: { precondition?: { type?: string } },
+  ) => Promise<{ ok: boolean; error?: { code?: string } }>
+  stat?: (key: unknown) => Promise<{
+    ok: boolean
+    error?: { code?: string }
+    value?: { storedBytes?: number; size?: number; tornTailBytes?: number }
+  }>
+}
+
+/**
+ * densable $xr — O_RDWR|O_APPEND hover-rest onlyIfExists. Never export minify `$xr`.
+ */
+async function leftoverXr(
+  filePath: string,
+  line: string,
+  torn?: string,
+): Promise<false | true | 'torn'> {
+  let handle: Awaited<ReturnType<typeof fsOpen>> | undefined
+  try {
+    handle = await fsOpen(filePath, fsConstants.O_RDWR | fsConstants.O_APPEND)
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? (error as { code?: unknown }).code
+        : undefined
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false
+    throw error
+  }
+  if (handle === undefined) return false
+  try {
+    const { size } = await handle.stat()
+    if (size === 0) return false
+    const buf = Buffer.alloc(1)
+    const { bytesRead } = await handle.read(buf, 0, 1, size - 1)
+    const newline = bytesRead === 1 && buf[0] === 10
+    const payload = Buffer.from(newline ? line : `\n${torn ?? line}`, 'utf8')
+    let offset: number | undefined
+    let written = 0
+    while (written < payload.length) {
+      const { bytesWritten } = await handle.write(
+        payload,
+        written,
+        payload.length - written,
+        offset,
+      )
+      if (bytesWritten <= 0) {
+        throw new Error('appendToExistingTranscript: short write')
+      }
+      written += bytesWritten
+      if (offset !== undefined) offset += bytesWritten
+    }
+    return newline ? true : 'torn'
+  } finally {
+    await handle?.close()
+  }
+}
+
+/**
+ * densable Dxr — split payload on `\n` into one `{data}` record per line
+ * (newline kept on the slice). Never export minify `Dxr`.
+ */
+function leftoverDxr(payload: string): Array<{ data: string }> {
+  const records: Array<{ data: string }> = []
+  let cursor = 0
+  while (cursor < payload.length) {
+    const nl = payload.indexOf('\n', cursor)
+    const end = nl === -1 ? payload.length : nl + 1
+    records.push({ data: payload.slice(cursor, end) })
+    cursor = end
+  }
+  return records
+}
+
+/**
+ * densable pye — tornTailSeal, hover-rest, $xr, mkdir 0o700 retry.
+ * Never export minify `pye`.
+ */
+async function leftoverPye(
+  filePath: string,
+  line: string,
+  storageV5: unknown,
+  onlyIfExists?: boolean,
+  torn?: string,
+): Promise<'skipped' | 'direct' | 'direct-torn' | 'backend' | 'backend-torn'> {
+  const project = getProject()
+  const seal =
+    onlyIfExists !== true && project.tornTailSealPending(filePath) === true
+  let payload = seal ? `\n${line}` : line
+  let tornWrite = false
+  const bind =
+    storageV5 !== undefined
+      ? bindMainSessionTranscriptPersistence(filePath, storageV5)
+      : undefined
+  const backend = bind?.backend as LeftoverStorageV5Append | undefined
+  if (
+    isHoverRestOn() &&
+    storageV5 !== undefined &&
+    bind !== undefined &&
+    backend !== undefined
+  ) {
+    if (onlyIfExists === true && backend.stat !== undefined) {
+      const st = await backend.stat(bind.key)
+      if (!st.ok) {
+        if (st.error?.code === 'NotFound') return 'skipped'
+        throw Object.assign(
+          new Error('onlyIfExists stat failed — append withheld'),
+          { cause: st.error },
+        )
+      }
+      if ((st.value?.storedBytes ?? st.value?.size) === 0) return 'skipped'
+      if ((st.value?.tornTailBytes ?? 0) > 0) {
+        payload = `\n${torn ?? payload}`
+        tornWrite = true
+      }
+    }
+    const written = await backend.append(bind.key, leftoverDxr(payload), {
+      ...(onlyIfExists === true ? { precondition: { type: 'ifExists' } } : {}),
+    })
+    if (!written.ok) {
+      if (onlyIfExists === true && written.error?.code === 'NotFound') {
+        return 'skipped'
+      }
+      throw Object.assign(new Error('storageV5 append failed'), {
+        code: written.error?.code,
+      })
+    }
+    if (seal) project.tornTailSealLanded(filePath)
+    return tornWrite ? 'backend-torn' : 'backend'
+  }
+  if (onlyIfExists === true) {
+    const result = await leftoverXr(filePath, payload, torn)
+    if (result === false) return 'skipped'
+    return result === 'torn' ? 'direct-torn' : 'direct'
+  }
+  try {
+    await fsAppendFile(filePath, payload, { mode: 0o600 })
+  } catch {
+    await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
+    await fsAppendFile(filePath, payload, { mode: 0o600 })
+  }
+  if (seal) project.tornTailSealLanded(filePath)
+  return 'direct'
+}
+
+/** densable Skn — dest is the replay path. Never export minify `Skn`. */
+function leftoverSkn(dest: string): void {
+  const parked = getProject().closeAppendRelocationBracket()
+  if (!parked) return
+  for (const { entry, storageV5, opts, resolve, reject } of parked) {
+    leftoverAppendEntryToFileAsync(dest, entry, storageV5, opts).then(
+      resolve,
+      reject,
+    )
+  }
+}
+
+/** densable WDr — pin tornTailToSeal for the next pye. Never export minify `WDr`. */
+function leftoverWdr(path?: string): void {
+  const project = getProject()
+  const dest = path ?? project.sessionFile ?? getTranscriptPath()
+  if (!dest) return
+  project.sealTornTailOnNextAppend(dest)
+}
+
+function hasTornTailSync(filePath: string): boolean {
+  let fd: number | undefined
+  try {
+    fd = openSync(filePath, 'r')
+    const { size } = fstatSync(fd)
+    if (size === 0) return false
+    const buf = Buffer.alloc(1)
+    const bytesRead = readSync(fd, buf, 0, 1, size - 1)
+    return bytesRead === 1 && buf[0] !== 0x0a
+  } catch {
+    return false
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        // ignore close error
+      }
+    }
+  }
+}
+
+/** densable yAr — true when empty or final byte on disk is `\n`. */
+async function fileEndsWithNewline(
+  filePath: string,
+  size: number,
+): Promise<boolean> {
+  if (size === 0) return true
+  const handle = await fsOpen(filePath, 'r')
+  try {
+    const buf = Buffer.alloc(1)
+    const { bytesRead } = await handle.read(buf, 0, 1, size - 1)
+    return bytesRead === 1 && buf[0] === 0x0a
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * densable KC — `$a()` skip, relocation park, pye(path, line, storageV5), fireMirror.
+ * Never export minify `KC`.
+ */
+function leftoverAppendEntryToFileAsync(
+  filePath: string,
+  entry: Entry,
+  storageV5?: unknown,
+  opts?: { tornTailEntry?: Entry; onlyIfExists?: boolean },
+): Promise<void> {
+  if (isPersistenceSuppressed()) return Promise.resolve()
+  const project = getProject()
+  const park = project.leftoverRelocationPark()
+  if (park.appends !== null && filePath === park.path) {
+    return new Promise((resolvePark, rejectPark) => {
+      park.appends!.push({
+        entry,
+        storageV5,
+        opts,
+        resolve: resolvePark,
+        reject: rejectPark,
+      })
+    })
+  }
+  const line = jsonStringify(entry) + '\n'
+  const torn =
+    opts?.tornTailEntry !== undefined
+      ? jsonStringify(opts.tornTailEntry) + '\n'
+      : undefined
+  // densable KC does not call WDr; leftoverPye reads tornTailSealPending.
+  const job = leftoverAppendSerial.run(filePath, async () => {
+    const result = await leftoverPye(
+      filePath,
+      line,
+      storageV5,
+      opts?.onlyIfExists,
+      torn,
+    )
+    if (result !== 'skipped') {
+      const mirrored =
+        (result === 'direct-torn' || result === 'backend-torn') &&
+        opts?.tornTailEntry !== undefined
+          ? opts.tornTailEntry
+          : entry
+      project.fireMirror(filePath, [mirrored])
+    }
+  })
+  return job.catch((error: unknown) => {
+    logForDebugging(
+      `appendEntryToFileAsync: append to ${filePath} failed: ${errorMessage(error)}`,
+      { level: 'error' },
+    )
+    throw error
+  })
+}
+
+/**
+ * densable iLr — persist the consented session mods folder (last-wins JSONL).
+ * Same-path no-op. Appends when sessionFile exists. Gold `KC(..., storageV5).catch`.
+ */
+export function saveDevModsFolder(folder: string, storageV5?: unknown): void {
+  const project = getProject()
+  if (project.currentSessionDevModsFolder === folder) return
+  project.currentSessionDevModsFolder = folder
+  if (project.sessionFile) {
+    const sessionFile = project.sessionFile
+    const entry: Entry = {
+      type: 'dev-mods',
+      folder,
+      sessionId: getSessionId() as UUID,
+    }
+    leftoverAppendEntryToFileAsync(sessionFile, entry, storageV5).catch(
+      (error: unknown) => {
+        if (isFsInaccessible(error)) {
+          logForDebugging(
+            `saveDevModsFolder: failed to append dev-mods entry to ${sessionFile} (${error.code}): ${errorMessage(error)}`,
+            { level: 'error' },
+          )
+        } else {
+          logError(error)
+        }
+        recordTranscriptWriteFailure('dev_mods', error, sessionFile)
+      },
+    )
+  }
+}
+
+/** densable aLr */
+export function getCurrentSessionDevModsFolder(): string | undefined {
+  return getProject().currentSessionDevModsFolder
+}
+
 export function saveWorktreeState(
   worktreeSession: PersistedWorktreeSession | null,
 ): void {
@@ -4945,6 +5470,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       prRepositories,
       modes,
       worktreeStates,
+      devModsFolders,
       goals,
       fileHistorySnapshots,
       attributionSnapshots,
@@ -5033,6 +5559,9 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         sessionId && worktreeStates.has(sessionId)
           ? worktreeStates.get(sessionId)
           : log.worktreeSession,
+      devModsFolder: sessionId
+        ? (devModsFolders.get(sessionId) ?? log.devModsFolder)
+        : log.devModsFolder,
       goal: sessionId ? goals.get(sessionId) : log.goal,
       endedByModel: sessionId
         ? endedByModelSessions.has(sessionId)
@@ -5167,6 +5696,7 @@ const METADATA_TYPE_MARKERS = [
   '"type":"agent-setting"',
   '"type":"mode"',
   '"type":"worktree-state"',
+  '"type":"dev-mods"',
   '"type":"bridge-session"',
   '"type":"goal"',
   '"type":"goal-cleared"',
@@ -5614,6 +6144,8 @@ export async function loadTranscriptFile(
   prRepositories: Map<UUID, string>
   modes: Map<UUID, string>
   worktreeStates: Map<UUID, PersistedWorktreeSession | null>
+  /** densable currentSessionDevModsFolder last-wins. */
+  devModsFolders: Map<UUID, string>
   goals: Map<UUID, GoalState>
   fileHistorySnapshots: Map<UUID, FileHistorySnapshotMessage>
   attributionSnapshots: Map<UUID, AttributionSnapshotMessage>
@@ -5657,6 +6189,7 @@ export async function loadTranscriptFile(
   const prRepositories = new Map<UUID, string>()
   const modes = new Map<UUID, string>()
   const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
+  const devModsFolders = new Map<UUID, string>()
   const goals = new Map<UUID, GoalState>()
   const bridgeSessionIds = new Map<UUID, string>()
   const bridgeLastSeqs = new Map<UUID, number>()
@@ -5699,6 +6232,7 @@ export async function loadTranscriptFile(
     let buf: Buffer | null = null
     let metadataLines: string[] | null = null
     let hasPreservedSegment = false
+    let tailTorn: boolean | undefined
     // Official DISABLE_PRECOMPACT_SKIP densable.
     const precompactSkipDisabled = isPrecompactSkipDisabled()
     if (!precompactSkipDisabled) {
@@ -5707,6 +6241,7 @@ export async function loadTranscriptFile(
         const scan = await readTranscriptForLoad(filePath, size)
         buf = scan.postBoundaryBuf
         hasPreservedSegment = scan.hasPreservedSegment
+        tailTorn = !(await fileEndsWithNewline(filePath, size))
         // >0 means we truncated pre-boundary bytes and must recover
         // session-scoped metadata from that range. A preservedSegment
         // boundary does not truncate (preserved messages are physically
@@ -5722,7 +6257,18 @@ export async function loadTranscriptFile(
         }
       }
     }
-    buf ??= await readFile(filePath)
+    if (buf === null) {
+      buf = await readFile(filePath)
+      tailTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a
+    }
+    if (
+      tailTorn &&
+      !opts?.keepAllLeaves &&
+      (filePath === getProject().sessionFile ||
+        filePath === getTranscriptPath())
+    ) {
+      leftoverWdr(filePath)
+    }
     // For large buffers (which here means readTranscriptForLoad output with
     // attr-snaps already stripped at the fd level — the <5MB readFile path
     // falls through the size gate below), the dominant cost is parsing dead
@@ -5776,6 +6322,17 @@ export async function loadTranscriptFile(
           modes.set(entry.sessionId, entry.mode)
         } else if (entry.type === 'worktree-state' && entry.sessionId) {
           worktreeStates.set(entry.sessionId, entry.worktreeSession)
+        } else if (entry.type === 'dev-mods' && entry.sessionId) {
+          if (
+            typeof entry.folder === 'string' &&
+            leftoverDevModsFolderMatches(entry.folder, entry.sessionId)
+          ) {
+            devModsFolders.set(entry.sessionId, entry.folder)
+          } else {
+            logForDebugging(
+              'dev mods: dropped a dev-mods entry naming a folder not its own',
+            )
+          }
         } else if (entry.type === 'goal' && entry.sessionId) {
           goals.set(entry.sessionId, entry.state)
         } else if (entry.type === 'goal-cleared' && entry.sessionId) {
@@ -5874,6 +6431,17 @@ export async function loadTranscriptFile(
         modes.set(entry.sessionId, entry.mode)
       } else if (entry.type === 'worktree-state' && entry.sessionId) {
         worktreeStates.set(entry.sessionId, entry.worktreeSession)
+      } else if (entry.type === 'dev-mods' && entry.sessionId) {
+        if (
+          typeof entry.folder === 'string' &&
+          leftoverDevModsFolderMatches(entry.folder, entry.sessionId)
+        ) {
+          devModsFolders.set(entry.sessionId, entry.folder)
+        } else {
+          logForDebugging(
+            'dev mods: dropped a dev-mods entry naming a folder not its own',
+          )
+        }
       } else if (entry.type === 'goal' && entry.sessionId) {
         goals.set(entry.sessionId, entry.state)
       } else if (entry.type === 'goal-cleared' && entry.sessionId) {
@@ -6032,6 +6600,7 @@ export async function loadTranscriptFile(
     prRepositories,
     modes,
     worktreeStates,
+    devModsFolders,
     goals,
     fileHistorySnapshots,
     attributionSnapshots,
@@ -6142,6 +6711,7 @@ export async function getLastSessionLog(
     tags,
     agentSettings,
     worktreeStates,
+    devModsFolders,
     fileHistorySnapshots,
     attributionSnapshots,
     contentReplacements,
@@ -6195,6 +6765,7 @@ export async function getLastSessionLog(
     ),
     aiTitle: aiTitles.get(sessionId),
     worktreeSession: worktreeStates.get(sessionId),
+    devModsFolder: devModsFolders.get(sessionId),
     goal: goals.get(sessionId),
     contextCollapseCommits: contextCollapseCommits.filter(
       e => e.sessionId === sessionId,

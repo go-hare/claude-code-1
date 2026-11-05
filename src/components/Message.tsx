@@ -170,6 +170,7 @@ function MessageImpl({
               advisorModel={message.advisorModel as string | undefined}
               model={(message.message as { model?: string }).model}
               apiMessageId={apiMessageId}
+              messageId={message.uuid}
               isFirstTextBlock={index === firstTextBlockIndex}
               isApiError={message.isApiErrorMessage === true}
             />
@@ -411,6 +412,7 @@ function AssistantMessageBlock({
   advisorModel,
   model,
   apiMessageId,
+  messageId,
   isFirstTextBlock,
   isApiError,
 }: {
@@ -445,6 +447,8 @@ function AssistantMessageBlock({
   model?: string;
   /** densable bFa — API message id for displayedMessageContent lookup */
   apiMessageId?: string;
+  /** densable 2.1.289 `or` `xI("AssistantMessage")` requestId (message.uuid). */
+  messageId?: string;
   /** First text block only receives SFa transformed text (aligns densable Tth) */
   isFirstTextBlock?: boolean;
   /** densable 2.1.243 #23 — pass through to AssistantTextMessage `Rle`. */
@@ -466,6 +470,7 @@ function AssistantMessageBlock({
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
+          messageId={messageId}
         />
       );
     }
@@ -504,6 +509,7 @@ function AssistantMessageBlock({
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
+          messageId={messageId}
         />
       );
     }

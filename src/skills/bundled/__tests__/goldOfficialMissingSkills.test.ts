@@ -21,7 +21,6 @@ const GOLD_NAMES = [
   'explain-usage',
   'memory-types',
   'pr',
-  'plugin-authoring',
   'artifact-design',
   'artifact-diagramming',
   'artifact-components',
@@ -157,7 +156,10 @@ describe('gold 2.1.289 missing bundled skills', () => {
 
   test('plugin-authoring prompt is SKILL.md body not listing stub', async () => {
     clearBundledSkills()
-    registerGoldOfficialMissingSkills()
+    const { registerPluginAuthoringSkill } = await import(
+      '../goldOfficialMissingSkills.js'
+    )
+    registerPluginAuthoringSkill()
     const skill = getBundledSkills().find(s => s.name === 'plugin-authoring')
     expect(skill?.type).toBe('prompt')
     if (!skill || skill.type !== 'prompt') throw new Error('expected prompt')

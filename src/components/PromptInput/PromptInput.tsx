@@ -198,6 +198,7 @@ import { getFastIconString } from '../FastIcon.js';
 import { GlobalSearchDialog } from '../GlobalSearchDialog.js';
 import { HistorySearchDialog } from '../HistorySearchDialog.js';
 import { ModelPicker } from '../ModelPicker.js';
+import { PluginPromptHintSite } from '../PluginRasterPanes.js';
 import { QuickOpenDialog } from '../QuickOpenDialog.js';
 import TextInput from '../TextInput.js';
 import { ThinkingToggle } from '../ThinkingToggle.js';
@@ -731,6 +732,7 @@ function PromptInput({
   const [showTeamsDialog, setShowTeamsDialog] = useState(false);
   const [showBridgeDialog, setShowBridgeDialog] = useState(false);
   const [teammateFooterIndex, setTeammateFooterIndex] = useState(0);
+  const [pluginSuppressesHint, setPluginSuppressesHint] = useState(false);
   // -1 sentinel: tasks pill is selected but no specific agent row is selected yet.
   // First ↓ selects the pill, second ↓ moves to row 0. Prevents double-select
   // of pill + row when both bg tasks (pill) and forked agents (rows) are visible.
@@ -1999,7 +2001,8 @@ function PromptInput({
     );
     trackAndSetInput(newInput);
     // densable UG on typed insert: stamp slashNameOnly gaps when slash/ultraplan.
-    const visual = vimMode === 'VISUAL' || vimMode === 'VISUAL LINE';
+    const modeStr = vimMode as string;
+    const visual = modeStr === 'VISUAL' || modeStr === 'VISUAL LINE';
     const stamped = stampSlashNameOnlyPastedGaps(pastedContentsRef.current, newInput, visual);
     if (stamped !== pastedContentsRef.current) {
       setPastedContents(stamped);
@@ -3399,7 +3402,7 @@ function PromptInput({
         maxColumnWidth={maxColumnWidth}
         toolPermissionContext={effectiveToolPermissionContext}
         helpOpen={helpOpen}
-        suppressHint={input.length > 0}
+        suppressHint={input.length > 0 || pluginSuppressesHint}
         isLoading={isLoading}
         tasksSelected={tasksSelected}
         teamsSelected={teamsSelected}
@@ -3417,6 +3420,12 @@ function PromptInput({
         historyFailedMatch={historyFailedMatch}
         onOpenTasksDialog={isFullscreenEnvEnabled() ? handleOpenTasksDialog : undefined}
         leftArrowAgain={leftArrowHintShown}
+      />
+      <PluginPromptHintSite
+        isDraft={input.length > 0}
+        isWorking={isLoading}
+        isInteractive={suggestions.length > 0 || helpOpen || isSearchingHistory || exitMessage.show || isPasting}
+        onSuppressDefaultHint={setPluginSuppressesHint}
       />
       {isFullscreenEnvEnabled() ? (
         // position=absolute takes zero layout height so the spinner

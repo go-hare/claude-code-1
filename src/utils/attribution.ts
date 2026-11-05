@@ -44,6 +44,76 @@ export type AttributionTexts = {
   pr: string
 }
 
+export type AttributionTextKind = 'commit' | 'pr' | 'exemption' | 'remedy'
+
+function getAttributionFunctionHooks():
+  | typeof import('./plugins/functionHooksModules.js')
+  | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('./plugins/functionHooksModules.js') as typeof import('./plugins/functionHooksModules.js')
+  } catch {
+    return null
+  }
+}
+
+const ATTRIBUTION_TEXT_SITE = {
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined => {
+    if (typeof passed.kind !== 'string') return 'no { kind }'
+    if (passed.kind !== original.kind) {
+      return 'a changed kind (the hooks beneath match on it)'
+    }
+    return typeof passed.text === 'string' ? undefined : 'no { text }'
+  },
+}
+
+/**
+ * densable `ZEe` / `TQ` (`attribution.text`): routes a composed git attribution
+ * text (`commit` | `pr` | `exemption` | `remedy`) through matching function hooks.
+ */
+export async function resolveAttributionText(
+  kind: AttributionTextKind,
+  text: string,
+): Promise<string> {
+  const hooks = getAttributionFunctionHooks()
+  if (!hooks?.hasMatchingFunctionHook('attribution.text', { kind })) {
+    return text
+  }
+  const payload: Record<string, unknown> = { kind, text }
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ text: string }> => ({
+    text: typeof event.text === 'string' ? event.text : text,
+  })
+  try {
+    const result = await hooks.runFunctionHookChain(
+      'attribution.text',
+      payload,
+      tail,
+      undefined,
+      undefined,
+      { site: ATTRIBUTION_TEXT_SITE },
+    )
+    if (
+      result !== null &&
+      typeof result === 'object' &&
+      'text' in result &&
+      typeof (result as { text?: unknown }).text === 'string'
+    ) {
+      return (result as { text: string }).text
+    }
+  } catch (err) {
+    logForDebugging(
+      `attribution.text (${kind}): ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+  }
+  return text
+}
+
 /**
  * densable AVt — `Claude ${VP(id)}` else `Claude (${id})`.
  * VP is the marketing / public display label.
@@ -198,7 +268,9 @@ export function commitTrailerModelName(model: string): string {
  * - Backward compatibility with deprecated includeCoAuthoredBy setting
  * - Remote mode: returns session URL for attribution
  */
-export function getAttributionTexts(): AttributionTexts {
+export function getAttributionTexts(options?: {
+  model?: string
+}): AttributionTexts {
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
     return { commit: '', pr: '' }
   }
@@ -220,7 +292,7 @@ export function getAttributionTexts(): AttributionTexts {
     return { commit: '', pr: '' }
   }
 
-  const modelName = getRealModelName()
+  const modelName = options?.model ?? getRealModelName()
   const email = getAttributionEmail(modelName)
   const defaultAttribution = `🤖 Generated with [Claude Code](${PRODUCT_URL})`
   const defaultCommit = `Co-Authored-By: ${commitTrailerModelName(modelName)} <${email}>`
@@ -241,6 +313,28 @@ export function getAttributionTexts(): AttributionTexts {
   }
 
   return { commit: defaultCommit, pr: defaultAttribution }
+}
+
+/**
+ * densable `Bdt` / `Pbt` — async attribution resolver applying `attribution.text`
+ * function hooks (`commit` and `pr`) when any matching hook is loaded.
+ */
+export async function resolveAttributionTexts(options?: {
+  model?: string
+}): Promise<AttributionTexts> {
+  const base = getAttributionTexts(options)
+  if (process.env.USER_TYPE === 'ant' && isUndercover()) {
+    return base
+  }
+  const hooks = getAttributionFunctionHooks()
+  if (!hooks?.hasMatchingFunctionHook('attribution.text')) {
+    return base
+  }
+  const [commit, pr] = await Promise.all([
+    resolveAttributionText('commit', base.commit),
+    resolveAttributionText('pr', base.pr),
+  ])
+  return { commit, pr }
 }
 
 /**
@@ -446,7 +540,13 @@ export async function getEnhancedPRAttribution(
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
     return ''
   }
+  const base = await computeBaseEnhancedPRAttribution(getAppState)
+  return resolveAttributionText('pr', base)
+}
 
+async function computeBaseEnhancedPRAttribution(
+  getAppState: () => AppState,
+): Promise<string> {
   if (getClientType() === 'remote') {
     const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
     if (remoteSessionId) {

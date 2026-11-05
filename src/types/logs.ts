@@ -64,6 +64,8 @@ export type LogOption = {
   mode?: 'coordinator' | 'normal' // Session mode for coordinator/normal detection
   sessionKind?: string // Session kind: 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
   worktreeSession?: PersistedWorktreeSession | null // Worktree state at session end (null = exited, undefined = never entered)
+  /** densable currentSessionDevModsFolder — last-wins `type:"dev-mods"`. */
+  devModsFolder?: string
   contentReplacements?: ContentReplacementRecord[] // Replacement decisions for resume reconstruction
   goal?: GoalState // Active goal state at session end (for resume)
   /**
@@ -304,6 +306,13 @@ export type WorktreeStateEntry = {
   worktreeSession: PersistedWorktreeSession | null
 }
 
+/** densable `dev-mods` JSONL — last-wins consented mods folder (`iLr` / `aLr`). */
+export type DevModsFolderEntry = {
+  type: 'dev-mods'
+  sessionId: UUID
+  folder: string
+}
+
 /**
  * densable `bridge-session` (Bkn / EGt) — last-wins Remote Control server session
  * pointer for --resume / mid-session resume. `bridgeSessionId:""` is a tombstone
@@ -540,6 +549,7 @@ export type Entry =
   | SpeculationAcceptMessage
   | ModeEntry
   | WorktreeStateEntry
+  | DevModsFolderEntry
   | BridgeSessionEntry
   | HistorySuppressionEntry
   | ContentReplacementEntry

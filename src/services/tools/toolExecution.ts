@@ -58,6 +58,7 @@ import type {
   Message,
   ProgressMessage,
   StopHookInfo,
+  UserMessage,
 } from '../../types/message.js'
 import { count } from '../../utils/array.js'
 import { createAttachmentMessage } from '../../utils/attachments.js'
@@ -139,6 +140,16 @@ import {
   runPreToolUseHooks,
 } from './toolHooks.js'
 import { isSkillLearningEnabled } from '../skillLearning/featureCheck.js'
+import {
+  type FunctionHookHopSite,
+  hasMatchingFunctionHook,
+  isInsideAgentSpawnLaunch,
+  runFunctionHookChain,
+} from '../../utils/plugins/functionHooksModules.js'
+import {
+  pinValue,
+  restorePinnedKeys,
+} from '../../utils/plugins/functionHooksHop.js'
 
 // Cached import promise for the skill-learning wrapper — paid once, not per call.
 let _skillLearningWrapperCache:
@@ -468,6 +479,456 @@ export async function* runToolUse(
   }
 }
 
+const SHADOWED_TOOL_KEYS_FIELD = '$shadowed'
+
+const RESERVED_TOOL_CALL_ENVELOPE_KEYS = [
+  'tool',
+  'tool_use_id',
+  'agentId',
+  'consent',
+  SHADOWED_TOOL_KEYS_FIELD,
+] as const
+
+const toolCallSite: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    restorePinnedKeys(['agentId', SHADOWED_TOOL_KEYS_FIELD], passed, original),
+  checkArgument: (passed, original) => {
+    for (const key of RESERVED_TOOL_CALL_ENVELOPE_KEYS) {
+      if (pinValue(passed[key]) !== pinValue(original[key])) {
+        return `a changed ${key} (reserved)`
+      }
+    }
+    return undefined
+  },
+}
+
+type ToolCallCoreCapture = {
+  output?: { value: unknown }
+  isReadOnly?: boolean
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildToolCallHookInput(
+  toolName: string,
+  toolUseID: string,
+  rawInput: Record<string, unknown>,
+  agentId: string | undefined,
+): Record<string, unknown> {
+  const shadowed: Record<string, unknown> = {}
+  let hasShadowed = false
+  for (const key of RESERVED_TOOL_CALL_ENVELOPE_KEYS) {
+    if (Object.hasOwn(rawInput, key)) {
+      shadowed[key] = rawInput[key]
+      hasShadowed = true
+    }
+  }
+  const { consent: _consent, agentId: _agentId, ...rest } = rawInput
+  return {
+    ...rest,
+    tool: toolName,
+    tool_use_id: toolUseID,
+    ...(hasShadowed && { [SHADOWED_TOOL_KEYS_FIELD]: shadowed }),
+    ...(agentId !== undefined && { agentId }),
+  }
+}
+
+function extractToolInputFromHookEvent(
+  event: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    tool: _tool,
+    tool_use_id: _toolUseId,
+    agentId: _agentId,
+    consent: _consent,
+    [SHADOWED_TOOL_KEYS_FIELD]: shadowed,
+    ...rest
+  } = event
+  if (isPlainRecord(shadowed)) {
+    return { ...rest, ...shadowed }
+  }
+  return rest
+}
+
+function findToolResultBlockInUpdate(
+  update: MessageUpdateLazy,
+  toolUseID: string,
+): ToolResultBlockParam | undefined {
+  const msg = update.message
+  if (msg.type !== 'user') {
+    return undefined
+  }
+  const userMsg = msg as UserMessage
+  const content = userMsg.message.content
+  if (typeof content === 'string' || !Array.isArray(content)) {
+    return undefined
+  }
+  for (const block of content) {
+    if (block.type === 'tool_result' && block.tool_use_id === toolUseID) {
+      return block
+    }
+  }
+  return undefined
+}
+
+function formatToolResultBlockText(
+  content: ToolResultBlockParam['content'],
+): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .flatMap(part =>
+      typeof part === 'object' && part !== null && part.type === 'text'
+        ? [String(part.text ?? '')]
+        : [],
+    )
+    .join('\n')
+}
+
+function extractToolResultSummary(
+  updates: readonly MessageUpdateLazy[],
+  toolUseID: string,
+): { text: string; isError?: true } {
+  for (const update of updates) {
+    const block = findToolResultBlockInUpdate(update, toolUseID)
+    if (block) {
+      return {
+        text: formatToolResultBlockText(block.content),
+        ...(block.is_error === true && { isError: true as const }),
+      }
+    }
+  }
+  return { text: '' }
+}
+
+function extractToolUseResultFromMessages(
+  updates: readonly MessageUpdateLazy[],
+): unknown {
+  for (const { message } of updates) {
+    if (message.type === 'user' && message.toolUseResult !== undefined) {
+      return message.toolUseResult
+    }
+  }
+  return undefined
+}
+
+function buildToolCallDenyMessages(
+  toolUseID: string,
+  reason: string,
+  assistantUUID: AssistantMessage['uuid'],
+): MessageUpdateLazy[] {
+  return [
+    {
+      message: createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            content: `<tool_use_error>${reason}</tool_use_error>`,
+            is_error: true,
+            tool_use_id: toolUseID,
+          },
+        ],
+        toolUseResult: `Error: ${reason}`,
+        sourceToolAssistantUUID: assistantUUID,
+      }),
+    },
+  ]
+}
+
+function rebuildMessagesWithReplacedToolResult(
+  priorRun: { messages: MessageUpdateLazy[] } | undefined,
+  toolUseID: string,
+  newBlock: ToolResultBlockParam,
+  toolUseResult: unknown,
+  assistantUUID: AssistantMessage['uuid'],
+): MessageUpdateLazy[] {
+  if (!priorRun) {
+    return [
+      {
+        message: createUserMessage({
+          content: [newBlock],
+          toolUseResult,
+          sourceToolAssistantUUID: assistantUUID,
+        }),
+      },
+    ]
+  }
+  const existingIdx = priorRun.messages.findIndex(
+    update => findToolResultBlockInUpdate(update, toolUseID) !== undefined,
+  )
+  const rawExistingMsg =
+    existingIdx !== -1 ? priorRun.messages[existingIdx]?.message : undefined
+  const existingUserMsg =
+    rawExistingMsg?.type === 'user'
+      ? (rawExistingMsg as UserMessage)
+      : undefined
+  const existingContextModifier =
+    existingIdx !== -1
+      ? priorRun.messages[existingIdx]?.contextModifier
+      : undefined
+  const contentBlocks: ContentBlockParam[] =
+    existingUserMsg !== undefined &&
+    Array.isArray(existingUserMsg.message.content)
+      ? existingUserMsg.message.content.map(block =>
+          block.type === 'tool_result' && block.tool_use_id === toolUseID
+            ? newBlock
+            : block,
+        )
+      : [newBlock]
+  const replacedEntry: MessageUpdateLazy = {
+    message: createUserMessage({
+      content: contentBlocks,
+      imagePasteIds: existingUserMsg?.imagePasteIds,
+      mcpMeta: existingUserMsg?.mcpMeta,
+      toolEndsTurn: existingUserMsg?.toolEndsTurn,
+      toolUseResult,
+      sourceToolAssistantUUID: assistantUUID,
+    }),
+    ...(existingContextModifier !== undefined && {
+      contextModifier: existingContextModifier,
+    }),
+  }
+  const remaining = priorRun.messages.filter((_, idx) => idx !== existingIdx)
+  return [replacedEntry, ...remaining]
+}
+
+async function dispatchCheckPermissionsAndCallTool(
+  tool: Tool,
+  toolUseID: string,
+  input: { [key: string]: boolean | string | number },
+  toolUseContext: ToolUseContext,
+  canUseTool: CanUseToolFn,
+  assistantMessage: AssistantMessage,
+  messageId: string,
+  requestId: string | undefined,
+  mcpServerType: McpServerType,
+  mcpServerBaseUrl: ReturnType<typeof getLoggingSafeMcpBaseUrl>,
+  onToolProgress: (
+    progress:
+      | ToolProgress<ToolProgressData>
+      | ProgressMessage<HookProgress>
+      | ToolBridgeEvent,
+  ) => void,
+): Promise<MessageUpdateLazy[]> {
+  if (!isInsideAgentSpawnLaunch() && hasMatchingFunctionHook('tool.call')) {
+    const rawCoerced =
+      (tool as { coerceInputBeforePluginHooks?: boolean })
+        .coerceInputBeforePluginHooks && tool.coerceInput
+        ? tool.coerceInput(input)?.input
+        : undefined
+    const baseInput = isPlainRecord(rawCoerced) ? rawCoerced : input
+    const toolCallEnvelope = buildToolCallHookInput(
+      tool.name,
+      toolUseID,
+      baseInput,
+      toolUseContext.agentId,
+    )
+    if (
+      hasMatchingFunctionHook('tool.call', toolCallEnvelope) ||
+      hasMatchingFunctionHook('tool.call', { tool: tool.name })
+    ) {
+      type CoreRunEntry = {
+        input: Record<string, unknown>
+        messages: MessageUpdateLazy[]
+        result: unknown
+      }
+      const coreRuns: CoreRunEntry[] = []
+      let coreThrown: { error: unknown } | undefined
+      let rawChainOut: unknown
+      try {
+        rawChainOut = await runFunctionHookChain(
+          'tool.call',
+          toolCallEnvelope,
+          async event => {
+            const rewrittenInput = extractToolInputFromHookEvent(event)
+            const capture: ToolCallCoreCapture = {}
+            try {
+              const messages = await checkPermissionsAndCallTool(
+                tool,
+                toolUseID,
+                rewrittenInput as { [key: string]: boolean | string | number },
+                toolUseContext,
+                canUseTool,
+                assistantMessage,
+                messageId,
+                requestId,
+                mcpServerType,
+                mcpServerBaseUrl,
+                onToolProgress,
+                capture,
+              )
+              const resultValue = capture.output
+                ? capture.output.value
+                : extractToolUseResultFromMessages(messages)
+              const summary = extractToolResultSummary(messages, toolUseID)
+              const ref = coreRuns.push({
+                input: rewrittenInput,
+                messages,
+                result: resultValue,
+              })
+              return {
+                ref,
+                result: resultValue,
+                ...summary,
+                ...(capture.isReadOnly && { isReadOnly: true }),
+              }
+            } catch (err) {
+              coreThrown = { error: err }
+              throw err
+            }
+          },
+          undefined,
+          undefined,
+          {
+            signal: toolUseContext.abortController.signal,
+            site: toolCallSite,
+          },
+        )
+      } catch (err) {
+        if (
+          coreThrown !== undefined ||
+          err instanceof AbortError ||
+          toolUseContext.abortController.signal.aborted
+        ) {
+          throw err
+        }
+        logForDebugging(
+          `tool.call ${tool.name} ${toolUseID}: hook dispatch threw (${errorMessage(err)}); running tool`,
+        )
+        return (
+          coreRuns.at(-1)?.messages ??
+          checkPermissionsAndCallTool(
+            tool,
+            toolUseID,
+            input,
+            toolUseContext,
+            canUseTool,
+            assistantMessage,
+            messageId,
+            requestId,
+            mcpServerType,
+            mcpServerBaseUrl,
+            onToolProgress,
+          )
+        )
+      }
+
+      const out = isPlainRecord(rawChainOut) ? rawChainOut : {}
+      if (typeof out.deny === 'string') {
+        return buildToolCallDenyMessages(
+          toolUseID,
+          out.deny,
+          assistantMessage.uuid,
+        )
+      }
+
+      const matchedRun =
+        typeof out.ref === 'number' ? coreRuns[out.ref - 1] : undefined
+      const keptCoreResult =
+        matchedRun !== undefined &&
+        (out.result === undefined ||
+          out.result === matchedRun.result ||
+          pinValue(out.result) === pinValue(matchedRun.result))
+
+      let finalMessages: MessageUpdateLazy[]
+      if (keptCoreResult) {
+        finalMessages = [...matchedRun.messages]
+      } else {
+        const hasExplicitResult = Object.hasOwn(out, 'result')
+        let replacementResult = out.result
+        if (
+          tool.outputSchema &&
+          (replacementResult !== undefined ||
+            (hasExplicitResult && typeof out.text !== 'string'))
+        ) {
+          const parsedOut = tool.outputSchema.safeParse(replacementResult)
+          if (!parsedOut.success) {
+            const shapeErr = `tool.call step resolved ${tool.name} with a result that does not match its output shape: ${parsedOut.error.message}`
+            return buildToolCallDenyMessages(
+              toolUseID,
+              shapeErr,
+              assistantMessage.uuid,
+            )
+          }
+          replacementResult = parsedOut.data
+        }
+        let mappedBlock: ToolResultBlockParam
+        if (replacementResult === undefined) {
+          mappedBlock = {
+            type: 'tool_result',
+            tool_use_id: toolUseID,
+            content: typeof out.text === 'string' ? out.text : '',
+          }
+        } else {
+          try {
+            mappedBlock = await processToolResultBlock(
+              tool,
+              replacementResult,
+              toolUseID,
+            )
+          } catch {
+            mappedBlock = {
+              type: 'tool_result',
+              tool_use_id: toolUseID,
+              content:
+                typeof out.text === 'string'
+                  ? out.text
+                  : typeof replacementResult === 'string'
+                    ? replacementResult
+                    : jsonStringify(replacementResult),
+            }
+          }
+        }
+        const preserveResult =
+          !toolUseContext.agentId ||
+          toolUseContext.preserveToolUseResults === true
+        finalMessages = rebuildMessagesWithReplacedToolResult(
+          matchedRun ?? coreRuns.at(-1),
+          toolUseID,
+          mappedBlock,
+          preserveResult ? replacementResult : undefined,
+          assistantMessage.uuid,
+        )
+      }
+
+      const contextEntries = Array.isArray(out.context)
+        ? (out.context as unknown[]).filter(
+            (entry): entry is string =>
+              typeof entry === 'string' && entry !== '',
+          )
+        : []
+      if (contextEntries.length > 0) {
+        finalMessages.push({
+          message: createAttachmentMessage({
+            type: 'hook_additional_context',
+            content: contextEntries,
+            hookName: 'tool.call',
+            toolUseID: `${toolUseID}-context`,
+            hookEvent: 'PostToolUse',
+          }),
+        })
+      }
+      return finalMessages
+    }
+  }
+
+  return checkPermissionsAndCallTool(
+    tool,
+    toolUseID,
+    input,
+    toolUseContext,
+    canUseTool,
+    assistantMessage,
+    messageId,
+    requestId,
+    mcpServerType,
+    mcpServerBaseUrl,
+    onToolProgress,
+  )
+}
+
 function streamedCheckPermissionsAndCallTool(
   tool: Tool,
   toolUseID: string,
@@ -486,7 +947,7 @@ function streamedCheckPermissionsAndCallTool(
   // Ideally the progress reporting and tool call reporting would
   // be via separate mechanisms.
   const stream = new Stream<MessageUpdateLazy | ToolBridgeEvent>()
-  checkPermissionsAndCallTool(
+  dispatchCheckPermissionsAndCallTool(
     tool,
     toolUseID,
     input,
@@ -601,6 +1062,7 @@ async function checkPermissionsAndCallTool(
       | ProgressMessage<HookProgress>
       | ToolBridgeEvent,
   ) => void,
+  toolCallCapture?: ToolCallCoreCapture,
 ): Promise<MessageUpdateLazy[]> {
   // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
   // SendMessage Cpr=200 summary truncate lands here via shapeClass truncate_summary.
@@ -1389,6 +1851,15 @@ async function checkPermissionsAndCallTool(
       })
 
   try {
+    if (toolCallCapture) {
+      try {
+        if (tool.isReadOnly(callInput)) {
+          toolCallCapture.isReadOnly = true
+        }
+      } catch {
+        // Ignore isReadOnly errors on custom/stub tools
+      }
+    }
     // AC1 parity: wrap the single canonical tool.call site with deterministic
     // tool-event observation hooks (codex review follow-up). Hooks are
     // fire-and-forget inside the wrapper; tool execution is never blocked or
@@ -1820,6 +2291,9 @@ async function checkPermissionsAndCallTool(
     // Yield the remaining hook results after the other messages are sent
     for (const hookResult of hookResults) {
       resultingMessages.push(hookResult)
+    }
+    if (toolCallCapture) {
+      toolCallCapture.output = { value: toolOutput }
     }
     return resultingMessages
   } catch (error) {

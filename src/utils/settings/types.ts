@@ -774,6 +774,13 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'When true (and set in managed settings), marketplace plugins with source "command" are not installed or updated and their commands are not run. When unset, allowManagedHooksOnly also disables command-sourced plugins (densable _le). Invalid values are treated as true (fail closed).',
         ),
+      // densable A8 — CLI-flag sideload bypass of strictKnownMarketplaces
+      disableSideloadFlags: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true (and set in managed settings), rejects the --plugin-dir, --plugin-url, --agents, and non-sdk --mcp-config CLI flags at startup. Closes the CLI-flag bypass of strictKnownMarketplaces. Pair with allowedMcpServers for per-server MCP control; this setting does not gate other MCP entry points (SDK setMcpServers, claude mcp add, .mcp.json). Also blocks surfaces that spawn the CLI with these flags internally (see settings documentation). Only honored from managed settings; ignored in user/project/local settings.',
+        ),
       // Allowlist of URL patterns HTTP hooks may target (follows allowedMcpServers precedent)
       allowedHttpHookUrls: z
         .array(z.string())
@@ -894,6 +901,20 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Enabled plugins using plugin-id@marketplace-id format. Example: { "formatter@anthropic-tools": true }. Also supports extended format with version constraints.',
+        ),
+      prependPlugins: z
+        .array(z.string())
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Managed plugins (plugin@marketplace ids that managed enabledPlugins sets true) whose hooks run first, outermost, in the listed order: the first id listed sees every event before any other plugin and every result after it. Managed plugins not listed here or in appendPlugins follow the listed ones; user, project and marketplace plugins come after those; then appendPlugins; then the built-in plugins. The bundled cc-plugin-sec-default@builtin seats itself outermost (on a machine with managed settings and for Team and Enterprise organizations) unless this list is set, in which case list it where it should sit or leave it out. Name it there as sec-default@builtin, the id every release reads, for as long as any machine in the organization may run a release from before its rename; a release that knows the new id reads either. Any other id that is not an enabled managed plugin is skipped; an id listed in both keys is prepended. Only honored from managed settings (or, on a machine with none, from user settings for your own plugins); ignored in project, local and --settings sources.',
+        ),
+      appendPlugins: z
+        .array(z.string())
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Managed plugins (plugin@marketplace ids that managed enabledPlugins sets true) whose hooks run last among plugins, innermost, in the listed order: the last id listed sits just above the built-in plugins and sees each event as every other plugin left it. Only honored from managed settings (or, on a machine with none, from user settings for your own plugins); ignored in project, local and --settings sources.',
         ),
       // Extra marketplaces for this repository (usually for project settings)
       extraKnownMarketplaces: z

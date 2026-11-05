@@ -1,20 +1,22 @@
 import type { Command } from '../../commands.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
+import { isDiffSidebarOwnedByPlugin } from '../../utils/replDiffTab.js'
 import {
   resolveDiffPresentation,
   type CommandPresentation,
 } from '../../utils/willowCrate.js'
 
 /**
- * densable 2.1.283 `D$e` (was `jDl`):
- *   description: G0t(Cl()?"fullscreen":"inline")==="fullscreen" ? toggle : view
- *   immediate: (args, presentation) => G0t(presentation)==="fullscreen"
- *   isEnabled: !Otn() — skip plugin-owned `/diff` (host N/A)
+ * densable 2.1.289 `Yje` (was `D$e` / `jDl`):
+ *   isEnabled: () => !Wpn()
+ *   description: k1t(vc()?"fullscreen":"inline")==="fullscreen" ? toggle : view
+ *   immediate: (args, presentation) => k1t(presentation)==="fullscreen"
  * Official also has thinClientDispatch:"control-request" — no local host.
  */
 const diff = {
   type: 'local-jsx',
   name: 'diff',
+  isEnabled: () => !isDiffSidebarOwnedByPlugin(),
   get description() {
     return resolveDiffPresentation(
       isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',

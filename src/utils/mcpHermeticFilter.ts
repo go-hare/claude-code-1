@@ -16,6 +16,7 @@ export type McpHermeticDropReason =
   | 'safe mode'
   | 'hermetic mode'
   | 'enterprise MCP config'
+  | 'disableSideloadFlags policy'
 
 export type McpHermeticFilterResult<T> = {
   servers: Record<string, T>
@@ -44,6 +45,8 @@ export function filterMcpServersForHermeticMode<T extends { type?: string }>(
     hermetic?: boolean
     /** densable dropForEnterpriseMcpConfig — remote + managed-mcp exclusive */
     dropForEnterpriseMcpConfig?: boolean
+    /** densable dropForSideloadPolicy — remote/bridge-carrier + disableSideloadFlags */
+    dropForSideloadPolicy?: boolean
   },
 ): McpHermeticFilterResult<T> {
   const env = input?.env ?? process.env
@@ -51,14 +54,17 @@ export function filterMcpServersForHermeticMode<T extends { type?: string }>(
     input?.safeMode ?? isSafeModeEnabled(env, input?.argv ?? process.argv)
   const hermetic = input?.hermetic ?? isRemoteHermeticSession(env)
   const enterprise = input?.dropForEnterpriseMcpConfig === true
-  // densable AYh priority: safe > hermetic > enterprise
+  const sideload = input?.dropForSideloadPolicy === true
+  // densable AYh/js priority: safe > hermetic > enterprise > sideload
   const reason: McpHermeticDropReason | undefined = safe
     ? 'safe mode'
     : hermetic
       ? 'hermetic mode'
       : enterprise
         ? 'enterprise MCP config'
-        : undefined
+        : sideload
+          ? 'disableSideloadFlags policy'
+          : undefined
   if (!reason) {
     return { servers, dropped: [], reason: undefined }
   }
@@ -80,10 +86,21 @@ export function formatMcpHermeticDropWarn(
   const unit = n === 1 ? 'server' : 'servers'
   // densable debug line uses "ignored (reason)"; local historical surface is
   // "ignored in <reason>" for safe/hermetic — keep that for non-enterprise.
-  if (reason === 'enterprise MCP config') {
+  if (
+    reason === 'enterprise MCP config' ||
+    reason === 'disableSideloadFlags policy'
+  ) {
     return `--mcp-config: ${n} ${unit} ignored (${reason}): ${dropped.join(', ')}`
   }
   return `--mcp-config: ${n} ${unit} ignored in ${reason}: ${dropped.join(', ')}`
+}
+
+export function formatSideloadPolicyMcpDropWarn(
+  dropped: readonly string[],
+): string {
+  const n = dropped.length
+  const unit = n === 1 ? 'server' : 'servers'
+  return `Warning: managed setting disableSideloadFlags forbids --mcp-config on this machine; ignoring ${n} server-delivered MCP ${unit}: ${dropped.join(', ')}`
 }
 
 /**

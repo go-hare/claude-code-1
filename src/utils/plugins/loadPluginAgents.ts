@@ -1,6 +1,10 @@
 import memoize from 'lodash-es/memoize.js'
-import { basename } from 'path'
+import { basename, join } from 'path'
 import { isAutoMemoryEnabled } from '../../memdir/paths.js'
+import {
+  externalBuiltinNamespaceName,
+  getBuiltinPluginDefinition,
+} from '../../plugins/builtinPlugins.js'
 import type { AgentColorName } from '@claude-code/builtin-tools/tools/AgentTool/agentColorManager.js'
 import {
   type AgentMemoryScope,
@@ -64,6 +68,189 @@ async function loadAgentsFromDirectory(
   return agents
 }
 
+function parsePluginAgentMarkdown(params: {
+  filePath: string
+  content: string
+  pluginName: string
+  namespace: string[]
+  sourceName: string
+  pluginPath: string
+  pluginManifest: PluginManifest
+}): AgentDefinition | null {
+  const {
+    filePath,
+    content,
+    pluginName,
+    namespace,
+    sourceName,
+    pluginPath,
+    pluginManifest,
+  } = params
+  const { frontmatter, content: markdownContent } = parseFrontmatter(
+    content,
+    filePath,
+  )
+
+  const baseAgentName =
+    (frontmatter.name as string) || basename(filePath).replace(/\.md$/, '')
+
+  // densable 2.1.218: bare agent name (before plugin namespacing) rejects ":" / leading "-"
+  if (typeof baseAgentName === 'string') {
+    const nameCheck = validateAgentMarkdownName(baseAgentName)
+    if (!nameCheck.ok) {
+      logForDebugging(
+        `Plugin agent file ${filePath} has invalid name '${baseAgentName}': ${nameCheck.error.replace(/^Invalid "name": /, '')}`,
+      )
+      return null
+    }
+  }
+
+  // Apply namespace prefixing like we do for commands
+  const nameParts = [pluginName, ...namespace, baseAgentName]
+  const agentType = nameParts.join(':')
+
+  // Parse agent metadata from frontmatter
+  const whenToUse =
+    coerceDescriptionToString(frontmatter.description, agentType) ??
+    coerceDescriptionToString(frontmatter['when-to-use'], agentType) ??
+    `Agent from ${pluginName} plugin`
+
+  let tools = parseAgentToolsFromFrontmatter(frontmatter.tools)
+  const skills = parseSlashCommandToolsFromFrontmatter(frontmatter.skills)
+  const color = frontmatter.color as AgentColorName | undefined
+  const modelRaw = frontmatter.model
+  let model: string | undefined
+  if (typeof modelRaw === 'string' && modelRaw.trim().length > 0) {
+    const trimmed = modelRaw.trim()
+    model = trimmed.toLowerCase() === 'inherit' ? 'inherit' : trimmed
+  }
+  const backgroundRaw = frontmatter.background
+  const background =
+    backgroundRaw === 'true' || backgroundRaw === true ? true : undefined
+  // densable He: omitClaudeMd === "true" || === true
+  const omitClaudeMdRaw = frontmatter.omitClaudeMd
+  const omitClaudeMd =
+    omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
+  // Substitute ${CLAUDE_PLUGIN_ROOT} so agents can reference bundled files,
+  // and ${user_config.X} (non-sensitive only) so they can embed configured
+  // usernames, endpoints, etc. Sensitive refs resolve to a placeholder.
+  let systemPrompt = substitutePluginVariables(markdownContent.trim(), {
+    path: pluginPath,
+    source: sourceName,
+  })
+  if (pluginManifest.userConfig) {
+    systemPrompt = substituteUserConfigInContent(
+      systemPrompt,
+      loadPluginOptions(sourceName),
+      pluginManifest.userConfig,
+    )
+  }
+
+  // Parse memory scope
+  const memoryRaw = frontmatter.memory as string | undefined
+  let memory: AgentMemoryScope | undefined
+  if (memoryRaw !== undefined) {
+    if (VALID_MEMORY_SCOPES.includes(memoryRaw as AgentMemoryScope)) {
+      memory = memoryRaw as AgentMemoryScope
+    } else {
+      logForDebugging(
+        `Plugin agent file ${filePath} has invalid memory value '${memoryRaw}'. Valid options: ${VALID_MEMORY_SCOPES.join(', ')}`,
+      )
+    }
+  }
+
+  // Parse isolation mode
+  const isolationRaw = frontmatter.isolation as string | undefined
+  const isolation =
+    isolationRaw === 'worktree' ? ('worktree' as const) : undefined
+
+  // Parse effort (string level or integer)
+  const effortRaw = frontmatter.effort
+  const effort =
+    effortRaw !== undefined ? parseEffortValue(effortRaw) : undefined
+  if (effortRaw !== undefined && effort === undefined) {
+    logForDebugging(
+      `Plugin agent file ${filePath} has invalid effort '${effortRaw}'. Valid options: ${EFFORT_LEVELS.join(', ')} or an integer`,
+    )
+  }
+
+  // permissionMode, hooks, and mcpServers are intentionally NOT parsed for
+  // plugin agents. Plugins are third-party marketplace code; these fields
+  // escalate what the agent can do beyond what the user approved at install
+  // time. For this level of control, define the agent in .claude/agents/
+  // where the user explicitly wrote the frontmatter. (Note: plugins can
+  // still ship hooks and MCP servers at the manifest level — that's the
+  // install-time trust boundary. Per-agent declarations would let a single
+  // agent file buried in agents/ silently add them.) See PR #22558 review.
+  for (const field of ['permissionMode', 'hooks', 'mcpServers'] as const) {
+    if (frontmatter[field] !== undefined) {
+      logForDebugging(
+        `Plugin agent file ${filePath} sets ${field}, which is ignored for plugin agents. Use .claude/agents/ for this level of control.`,
+        { level: 'warn' },
+      )
+    }
+  }
+
+  // Parse maxTurns
+  const maxTurnsRaw = frontmatter.maxTurns
+  const maxTurns = parsePositiveIntFromFrontmatter(maxTurnsRaw)
+  if (maxTurnsRaw !== undefined && maxTurns === undefined) {
+    logForDebugging(
+      `Plugin agent file ${filePath} has invalid maxTurns '${maxTurnsRaw}'. Must be a positive integer.`,
+    )
+  }
+
+  // densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h")
+  const cacheTtl = parseAgentFrontmatterCacheTtl(frontmatter)
+
+  // Parse disallowedTools
+  const disallowedTools =
+    frontmatter.disallowedTools !== undefined
+      ? parseAgentToolsFromFrontmatter(frontmatter.disallowedTools)
+      : undefined
+
+  // If memory is enabled, inject Write/Edit/Read tools for memory access
+  if (isAutoMemoryEnabled() && memory && tools !== undefined) {
+    const toolSet = new Set(tools)
+    for (const tool of [
+      FILE_WRITE_TOOL_NAME,
+      FILE_EDIT_TOOL_NAME,
+      FILE_READ_TOOL_NAME,
+    ]) {
+      if (!toolSet.has(tool)) {
+        tools = [...tools, tool]
+      }
+    }
+  }
+
+  return {
+    agentType,
+    whenToUse,
+    tools,
+    ...(disallowedTools !== undefined ? { disallowedTools } : {}),
+    ...(skills !== undefined ? { skills } : {}),
+    getSystemPrompt: () => {
+      if (isAutoMemoryEnabled() && memory) {
+        const memoryPrompt = loadAgentMemoryPrompt(agentType, memory)
+        return systemPrompt + '\n\n' + memoryPrompt
+      }
+      return systemPrompt
+    },
+    source: 'plugin' as const,
+    color,
+    model,
+    filename: baseAgentName,
+    plugin: sourceName,
+    ...(background ? { background } : {}),
+    ...(omitClaudeMd ? { omitClaudeMd } : {}),
+    ...(memory ? { memory } : {}),
+    ...(isolation ? { isolation } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+    ...(cacheTtl !== undefined ? { cacheTtl } : {}),
+  } as AgentDefinition
+}
+
 async function loadAgentFromFile(
   filePath: string,
   pluginName: string,
@@ -79,175 +266,77 @@ async function loadAgentFromFile(
   }
   try {
     const content = await fs.readFile(filePath, { encoding: 'utf-8' })
-    const { frontmatter, content: markdownContent } = parseFrontmatter(
-      content,
+    return parsePluginAgentMarkdown({
       filePath,
-    )
-
-    const baseAgentName =
-      (frontmatter.name as string) || basename(filePath).replace(/\.md$/, '')
-
-    // densable 2.1.218: bare agent name (before plugin namespacing) rejects ":" / leading "-"
-    if (typeof baseAgentName === 'string') {
-      const nameCheck = validateAgentMarkdownName(baseAgentName)
-      if (!nameCheck.ok) {
-        logForDebugging(
-          `Plugin agent file ${filePath} has invalid name '${baseAgentName}': ${nameCheck.error.replace(/^Invalid "name": /, '')}`,
-        )
-        return null
-      }
-    }
-
-    // Apply namespace prefixing like we do for commands
-    const nameParts = [pluginName, ...namespace, baseAgentName]
-    const agentType = nameParts.join(':')
-
-    // Parse agent metadata from frontmatter
-    const whenToUse =
-      coerceDescriptionToString(frontmatter.description, agentType) ??
-      coerceDescriptionToString(frontmatter['when-to-use'], agentType) ??
-      `Agent from ${pluginName} plugin`
-
-    let tools = parseAgentToolsFromFrontmatter(frontmatter.tools)
-    const skills = parseSlashCommandToolsFromFrontmatter(frontmatter.skills)
-    const color = frontmatter.color as AgentColorName | undefined
-    const modelRaw = frontmatter.model
-    let model: string | undefined
-    if (typeof modelRaw === 'string' && modelRaw.trim().length > 0) {
-      const trimmed = modelRaw.trim()
-      model = trimmed.toLowerCase() === 'inherit' ? 'inherit' : trimmed
-    }
-    const backgroundRaw = frontmatter.background
-    const background =
-      backgroundRaw === 'true' || backgroundRaw === true ? true : undefined
-    // densable He: omitClaudeMd === "true" || === true
-    const omitClaudeMdRaw = frontmatter.omitClaudeMd
-    const omitClaudeMd =
-      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
-    // Substitute ${CLAUDE_PLUGIN_ROOT} so agents can reference bundled files,
-    // and ${user_config.X} (non-sensitive only) so they can embed configured
-    // usernames, endpoints, etc. Sensitive refs resolve to a placeholder.
-    let systemPrompt = substitutePluginVariables(markdownContent.trim(), {
-      path: pluginPath,
-      source: sourceName,
+      content,
+      pluginName,
+      namespace,
+      sourceName,
+      pluginPath,
+      pluginManifest,
     })
-    if (pluginManifest.userConfig) {
-      systemPrompt = substituteUserConfigInContent(
-        systemPrompt,
-        loadPluginOptions(sourceName),
-        pluginManifest.userConfig,
-      )
-    }
-
-    // Parse memory scope
-    const memoryRaw = frontmatter.memory as string | undefined
-    let memory: AgentMemoryScope | undefined
-    if (memoryRaw !== undefined) {
-      if (VALID_MEMORY_SCOPES.includes(memoryRaw as AgentMemoryScope)) {
-        memory = memoryRaw as AgentMemoryScope
-      } else {
-        logForDebugging(
-          `Plugin agent file ${filePath} has invalid memory value '${memoryRaw}'. Valid options: ${VALID_MEMORY_SCOPES.join(', ')}`,
-        )
-      }
-    }
-
-    // Parse isolation mode
-    const isolationRaw = frontmatter.isolation as string | undefined
-    const isolation =
-      isolationRaw === 'worktree' ? ('worktree' as const) : undefined
-
-    // Parse effort (string level or integer)
-    const effortRaw = frontmatter.effort
-    const effort =
-      effortRaw !== undefined ? parseEffortValue(effortRaw) : undefined
-    if (effortRaw !== undefined && effort === undefined) {
-      logForDebugging(
-        `Plugin agent file ${filePath} has invalid effort '${effortRaw}'. Valid options: ${EFFORT_LEVELS.join(', ')} or an integer`,
-      )
-    }
-
-    // permissionMode, hooks, and mcpServers are intentionally NOT parsed for
-    // plugin agents. Plugins are third-party marketplace code; these fields
-    // escalate what the agent can do beyond what the user approved at install
-    // time. For this level of control, define the agent in .claude/agents/
-    // where the user explicitly wrote the frontmatter. (Note: plugins can
-    // still ship hooks and MCP servers at the manifest level — that's the
-    // install-time trust boundary. Per-agent declarations would let a single
-    // agent file buried in agents/ silently add them.) See PR #22558 review.
-    for (const field of ['permissionMode', 'hooks', 'mcpServers'] as const) {
-      if (frontmatter[field] !== undefined) {
-        logForDebugging(
-          `Plugin agent file ${filePath} sets ${field}, which is ignored for plugin agents. Use .claude/agents/ for this level of control.`,
-          { level: 'warn' },
-        )
-      }
-    }
-
-    // Parse maxTurns
-    const maxTurnsRaw = frontmatter.maxTurns
-    const maxTurns = parsePositiveIntFromFrontmatter(maxTurnsRaw)
-    if (maxTurnsRaw !== undefined && maxTurns === undefined) {
-      logForDebugging(
-        `Plugin agent file ${filePath} has invalid maxTurns '${maxTurnsRaw}'. Must be a positive integer.`,
-      )
-    }
-
-    // densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h")
-    const cacheTtl = parseAgentFrontmatterCacheTtl(frontmatter)
-
-    // Parse disallowedTools
-    const disallowedTools =
-      frontmatter.disallowedTools !== undefined
-        ? parseAgentToolsFromFrontmatter(frontmatter.disallowedTools)
-        : undefined
-
-    // If memory is enabled, inject Write/Edit/Read tools for memory access
-    if (isAutoMemoryEnabled() && memory && tools !== undefined) {
-      const toolSet = new Set(tools)
-      for (const tool of [
-        FILE_WRITE_TOOL_NAME,
-        FILE_EDIT_TOOL_NAME,
-        FILE_READ_TOOL_NAME,
-      ]) {
-        if (!toolSet.has(tool)) {
-          tools = [...tools, tool]
-        }
-      }
-    }
-
-    return {
-      agentType,
-      whenToUse,
-      tools,
-      ...(disallowedTools !== undefined ? { disallowedTools } : {}),
-      ...(skills !== undefined ? { skills } : {}),
-      getSystemPrompt: () => {
-        if (isAutoMemoryEnabled() && memory) {
-          const memoryPrompt = loadAgentMemoryPrompt(agentType, memory)
-          return systemPrompt + '\n\n' + memoryPrompt
-        }
-        return systemPrompt
-      },
-      source: 'plugin' as const,
-      color,
-      model,
-      filename: baseAgentName,
-      plugin: sourceName,
-      ...(background ? { background } : {}),
-      ...(omitClaudeMd ? { omitClaudeMd } : {}),
-      ...(memory ? { memory } : {}),
-      ...(isolation ? { isolation } : {}),
-      ...(effort !== undefined ? { effort } : {}),
-      ...(maxTurns !== undefined ? { maxTurns } : {}),
-      ...(cacheTtl !== undefined ? { cacheTtl } : {}),
-    } as AgentDefinition
   } catch (error) {
     logForDebugging(`Failed to load agent from ${filePath}: ${error}`, {
       level: 'error',
     })
     return null
   }
+}
+
+async function loadBuiltinPluginAgents(
+  plugin: {
+    name: string
+    source: string
+    path: string
+    manifest: PluginManifest
+  },
+  loadedPaths: Set<string>,
+): Promise<AgentDefinition[]> {
+  const hooks = getBuiltinPluginDefinition(plugin.name)?.hooksModule
+  if (hooks === undefined) return []
+  const prefixName = externalBuiltinNamespaceName(plugin.name, plugin.source)
+  if ('folder' in hooks) {
+    const agentsDir = join(hooks.folder, 'agents')
+    try {
+      const stats = await getFsImplementation().stat(agentsDir)
+      if (!stats.isDirectory()) return []
+    } catch {
+      return []
+    }
+    return loadAgentsFromDirectory(
+      agentsDir,
+      prefixName,
+      plugin.source,
+      plugin.path,
+      plugin.manifest,
+      loadedPaths,
+    )
+  }
+  if ('files' in hooks) {
+    const out: AgentDefinition[] = []
+    for (const [relPath, text] of Object.entries(hooks.files)) {
+      if (!relPath.startsWith('agents/') || !relPath.endsWith('.md')) continue
+      const filePath = `builtin:${plugin.name}/${relPath}`
+      try {
+        const parsed = parsePluginAgentMarkdown({
+          filePath,
+          content: text,
+          pluginName: prefixName,
+          namespace: relPath.split('/').slice(1, -1),
+          sourceName: plugin.source,
+          pluginPath: plugin.path,
+          pluginManifest: plugin.manifest,
+        })
+        if (parsed) out.push(parsed)
+      } catch (error) {
+        logForDebugging(`Failed to load agent from ${filePath}: ${error}`, {
+          level: 'error',
+        })
+      }
+    }
+    return out
+  }
+  return []
 }
 
 export const loadPluginAgents = memoize(
@@ -354,6 +443,11 @@ export const loadPluginAgents = memoize(
           for (const agents of pathResults) {
             pluginAgents.push(...agents)
           }
+        }
+        if (plugin.isBuiltin) {
+          pluginAgents.push(
+            ...(await loadBuiltinPluginAgents(plugin, loadedPaths)),
+          )
         }
         return pluginAgents
       }),

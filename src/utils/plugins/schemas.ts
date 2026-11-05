@@ -374,6 +374,10 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       .string()
       .optional()
       .describe('Brief, user-facing explanation of what the plugin provides'),
+    defaultEnabled: z
+      .boolean()
+      .optional()
+      .describe('Whether a built-in plugin is enabled by default'),
     author: PluginAuthorSchema()
       .optional()
       .describe('Information about the plugin creator or maintainer'),

@@ -1,5 +1,5 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
-import React, { useContext } from 'react';
+import React, { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
 import { shouldShowAutoCompactOffHint } from 'src/services/compact/autoCompact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
@@ -19,19 +19,93 @@ import {
   shouldRenderClientGeneratedErrorLine,
   TOKEN_REVOKED_ERROR_MESSAGE,
 } from '../../services/api/errors.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { isEmptyMessageText, NO_RESPONSE_REQUESTED } from '../../utils/messages.js';
 import { getUpgradeMessage } from '../../utils/model/contextWindowUpgradeCheck.js';
 import { getDefaultSonnetModel, renderModelName } from '../../utils/model/model.js';
+import {
+  getLastUiRenderPlugin,
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from '../../utils/plugins/functionHooksModules.js';
+import { getRenderVersion, subscribeRenderInvalidation } from '../../utils/render/invalidateAllRenders.js';
 import { isMacOsKeychainLocked } from '../../utils/secureStorage/macOsKeychainStorage.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { Markdown } from '../Markdown.js';
 import { MessageResponse, useIsMessageResponse } from '../MessageResponse.js';
 import { MessageActionsSelectedContext } from '../messageActions.js';
+import { extractDrawnPlugin, PluginRenderedTree } from '../PluginRasterPanes.js';
 import { RateLimitMessage } from './RateLimitMessage.js';
 
 const MAX_API_ERROR_CHARS = 1000;
+let assistantMessageRenderSeq = 0;
+
+function getUiRenderVersion(): number {
+  return getRenderVersion('ui.render');
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function findEnginePropsInTree(node: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findEnginePropsInTree(child);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (!isPlainRecord(node)) return undefined;
+  if (node.type === 'engine') {
+    return isPlainRecord(node.props) ? node.props : undefined;
+  }
+  if (node.children !== undefined) {
+    const hit = findEnginePropsInTree(node.children);
+    if (hit !== undefined) return hit;
+  }
+  if (isPlainRecord(node.props) && node.props.children !== undefined) {
+    return findEnginePropsInTree(node.props.children);
+  }
+  return undefined;
+}
+
+function resolveAssistantHookAnswer(
+  answer: unknown,
+  fallbackText: string,
+  fallbackDot: boolean,
+): { text: string; shouldShowDot: boolean; pluginTree?: unknown } {
+  if (isPlainRecord(answer)) {
+    if (answer.type === 'engine') {
+      const props = isPlainRecord(answer.props) ? answer.props : undefined;
+      return {
+        text: typeof props?.text === 'string' ? props.text : fallbackText,
+        shouldShowDot: typeof props?.isFirstOfReply === 'boolean' ? props.isFirstOfReply : fallbackDot,
+      };
+    }
+    if (typeof answer.type === 'string') {
+      const engineProps = findEnginePropsInTree(answer);
+      return {
+        text: typeof engineProps?.text === 'string' ? engineProps.text : fallbackText,
+        shouldShowDot: typeof engineProps?.isFirstOfReply === 'boolean' ? engineProps.isFirstOfReply : fallbackDot,
+        pluginTree: answer,
+      };
+    }
+    if (typeof answer.text === 'string') {
+      return {
+        text: answer.text,
+        shouldShowDot: typeof answer.isFirstOfReply === 'boolean' ? answer.isFirstOfReply : fallbackDot,
+      };
+    }
+  }
+  if (typeof answer === 'string') {
+    return { text: fallbackText, shouldShowDot: fallbackDot, pluginTree: answer };
+  }
+  return { text: fallbackText, shouldShowDot: fallbackDot };
+}
 
 type Props = {
   param: TextBlockParam;
@@ -42,6 +116,8 @@ type Props = {
   onOpenRateLimitOptions?: () => void;
   /** densable 2.1.243 #23 `Rle` — client-generated errors render as error lines. */
   isApiError?: boolean;
+  /** densable 2.1.289 `or` `xI("AssistantMessage")` requestId. */
+  messageId?: string;
 };
 
 /**
@@ -146,7 +222,113 @@ function PromptTooLongMessage(): React.ReactNode {
   );
 }
 
-export function AssistantTextMessage({
+export function AssistantTextMessage(props: Props): React.ReactNode {
+  const renderVer = useSyncExternalStore(subscribeRenderInvalidation, getUiRenderVersion, getUiRenderVersion);
+  const { text } = props.param;
+  const hasHook = hasMatchingFunctionHook('ui.render', {
+    component: 'AssistantMessage',
+    surface: 'terminal',
+    props: { text, isFirstOfReply: props.shouldShowDot },
+  });
+  if (!hasHook) {
+    return <AssistantTextMessageBody {...props} />;
+  }
+  return <AssistantTextMessageWithRenderHook {...props} renderVersion={renderVer} />;
+}
+
+type SettledAssistantRender = {
+  sourceText: string;
+  text: string;
+  shouldShowDot: boolean;
+  pluginTree?: unknown;
+  pluginName?: string;
+};
+
+function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: number }): React.ReactNode {
+  const { columns, rows } = useTerminalSize();
+  const viewportColumns = typeof props.width === 'number' ? props.width : columns;
+  const isFullscreen = isFullscreenEnvEnabled();
+  const fallbackIdRef = useRef<string | null>(null);
+  if (fallbackIdRef.current === null) {
+    fallbackIdRef.current = `assistant_${++assistantMessageRenderSeq}`;
+  }
+  const requestId = props.messageId ?? fallbackIdRef.current;
+  const { text } = props.param;
+  const [settled, setSettled] = useState<SettledAssistantRender | undefined>(undefined);
+  const evalKey = `${requestId}\0${viewportColumns}\0${rows}\0${String(isFullscreen)}\0${props.shouldShowDot ? '1' : '0'}\0${props.renderVersion}\0${text}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    const eventPayload: Record<string, unknown> = {
+      surface: 'terminal',
+      component: 'AssistantMessage',
+      requestId,
+      viewport: { columns: viewportColumns, rows, isFullscreen },
+      props: { text, isFirstOfReply: props.shouldShowDot },
+    };
+    void runFunctionHookChain('ui.render', eventPayload, async ev => {
+      const nextProps = isPlainRecord(ev) && isPlainRecord(ev.props) ? ev.props : eventPayload.props;
+      return { type: 'engine', ref: 0, props: nextProps };
+    }).then(
+      answer => {
+        if (cancelled) return;
+        const resolved = resolveAssistantHookAnswer(answer, text, props.shouldShowDot);
+        const owner =
+          extractDrawnPlugin(resolved.pluginTree, 'AssistantMessage', requestId) ??
+          extractDrawnPlugin(answer, 'AssistantMessage', requestId) ??
+          (getLastUiRenderPlugin() || undefined);
+        setSettled({
+          sourceText: text,
+          text: resolved.text,
+          shouldShowDot: resolved.shouldShowDot,
+          pluginTree: resolved.pluginTree,
+          pluginName: owner,
+        });
+      },
+      err => {
+        logForDebugging(
+          `ui.render (AssistantMessage ${requestId}): site failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        );
+        if (!cancelled) {
+          setSettled({
+            sourceText: text,
+            text,
+            shouldShowDot: props.shouldShowDot,
+          });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [evalKey, requestId, viewportColumns, rows, isFullscreen, text, props.shouldShowDot]);
+
+  const current = settled?.sourceText === text ? settled : undefined;
+  const effectiveText = current ? current.text : text;
+  const effectiveDot = current ? current.shouldShowDot : props.shouldShowDot;
+  const engineNode = (
+    <AssistantTextMessageBody
+      {...props}
+      param={effectiveText === text ? props.param : { ...props.param, text: effectiveText }}
+      shouldShowDot={effectiveDot}
+    />
+  );
+  if (current?.pluginTree !== undefined) {
+    return (
+      <PluginRenderedTree
+        node={current.pluginTree}
+        plugin={current.pluginName}
+        requestId={requestId}
+        component="AssistantMessage"
+        engine={engineNode}
+      />
+    );
+  }
+  return engineNode;
+}
+
+function AssistantTextMessageBody({
   param: { text },
   addMargin,
   shouldShowDot,

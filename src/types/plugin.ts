@@ -32,8 +32,32 @@ export type BuiltinPluginDefinition = {
   isAvailable?: () => boolean
   /** Default enabled state before the user sets a preference (defaults to true) */
   defaultEnabled?: boolean
+  /**
+   * densable uS `enabledFromPolicyOnly` — PZ reads policySettings.enabledPlugins
+   * for this builtin (not the merged user map).
+   */
+  enabledFromPolicyOnly?: boolean
+  /**
+   * densable uS `enabledFromTrustedSettingsOnly` — PZ reads trusted user
+   * settings (host: same user enabledPlugins map; do not invent avn).
+   */
+  enabledFromTrustedSettingsOnly?: boolean
   /** densable builtin `userConfig` — same shape as plugin.json userConfig. */
   userConfig?: PluginManifest['userConfig']
+  /**
+   * densable uS `hooksModule` — gold FU `{module,scan,files}` or `{module,folder}`.
+   * Never export minify `FU`/`uS`.
+   */
+  hooksModule?:
+    | {
+        module: { register: (...args: unknown[]) => unknown }
+        scan: unknown
+        files: Readonly<Record<string, string>>
+      }
+    | {
+        module: { register: (...args: unknown[]) => unknown }
+        folder: string
+      }
 }
 
 export type PluginRepository = {
@@ -95,6 +119,10 @@ export type LoadedPlugin = {
   skipMcpDiscovery?: boolean
   lspServers?: Record<string, LspServerConfig>
   settings?: Record<string, unknown>
+  /**
+   * densable Lh — builtin hooks register path (`folder` overlay or leftoverVo).
+   */
+  modulePath?: string
 }
 
 export type PluginComponent =

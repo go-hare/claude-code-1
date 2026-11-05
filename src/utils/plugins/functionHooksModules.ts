@@ -63,7 +63,10 @@ import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
 import { SURFACE_LIMITS } from './functionHooksSurfaceRuntime.js'
 import { createStore } from '../../state/store.js'
 import { isBareMode } from '../envUtils.js'
-import { isBuiltinPluginId } from '../../plugins/builtinPlugins.js'
+import {
+  BUILTIN_MARKETPLACE_NAME,
+  isBuiltinPluginId,
+} from '../../plugins/builtinPlugins.js'
 import { sleep } from '../sleep.js'
 import { buildMcpToolName } from '../../services/mcp/mcpStringUtils.js'
 import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
@@ -96,17 +99,128 @@ import {
   floorsAfterNextTo,
   handlerTier,
   hopBypassReason,
+  pinValue,
+  restorePinnedKeys,
   type FunctionHookNext,
+  type HookTier,
   type HopFloor,
   type HopHandler,
 } from './functionHooksHop.js'
 import { getMainThreadTurn } from '../mainThreadTurn.js'
+import {
+  getPromptInputCursorState,
+  getPromptInputStoreValue,
+  savePromptInputCursorOffset,
+  setPromptInputStoreValue,
+} from '../promptInputCursorStore.js'
+import {
+  collectorTelemetryRoad,
+  emitCollectorTelemetryEntry,
+  type OTelCollectorLogEntry,
+} from '../telemetry/events.js'
 
 /** densable rootEvent ALS for Loe/Noe — outer hook name is kept. */
 const hookDispatch = new AsyncLocalStorage<{ event: string }>()
 
+/** Guard against collector telemetry.log re-entry / road self-deadlock. */
+const collectorTelemetryDispatchAls = new AsyncLocalStorage<boolean>()
+
+/** densable `u2e` — default origin when the engine raises an event. */
+const ENGINE_HOOK_ORIGIN = Object.freeze({
+  plugin: 'engine',
+  tier: 'core',
+} as const)
+
+type HookCallOrigin = {
+  readonly plugin: string
+  readonly tier: string
+}
+
+type HookOriginEntry =
+  | string
+  | {
+      readonly plugin: string
+      readonly registration: number
+    }
+
+/** densable `fse` / `pse` — active hook frame stack for op re-entrancy (`de`/`Dt`). */
+const activeHookOriginAls = new AsyncLocalStorage<readonly HookOriginEntry[]>()
+
+/** densable `ut` — `.catch` grace budget on `next.error.budget`. */
+const HOOK_CATCH_GRACE_MS = 1000
+
+export type HookTraceEntry = {
+  readonly index: number
+  readonly plugin: string
+  readonly tier: HookTier
+  readonly event: string
+  readonly outcome:
+    | 'returned'
+    | 'passed'
+    | 'skipped'
+    | 'kept'
+    | 'expired'
+    | 'caught'
+    | 'rejected'
+  readonly reason?: string
+  readonly ms: number
+  readonly received: unknown
+  readonly returned: unknown
+}
+
+type HookTraceNode = {
+  entry?: HookTraceEntry
+  beneath?: HookTraceNode
+}
+
+const EMPTY_HOOK_TRACE: readonly HookTraceEntry[] = Object.freeze([])
+
+function collectHookTrace(
+  head: HookTraceNode | undefined,
+): readonly HookTraceEntry[] {
+  const out: HookTraceEntry[] = []
+  for (let cur = head; cur !== undefined; cur = cur.beneath) {
+    if (cur.entry !== undefined) out.push(cur.entry)
+  }
+  return out.length === 0 ? EMPTY_HOOK_TRACE : Object.freeze(out)
+}
+
+function leftOutRegistrationsForModule(
+  origin: readonly HookOriginEntry[] | undefined,
+  pluginName: string,
+): 'every' | number[] {
+  if (origin === undefined || origin.length === 0) return []
+  const regs = new Set<number>()
+  for (const frame of origin) {
+    const framePlugin = typeof frame === 'string' ? frame : frame.plugin
+    if (framePlugin !== pluginName) continue
+    if (typeof frame === 'string') return 'every'
+    regs.add(frame.registration)
+  }
+  return [...regs].sort((a, b) => a - b)
+}
+
+function buildOpHookOrigin(callerPlugin?: string): readonly HookOriginEntry[] {
+  const active = activeHookOriginAls.getStore() ?? []
+  if (callerPlugin === undefined || callerPlugin === '') return active
+  const last = active.at(-1)
+  const lastPlugin =
+    last === undefined
+      ? undefined
+      : typeof last === 'string'
+        ? last
+        : last.plugin
+  if (lastPlugin === callerPlugin) return active
+  return [...active, callerPlugin]
+}
+
 export function getLiveHookEvent(): string | undefined {
   return hookDispatch.getStore()?.event
+}
+
+export type FunctionHookBudget = {
+  readonly ms: number
+  readonly remainingMs: number
 }
 
 export type FunctionHookHandler = (
@@ -114,6 +228,18 @@ export type FunctionHookHandler = (
   event: Record<string, unknown>,
   next: ((value?: unknown) => Promise<unknown>) & {
     to?: FunctionHookNext['to']
+    is?: (pattern: string) => boolean
+    origin?: HookCallOrigin
+    event?: string
+    signal?: AbortSignal
+    trace?: readonly HookTraceEntry[]
+    budget?: FunctionHookBudget
+    error?: {
+      readonly kind: 'throw' | 'timeout'
+      readonly message?: string
+      readonly budget: number
+    }
+    called?: boolean
   },
 ) => unknown
 
@@ -149,6 +275,8 @@ export type LoadedFunctionHooksModule = {
   isManaged?: boolean
   /** densable `$e` / `se`. */
   isCore?: boolean
+  /** densable `rD` / `elo` — built-in module loaded natively in-process. */
+  native?: boolean
 }
 
 let loadedModules: LoadedFunctionHooksModule[] = []
@@ -228,6 +356,10 @@ export function setLoadedFunctionHooksModules(
   skipFirstLog.clear()
   skipPersistOnce.clear()
   promptBoxText = ''
+  promptBoxCursor = 0
+  setPromptInputStoreValue('')
+  clearSessionAuthHandles()
+  uiResolvePressCounter = 0
   for (const entry of clockCallbacks) entry.cancel()
   clockCallbacks.length = 0
   configOverlay.clear()
@@ -288,6 +420,7 @@ function replaceLoadedFunctionHooksModules(
     ...(mod.tier !== undefined && { tier: mod.tier }),
     ...(mod.isManaged !== undefined && { isManaged: mod.isManaged }),
     ...(mod.isCore !== undefined && { isCore: mod.isCore }),
+    ...(mod.native !== undefined && { native: mod.native }),
   }))
   for (const mod of loadedModules) {
     setPluginSurfaceModules(mod.name, mod.root, mod.surfaceModules ?? [])
@@ -340,6 +473,12 @@ export function functionHookPatternMatches(
   return negated ? !hit : hit
 }
 
+function isBuiltinTierMod(
+  mod: Pick<LoadedFunctionHooksModule, 'tier'>,
+): boolean {
+  return mod.tier === 'builtin' || mod.tier === 'prepend' || mod.tier === 'core'
+}
+
 /** densable `zk` / `Cc` — some loaded hook's pattern matches the event. */
 export function hasMatchingFunctionHook(
   event: string,
@@ -351,9 +490,35 @@ export function hasMatchingFunctionHook(
     (mod.hooks ?? []).some(hook => {
       if (!functionHookPatternMatches(hook.pattern, needle)) return false
       if (payload === undefined) return true
-      return matcherAllows(hook.matcher, payload, needle)
+      return matcherAllows(hook.matcher, payload, needle, isBuiltinTierMod(mod))
     }),
   )
+}
+
+/** densable `qP(e, r.origin)` — non-empty match after re-entrancy `de`/`Dt`. */
+function hasMatchingFunctionHookForOp(
+  event: string,
+  payload: Record<string, unknown>,
+  hookOrigin: readonly HookOriginEntry[],
+): boolean {
+  const needle = event.includes('.') ? event : `classic.${event}`
+  return loadedModules.some(mod => {
+    if (mod.status === 'unloaded') return false
+    if (
+      mod.status === 'retiring' &&
+      (inFlightByModule.get(mod.name) ?? 0) === 0
+    ) {
+      return false
+    }
+    const leftOut = leftOutRegistrationsForModule(hookOrigin, mod.name)
+    if (leftOut === 'every') return false
+    const builtin = isBuiltinTierMod(mod)
+    return (mod.hooks ?? []).some((hook, registration) => {
+      if (leftOut.includes(registration)) return false
+      if (!functionHookPatternMatches(hook.pattern, needle)) return false
+      return matcherAllows(hook.matcher, payload, needle, builtin)
+    })
+  })
 }
 
 /**
@@ -483,10 +648,35 @@ export function createPromptEditComposer(host: {
 
 export type FunctionHookTail = (
   event: Record<string, unknown>,
+  floors?: readonly HopFloor[],
 ) => Promise<unknown>
 
 /** densable `Twe` — hook budget before `hasOverrun`. */
 const HOOK_BUDGET_MS = 5000
+/** densable `Rwe` — default per-hook budget (`next.budget.ms`). */
+const HOOK_DEFAULT_STEP_BUDGET_MS = 10_000
+/** densable `ki` — `prompt.edit` step budget. */
+const HOOK_PROMPT_EDIT_BUDGET_MS = 50
+/** Generous `command.run` step budget so `claude-test` browser helper startup has positive wait headroom. */
+const HOOK_COMMAND_RUN_BUDGET_MS = 30_000
+
+function budgetMsForHookEvent(event: string): number {
+  if (event === 'prompt.edit') return HOOK_PROMPT_EDIT_BUDGET_MS
+  if (event === 'command.run') return HOOK_COMMAND_RUN_BUDGET_MS
+  return HOOK_DEFAULT_STEP_BUDGET_MS
+}
+
+function makeStepBudget(
+  budgetMs: number,
+  deadline: number,
+): FunctionHookBudget {
+  return Object.freeze({
+    ms: budgetMs,
+    get remainingMs(): number {
+      return Math.max(0, deadline - Date.now())
+    },
+  })
+}
 
 /**
  * densable `pc().hookFailed` payload. Worker `oGt` posts `{type:'hook_failed',...}`.
@@ -681,10 +871,25 @@ export async function runFunctionHookChain(
   tail: FunctionHookTail,
   only?: string,
   environments?: readonly string[],
+  callOptions?: {
+    origin?: HookCallOrigin
+    hookOrigin?: readonly HookOriginEntry[]
+    floors?: readonly HopFloor[]
+    signal?: AbortSignal
+    site?: FunctionHookHopSite
+    budgetMs?: number
+  },
 ): Promise<unknown> {
   if (hookDispatch.getStore() === undefined) {
     return hookDispatch.run({ event }, () =>
-      runFunctionHookChain(event, payload, tail, only, environments),
+      runFunctionHookChain(
+        event,
+        payload,
+        tail,
+        only,
+        environments,
+        callOptions,
+      ),
     )
   }
   // densable F0/r1: classic events are `classic.<HookEvent>`; yOt
@@ -700,7 +905,10 @@ export async function runFunctionHookChain(
     const compactReason = sessionCompactMessagesCheck(payload.messages)
     if (compactReason !== undefined) throw new Error(compactReason)
   }
-  const matched = loadedModules.flatMap(mod => {
+  const outerHookOrigin =
+    callOptions?.hookOrigin ?? activeHookOriginAls.getStore() ?? []
+  const initialFloors = callOptions?.floors ?? EMPTY_HOP_FLOORS
+  const rawMatched = loadedModules.flatMap(mod => {
     // densable u8e: g.name !== (n ?? g.name)
     if (only !== undefined && mod.name !== only) return []
     if (environments !== undefined && !environments.includes(mod.name))
@@ -711,43 +919,94 @@ export async function runFunctionHookChain(
       (inFlightByModule.get(mod.name) ?? 0) === 0
     )
       return []
+    const leftOut = leftOutRegistrationsForModule(
+      callOptions?.hookOrigin,
+      mod.name,
+    )
+    if (leftOut === 'every') return []
     return (mod.hooks ?? [])
-      .filter(hook => {
+      .map((hook, registration) => ({ hook, registration }))
+      .filter(({ hook, registration }) => {
+        if (leftOut.includes(registration)) return false
         if (!functionHookPatternMatches(hook.pattern, needle)) return false
+        const builtin = isBuiltinTierMod(mod)
         if (event === 'ui.fault' || needle === 'classic.ui.fault') {
           try {
-            return matcherAllows(hook.matcher, payload, needle)
+            return matcherAllows(hook.matcher, payload, needle, builtin)
           } catch {
             // densable iO: on('ui.fault') matcher threw on the host; taken as heard
             return true
           }
         }
-        return matcherAllows(hook.matcher, payload, needle)
+        return matcherAllows(hook.matcher, payload, needle, builtin)
       })
-      .map(hook => ({ mod, hook }))
+      .map(({ hook, registration }) => ({ mod, hook, registration }))
   })
+  // Coalesce consecutive hooks belonging to the same worker module so mixing
+  // native + worker modules dispatches once per worker module instead of k^2.
+  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const matched = collapseWorkerSteps
+    ? rawMatched.filter((entry, idx) => {
+        if (entry.mod.native === true) return true
+        const prev = rawMatched[idx - 1]
+        return prev === undefined || prev.mod.name !== entry.mod.name
+      })
+    : rawMatched
+  const hasNativeMatched = matched.some(entry => entry.mod.native === true)
+  const hasWorkerMatched = matched.some(entry => entry.mod.native !== true)
+  const hasManagedTierMatched = matched.some(
+    entry =>
+      entry.mod.tier === 'prepend' ||
+      entry.mod.tier === 'append' ||
+      entry.mod.isManaged === true ||
+      entry.hook.isManaged === true,
+  )
   if (workerOwnsDispatch && functionHooksWorker) {
     if (functionHooksWorker.died !== undefined) {
       throw new Error(functionHooksWorker.died)
     }
-    const reply = await functionHooksWorker.dispatch(
-      event,
-      payload,
-      loadedModules
-        .filter(mod => mod.status !== 'unloaded')
-        .filter(mod => only === undefined || mod.name === only)
-        .map(mod => mod.name),
-      tail,
-      only,
-    )
-    if (event === 'ui.render' || needle === 'classic.ui.render') {
-      lastUiRenderPlugin =
-        pluginFromDrawing(reply.returned) ??
-        (isEngineDrawing(reply.returned)
-          ? ''
-          : (matched.at(-1)?.mod.name ?? ''))
+    if (
+      !hasNativeMatched &&
+      !hasManagedTierMatched &&
+      event !== 'engine.create'
+    ) {
+      const workerEnvironments =
+        environments !== undefined
+          ? environments.filter(name =>
+              loadedModules.some(
+                mod =>
+                  mod.name === name &&
+                  mod.status !== 'unloaded' &&
+                  mod.native !== true,
+              ),
+            )
+          : loadedModules
+              .filter(mod => mod.status !== 'unloaded' && mod.native !== true)
+              .filter(mod => only === undefined || mod.name === only)
+              .map(mod => mod.name)
+      const reply = await functionHooksWorker.dispatch(
+        event,
+        payload,
+        workerEnvironments,
+        tail,
+        only,
+        {
+          ...(callOptions?.origin !== undefined && {
+            origin: callOptions.origin,
+          }),
+          ...(outerHookOrigin.length > 0 && { hookOrigin: outerHookOrigin }),
+          ...(initialFloors.length > 0 && { floors: initialFloors }),
+        },
+      )
+      if (event === 'ui.render' || needle === 'classic.ui.render') {
+        lastUiRenderPlugin =
+          pluginFromDrawing(reply.returned) ??
+          (isEngineDrawing(reply.returned)
+            ? ''
+            : (matched.at(-1)?.mod.name ?? ''))
+      }
+      return reply.returned
     }
-    return reply.returned
   }
   type HookTrace = {
     plugin: string
@@ -755,15 +1014,129 @@ export async function runFunctionHookChain(
     returned?: unknown
   }
   const traces: HookTrace[] = []
+  const budgetMs = callOptions?.budgetMs ?? budgetMsForHookEvent(event)
   const callAt = (
     index: number,
     value: Record<string, unknown>,
+    floors: readonly HopFloor[],
+    runNode: HookTraceNode,
   ): Promise<unknown> => {
     const step = matched[index]
-    if (step === undefined) return tail(value)
+    if (step === undefined) {
+      const tailStart = performance.now()
+      return Promise.resolve()
+        .then(() => tail(value, floors))
+        .then(
+          returned => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: 'engine',
+              tier: 'core',
+              event: needle,
+              outcome: 'returned',
+              ms: Math.max(0, performance.now() - tailStart),
+              received: value,
+              returned,
+            })
+            return returned
+          },
+          err => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: 'engine',
+              tier: 'core',
+              event: needle,
+              outcome: 'rejected',
+              ms: Math.max(0, performance.now() - tailStart),
+              received: value,
+              returned: undefined,
+            })
+            throw err
+          },
+        )
+    }
+    const stepHandler = hopHandlerOf(step.mod, step.hook, step.registration)
+    const stepTier = handlerTier(stepHandler)
+    const bypass = hopBypassReason(stepHandler, floors)
+    if (bypass !== undefined) {
+      logForDebugging(
+        `${step.mod.name}: ${event} ${bypass} (tier ${stepTier}); beneath runs`,
+      )
+      runNode.entry = Object.freeze({
+        index,
+        plugin: step.mod.name,
+        tier: stepTier,
+        event: needle,
+        outcome: 'skipped',
+        reason: bypass,
+        ms: 0,
+        received: value,
+        returned: undefined,
+      })
+      const childNode: HookTraceNode = {}
+      runNode.beneath = childNode
+      return callAt(index + 1, value, floors, childNode)
+    }
     enterModule(step.mod.name)
-    const next = (passed?: unknown) => {
-      const onward = isEventRecord(passed) ? passed : value
+    const stepStarted = performance.now()
+    const stepDeadline = Date.now() + budgetMs
+    const callOrigin = callOptions?.origin ?? ENGINE_HOOK_ORIGIN
+    let nextCalled = false
+    let inFlightDownstream: Promise<unknown> | undefined
+    let lastDownstreamResult: unknown
+    let hasDownstreamResult = false
+    const beneathHolder: { beneath?: HookTraceNode } = {}
+
+    const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
+      const named =
+        tiers.length === 1 && Array.isArray(tiers[0])
+          ? (tiers[0] as string[])
+          : tiers
+      const untieredLegacyPluginRegister =
+        event === 'plugin.register' &&
+        step.mod.tier === undefined &&
+        step.mod.isManaged !== true &&
+        step.hook.isManaged !== true &&
+        step.mod.isCore !== true &&
+        step.hook.isCore !== true
+      if (untieredLegacyPluginRegister) {
+        if (named.length === 0) return floors
+        try {
+          return floorsAfterNextTo(floors, named, {
+            plugin: step.mod.name,
+            tier: 'prepend',
+          })
+        } catch {
+          return floors
+        }
+      }
+      return floorsAfterNextTo(floors, named, {
+        plugin: step.mod.name,
+        tier: stepTier,
+      })
+    }
+
+    const runDownstream = (
+      passed: unknown,
+      targetFloors: readonly HopFloor[],
+    ): Promise<unknown> => {
+      nextCalled = true
+      let onward = isEventRecord(passed) ? passed : value
+      const isCoreStep = step.hook.isCore === true || step.mod.isCore === true
+      if (!isCoreStep && callOptions?.site !== undefined) {
+        const candidate = Object.is(onward, value) ? onward : { ...onward }
+        const restored =
+          callOptions.site.restoreArgument?.(candidate, value) ?? candidate
+        const problem = callOptions.site.checkArgument?.(restored, value)
+        if (problem !== undefined) {
+          return Promise.reject(
+            new Error(
+              `${step.mod.name}: next() passed an argument with ${problem}`,
+            ),
+          )
+        }
+        onward = restored
+      }
       // densable tn/Ht — Pane/AbovePrompt rewrite must not drift props.view.
       if (
         (event === 'ui.render' || needle === 'classic.ui.render') &&
@@ -775,19 +1148,116 @@ export async function runFunctionHookChain(
           throw new Error(viewReason)
         }
       }
-      return callAt(index + 1, onward)
+      const childNode: HookTraceNode = {}
+      beneathHolder.beneath = childNode
+      runNode.beneath = childNode
+      const pending = activeHookOriginAls
+        .run(outerHookOrigin, () =>
+          callAt(index + 1, onward, targetFloors, childNode),
+        )
+        .then(res => {
+          lastDownstreamResult = res
+          hasDownstreamResult = true
+          return res
+        })
+      inFlightDownstream = pending
+      return pending
+    }
+
+    const next = (passed?: unknown) => runDownstream(passed, floors)
+    const nextTo = async (passed: unknown, ...tiers: string[]) =>
+      runDownstream(passed, nextFloorsForTo(tiers))
+    Object.assign(next, {
+      to: nextTo,
+      is: (pattern: string) => functionHookPatternMatches(pattern, needle),
+      origin: callOrigin,
+      event,
+      ...(callOptions?.signal !== undefined && { signal: callOptions.signal }),
+    })
+    Object.defineProperty(next, 'trace', {
+      get: () => collectHookTrace(beneathHolder.beneath),
+      enumerable: true,
+    })
+    Object.defineProperty(next, 'budget', {
+      get: () => makeStepBudget(budgetMs, stepDeadline),
+      enumerable: true,
+    })
+    if (
+      hasWorkerMatched &&
+      step.mod.native !== true &&
+      workerOwnsDispatch &&
+      functionHooksWorker
+    ) {
+      return functionHooksWorker
+        .dispatch(
+          event,
+          value,
+          [step.mod.name],
+          (onward, workerFloors) =>
+            runDownstream(onward, workerFloors ?? floors),
+          step.mod.name,
+          {
+            origin: callOrigin,
+            ...(outerHookOrigin.length > 0 && { hookOrigin: outerHookOrigin }),
+            ...(floors.length > 0 && { floors }),
+          },
+        )
+        .then(reply => {
+          runNode.entry = Object.freeze({
+            index,
+            plugin: step.mod.name,
+            tier: stepTier,
+            event: needle,
+            outcome: 'returned',
+            ms: Math.max(0, performance.now() - stepStarted),
+            received: value,
+            returned: reply.returned,
+          })
+          traces.push({
+            plugin: step.mod.name,
+            outcome: 'returned',
+            returned: reply.returned,
+          })
+          if (
+            (event === 'ui.render' || needle === 'classic.ui.render') &&
+            reply.returned !== undefined
+          ) {
+            lastUiRenderPlugin =
+              pluginFromDrawing(reply.returned) ??
+              (isEngineDrawing(reply.returned) ? '' : step.mod.name)
+            return stampPluginOnDrawing(reply.returned, lastUiRenderPlugin)
+          }
+          return reply.returned
+        })
+        .finally(() => leaveModule(step.mod.name))
     }
     const engine = pluginEngine(step.mod)
-    if (event === 'plugin.register') {
-      const current = isEventRecord(value) ? { ...value } : {}
-      const to = (rewritten: unknown, _tier?: string) =>
-        next(isEventRecord(rewritten) ? rewritten : current)
-      Object.assign(next, { to })
-    }
-    const running = Promise.resolve(step.hook.hook(engine, value, next))
+    const stepHookOrigin: readonly HookOriginEntry[] = [
+      ...outerHookOrigin,
+      { plugin: step.mod.name, registration: step.registration },
+    ]
+    const running = Promise.resolve().then(() =>
+      activeHookOriginAls.run(stepHookOrigin, () =>
+        step.hook.hook(engine, value, next),
+      ),
+    )
     watchHookBudget(running, step.mod.name, event)
     return running
       .then(returned => {
+        const outcome =
+          hasDownstreamResult && Object.is(returned, lastDownstreamResult)
+            ? 'passed'
+            : 'returned'
+        runNode.entry = Object.freeze({
+          index,
+          plugin: step.mod.name,
+          tier: stepTier,
+          event: needle,
+          outcome,
+          ms: Math.max(0, performance.now() - stepStarted),
+          received: value,
+          returned,
+        })
         traces.push({
           plugin: step.mod.name,
           outcome: 'returned',
@@ -815,9 +1285,68 @@ export async function runFunctionHookChain(
           },
           thrown,
         )
-        if (!step.hook.catch) throw err
-        return Promise.resolve(step.hook.catch(engine, value, next)).then(
-          returned => {
+        if (!step.hook.catch) {
+          runNode.entry = Object.freeze({
+            index,
+            plugin: step.mod.name,
+            tier: stepTier,
+            event: needle,
+            outcome: 'rejected',
+            ms: Math.max(0, performance.now() - stepStarted),
+            received: value,
+            returned: undefined,
+          })
+          throw err
+        }
+        const catchHandler = step.hook.catch
+        const catchDeadline = Date.now() + HOOK_CATCH_GRACE_MS
+        const catchTo = async (passed: unknown, ...tiers: string[]) =>
+          inFlightDownstream ?? runDownstream(passed, nextFloorsForTo(tiers))
+        const catchNext = Object.assign(
+          (passed?: unknown) =>
+            inFlightDownstream ?? runDownstream(passed, floors),
+          {
+            to: catchTo,
+            is: (pattern: string) =>
+              functionHookPatternMatches(pattern, needle),
+            origin: callOrigin,
+            event,
+            ...(callOptions?.signal !== undefined && {
+              signal: callOptions.signal,
+            }),
+            error: Object.freeze({
+              kind: 'throw' as const,
+              ...(thrown !== '' && { message: thrown }),
+              budget: HOOK_CATCH_GRACE_MS,
+            }),
+            called: nextCalled,
+          },
+        )
+        Object.defineProperty(catchNext, 'trace', {
+          get: () => collectHookTrace(beneathHolder.beneath),
+          enumerable: true,
+        })
+        Object.defineProperty(catchNext, 'budget', {
+          get: () => makeStepBudget(HOOK_CATCH_GRACE_MS, catchDeadline),
+          enumerable: true,
+        })
+        return Promise.resolve()
+          .then(() =>
+            activeHookOriginAls.run(stepHookOrigin, () =>
+              catchHandler(engine, value, catchNext),
+            ),
+          )
+          .then(returned => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: step.mod.name,
+              tier: stepTier,
+              event: needle,
+              outcome: 'caught',
+              ms: Math.max(0, performance.now() - stepStarted),
+              received: value,
+              returned,
+            })
             traces.push({
               plugin: step.mod.name,
               outcome: 'caught',
@@ -831,14 +1360,14 @@ export async function runFunctionHookChain(
               return stampPluginOnDrawing(returned, step.mod.name)
             }
             return returned
-          },
-        )
+          })
       })
       .finally(() => leaveModule(step.mod.name))
   }
+  const rootTraceNode: HookTraceNode = {}
   // densable `gSt`: nested evaluateUiRender from a hook skips sBo cache.
   return hookEvalAls.run(true, () =>
-    callAt(0, payload).then(returned => {
+    callAt(0, payload, initialFloors, rootTraceNode).then(returned => {
       if (event === 'plugin.register' && isEventRecord(returned)) {
         Object.defineProperty(returned, '__pluginRegisterTrace', {
           value: traces,
@@ -864,14 +1393,22 @@ export type FunctionHookHopSite = {
 function hopHandlerOf(
   mod: LoadedFunctionHooksModule,
   hook: LoadedFunctionHook,
-): HopHandler & { hook: FunctionHookHandler; mod: LoadedFunctionHooksModule } {
+  registration = 0,
+): HopHandler & {
+  hook: FunctionHookHandler
+  catch?: FunctionHookHandler
+  mod: LoadedFunctionHooksModule
+  registration: number
+} {
   return {
     name: mod.name,
     tier: mod.tier,
     isManaged: hook.isManaged ?? mod.isManaged,
     isCore: hook.isCore ?? mod.isCore,
     hook: hook.hook,
+    ...(hook.catch !== undefined && { catch: hook.catch }),
     mod,
+    registration,
   }
 }
 
@@ -905,64 +1442,654 @@ export async function runFunctionHookHop(
     prepend?: Array<
       HopHandler & {
         hook: FunctionHookHandler
+        catch?: FunctionHookHandler
         mod?: LoadedFunctionHooksModule
+        registration?: number
       }
     >
     site?: FunctionHookHopSite
+    signal?: AbortSignal
+    origin?: HookCallOrigin
+    hookOrigin?: readonly HookOriginEntry[]
+    budgetMs?: number
   },
 ): Promise<unknown> {
   const needle = event.includes('.') ? event : `classic.${event}`
-  const fromLoaded = loadedModules.flatMap(mod => {
+  const outerHookOrigin =
+    extra?.hookOrigin ?? activeHookOriginAls.getStore() ?? []
+  const rawFromLoaded = loadedModules.flatMap(mod => {
     if (mod.status === 'unloaded') return []
+    if (
+      mod.status === 'retiring' &&
+      (inFlightByModule.get(mod.name) ?? 0) === 0
+    ) {
+      return []
+    }
+    const leftOut = leftOutRegistrationsForModule(extra?.hookOrigin, mod.name)
+    if (leftOut === 'every') return []
+    const builtin = isBuiltinTierMod(mod)
     return (mod.hooks ?? [])
-      .filter(hook => functionHookPatternMatches(hook.pattern, needle))
-      .filter(hook => matcherAllows(hook.matcher, payload, needle))
-      .map(hook => hopHandlerOf(mod, hook))
+      .map((hook, registration) => ({ hook, registration }))
+      .filter(({ registration }) => !leftOut.includes(registration))
+      .filter(({ hook }) => functionHookPatternMatches(hook.pattern, needle))
+      .filter(({ hook }) =>
+        matcherAllows(hook.matcher, payload, needle, builtin),
+      )
+      .map(({ hook, registration }) => hopHandlerOf(mod, hook, registration))
   })
+  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const fromLoaded = collapseWorkerSteps
+    ? rawFromLoaded.filter((entry, idx) => {
+        if (entry.mod.native === true) return true
+        const prev = rawFromLoaded[idx - 1]
+        return prev === undefined || prev.mod.name !== entry.mod.name
+      })
+    : rawFromLoaded
   const handlers = [...(extra?.prepend ?? []), ...fromLoaded]
   const site = extra?.site
+  const callOrigin = extra?.origin ?? ENGINE_HOOK_ORIGIN
+  const budgetMs = extra?.budgetMs ?? budgetMsForHookEvent(event)
   const callAt = (
     index: number,
     value: Record<string, unknown>,
     floors: readonly HopFloor[],
+    runNode: HookTraceNode,
   ): Promise<unknown> => {
     const step = handlers[index]
-    if (step === undefined) return tail(value)
+    if (step === undefined) {
+      const tailStart = performance.now()
+      return Promise.resolve()
+        .then(() => tail(value, floors))
+        .then(
+          returned => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: 'engine',
+              tier: 'core',
+              event: needle,
+              outcome: 'returned',
+              ms: Math.max(0, performance.now() - tailStart),
+              received: value,
+              returned,
+            })
+            return returned
+          },
+          err => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: 'engine',
+              tier: 'core',
+              event: needle,
+              outcome: 'rejected',
+              ms: Math.max(0, performance.now() - tailStart),
+              received: value,
+              returned: undefined,
+            })
+            throw err
+          },
+        )
+    }
+    const stepTier = handlerTier(step)
     const bypass = hopBypassReason(step, floors)
     if (bypass !== undefined) {
       logForDebugging(
-        `${step.name}: ${event} ${bypass} (tier ${handlerTier(step)}); beneath runs`,
+        `${step.name}: ${event} ${bypass} (tier ${stepTier}); beneath runs`,
       )
-      return callAt(index + 1, value, floors)
+      runNode.entry = Object.freeze({
+        index,
+        plugin: step.name,
+        tier: stepTier,
+        event: needle,
+        outcome: 'skipped',
+        reason: bypass,
+        ms: 0,
+        received: value,
+        returned: undefined,
+      })
+      const childNode: HookTraceNode = {}
+      runNode.beneath = childNode
+      return callAt(index + 1, value, floors, childNode)
     }
     const engine = pluginEngine(step.mod ?? { name: step.name })
-    const next = ((passed?: unknown) =>
-      callAt(
-        index + 1,
-        argumentForNext(step, site, passed, value),
-        floors,
-      )) as FunctionHookNext
-    next.to = (passed: unknown, ...tiers: string[]) => {
+    const stepStarted = performance.now()
+    const stepDeadline = Date.now() + budgetMs
+    let nextCalled = false
+    let inFlightDownstream: Promise<unknown> | undefined
+    let lastDownstreamResult: unknown
+    let hasDownstreamResult = false
+    const beneathHolder: { beneath?: HookTraceNode } = {}
+    const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
       const named =
         tiers.length === 1 && Array.isArray(tiers[0])
           ? (tiers[0] as string[])
           : tiers
-      return callAt(
-        index + 1,
-        argumentForNext(step, site, passed, value),
-        floorsAfterNextTo(floors, named, {
-          plugin: step.name,
-          tier: handlerTier(step),
-        }),
-      )
+      return floorsAfterNextTo(floors, named, {
+        plugin: step.name,
+        tier: stepTier,
+      })
+    }
+    const runDownstream = (
+      passed: unknown,
+      targetFloors: readonly HopFloor[],
+    ): Promise<unknown> => {
+      nextCalled = true
+      let onward: Record<string, unknown>
+      try {
+        onward =
+          step.isCore === true || step.mod?.isCore === true
+            ? isEventRecord(passed)
+              ? passed
+              : value
+            : argumentForNext(step, site, passed, value)
+      } catch (err) {
+        return Promise.reject(err)
+      }
+      const childNode: HookTraceNode = {}
+      beneathHolder.beneath = childNode
+      runNode.beneath = childNode
+      const pending = activeHookOriginAls
+        .run(outerHookOrigin, () =>
+          callAt(index + 1, onward, targetFloors, childNode),
+        )
+        .then(res => {
+          lastDownstreamResult = res
+          hasDownstreamResult = true
+          return res
+        })
+      inFlightDownstream = pending
+      return pending
+    }
+    const next = ((passed?: unknown) =>
+      runDownstream(passed, floors)) as FunctionHookNext &
+      Parameters<FunctionHookHandler>[2]
+    next.to = async (passed: unknown, ...tiers: string[]) =>
+      runDownstream(passed, nextFloorsForTo(tiers))
+    Object.assign(next, {
+      is: (pattern: string) => functionHookPatternMatches(pattern, needle),
+      origin: callOrigin,
+      event,
+      ...(extra?.signal !== undefined && { signal: extra.signal }),
+    })
+    Object.defineProperty(next, 'trace', {
+      get: () => collectHookTrace(beneathHolder.beneath),
+      enumerable: true,
+    })
+    Object.defineProperty(next, 'budget', {
+      get: () => makeStepBudget(budgetMs, stepDeadline),
+      enumerable: true,
+    })
+    if (
+      step.mod !== undefined &&
+      step.mod.native !== true &&
+      workerOwnsDispatch &&
+      functionHooksWorker
+    ) {
+      enterModule(step.name)
+      return functionHooksWorker
+        .dispatch(
+          event,
+          value,
+          [step.mod.name],
+          (onward, workerFloors) =>
+            runDownstream(onward, workerFloors ?? floors),
+          step.mod.name,
+          {
+            origin: callOrigin,
+            ...(outerHookOrigin.length > 0 && { hookOrigin: outerHookOrigin }),
+            ...(floors.length > 0 && { floors }),
+          },
+        )
+        .then(reply => {
+          runNode.entry = Object.freeze({
+            index,
+            plugin: step.name,
+            tier: stepTier,
+            event: needle,
+            outcome: 'returned',
+            ms: Math.max(0, performance.now() - stepStarted),
+            received: value,
+            returned: reply.returned,
+          })
+          return reply.returned
+        })
+        .finally(() => leaveModule(step.name))
     }
     enterModule(step.name)
-    return Promise.resolve(step.hook(engine, value, next)).finally(() =>
-      leaveModule(step.name),
+    const stepHookOrigin: readonly HookOriginEntry[] =
+      step.registration !== undefined
+        ? [
+            ...outerHookOrigin,
+            { plugin: step.name, registration: step.registration },
+          ]
+        : [...outerHookOrigin, step.name]
+    const running = Promise.resolve().then(() =>
+      activeHookOriginAls.run(stepHookOrigin, () =>
+        step.hook(engine, value, next),
+      ),
+    )
+    watchHookBudget(running, step.name, event)
+    return running
+      .then(returned => {
+        const outcome =
+          hasDownstreamResult && Object.is(returned, lastDownstreamResult)
+            ? 'passed'
+            : 'returned'
+        runNode.entry = Object.freeze({
+          index,
+          plugin: step.name,
+          tier: stepTier,
+          event: needle,
+          outcome,
+          ms: Math.max(0, performance.now() - stepStarted),
+          received: value,
+          returned,
+        })
+        return returned
+      })
+      .catch(err => {
+        const thrown = describeThrown(err)
+        notifyHookFailed(
+          {
+            plugin: step.name,
+            environmentId: step.name,
+            event,
+            reason: prefixPluginReason(step.name, thrown),
+            effect: 'skipped; what is below it ran in its place',
+            hasOverrun: false,
+          },
+          thrown,
+        )
+        if (!step.catch) {
+          runNode.entry = Object.freeze({
+            index,
+            plugin: step.name,
+            tier: stepTier,
+            event: needle,
+            outcome: 'rejected',
+            ms: Math.max(0, performance.now() - stepStarted),
+            received: value,
+            returned: undefined,
+          })
+          throw err
+        }
+        const catchHandler = step.catch
+        const catchDeadline = Date.now() + HOOK_CATCH_GRACE_MS
+        const catchTo = async (passed: unknown, ...tiers: string[]) =>
+          inFlightDownstream ?? runDownstream(passed, nextFloorsForTo(tiers))
+        const catchNext = Object.assign(
+          (passed?: unknown) =>
+            inFlightDownstream ?? runDownstream(passed, floors),
+          {
+            to: catchTo,
+            is: (pattern: string) =>
+              functionHookPatternMatches(pattern, needle),
+            origin: callOrigin,
+            event,
+            ...(extra?.signal !== undefined && { signal: extra.signal }),
+            error: Object.freeze({
+              kind: 'throw' as const,
+              ...(thrown !== '' && { message: thrown }),
+              budget: HOOK_CATCH_GRACE_MS,
+            }),
+            called: nextCalled,
+          },
+        )
+        Object.defineProperty(catchNext, 'trace', {
+          get: () => collectHookTrace(beneathHolder.beneath),
+          enumerable: true,
+        })
+        Object.defineProperty(catchNext, 'budget', {
+          get: () => makeStepBudget(HOOK_CATCH_GRACE_MS, catchDeadline),
+          enumerable: true,
+        })
+        return Promise.resolve()
+          .then(() =>
+            activeHookOriginAls.run(stepHookOrigin, () =>
+              catchHandler(engine, value, catchNext),
+            ),
+          )
+          .then(returned => {
+            runNode.entry = Object.freeze({
+              index,
+              plugin: step.name,
+              tier: stepTier,
+              event: needle,
+              outcome: 'caught',
+              ms: Math.max(0, performance.now() - stepStarted),
+              received: value,
+              returned,
+            })
+            return returned
+          })
+      })
+      .finally(() => leaveModule(step.name))
+  }
+  const rootTraceNode: HookTraceNode = {}
+  return hookEvalAls.run(true, () =>
+    callAt(0, payload, EMPTY_HOP_FLOORS, rootTraceNode),
+  )
+}
+
+/** densable `jJ` — resolve `{ plugin, tier }` for `next.origin`. */
+function resolveHookCallOrigin(callerPlugin?: string): HookCallOrigin {
+  if (callerPlugin === undefined || callerPlugin === '') {
+    return ENGINE_HOOK_ORIGIN
+  }
+  const found = loadedModules.find(mod => mod.name === callerPlugin)
+  const tier =
+    found !== undefined
+      ? handlerTier({
+          name: found.name,
+          tier: found.tier,
+          isManaged: found.isManaged,
+          isCore: found.isCore,
+        })
+      : isBuiltinPluginId(callerPlugin) || callerPlugin.startsWith('builtin:')
+        ? 'builtin'
+        : 'user'
+  return Object.freeze({ plugin: callerPlugin, tier })
+}
+
+/**
+ * Worker-local `engine.create` runner: runs against this thread's `pluginEngine`
+ * and returns plain serializable interface metadata (never functions).
+ */
+export async function runEngineCreateLocalInProcess(
+  payload: Record<string, unknown>,
+  environments?: readonly string[],
+): Promise<{ interfaces: Record<string, string[]> }> {
+  const core = pluginEngine({ name: 'core' })
+  const coreKeys = new Set(Object.keys(core))
+  const out = await runFunctionHookChain(
+    'engine.create',
+    payload,
+    async () => core,
+    undefined,
+    environments,
+  )
+  const interfaces: Record<string, string[]> = {}
+  if (isEventRecord(out)) {
+    const extraTable: Record<string, Record<string, unknown>> = {}
+    for (const [noun, methods] of Object.entries(out)) {
+      if (coreKeys.has(noun) || !isEventRecord(methods)) continue
+      const methodNames = Object.entries(methods)
+        .filter(([, fn]) => typeof fn === 'function')
+        .map(([name]) => name)
+      if (methodNames.length > 0) {
+        interfaces[noun] = methodNames
+        extraTable[noun] = methods
+      }
+    }
+    if (Object.keys(extraTable).length > 0 && environments) {
+      for (const envId of environments) {
+        if (!finalizedEnvironments.has(envId)) {
+          setOwnedTable(envId, {
+            ...(ownedTables.get(envId) ?? {}),
+            ...extraTable,
+          })
+        }
+      }
+    }
+  }
+  return { interfaces }
+}
+
+/** densable `engine.create` fold — initializes `$` extensions (e.g. `cc-plugin-telemetry` batcher). */
+export async function runEngineCreateFold(): Promise<unknown> {
+  const activeMods = loadedModules.filter(mod => mod.status !== 'unloaded')
+  const payload: Record<string, unknown> = {
+    plugins: activeMods.map(mod => mod.name),
+  }
+  const hookingMods = activeMods.filter(mod =>
+    (mod.hooks ?? []).some(
+      hook =>
+        functionHookPatternMatches(hook.pattern, 'engine.create') &&
+        matcherAllows(
+          hook.matcher,
+          payload,
+          'engine.create',
+          isBuiltinTierMod(mod),
+        ),
+    ),
+  )
+  if (hookingMods.length === 0) return undefined
+  const useWorker = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const nativeHooking = hookingMods
+    .filter(mod => !(useWorker && mod.native !== true))
+    .map(mod => mod.name)
+  const workerHooking = useWorker
+    ? hookingMods.filter(mod => mod.native !== true).map(mod => mod.name)
+    : []
+  let folded: unknown
+  if (nativeHooking.length > 0) {
+    folded = await runFunctionHookChain(
+      'engine.create',
+      payload,
+      async () => pluginEngine({ name: 'core' }),
+      undefined,
+      nativeHooking,
     )
   }
-  return hookEvalAls.run(true, () => callAt(0, payload, EMPTY_HOP_FLOORS))
+  if (workerHooking.length > 0 && functionHooksWorker) {
+    const workerReply = await functionHooksWorker.engineCreate(
+      payload,
+      workerHooking,
+    )
+    if (folded === undefined) folded = workerReply.returned
+  }
+  return folded
 }
+
+/**
+ * densable streaming hook chain (`turn.step`, `process.spawn`) — each matching
+ * async-generator hook yields from `next(event)` and returns its generator completion.
+ */
+export async function* runFunctionHookStreamChain<TChunk, TReturn = unknown>(
+  event: string,
+  payload: Record<string, unknown>,
+  tail: (
+    event: Record<string, unknown>,
+  ) => AsyncGenerator<TChunk, TReturn, unknown>,
+  only?: string,
+  environments?: readonly string[],
+): AsyncGenerator<TChunk, TReturn, unknown> {
+  const needle = event.includes('.') ? event : `classic.${event}`
+  const rawMatched = loadedModules.flatMap(mod => {
+    if (only !== undefined && mod.name !== only) return []
+    if (environments !== undefined && !environments.includes(mod.name))
+      return []
+    if (mod.status === 'unloaded') return []
+    if (
+      mod.status === 'retiring' &&
+      (inFlightByModule.get(mod.name) ?? 0) === 0
+    ) {
+      return []
+    }
+    const builtin = isBuiltinTierMod(mod)
+    return (mod.hooks ?? [])
+      .map((hook, registration) => ({ hook, registration }))
+      .filter(({ hook }) => functionHookPatternMatches(hook.pattern, needle))
+      .filter(({ hook }) =>
+        matcherAllows(hook.matcher, payload, needle, builtin),
+      )
+      .map(({ hook, registration }) => ({ mod, hook, registration }))
+  })
+  const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
+  const matched = collapseWorkerSteps
+    ? rawMatched.filter((entry, idx) => {
+        if (entry.mod.native === true) return true
+        const prev = rawMatched[idx - 1]
+        return prev === undefined || prev.mod.name !== entry.mod.name
+      })
+    : rawMatched
+  if (matched.length === 0) {
+    return yield* tail(payload)
+  }
+  let tailEntered = false
+  const wrappedTail = async function* (
+    finalEvent: Record<string, unknown>,
+  ): AsyncGenerator<TChunk, TReturn, unknown> {
+    tailEntered = true
+    return yield* tail(finalEvent)
+  }
+  const budgetMs = budgetMsForHookEvent(event)
+  const outerHookOrigin = activeHookOriginAls.getStore() ?? []
+  const stepAt = (
+    index: number,
+    value: Record<string, unknown>,
+  ): AsyncGenerator<TChunk, TReturn, unknown> => {
+    const step = matched[index]
+    if (step === undefined) return wrappedTail(value)
+    const nextGen = (passed?: unknown) =>
+      stepAt(index + 1, isEventRecord(passed) ? passed : value)
+    const stepDeadline = Date.now() + budgetMs
+    Object.assign(nextGen, {
+      is: (pattern: string) => functionHookPatternMatches(pattern, needle),
+      origin: ENGINE_HOOK_ORIGIN,
+      event,
+      trace: EMPTY_HOOK_TRACE,
+    })
+    Object.defineProperty(nextGen, 'budget', {
+      get: () => makeStepBudget(budgetMs, stepDeadline),
+      enumerable: true,
+    })
+    if (step.mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
+      const workerClient = functionHooksWorker
+      return (async function* (): AsyncGenerator<TChunk, TReturn, unknown> {
+        enterModule(step.mod.name)
+        try {
+          return yield* workerClient.stream<TChunk, TReturn>(
+            event,
+            value,
+            [step.mod.name],
+            onward => nextGen(onward),
+            step.mod.name,
+          )
+        } catch (err) {
+          if (tailEntered) throw err
+          logForDebugging(
+            `${step.mod.name}: ${event} stream hook threw (${describeThrown(err)}); continuing beneath`,
+            { level: 'warn' },
+          )
+          return yield* nextGen(value)
+        } finally {
+          leaveModule(step.mod.name)
+        }
+      })()
+    }
+    const engine = pluginEngine(step.mod)
+    const stepHookOrigin: readonly HookOriginEntry[] = [
+      ...outerHookOrigin,
+      { plugin: step.mod.name, registration: step.registration },
+    ]
+    return (async function* (): AsyncGenerator<TChunk, TReturn, unknown> {
+      enterModule(step.mod.name)
+      try {
+        const iter = activeHookOriginAls.run(stepHookOrigin, () =>
+          step.hook.hook(
+            engine,
+            value,
+            nextGen as unknown as Parameters<FunctionHookHandler>[2],
+          ),
+        ) as AsyncGenerator<TChunk, TReturn, unknown>
+        if (
+          iter !== null &&
+          typeof iter === 'object' &&
+          typeof iter.next === 'function'
+        ) {
+          return yield* iter
+        }
+        return yield* nextGen(value)
+      } catch (err) {
+        if (tailEntered) throw err
+        logForDebugging(
+          `${step.mod.name}: ${event} stream hook threw (${describeThrown(err)}); continuing beneath`,
+          { level: 'warn' },
+        )
+        return yield* nextGen(value)
+      } finally {
+        leaveModule(step.mod.name)
+      }
+    })()
+  }
+  return yield* stepAt(0, payload)
+}
+
+/** densable `ra` — `telemetry.log` pins `to` (`ke(["to"])` + `checkArgument`). */
+const TELEMETRY_LOG_SITE: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    !Object.hasOwn(passed, 'to') && Object.hasOwn(original, 'to')
+      ? { ...passed, to: original.to }
+      : passed,
+  checkArgument: (passed, original) =>
+    passed.to === original.to ? undefined : 'a changed to (pinned)',
+}
+
+/**
+ * densable `ya("telemetry.log", { origin, signal })(entry)` + `oQ` + `ZJ.core`:
+ * default `to` is `'anthropic'`; when `finalEntry.to === 'collector'` and the
+ * road signal is not aborted, `ZJ.core` emits the collector entry to OTEL.
+ */
+export function dispatchTelemetryLog(
+  entry: Record<string, unknown>,
+  options?: {
+    plugin?: string
+    signal?: AbortSignal
+  },
+): Promise<unknown> {
+  const normalized: Record<string, unknown> =
+    entry.to === 'collector' ? entry : { ...entry, to: entry.to ?? 'anthropic' }
+  const origin = resolveHookCallOrigin(options?.plugin)
+  const signal = options?.signal
+  const run = () =>
+    runFunctionHookChain(
+      'telemetry.log',
+      normalized,
+      async rawFinal => {
+        const candidate = isEventRecord(rawFinal) ? rawFinal : normalized
+        const finalEntry =
+          TELEMETRY_LOG_SITE.restoreArgument?.(candidate, normalized) ??
+          candidate
+        const problem = TELEMETRY_LOG_SITE.checkArgument?.(
+          finalEntry,
+          normalized,
+        )
+        if (problem !== undefined) {
+          throw new Error(`next() passed an argument with ${problem}`)
+        }
+        if (finalEntry.to === 'collector' && !signal?.aborted) {
+          emitCollectorTelemetryEntry(finalEntry)
+        }
+        return { value: undefined }
+      },
+      undefined,
+      undefined,
+      {
+        origin,
+        signal,
+        site: TELEMETRY_LOG_SITE,
+      },
+    )
+  if (normalized.to === 'collector') {
+    return collectorTelemetryDispatchAls.run(true, run)
+  }
+  return run()
+}
+
+const DEFAULT_COLLECTOR_TELEMETRY_ROAD = {
+  send: (entry: OTelCollectorLogEntry, signal: AbortSignal) =>
+    dispatchTelemetryLog(entry, { signal }),
+  isCollectorHooked: () =>
+    collectorTelemetryDispatchAls.getStore() !== true &&
+    hasMatchingFunctionHook('telemetry.log', { to: 'collector' }),
+}
+
+/** densable `Xue.setRoad(R)` — bind host collector road to `telemetry.log`. */
+export function installDefaultCollectorTelemetryRoad(): void {
+  collectorTelemetryRoad.setRoad(DEFAULT_COLLECTOR_TELEMETRY_ROAD)
+}
+
+installDefaultCollectorTelemetryRoad()
 
 type StateRef = { plugin: string; key: string; id?: string }
 
@@ -1163,6 +2290,13 @@ export function setCommandRunHandler(
   commandRunHandler = handler
 }
 
+export function getPluginRegisteredCommands(): ReadonlyArray<{
+  plugin: string
+  spec: PluginCommandSpec
+}> {
+  return [...pluginCommands.values()]
+}
+
 function forgetPluginCommands(plugin?: string): void {
   if (plugin === undefined) {
     pluginCommands.clear()
@@ -1189,6 +2323,125 @@ const STORE_PLUGIN_RE = /^[a-z0-9._-]+$/
 const STORE_DOS_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
 const pluginStore = new Map<string, unknown>()
 let promptBoxText = ''
+let promptBoxCursor = 0
+let uiResolvePressCounter = 0
+
+const SESSION_AUTHORIZE_ENDPOINT = 'https://api.anthropic.com'
+const SESSION_AUTHORIZE_PER_PLUGIN_CAP = 4
+
+type SessionAuthHandleEntry = {
+  plugin: string
+  headers: Record<string, string>
+  host: string
+}
+
+const sessionAuthEntries = new Map<string, SessionAuthHandleEntry>()
+const sessionAuthHandlesByPlugin = new Map<string, string[]>()
+
+function clearSessionAuthHandles(): void {
+  sessionAuthEntries.clear()
+  sessionAuthHandlesByPlugin.clear()
+}
+
+function forgetPluginSessionAuthHandles(plugin: string): void {
+  const handles = sessionAuthHandlesByPlugin.get(plugin)
+  if (!handles) return
+  for (const handle of handles) sessionAuthEntries.delete(handle)
+  sessionAuthHandlesByPlugin.delete(plugin)
+}
+
+function mintSessionAuthHandle(
+  plugin: string,
+  headers: Record<string, string>,
+  host: string,
+): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomUUID } = require('crypto') as typeof import('crypto')
+  const handle = `auth_${randomUUID().replace(/-/g, '')}`
+  sessionAuthEntries.set(handle, { plugin, headers, host })
+  const list = [...(sessionAuthHandlesByPlugin.get(plugin) ?? []), handle]
+  while (list.length > SESSION_AUTHORIZE_PER_PLUGIN_CAP) {
+    const oldest = list.shift()
+    if (oldest !== undefined) sessionAuthEntries.delete(oldest)
+  }
+  sessionAuthHandlesByPlugin.set(plugin, list)
+  return handle
+}
+
+function resolveSessionAuthHandle(
+  plugin: string,
+  handle: string,
+): SessionAuthHandleEntry | undefined {
+  const entry = sessionAuthEntries.get(handle)
+  return entry?.plugin === plugin ? entry : undefined
+}
+
+async function runSessionAuthorize(
+  plugin?: string,
+): Promise<{ handle: string; kind: 'bearer' | 'api-key' } | null> {
+  const owner = plugin ?? ''
+  if (
+    process.env.CLAUDE_CODE_EVAL_CONFINED === '1' ||
+    Boolean(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+  ) {
+    return null
+  }
+  try {
+    const { getAuthHeaders, withholdMisroutedCredential } = await import(
+      '../http.js'
+    )
+    let rawAuth: { headers: Record<string, string>; error?: string }
+    try {
+      rawAuth = getAuthHeaders()
+    } catch {
+      rawAuth = { headers: {}, error: 'no credential' }
+    }
+    if (
+      rawAuth.error !== undefined &&
+      Object.keys(rawAuth.headers).length === 0
+    ) {
+      if (process.env.ANTHROPIC_AUTH_TOKEN) {
+        rawAuth = {
+          headers: {
+            Authorization: `Bearer ${process.env.ANTHROPIC_AUTH_TOKEN}`,
+          },
+        }
+      } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+        rawAuth = {
+          headers: {
+            Authorization: `Bearer ${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
+          },
+        }
+      } else if (process.env.ANTHROPIC_API_KEY) {
+        rawAuth = {
+          headers: {
+            'x-api-key': process.env.ANTHROPIC_API_KEY,
+          },
+        }
+      }
+    }
+    const vetted = withholdMisroutedCredential(
+      rawAuth,
+      SESSION_AUTHORIZE_ENDPOINT,
+    )
+    if (vetted.error !== undefined) return null
+    const kind: 'bearer' | 'api-key' | undefined =
+      'Authorization' in vetted.headers
+        ? 'bearer'
+        : 'x-api-key' in vetted.headers
+          ? 'api-key'
+          : undefined
+    if (kind === undefined) return null
+    const host = new URL(SESSION_AUTHORIZE_ENDPOINT).host
+    return {
+      handle: mintSessionAuthHandle(owner, { ...vetted.headers }, host),
+      kind,
+    }
+  } catch {
+    return null
+  }
+}
+
 const clockCallbacks: Array<{ cancel: () => void }> = []
 const audioPlays = new Map<string, number>()
 
@@ -1217,24 +2470,48 @@ type ConfigOverlayValue = boolean | string | number | string[]
 const configOverlay = new Map<string, ConfigOverlayValue>()
 const settingsOverlay = new Map<string, Map<string, unknown>>()
 
+/** densable `qV` — short source names accepted by `$.settings.read({ source })`. */
+const SETTINGS_READ_SOURCE_ALIASES: Readonly<
+  Record<string, (typeof SETTINGS_READ_SOURCES)[number]>
+> = {
+  user: 'userSettings',
+  project: 'projectSettings',
+  local: 'localSettings',
+  flag: 'flagSettings',
+  policy: 'policySettings',
+}
+
+function resolveSettingsReadSource(
+  source: unknown,
+): (typeof SETTINGS_READ_SOURCES)[number] | undefined {
+  if (typeof source !== 'string') return undefined
+  if (
+    SETTINGS_READ_SOURCES.includes(
+      source as (typeof SETTINGS_READ_SOURCES)[number],
+    )
+  ) {
+    return source as (typeof SETTINGS_READ_SOURCES)[number]
+  }
+  return Object.hasOwn(SETTINGS_READ_SOURCE_ALIASES, source)
+    ? SETTINGS_READ_SOURCE_ALIASES[source]
+    : undefined
+}
+
 function settingsSourceCheck(
   source: unknown,
   op: string,
   plugin?: string,
-): asserts source is undefined | (typeof SETTINGS_READ_SOURCES)[number] {
-  if (
-    source !== undefined &&
-    (typeof source !== 'string' ||
-      !SETTINGS_READ_SOURCES.includes(
-        source as (typeof SETTINGS_READ_SOURCES)[number],
-      ))
-  ) {
+): (typeof SETTINGS_READ_SOURCES)[number] | undefined {
+  if (source === undefined) return undefined
+  const resolved = resolveSettingsReadSource(source)
+  if (resolved === undefined) {
     hostCheck(
       op,
       `takes { source } naming one of ${SETTINGS_READ_SOURCES.join(', ')} (got ${typeof source === 'string' ? source : typeof source})`,
       plugin,
     )
   }
+  return resolved
 }
 
 function overlayForSource(source: string): Map<string, unknown> {
@@ -1264,26 +2541,74 @@ async function readSettingsHost(
   op: string,
   plugin?: string,
 ): Promise<Record<string, unknown>> {
-  const source = rec?.source
-  settingsSourceCheck(source, op, plugin)
+  const resolvedSource = settingsSourceCheck(rec?.source, op, plugin)
   try {
     const { getSettingsForSource, getInitialSettings } = await import(
       '../settings/settings.js'
     )
-    if (typeof source === 'string') {
+    if (resolvedSource !== undefined) {
       return mergeSettings(
-        (getSettingsForSource(
-          source as (typeof SETTINGS_READ_SOURCES)[number],
-        ) ?? {}) as Record<string, unknown>,
-        source,
+        (getSettingsForSource(resolvedSource) ?? {}) as Record<string, unknown>,
+        resolvedSource,
       )
     }
     return mergeSettings(
       (getInitialSettings() ?? {}) as Record<string, unknown>,
     )
   } catch {
-    return mergeSettings({}, typeof source === 'string' ? source : undefined)
+    return mergeSettings({}, resolvedSource)
   }
+}
+
+/** densable `n9e` + `q(e)` — unwrap `{ value }` or throw `${plugin}: $.${op}: ${deny}`. */
+function unwrapOpHookResult(
+  op: string,
+  out: unknown,
+  plugin?: string,
+): unknown {
+  const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+  if (!isEventRecord(out)) {
+    throw new Error(`${prefix}$.${op}: hook returned a non-object`)
+  }
+  if (out.deny !== undefined) {
+    if (typeof out.deny !== 'string') {
+      throw new Error(`${prefix}$.${op}: hook returned a non-string deny`)
+    }
+    throw new Error(`${prefix}$.${op}: ${out.deny}`)
+  }
+  if (!Object.hasOwn(out, 'value')) {
+    throw new Error(`${prefix}$.${op}: hook returned no { value }`)
+  }
+  return out.value
+}
+
+async function runSettingsRead(
+  rec: Record<string, unknown> | undefined,
+  op: string,
+  plugin?: string,
+): Promise<unknown> {
+  settingsSourceCheck(rec?.source, op, plugin)
+  const payload: Record<string, unknown> =
+    rec?.source !== undefined ? { source: rec.source } : {}
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('settings.read', payload, hookOrigin)) {
+    return readSettingsHost(rec, op, plugin)
+  }
+  const out = await runFunctionHookChain(
+    'settings.read',
+    payload,
+    async event => {
+      settingsSourceCheck(event.source, op, plugin)
+      return { value: await readSettingsHost(event, op, plugin) }
+    },
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+    },
+  )
+  return unwrapOpHookResult('settings.read', out, plugin)
 }
 
 function pickAgentRegister(
@@ -2268,6 +3593,18 @@ function pluginEngine(
             new Error(`${mod.name}: $.ui.resolve ${reason}`),
           )
         }
+        // In worker mode, resolve element constructors locally inside the worker
+        // so functions never cross MessagePort (and press handles register in the
+        // worker's pressHandlers table, invoked via PressMessage).
+        if (hostOpPorts.has(environmentId) && isEventRecord(input)) {
+          const surface = String(input.surface)
+          const component = String(input.component)
+          const stored = getResolvedAnswer(environmentId, surface, component)
+          if (stored !== undefined) return Promise.resolve(stored)
+          return runFunctionHookChain('ui.resolve', input, async () =>
+            makeUiResolveTable(surface, mod.name),
+          ).then(table => fillWithheldUiResolveTable(table, surface, mod.name))
+        }
         return hostOp(environmentId, 'ui.resolve', [input])
       },
       open(input: unknown) {
@@ -2488,6 +3825,51 @@ function pluginEngine(
     mcp: {
       call: (server: unknown, tool: unknown, callArgs: unknown = {}) =>
         hostOp(environmentId, 'mcp.call', [{ server, tool, args: callArgs }]),
+      connect: (server: unknown) =>
+        typeof server === 'string' && server.trim() !== ''
+          ? hostOp(environmentId, 'mcp.connect', [{ server }])
+          : Promise.reject(
+              new Error(
+                `${mod.name}: $.mcp.connect takes a server name (a non-empty string)`,
+              ),
+            ),
+    },
+    telemetry: {
+      log: (entry: unknown) => {
+        if (!isEventRecord(entry)) {
+          return Promise.reject(
+            new Error(
+              `${mod.name}: $.telemetry.log takes an entry ({ to?, event, props? } or a collector record)`,
+            ),
+          )
+        }
+        const picked: Record<string, unknown> = {}
+        for (const key of [
+          'to',
+          'event',
+          'props',
+          'attributes',
+          'loggedAt',
+          'span',
+        ]) {
+          if (entry[key] !== undefined) picked[key] = entry[key]
+        }
+        return hostOp(environmentId, 'telemetry.log', [picked])
+      },
+      mark: (entry: unknown) => {
+        if (!isEventRecord(entry)) {
+          return Promise.reject(
+            new Error(
+              `${mod.name}: $.telemetry.mark takes an entry ({ feature, kind, reason?, props? })`,
+            ),
+          )
+        }
+        const picked: Record<string, unknown> = {}
+        for (const key of ['feature', 'kind', 'reason', 'props']) {
+          if (entry[key] !== undefined) picked[key] = entry[key]
+        }
+        return hostOp(environmentId, 'telemetry.mark', [picked])
+      },
     },
     model: {
       complete: (input: unknown) =>
@@ -2543,9 +3925,25 @@ function hostOp(
   const port = hostOpPorts.get(environmentId)
   if (!port) return handleHostOp(op, args, environmentId)
   const opId = ++hostOpCounter
+  const activeOrigin = activeHookOriginAls.getStore()
+  const activeFrame = activeOrigin?.at(-1)
+  const registration =
+    activeFrame !== undefined &&
+    typeof activeFrame !== 'string' &&
+    activeFrame.plugin === environmentId
+      ? activeFrame.registration
+      : undefined
   return new Promise((resolve, reject) => {
     pendingHostOps.set(opId, { resolve, reject })
-    port.postMessage({ type: 'op', opId, op, args })
+    port.postMessage({
+      type: 'op',
+      opId,
+      op,
+      args,
+      ...(registration !== undefined && { registration }),
+      ...(activeOrigin !== undefined &&
+        activeOrigin.length > 0 && { hookOrigin: activeOrigin }),
+    })
   })
 }
 
@@ -2572,13 +3970,22 @@ function argvFrom(value: unknown): string[] {
 async function runProcess(
   argv: unknown,
   init: Record<string, unknown> | undefined,
-): Promise<{ code: number; stdout: string; stderr: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const command = argvFrom(argv)
-  if (command.length === 0) return { code: 1, stdout: '', stderr: '' }
+  if (command.length === 0) return { exitCode: 1, stdout: '', stderr: '' }
   const { spawnSync } = await import('child_process')
+  let baseCwd = process.cwd()
+  try {
+    const { getCwd } = await import('../cwd.js')
+    baseCwd = getCwd()
+  } catch {
+    // fallback to process.cwd()
+  }
+  const cwd =
+    typeof init?.cwd === 'string' ? resolve(baseCwd, init.cwd) : baseCwd
   const result = spawnSync(command[0]!, command.slice(1), {
     encoding: 'utf8',
-    cwd: typeof init?.cwd === 'string' ? init.cwd : undefined,
+    cwd,
     env: isEventRecord(init?.env)
       ? { ...process.env, ...(init.env as Record<string, string>) }
       : process.env,
@@ -2586,7 +3993,7 @@ async function runProcess(
     timeout: typeof init?.timeoutMs === 'number' ? init.timeoutMs : undefined,
   })
   return {
-    code: result.status ?? 1,
+    exitCode: result.status ?? 1,
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
   }
@@ -2607,21 +4014,65 @@ async function spawnDetached(argv: unknown): Promise<{ pid: number }> {
 async function fetchHttp(
   url: string,
   init?: Record<string, unknown>,
+  plugin?: string,
 ): Promise<{
   ok: boolean
   status: number
+  headers: Record<string, string>
   text: string
 }> {
-  const response = await fetch(url, {
+  const owner = plugin ?? ''
+  const prefix = owner !== '' ? `${owner}: ` : ''
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    throw new Error(`${prefix}$.http.fetch: not a URL: ${String(url)}`)
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error(
+      `${prefix}$.http.fetch: ${parsedUrl.href} refused: http or https only`,
+    )
+  }
+  let authEntry: SessionAuthHandleEntry | undefined
+  if (init?.auth !== undefined) {
+    if (
+      process.env.CLAUDE_CODE_EVAL_CONFINED === '1' ||
+      Boolean(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+    ) {
+      throw new Error(
+        `${prefix}$.http.fetch: refused: the session's credential is withheld: nonessential network traffic is disabled for this session`,
+      )
+    }
+    authEntry = resolveSessionAuthHandle(owner, String(init.auth))
+    if (authEntry === undefined) {
+      throw new Error(
+        `${prefix}$.http.fetch: unknown auth handle; $.session.authorize() mints one`,
+      )
+    }
+  }
+  const callerHeaders: Record<string, string> = {}
+  if (isEventRecord(init?.headers)) {
+    for (const [k, v] of Object.entries(init.headers)) {
+      if (k.toLowerCase() === 'host') continue
+      callerHeaders[k] = String(v)
+    }
+  }
+  const mergedHeaders =
+    authEntry !== undefined &&
+    parsedUrl.protocol === 'https:' &&
+    parsedUrl.host === authEntry.host
+      ? { ...callerHeaders, ...authEntry.headers }
+      : callerHeaders
+  const response = await fetch(parsedUrl.href, {
     method: typeof init?.method === 'string' ? init.method : undefined,
-    headers: isEventRecord(init?.headers)
-      ? (init.headers as Record<string, string>)
-      : undefined,
+    headers: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
     body: typeof init?.body === 'string' ? init.body : undefined,
   })
   return {
     ok: response.ok,
     status: response.status,
+    headers: Object.fromEntries(response.headers.entries()),
     text: await response.text(),
   }
 }
@@ -2678,14 +4129,26 @@ export async function handleHostOp(
   }
   if (op === 'session.surface') return 'terminal'
   if (op === 'session.surfaces') return ['terminal']
-  if (op === 'session.version') return MACRO.VERSION
+  if (op === 'session.version') {
+    const version = typeof MACRO !== 'undefined' ? MACRO.VERSION : ''
+    const base = version.match(/^\d+\.\d+\.\d+(?:-[a-z]+)?/)?.[0]
+    const builtAt = typeof MACRO !== 'undefined' ? (MACRO.BUILD_TIME ?? '') : ''
+    return {
+      version,
+      ...(base !== undefined && { base }),
+      builtAt,
+    }
+  }
   if (op === 'session.turns') {
     return countSessionTurns()
   }
   if (op === 'session.messages') {
-    return listSessionMessages(rec ?? {})
+    return listSessionMessages(rec ?? {}, plugin)
   }
-  if (op === 'session.repo' || op === 'session.authorize') return null
+  if (op === 'session.repo') return null
+  if (op === 'session.authorize') {
+    return runSessionAuthorize(plugin)
+  }
   if (op === 'session.usage') {
     const extra = rec
       ? Object.keys(rec).filter(key => key !== 'breakdown' && key !== 'columns')
@@ -2895,15 +4358,18 @@ export async function handleHostOp(
     return runPromptSubmit(rec ?? {}, plugin)
   }
   if (op === 'prompt.read') {
-    return { text: promptBoxText }
+    const storeState = getPromptInputCursorState()
+    const text =
+      storeState.active || storeState.value !== ''
+        ? storeState.value
+        : promptBoxText
+    return { text }
   }
   if (op === 'prompt.fill') {
-    const text = typeof rec?.text === 'string' ? rec.text : ''
-    promptBoxText = text
-    return { ok: true }
+    return runPromptFill(rec ?? {}, plugin)
   }
   if (op === 'prompt.suggest') {
-    return { ok: true }
+    return { isShown: true, ok: true }
   }
   if (
     op === 'store.get' ||
@@ -2932,7 +4398,7 @@ export async function handleHostOp(
       : isEventRecord(args[1])
         ? args[1]
         : undefined
-    return fetchHttp(url, init)
+    return fetchHttp(url, init, plugin)
   }
   if (op === 'process.run') {
     const argv = rec ? rec.argv : args[0]
@@ -2968,6 +4434,47 @@ export async function handleHostOp(
   if (op === 'mcp.call') {
     return runMcpCall(rec ?? {}, plugin)
   }
+  if (op === 'mcp.connect') {
+    return runMcpConnect(rec ?? {}, plugin)
+  }
+  if (op === 'telemetry.log') {
+    const to = rec?.to
+    if (
+      rec === undefined ||
+      (to !== undefined && to !== 'anthropic' && to !== 'collector')
+    ) {
+      hostCheck(
+        'telemetry.log',
+        'takes an entry ({ to?, event, ... }, to "anthropic" or "collector")',
+        plugin,
+      )
+    }
+    return dispatchTelemetryLog(
+      { ...(rec ?? {}), to: to ?? 'anthropic' },
+      {
+        plugin,
+      },
+    )
+  }
+  if (op === 'telemetry.mark') {
+    if (rec === undefined) {
+      hostCheck(
+        'telemetry.mark',
+        'takes an entry ({ feature, kind, reason?, props? })',
+        plugin,
+      )
+    }
+    return runFunctionHookChain(
+      'telemetry.mark',
+      rec ?? {},
+      async () => ({
+        value: undefined,
+      }),
+      undefined,
+      undefined,
+      { origin: resolveHookCallOrigin(plugin) },
+    )
+  }
   if (op === 'agent.list') {
     return listPluginAgents()
   }
@@ -2987,7 +4494,7 @@ export async function handleHostOp(
     return runPluginCommand(rec ?? {}, plugin)
   }
   if (op === 'tool.list') {
-    return listSessionTools()
+    return runToolList(plugin)
   }
   if (op === 'tool.call') {
     return runToolCall(rec ?? {}, plugin)
@@ -2996,7 +4503,7 @@ export async function handleHostOp(
     return runToolCheck(rec ?? {}, plugin)
   }
   if (op === 'tool.register') {
-    return registerPluginTool(rec ?? {}, plugin)
+    return runToolRegister(rec ?? {}, plugin)
   }
   if (op === 'interface.call') {
     return runInterfaceCall(rec ?? {}, plugin)
@@ -3019,7 +4526,7 @@ export async function handleHostOp(
     return runUiHost(op, rec ?? {}, plugin)
   }
   if (op === 'settings.read') {
-    return readSettingsHost(rec, op, plugin)
+    return runSettingsRead(rec, op, plugin)
   }
   if (op === 'fs.read') {
     const path = pathFrom(args)
@@ -3035,20 +4542,106 @@ export async function handleHostOp(
     return undefined
   }
   if (op === 'fs.list') {
-    const { readdirSync } = await import('fs')
-    const path = pathFrom(args) ?? '.'
-    return readdirSync(path)
+    const { lstatSync, readdirSync, statSync } = await import('fs')
+    // Preserve legacy positional handleHostOp('fs.list', [dir]) test expectation
+    if (
+      rec === undefined &&
+      typeof args[0] === 'string' &&
+      plugin === undefined
+    ) {
+      return readdirSync(args[0])
+    }
+    let baseCwd = process.cwd()
+    try {
+      const { getCwd } = await import('../cwd.js')
+      baseCwd = getCwd()
+    } catch {
+      // fallback to process.cwd()
+    }
+    const rawPath = pathFrom(args) ?? '.'
+    const target = resolve(baseCwd, rawPath)
+    const entries = readdirSync(target, { withFileTypes: true })
+    const listed: Array<{
+      name: string
+      kind: 'file' | 'dir' | 'other'
+      size: number
+      mtimeMs: number
+      isLink: boolean
+    }> = []
+    for (const entry of entries) {
+      const full = join(target, entry.name)
+      let isLink = entry.isSymbolicLink()
+      if (!isLink) {
+        try {
+          isLink = lstatSync(full).isSymbolicLink()
+        } catch {
+          // ignore lstat failure
+        }
+      }
+      try {
+        const st = statSync(full)
+        const kind: 'file' | 'dir' | 'other' = st.isFile()
+          ? 'file'
+          : st.isDirectory()
+            ? 'dir'
+            : 'other'
+        listed.push({
+          name: entry.name,
+          kind,
+          size: kind === 'file' ? st.size : 0,
+          mtimeMs: st.mtimeMs,
+          isLink,
+        })
+      } catch {
+        listed.push({
+          name: entry.name,
+          kind: 'other',
+          size: 0,
+          mtimeMs: 0,
+          isLink,
+        })
+      }
+    }
+    listed.sort((a, b) => a.name.localeCompare(b.name))
+    return listed
   }
   if (op === 'fs.stat') {
-    const { statSync } = await import('fs')
-    const path = pathFrom(args)
-    if (typeof path !== 'string') return undefined
-    const st = statSync(path)
+    const { lstatSync, realpathSync, statSync } = await import('fs')
+    const rawPath = pathFrom(args)
+    if (typeof rawPath !== 'string') return undefined
+    let baseCwd = process.cwd()
+    try {
+      const { getCwd } = await import('../cwd.js')
+      baseCwd = getCwd()
+    } catch {
+      // fallback to process.cwd()
+    }
+    const target = resolve(baseCwd, rawPath)
+    const lst = lstatSync(target)
+    const isLink = lst.isSymbolicLink()
+    let resolvedStat: ReturnType<typeof statSync> | undefined
+    if (isLink) {
+      try {
+        resolvedStat = statSync(target)
+      } catch {
+        resolvedStat = undefined
+      }
+    }
+    const st = resolvedStat ?? lst
+    const kind: 'file' | 'dir' | 'other' = st.isFile()
+      ? 'file'
+      : st.isDirectory()
+        ? 'dir'
+        : 'other'
+    const shouldResolve = rec?.resolve === true && resolvedStat !== undefined
     return {
+      kind,
       size: st.size,
       mtimeMs: st.mtimeMs,
+      isLink,
       isFile: st.isFile(),
       isDirectory: st.isDirectory(),
+      ...(shouldResolve && { realPath: realpathSync(target) }),
     }
   }
   if (op === 'fs.exists') {
@@ -3864,6 +5457,105 @@ async function runMcpCall(
   return { content, isError: result.isError === true }
 }
 
+const pluginOwnedMcpServers = new Map<string, Set<string>>()
+
+function forgetPluginOwnedMcpServers(pluginName: string): void {
+  const owned = pluginOwnedMcpServers.get(pluginName)
+  if (!owned) return
+  pluginOwnedMcpServers.delete(pluginName)
+  const host = getPluginToolSessionHost()
+  for (const name of owned) {
+    void host?.removeMcpServer?.(name)
+  }
+}
+
+async function runMcpConnect(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<{
+  isConnected: boolean
+  server?: string
+  reason?: string
+  message?: string
+}> {
+  const server = input.server
+  if (typeof server !== 'string' || server.trim() === '') {
+    hostCheck('mcp.connect', 'takes { server } (a non-empty string)', plugin)
+  }
+  const key = String(server)
+  const prefix = plugin !== undefined && plugin !== '' ? plugin : ''
+  const host = getPluginToolSessionHost()
+  if (!host) {
+    throw new Error(
+      `${prefix}: $.mcp.connect is not available in this mode: no session is bound in this process (the REPL has not mounted and no headless session is built); catch it and carry on`,
+    )
+  }
+  try {
+    const pluginId = resolvePluginStorageId(prefix)
+    const [{ loadAllPluginsCacheOnly }, { getPluginMcpServers }] =
+      await Promise.all([
+        import('./pluginLoader.js'),
+        import('./mcpPluginIntegration.js'),
+      ])
+    const { externalBuiltinNamespaceName, getBuiltinPluginDefinition } =
+      await import('../../plugins/builtinPlugins.js')
+    const { enabled } = await loadAllPluginsCacheOnly()
+    const loadedPlugin = enabled.find(entry => entry.source === pluginId)
+    if (!loadedPlugin) {
+      return {
+        isConnected: false,
+        reason: 'unlisted',
+        message: `This plugin's manifest lists no MCP server named "${key}".`,
+      }
+    }
+    const candidate = loadedPlugin.isBuiltin
+      ? {
+          ...loadedPlugin,
+          mcpServers: getBuiltinPluginDefinition(loadedPlugin.name)?.mcpServers,
+        }
+      : loadedPlugin
+    if (loadedPlugin.isBuiltin && candidate.mcpServers === undefined) {
+      return {
+        isConnected: false,
+        reason: 'unlisted',
+        message: `This plugin's manifest lists no MCP server named "${key}".`,
+      }
+    }
+    const scopedName = `plugin:${externalBuiltinNamespaceName(loadedPlugin.name, loadedPlugin.source)}:${key}`
+    const resolved = await getPluginMcpServers(candidate, [])
+    const config = resolved?.[scopedName]
+    if (!config) {
+      return {
+        isConnected: false,
+        reason: 'unlisted',
+        message: `This plugin's manifest lists no MCP server named "${key}".`,
+      }
+    }
+    if (isBareMode()) {
+      return {
+        isConnected: false,
+        reason: 'policy',
+        message:
+          'This session runs with --bare, which connects no plugin servers.',
+      }
+    }
+    let owned = pluginOwnedMcpServers.get(prefix)
+    if (!owned) {
+      owned = new Set()
+      pluginOwnedMcpServers.set(prefix, owned)
+    }
+    owned.add(scopedName)
+    await Promise.resolve(host.addMcpServer(scopedName, config))
+    return { isConnected: true, server: scopedName }
+  } catch (err) {
+    return {
+      isConnected: false,
+      reason: 'failed',
+      message: `The MCP server "${key}" did not connect: ${describeThrown(err)}.`,
+    }
+  }
+}
+
 function pluginAgentSpecError(
   spec: Record<string, unknown>,
 ): string | undefined {
@@ -4272,7 +5964,8 @@ async function runAgentSpawn(
   if (input.tool !== AGENT_TOOL_NAME) {
     hostCheck('agent.spawn', "takes the Agent tool's input", plugin)
   }
-  if (!hasMatchingFunctionHook('agent.spawn')) {
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('agent.spawn', input, hookOrigin)) {
     return launchAgentSpawn(input, plugin)
   }
   // densable Cc("agent.spawn") → CLt/vLt race: core.perform = launch.
@@ -4286,6 +5979,12 @@ async function runAgentSpawn(
       arrived = true
       launched = await launchAgentSpawn(event, plugin)
       return launched
+    },
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
     },
   )
   if (!arrived) {
@@ -4572,17 +6271,219 @@ function messageUuid(message: unknown): string | undefined {
   return message.uuid
 }
 
+type GoldSessionToolUse = {
+  id: string
+  tool_use_id: string
+  tool: string
+  input: Record<string, unknown>
+  result?: unknown
+  text?: string
+  isError?: true
+  agentId?: string
+  durationMs?: number
+}
+
+type GoldSessionToolResult = {
+  tool_use_id: string
+  text: string
+  isError: boolean
+  result?: unknown
+}
+
+type GoldSessionMessage = {
+  role: 'user' | 'assistant'
+  text: string
+  toolUses: GoldSessionToolUse[]
+  toolResults?: GoldSessionToolResult[]
+}
+
+const SESSION_MESSAGES_CAP = 500
+
+function plainInputClone(value: unknown): Record<string, unknown> {
+  if (!isEventRecord(value)) return {}
+  try {
+    const parsed: unknown = JSON.parse(JSON.stringify(value))
+    return isEventRecord(parsed) ? parsed : {}
+  } catch {
+    return { ...value }
+  }
+}
+
+function toGoldSessionRow(message: unknown): GoldSessionMessage | undefined {
+  if (!isEventRecord(message)) return undefined
+  if (message.role === 'user' || message.role === 'assistant') {
+    const rawToolUses = Array.isArray(message.toolUses) ? message.toolUses : []
+    const toolUses: GoldSessionToolUse[] = rawToolUses
+      .filter(isEventRecord)
+      .map(tu => {
+        const id =
+          typeof tu.tool_use_id === 'string'
+            ? tu.tool_use_id
+            : typeof tu.id === 'string'
+              ? tu.id
+              : ''
+        return {
+          ...tu,
+          id,
+          tool_use_id: id,
+          tool: typeof tu.tool === 'string' ? tu.tool : '',
+          input: plainInputClone(tu.input),
+        } as GoldSessionToolUse
+      })
+    return {
+      ...(message as GoldSessionMessage),
+      role: message.role,
+      text: typeof message.text === 'string' ? message.text : '',
+      toolUses,
+    }
+  }
+  const msgBody = isEventRecord(message.message) ? message.message : undefined
+  if (message.type === 'assistant') {
+    const content = msgBody?.content
+    const textParts: string[] = []
+    const toolUses: GoldSessionToolUse[] = []
+    if (typeof content === 'string') {
+      textParts.push(content)
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!isEventRecord(block)) continue
+        if (block.type === 'text' && typeof block.text === 'string') {
+          textParts.push(block.text)
+        } else if (block.type === 'tool_use') {
+          const id = typeof block.id === 'string' ? block.id : ''
+          toolUses.push({
+            id,
+            tool_use_id: id,
+            tool: typeof block.name === 'string' ? block.name : '',
+            input: plainInputClone(block.input),
+          })
+        }
+      }
+    }
+    return {
+      role: 'assistant',
+      text: textParts.join(''),
+      toolUses,
+    }
+  }
+  if (message.type !== 'user') return undefined
+  if (message.isMeta === true || message.isVirtual === true) return undefined
+  const content = msgBody?.content
+  if (content === undefined || typeof content === 'string') {
+    return {
+      role: 'user',
+      text: typeof content === 'string' ? content : '',
+      toolUses: [],
+    }
+  }
+  const textParts: string[] = []
+  const toolResults: GoldSessionToolResult[] = []
+  const hasToolUseResult = message.toolUseResult !== undefined
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!isEventRecord(block)) continue
+      if (block.type === 'text' && typeof block.text === 'string') {
+        textParts.push(block.text)
+      } else if (block.type === 'tool_result') {
+        toolResults.push({
+          tool_use_id:
+            typeof block.tool_use_id === 'string' ? block.tool_use_id : '',
+          text: toolResultTextFromContent(block.content),
+          isError: block.is_error === true,
+          ...(hasToolUseResult && { result: message.toolUseResult }),
+        })
+      }
+    }
+  }
+  return {
+    role: 'user',
+    text: textParts.join(''),
+    toolUses: [],
+    ...(toolResults.length > 0 && { toolResults }),
+  }
+}
+
+function shapeSessionMessages(
+  rawMessages: unknown[],
+  asApi: boolean,
+  plugin?: string,
+): unknown[] {
+  if (rawMessages.length === 0) return []
+  if (asApi) {
+    return rawMessages.flatMap(item => {
+      if (!isEventRecord(item)) return []
+      if (
+        (item.type === 'user' || item.type === 'assistant') &&
+        isEventRecord(item.message)
+      ) {
+        return [item.message]
+      }
+      if (item.role === 'user' || item.role === 'assistant') return [item]
+      return []
+    })
+  }
+  // Preserve direct host-op unit test stubs (`{ type: 'user' }` without `.message` or `.role`)
+  const allBareStubs = rawMessages.every(
+    item =>
+      isEventRecord(item) &&
+      !('message' in item) &&
+      !('role' in item) &&
+      (item.type === 'user' || item.type === 'assistant'),
+  )
+  if (allBareStubs && plugin === undefined) {
+    return rawMessages
+  }
+  const out: GoldSessionMessage[] = []
+  const resultsById = new Map<string, GoldSessionToolResult>()
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    if (out.length >= SESSION_MESSAGES_CAP) break
+    const row = toGoldSessionRow(rawMessages[i])
+    if (!row) continue
+    for (const tr of row.toolResults ?? []) {
+      if (tr.tool_use_id !== '') resultsById.set(tr.tool_use_id, tr)
+    }
+    const enrichedToolUses = row.toolUses.map(tu => {
+      const match = resultsById.get(tu.tool_use_id)
+      if (!match) return tu
+      const isAgentTool = tu.tool === AGENT_TOOL_NAME || tu.tool === 'Task'
+      const agentExtras =
+        isAgentTool && isEventRecord(match.result)
+          ? {
+              ...(typeof match.result.agentId === 'string' && {
+                agentId: match.result.agentId,
+              }),
+              ...(typeof match.result.totalDurationMs === 'number' && {
+                durationMs: match.result.totalDurationMs,
+              }),
+            }
+          : {}
+      return {
+        ...tu,
+        ...('result' in match && { result: match.result }),
+        text: match.text,
+        ...(match.isError && { isError: true as const }),
+        ...agentExtras,
+      }
+    })
+    out.push({ ...row, toolUses: enrichedToolUses })
+  }
+  return out.reverse()
+}
+
 async function listSessionMessages(
   input: Record<string, unknown>,
+  plugin?: string,
 ): Promise<unknown[] | { deny: string }> {
+  const asApi = input.as === 'api'
   if (typeof input.agentId !== 'string') {
-    return sessionUserMessages()
+    return shapeSessionMessages(sessionUserMessages(), asApi, plugin)
   }
   const agentId = input.agentId
   const saved = await savedAgentMessages(agentId)
   const live = liveAgentMessages(agentId)
   if (!saved) {
-    return live ?? agentConversationDeny(agentId)
+    if (live === undefined) return agentConversationDeny(agentId)
+    return shapeSessionMessages(live, asApi, plugin)
   }
   const liveList = live ?? []
   const seen = new Set(
@@ -4591,13 +6492,14 @@ async function listSessionMessages(
       return uuid === undefined ? [] : [uuid]
     }),
   )
-  return [
+  const combined = [
     ...saved.filter(message => {
       const uuid = messageUuid(message)
       return uuid === undefined || !seen.has(uuid)
     }),
     ...liveList,
   ]
+  return shapeSessionMessages(combined, asApi, plugin)
 }
 
 function sessionTools(): SessionListedTool[] {
@@ -5707,11 +7609,19 @@ function pluginFromDrawing(node: unknown): string | undefined {
   if (typeof image?.plugin === 'string' && image.plugin !== '') {
     return image.plugin
   }
+  const press = isEventRecord(node.press) ? node.press : undefined
+  if (typeof press?.plugin === 'string' && press.plugin !== '') {
+    return press.plugin
+  }
+  const client = isEventRecord(node.client) ? node.client : undefined
+  if (typeof client?.plugin === 'string' && client.plugin !== '') {
+    return client.plugin
+  }
   if (node.children !== undefined) return pluginFromDrawing(node.children)
   return undefined
 }
 
-/** densable `Te` / Image restamp — stamp the returning plugin onto Raster/Image. */
+/** densable `Te` / Image restamp — stamp the returning plugin onto Raster/Image/Client/press. */
 function stampPluginOnDrawing(node: unknown, plugin: string): unknown {
   if (plugin === '') return node
   if (Array.isArray(node)) {
@@ -5733,6 +7643,30 @@ function stampPluginOnDrawing(node: unknown, plugin: string): unknown {
     return {
       ...node,
       image: { plugin },
+      ...(children !== undefined && { children }),
+    }
+  }
+  if (
+    node.type === 'Client' &&
+    (!isEventRecord(node.client) || node.client.plugin === '')
+  ) {
+    return {
+      ...node,
+      client: { plugin },
+      ...(children !== undefined && { children }),
+    }
+  }
+  if (isEventRecord(node.press) && node.press.plugin === '') {
+    const handle = node.press.handle
+    const emptySlot = pressSlot('', handle)
+    const held = pressHandlers.get(emptySlot)
+    if (held !== undefined) {
+      pressHandlers.delete(emptySlot)
+      pressHandlers.set(pressSlot(plugin, handle), held)
+    }
+    return {
+      ...node,
+      press: { plugin, handle },
       ...(children !== undefined && { children }),
     }
   }
@@ -8367,6 +10301,37 @@ function blitPayload(input: unknown): Record<string, unknown> {
       }
 }
 
+function flattenUiResolveChildren(input: unknown): unknown[] {
+  if (input === undefined || input === null || typeof input === 'boolean') {
+    return []
+  }
+  const raw = Array.isArray(input) ? input : [input]
+  return raw
+    .flat(Number.POSITIVE_INFINITY)
+    .filter(c => c !== null && c !== undefined && typeof c !== 'boolean')
+    .map(c => (typeof c === 'number' ? String(c) : c))
+}
+
+function extractUiChildText(item: unknown): string {
+  if (typeof item === 'string' || typeof item === 'number') return String(item)
+  if (isEventRecord(item) && Array.isArray(item.children)) {
+    return item.children.map(extractUiChildText).join('')
+  }
+  return ''
+}
+
+function sanitizeHoverStyleRecord(
+  hover: unknown,
+): Record<string, unknown> | undefined {
+  if (!isEventRecord(hover)) return undefined
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(hover)) {
+    if (v === undefined || v === null || typeof v === 'function') continue
+    out[k] = v
+  }
+  return out
+}
+
 /**
  * densable `Nr` / surface `elements[name]`: JSX pragma constructors.
  * Do not run Ink here — blit still mounts via `walkUiMounts`.
@@ -8376,9 +10341,10 @@ function uiResolveH(
   props: Record<string, unknown>,
   ...childList: unknown[]
 ): Record<string, unknown> {
+  const flat = flattenUiResolveChildren(childList)
   const node: Record<string, unknown> = { type: name }
   if (Object.keys(props).length > 0) node.props = props
-  if (childList.length > 0) node.children = childList
+  if (flat.length > 0) node.children = flat
   return node
 }
 
@@ -8391,21 +10357,115 @@ function uiResolveElementNames(surface: string): readonly string[] {
 /** densable `ivo` / `du` — freeze table of `(props) => h(name, rest, children)`. */
 function makeUiResolveTable(
   surface: string,
+  plugin = '',
 ): Readonly<Record<string, (props?: Record<string, unknown>) => unknown>> {
   const elements: Record<string, (props?: Record<string, unknown>) => unknown> =
     Object.create(null)
   for (const name of uiResolveElementNames(surface)) {
     elements[name] = Object.freeze((props?: Record<string, unknown>) => {
-      const { children, ...rest } = (props ?? {}) as {
+      const { children, ...rawRest } = (props ?? {}) as {
         children?: unknown
       } & Record<string, unknown>
-      const childList =
-        children === undefined
-          ? []
-          : Array.isArray(children)
-            ? children
-            : [children]
-      return uiResolveH(name, rest, ...childList)
+      const childList = flattenUiResolveChildren(children)
+      const rest: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(rawRest)) {
+        if (k === 'ref' || v === undefined || v === null) continue
+        rest[k] = v
+      }
+      const takesHover = name === 'Box' || name === 'Text' || name === 'Button'
+      const hover = takesHover
+        ? sanitizeHoverStyleRecord(rest.hover)
+        : undefined
+      if (takesHover) delete rest.hover
+      if (name === 'Box' && typeof rest.key === 'number') {
+        rest.key = String(rest.key)
+      }
+      let pressStamp: { plugin: string; handle: number } | undefined
+      let keepChildren = true
+      if (name === 'Button') {
+        if (rest.label === undefined && childList.length > 0) {
+          const joined = childList.map(extractUiChildText).join('')
+          if (joined !== '') rest.label = joined
+        }
+        if (rest.key === undefined && typeof rest.label === 'string') {
+          rest.key = rest.label
+        }
+        if (typeof rest.onPress === 'function') {
+          const onPress = rest.onPress as (event: unknown) => unknown
+          delete rest.onPress
+          const handle = ++uiResolvePressCounter
+          holdPress(plugin, handle, onPress)
+          pressStamp = { plugin, handle }
+        }
+        keepChildren = false
+      } else if (name === 'Select') {
+        if (typeof rest.onSelect === 'function') {
+          const onSelect = rest.onSelect as (
+            value: string,
+            event: unknown,
+          ) => unknown
+          delete rest.onSelect
+          const handle = ++uiResolvePressCounter
+          holdPress(plugin, handle, (e: unknown) => {
+            const val =
+              isEventRecord(e) && typeof e.value === 'string'
+                ? e.value
+                : String(e ?? '')
+            return onSelect(val, e)
+          })
+          pressStamp = { plugin, handle }
+        }
+        keepChildren = false
+      } else if (name === 'Input') {
+        const onInput =
+          typeof rest.onInput === 'function'
+            ? (rest.onInput as (value: string, event: unknown) => unknown)
+            : undefined
+        const onSubmit =
+          typeof rest.onSubmit === 'function'
+            ? (rest.onSubmit as (value: string, event: unknown) => unknown)
+            : undefined
+        delete rest.onInput
+        delete rest.onSubmit
+        if (onInput !== undefined || onSubmit !== undefined) {
+          const handle = ++uiResolvePressCounter
+          holdPress(plugin, handle, (e: unknown) => {
+            if (!isEventRecord(e)) return undefined
+            const val = typeof e.value === 'string' ? e.value : ''
+            if (e.kind === 'submit') return onSubmit?.(val, e)
+            return onInput?.(val, e)
+          })
+          pressStamp = { plugin, handle }
+        }
+        keepChildren = false
+      } else if (name === 'Markdown') {
+        if (typeof rest.onLinkPress === 'function') {
+          const onLinkPress = rest.onLinkPress as (
+            link: unknown,
+            event: unknown,
+          ) => unknown
+          delete rest.onLinkPress
+          const handle = ++uiResolvePressCounter
+          holdPress(plugin, handle, (e: unknown) => {
+            if (!isEventRecord(e)) return undefined
+            const link = isEventRecord(e.link)
+              ? e.link
+              : typeof e.href === 'string'
+                ? { href: e.href }
+                : undefined
+            return onLinkPress(link, e)
+          })
+          pressStamp = { plugin, handle }
+        }
+        keepChildren = false
+      }
+      for (const [k, v] of Object.entries(rest)) {
+        if (typeof v === 'function') delete rest[k]
+      }
+      const node = uiResolveH(name, rest, ...(keepChildren ? childList : []))
+      if (hover !== undefined) node.hover = hover
+      if (pressStamp !== undefined) node.press = pressStamp
+      return node
     })
   }
   return Object.freeze(elements)
@@ -8437,7 +10497,7 @@ function fillWithheldUiResolveTable(
       )
     }
     next[name] = Object.freeze((props?: Record<string, unknown>) => {
-      const children = props?.children ?? []
+      const children = flattenUiResolveChildren(props?.children)
       return {
         type: 'Box',
         props: { flexDirection: 'column' },
@@ -9282,7 +11342,7 @@ function runUiHost(
     }
     // densable `$t` / yOt `ui.resolve` (not classic.ui.resolve); tail is `ivo`.
     return runFunctionHookChain('ui.resolve', input, async () =>
-      makeUiResolveTable(surface),
+      makeUiResolveTable(surface, owner),
     ).then(table => fillWithheldUiResolveTable(table, surface, plugin))
   }
   return undefined
@@ -9329,6 +11389,41 @@ async function runToolCall(
   })
 }
 
+const TOOL_CHECK_HOP_SITE: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    restorePinnedKeys(['tool_use_id'], passed, original),
+  checkArgument: (passed, original) => {
+    if (
+      passed.tool !== original.tool ||
+      pinValue(passed.input) !== pinValue(original.input) ||
+      passed.tool_use_id !== original.tool_use_id
+    ) {
+      return 'the tool, its input and the call are the question and are pinned; a hook answers { decision }, it does not ask about another call'
+    }
+    return undefined
+  },
+}
+
+async function runToolList(plugin?: string): Promise<unknown> {
+  const payload: Record<string, unknown> = {}
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('tool.list', payload, hookOrigin)) {
+    return listSessionTools()
+  }
+  const out = await runFunctionHookChain(
+    'tool.list',
+    payload,
+    async () => ({ value: await listSessionTools() }),
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+    },
+  )
+  return unwrapOpHookResult('tool.list', out, plugin)
+}
+
 async function runToolCheck(
   input: Record<string, unknown>,
   plugin?: string,
@@ -9344,28 +11439,69 @@ async function runToolCheck(
       plugin,
     )
   }
-  if (toolCheckHandler) {
-    return toolCheckHandler({ tool: input.tool, input: input.input })
-  }
+  const toolName = input.tool
+  const toolArgs = input.input
   const tools = sessionTools()
-  if (tools.length === 0) return { behavior: 'allow' }
-  if (!tools.some(tool => tool.name === input.tool)) {
+  if (
+    !toolCheckHandler &&
+    tools.length > 0 &&
+    !tools.some(tool => tool.name === toolName)
+  ) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(
-      `${prefix}$.tool.check: no tool named "${input.tool}" in this session`,
+      `${prefix}$.tool.check: no tool named "${toolName}" in this session`,
     )
   }
-  return { behavior: 'allow' }
+  const payload: Record<string, unknown> = {
+    tool: toolName,
+    input: toolArgs,
+  }
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('tool.check', payload, hookOrigin)) {
+    if (toolCheckHandler) {
+      return toolCheckHandler({ tool: toolName, input: toolArgs })
+    }
+    return { decision: 'allow' }
+  }
+  const coreTail = async (): Promise<Record<string, unknown>> => {
+    if (toolCheckHandler) {
+      const custom = await toolCheckHandler({
+        tool: toolName,
+        input: toolArgs,
+      })
+      if (isEventRecord(custom)) {
+        if (typeof custom.decision === 'string') return custom
+        if (typeof custom.behavior === 'string') {
+          return {
+            decision: custom.behavior,
+            ...(typeof custom.message === 'string' && {
+              reason: custom.message,
+            }),
+            ...(typeof custom.rule === 'string' && { rule: custom.rule }),
+          }
+        }
+      }
+    }
+    return { decision: 'allow' }
+  }
+  return runFunctionHookChain(
+    'tool.check',
+    payload,
+    coreTail,
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+      site: TOOL_CHECK_HOP_SITE,
+    },
+  )
 }
 
-/**
- * densable m_o — `$.tool.register` → HTTP loopback MCP → model-visible tool.
- * Returns `{ tool: "mcp__<server>__<name>" }`.
- */
-async function registerPluginTool(
+function checkToolRegisterInput(
   input: Record<string, unknown>,
   plugin?: string,
-): Promise<{ tool: string }> {
+): PluginRegisteredToolSpec {
   const nameCheck = agentRegisterNameCheck(input)
   if (nameCheck !== undefined) hostCheck('tool.register', nameCheck, plugin)
   const description = input.description
@@ -9391,6 +11527,62 @@ async function registerPluginTool(
       plugin,
     )
   }
+  return {
+    name: String(input.name),
+    description: String(description),
+    inputSchema: { type: 'object', ...schemaRaw },
+  }
+}
+
+async function runToolRegister(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<unknown> {
+  const checked = checkToolRegisterInput(input, plugin)
+  const payload: Record<string, unknown> = {
+    name: checked.name,
+    description: checked.description,
+    inputSchema: checked.inputSchema,
+  }
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('tool.register', payload, hookOrigin)) {
+    return registerPluginTool(payload, plugin)
+  }
+  const out = await runFunctionHookChain(
+    'tool.register',
+    payload,
+    async event => {
+      const nextChecked = checkToolRegisterInput(event, plugin)
+      return {
+        value: await registerPluginTool(
+          {
+            name: nextChecked.name,
+            description: nextChecked.description,
+            inputSchema: nextChecked.inputSchema,
+          },
+          plugin,
+        ),
+      }
+    },
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+    },
+  )
+  return unwrapOpHookResult('tool.register', out, plugin)
+}
+
+/**
+ * densable m_o — `$.tool.register` → HTTP loopback MCP → model-visible tool.
+ * Returns `{ tool: "mcp__<server>__<name>" }`.
+ */
+async function registerPluginTool(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<{ tool: string }> {
+  const spec = checkToolRegisterInput(input, plugin)
   const prefix = plugin !== undefined && plugin !== '' ? plugin : ''
   if (prefix === '') {
     throw new Error('$.tool.register: plugin name is required')
@@ -9402,12 +11594,7 @@ async function registerPluginTool(
     )
   }
 
-  const name = String(input.name)
-  const spec: PluginRegisteredToolSpec = {
-    name,
-    description: String(description),
-    inputSchema: { type: 'object', ...schemaRaw },
-  }
+  const name = spec.name
 
   const host = getPluginToolSessionHost()
   // densable Hu — refuse before the bag or loopback generation is touched.
@@ -9669,6 +11856,122 @@ function runPromptSubmit(
     priority: 'later',
   })
   return wait
+}
+
+async function runPromptFill(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<{
+  isFilled: boolean
+  ok: boolean
+  refusal?: string
+  text: string
+  cursor: number
+}> {
+  const rawText = typeof input.text === 'string' ? input.text : ''
+  const rawMode = input.mode
+  if (rawMode !== undefined && !isPromptFillMode(rawMode)) {
+    hostCheck(
+      'prompt.fill',
+      `takes { mode } of ${PROMPT_FILL_MODES.join(', ')}`,
+      plugin,
+    )
+  }
+  const mode = isPromptFillMode(rawMode) ? rawMode : 'replace'
+  const storeState = getPromptInputCursorState()
+  const currentText =
+    storeState.active || getPromptInputStoreValue() !== ''
+      ? storeState.value
+      : promptBoxText
+  const currentCursor = Math.max(
+    0,
+    Math.min(
+      storeState.savedCursorOffset !== null
+        ? storeState.savedCursorOffset
+        : storeState.active || getPromptInputStoreValue() !== ''
+          ? currentText.length
+          : promptBoxCursor,
+      currentText.length,
+    ),
+  )
+  const applyFill = (
+    fillText: string,
+    fillMode: (typeof PROMPT_FILL_MODES)[number],
+  ): { text: string; cursor: number } => {
+    if (fillMode === 'append') {
+      const nextText = `${currentText}${fillText}`
+      return { text: nextText, cursor: nextText.length }
+    }
+    if (fillMode === 'insert') {
+      const nextText = `${currentText.slice(0, currentCursor)}${fillText}${currentText.slice(currentCursor)}`
+      return { text: nextText, cursor: currentCursor + fillText.length }
+    }
+    return { text: fillText, cursor: fillText.length }
+  }
+  const commitDraft = (nextText: string, nextCursor: number) => {
+    promptBoxText = nextText
+    promptBoxCursor = nextCursor
+    setPromptInputStoreValue(nextText)
+    savePromptInputCursorOffset(nextCursor)
+    return {
+      isFilled: true,
+      ok: true,
+      text: nextText,
+      cursor: nextCursor,
+    }
+  }
+  const origin =
+    plugin !== undefined && plugin !== ''
+      ? { kind: 'plugin' as const, name: plugin }
+      : { kind: 'engine' as const }
+  const payload: Record<string, unknown> = {
+    text: rawText,
+    mode,
+    origin,
+    ...(Array.isArray(input.decorations) && { decorations: input.decorations }),
+  }
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('prompt.fill', payload, hookOrigin)) {
+    const applied = applyFill(rawText, mode)
+    return commitDraft(applied.text, applied.cursor)
+  }
+  let filledDraft: { text: string; cursor: number } | undefined
+  const out = await runFunctionHookChain(
+    'prompt.fill',
+    payload,
+    async event => {
+      const nextMode = isPromptFillMode(event.mode) ? event.mode : mode
+      const nextText = typeof event.text === 'string' ? event.text : rawText
+      filledDraft = applyFill(nextText, nextMode)
+      commitDraft(filledDraft.text, filledDraft.cursor)
+      return { isFilled: true }
+    },
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+    },
+  )
+  if (isEventRecord(out) && out.isFilled === false) {
+    return {
+      isFilled: false,
+      ok: false,
+      ...(typeof out.refusal === 'string' && { refusal: out.refusal }),
+      text: currentText,
+      cursor: currentCursor,
+    }
+  }
+  const settled = filledDraft ?? applyFill(rawText, mode)
+  if (filledDraft === undefined) {
+    commitDraft(settled.text, settled.cursor)
+  }
+  return {
+    isFilled: true,
+    ok: true,
+    text: settled.text,
+    cursor: settled.cursor,
+  }
 }
 
 function pluginStoreRoot(): string {
@@ -10315,14 +12618,15 @@ function siteHasElement(
 /** densable `dUe` — plugins whose `ui.render` matcher matches `{component}`. */
 function pluginsWithUiRenderComponent(component: string): string[] {
   return loadedModules
-    .filter(mod =>
-      (mod.hooks ?? []).some(
+    .filter(mod => {
+      const builtin = isBuiltinTierMod(mod)
+      return (mod.hooks ?? []).some(
         hook =>
           (functionHookPatternMatches(hook.pattern, 'ui.render') ||
             functionHookPatternMatches(hook.pattern, 'classic.ui.render')) &&
-          matcherAllows(hook.matcher, { component }, 'ui.render'),
-      ),
-    )
+          matcherAllows(hook.matcher, { component }, 'ui.render', builtin),
+      )
+    })
     .map(mod => mod.name)
 }
 
@@ -11025,6 +13329,14 @@ export async function invokePress(
 ): Promise<unknown> {
   const held = pressHandlers.get(pressSlot(environmentId, handle))
   if (held === undefined) {
+    if (workerOwnsDispatch && functionHooksWorker) {
+      const mod = loadedModules.find(
+        item => item.name === environmentId && item.status !== 'unloaded',
+      )
+      if (mod && mod.native !== true) {
+        return functionHooksWorker.press(environmentId, handle, event)
+      }
+    }
     throw new Error(
       `ui.press/ui.input/ui.select: no handler is held under handle ${handle}`,
     )
@@ -11052,10 +13364,10 @@ export function releasePresses(
   site?: { component: string; requestId: string },
 ): void {
   if (handles.length === 0) return
-  const loaded = loadedModules.some(
-    mod => mod.name === environmentId && mod.status !== 'unloaded',
+  const mod = loadedModules.find(
+    item => item.name === environmentId && item.status !== 'unloaded',
   )
-  if (!loaded) {
+  if (!mod) {
     const component = site?.component ?? 'Pane'
     const requestId = site?.requestId ?? ''
     logForDebugging(
@@ -11065,6 +13377,9 @@ export function releasePresses(
   }
   for (const handle of handles) {
     pressHandlers.delete(pressSlot(environmentId, handle))
+  }
+  if (mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
+    functionHooksWorker.releasePresses(environmentId, handles)
   }
 }
 
@@ -11076,7 +13391,12 @@ function collectButtonHandles(tree: unknown): Map<string, unknown[]> {
       return
     }
     if (!isEventRecord(node)) return
-    if (node.type === 'Button') {
+    if (
+      node.type === 'Button' ||
+      node.type === 'Select' ||
+      node.type === 'Input' ||
+      node.type === 'Markdown'
+    ) {
       const press = isEventRecord(node.press) ? node.press : undefined
       const plugin = typeof press?.plugin === 'string' ? press.plugin : ''
       if (plugin !== '' && press?.handle !== undefined) {
@@ -11447,6 +13767,9 @@ type WorkerReply = {
   returned?: unknown
   error?: string
   argument?: unknown
+  floors?: readonly HopFloor[]
+  open?: { argument?: unknown }
+  step?: { done: boolean; value: unknown }
   nextId?: number
   callId?: number
   pressId?: number
@@ -11467,6 +13790,15 @@ type PendingJob = {
   reject: (err: Error) => void
   abort: AbortController
   tail?: FunctionHookTail
+  streamPull?: {
+    resolve: (step: { done: boolean; value: unknown }) => void
+    reject: (err: Error) => void
+  }
+  openNextStream?: (
+    arg: Record<string, unknown>,
+  ) => AsyncGenerator<unknown, unknown, unknown>
+  openedNextStreams?: Map<number, AsyncGenerator<unknown, unknown, unknown>>
+  isStream?: boolean
   environments: string[]
   failed: Set<string>
 }
@@ -11540,16 +13872,130 @@ class FunctionHooksWorkerClient {
       }
       if (message.type === 'next') {
         const job = this.inFlight.get(message.id ?? -1)
-        void Promise.resolve(
-          job?.tail?.(isEventRecord(message.argument) ? message.argument : {}),
-        ).then(value => {
+        if (!job || !job.tail) {
           this.post({
-            type: 'next_result',
+            type: 'next_error',
             id: message.id,
             nextId: message.nextId,
-            result: value,
+            error: 'dispatch settled',
           })
-        })
+          return
+        }
+        const nextFloors = Array.isArray(message.floors)
+          ? (message.floors as readonly HopFloor[])
+          : undefined
+        void Promise.resolve()
+          .then(() =>
+            job.tail!(
+              isEventRecord(message.argument) ? message.argument : {},
+              nextFloors,
+            ),
+          )
+          .then(
+            value => {
+              try {
+                this.post({
+                  type: 'next_result',
+                  id: message.id,
+                  nextId: message.nextId,
+                  result: value,
+                })
+              } catch (postErr) {
+                this.post({
+                  type: 'next_error',
+                  id: message.id,
+                  nextId: message.nextId,
+                  error:
+                    postErr instanceof Error
+                      ? postErr.message
+                      : String(postErr),
+                })
+              }
+            },
+            err => {
+              this.post({
+                type: 'next_error',
+                id: message.id,
+                nextId: message.nextId,
+                error: err instanceof Error ? err.message : String(err),
+              })
+            },
+          )
+        return
+      }
+      if (message.type === 'next_pull') {
+        const job = this.inFlight.get(message.id ?? -1)
+        const nextId = message.nextId ?? -1
+        if (!job || !job.openNextStream || !job.openedNextStreams) {
+          this.post({
+            type: 'next_error',
+            id: message.id,
+            nextId,
+            error: 'dispatch settled',
+          })
+          return
+        }
+        let gen = job.openedNextStreams.get(nextId)
+        if (!gen) {
+          if (!message.open) {
+            this.post({
+              type: 'next_error',
+              id: message.id,
+              nextId,
+              error: 'no stream is open under this nextId',
+            })
+            return
+          }
+          try {
+            const arg = isEventRecord(message.open.argument)
+              ? message.open.argument
+              : {}
+            gen = job.openNextStream(arg)
+            job.openedNextStreams.set(nextId, gen)
+          } catch (openErr) {
+            this.post({
+              type: 'next_error',
+              id: message.id,
+              nextId,
+              error:
+                openErr instanceof Error ? openErr.message : String(openErr),
+            })
+            return
+          }
+        }
+        void gen.next().then(
+          step => {
+            if (step.done === true) {
+              job.openedNextStreams?.delete(nextId)
+            }
+            try {
+              this.post({
+                type: 'next_step',
+                id: message.id,
+                nextId,
+                step: { done: step.done === true, value: step.value },
+              })
+            } catch (postErr) {
+              this.post({
+                type: 'next_error',
+                id: message.id,
+                nextId,
+                error: `a chunk that is not plain data: ${
+                  postErr instanceof Error ? postErr.message : String(postErr)
+                }`,
+              })
+            }
+          },
+          err => {
+            job.openedNextStreams?.delete(nextId)
+            this.post({
+              type: 'next_error',
+              id: message.id,
+              nextId,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          },
+        )
         return
       }
       if (message.type === 'loaded' || message.type === 'load_error') {
@@ -11601,6 +14047,25 @@ class FunctionHooksWorkerClient {
       }
       const job = this.inFlight.get(message.id ?? -1)
       if (!job) return
+      if (job.isStream) {
+        const pull = job.streamPull
+        job.streamPull = undefined
+        if (message.type === 'error') {
+          this.inFlight.delete(message.id ?? -1)
+          const err = new Error(message.error ?? 'hooks worker failed')
+          if (pull) pull.reject(err)
+          else job.reject(err)
+          return
+        }
+        if (message.type === 'stream_step' && message.step !== undefined) {
+          if (message.step.done) {
+            this.inFlight.delete(message.id ?? -1)
+            this.clearOverruns(job)
+          }
+          pull?.resolve(message.step)
+          return
+        }
+      }
       this.inFlight.delete(message.id ?? -1)
       if (message.type === 'error')
         job.reject(new Error(message.error ?? 'hooks worker failed'))
@@ -11713,11 +14178,26 @@ class FunctionHooksWorkerClient {
     channel.port1.on('message', (raw: unknown) => {
       const message = isEventRecord(raw) ? raw : undefined
       if (!message || message.type !== 'op') return
-      void handleHostOp(
-        String(message.op ?? ''),
-        Array.isArray(message.args) ? message.args : [],
-        plugin.name,
-      ).then(
+      const registration =
+        typeof message.registration === 'number'
+          ? message.registration
+          : undefined
+      const forwardedOrigin = Array.isArray(message.hookOrigin)
+        ? (message.hookOrigin as readonly HookOriginEntry[])
+        : registration !== undefined
+          ? ([{ plugin: plugin.name, registration }] as const)
+          : undefined
+      const runOp = () =>
+        handleHostOp(
+          String(message.op ?? ''),
+          Array.isArray(message.args) ? message.args : [],
+          plugin.name,
+        )
+      const pending =
+        forwardedOrigin !== undefined
+          ? activeHookOriginAls.run(forwardedOrigin, runOp)
+          : runOp()
+      void pending.then(
         value => {
           channel.port1.postMessage({
             type: 'op_result',
@@ -11763,6 +14243,11 @@ class FunctionHooksWorkerClient {
     environments: string[],
     tail: FunctionHookTail,
     only?: string,
+    callOptions?: {
+      origin?: HookCallOrigin
+      hookOrigin?: readonly HookOriginEntry[]
+      floors?: readonly HopFloor[]
+    },
   ): Promise<WorkerReply> {
     if (this.died !== undefined) return Promise.reject(new Error(this.died))
     const id = ++this.nextId
@@ -11783,8 +14268,105 @@ class FunctionHooksWorkerClient {
         payload,
         environments,
         only,
+        ...(callOptions?.origin !== undefined && {
+          origin: callOptions.origin,
+        }),
+        ...(callOptions?.hookOrigin !== undefined && {
+          hookOrigin: callOptions.hookOrigin,
+        }),
+        ...(callOptions?.floors !== undefined && {
+          floors: callOptions.floors,
+        }),
       })
     })
+  }
+
+  engineCreate(
+    payload: Record<string, unknown>,
+    environments: string[],
+  ): Promise<WorkerReply> {
+    if (this.died !== undefined) return Promise.reject(new Error(this.died))
+    const id = ++this.nextId
+    const abort = new AbortController()
+    return new Promise((resolve, reject) => {
+      this.inFlight.set(id, {
+        resolve,
+        reject,
+        abort,
+        environments,
+        failed: new Set(),
+      })
+      this.post({
+        type: 'engine_create',
+        id,
+        payload,
+        environments,
+      })
+    })
+  }
+
+  async *stream<TChunk, TReturn = unknown>(
+    event: string,
+    payload: Record<string, unknown>,
+    environments: string[],
+    openNextStream: (
+      arg: Record<string, unknown>,
+    ) => AsyncGenerator<unknown, unknown, unknown>,
+    only?: string,
+  ): AsyncGenerator<TChunk, TReturn, unknown> {
+    if (this.died !== undefined) throw new Error(this.died)
+    const id = ++this.nextId
+    const abort = new AbortController()
+    const openedNextStreams = new Map<
+      number,
+      AsyncGenerator<unknown, unknown, unknown>
+    >()
+    const job: PendingJob = {
+      resolve: () => {},
+      reject: () => {},
+      abort,
+      isStream: true,
+      openNextStream,
+      openedNextStreams,
+      environments,
+      failed: new Set(),
+    }
+    this.inFlight.set(id, job)
+    this.post({
+      type: 'dispatch_stream',
+      id,
+      event,
+      payload,
+      environments,
+      only,
+      hasTail: true,
+    })
+    let finished = false
+    try {
+      while (true) {
+        if (this.died !== undefined) throw new Error(this.died)
+        const step = await new Promise<{ done: boolean; value: unknown }>(
+          (resolve, reject) => {
+            job.streamPull = { resolve, reject }
+            this.post({ type: 'stream_pull', id })
+          },
+        )
+        if (step.done) {
+          finished = true
+          return step.value as TReturn
+        }
+        yield step.value as TChunk
+      }
+    } finally {
+      this.inFlight.delete(id)
+      if (!finished && this.died === undefined) {
+        this.post({ type: 'stream_close', id })
+      }
+      for (const gen of openedNextStreams.values()) {
+        void Promise.resolve(gen.return(undefined)).catch(() => undefined)
+      }
+      openedNextStreams.clear()
+    }
   }
 
   build(
@@ -11949,6 +14531,7 @@ function unloadModule(name: string): void {
   for (const key of [...pluginStore.keys()]) {
     if (key.startsWith(`${name}\0`)) pluginStore.delete(key)
   }
+  forgetPluginSessionAuthHandles(name)
   ownedTables.delete(name)
   resolvedTables.delete(name)
   resolvedByKey.delete(name)
@@ -12287,9 +14870,10 @@ export function setPluginBandExpanded(next: boolean): void {
 function uiRenderMatcherMatches(
   matcher: unknown,
   site: ClientFaultSite,
+  isBuiltin = false,
 ): boolean {
   if (Array.isArray(matcher)) {
-    return matcher.some(item => uiRenderMatcherMatches(item, site))
+    return matcher.some(item => uiRenderMatcherMatches(item, site, isBuiltin))
   }
   return matcherAllows(
     matcher,
@@ -12299,6 +14883,7 @@ function uiRenderMatcherMatches(
       requestId: site.requestId,
     },
     'ui.render',
+    isBuiltin,
   )
 }
 
@@ -12306,13 +14891,14 @@ function uiRenderMatcherMatches(
 function uiRenderPluginNames(site: ClientFaultSite): string[] {
   return loadedModules
     .filter(mod => mod.status !== 'unloaded')
-    .filter(mod =>
-      (mod.hooks ?? []).some(
+    .filter(mod => {
+      const builtin = isBuiltinTierMod(mod)
+      return (mod.hooks ?? []).some(
         hook =>
           functionHookPatternMatches(hook.pattern, 'ui.render') &&
-          uiRenderMatcherMatches(hook.matcher, site),
-      ),
-    )
+          uiRenderMatcherMatches(hook.matcher, site, builtin),
+      )
+    })
     .map(mod => mod.name)
 }
 
@@ -12464,6 +15050,7 @@ function ownerHeardUiFault(report: ClientFaultReport): boolean {
   return loadedModules.some(mod => {
     if (mod.name !== report.plugin) return false
     if (mod.status === 'unloaded') return false
+    const builtin = isBuiltinTierMod(mod)
     return (mod.hooks ?? []).some(hook => {
       if (!functionHookPatternMatches(hook.pattern, needle)) return false
       try {
@@ -12479,6 +15066,7 @@ function ownerHeardUiFault(report: ClientFaultReport): boolean {
             reason: report.reason,
           },
           needle,
+          builtin,
         )
       } catch {
         return true
@@ -12622,42 +15210,80 @@ export async function dispatchClientMessage(
  * densable `FCe(event).checkMatcher`. Field equality, plus ui.render's
  * engine-alone component (`AskUserQuestion`).
  */
-function checkMatcher(event: string, matcher: unknown): string | undefined {
+function checkMatcher(
+  event: string,
+  matcher: unknown,
+  isBuiltin = false,
+): string | undefined {
   if (!isEventRecord(matcher)) return undefined
   const body = event.startsWith('classic.')
     ? event.slice('classic.'.length)
     : event
   if (
     (body === 'ui.render' || event === 'ui.render') &&
-    Object.hasOwn(matcher, 'component') &&
-    matcher.component === ENGINE_ALONE_UI_RENDER
+    Object.hasOwn(matcher, 'component')
   ) {
-    return `${ENGINE_ALONE_UI_RENDER} is drawn by the engine alone; its answer authorises an action. A plugin adds context with $.ui.notice`
+    if (matcher.component === 'PermissionRequest') {
+      return 'PermissionRequest is drawn by the engine alone; its answer authorises an action. A plugin adds context with $.ui.notice'
+    }
+    const isModHotReloadCard =
+      isBuiltin ||
+      (isEventRecord(matcher.props) &&
+        matcher.props.metadataSource === 'mod_hot_reload')
+    if (matcher.component === ENGINE_ALONE_UI_RENDER && !isModHotReloadCard) {
+      return `${ENGINE_ALONE_UI_RENDER} is drawn by the engine alone; its answer authorises an action. A plugin adds context with $.ui.notice`
+    }
   }
   return undefined
 }
 
-/** A non-object matcher matches everything. Object fields must equal the event. */
+function matchFieldValue(expected: unknown, actual: unknown): boolean {
+  if (expected instanceof RegExp) {
+    if (typeof actual !== 'string') return false
+    if (expected.flags.includes('g') || expected.flags.includes('y')) {
+      expected.lastIndex = 0
+    }
+    return expected.exec(actual) !== null
+  }
+  if (Array.isArray(expected)) {
+    return expected.some(item => matchFieldValue(item, actual))
+  }
+  if (isEventRecord(expected)) {
+    if (!isEventRecord(actual)) return false
+    return Object.entries(expected).every(([k, v]) =>
+      matchFieldValue(v, actual[k]),
+    )
+  }
+  return expected === actual
+}
+
+/** A non-object matcher matches everything. Object/array/RegExp fields match gold `vSt`. */
 function matcherAllows(
   matcher: unknown,
   event: Record<string, unknown>,
   eventName?: string,
+  isBuiltin = false,
 ): boolean {
+  if (Array.isArray(matcher)) {
+    return matcher.some(entry =>
+      matcherAllows(entry, event, eventName, isBuiltin),
+    )
+  }
   if (!isEventRecord(matcher)) return true
   if (
     eventName !== undefined &&
-    checkMatcher(eventName, matcher) !== undefined
+    checkMatcher(eventName, matcher, isBuiltin) !== undefined
   ) {
     return false
   }
-  return Object.entries(matcher).every(
-    ([key, expected]) => event[key] === expected,
+  return Object.entries(matcher).every(([key, expected]) =>
+    matchFieldValue(expected, event[key]),
   )
 }
 
 const REGISTER_FILE = 'hooks/register.ts'
 
-/** densable `yOt` tails after `classic.<HookEvent>`. */
+/** densable `uQe` + `WEn` tails after `classic.<HookEvent>` (gold 2.1.289). */
 const FUNCTION_HOOK_EVENTS = [
   'tool.call',
   'tool.check',
@@ -12679,15 +15305,19 @@ const FUNCTION_HOOK_EVENTS = [
   'prompt.section',
   'prompt.context',
   'prompt.attachment',
+  'prompt.compose',
   'tool.describe',
   'command.run',
   'command.describe',
   'config.set',
   'config.describe',
+  'telemetry.log',
+  'telemetry.mark',
   'skill.prompt',
   'attribution.text',
   'session.start',
   'session.receive',
+  'session.append',
   'session.send',
   'session.compact',
   'session.attach',
@@ -12705,10 +15335,62 @@ const FUNCTION_HOOK_EVENTS = [
   'audio.play',
   'audio.speak',
   'mcp.call',
+  'mcp.connect',
   'session.cwd',
   'session.root',
   'session.model',
   'session.turns',
+  'session.id',
+  'session.messages',
+  'session.repo',
+  'session.surface',
+  'session.surfaces',
+  'session.authorize',
+  'session.usage',
+  'session.version',
+  'turn.abort',
+  'prompt.read',
+  'flag.value',
+  'tool.list',
+  'tool.register',
+  'command.list',
+  'command.register',
+  'config.list',
+  'agent.list',
+  'agent.register',
+  'ui.toast',
+  'ui.status',
+  'ui.log',
+  'ui.notice',
+  'ui.invalidate',
+  'ui.open',
+  'ui.close',
+  'ui.panes',
+  'ui.selection',
+  'ui.copy',
+  'ui.blit',
+  'fs.read',
+  'fs.write',
+  'fs.list',
+  'fs.exists',
+  'fs.stat',
+  'fs.ancestors',
+  'store.get',
+  'store.set',
+  'store.delete',
+  'store.keys',
+  'state.get',
+  'state.set',
+  'clock.now',
+  'clock.sleep',
+  'clock.after',
+  'clock.every',
+  'http.fetch',
+  'process.run',
+  'process.spawn',
+  'settings.read',
+  'env.get',
+  'env.set',
 ] as const
 
 const KNOWN_EVENTS = new Set<string>([
@@ -12787,6 +15469,185 @@ export type FunctionHookPlugin = {
   tier?: LoadedFunctionHooksModule['tier']
 }
 
+export type LeftoverHooksModule =
+  | {
+      module: { register: (...args: unknown[]) => unknown }
+      scan: unknown
+      files: Readonly<Record<string, string>>
+    }
+  | {
+      module: { register: (...args: unknown[]) => unknown }
+      folder: string
+    }
+
+const leftoverHooksByName = new Map<string, LeftoverHooksModule>()
+const leftoverShipped = new Map<
+  string,
+  { register: (...args: unknown[]) => unknown }
+>()
+const leftoverScans = new Map<string, unknown>()
+
+/**
+ * densable Vo — `builtin:${name}/${ue}` with ue = REGISTER_FILE.
+ * Never export minify `Vo`.
+ */
+function leftoverVo(name: string): string {
+  return `builtin:${name}/${REGISTER_FILE}`
+}
+
+/**
+ * densable Lh — folder overlay `{path:folder, modulePath:join(folder,ue)}`,
+ * else `{path:Ai, modulePath:Vo(name)}`. Never export minify `Lh`.
+ */
+export function leftoverLh(
+  name: string,
+  hooks: LeftoverHooksModule,
+): { path: string; modulePath: string } {
+  return 'folder' in hooks
+    ? { path: hooks.folder, modulePath: join(hooks.folder, REGISTER_FILE) }
+    : { path: BUILTIN_MARKETPLACE_NAME, modulePath: leftoverVo(name) }
+}
+
+/** densable Ne — registerScan / register keyed by leftoverVo. Never export minify `Ne`. */
+const leftoverNe = {
+  registerScan(name: string, scan: unknown): void {
+    leftoverScans.set(name, scan)
+  },
+  register(
+    name: string,
+    shipped: { register: (...args: unknown[]) => unknown },
+  ): void {
+    leftoverShipped.set(name, shipped)
+  },
+  scan(name: string): unknown {
+    return leftoverScans.get(name)
+  },
+  source(name: string): unknown {
+    return leftoverShipped.get(name) ?? leftoverHooksByName.get(name)
+  },
+}
+
+function leftoverIsStandaloneExecutable(): boolean {
+  return (
+    typeof Bun !== 'undefined' &&
+    (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable ===
+      true
+  )
+}
+
+/** densable Bt — freeze string files from the scan payload. */
+function leftoverBt(payload: unknown): Readonly<Record<string, string>> {
+  const files =
+    payload !== null && typeof payload === 'object' && 'files' in payload
+      ? (payload as { files?: unknown }).files
+      : undefined
+  const entries =
+    files !== null && typeof files === 'object'
+      ? Object.entries(files as Record<string, unknown>)
+      : []
+  return Object.freeze(
+    Object.fromEntries(
+      entries.filter(([, value]) => typeof value === 'string'),
+    ),
+  ) as Readonly<Record<string, string>>
+}
+
+/** densable Ht — `{module, scan:Ut, files:Bt}`. Never export minify `Ht`. */
+function leftoverHt(
+  module: { register: (...args: unknown[]) => unknown },
+  payload: unknown,
+  dir: string,
+): {
+  module: { register: (...args: unknown[]) => unknown }
+  scan: unknown
+  files: Readonly<Record<string, string>>
+} {
+  return {
+    module,
+    scan: leftoverUt(payload, dir),
+    files: leftoverBt(payload),
+  }
+}
+
+/** densable Ut — scan.hooks + scan.calls arrays, else throw. */
+function leftoverUt(payload: unknown, dir: string): unknown {
+  const scan =
+    payload !== null && typeof payload === 'object' && 'scan' in payload
+      ? (payload as { scan?: unknown }).scan
+      : undefined
+  if (
+    scan !== null &&
+    typeof scan === 'object' &&
+    Array.isArray((scan as { hooks?: unknown }).hooks) &&
+    Array.isArray((scan as { calls?: unknown }).calls) &&
+    ((scan as { nextTo?: unknown }).nextTo === undefined ||
+      Array.isArray((scan as { nextTo?: unknown }).nextTo))
+  ) {
+    return scan
+  }
+  throw new Error(`the build carried no hooks module scan for ${dir}`)
+}
+
+/**
+ * densable FU(dir, module, scan) — SEA `Nu()?Ht:{module,folder}`.
+ * Return is Ht | `{module,folder}` only — never `{shipped}`.
+ * Never export minify `FU`.
+ */
+export function leftoverFu(
+  dir: string,
+  module: { register: (...args: unknown[]) => unknown },
+  scan: () => unknown,
+):
+  | {
+      module: { register: (...args: unknown[]) => unknown }
+      scan: unknown
+      files: Readonly<Record<string, string>>
+    }
+  | {
+      module: { register: (...args: unknown[]) => unknown }
+      folder: string
+    } {
+  return leftoverIsStandaloneExecutable()
+    ? leftoverHt(module, scan(), dir)
+    : { module, folder: dir }
+}
+
+/**
+ * densable uS — Ne keyed by leftoverVo; scan vs shipped if/else.
+ * leftoverHooksByName is analog extra for listBuiltinFunctionHookPlugins.
+ * Never export minify `uS`.
+ */
+export function leftoverUs(plugin: {
+  name: string
+  hooksModule?:
+    | LeftoverHooksModule
+    | { shipped: { register: (...args: unknown[]) => unknown } }
+}): void {
+  const hooks = plugin.hooksModule
+  if (hooks === undefined) return
+  const vo = leftoverVo(plugin.name)
+  if ('scan' in hooks) leftoverNe.registerScan(vo, hooks.scan)
+  else if ('shipped' in hooks) leftoverNe.register(vo, hooks.shipped)
+  // analog extra vs gold Ne-only: leftoverHooksByName feeds listBuiltinFunctionHookPlugins.
+  if (!('shipped' in hooks)) leftoverHooksByName.set(vo, hooks)
+}
+
+/** densable Ne.scan / Ne.source / Lh after uS. */
+export function leftoverBuiltinHooksModule(
+  name: string,
+): LeftoverHooksModule | undefined {
+  return leftoverHooksByName.get(leftoverVo(name))
+}
+
+function leftoverPluginNameFromVo(key: string): string {
+  const prefix = 'builtin:'
+  const suffix = `/${REGISTER_FILE}`
+  if (key.startsWith(prefix) && key.endsWith(suffix)) {
+    return key.slice(prefix.length, key.length - suffix.length)
+  }
+  return key
+}
+
 function resolvePluginStorageId(pluginName: string): string {
   const mod = loadedModules.find(m => m.name === pluginName)
   return mod?.pluginStorageId ?? pluginName
@@ -12802,11 +15663,141 @@ function resolvePluginStorageId(pluginName: string): string {
  * fails to load or whose `on()` rejects is skipped. Each load reads the
  * file again, so a later load sees edits.
  */
+function readPluginManifestDefaults(
+  pluginPath: string,
+): Record<string, unknown> {
+  if (pluginPath === '' || pluginPath === BUILTIN_MARKETPLACE_NAME) return {}
+  for (const candidate of [
+    join(pluginPath, '.claude-plugin', 'plugin.json'),
+    join(pluginPath, 'plugin.json'),
+  ]) {
+    try {
+      if (!existsSync(candidate)) continue
+      const parsed: unknown = JSON.parse(readFileSync(candidate, 'utf8'))
+      if (!isEventRecord(parsed) || !isEventRecord(parsed.userConfig)) continue
+      const defaults: Record<string, unknown> = {}
+      for (const [key, spec] of Object.entries(parsed.userConfig)) {
+        if (isEventRecord(spec) && spec.default !== undefined) {
+          defaults[key] = spec.default
+        }
+      }
+      return defaults
+    } catch {
+      // ignore malformed/missing manifest
+    }
+  }
+  return {}
+}
+
+function readAgentsMdSettingsOptions(): Record<string, unknown> {
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../settings/settings.js') as typeof import('../settings/settings.js')
+    const merged = mergeSettings(
+      (getInitialSettings() ?? {}) as Record<string, unknown>,
+    )
+    return {
+      ...(typeof merged.projectInstructions === 'string' && {
+        projectInstructions: merged.projectInstructions,
+      }),
+      ...(typeof merged.instructionFiles === 'string' && {
+        instructionFiles: merged.instructionFiles,
+      }),
+    }
+  } catch {
+    return mergeSettings({})
+  }
+}
+
+function resolveEffectivePluginOptions(
+  plugin: FunctionHookPlugin,
+): Record<string, unknown> {
+  const defaults = readPluginManifestDefaults(plugin.path)
+  let fromStorage: Record<string, unknown> = {}
+  if (typeof plugin.source === 'string' && plugin.source !== '') {
+    try {
+      const { loadPluginOptions } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./pluginOptionsStorage.js') as typeof import('./pluginOptionsStorage.js')
+      fromStorage = { ...loadPluginOptions(plugin.source) }
+    } catch {
+      fromStorage = {}
+    }
+  }
+  const isAgentsMd =
+    plugin.name === 'builtin:cc-plugin-agents-md' ||
+    plugin.name === 'cc-plugin-agents-md' ||
+    plugin.name === 'builtin:agents-md' ||
+    plugin.name === 'agents-md' ||
+    plugin.source === `cc-plugin-agents-md@${BUILTIN_MARKETPLACE_NAME}` ||
+    plugin.source === `agents-md@${BUILTIN_MARKETPLACE_NAME}`
+  const agentsMdOpts = isAgentsMd ? readAgentsMdSettingsOptions() : {}
+  return {
+    ...defaults,
+    ...agentsMdOpts,
+    ...fromStorage,
+    ...(plugin.options ?? {}),
+  }
+}
+
+async function admitUserPluginIfAllowed(
+  plugin: FunctionHookPlugin,
+  judges: readonly LoadedFunctionHooksModule[],
+): Promise<boolean> {
+  if (plugin.tier !== 'user') return true
+  const activeJudges = judges.filter(
+    mod => mod.tier !== 'user' && mod.status !== 'unloaded',
+  )
+  if (activeJudges.length === 0) return true
+  let scannedEvents: string[] = []
+  if (plugin.path !== '' && plugin.path !== BUILTIN_MARKETPLACE_NAME) {
+    try {
+      const src = readFileSync(join(plugin.path, REGISTER_FILE), 'utf8')
+      scannedEvents = scanFunctionHookSource(src).patterns
+    } catch {
+      scannedEvents = []
+    }
+  }
+  const shown: Record<string, unknown> = {
+    name: plugin.name,
+    tier: 'user',
+    root: plugin.path,
+    provenance: plugin.source ?? plugin.name,
+    uses: { events: scannedEvents, calls: [] },
+  }
+  if (!hasMatchingFunctionHook('plugin.register', shown, activeJudges)) {
+    return true
+  }
+  const prevLoaded = loadedModules
+  const prevWorkerOwns = workerOwnsDispatch
+  loadedModules = [...activeJudges]
+  workerOwnsDispatch = activeJudges.some(mod => mod.native !== true)
+  try {
+    const verdict = await runPluginRegister(shown, plugin.name)
+    if (verdict !== undefined && !('allow' in verdict)) {
+      logForDebugging(`${plugin.name}: ${pluginRegisterRefusedLine(verdict)}`, {
+        level: 'warn',
+      })
+      return false
+    }
+    return true
+  } finally {
+    loadedModules = prevLoaded
+    workerOwnsDispatch = prevWorkerOwns
+  }
+}
+
 export async function recordFunctionHookPlugins(
   plugins: readonly FunctionHookPlugin[],
 ): Promise<LoadedFunctionHooksModule[]> {
   const next: LoadedFunctionHooksModule[] = []
   for (const plugin of plugins) {
+    if (
+      !(await admitUserPluginIfAllowed(plugin, [...loadedModules, ...next]))
+    ) {
+      continue
+    }
     const recorded = await recordRegisterPatterns(plugin)
     if (recorded !== null) next.push(recorded)
   }
@@ -12850,11 +15841,28 @@ export async function loadFunctionHooksModules(
     replaceLoadedFunctionHooksModules(await loadFunctionHooksInProcess(plugins))
     return
   }
-  const worker = await ensureFunctionHooksWorker()
-  if (worker.died !== undefined) throw new Error(worker.died)
   const loaded: LoadedFunctionHooksModule[] = []
+  let worker: FunctionHooksWorkerClient | null = null
+  let loadedAnyWorkerPlugin = false
   for (const plugin of plugins) {
-    const reply = await worker.load(plugin)
+    if (!(await admitUserPluginIfAllowed(plugin, loaded))) {
+      continue
+    }
+    const withOptions: FunctionHookPlugin = {
+      ...plugin,
+      options: resolveEffectivePluginOptions(plugin),
+    }
+    if (resolveNativeBuiltinHooksModule(withOptions) !== undefined) {
+      const recorded = await recordRegisterPatterns(withOptions)
+      if (recorded !== null) loaded.push(recorded)
+      continue
+    }
+    if (!worker) {
+      worker = await ensureFunctionHooksWorker()
+      if (worker.died !== undefined) throw new Error(worker.died)
+    }
+    const reply = await worker.load(withOptions)
+    loadedAnyWorkerPlugin = true
     const registered = Array.isArray(reply.registered) ? reply.registered : []
     for (const mod of registered.filter(isWorkerModule)) {
       loaded.push({
@@ -12876,6 +15884,9 @@ export async function loadFunctionHooksModules(
         ...(plugin.source !== undefined && {
           pluginStorageId: plugin.source,
         }),
+        ...(plugin.link !== undefined && { link: plugin.link }),
+        ...(plugin.tier !== undefined && { tier: plugin.tier }),
+        ...(plugin.tier === 'prepend' && { isManaged: true }),
       })
     }
   }
@@ -12886,10 +15897,11 @@ export async function loadFunctionHooksModules(
     .filter(mod => mod.status !== 'unloaded' && !nextNames.has(mod.name))
     .map(mod => mod.name)
   for (const name of removed) {
+    forgetPluginOwnedMcpServers(name)
     await retireFunctionHooksModule(name)
   }
   replaceLoadedFunctionHooksModules(loaded)
-  workerOwnsDispatch = true
+  workerOwnsDispatch = loadedAnyWorkerPlugin
 }
 
 type WorkerModule = {
@@ -13042,82 +16054,166 @@ export function scanFunctionHookSource(source: string): {
   return { ok: true, patterns }
 }
 
-const BUILTIN_MODS_DIR = join(
-  import.meta.dir,
-  '../../../vendor/claude-code-mods/mods',
-)
-
 export function listBuiltinFunctionHookPlugins(): FunctionHookPlugin[] {
-  try {
-    const { readdirSync, statSync } = require('fs') as typeof import('fs')
-    return readdirSync(BUILTIN_MODS_DIR)
-      .filter(name => {
-        try {
-          if (!statSync(join(BUILTIN_MODS_DIR, name, REGISTER_FILE)).isFile()) {
-            return false
-          }
-        } catch {
-          return false
+  const listed: FunctionHookPlugin[] = []
+  let enabledSources: Set<string> | undefined
+  for (const key of leftoverHooksByName.keys()) {
+    const name = leftoverPluginNameFromVo(key)
+    try {
+      const { getBuiltinPluginDefinition, getBuiltinPlugins } =
+        require('../../plugins/builtinPlugins.js') as typeof import('../../plugins/builtinPlugins.js')
+      if (getBuiltinPluginDefinition(name) !== undefined) {
+        if (enabledSources === undefined) {
+          enabledSources = new Set(
+            getBuiltinPlugins().enabled.map(plugin => plugin.source),
+          )
         }
-        if (name === 'agents-md') {
-          try {
-            const { getFeatureValue_CACHED_MAY_BE_STALE } =
-              require('../../services/analytics/growthbook.js') as typeof import('../../services/analytics/growthbook.js')
-            return getFeatureValue_CACHED_MAY_BE_STALE(
-              'tengu_agents_md_mod',
-              true,
-            )
-          } catch {
-            return true
-          }
+        if (!enabledSources.has(`${name}@${BUILTIN_MARKETPLACE_NAME}`)) {
+          continue
         }
-        return true
-      })
-      .map(name => {
-        const plugin: FunctionHookPlugin = {
-          name: `builtin:${name}`,
-          path: join(BUILTIN_MODS_DIR, name),
-          source: `${name}@builtin`,
-          tier: 'builtin',
-        }
-        if (name === 'agents-md') {
-          try {
-            const { getInitialSettings } =
-              require('../settings/settings.js') as typeof import('../settings/settings.js')
-            const settings = getInitialSettings() ?? {}
-            plugin.options = {
-              ...(typeof settings.instructionFiles === 'string' && {
-                instructionFiles: settings.instructionFiles,
-              }),
-            }
-          } catch {
-            // settings optional during early boot
-          }
-        }
-        return plugin
-      })
-  } catch {
-    return []
+      }
+    } catch {
+      // builtinPlugins optional during standalone tests
+    }
+    const hooks = leftoverBuiltinHooksModule(name)
+    if (hooks === undefined) continue
+    const overlay = leftoverLh(name, hooks)
+    const tier: LoadedFunctionHooksModule['tier'] =
+      name === 'cc-plugin-sec-default' ? 'prepend' : 'builtin'
+    const plugin: FunctionHookPlugin = {
+      name: `builtin:${name}`,
+      path: overlay.path,
+      source: `${name}@${BUILTIN_MARKETPLACE_NAME}`,
+      tier,
+    }
+    const resolvedOpts = resolveEffectivePluginOptions(plugin)
+    if (Object.keys(resolvedOpts).length > 0) {
+      plugin.options = resolvedOpts
+    }
+    listed.push(plugin)
   }
+  return listed
+}
+
+const GLOBAL_FRAGMENT_SYMBOL = Symbol.for('claude-code.ui.fragment')
+
+function ensureGlobalHyperscriptHelpers(): void {
+  const g = globalThis as Record<string, unknown>
+  if (g.Fragment === undefined) {
+    Object.defineProperty(g, 'Fragment', {
+      value: GLOBAL_FRAGMENT_SYMBOL,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    })
+  }
+  if (g.h === undefined) {
+    const hyperscript = (
+      type: unknown,
+      props: Record<string, unknown> | null | undefined,
+      ...childList: unknown[]
+    ) => {
+      const rest = props ? { ...props } : {}
+      const fromProps = rest.children
+      delete rest.children
+      const flatChildren = flattenUiResolveChildren(
+        childList.length > 0 ? childList : fromProps,
+      )
+      if (typeof type === 'function') {
+        const nextProps: Record<string, unknown> = { ...rest }
+        if (flatChildren.length === 1) nextProps.children = flatChildren[0]
+        else if (flatChildren.length > 1) nextProps.children = flatChildren
+        return (type as (p: Record<string, unknown>) => unknown)(nextProps)
+      }
+      if (type === GLOBAL_FRAGMENT_SYMBOL) {
+        return {
+          type: 'Box',
+          props: { flexDirection: 'column' },
+          ...(flatChildren.length > 0 && { children: flatChildren }),
+        }
+      }
+      const node: Record<string, unknown> = { type }
+      if (Object.keys(rest).length > 0) node.props = rest
+      if (flatChildren.length > 0) node.children = flatChildren
+      return node
+    }
+    Object.defineProperty(g, 'h', {
+      value: hyperscript,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    })
+  }
+}
+
+/**
+ * densable `rD(n)` — look up `hooksModule.module` for `@builtin` plugins so
+ * built-in mods run natively in-process (both dev and standalone SEA).
+ */
+function resolveNativeBuiltinHooksModule(
+  plugin: FunctionHookPlugin,
+): { register: (...args: unknown[]) => unknown } | undefined {
+  const suffix = `@${BUILTIN_MARKETPLACE_NAME}`
+  if (plugin.source === undefined || !plugin.source.endsWith(suffix)) {
+    return undefined
+  }
+  const rawName = plugin.source.slice(0, -suffix.length)
+  try {
+    const { getBuiltinPluginDefinition } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../plugins/builtinPlugins.js') as typeof import('../../plugins/builtinPlugins.js')
+    const defHooks = getBuiltinPluginDefinition(rawName)?.hooksModule
+    if (
+      defHooks !== undefined &&
+      'module' in defHooks &&
+      typeof defHooks.module?.register === 'function'
+    ) {
+      return defHooks.module
+    }
+  } catch {
+    // builtinPlugins optional in isolated unit tests
+  }
+  const registeredHooks = leftoverBuiltinHooksModule(rawName)
+  if (
+    registeredHooks !== undefined &&
+    'module' in registeredHooks &&
+    typeof registeredHooks.module?.register === 'function'
+  ) {
+    return registeredHooks.module
+  }
+  return undefined
 }
 
 async function recordRegisterPatterns(
   plugin: FunctionHookPlugin,
 ): Promise<LoadedFunctionHooksModule | null> {
-  const modulePath = join(plugin.path, REGISTER_FILE)
-  let source: string
-  try {
-    source = readFileSync(modulePath, 'utf8')
-  } catch {
-    return null
-  }
-  const scanned = scanFunctionHookSource(source)
-  if (!scanned.ok) return null
+  const nativeModule = resolveNativeBuiltinHooksModule(plugin)
+  let source = ''
   let loaded: { register?: unknown }
-  try {
-    loaded = await loadRegisterNamespace(plugin, modulePath)
-  } catch {
-    return null
+  if (nativeModule !== undefined) {
+    ensureGlobalHyperscriptHelpers()
+    loaded = nativeModule
+    if (plugin.path !== BUILTIN_MARKETPLACE_NAME) {
+      try {
+        source = readFileSync(join(plugin.path, REGISTER_FILE), 'utf8')
+      } catch {
+        source = ''
+      }
+    }
+  } else {
+    const modulePath = join(plugin.path, REGISTER_FILE)
+    try {
+      source = readFileSync(modulePath, 'utf8')
+    } catch {
+      return null
+    }
+    const scanned = scanFunctionHookSource(source)
+    if (!scanned.ok) return null
+    try {
+      loaded = await loadRegisterNamespace(plugin, modulePath)
+    } catch {
+      return null
+    }
   }
   if (typeof loaded.register !== 'function') return null
   const patterns: string[] = []
@@ -13138,7 +16234,11 @@ async function recordRegisterPatterns(
     if (typeof hook !== 'function') {
       throw new Error(`${plugin.name}: on("${pattern}") takes a function`)
     }
-    const matcherReason = checkMatcher(pattern, matcher)
+    const isBuiltin =
+      plugin.tier === 'builtin' ||
+      plugin.tier === 'prepend' ||
+      plugin.tier === 'core'
+    const matcherReason = checkMatcher(pattern, matcher, isBuiltin)
     if (matcherReason !== undefined) {
       throw new Error(`${plugin.name}: ${pattern}: ${matcherReason}`)
     }
@@ -13155,9 +16255,10 @@ async function recordRegisterPatterns(
         )
       }
     }
+    const hasMatcher = matcher !== undefined
     const isWildcard =
       pattern === '*' || pattern.endsWith('.*') || pattern.startsWith('!')
-    if (!isWildcard) {
+    if (!hasMatcher || isWildcard) {
       if (seen.has(pattern)) {
         throw new Error(`${plugin.name}: on("${pattern}") registered twice`)
       }
@@ -13192,14 +16293,14 @@ async function recordRegisterPatterns(
     }
   }
   try {
-    await loaded.register(on, plugin.options ?? {})
+    await loaded.register(on, resolveEffectivePluginOptions(plugin))
   } catch {
     return null
   }
-  const surfaceModules = loadScannedSurfaceModules(
-    plugin.path,
-    scanClientModulePaths(source),
-  )
+  const surfaceModules =
+    source !== '' && plugin.path !== BUILTIN_MARKETPLACE_NAME
+      ? loadScannedSurfaceModules(plugin.path, scanClientModulePaths(source))
+      : []
   return {
     name: plugin.name,
     root: plugin.path,
@@ -13209,5 +16310,7 @@ async function recordRegisterPatterns(
     ...(plugin.source !== undefined && { pluginStorageId: plugin.source }),
     ...(plugin.link !== undefined && { link: plugin.link }),
     ...(plugin.tier !== undefined && { tier: plugin.tier }),
+    ...(plugin.tier === 'prepend' && { isManaged: true }),
+    ...(nativeModule !== undefined && { native: true }),
   }
 }

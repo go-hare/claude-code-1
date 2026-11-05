@@ -25,6 +25,7 @@ import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { applyEngineConfirmDisplay, normalizeAskQuestions } from '../../../dialog/permissionAsk.js';
 import { isEngineConfirmAsk } from '../../../utils/permissions/confirmWithUser.js';
 import { resolvePermissionRequestSource } from '../../../dialog/permissionRequestSource.js';
+import { PluginAskUserQuestionSite } from '../../PluginRasterPanes.js';
 import { AfkCountdown } from './AfkCountdown.js';
 import { QuestionView } from './QuestionView.js';
 import { SubmitQuestionsView } from './SubmitQuestionsView.js';
@@ -457,8 +458,9 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
     { context: 'Tabs', isActive: !(isInTextInput && !isInSubmitView) },
   );
 
+  let engineNode: React.ReactNode = null;
   if (currentQuestion) {
-    return (
+    engineNode = (
       <>
         <QuestionView
           question={currentQuestion}
@@ -490,10 +492,8 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
         <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
       </>
     );
-  }
-
-  if (isInSubmitView) {
-    return (
+  } else if (isInSubmitView) {
+    engineNode = (
       <>
         <SubmitQuestionsView
           questions={questions}
@@ -509,8 +509,16 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
     );
   }
 
-  // This should never be reached
-  return null;
+  return (
+    <PluginAskUserQuestionSite
+      requestId={toolUseConfirm.toolUseID}
+      toolName={toolUseConfirm.tool.name}
+      questions={questions}
+      metadataSource={metadataSource}
+    >
+      {engineNode}
+    </PluginAskUserQuestionSite>
+  );
 }
 
 // densable I3: resize may degrade to text placeholders

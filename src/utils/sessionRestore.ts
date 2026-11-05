@@ -406,6 +406,8 @@ type ResumeLoadResult = {
   tag?: string
   mode?: 'coordinator' | 'normal'
   worktreeSession?: PersistedWorktreeSession | null
+  /** densable currentSessionDevModsFolder */
+  devModsFolder?: string
   prNumber?: number
   prUrl?: string
   prRepository?: string

@@ -28,6 +28,7 @@ import {
 } from './plugins/pluginOptionsStorage.js'
 import { getPluginDataDir } from './plugins/pluginDirectories.js'
 import {
+  getPluginRegisteredCommands,
   hasMatchingFunctionHook,
   runFunctionHookChain,
 } from './plugins/functionHooksModules.js'
@@ -188,7 +189,7 @@ import {
 import { getMainThreadAgentHooks } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import { jsonStringify, jsonParse, slowLogging } from './slowOperations.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isBareMode, isEnvTruthy } from './envUtils.js'
 import {
   ControlStreamClosedError,
   errorMessage,
@@ -2386,6 +2387,12 @@ export function hasHookForEvent(
   const mt = getMainThreadAgentHooks()?.[hookEvent]
   if (mt && mt.length > 0) return true
   if (appState?.sessionHooks.get(sessionId)?.hooks[hookEvent]) return true
+  if (
+    !shouldDisableAllHooksIncludingManaged() &&
+    hasMatchingFunctionHook(hookEvent)
+  ) {
+    return true
+  }
   return false
 }
 
@@ -5260,6 +5267,55 @@ export async function* executeSessionStartHooks(
   // Official flo: ihr("hook_exec", ees) / try yield* S2 / finally shr
   startSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
   try {
+    if (
+      source !== 'clear' &&
+      source !== 'compact' &&
+      !isBareMode() &&
+      !shouldDisableAllHooksIncludingManaged() &&
+      hasMatchingFunctionHook('session.start')
+    ) {
+      const activeSessionId = sessionId ?? getSessionId()
+      const isInteractive = !getIsNonInteractiveSession()
+      const cwd = getCwd()
+      const surface = isInteractive ? 'terminal' : null
+      logForDebugging(
+        `session.start: raised (surface ${surface ?? 'none'}, ${isInteractive ? 'interactive' : 'not interactive'})`,
+      )
+      try {
+        await runFunctionHookChain(
+          'session.start',
+          {
+            sessionId: activeSessionId,
+            isInteractive,
+            cwd,
+            surface,
+            source,
+            ...(model !== undefined ? { model } : {}),
+          },
+          async () => ({ cwd }),
+          undefined,
+          undefined,
+          signal ? { signal } : undefined,
+        )
+      } catch (err) {
+        logForDebugging(
+          `session.start: failed: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        )
+      }
+      if (getPluginRegisteredCommands().length > 0) {
+        const { clearCommandMemoizationCaches } = await import('../commands.js')
+        clearCommandMemoizationCaches()
+        try {
+          const { notifySkillsInvalidated } = await import(
+            './skills/skillChangeDetector.js'
+          )
+          notifySkillsInvalidated()
+        } catch {
+          // optional in isolated tests
+        }
+      }
+    }
     yield* executeHooks({
       hookInput,
       toolUseID: randomUUID(),
@@ -5694,6 +5750,7 @@ export async function executeSessionEndHooks(
     timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
   } = options || {}
 
+  const endingSessionId = getSessionId()
   const hookInput = {
     ...createBaseHookInput(undefined),
     hook_event_name: 'SessionEnd' as const,
@@ -5719,8 +5776,49 @@ export async function executeSessionEndHooks(
 
   // Clear session hooks after execution
   if (setAppState) {
-    const sessionId = getSessionId()
-    clearSessionHooks(setAppState, sessionId)
+    clearSessionHooks(setAppState, endingSessionId)
+  }
+
+  if (
+    !isBareMode() &&
+    !shouldDisableAllHooksIncludingManaged() &&
+    hasMatchingFunctionHook('session.end')
+  ) {
+    const boundMs = getSessionEndHooksBoundMs()
+    const boundSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(boundMs)])
+      : AbortSignal.timeout(boundMs)
+    let boundTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        runFunctionHookChain(
+          'session.end',
+          {
+            sessionId: endingSessionId,
+            reason,
+            resume: { id: endingSessionId },
+          },
+          async () => ({ sessionId: endingSessionId }),
+          undefined,
+          undefined,
+          { signal: boundSignal },
+        ),
+        new Promise<never>((_, reject) => {
+          boundTimer = setTimeout(
+            () => reject(new Error('SessionEnd bound exceeded')),
+            boundMs,
+          )
+          boundTimer.unref?.()
+        }),
+      ])
+    } catch (err) {
+      const detail = boundSignal.aborted
+        ? 'cut at the SessionEnd bound, the session ends regardless'
+        : `failed: ${err instanceof Error ? err.message : String(err)}`
+      logForDebugging(`session.end (${reason}): ${detail}`, { level: 'warn' })
+    } finally {
+      if (boundTimer !== undefined) clearTimeout(boundTimer)
+    }
   }
 }
 

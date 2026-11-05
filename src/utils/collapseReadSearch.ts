@@ -1650,15 +1650,21 @@ function leftoverQrrLeConfig(): {
     clientDataCacheSlots?: Record<string, LeftoverQrrSlot> | null
   }
   saveGlobalConfig: (
-    updater: (current: {
-      clientDataCache?: Record<string, unknown> | null
-      clientDataCacheSlots?: Record<string, LeftoverQrrSlot> | null
-    }) => typeof current,
+    updater: <
+      T extends {
+        clientDataCache?: Record<string, unknown> | null
+        clientDataCacheSlots?: Record<string, LeftoverQrrSlot> | null
+      },
+    >(
+      current: T,
+    ) => T,
   ) => void
 } | null {
   try {
     /* eslint-disable @typescript-eslint/no-require-imports */
-    return require('./config.js') as typeof import('./config.js')
+    return require('./config.js') as unknown as ReturnType<
+      typeof leftoverQrrLeConfig
+    >
     /* eslint-enable @typescript-eslint/no-require-imports */
   } catch {
     return null

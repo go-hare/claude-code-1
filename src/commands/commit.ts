@@ -1,5 +1,9 @@
 import type { Command } from '../commands.js'
-import { getAttributionTexts } from '../utils/attribution.js'
+import * as attributionMod from '../utils/attribution.js'
+import {
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from '../utils/plugins/functionHooksModules.js'
 import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.js'
 import { getUndercoverInstructions, isUndercover } from '../utils/undercover.js'
 
@@ -9,8 +13,73 @@ const ALLOWED_TOOLS = [
   'Bash(git commit:*)',
 ]
 
-function getPromptContent(): string {
-  const { commit: commitAttribution } = getAttributionTexts()
+const ATTRIBUTION_TEXT_SITE = {
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined => {
+    if (typeof passed.kind !== 'string') return 'no { kind }'
+    if (passed.kind !== original.kind) {
+      return 'a changed kind (the hooks beneath match on it)'
+    }
+    return typeof passed.text === 'string' ? undefined : 'no { text }'
+  },
+}
+
+async function resolveHookAttributionText(
+  kind: 'commit' | 'pr',
+  text: string,
+): Promise<string> {
+  const maybeResolve = (
+    attributionMod as Partial<typeof import('../utils/attribution.js')>
+  ).resolveAttributionText
+  if (typeof maybeResolve === 'function') {
+    return maybeResolve(kind, text)
+  }
+  if (!hasMatchingFunctionHook('attribution.text', { kind })) {
+    return text
+  }
+  const payload: Record<string, unknown> = { kind, text }
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ text: string }> => ({
+    text: typeof event.text === 'string' ? event.text : text,
+  })
+  try {
+    const result = await runFunctionHookChain(
+      'attribution.text',
+      payload,
+      tail,
+      undefined,
+      undefined,
+      { site: ATTRIBUTION_TEXT_SITE },
+    )
+    if (
+      result !== null &&
+      typeof result === 'object' &&
+      'text' in result &&
+      typeof (result as { text?: unknown }).text === 'string'
+    ) {
+      return (result as { text: string }).text
+    }
+  } catch {
+    // Preserve base text on hook error
+  }
+  return text
+}
+
+async function getPromptContent(): Promise<string> {
+  const baseAttribution = attributionMod.getAttributionTexts()
+  let commitAttribution = baseAttribution.commit
+  if (
+    !(process.env.USER_TYPE === 'ant' && isUndercover()) &&
+    hasMatchingFunctionHook('attribution.text')
+  ) {
+    commitAttribution = await resolveHookAttributionText(
+      'commit',
+      commitAttribution,
+    )
+  }
 
   let prefix = ''
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
@@ -64,7 +133,7 @@ const command = {
   progressMessage: 'creating commit',
   source: 'builtin',
   async getPromptForCommand(_args, context) {
-    const promptContent = getPromptContent()
+    const promptContent = await getPromptContent()
     const finalContent = await executeShellCommandsInPrompt(
       promptContent,
       {

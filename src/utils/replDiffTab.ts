@@ -10,6 +10,7 @@ import { getCwd } from './cwd.js'
 import { isGeneratedFile, isTestFile } from './generatedFiles.js'
 import { findGitRootUncached } from './git.js'
 import { matchingRuleForInput } from './permissions/filesystem.js'
+import { isDiffModLoaded } from '../plugins/bundled/diff.js'
 import { isDiffPanelEnabled } from './willowCrate.js'
 import { getReplDiffHost } from './sessionHost.js'
 
@@ -295,10 +296,19 @@ export function diffSidebarHasGitRepo(): boolean {
 }
 
 /**
+ * densable `Wpn()` — whether `cc-plugin-diff` is active and live in
+ * `getLoadedFunctionHooksModules()`, superseding the classic diff sidebar.
+ */
+export function isDiffSidebarOwnedByPlugin(): boolean {
+  return isDiffModLoaded()
+}
+
+/**
  * densable `Mcs(cols)`.
  * `diffSidebarOpen === false` pins closed; `true` uses 110; unset uses 144.
  */
 export function shouldAutoOpenDiffSidebar(columns: number): boolean {
+  if (isDiffSidebarOwnedByPlugin()) return false
   const open = getGlobalConfig().diffSidebarOpen
   if (open === false) return false
   const min =
@@ -314,6 +324,10 @@ export function toggleReplDiffTab(
   setAppState: SetAppState,
   currentTab: ReplTab,
 ): ReplTab {
+  if (currentTab !== 'diff' && isDiffSidebarOwnedByPlugin()) {
+    resetReplTabToConvo(host, setAppState)
+    return 'convo'
+  }
   const next: ReplTab = currentTab === 'diff' ? 'convo' : 'diff'
   clearReplDiffPanelAutoOpen(host)
   setAppState(prev =>
@@ -413,7 +427,9 @@ export function toggleDiffPanelForSlash(
     toggleReplDiffTab(host, setAppState, current)
     return DIFF_PANEL_HIDDEN_MESSAGE
   }
-  if (!isDiffPanelEnabled()) return DIFF_PANEL_UNAVAILABLE_MESSAGE
+  if (!isDiffPanelEnabled() || isDiffSidebarOwnedByPlugin()) {
+    return DIFF_PANEL_UNAVAILABLE_MESSAGE
+  }
   if (!diffSidebarHasGitRepo()) return DIFF_SIDEBAR_NO_GIT_MESSAGE
   if (columns < DIFF_SIDEBAR_MIN_COLS) {
     return `Resize your terminal to at least ${DIFF_SIDEBAR_MIN_COLS} columns to show the diff panel`
@@ -428,7 +444,7 @@ export function logReplDiffPanelShown(
   sessionId: string,
   columns: number,
 ): void {
-  if (!isDiffPanelEnabled()) return
+  if (!isDiffPanelEnabled() || isDiffSidebarOwnedByPlugin()) return
   const state = hostOf(host)
   const trigger = consumeReplDiffPanelAutoOpen(host) ? 'auto_open' : 'manual'
   if (sessionId === state.lastLoggedSessionId) return
@@ -456,7 +472,7 @@ export function computeDiffSidebarWidth(args: {
   columns: number
   hasGitRepo: boolean
 }): number {
-  if (!args.willowCrateEnabled) return 0
+  if (!args.willowCrateEnabled || isDiffSidebarOwnedByPlugin()) return 0
   if (
     args.isFullscreen &&
     !args.isThinClient &&
@@ -473,18 +489,19 @@ export function computeDiffSidebarWidth(args: {
 /**
  * densable `H$y(enabled, trackedCount, setState)`.
  * Returns the auto-open baseline (null once tracked files diverge).
- * GrowthBook on→off resets the tab to convo.
+ * GrowthBook on→off (or yield to `cc-plugin-diff`) resets the tab to convo.
  */
 export function useReplDiffAutoOpenBaseline(
   enabled: boolean,
   trackedFileCount: number,
   setAppState: SetAppState,
 ): number | null {
-  const enabledRef = useRef(enabled)
+  const effectiveEnabled = enabled && !isDiffSidebarOwnedByPlugin()
+  const enabledRef = useRef(effectiveEnabled)
   const baselineRef = useRef<number | null>(null)
-  if (enabledRef.current !== enabled) {
-    enabledRef.current = enabled
-    baselineRef.current = enabled ? trackedFileCount : null
+  if (enabledRef.current !== effectiveEnabled) {
+    enabledRef.current = effectiveEnabled
+    baselineRef.current = effectiveEnabled ? trackedFileCount : null
   } else if (
     baselineRef.current !== null &&
     trackedFileCount !== baselineRef.current
@@ -500,14 +517,14 @@ export function useReplDiffAutoOpenBaseline(
     baselineRef.current = null
   }
 
-  const prevEnabledRef = useRef(enabled)
+  const prevEnabledRef = useRef(effectiveEnabled)
   useEffect(() => {
     const wasEnabled = prevEnabledRef.current
-    prevEnabledRef.current = enabled
-    if (wasEnabled && !enabled) {
+    prevEnabledRef.current = effectiveEnabled
+    if (wasEnabled && !effectiveEnabled) {
       resetReplTabToConvo(host, setAppState)
     }
-  }, [enabled, host, setAppState])
+  }, [effectiveEnabled, host, setAppState])
 
   return baselineRef.current
 }

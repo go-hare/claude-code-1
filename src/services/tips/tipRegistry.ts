@@ -58,6 +58,13 @@ import {
 } from '../../utils/sessionStorage.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
+  BUILTIN_MARKETPLACE_NAME,
+  getBuiltinPluginDefinition,
+  isBuiltinPluginAvailable,
+  resolveBuiltinPluginEnabledSetting,
+} from '../../plugins/builtinPlugins.js'
+import { YOU_SHOULD_KNOW_PLUGIN_NAME } from '../../plugins/bundled/youShouldKnow.js'
+import {
   formatGrantAmount,
   getCachedOverageCreditGrant,
 } from '../api/overageCreditGrant.js'
@@ -122,6 +129,26 @@ const externalTips: Tip[] = [
       const config = getGlobalConfig()
       return config.numStartups < 10
     },
+  },
+  {
+    // densable SOn — you-should-know-plugin. Gold isRelevant:
+    // A5r(Hae) && sE(Hae)?.defaultEnabled===!1 && rGt(`${Hae}@${Ai}`)===void 0
+    id: 'you-should-know-plugin',
+    providerAgnostic: true,
+    advertisedCommand: 'plugin',
+    cooldownSessions: 10,
+    maxLifetimeShows: 3,
+    content: async ctx => {
+      const blue = color('suggestion', ctx?.theme ?? 'dark')
+      return `Want a side agent watching your back while Claude works? Turn on You should know:\n${blue(`/plugin enable ${YOU_SHOULD_KNOW_PLUGIN_NAME}@${BUILTIN_MARKETPLACE_NAME}`)}`
+    },
+    isRelevant: async () =>
+      isBuiltinPluginAvailable(YOU_SHOULD_KNOW_PLUGIN_NAME) &&
+      getBuiltinPluginDefinition(YOU_SHOULD_KNOW_PLUGIN_NAME)
+        ?.defaultEnabled === false &&
+      resolveBuiltinPluginEnabledSetting(
+        `${YOU_SHOULD_KNOW_PLUGIN_NAME}@${BUILTIN_MARKETPLACE_NAME}`,
+      ) === undefined,
   },
   {
     id: 'plan-mode-for-complex-tasks',
@@ -771,6 +798,10 @@ const internalOnlyTips: Tip[] =
         },
       ]
     : []
+
+export function getBuiltInTips(): Tip[] {
+  return [...externalTips, ...internalOnlyTips]
+}
 
 /** densable `N` / `h` / `FV` */
 class WeakOwnerCache<T> {

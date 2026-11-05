@@ -2416,21 +2416,71 @@ describe('function-hooks classic pattern', () => {
   })
 
   test('listBuiltinFunctionHookPlugins reads vendor/claude-code-mods/mods', () => {
-    expect(Array.isArray(listBuiltinFunctionHookPlugins())).toBe(true)
+    const { registerAgentsMdBuiltinPlugin } =
+      require('../../plugins/bundled/agentsMd.js') as typeof import('../../plugins/bundled/agentsMd.js')
+    registerAgentsMdBuiltinPlugin()
+    const plugins = listBuiltinFunctionHookPlugins()
+    expect(Array.isArray(plugins)).toBe(true)
+    expect(
+      plugins.some(plugin => plugin.name === 'builtin:cc-plugin-agents-md'),
+    ).toBe(true)
   })
 
   test('builtin agents-md register.ts is plain JS the VM can load', async () => {
     const previous = process.env.CLAUDE_CODE_HOOKS_SAME_THREAD
     process.env.CLAUDE_CODE_HOOKS_SAME_THREAD = '1'
     try {
+      const { registerAgentsMdBuiltinPlugin } =
+        require('../../plugins/bundled/agentsMd.js') as typeof import('../../plugins/bundled/agentsMd.js')
+      registerAgentsMdBuiltinPlugin()
       const plugins = listBuiltinFunctionHookPlugins()
-      const agents = plugins.find(plugin => plugin.name === 'builtin:agents-md')
+      const agents = plugins.find(
+        plugin => plugin.name === 'builtin:cc-plugin-agents-md',
+      )
       expect(agents).toBeDefined()
       await loadFunctionHooksModules(
-        plugins.filter(p => p.name === 'builtin:agents-md'),
+        plugins.filter(p => p.name === 'builtin:cc-plugin-agents-md'),
       )
       expect(hasMatchingFunctionHook('prompt.context')).toBe(true)
       expect(hasMatchingFunctionHook('session.start')).toBe(true)
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLAUDE_CODE_HOOKS_SAME_THREAD
+      else process.env.CLAUDE_CODE_HOOKS_SAME_THREAD = previous
+    }
+  })
+
+  test('builtin mods-guide and you-should-know register.ts load', async () => {
+    const previous = process.env.CLAUDE_CODE_HOOKS_SAME_THREAD
+    process.env.CLAUDE_CODE_HOOKS_SAME_THREAD = '1'
+    const root = join(import.meta.dir, '../../..')
+    const { registerModsGuideBuiltinPlugin } =
+      require('../../plugins/bundled/modsGuide.js') as typeof import('../../plugins/bundled/modsGuide.js')
+    const { registerYouShouldKnowBuiltinPlugin } =
+      require('../../plugins/bundled/youShouldKnow.js') as typeof import('../../plugins/bundled/youShouldKnow.js')
+    registerModsGuideBuiltinPlugin()
+    registerYouShouldKnowBuiltinPlugin()
+    try {
+      await loadFunctionHooksModules([
+        {
+          name: 'builtin:cc-plugin-mods-guide',
+          path: join(root, 'vendor/claude-code-mods/mods/cc-plugin-mods-guide'),
+          source: 'cc-plugin-mods-guide@builtin',
+          tier: 'builtin',
+        },
+        {
+          name: 'builtin:cc-plugin-you-should-know',
+          path: join(
+            root,
+            'vendor/claude-code-mods/mods/cc-plugin-you-should-know',
+          ),
+          source: 'cc-plugin-you-should-know@builtin',
+          tier: 'builtin',
+        },
+      ])
+      expect(hasMatchingFunctionHook('ui.render')).toBe(true)
+      expect(hasMatchingFunctionHook('prompt.submit')).toBe(true)
+      expect(hasMatchingFunctionHook('session.end')).toBe(true)
     } finally {
       if (previous === undefined)
         delete process.env.CLAUDE_CODE_HOOKS_SAME_THREAD

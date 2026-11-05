@@ -1,6 +1,6 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { constants as fsConstants } from 'fs'
-import { mkdir, open } from 'fs/promises'
+import { lstat, mkdir, open } from 'fs/promises'
 import { dirname, isAbsolute, join, normalize, sep as pathSep } from 'path'
 import type { ToolUseContext } from '../Tool.js'
 import type { Command } from '../types/command.js'
@@ -23,10 +23,15 @@ export type BundledSkillDefinition = {
   /** Official menu/typeahead blurb (Fmr menuDescription). */
   menuDescription?: string
   allowedTools?: string[]
+  getAllowedTools?: () => Promise<string[] | undefined>
+  disallowedTools?: readonly string[]
   model?: string
   disableModelInvocation?: boolean
   userInvocable?: boolean
   isEnabled?: () => boolean
+  requires?: { workspace?: boolean; ink?: boolean }
+  background?: boolean
+  getArgumentCompletions?: Command['getArgumentCompletions']
   /**
    * densable 2.1.218 `sdr` — first arg token → target command name
    * (`/design sync` → `design-sync`).
@@ -62,7 +67,9 @@ export type BundledSkillDefinition = {
    * same contract as disk-based skills. The resolved dir (or null on
    * extract failure) is passed as the third argument to getPromptForCommand.
    */
-  files?: Record<string, string> | (() => Promise<Record<string, string>>)
+  files?:
+    | Record<string, string>
+    | ((context: ToolUseContext) => Promise<Record<string, string>>)
   getPromptForCommand: (
     args: string,
     context: ToolUseContext,
@@ -76,15 +83,14 @@ const bundledSkills: Command[] = []
 const bundledSkillKillSwitchSurvivors = new WeakSet<Command>()
 
 /**
- * Register a bundled skill that will be available to the model.
- * Call this at module initialization or in an init function.
- *
- * Bundled skills are compiled into the CLI binary and available to all users.
- * They follow the same pattern as registerPostSamplingHook() for internal features.
+ * Gold Kwd / wireSkillFilesExtraction — wraps `getPromptForCommand` so bundled
+ * `files` extract once on first invocation and prepend the base-dir header.
  */
-export function registerBundledSkill(definition: BundledSkillDefinition): void {
+export function wireSkillFilesExtraction(definition: BundledSkillDefinition): {
+  skillRoot: string | undefined
+  getPromptForCommand: BundledSkillDefinition['getPromptForCommand']
+} {
   const { files } = definition
-
   let skillRoot: string | undefined
   let getPromptForCommand = definition.getPromptForCommand
 
@@ -95,11 +101,19 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     // Closure-local memoization: extract once per process.
     // Memoize the promise (not the result) so concurrent callers await
     // the same extraction instead of racing into separate writes.
+    let cachedResolvedFiles: Record<string, string> | undefined
     let extractionPromise: Promise<string | null> | undefined
     const inner = definition.getPromptForCommand
     getPromptForCommand = async (args, ctx) => {
+      if (ctx?.options?.isSkillPreload === true) {
+        return inner(args, ctx, undefined)
+      }
       const inflight = (extractionPromise ??= (async () => {
-        const resolved = filesIsFn ? await files() : files
+        const resolved =
+          cachedResolvedFiles ?? (filesIsFn ? await files(ctx) : files)
+        if (Object.keys(resolved).length > 0) {
+          cachedResolvedFiles = resolved
+        }
         return extractBundledSkillFiles(definition.name, resolved)
       })())
       let extractedDir: string | null
@@ -107,19 +121,35 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
         extractedDir = await inflight
       } catch (e) {
         // Gold Kwd: reset memo so a later invoke can retry.
-        if (extractionPromise === inflight) extractionPromise = undefined
+        if (extractionPromise === inflight) {
+          extractionPromise = undefined
+          cachedResolvedFiles = undefined
+        }
         throw e
       }
       const blocks = await inner(args, ctx, extractedDir)
       if (extractedDir === null) {
-        // Gold Kwd retries extract next invoke (clears the promise). Local
-        // O_EXCL cannot re-write a successful extract, so only reset on fail.
+        // Gold Kwd retries extract next invoke (clears the promise).
         if (extractionPromise === inflight) extractionPromise = undefined
         return blocks
       }
       return prependBaseDir(blocks, extractedDir)
     }
   }
+
+  return { skillRoot, getPromptForCommand }
+}
+
+/**
+ * Register a bundled skill that will be available to the model.
+ * Call this at module initialization or in an init function.
+ *
+ * Bundled skills are compiled into the CLI binary and available to all users.
+ * They follow the same pattern as registerPostSamplingHook() for internal features.
+ */
+export function registerBundledSkill(definition: BundledSkillDefinition): void {
+  const { skillRoot, getPromptForCommand } =
+    wireSkillFilesExtraction(definition)
 
   const command: Command = {
     type: 'prompt',
@@ -128,6 +158,12 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     aliases: definition.aliases,
     hasUserSpecifiedDescription: true,
     allowedTools: definition.allowedTools ?? [],
+    ...(definition.getAllowedTools !== undefined
+      ? { getAllowedTools: definition.getAllowedTools }
+      : {}),
+    ...(definition.disallowedTools !== undefined
+      ? { disallowedTools: [...definition.disallowedTools] }
+      : {}),
     argumentHint: definition.argumentHint,
     menuDescription: definition.menuDescription,
     whenToUse: definition.whenToUse,
@@ -140,6 +176,15 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     hooks: definition.hooks,
     skillRoot,
     context: definition.context,
+    ...(definition.background !== undefined
+      ? { background: definition.background }
+      : {}),
+    ...(definition.requires !== undefined
+      ? { requires: definition.requires }
+      : {}),
+    ...(definition.getArgumentCompletions !== undefined
+      ? { getArgumentCompletions: definition.getArgumentCompletions }
+      : {}),
     ...(definition.getContext !== undefined
       ? { getContext: definition.getContext }
       : {}),
@@ -225,6 +270,7 @@ async function extractBundledSkillFiles(
   skillName: string,
   files: Record<string, string>,
 ): Promise<string | null> {
+  if (Object.keys(files).length === 0) return null
   const dir = getBundledSkillExtractDir(skillName)
   try {
     await writeSkillFiles(dir, files)
@@ -265,8 +311,12 @@ async function writeSkillFiles(
 // nonce via inotify on the predictable parent still can't write into it.
 // O_NOFOLLOW|O_EXCL is belt-and-suspenders (O_NOFOLLOW only protects the
 // final component); we deliberately do NOT unlink+retry on EEXIST — unlink()
-// follows intermediate symlinks too.
+// follows intermediate symlinks too. On EEXIST, gold Q7n `verify-content`
+// opens O_RDONLY|O_NOFOLLOW|O_NONBLOCK, checks stat().isFile(), and accepts
+// an identical regular file so partial-extract retries and second definitions
+// sharing the per-process nonce dir don't permanently wedge.
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
+const O_NONBLOCK = fsConstants.O_NONBLOCK ?? 0
 // On Windows, use string flags — numeric O_EXCL can produce EINVAL through libuv.
 const SAFE_WRITE_FLAGS =
   process.platform === 'win32'
@@ -275,13 +325,60 @@ const SAFE_WRITE_FLAGS =
       fsConstants.O_CREAT |
       fsConstants.O_EXCL |
       O_NOFOLLOW
+const SAFE_READ_FLAGS =
+  process.platform === 'win32'
+    ? 'r'
+    : fsConstants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK
 
 async function safeWriteFile(p: string, content: string): Promise<void> {
-  const fh = await open(p, SAFE_WRITE_FLAGS, 0o600)
+  let fh: Awaited<ReturnType<typeof open>>
+  try {
+    fh = await open(p, SAFE_WRITE_FLAGS, 0o600)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | null)?.code === 'EEXIST') {
+      await verifyExistingRegularFileContent(p, content, err)
+      return
+    }
+    throw err
+  }
   try {
     await fh.writeFile(content, 'utf8')
   } finally {
     await fh.close()
+  }
+}
+
+async function verifyExistingRegularFileContent(
+  p: string,
+  expected: string,
+  originalError: unknown,
+): Promise<void> {
+  if (process.platform === 'win32') {
+    const lst = await lstat(p).catch(() => null)
+    if (!lst || lst.isSymbolicLink() || !lst.isFile()) {
+      throw originalError
+    }
+  }
+  let fh: Awaited<ReturnType<typeof open>>
+  try {
+    fh = await open(p, SAFE_READ_FLAGS)
+  } catch {
+    throw originalError
+  }
+  let existing: string
+  try {
+    const st = await fh.stat()
+    if (!st.isFile()) {
+      throw originalError
+    }
+    existing = await fh.readFile({ encoding: 'utf8' })
+  } catch {
+    throw originalError
+  } finally {
+    await fh.close()
+  }
+  if (existing !== expected) {
+    throw originalError
   }
 }
 

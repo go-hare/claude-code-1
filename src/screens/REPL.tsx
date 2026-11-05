@@ -147,6 +147,8 @@ import {
 } from '../utils/swarm/leaderPermissionBridge.js';
 import {
   getRegisteredPluginAgentDefinitions,
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
   setAgentSpawnHandler,
   setFunctionHooksAppStateReader,
   setFunctionHooksAppStateWriter,
@@ -629,7 +631,13 @@ import { useAwaySummary } from 'src/hooks/useAwaySummary.js';
 import { useChromeExtensionNotification } from 'src/hooks/useChromeExtensionNotification.js';
 import { useOfficialMarketplaceNotification } from 'src/hooks/useOfficialMarketplaceNotification.js';
 import { usePromptsFromClaudeInChrome } from 'src/hooks/usePromptsFromClaudeInChrome.js';
-import { evaluateTipContent, getTipToShowOnSpinner, recordShownTip } from 'src/services/tips/tipScheduler.js';
+import { isTipsModLoaded } from '../plugins/bundled/tips.js';
+import {
+  evaluateTipContent,
+  getSpinnerTipPluginSeat,
+  getTipToShowOnSpinner,
+  recordShownTip,
+} from 'src/services/tips/tipScheduler.js';
 import type { Theme } from 'src/utils/theme.js';
 import {
   checkAndDisableAutoModeIfNeeded,
@@ -2330,7 +2338,9 @@ export function REPL({
 
   // densable `$.ui.ask` host: AskUserQuestion permission dialog.
   useEffect(() => {
-    setFunctionHooksAppStateReader(() => store.getState());
+    setFunctionHooksAppStateReader(
+      () => ({ ...store.getState(), messages: messagesRef.current }) as ReturnType<typeof store.getState>,
+    );
     setFunctionHooksAppStateWriter(store.setState);
     // densable YNo + Hu session bag for $.tool.register → MCP loopback.
     ensurePluginToolRegistrarInstalled();
@@ -2414,6 +2424,7 @@ export function REPL({
 
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   // densable je/Wt — turn-start snapshot for idle-fork nzu(replyOnResume).
   // Marked whenever a new query AbortController is armed.
   const turnStartRef = useRef<{ length: number; uuid?: string } | null>(null);
@@ -3329,6 +3340,47 @@ export function REPL({
   // Without this guard, both calls pick a tip → two recordShownTip → two
   // saveGlobalConfig writes back-to-back. Reset at submit in onSubmit.
   const tipPickedThisTurnRef = React.useRef(false);
+  const spinnerTipInputsRef = React.useRef({ theme, storageV5 });
+  spinnerTipInputsRef.current = { theme, storageV5 };
+  useEffect(() => {
+    const host = getReplDiffHost();
+    const slot = {
+      context: () => {
+        const newMessages = messagesRef.current.slice(bashToolsProcessedIdx.current);
+        for (const tool of extractBashToolsFromMessages(newMessages)) {
+          bashTools.current.add(tool);
+        }
+        for (const bashHost of extractBashHostsFromMessages(newMessages)) {
+          bashHosts.current.add(bashHost);
+        }
+        bashToolsProcessedIdx.current = messagesRef.current.length;
+        return {
+          theme: spinnerTipInputsRef.current.theme,
+          readFileState: readFileState.current,
+          bashTools: bashTools.current,
+          bashHosts: bashHosts.current,
+          session: { host },
+          storageV5: spinnerTipInputsRef.current.storageV5,
+        };
+      },
+      storageV5: () => spinnerTipInputsRef.current.storageV5,
+      show: (payload: { text: string; label?: string } | undefined) => {
+        setAppState(prev =>
+          payload === undefined
+            ? prev.spinnerTip === undefined
+              ? prev
+              : { ...prev, spinnerTip: undefined, spinnerTipLabel: undefined }
+            : prev.spinnerTip === payload.text && prev.spinnerTipLabel === payload.label
+              ? prev
+              : { ...prev, spinnerTip: payload.text, spinnerTipLabel: payload.label },
+        );
+      },
+    };
+    getSpinnerTipPluginSeat(host).seat(slot);
+    return () => {
+      getSpinnerTipPluginSeat(host).vacate(slot);
+    };
+  }, [setAppState]);
   const pickNewSpinnerTip = useCallback(() => {
     if (tipPickedThisTurnRef.current) return;
     tipPickedThisTurnRef.current = true;
@@ -3348,6 +3400,9 @@ export function REPL({
       session: { host: getReplDiffHost() },
       storageV5,
     };
+    if (isTipsModLoaded() && getSpinnerTipPluginSeat(tipContext.session.host).pickDue()) {
+      return;
+    }
     void getTipToShowOnSpinner(tipContext).then(async tip => {
       // densable Ghe: `let m=c?await Ghe(c,{session:e,theme:t,...}):""; if(!m){u();return}`
       const content = tip ? await evaluateTipContent(tip, tipContext) : '';
@@ -6540,12 +6595,20 @@ export function REPL({
         }
 
         // densable ARt(cmd, args): immediate may be boolean | (args)=>boolean
-        const shouldTreatAsImmediate =
+        const presentationMode: 'fullscreen' | 'inline' = isFullscreenEnvEnabled() ? 'fullscreen' : 'inline';
+        const isImmediateNow = isCommandImmediate(matchingCommand, commandArgs, presentationMode);
+        const shouldTreatAsImmediate = queryGuard.isActive && (isImmediateNow || options?.fromKeybinding);
+        const isImmediatePluginLocal =
           queryGuard.isActive &&
-          (isCommandImmediate(matchingCommand, commandArgs, isFullscreenEnvEnabled() ? 'fullscreen' : 'inline') ||
-            options?.fromKeybinding);
+          isImmediateNow &&
+          matchingCommand?.type === 'local' &&
+          matchingCommand.loadedFrom === 'plugin' &&
+          matchingCommand.immediate === true;
 
-        if (matchingCommand && shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') {
+        if (
+          matchingCommand &&
+          ((shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') || isImmediatePluginLocal)
+        ) {
           // densable aQr(cmd, endedByModel) — toast + return, do not run the command.
           if (isEndedByModelCommandBlocked(matchingCommand, store.getState().endedByModel)) {
             addNotification({
@@ -6652,9 +6715,109 @@ export function REPL({
             // updates — matches the pattern at L2384/L2400/L2662 and avoids
             // pinning stale REPL render scopes in downstream closures.
             const context = getToolUseContext(messagesRef.current, [], createAbortController(), mainLoopModel);
+            const canonicalName = getCommandName(matchingCommand);
+            const stdoutColumns = process.stdout.columns;
+            const commandPresentation = {
+              isFullscreen: presentationMode === 'fullscreen',
+              columns: typeof stdoutColumns === 'number' && stdoutColumns > 0 ? stdoutColumns : 80,
+            };
+            const commandOrigin = options?.fromKeybinding ? { kind: 'keybinding' } : { kind: 'composer' };
+            const hasCmdRunHook =
+              hasMatchingFunctionHook('command.run', { command: canonicalName }) ||
+              (canonicalName !== matchingCommand.name &&
+                hasMatchingFunctionHook('command.run', { command: matchingCommand.name }));
+
+            if (matchingCommand.type === 'local') {
+              const mod = await matchingCommand.load();
+              const callCtx = {
+                ...context,
+                isMidTurn: true,
+                dispatchedAsImmediate: true,
+                presentation: presentationMode,
+                submissionOrigin: commandOrigin,
+              };
+              if (hasCmdRunHook) {
+                let coreText: string | undefined;
+                let coreRan = false;
+                const chainOut = await runFunctionHookChain(
+                  'command.run',
+                  {
+                    command: canonicalName,
+                    args: commandArgs,
+                    origin: commandOrigin,
+                    presentation: commandPresentation,
+                  },
+                  async event => {
+                    const nextArgs = typeof event.args === 'string' ? event.args : commandArgs;
+                    const res = await mod.call(nextArgs, callCtx);
+                    coreRan = true;
+                    coreText = res.type === 'text' ? res.value : undefined;
+                    return { ref: 1, text: coreText ?? '' };
+                  },
+                  undefined,
+                  undefined,
+                  { signal: context.abortController.signal },
+                );
+                const outRec =
+                  typeof chainOut === 'object' && chainOut !== null && !Array.isArray(chainOut)
+                    ? (chainOut as Record<string, unknown>)
+                    : {};
+                const answeredText = typeof outRec.text === 'string' ? outRec.text : undefined;
+                const answeredContext = Array.isArray(outRec.context)
+                  ? outRec.context.filter((item): item is string => typeof item === 'string' && item !== '')
+                  : [];
+                const finalText = !coreRan ? answeredText : (answeredText ?? coreText);
+                onDone(finalText || undefined, {
+                  ...(answeredContext.length > 0 && { metaMessages: answeredContext }),
+                });
+                return;
+              }
+              const res = await mod.call(commandArgs, callCtx);
+              if (res.type === 'text') {
+                onDone(res.value || undefined);
+              } else {
+                onDone(undefined, { display: 'skip' });
+              }
+              return;
+            }
 
             const mod = await matchingCommand.load();
-            const jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, commandArgs);
+            let jsx: React.ReactNode = null;
+            if (hasCmdRunHook) {
+              let coreRan = false;
+              const chainOut = await runFunctionHookChain(
+                'command.run',
+                {
+                  command: canonicalName,
+                  args: commandArgs,
+                  origin: commandOrigin,
+                  presentation: commandPresentation,
+                },
+                async event => {
+                  const nextArgs = typeof event.args === 'string' ? event.args : commandArgs;
+                  jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, nextArgs);
+                  coreRan = true;
+                  return { ref: 1, text: '' };
+                },
+                undefined,
+                undefined,
+                { signal: context.abortController.signal },
+              );
+              if (!coreRan) {
+                const outRec =
+                  typeof chainOut === 'object' && chainOut !== null && !Array.isArray(chainOut)
+                    ? (chainOut as Record<string, unknown>)
+                    : {};
+                const answeredText = typeof outRec.text === 'string' ? outRec.text : undefined;
+                const answeredContext = Array.isArray(outRec.context)
+                  ? outRec.context.filter((item): item is string => typeof item === 'string' && item !== '')
+                  : [];
+                onDone(answeredText, answeredContext.length > 0 ? { metaMessages: answeredContext } : undefined);
+                return;
+              }
+            } else {
+              jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, commandArgs);
+            }
 
             // Skip if onDone already fired — prevents stuck isLocalJSXCommand
             // (see processSlashCommand.tsx local-jsx case for full mechanism).

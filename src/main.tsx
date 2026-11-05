@@ -330,6 +330,7 @@ import {
   filterMcpServersForHermeticMode,
   formatEnterpriseMcpConfigDropWarn,
   formatMcpHermeticDropWarn,
+  formatSideloadPolicyMcpDropWarn,
 } from './utils/mcpHermeticFilter.js';
 import { isRemoteEnvEnabled } from './utils/residualFinalEnvGates.js';
 import { isXaaEnabled } from 'src/services/mcp/xaaIdpLogin.js';
@@ -405,6 +406,7 @@ import {
   streamJsonStdinChunks,
   waitForAwaitInitialize,
 } from './cli/awaitInitialize.js';
+import { isBridgeCarrierChild } from './bridge/bridgeCarrier.js';
 import {
   holdBackMcpConfigsForClaim,
   isSpareParked,
@@ -413,6 +415,7 @@ import {
 } from './cli/spareClaim.js';
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from './utils/claudeInChrome/common.js';
 import { COMPUTER_USE_MCP_SERVER_NAME } from './utils/computerUse/common.js';
+import { leftoverSideloadDisabled } from './utils/plugins/pluginDevMods.js';
 import { resolveQuestionPreviewFormat } from './utils/residualUiEnvGates.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1341,7 +1344,7 @@ async function run(): Promise<CommanderCommand> {
 
   // Use preAction hook to run initialization only when executing a command,
   // not when displaying help. This avoids the need for env variable signaling.
-  program.hook('preAction', async thisCommand => {
+  program.hook('preAction', async (thisCommand, actionCommand) => {
     profileCheckpoint('preAction_start');
     // densable Gqr(DXn) — start reading initialize before init/plugin work.
     if (
@@ -1423,6 +1426,95 @@ async function run(): Promise<CommanderCommand> {
     if (Array.isArray(pluginUrl) && pluginUrl.length > 0 && pluginUrl.every((p: unknown) => typeof p === 'string')) {
       setInlinePluginUrls(pluginUrl as string[]);
       clearPluginCache('preAction: --plugin-url inline plugins');
+    }
+    // densable vfr / YAt / n1 — CLAUDE_CODE_PLUGIN_DIRS inline plugins + A8 gate.
+    const leftoverSideloadFlagsDisabledMessage = (flags: string[]): string => {
+      const listed = flags.join(', ');
+      const verb = flags.length === 1 ? 'is' : 'are';
+      return `${listed} ${verb} disabled by your organization's managed settings (disableSideloadFlags). Plugins, custom agents, and MCP servers can only be loaded from sources your administrator has approved. Ask your administrator to remove disableSideloadFlags from managed settings, or use an approved marketplace / settings file instead.`;
+    };
+    const {
+      delimiter: pathDelimiter,
+      isAbsolute: isAbsPath,
+      resolve: resolvePath,
+    } = require('path') as typeof import('path');
+    const { homedir } = require('os') as typeof import('os');
+    const expandTildeLocal = (raw: string): string => {
+      if (raw === '~') return homedir();
+      if (raw.startsWith('~/') || raw.startsWith('~\\')) return resolvePath(homedir(), raw.slice(2));
+      return raw;
+    };
+    const isValidLocalPluginDir = (p: string): boolean => {
+      if (!isAbsPath(p) || p.includes('\x00')) return false;
+      if (/^[/\\]{2}/.test(p) || /^\\\?\?(?:[/\\]|$)/.test(p)) return false;
+      const resolved = resolvePath(p);
+      if (/^[/\\]{2}/.test(resolved)) return false;
+      return true;
+    };
+    const parseEnvPluginDirs = (): string[] => {
+      const rawEntries = (process.env.CLAUDE_CODE_PLUGIN_DIRS ?? '')
+        .split(pathDelimiter)
+        .map(entry => expandTildeLocal(entry.trim()))
+        .filter(entry => entry !== '');
+      const skipped = rawEntries.filter(entry => !isValidLocalPluginDir(entry));
+      if (skipped.length > 0) {
+        logForDebugging(
+          `CLAUDE_CODE_PLUGIN_DIRS: skipped ${skipped.join(', ')}: a plugin folder here is an absolute local path or starts with ~`,
+          { level: 'warn' },
+        );
+      }
+      return rawEntries.filter(isValidLocalPluginDir).map(entry => resolvePath(entry));
+    };
+    const dedupePluginDirs = (...lists: string[][]): string[] => {
+      const seen = new Map<string, string>();
+      for (const entry of lists.flat()) {
+        const key = resolvePath(entry);
+        if (!seen.has(key)) seen.set(key, entry);
+      }
+      return [...seen.values()];
+    };
+    const initNoMcpSet = new Set(pluginDirNoMcp.map(entry => resolvePath(entry)));
+    const envPluginDirs = parseEnvPluginDirs().filter(entry => !initNoMcpSet.has(resolvePath(entry)));
+    if (process.env.CLAUDE_CODE_PLUGIN_DIRS !== undefined) {
+      process.env.CLAUDE_CODE_PLUGIN_DIRS = envPluginDirs.join(pathDelimiter);
+    }
+    if (envPluginDirs.length > 0) {
+      setInlinePlugins(dedupePluginDirs(pluginDir, envPluginDirs));
+      clearPluginCache('preAction: CLAUDE_CODE_PLUGIN_DIRS inline plugins');
+    }
+
+    if (leftoverSideloadDisabled()) {
+      const leftoverCliFlagOn = (value: unknown): boolean =>
+        Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.length > 0;
+      const flags: string[] = [];
+      for (const [optKey, flagLabel] of [
+        ['pluginDir', '--plugin-dir'],
+        ['pluginDirNoMcp', '--plugin-dir-no-mcp'],
+        ['pluginUrl', '--plugin-url'],
+        ['agents', '--agents'],
+      ] as const) {
+        if (
+          leftoverCliFlagOn(thisCommand.getOptionValue(optKey)) ||
+          leftoverCliFlagOn(actionCommand?.getOptionValue(optKey))
+        ) {
+          flags.push(flagLabel);
+        }
+      }
+      if (appliedInitialize && appliedInitialize.pluginDirs.length + appliedInitialize.pluginDirsNoMcp.length > 0) {
+        flags.push('plugins (initialize request)');
+      }
+      if (envPluginDirs.length > 0) {
+        flags.push('CLAUDE_CODE_PLUGIN_DIRS');
+      }
+      if (flags.length > 0) {
+        const copy = leftoverSideloadFlagsDisabledMessage(flags);
+        process.stderr.write(
+          envPluginDirs.length > 0
+            ? `${copy} Unset CLAUDE_CODE_PLUGIN_DIRS (in the environment, or in the settings \`env\` block that sets it) to run without those folders.\n`
+            : `${copy}\n`,
+        );
+        process.exit(1);
+      }
     }
 
     runMigrations();
@@ -2476,17 +2568,24 @@ async function run(): Promise<CommanderCommand> {
 
         let allConfigs: Record<string, McpServerConfig> = {};
         const fatalErrors: ValidationError[] = [];
-        const skipEntries: Array<{ name: string; type: string; message: string }> = [];
+        const skipEntries: Array<{ name: string; type: string; message: string; rawServerType?: unknown }> = [];
 
         // densable W=$e?V:void 0 — bridgeSessionId only when sdkUrl (carrier child).
         const bridgeSessionId = sdkUrl ? (sessionId as string | undefined) : undefined;
         for (const configItem of processedConfigs) {
           let configs: Record<string, McpServerConfig> | null = null;
           let errors: ValidationError[] = [];
+          let rawServersRecord: Record<string, unknown> | undefined;
 
           // First try to parse as JSON string
           const parsedJson = safeParseJSON(configItem);
           if (parsedJson) {
+            if (typeof parsedJson === 'object' && !Array.isArray(parsedJson)) {
+              const maybeServers = (parsedJson as Record<string, unknown>).mcpServers;
+              if (maybeServers && typeof maybeServers === 'object' && !Array.isArray(maybeServers)) {
+                rawServersRecord = maybeServers as Record<string, unknown>;
+              }
+            }
             const result = parseMcpConfig({
               configObject: parsedJson,
               filePath: 'command line',
@@ -2501,6 +2600,17 @@ async function run(): Promise<CommanderCommand> {
           } else {
             // Try as file path
             const configPath = resolve(configItem);
+            try {
+              const rawFile = safeParseJSON(getFsImplementation().readFileSync(configPath, { encoding: 'utf-8' }));
+              if (rawFile && typeof rawFile === 'object' && !Array.isArray(rawFile)) {
+                const maybeServers = (rawFile as Record<string, unknown>).mcpServers;
+                if (maybeServers && typeof maybeServers === 'object' && !Array.isArray(maybeServers)) {
+                  rawServersRecord = maybeServers as Record<string, unknown>;
+                }
+              }
+            } catch {
+              // parseMcpConfigFromFilePath surfaces file read errors below
+            }
             const result = parseMcpConfigFromFilePath({
               filePath: configPath,
               expandVars: true,
@@ -2527,10 +2637,16 @@ async function run(): Promise<CommanderCommand> {
               for (const err of errors) {
                 const meta = err.mcpErrorMetadata;
                 if (meta?.skipReason && meta.serverName != null) {
+                  const rawEntry = rawServersRecord?.[meta.serverName];
+                  const rawServerType =
+                    rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry)
+                      ? (rawEntry as Record<string, unknown>).type
+                      : undefined;
                   skipEntries.push({
                     name: meta.serverName,
                     type: meta.skipReason,
                     message: err.message,
+                    rawServerType,
                   });
                 }
               }
@@ -2551,9 +2667,17 @@ async function run(): Promise<CommanderCommand> {
 
         // densable: only surface skips for names that did not load into allConfigs
         const uniqueSkips = new Map<string, { name: string; type: string; message: string }>();
+        let hadSkippedNonSdkMcpEntry = false;
         for (const skip of skipEntries) {
+          if (skip.rawServerType !== 'sdk') {
+            hadSkippedNonSdkMcpEntry = true;
+          }
           if (!Object.hasOwn(allConfigs, skip.name)) {
-            uniqueSkips.set(skip.name, skip);
+            uniqueSkips.set(skip.name, {
+              name: skip.name,
+              type: skip.type,
+              message: skip.message,
+            });
           }
         }
         if (uniqueSkips.size > 0) {
@@ -2573,6 +2697,19 @@ async function run(): Promise<CommanderCommand> {
             );
           }
         }
+
+        // densable A8 && !kFr(w): non-sdk --mcp-config rejected locally, soft-dropped on remote or bridge carrier child.
+        const hasNonSdkMcpEntry =
+          Object.values(allConfigs).some(cfg => cfg?.type !== 'sdk') || hadSkippedNonSdkMcpEntry;
+        const isRemoteOrCarrier = isRemoteEnvEnabled() || isBridgeCarrierChild();
+        const sideloadBlocked = leftoverSideloadDisabled() && hasNonSdkMcpEntry;
+        if (sideloadBlocked && !isRemoteOrCarrier) {
+          process.stderr.write(
+            `--mcp-config is disabled by your organization's managed settings (disableSideloadFlags). Plugins, custom agents, and MCP servers can only be loaded from sources your administrator has approved. Ask your administrator to remove disableSideloadFlags from managed settings, or use an approved marketplace / settings file instead.\n`,
+          );
+          process.exit(1);
+        }
+        const dropForSideloadPolicy = sideloadBlocked && isRemoteOrCarrier;
 
         if (Object.keys(allConfigs).length > 0) {
           // densable 2.1.219: reserved names are soft-skipped inside parseMcpConfig
@@ -2611,10 +2748,14 @@ async function run(): Promise<CommanderCommand> {
             areMcpConfigsAllowedWithEnterpriseMcpConfig(sdkOnly);
           const hermetic = filterMcpServersForHermeticMode(allowedRecord, {
             dropForEnterpriseMcpConfig,
+            dropForSideloadPolicy,
           });
           if (hermetic.dropped.length > 0 && hermetic.reason) {
             if (hermetic.reason === 'enterprise MCP config') {
               process.stderr.write(formatEnterpriseMcpConfigDropWarn(hermetic.dropped) + '\n');
+            } else if (hermetic.reason === 'disableSideloadFlags policy') {
+              logForDebugging(`${formatMcpHermeticDropWarn(hermetic.dropped, hermetic.reason)}`, { level: 'warn' });
+              process.stderr.write(formatSideloadPolicyMcpDropWarn(hermetic.dropped) + '\n');
             } else {
               process.stderr.write(formatMcpHermeticDropWarn(hermetic.dropped, hermetic.reason) + '\n');
             }

@@ -294,6 +294,13 @@ import {
   getPluginSkills,
   clearPluginSkillsCache,
 } from './utils/plugins/loadPluginCommands.js'
+import {
+  getLiveHookEvent,
+  getPluginRegisteredCommands,
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from './utils/plugins/functionHooksModules.js'
+import { isFullscreenEnvEnabled } from './utils/fullscreen.js'
 import memoize from 'lodash-es/memoize.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { isUsing3PServices, isClaudeAISubscriber } from './utils/auth.js'
@@ -747,6 +754,116 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
 })
 
 /**
+ * densable `KLn` + `Jln` — convert a `$.command.register` entry (`Fst`) into a
+ * `local` session command (`loadedFrom: 'plugin'`) backed by `command.run`.
+ */
+function createPluginRegisteredCommand(entry: {
+  plugin: string
+  spec: {
+    name: string
+    description: string
+    argumentHint?: unknown
+    immediate?: unknown
+  }
+}): Command {
+  const { plugin, spec } = entry
+  return {
+    type: 'local',
+    name: spec.name,
+    description: spec.description,
+    ...(typeof spec.argumentHint === 'string' && {
+      argumentHint: spec.argumentHint,
+    }),
+    immediate: spec.immediate === true,
+    loadedFrom: 'plugin',
+    supportsNonInteractive: true,
+    load: async () => ({
+      call: async (args, context) => {
+        if (getLiveHookEvent() === 'command.run') {
+          return { type: 'text', value: '' }
+        }
+        const ctxRecord = context as unknown as Record<string, unknown>
+        const rawOrigin = ctxRecord.submissionOrigin
+        const origin =
+          typeof rawOrigin === 'object' &&
+          rawOrigin !== null &&
+          'kind' in rawOrigin &&
+          typeof (rawOrigin as { kind?: unknown }).kind === 'string'
+            ? (rawOrigin as { kind: string; name?: string })
+            : { kind: 'composer' as const }
+        const rawPresentation = ctxRecord.presentation
+        const stdoutColumns = process.stdout.columns
+        const presentation = {
+          isFullscreen:
+            rawPresentation === 'fullscreen' ||
+            (rawPresentation !== 'inline' && isFullscreenEnvEnabled()),
+          columns:
+            typeof stdoutColumns === 'number' && stdoutColumns > 0
+              ? stdoutColumns
+              : 80,
+        }
+        const hasHook = hasMatchingFunctionHook('command.run', {
+          command: spec.name,
+        })
+        const answered = await runFunctionHookChain(
+          'command.run',
+          {
+            command: spec.name,
+            args,
+            origin,
+            presentation,
+          },
+          async () => ({ text: '' }),
+          undefined,
+          undefined,
+          context?.abortController?.signal
+            ? { signal: context.abortController.signal }
+            : undefined,
+        )
+        if (!hasHook) {
+          return {
+            type: 'text',
+            value: `${plugin} registered /${spec.name} but no command.run hook answered it: add on("command.run", { command: "${spec.name}" }, ($, e) => ({ text: ... })) to the plugin.`,
+          }
+        }
+        const text =
+          typeof answered === 'object' &&
+          answered !== null &&
+          'text' in answered &&
+          typeof (answered as { text?: unknown }).text === 'string'
+            ? (answered as { text: string }).text
+            : undefined
+        if (text === undefined) {
+          return { type: 'skip' }
+        }
+        return { type: 'text', value: text }
+      },
+    }),
+  }
+}
+
+function appendPluginRegisteredCommands(commands: Command[]): Command[] {
+  const registered = getPluginRegisteredCommands()
+  if (registered.length === 0) return commands
+  const claimed = new Set<string>()
+  for (const cmd of commands) {
+    if (cmd.loadedFrom === 'syncedSkills') continue
+    claimed.add(cmd.name)
+    claimed.add(getCommandName(cmd))
+    for (const alias of cmd.aliases ?? []) {
+      claimed.add(alias)
+    }
+  }
+  const additions: Command[] = []
+  for (const entry of registered) {
+    if (claimed.has(entry.spec.name)) continue
+    claimed.add(entry.spec.name)
+    additions.push(createPluginRegisteredCommand(entry))
+  }
+  return additions.length === 0 ? commands : [...commands, ...additions]
+}
+
+/**
  * densable Ade — drop local-jsx in headless so findCommand hits the local twin
  * (`goalNonInteractive`, `contextNonInteractive`, `configNonInteractive`, …). Gold `kDe`.
  */
@@ -779,7 +896,14 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
 
   if (dynamicSkills.length === 0) {
-    return finalizeCommandList(applySyncedSkillShadowFilter(baseCommands))
+    const withRegistered = appendPluginRegisteredCommands(baseCommands)
+    return finalizeCommandList(
+      applySyncedSkillShadowFilter(
+        withRegistered === baseCommands
+          ? baseCommands
+          : stripCollidingPluginAliases(withRegistered),
+      ),
+    )
   }
 
   // Dedupe dynamic skills - only add if not already present
@@ -795,7 +919,11 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     // Re-run Hxb so session interactivity changes after load still yield
     // help/feedback claims for plugin aliases (loadAllCommands is memoized).
     return finalizeCommandList(
-      applySyncedSkillShadowFilter(stripCollidingPluginAliases(baseCommands)),
+      applySyncedSkillShadowFilter(
+        stripCollidingPluginAliases(
+          appendPluginRegisteredCommands(baseCommands),
+        ),
+      ),
     )
   }
 
@@ -806,18 +934,25 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   if (insertIndex === -1) {
     return finalizeCommandList(
       applySyncedSkillShadowFilter(
-        stripCollidingPluginAliases([...baseCommands, ...uniqueDynamicSkills]),
+        stripCollidingPluginAliases(
+          appendPluginRegisteredCommands([
+            ...baseCommands,
+            ...uniqueDynamicSkills,
+          ]),
+        ),
       ),
     )
   }
 
   return finalizeCommandList(
     applySyncedSkillShadowFilter(
-      stripCollidingPluginAliases([
-        ...baseCommands.slice(0, insertIndex),
-        ...uniqueDynamicSkills,
-        ...baseCommands.slice(insertIndex),
-      ]),
+      stripCollidingPluginAliases(
+        appendPluginRegisteredCommands([
+          ...baseCommands.slice(0, insertIndex),
+          ...uniqueDynamicSkills,
+          ...baseCommands.slice(insertIndex),
+        ]),
+      ),
     ),
   )
 }

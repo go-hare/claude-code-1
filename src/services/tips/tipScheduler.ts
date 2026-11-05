@@ -1,4 +1,5 @@
 import { logForDebugging } from '../../utils/debug.js'
+import { getReplDiffHost } from '../../utils/sessionHost.js'
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -17,6 +18,56 @@ import {
   tipIsRelevant,
 } from './tipRegistry.js'
 import type { Tip, TipContext } from './types.js'
+
+export type SeatedSpinnerTipSlot = {
+  context: () => {
+    session?: unknown
+    theme?: TipContext['theme'] | string
+    storageV5?: unknown
+    [key: string]: unknown
+  }
+  storageV5: () => unknown
+  show: (tip: { text: string; label?: string } | undefined) => void
+}
+
+export class SpinnerTipPluginSeat {
+  private seated: SeatedSpinnerTipSlot | undefined
+  private picker: ((slot: SeatedSpinnerTipSlot) => void) | undefined
+
+  seat(slot: SeatedSpinnerTipSlot): void {
+    this.seated = slot
+  }
+
+  vacate(slot: SeatedSpinnerTipSlot): void {
+    if (this.seated === slot) this.seated = undefined
+  }
+
+  current(): SeatedSpinnerTipSlot | undefined {
+    return this.seated
+  }
+
+  install(picker: (slot: SeatedSpinnerTipSlot) => void): void {
+    this.picker = picker
+  }
+
+  pickDue(): boolean {
+    if (this.picker === undefined || this.seated === undefined) return false
+    this.picker(this.seated)
+    return true
+  }
+}
+
+const spinnerTipPluginSeats = new WeakMap<object, SpinnerTipPluginSeat>()
+
+export function getSpinnerTipPluginSeat(
+  host: object = getReplDiffHost(),
+): SpinnerTipPluginSeat {
+  const hit = spinnerTipPluginSeats.get(host)
+  if (hit !== undefined) return hit
+  const created = new SpinnerTipPluginSeat()
+  spinnerTipPluginSeats.set(host, created)
+  return created
+}
 
 /** densable `EV` — Qhe skips when max(Nhe, Ohe) >= 2. */
 const MARKETPLACE_PLUGIN_TIP_COUNT_CAP = 2
@@ -142,6 +193,13 @@ export async function evaluateTipContent(
   }
 }
 
+function sanitizedTipAnalyticsId(tip: Tip): string {
+  if (tip.id.startsWith('marketplace-plugin:') && tip.id.includes('@')) {
+    return 'marketplace-plugin:org-marketplace'
+  }
+  return tip.id
+}
+
 export async function getTipToShowOnSpinner(
   context: TipContext,
 ): Promise<Tip | undefined> {
@@ -159,14 +217,21 @@ export async function getTipToShowOnSpinner(
   return selectTipWithLongestTimeSinceShown(tips)
 }
 
-export function recordShownTip(tip: Tip): void {
+export function recordShownTip(
+  tip: Tip,
+  surface: 'spinner' | 'startup' = 'spinner',
+  _storageV5?: unknown,
+): void {
   // Record in history
   recordTipShown(tip.id)
 
   // Log event for analytics
   logEvent('tengu_tip_shown', {
-    tipIdLength:
-      tip.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    tipIdLength: sanitizedTipAnalyticsId(
+      tip,
+    ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     cooldownSessions: tip.cooldownSessions,
+    surface:
+      surface as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 }

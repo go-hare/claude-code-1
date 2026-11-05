@@ -1,9 +1,10 @@
 import type { Command } from '../commands.js'
-import {
-  getAttributionTexts,
-  getEnhancedPRAttribution,
-} from '../utils/attribution.js'
+import * as attributionMod from '../utils/attribution.js'
 import { getDefaultBranch } from '../utils/git.js'
+import {
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from '../utils/plugins/functionHooksModules.js'
 import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.js'
 import { getUndercoverInstructions, isUndercover } from '../utils/undercover.js'
 
@@ -127,14 +128,66 @@ const ALLOWED_TOOLS = [
 
 const DISALLOWED_TOOLS = wrapShellToolPatterns(COMMIT_PUSH_PR_DENY_PATTERNS)
 
-function getPromptContent(
+const ATTRIBUTION_TEXT_SITE = {
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined => {
+    if (typeof passed.kind !== 'string') return 'no { kind }'
+    if (passed.kind !== original.kind) {
+      return 'a changed kind (the hooks beneath match on it)'
+    }
+    return typeof passed.text === 'string' ? undefined : 'no { text }'
+  },
+}
+
+async function resolveHookAttributionText(
+  kind: 'commit' | 'pr',
+  text: string,
+): Promise<string> {
+  const maybeResolve = (
+    attributionMod as Partial<typeof import('../utils/attribution.js')>
+  ).resolveAttributionText
+  if (typeof maybeResolve === 'function') {
+    return maybeResolve(kind, text)
+  }
+  if (!hasMatchingFunctionHook('attribution.text', { kind })) {
+    return text
+  }
+  const payload: Record<string, unknown> = { kind, text }
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ text: string }> => ({
+    text: typeof event.text === 'string' ? event.text : text,
+  })
+  try {
+    const result = await runFunctionHookChain(
+      'attribution.text',
+      payload,
+      tail,
+      undefined,
+      undefined,
+      { site: ATTRIBUTION_TEXT_SITE },
+    )
+    if (
+      result !== null &&
+      typeof result === 'object' &&
+      'text' in result &&
+      typeof (result as { text?: unknown }).text === 'string'
+    ) {
+      return (result as { text: string }).text
+    }
+  } catch {
+    // Preserve base text on hook error
+  }
+  return text
+}
+
+function buildPromptContent(
   defaultBranch: string,
-  prAttribution?: string,
+  commitAttribution: string,
+  effectivePrAttribution: string,
 ): string {
-  const { commit: commitAttribution, pr: defaultPrAttribution } =
-    getAttributionTexts()
-  // Use provided PR attribution or fall back to default
-  const effectivePrAttribution = prAttribution ?? defaultPrAttribution
   const safeUser = process.env.SAFEUSER || ''
   const username = process.env.USER || ''
 
@@ -219,17 +272,49 @@ const command = {
   disallowedTools: DISALLOWED_TOOLS,
   get contentLength() {
     // Use 'main' as estimate for content length calculation
-    return getPromptContent('main').length
+    const { commit, pr } = attributionMod.getAttributionTexts()
+    return buildPromptContent('main', commit, pr).length
   },
   progressMessage: 'creating commit and PR',
   source: 'builtin',
   async getPromptForCommand(args, context) {
     // Get default branch and enhanced PR attribution
+    const maybeGetEnhancedPR = (
+      attributionMod as Partial<typeof import('../utils/attribution.js')>
+    ).getEnhancedPRAttribution
     const [defaultBranch, prAttribution] = await Promise.all([
       getDefaultBranch(),
-      getEnhancedPRAttribution(context.getAppState),
+      typeof maybeGetEnhancedPR === 'function'
+        ? maybeGetEnhancedPR(context.getAppState)
+        : Promise.resolve(undefined),
     ])
-    let promptContent = getPromptContent(defaultBranch, prAttribution)
+    const baseAttribution = attributionMod.getAttributionTexts()
+    let commitAttribution = baseAttribution.commit
+    let effectivePrAttribution = prAttribution ?? baseAttribution.pr
+    if (
+      !(process.env.USER_TYPE === 'ant' && isUndercover()) &&
+      hasMatchingFunctionHook('attribution.text')
+    ) {
+      const hasRealResolver =
+        typeof (
+          attributionMod as Partial<typeof import('../utils/attribution.js')>
+        ).resolveAttributionText === 'function'
+      // Real getEnhancedPRAttribution already ran resolveAttributionText('pr', base)
+      // when returning a string; only resolve 'pr' here if prAttribution was undefined
+      // or attribution.js was partially mocked in a test.
+      const shouldResolvePr = prAttribution === undefined || !hasRealResolver
+      ;[commitAttribution, effectivePrAttribution] = await Promise.all([
+        resolveHookAttributionText('commit', commitAttribution),
+        shouldResolvePr
+          ? resolveHookAttributionText('pr', effectivePrAttribution)
+          : Promise.resolve(effectivePrAttribution),
+      ])
+    }
+    let promptContent = buildPromptContent(
+      defaultBranch,
+      commitAttribution,
+      effectivePrAttribution,
+    )
 
     // Append user instructions if args provided
     const trimmedArgs = args?.trim()

@@ -1,11 +1,15 @@
 import { feature } from 'bun:bundle'
 import { prependBullets } from 'src/constants/prompts.js'
-import { getAttributionTexts } from 'src/utils/attribution.js'
+import * as attributionMod from 'src/utils/attribution.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
 import { isBareMode } from 'src/utils/envUtils.js'
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { shouldIncludeGitInstructions } from 'src/utils/gitSettings.js'
 import { getClaudeTempDir } from 'src/utils/permissions/filesystem.js'
+import {
+  hasMatchingFunctionHook,
+  runFunctionHookChain,
+} from 'src/utils/plugins/functionHooksModules.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import {
@@ -40,7 +44,62 @@ function getBackgroundUsageNote(): string | null {
   return "You can use the `run_in_background` parameter to run the command in the background. Only use this if you don't need the result immediately and are OK being notified when the command completes later. You do not need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at the end of the command when using this parameter."
 }
 
-function getCommitAndPRInstructions(): string {
+const ATTRIBUTION_TEXT_SITE = {
+  checkArgument: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ): string | undefined => {
+    if (typeof passed.kind !== 'string') return 'no { kind }'
+    if (passed.kind !== original.kind) {
+      return 'a changed kind (the hooks beneath match on it)'
+    }
+    return typeof passed.text === 'string' ? undefined : 'no { text }'
+  },
+}
+
+async function resolveHookAttributionText(
+  kind: 'commit' | 'pr',
+  text: string,
+): Promise<string> {
+  const maybeResolve = (
+    attributionMod as Partial<typeof import('src/utils/attribution.js')>
+  ).resolveAttributionText
+  if (typeof maybeResolve === 'function') {
+    return maybeResolve(kind, text)
+  }
+  if (!hasMatchingFunctionHook('attribution.text', { kind })) {
+    return text
+  }
+  const payload: Record<string, unknown> = { kind, text }
+  const tail = async (
+    event: Record<string, unknown>,
+  ): Promise<{ text: string }> => ({
+    text: typeof event.text === 'string' ? event.text : text,
+  })
+  try {
+    const result = await runFunctionHookChain(
+      'attribution.text',
+      payload,
+      tail,
+      undefined,
+      undefined,
+      { site: ATTRIBUTION_TEXT_SITE },
+    )
+    if (
+      result !== null &&
+      typeof result === 'object' &&
+      'text' in result &&
+      typeof (result as { text?: unknown }).text === 'string'
+    ) {
+      return (result as { text: string }).text
+    }
+  } catch {
+    // Preserve base text on hook error
+  }
+  return text
+}
+
+async function getCommitAndPRInstructions(): Promise<string> {
   // Defense-in-depth: undercover instructions must survive even if the user
   // has disabled git instructions entirely. Attribution stripping and model-ID
   // hiding are mechanical and work regardless, but the explicit "don't blow
@@ -77,7 +136,18 @@ Use the gh command via the Bash tool for other GitHub-related tasks including wo
   }
 
   // For external users, include full inline instructions
-  const { commit: commitAttribution, pr: prAttribution } = getAttributionTexts()
+  const baseAttribution = attributionMod.getAttributionTexts()
+  let commitAttribution = baseAttribution.commit
+  let prAttribution = baseAttribution.pr
+  if (
+    !(process.env.USER_TYPE === 'ant' && isUndercover()) &&
+    hasMatchingFunctionHook('attribution.text')
+  ) {
+    ;[commitAttribution, prAttribution] = await Promise.all([
+      resolveHookAttributionText('commit', commitAttribution),
+      resolveHookAttributionText('pr', prAttribution),
+    ])
+  }
 
   // LOCAL (not official densable): Windows multi-git parallel Bash amplifies
   // Git-for-Windows conhost flash — combine read-only git analysis into one shell.
@@ -288,7 +358,7 @@ function getSimpleSandboxSection(): string {
   ].join('\n')
 }
 
-export function getSimplePrompt(): string {
+export async function getSimplePrompt(): Promise<string> {
   // Ant-native builds alias find/grep to embedded bfs/ugrep in Claude's shell,
   // so we don't steer away from them (and Glob/Grep tools are removed).
   const embedded = hasEmbeddedSearchTools()
@@ -384,6 +454,8 @@ export function getSimplePrompt(): string {
       : []),
   ]
 
+  const commitAndPRInstructions = await getCommitAndPRInstructions()
+
   return [
     'Executes a given bash command and returns its output.',
     '',
@@ -397,6 +469,6 @@ export function getSimplePrompt(): string {
     '# Instructions',
     ...prependBullets(instructionItems),
     getSimpleSandboxSection(),
-    ...(getCommitAndPRInstructions() ? ['', getCommitAndPRInstructions()] : []),
+    ...(commitAndPRInstructions ? ['', commitAndPRInstructions] : []),
   ].join('\n')
 }

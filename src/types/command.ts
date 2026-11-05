@@ -350,6 +350,8 @@ export type CommandBase = {
   isSensitive?: boolean // If true, args are redacted from the conversation history
   /** Defaults to `name`. Only override when the displayed name differs (e.g. plugin prefix stripping). */
   userFacingName?: () => string
+  /** densable `requires` — e.g. `{ workspace?: boolean; ink?: boolean }`. */
+  requires?: { workspace?: boolean; ink?: boolean }
   /**
    * densable 2.1.248 FleetView `Lc` — when set, AgentsView slash dispatch calls
    * this instead of free-form intent / normal load(). Host injects exit /

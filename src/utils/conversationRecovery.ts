@@ -643,6 +643,8 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   bridgeSessionId?: string
   /** AI-generated tab title (`ai-title` entry) for restoreSessionMetadata. */
   aiTitle?: string
+  /** densable currentSessionDevModsFolder last-wins. */
+  devModsFolder?: string
 }> {
   const {
     messages: byUuid,
@@ -650,6 +652,7 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     relocatedCwds,
     bridgeSessionIds,
     aiTitles,
+    devModsFolders,
   } = await loadTranscriptFile(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
@@ -673,6 +676,7 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
     relocatedCwd: sessionId ? relocatedCwds.get(sessionId) : undefined,
     bridgeSessionId: sessionId ? bridgeSessionIds.get(sessionId) : undefined,
     aiTitle: sessionId ? aiTitles.get(sessionId) : undefined,
+    devModsFolder: sessionId ? devModsFolders.get(sessionId) : undefined,
   }
 }
 
@@ -739,6 +743,8 @@ export async function loadConversationForResume(
   bridgeSessionId?: string
   /** Official `$2l` / `Jqy` `deferredToolUse`. */
   deferredToolUse?: HookDeferredToolAttachment
+  /** densable currentSessionDevModsFolder — last-wins `type:"dev-mods"`. */
+  devModsFolder?: string
 } | null> {
   try {
     let log: LogOption | null = null
@@ -750,6 +756,8 @@ export async function loadConversationForResume(
     let bridgeFromJsonl: string | undefined
     /** From jsonl path branch when no LogOption. */
     let aiTitleFromJsonl: string | undefined
+    /** densable iLr — from jsonl path branch when no LogOption. */
+    let devModsFromJsonl: string | undefined
 
     if (source === undefined) {
       // --continue: most recent session, skipping live --bg/daemon sessions
@@ -787,6 +795,7 @@ export async function loadConversationForResume(
       relocatedFromJsonl = loaded.relocatedCwd
       bridgeFromJsonl = loaded.bridgeSessionId
       aiTitleFromJsonl = loaded.aiTitle
+      devModsFromJsonl = loaded.devModsFolder
     } else if (typeof source === 'string') {
       // Load specific session by ID
       log = await getLastSessionLog(source as UUID)
@@ -884,6 +893,8 @@ export async function loadConversationForResume(
       relocatedCwd: log?.relocatedCwd ?? relocatedFromJsonl,
       // densable 2.1.224 #30 — non-empty bridge pointer for resume force-on
       bridgeSessionId: log?.bridgeSessionId ?? bridgeFromJsonl,
+      // densable iLr — consented mods folder for restoreSessionMetadata / bOn
+      devModsFolder: log?.devModsFolder ?? devModsFromJsonl,
       deferredToolUse,
     }
   } catch (error) {

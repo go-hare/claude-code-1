@@ -91,7 +91,8 @@ export async function clearConversation({
   setAppState?: (f: (prev: AppState) => AppState) => void
   setConversationId?: (id: UUID) => void
 }): Promise<void> {
-  // Execute SessionEnd hooks before clearing. Per-hook `_go` vs bound `Kfe`.
+  // Execute SessionEnd + function-hook `session.end` (`reason: 'clear'`) before
+  // session ID rotation (`regenerateSessionId`). Per-hook `_go` vs bound `Kfe`.
   const sessionEndTimeoutMs = getSessionEndHookTimeoutMs()
   const sessionEndBoundMs = getSessionEndHooksBoundMs()
   await executeSessionEndHooks('clear', {
@@ -325,7 +326,8 @@ export async function clearConversation({
     saveWorktreeState(worktreeSession)
   }
 
-  // Execute SessionStart hooks after clearing
+  // Execute classic SessionStart settings hooks after clearing (function-hook
+  // `session.start` does not fire on `'clear'`, per gold `claude-code.d.ts`).
   const hookMessages = await processSessionStartHooks('clear')
 
   // Update messages with hook results
