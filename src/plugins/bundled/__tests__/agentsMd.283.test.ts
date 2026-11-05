@@ -7,7 +7,7 @@ import { USER_CONFIG } from '../../../../vendor/claude-code-mods/mods/agents-md/
 
 describe('agents-md builtin plugin 2.1.283', () => {
   test('plugin name and /config title match gold', () => {
-    expect(AGENTS_MD_PLUGIN_NAME).toBe('agents-md')
+    expect(AGENTS_MD_PLUGIN_NAME).toBe('cc-plugin-agents-md')
     expect(AGENTS_MD_PLUGIN_DESCRIPTION).toContain(
       'AGENTS.md as project instructions',
     )
