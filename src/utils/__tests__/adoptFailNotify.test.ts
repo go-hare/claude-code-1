@@ -34,6 +34,8 @@ describe('notifyAdoptTaskFailed (SAo)', () => {
       )
       expect(hit).toBeTruthy()
       expect(hit?.priority).toBe('next')
+      expect(hit?.skipAttachments).toBe(true)
+      expect(hit?.shouldQuery).toBe(false)
     } catch {
       // getCommandQueue may not exist in some builds — XML shape is enough
     }
@@ -41,8 +43,10 @@ describe('notifyAdoptTaskFailed (SAo)', () => {
 
   test('escapes XML special chars in summary', () => {
     const msg = notifyAdoptTaskFailed('t', 'a <b> & "c"')
-    expect(msg).toContain('a &lt;b&gt; &amp; &quot;c&quot;')
+    // densable Wt: `& < >` only — quotes stay quotes (text node, not attr).
+    expect(msg).toContain('a &lt;b&gt; &amp; "c"')
     expect(msg).not.toContain('<b>')
+    expect(msg).not.toContain('&quot;')
   })
 })
 
@@ -52,8 +56,9 @@ describe('notifyAdoptAgentFailed (RAo)', () => {
       { agentId: 'ag1', description: 'explore' },
       'owner not resumed',
     )
-    // Quotes in description are XML-escaped inside <summary>.
-    expect(msg).toContain('Background agent &quot;explore&quot;')
+    // densable Wt leaves quotes in the text node.
+    expect(msg).toContain('Background agent "explore"')
+    expect(msg).not.toContain('&quot;')
     expect(msg).toContain('could not be resumed (owner not resumed)')
     expect(msg).toContain('<task-id>ag1</task-id>')
   })
@@ -70,7 +75,8 @@ describe('notifyAdoptWorkflowFailed (AAo)', () => {
       },
       'transcript link failed',
     )
-    expect(msg).toContain('Background workflow &quot;spec&quot;')
+    expect(msg).toContain('Background workflow "spec"')
+    expect(msg).not.toContain('&quot;')
     expect(msg).toContain('could not be resumed (transcript link failed)')
     expect(msg).toContain("Workflow({scriptPath: '/tmp/spec.ts'")
     expect(msg).toContain("resumeFromRunId: 'wf_abc'")

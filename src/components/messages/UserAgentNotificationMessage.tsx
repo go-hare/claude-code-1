@@ -4,6 +4,7 @@ import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { Box, Text, type TextProps } from '@anthropic/ink';
 import { formatDuration } from '../../utils/format.js';
 import { extractTag } from '../../utils/messages.js';
+import { unescapeXmlEntities } from '../../utils/xml.js';
 
 type Props = {
   addMargin: boolean;
@@ -24,8 +25,10 @@ function getStatusColor(status: string | null): TextProps['color'] {
 }
 
 export function UserAgentNotificationMessage({ addMargin, param: { text } }: Props): React.ReactNode {
-  const summary = extractTag(text, 'summary');
-  if (!summary) return null;
+  // gold As: zr(_, Dk) then KS — display-side amp/lt/gt only (not rie/quot).
+  const summaryRaw = extractTag(text, 'summary');
+  if (!summaryRaw) return null;
+  const summary = unescapeXmlEntities(summaryRaw);
 
   const status = extractTag(text, 'status');
   const color = getStatusColor(status);

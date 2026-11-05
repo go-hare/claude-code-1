@@ -14,6 +14,7 @@ describe('UserAgentNotificationMessage wrap', () => {
     expect(src).toContain('{BLACK_CIRCLE}')
     expect(src).toContain("{' '}")
     expect(src).toContain('{summary}')
+    expect(src).toContain('unescapeXmlEntities')
     expect(src).toContain("extractTag(text, 'duration_ms')")
     expect(src).toContain('formatDuration')
     expect(src).not.toMatch(/flexGrow=\{/)

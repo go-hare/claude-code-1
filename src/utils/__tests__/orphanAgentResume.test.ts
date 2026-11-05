@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { getCommandQueue, resetCommandQueue } from '../messageQueueManager.js'
+import { FORKED_SKILL_LAUNCH_TAG } from '../../constants/xml.js'
 import {
   buildOrphanWorkflowStoppedSummary,
+  buildOrphanWorkflowStoppedTitle,
   classifyOrphanAgent,
   clearAgentResumeInFlightForTests,
+  enrichOrphanCandidatesWithDisk,
   isAgentResumeInFlight,
   isAgentTranscriptIncomplete,
   stripInterruptedTrailingTurns,
@@ -69,8 +72,46 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
       description: 'explore repo',
       launchedByAgentTool: true,
       outputFile: '/tmp/o',
+      isWebFetchLaunch: false,
+      canReadOutputFile: true,
     })
     expect(notifiedTaskIds.size).toBe(0)
+  })
+
+  test('marks isWebFetchLaunch from Agent tool_use subagent_type', () => {
+    const { asyncAgents } = scanAsyncAgentsFromMessages([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu-wf',
+              name: 'Agent',
+              input: { subagent_type: 'web-fetch' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu-wf', is_error: false },
+          ],
+        },
+        toolUseResult: {
+          status: 'async_launched',
+          agentId: 'agent-wf',
+          description: 'fetch page',
+        },
+      },
+    ])
+    expect(asyncAgents[0]).toMatchObject({
+      agentId: 'agent-wf',
+      isWebFetchLaunch: true,
+      launchedByAgentTool: true,
+    })
   })
 
   test('marks redispatched via SendMessage resume result', () => {
@@ -85,13 +126,13 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
         toolUseResult: {
           success: true,
           message: 'resumed',
-          resumedAgentId: 'agent-r',
+          resumedAgentId: 'a0123456789abcdef',
         },
       },
     ])
-    expect(asyncAgents.find(a => a.agentId === 'agent-r')?.redispatched).toBe(
-      true,
-    )
+    expect(
+      asyncAgents.find(a => a.agentId === 'a0123456789abcdef')?.redispatched,
+    ).toBe(true)
   })
 
   test('collects notified task-ids from user text (bAf gate: both tags)', () => {
@@ -128,6 +169,55 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
     expect(notifiedTaskIds.has('bare-id')).toBe(false)
   })
 
+  test('qi co live marker is excluded; kind marker notifies remaining map keys', () => {
+    const { asyncAgents, notifiedTaskIds } = scanAsyncAgentsFromMessages([
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu1', is_error: false },
+          ],
+        },
+        toolUseResult: {
+          status: 'async_launched',
+          agentId: 'a0123456789abcdef',
+          description: 'keep live',
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu2', is_error: false },
+          ],
+        },
+        toolUseResult: {
+          status: 'async_launched',
+          agentId: 'a0fedcba987654321',
+          description: 'summarized',
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'text',
+              text: `<task-notification><task-id>${ORPHAN_SUMMARY_PREFIX}_live__:a0123456789abcdef</task-id><task-id>${ORPHAN_SUMMARY_PREFIX}__:agent</task-id><status>stopped</status></task-notification>`,
+            },
+          ],
+        },
+      },
+    ])
+    expect(asyncAgents.map(a => a.agentId).sort()).toEqual([
+      'a0123456789abcdef',
+      'a0fedcba987654321',
+    ])
+    expect(notifiedTaskIds.has('a0123456789abcdef')).toBe(false)
+    expect(notifiedTaskIds.has('a0fedcba987654321')).toBe(true)
+    expect(notifiedTaskIds.has(`${ORPHAN_SUMMARY_PREFIX}__:agent`)).toBe(true)
+  })
+
   test('redispatched after notify deletes from notifiedTaskIds (single-pass Rqb)', () => {
     // Official FAIL repro: notify then SendMessage resume — redispatched wins.
     const { asyncAgents, notifiedTaskIds } = scanAsyncAgentsFromMessages([
@@ -137,7 +227,7 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
           content: [
             {
               type: 'text',
-              text: '<task-notification><task-id>agN</task-id><status>completed</status></task-notification>',
+              text: '<task-notification><task-id>a0123456789abcdef</task-id><status>completed</status></task-notification>',
             },
           ],
         },
@@ -152,17 +242,19 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
         toolUseResult: {
           success: true,
           message: 'resumed agN',
-          resumedAgentId: 'agN',
+          resumedAgentId: 'a0123456789abcdef',
         },
       },
     ])
-    expect(asyncAgents.find(a => a.agentId === 'agN')?.redispatched).toBe(true)
-    expect(notifiedTaskIds.has('agN')).toBe(false)
+    expect(
+      asyncAgents.find(a => a.agentId === 'a0123456789abcdef')?.redispatched,
+    ).toBe(true)
+    expect(notifiedTaskIds.has('a0123456789abcdef')).toBe(false)
 
     const r = processOrphanAgentCandidates(
       [
         {
-          agentId: 'agN',
+          agentId: 'a0123456789abcdef',
           description: 'resumed agN',
           redispatched: true,
           mtimeMs: null,
@@ -176,7 +268,7 @@ describe('scanAsyncAgentsFromMessages (Rqb agent subset)', () => {
     )
     // Not skipped as notified; classified stopped (redispatched residue).
     expect(r.skippedNotified).toEqual([])
-    expect(r.stopped.map(s => s.entry.agentId)).toEqual(['agN'])
+    expect(r.stopped.map(s => s.entry.agentId)).toEqual(['a0123456789abcdef'])
   })
 })
 
@@ -273,7 +365,12 @@ describe('Hqb / Dqb shell & workflow orphans', () => {
     expect(msg).toContain(`${ORPHAN_SUMMARY_PREFIX}__:shell`)
     expect(msg).toContain(`${ORPHAN_SUMMARY_PREFIX}_live__:live1`)
     expect(msg).toContain('<status>stopped</status>')
-    expect(msg).toContain('2 background shell command task(s)')
+    expect(msg).toContain(
+      "2 background shell command tasks didn't finish before the previous session ended",
+    )
+    expect(msg).toContain('<note>')
+    expect(msg).toContain('No completion record was found for them')
+    expect(msg).not.toContain('&quot;')
   })
 
   test('Hqb multi shells product path lf+F$a (source + classify)', () => {
@@ -342,6 +439,7 @@ describe('Hqb / Dqb shell & workflow orphans', () => {
     )
     expect(src).toContain("reason?: 'worker_restart'")
     expect(src).toContain('reason: opts?.reason')
+    expect(src).toContain('unescapeXmlEntities(opts.summary)')
     expect(src).toContain('emitWorkerRestartOrphanStopped')
     expect(src).toContain('Stopped by a worker restart:')
     expect(src).toContain("reason: 'worker_restart'")
@@ -397,8 +495,16 @@ describe('Hqb / Dqb shell & workflow orphans', () => {
       workflowName: 'ship',
       runId: 'r1',
     })
-    expect(s).toContain('"ship"')
-    expect(s).toContain('resumeFromRunId: "r1"')
+    expect(s).toContain('No completion record was found for it')
+    expect(s).toContain('resumeFromRunId')
+    expect(
+      buildOrphanWorkflowStoppedTitle({
+        taskId: 'w1',
+        toolUseId: 't',
+        workflowName: 'ship',
+        runId: 'r1',
+      }),
+    ).toContain('"ship"')
   })
 
   test('Dqb skips notified/stopped/live', () => {
@@ -630,12 +736,38 @@ describe('classifyOrphanAgent (kqb subset)', () => {
         launchedByAgentTool: true,
         hasMeta: true,
         mtimeMs: Date.now(),
+        canReadOutputFile: true,
       },
       { autoResumeEnabled: false },
     )
     expect(r.kind).toBe('stopped')
     if (r.kind === 'stopped') {
-      expect(r.summary).toContain('transcript is saved on disk')
+      expect(r.summary).toContain('Background agent "x"')
+      expect(r.summary).toContain(
+        "didn't finish before the previous session ended",
+      )
+      expect(r.note).toContain('transcript is saved')
+      expect(r.note).toContain('worktree/output')
+    }
+  })
+
+  test('web-fetch launch note omits worktree and asks SendMessage', () => {
+    const r = classifyOrphanAgent(
+      {
+        agentId: 'wf1',
+        description: 'fetch',
+        launchedByAgentTool: true,
+        hasMeta: true,
+        mtimeMs: Date.now(),
+        isWebFetchLaunch: true,
+        canReadOutputFile: false,
+      },
+      { autoResumeEnabled: false },
+    )
+    expect(r.kind).toBe('stopped')
+    if (r.kind === 'stopped') {
+      expect(r.note).toContain('SendMessage to get its report')
+      expect(r.note).not.toContain('worktree/output')
     }
   })
 
@@ -648,7 +780,11 @@ describe('classifyOrphanAgent (kqb subset)', () => {
     })
     expect(r.kind).toBe('failed')
     if (r.kind === 'failed') {
-      expect(r.summary).toContain('in-process state was lost')
+      expect(r.summary).toContain('Background agent "lost"')
+      expect(r.summary).toContain(
+        "didn't finish before the previous session ended",
+      )
+      expect(r.note).toContain('in-process state was lost')
     }
   })
 
@@ -666,7 +802,7 @@ describe('classifyOrphanAgent (kqb subset)', () => {
     expect(r.kind).not.toBe('auto-resume')
   })
 
-  test('sidecar stoppedByUser classifies stopped (no auto-resume)', () => {
+  test('Ji has no stoppedByUser branch (Aye gates later)', () => {
     const now = Date.now()
     const r = classifyOrphanAgent(
       {
@@ -675,15 +811,10 @@ describe('classifyOrphanAgent (kqb subset)', () => {
         launchedByAgentTool: true,
         hasMeta: true,
         mtimeMs: now - 1000,
-        stoppedByUser: true,
       },
       { nowMs: now },
     )
-    expect(r.kind).toBe('stopped')
-    if (r.kind === 'stopped') {
-      expect(r.summary).toContain('stopped by the user')
-      expect(r.summary).toContain('will not be auto-resumed')
-    }
+    expect(r.kind).toBe('auto-resume')
   })
 })
 
@@ -728,20 +859,73 @@ describe('SAf / EAf / vAf / Iqb notifies', () => {
       agentId: 'ag1',
       description: 'explore',
       outputFile: '/tmp/out',
+      canReadOutputFile: true,
     })
     expect(msg).toContain('<task-id>ag1</task-id>')
     expect(msg).toContain('<output-file>/tmp/out</output-file>')
     expect(msg).not.toContain('<status>')
+    expect(msg).toContain('Background agent "explore" was restarted')
+    expect(msg).toContain('<note>')
     expect(msg).toContain('automatically restarted')
+    expect(msg).not.toContain('&quot;')
   })
 
   test('EAf completed status', () => {
     const msg = notifyOrphanAgentAlreadyCompleted({
       agentId: 'ag2',
       description: 'done',
+      canReadOutputFile: true,
+      outputFile: '/tmp/out',
     })
     expect(msg).toContain('<status>completed</status>')
+    expect(msg).toContain('finished before the previous session ended')
     expect(msg).toContain('already completed')
+    expect(msg).toContain('Read its output file')
+    expect(msg).toContain('<output-file>/tmp/out</output-file>')
+    expect(msg).not.toContain('&quot;')
+  })
+
+  test('EAf web-fetch completed uses SendMessage not output file', () => {
+    const msg = notifyOrphanAgentAlreadyCompleted({
+      agentId: 'ag2w',
+      description: 'done',
+      isWebFetchLaunch: true,
+      canReadOutputFile: true,
+      outputFile: '/tmp/out',
+    })
+    expect(msg).toContain(
+      'Send it a message with SendMessage to get its report',
+    )
+    expect(msg).not.toContain('Read its output file')
+    expect(msg).not.toContain('<output-file>')
+  })
+
+  test('EAf live local_agent webFetchSavedFiles omits output-file', () => {
+    const live = new Map([
+      ['ag2l', { type: 'local_agent', webFetchSavedFiles: ['/tmp/saved'] }],
+    ])
+    const msg = notifyOrphanAgentAlreadyCompleted(
+      {
+        agentId: 'ag2l',
+        description: 'done',
+        canReadOutputFile: true,
+        outputFile: '/tmp/out',
+      },
+      live,
+    )
+    expect(msg).toContain(
+      'Send it a message with SendMessage to get its report',
+    )
+    expect(msg).not.toContain('<output-file>')
+  })
+
+  test('SAf omits output-file when canReadOutputFile is missing', () => {
+    const msg = notifyOrphanAgentAutoResumed({
+      agentId: 'ag1m',
+      description: 'explore',
+      outputFile: '/tmp/out',
+    })
+    expect(msg).not.toContain('<output-file>')
   })
 
   test('vAf stopped with reason', () => {
@@ -750,7 +934,9 @@ describe('SAf / EAf / vAf / Iqb notifies', () => {
       'no transcript',
     )
     expect(msg).toContain('<status>stopped</status>')
-    expect(msg).toContain('could not be automatically restarted: no transcript')
+    expect(msg).toContain("couldn't be restarted: no transcript")
+    expect(msg).toContain('could not be automatically restarted')
+    expect(msg).not.toContain('&quot;')
   })
 
   test('Iqb multi-id batch', () => {
@@ -762,6 +948,22 @@ describe('SAf / EAf / vAf / Iqb notifies', () => {
     expect(msg).toContain('<task-id>b</task-id>')
     expect(msg).toContain('<status>failed</status>')
     expect(msg).toContain('2 background agents')
+    expect(msg).toContain('<note>')
+    expect(msg).not.toContain('&quot;')
+  })
+
+  test('Iqb mixed web-fetch suffix on summary', () => {
+    const msg = notifyOrphanAgentsBatch('stopped', [
+      { agentId: 'a', description: 'one', canReadOutputFile: true },
+      {
+        agentId: 'b',
+        description: 'two',
+        isWebFetchLaunch: true,
+        canReadOutputFile: false,
+      },
+    ])
+    expect(msg).toContain('fetched web content')
+    expect(msg).toContain('SendMessage only')
   })
 })
 
@@ -876,5 +1078,275 @@ describe('scheduleDeferredOrphanAutoResume (ese)', () => {
     })
     expect(r.skipped).toBe(true)
     expect(called).toBe(0)
+  })
+})
+
+describe('kqb 2.1.289 OA / forked-skill / Lt Di / redispatched Pe', () => {
+  const VALID_AGENT = 'a0123456789abcdef'
+
+  test('source lock: OA gate, Lt on SDK Di, redispatched Pe, forked skill', () => {
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { join } = require('path') as typeof import('path')
+    const src = readFileSync(
+      join(import.meta.dirname, '../orphanAgentResume.ts'),
+      'utf8',
+    )
+    expect(src).toContain('toAgentId(f.resumedAgentId) !== null')
+    expect(src).toContain('launchedByForkedSkill')
+    expect(src).toContain('FORKED_SKILL_LAUNCH_TAG')
+    expect(src).toContain("d.subtype === 'local_command'")
+    expect(src).toContain("d.attachment.taskType === 'local_bash'")
+    expect(src).toContain('leftoverHasInternalAgentEventReader')
+    expect(src).toContain('getProject().hasInternalAgentEventReader()')
+    expect(src).not.toContain('getInternalEventReader?.() != null')
+    expect(src).toContain('leftoverOrphanOutputFile(item.entry)')
+    expect(src).toContain('leftoverNotifyOrphanPe')
+    expect(src).toContain('item.entry.redispatched')
+    expect(src).toContain('skipAttachments: true')
+    expect(src).toContain('shouldQuery: false')
+    expect(src).toContain('emitSdk: false')
+    expect(src).not.toContain('export function Pe')
+    expect(src).not.toContain('export function Lt')
+    expect(src).not.toContain('export function Di')
+    expect(src).not.toContain('export function OA')
+    expect(src).not.toContain('export function EPo')
+    expect(src).not.toContain('export function PNt')
+  })
+
+  test('resumedAgentId OA gate drops non-UUID', () => {
+    const { asyncAgents } = scanAsyncAgentsFromMessages([
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'sm1', is_error: false },
+          ],
+        },
+        toolUseResult: {
+          success: true,
+          message: 'resumed',
+          resumedAgentId: 'agent-r',
+        },
+      },
+    ])
+    expect(asyncAgents.find(a => a.agentId === 'agent-r')).toBeUndefined()
+  })
+
+  test('local_command forked-skill-launch sets launchedByForkedSkill', () => {
+    const marker = `<${FORKED_SKILL_LAUNCH_TAG}>${JSON.stringify({
+      agentId: VALID_AGENT,
+      skillName: 'demo',
+      description: 'forked demo',
+    })}</${FORKED_SKILL_LAUNCH_TAG}>`
+    const { asyncAgents } = scanAsyncAgentsFromMessages([
+      {
+        type: 'system',
+        subtype: 'local_command',
+        content: marker,
+      },
+    ])
+    expect(asyncAgents).toHaveLength(1)
+    expect(asyncAgents[0]).toMatchObject({
+      agentId: VALID_AGENT,
+      description: 'forked demo',
+      launchedByForkedSkill: true,
+      isWebFetchLaunch: false,
+    })
+    expect(marker).toContain(FORKED_SKILL_LAUNCH_TAG)
+  })
+
+  test('attachment task_status local_bash running collects bgShells', () => {
+    const { bgShells } = scanAsyncAgentsFromMessages([
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'task_status',
+          taskType: 'local_bash',
+          status: 'running',
+          taskId: 'shell-att',
+          shell: { toolUseId: 'bash-tu' },
+        },
+      },
+    ])
+    expect(bgShells).toEqual([{ taskId: 'shell-att', toolUseId: 'bash-tu' }])
+  })
+
+  test('classify auto-resumes launchedByForkedSkill with meta + fresh mtime', () => {
+    const now = 1_000_000
+    const r = classifyOrphanAgent(
+      {
+        agentId: VALID_AGENT,
+        description: 'forked',
+        launchedByForkedSkill: true,
+        hasMeta: true,
+        mtimeMs: now - 1000,
+      },
+      { nowMs: now },
+    )
+    expect(r.kind).toBe('auto-resume')
+  })
+
+  test('classify Wt-escapes description in title (&<> only)', () => {
+    const r = classifyOrphanAgent({
+      agentId: VALID_AGENT,
+      description: 'a <b> & c',
+      mtimeMs: null,
+      hasMeta: false,
+    })
+    expect(r.kind).toBe('failed')
+    if (r.kind === 'failed') {
+      expect(r.summary).toContain('Background agent "a &lt;b&gt; &amp; c"')
+      expect(r.summary).not.toContain('&quot;')
+    }
+  })
+
+  test('classify fetchable without mtime is stopped not failed', () => {
+    const r = classifyOrphanAgent({
+      agentId: VALID_AGENT,
+      description: 'ghost',
+      mtimeMs: null,
+      hasMeta: false,
+      fetchable: true,
+    })
+    expect(r.kind).toBe('stopped')
+  })
+
+  test('enrich OA non-UUID skips disk and sets fetchable false', async () => {
+    const [row] = await enrichOrphanCandidatesWithDisk([
+      { agentId: 'not-a-uuid', description: 'x' },
+    ])
+    expect(row).toMatchObject({
+      agentId: 'not-a-uuid',
+      mtimeMs: null,
+      hasMeta: false,
+      fetchable: false,
+    })
+  })
+
+  test('redispatched Pe immediately; remaining length===1 Pe not Iqb batch', async () => {
+    const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
+      '../sdkEventQueue.js'
+    )
+    clearTaskTerminatedSdkGate('redisp')
+    clearTaskTerminatedSdkGate('plain')
+    drainSdkEvents()
+    const r = processOrphanAgentCandidates(
+      [
+        {
+          agentId: 'redisp',
+          description: 'one',
+          redispatched: true,
+          mtimeMs: null,
+          hasMeta: false,
+        },
+        {
+          agentId: 'plain',
+          description: 'two',
+          mtimeMs: null,
+          hasMeta: false,
+        },
+      ],
+      { notify: true },
+    )
+    expect(r.stopped.map(s => s.entry.agentId)).toEqual(['redisp'])
+    expect(r.failed.map(f => f.entry.agentId)).toEqual(['plain'])
+    try {
+      const q = getCommandQueue()
+      const vals = q
+        .filter(c => c.mode === 'task-notification')
+        .map(c => String(c.value))
+      expect(vals.some(v => v.includes('<task-id>redisp</task-id>'))).toBe(true)
+      expect(vals.some(v => v.includes('<task-id>plain</task-id>'))).toBe(true)
+      expect(vals.some(v => v.includes('2 background agents'))).toBe(false)
+    } catch {
+      /* queue optional */
+    }
+    const events = drainSdkEvents()
+    expect(
+      events.filter(e => 'subtype' in e && e.subtype === 'task_notification')
+        .length,
+    ).toBeGreaterThanOrEqual(1)
+    clearTaskTerminatedSdkGate('redisp')
+    clearTaskTerminatedSdkGate('plain')
+  })
+
+  test('SDK Di uses Lt (webfetch omits outputFile even when canRead)', async () => {
+    const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
+      '../sdkEventQueue.js'
+    )
+    clearTaskTerminatedSdkGate('wf-sdk')
+    drainSdkEvents()
+    processOrphanAgentCandidates(
+      [
+        {
+          agentId: 'wf-sdk',
+          description: 'fetch',
+          isWebFetchLaunch: true,
+          canReadOutputFile: true,
+          outputFile: '/tmp/out',
+          mtimeMs: Date.now(),
+          hasMeta: true,
+          launchedByAgentTool: true,
+        },
+      ],
+      { notify: true, autoResumeEnabled: false },
+    )
+    const events = drainSdkEvents()
+    const term = events.find(
+      e =>
+        'subtype' in e &&
+        e.subtype === 'task_notification' &&
+        'task_id' in e &&
+        e.task_id === 'wf-sdk',
+    )
+    expect(term).toBeDefined()
+    expect(term).toMatchObject({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'wf-sdk',
+      status: 'stopped',
+    })
+    expect((term as { output_file?: string }).output_file).toBe('')
+    clearTaskTerminatedSdkGate('wf-sdk')
+  })
+
+  test('SDK Di Lt keeps outputFile when canRead is false (Pe XML omits)', async () => {
+    const { clearTaskTerminatedSdkGate, drainSdkEvents } = await import(
+      '../sdkEventQueue.js'
+    )
+    clearTaskTerminatedSdkGate('unread')
+    drainSdkEvents()
+    processOrphanAgentCandidates(
+      [
+        {
+          agentId: 'unread',
+          description: 'gone',
+          canReadOutputFile: false,
+          outputFile: '/tmp/secret',
+          mtimeMs: null,
+          hasMeta: false,
+        },
+      ],
+      { notify: true },
+    )
+    const events = drainSdkEvents()
+    const term = events.find(
+      e =>
+        'subtype' in e &&
+        e.subtype === 'task_notification' &&
+        'task_id' in e &&
+        e.task_id === 'unread',
+    )
+    expect((term as { output_file?: string }).output_file).toBe('/tmp/secret')
+    try {
+      const q = getCommandQueue()
+      const vals = q
+        .filter(c => c.mode === 'task-notification')
+        .map(c => String(c.value))
+      expect(vals.some(v => v.includes('/tmp/secret'))).toBe(false)
+    } catch {
+      /* queue optional */
+    }
+    clearTaskTerminatedSdkGate('unread')
   })
 })

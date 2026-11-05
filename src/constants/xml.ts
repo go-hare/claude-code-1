@@ -36,6 +36,8 @@ export const TASK_TYPE_TAG = 'task-type'
 export const OUTPUT_FILE_TAG = 'output-file'
 export const STATUS_TAG = 'status'
 export const SUMMARY_TAG = 'summary'
+/** densable `n6` — orphan notify body after `<summary>` (gold Pe/Zi). */
+export const NOTE_TAG = 'note'
 export const REASON_TAG = 'reason'
 export const WORKTREE_TAG = 'worktree'
 export const WORKTREE_PATH_TAG = 'worktreePath'

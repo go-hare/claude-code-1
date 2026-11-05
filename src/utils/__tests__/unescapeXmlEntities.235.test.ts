@@ -22,6 +22,12 @@ describe('unescapeXmlEntities (densable oX)', () => {
     expect(unescapeXmlEntities('hello world')).toBe('hello world')
   })
 
+  test('Sp KS leaves quoted agent names as quotes after Wt (no &quot; paint)', () => {
+    const raw = 'Background agent "Verify E2B bake-off trainer"'
+    expect(unescapeXmlEntities(escapeXml(raw))).toBe(raw)
+    expect(unescapeXmlEntities(escapeXml(raw))).not.toContain('&quot;')
+  })
+
   test('unknown mapped miss keeps original match via ??t', () => {
     // regex only matches amp|lt|gt; confirm no throw on mixed content
     expect(unescapeXmlEntities('x &amp; y &unknown; z')).toBe(

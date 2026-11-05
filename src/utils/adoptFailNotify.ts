@@ -9,6 +9,7 @@
  */
 
 import {
+  NOTE_TAG,
   OUTPUT_FILE_TAG,
   STATUS_TAG,
   SUMMARY_TAG,
@@ -18,14 +19,7 @@ import {
 } from '../constants/xml.js'
 import { asAgentId } from '../types/ids.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
-
-function escapeXmlText(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+import { escapeXml } from './xml.js'
 
 /**
  * Official Ebn / SAo base — queue a task-notification with optional status and
@@ -35,6 +29,11 @@ function escapeXmlText(s: string): string {
 export function notifyTaskNotification(opts: {
   taskId: string
   summary: string
+  /**
+   * densable Pe `r` / Zi `body` — `<note>` after `<summary>`. Sp paints
+   * summary only (gold KS). Omit when there is no note.
+   */
+  note?: string
   /** Official Ebn `t` — omit for SAf (restarted, still running). */
   status?: string
   outputFile?: string
@@ -50,24 +49,30 @@ export function notifyTaskNotification(opts: {
    */
   emitSdk?: boolean
 }): string {
-  const safeId = escapeXmlText(opts.taskId)
-  const safeSummary = escapeXmlText(opts.summary)
+  // densable Wt — text-node escape `& < >` only. Quotes stay quotes so Sp
+  // KS (`unescapeXmlEntities`) never paints leftover `&quot;`.
+  const safeId = escapeXml(opts.taskId)
+  const safeSummary = escapeXml(opts.summary)
   const toolUseLine =
     opts.toolUseId !== undefined && opts.toolUseId.length > 0
-      ? `\n<${TOOL_USE_ID_TAG}>${escapeXmlText(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
+      ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
       : ''
   const outputLine =
     opts.outputFile !== undefined && opts.outputFile.length > 0
-      ? `\n<${OUTPUT_FILE_TAG}>${escapeXmlText(opts.outputFile)}</${OUTPUT_FILE_TAG}>`
+      ? `\n<${OUTPUT_FILE_TAG}>${escapeXml(opts.outputFile)}</${OUTPUT_FILE_TAG}>`
       : ''
   const statusLine =
     opts.status !== undefined
-      ? `\n<${STATUS_TAG}>${escapeXmlText(opts.status)}</${STATUS_TAG}>`
+      ? `\n<${STATUS_TAG}>${escapeXml(opts.status)}</${STATUS_TAG}>`
       : ''
-  // Official order: task-id, tool-use-id (Hqb/Dqb), output-file, status, summary
+  const noteLine =
+    opts.note !== undefined && opts.note.length > 0
+      ? `\n<${NOTE_TAG}>${escapeXml(opts.note)}</${NOTE_TAG}>`
+      : ''
+  // Official Zi order: task-id, tool-use-id, output-file, status, summary, note body
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${safeId}</${TASK_ID_TAG}>${toolUseLine}${outputLine}${statusLine}
-<${SUMMARY_TAG}>${safeSummary}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${safeSummary}</${SUMMARY_TAG}>${noteLine}
 </${TASK_NOTIFICATION_TAG}>`
 
   let targetAgentId = opts.agentId
@@ -88,8 +93,10 @@ export function notifyTaskNotification(opts: {
       mode: 'task-notification',
       agentId:
         targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
-      // Official SAo/Ebn uses priority "next".
+      // densable Pe/es/Ut: skipAttachments:!0, priority:"next", shouldQuery:!1
+      skipAttachments: true,
       priority: 'next',
+      shouldQuery: false,
     })
   } catch {
     // best-effort — rehydrate must not throw on notify fail

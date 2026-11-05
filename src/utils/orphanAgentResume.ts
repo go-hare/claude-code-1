@@ -15,10 +15,38 @@
  * terminal orphans (multi F$a + singles).
  */
 
+import {
+  COMMAND_ARGS_TAG,
+  COMMAND_MESSAGE_TAG,
+  COMMAND_NAME_TAG,
+  FORKED_SKILL_LAUNCH_TAG,
+  LOCAL_COMMAND_STDERR_TAG,
+  LOCAL_COMMAND_STDOUT_TAG,
+  NOTE_TAG,
+  OUTPUT_FILE_TAG,
+  STATUS_TAG,
+  SUMMARY_TAG,
+  TASK_ID_TAG,
+  TASK_NOTIFICATION_TAG,
+} from '../constants/xml.js'
+import { asAgentId, toAgentId } from '../types/ids.js'
 import { notifyTaskNotification } from './adoptFailNotify.js'
+import { escapeXml, unescapeXmlEntities } from './xml.js'
 
 /** Official Agent tool wire names that mark launchedByAgentTool. */
 const AGENT_TOOL_NAMES = new Set(['Agent', 'Task'])
+
+/** densable qi `Co` — Skill tool_use ids mark launchedByForkedSkill. */
+const SKILL_TOOL_NAMES = new Set(['Skill'])
+
+const FORKED_SKILL_LAUNCH_STRIP_RE = new RegExp(
+  `<(${LOCAL_COMMAND_STDOUT_TAG}|${LOCAL_COMMAND_STDERR_TAG}|${COMMAND_NAME_TAG}|${COMMAND_MESSAGE_TAG}|${COMMAND_ARGS_TAG})>[\\s\\S]*</\\1>`,
+  'g',
+)
+
+const FORKED_SKILL_LAUNCH_BODY_RE = new RegExp(
+  `^[\\s�]*<${FORKED_SKILL_LAUNCH_TAG}>([^<]*)</${FORKED_SKILL_LAUNCH_TAG}>\\s*$`,
+)
 
 /** Official hGo — max orphans before aggregate-only summary. */
 export const ORPHAN_AGENT_CAP = 20
@@ -28,10 +56,243 @@ export const ORPHAN_AUTO_RESUME_MAX_AGE_MS = 172_800_000
 
 /** Official gGo — internal scan marker prefix (F$a task-id markers). */
 export const ORPHAN_SUMMARY_PREFIX = '__orphan_summary'
+/** densable Et — `__orphan_summary__:agent|shell|workflow` marks remaining keys notified. */
+const ORPHAN_SUMMARY_KIND_PREFIX = `${ORPHAN_SUMMARY_PREFIX}__:`
+/** densable Pt — `__orphan_summary_live__:` ids stay out of the remaining-key sweep. */
+const ORPHAN_SUMMARY_LIVE_PREFIX = `${ORPHAN_SUMMARY_PREFIX}_live__:`
 
 /** Official N$a — aggregate orphan summary text. */
 export const ORPHAN_AGGREGATE_SUMMARY =
   'Orphaned by a previous Claude Code process exit and reported in an aggregate summary.'
+
+/**
+ * densable Oe — Sp title stem + "didn't finish before the previous session
+ * ended". Not exported (gold minify Oe).
+ */
+function leftoverOrphanDidntFinish(stem: string): string {
+  return `${stem} didn't finish before the previous session ended`
+}
+
+/** densable `_vr` — Agent/Task tool_use whose subagent_type is web-fetch. */
+function leftoverIsWebFetchAgentToolUse(
+  block: Record<string, unknown>,
+): boolean {
+  if (!AGENT_TOOL_NAMES.has(typeof block.name === 'string' ? block.name : '')) {
+    return false
+  }
+  const input = block.input
+  if (!isRecord(input) || !('subagent_type' in input)) return false
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isWebFetchAgentTypeName } =
+      require('@claude-code/builtin-tools/tools/AgentTool/built-in/webFetchAgent.js') as typeof import('@claude-code/builtin-tools/tools/AgentTool/built-in/webFetchAgent.js')
+    return isWebFetchAgentTypeName(input.subagent_type)
+  } catch {
+    return (
+      typeof input.subagent_type === 'string' &&
+      input.subagent_type
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[\s\-_]+/g, '') === 'webfetch'
+    )
+  }
+}
+
+/** densable `n=!Nt()` — parent can read output files unless diskless. */
+function leftoverLiveAgentTasks(
+  getState?: () => unknown,
+): Map<string, { type?: string; webFetchSavedFiles?: unknown }> | undefined {
+  if (!getState) return undefined
+  try {
+    const state = getState() as {
+      tasks?: Record<string, { type?: string; webFetchSavedFiles?: unknown }>
+    }
+    const tasks = state?.tasks
+    if (!tasks) return undefined
+    return new Map(Object.entries(tasks))
+  } catch {
+    return undefined
+  }
+}
+
+function leftoverParentCanReadOutputFile(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isDisklessLaunch } =
+      require('./sessionHost.js') as typeof import('./sessionHost.js')
+    return !isDisklessLaunch()
+  } catch {
+    return true
+  }
+}
+
+/**
+ * densable kqb `ne` / es / Kco / Yco closing sentence.
+ * isWebFetchLaunch → SendMessage only; canReadOutputFile → worktree/output;
+ * else status-report SendMessage.
+ */
+function leftoverOrphanLandingHint(entry: {
+  isWebFetchLaunch?: boolean
+  canReadOutputFile?: boolean
+}): 'webfetch' | 'output' | 'status' {
+  if (entry.isWebFetchLaunch === true) return 'webfetch'
+  // densable es `!b.canReadOutputFile` — missing field is not readable.
+  if (entry.canReadOutputFile !== true) return 'status'
+  if (!leftoverParentCanReadOutputFile()) return 'status'
+  return 'output'
+}
+
+/** densable Lt — omit outputFile for web-fetch launches. Never export minify `Lt`. */
+function leftoverOrphanOutputFile(entry: {
+  isWebFetchLaunch?: boolean
+  outputFile?: string
+}): string | undefined {
+  if (entry.isWebFetchLaunch) return undefined
+  return entry.outputFile
+}
+
+/** densable Pe `s=e.canReadOutputFile?Lt(e):void 0`. Never export minify `Pe`. */
+function leftoverPeOutputFile(entry: {
+  isWebFetchLaunch?: boolean
+  canReadOutputFile?: boolean
+  outputFile?: string
+}): string | undefined {
+  if (entry.canReadOutputFile !== true) return undefined
+  return leftoverOrphanOutputFile(entry)
+}
+
+/**
+ * densable Pe XML bookend — SDK already closed via Di/Lt.
+ * Gold Zi interpolates Q/ne after Wt; do not escapeXml summary/note again.
+ */
+function leftoverNotifyOrphanPe(
+  entry: OrphanAgentEntry,
+  status: 'stopped' | 'failed',
+  summary: string,
+  note: string,
+): void {
+  const outputFile = leftoverPeOutputFile(entry)
+  const outputLine =
+    outputFile !== undefined && outputFile.length > 0
+      ? `\n<${OUTPUT_FILE_TAG}>${escapeXml(outputFile)}</${OUTPUT_FILE_TAG}>`
+      : ''
+  const noteLine = `\n<${NOTE_TAG}>${note}</${NOTE_TAG}>`
+  const message = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(entry.agentId)}</${TASK_ID_TAG}>${outputLine}
+<${STATUS_TAG}>${status}</${STATUS_TAG}>
+<${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>${noteLine}
+</${TASK_NOTIFICATION_TAG}>`
+  try {
+    const { enqueuePendingNotification } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
+    let targetAgentId: string | undefined
+    try {
+      const { getSessionId } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+      targetAgentId = getSessionId()
+    } catch {
+      targetAgentId = undefined
+    }
+    enqueuePendingNotification({
+      value: message,
+      mode: 'task-notification',
+      agentId:
+        targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
+      skipAttachments: true,
+      priority: 'next',
+      shouldQuery: false,
+    })
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * densable PNt — `mi().hasInternalAgentEventReader()`. Session CCR
+ * `getInternalEventReader()` is a different field; missing agent reader →
+ * false (classify failed, not stopped).
+ */
+function leftoverHasInternalAgentEventReader(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getProject } =
+      require('./sessionStorage.js') as typeof import('./sessionStorage.js')
+    return getProject().hasInternalAgentEventReader()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable EPo — unescapeXmlEntities then JSON.parse of
+ * `<forked-skill-launch>` JSON. File-private; never export minify `EPo`.
+ */
+function leftoverParseForkedSkillLaunch(content: string): Array<{
+  agentId: string
+  skillName: string
+  description: string
+}> {
+  const inner = content
+    .replace(FORKED_SKILL_LAUNCH_STRIP_RE, '�')
+    .match(FORKED_SKILL_LAUNCH_BODY_RE)?.[1]
+  if (inner === undefined) return []
+  try {
+    const parsed: unknown = JSON.parse(unescapeXmlEntities(inner))
+    if (!isRecord(parsed)) return []
+    const agentId = typeof parsed.agentId === 'string' ? parsed.agentId : ''
+    const skillName =
+      typeof parsed.skillName === 'string' ? parsed.skillName : ''
+    const description =
+      typeof parsed.description === 'string' ? parsed.description : ''
+    if (toAgentId(agentId) === null) return []
+    if (
+      skillName.length < 1 ||
+      skillName.length > 256 ||
+      /[\r\n]/.test(skillName)
+    ) {
+      return []
+    }
+    if (description.length > 4096) return []
+    return [{ agentId, skillName, description }]
+  } catch {
+    return []
+  }
+}
+
+/** densable kqb `ne` — "it" body + landing-hint tail. */
+function leftoverOrphanStoppedNote(
+  entry: OrphanAgentEntry,
+  kind: 'redispatched' | 'transcript' | 'lost',
+): string {
+  const hint = leftoverOrphanLandingHint(entry)
+  if (kind === 'redispatched') {
+    const tail =
+      hint === 'webfetch'
+        ? 'Send it another message with SendMessage to resume it and get its report before assuming the fetch landed.'
+        : hint === 'output'
+          ? 'Check its worktree/output for partial work before assuming the task landed.'
+          : 'Send it another message with SendMessage to resume it and ask for a status report before assuming the task landed.'
+    return `No completion record was found for it after it was re-dispatched via SendMessage in the previous session. It may have been stopped (via the UI, an SDK interrupt, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. ${tail}`
+  }
+  if (kind === 'transcript') {
+    const tail =
+      hint === 'webfetch'
+        ? 'Resume it by sending it a message with SendMessage to get its report.'
+        : hint === 'output'
+          ? 'Resume it by sending it a message with SendMessage, or check its worktree/output for partial work before assuming the task landed.'
+          : 'Resume it by sending it a message with SendMessage and ask for a status report before assuming the task landed.'
+    return `No completion record was found for it in the previous session. It may have been stopped, or it may have been running when the previous Claude Code process exited — either way its transcript is saved, so its progress is not lost. ${tail}`
+  }
+  const tail =
+    hint === 'webfetch'
+      ? 'Launch it again if its report is still needed.'
+      : hint === 'output'
+        ? 'Check its worktree/output for partial work before assuming the task landed.'
+        : 'Do not assume the task landed; launch it again if its result is still needed.'
+  return `It was running when the previous Claude Code process exited and did not complete. Its in-process state was lost. ${tail}`
+}
 
 /**
  * Official lf portable — once-gated SDK task_notification bookend for orphan
@@ -55,7 +316,11 @@ function emitOrphanLf(
       require('./sdkEventQueue.js') as typeof import('./sdkEventQueue.js')
     emitTaskTerminatedSdk(taskId, status, {
       toolUseId: opts?.toolUseId,
-      summary: opts?.summary,
+      // densable Di `{summary:KS(Q)}` — display-side amp/lt/gt after Wt.
+      summary:
+        opts?.summary !== undefined
+          ? unescapeXmlEntities(opts.summary)
+          : undefined,
       outputFile: opts?.outputFile,
       reason: opts?.reason,
     })
@@ -88,7 +353,7 @@ export function emitWorkerRestartOrphanStopped(
   description?: string,
 ): void {
   emitOrphanLf(taskId, 'stopped', {
-    summary: `Stopped by a worker restart: ${description || taskId}`,
+    summary: escapeXml(`Stopped by a worker restart: ${description || taskId}`),
     reason: 'worker_restart',
   })
 }
@@ -128,6 +393,21 @@ export type OrphanAgentEntry = {
   redispatched?: boolean
   /** Official launchedByAgentTool — only AgentTool-spawned are auto-resumable. */
   launchedByAgentTool?: boolean
+  /**
+   * densable qi `launchedByForkedSkill` — Skill tool / local_command
+   * `<forked-skill-launch>` marker.
+   */
+  launchedByForkedSkill?: boolean
+  /**
+   * densable `_vr` — Agent/Task tool_use `subagent_type` is web-fetch
+   * (`h9n` / leftover `isWebFetchAgentTypeName`).
+   */
+  isWebFetchLaunch?: boolean
+  /**
+   * densable `n && w.canReadOutputFile!==!1` — parent can Read/Bash the
+   * output file (`n=!Nt()` diskless).
+   */
+  canReadOutputFile?: boolean
 }
 
 export type OrphanShellEntry = {
@@ -148,10 +428,10 @@ export type OrphanClassifyInput = OrphanAgentEntry & {
   /** Official F3 meta present (agent metadata readable). */
   hasMeta?: boolean
   /**
-   * densable Gzg/hAe sidecar marker. When true, classify as stopped
-   * (no auto-resume) so orphan pass does not flail into Aye orr.
+   * densable kqb `fetchable` — no mtime but PNt internal agent event
+   * reader can hydrate. Stopped (not failed) when true.
    */
-  stoppedByUser?: boolean
+  fetchable?: boolean
 }
 
 /**
@@ -200,10 +480,19 @@ export type ScannedAsyncAgents = {
 
 type ScanMsg = {
   type?: string
+  subtype?: string
+  content?: unknown
   timestamp?: string
   message?: { content?: unknown }
   toolUseResult?: unknown
-  attachment?: { type?: string; prompt?: unknown }
+  attachment?: {
+    type?: string
+    prompt?: unknown
+    taskType?: string
+    status?: string
+    taskId?: string
+    shell?: { toolUseId?: string }
+  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -221,33 +510,88 @@ function contentTextSlices(content: unknown): string[] {
   return out
 }
 
+type LeftoverOrphanSummaryMarkers = {
+  summarizedKinds: Set<'agent' | 'shell' | 'workflow'>
+  liveExclusions: Set<string>
+}
+
 /**
- * Official bAf portable (agent subset) — only when both
- * `<task-notification>` and `<status>` open tags are present, collect
- * `<task-id>` values into `notified`. Single-pass; later redispatched
- * deletes win over earlier notifies.
+ * densable co — gate both `<task-notification>` and `<status>`; KS each
+ * `<task-id>`. `__orphan_summary_live__:` → liveExclusions (not notified);
+ * `__orphan_summary__:kind` → notified + summarizedKinds.
  */
-function collectNotifiedTaskIdsFromText(
+function leftoverCo(
   text: string,
   notified: Set<string>,
-): void {
-  // Official Cqb + wqb gate
-  if (!text.includes('<task-notification>') || !text.includes('<status>')) {
-    return
+): LeftoverOrphanSummaryMarkers {
+  const o: LeftoverOrphanSummaryMarkers = {
+    summarizedKinds: new Set(),
+    liveExclusions: new Set(),
   }
-  for (const m of text.matchAll(/<task-id>([^<]+)<\/task-id>/g)) {
-    const id = m[1]?.trim()
-    if (id) notified.add(id)
+  if (
+    !text.includes(`<${TASK_NOTIFICATION_TAG}>`) ||
+    !text.includes(`<${STATUS_TAG}>`)
+  ) {
+    return o
+  }
+  for (const m of text.matchAll(/<task-id>([^<]*)<\/task-id>/g)) {
+    const raw = m[1]
+    if (raw === undefined) continue
+    const s = unescapeXmlEntities(raw)
+    if (!s) continue
+    if (s.startsWith(ORPHAN_SUMMARY_LIVE_PREFIX)) {
+      o.liveExclusions.add(s.slice(ORPHAN_SUMMARY_LIVE_PREFIX.length))
+      continue
+    }
+    notified.add(s)
+    if (s.startsWith(ORPHAN_SUMMARY_KIND_PREFIX)) {
+      const u = s.slice(ORPHAN_SUMMARY_KIND_PREFIX.length)
+      if (u === 'agent' || u === 'shell' || u === 'workflow') {
+        o.summarizedKinds.add(u)
+      }
+    }
+  }
+  return o
+}
+
+/** densable R — remaining map keys of summarized kinds, minus liveExclusions. */
+function leftoverApplyOrphanSummaryMarkers(
+  markers: LeftoverOrphanSummaryMarkers,
+  maps: {
+    agent: Map<string, unknown>
+    shell: Map<string, unknown>
+    workflow: Map<string, unknown>
+  },
+  notified: Set<string>,
+): void {
+  for (const kind of markers.summarizedKinds) {
+    const w =
+      kind === 'agent'
+        ? maps.agent
+        : kind === 'shell'
+          ? maps.shell
+          : maps.workflow
+    for (const id of w.keys()) {
+      if (!markers.liveExclusions.has(id)) notified.add(id)
+    }
   }
 }
 
 function collectNotifiedFromContent(
   content: unknown,
   notified: Set<string>,
+  maps: {
+    agent: Map<string, unknown>
+    shell: Map<string, unknown>
+    workflow: Map<string, unknown>
+  },
 ): void {
-  for (const t of contentTextSlices(content)) {
-    collectNotifiedTaskIdsFromText(t, notified)
-  }
+  // densable Yi — join then one co/R (not per-slice).
+  leftoverApplyOrphanSummaryMarkers(
+    leftoverCo(contentTextSlices(content).join('\n'), notified),
+    maps,
+    notified,
+  )
 }
 
 /**
@@ -448,6 +792,9 @@ export function scanAsyncAgentsFromMessages(
   const notifiedTaskIds = new Set<string>()
   const stoppedTaskIds = new Set<string>()
   const agentToolUseIds = new Set<string>()
+  const webFetchAgentToolUseIds = new Set<string>()
+  const skillToolUseIds = new Set<string>()
+  const parentCanRead = leftoverParentCanReadOutputFile()
 
   for (const d of messages) {
     if (d.type === 'assistant') {
@@ -459,14 +806,24 @@ export function scanAsyncAgentsFromMessages(
         const id = typeof m.id === 'string' ? m.id : ''
         if (id && AGENT_TOOL_NAMES.has(name)) {
           agentToolUseIds.add(id)
+          if (leftoverIsWebFetchAgentToolUse(m)) {
+            webFetchAgentToolUseIds.add(id)
+          }
+        } else if (id && SKILL_TOOL_NAMES.has(name)) {
+          skillToolUseIds.add(id)
         }
       }
       continue
     }
 
     if (d.type === 'user') {
-      // Official: u(bAf(xqb(d.message.content), notifiedTaskIds)) first
-      collectNotifiedFromContent(d.message?.content, notifiedTaskIds)
+      // densable R(co(Yi(content), h)) before tool_result — remaining keys of
+      // summarized kinds minus liveExclusions.
+      collectNotifiedFromContent(d.message?.content, notifiedTaskIds, {
+        agent: asyncAgents,
+        shell: bgShells,
+        workflow: workflows,
+      })
 
       const f = d.toolUseResult
       if (!isRecord(f)) continue
@@ -474,18 +831,24 @@ export function scanAsyncAgentsFromMessages(
       if (!Array.isArray(content)) continue
 
       let fromAgentTool = false
+      let isWebFetchLaunch = false
+      let fromSkillTool = false
       for (const g of content) {
         if (!isRecord(g) || g.type !== 'tool_result') continue
         if (g.is_error) continue
         const tuid = typeof g.tool_use_id === 'string' ? g.tool_use_id : ''
-        if (tuid && agentToolUseIds.has(tuid)) fromAgentTool = true
+        if (tuid && agentToolUseIds.has(tuid)) {
+          fromAgentTool = true
+          if (webFetchAgentToolUseIds.has(tuid)) isWebFetchLaunch = true
+        }
+        if (tuid && skillToolUseIds.has(tuid)) fromSkillTool = true
 
-        // Official: SendMessage resume → redispatched; delete prior notify
+        // Official: SendMessage resume → redispatched; OA UUID gate
         if (
           f.success === true &&
           typeof f.message === 'string' &&
           typeof f.resumedAgentId === 'string' &&
-          f.resumedAgentId.length > 0
+          toAgentId(f.resumedAgentId) !== null
         ) {
           const rid = f.resumedAgentId
           notifiedTaskIds.delete(rid)
@@ -497,6 +860,8 @@ export function scanAsyncAgentsFromMessages(
               agentId: rid,
               description: f.message,
               redispatched: true,
+              isWebFetchLaunch: false,
+              canReadOutputFile: parentCanRead,
             })
           }
         }
@@ -560,6 +925,71 @@ export function scanAsyncAgentsFromMessages(
           outputFile:
             typeof f.outputFile === 'string' ? f.outputFile : undefined,
           launchedByAgentTool: fromAgentTool,
+          isWebFetchLaunch,
+          canReadOutputFile: parentCanRead && f.canReadOutputFile !== false,
+        })
+      }
+
+      // densable qi: Skill tool_result status=forked + background
+      if (
+        f.status === 'forked' &&
+        f.background === true &&
+        typeof f.agentId === 'string' &&
+        f.agentId.length > 0 &&
+        !f.agentId.startsWith(ORPHAN_SUMMARY_PREFIX) &&
+        !asyncAgents.has(f.agentId)
+      ) {
+        asyncAgents.set(f.agentId, {
+          agentId: f.agentId,
+          description:
+            typeof f.commandName === 'string' ? f.commandName : f.agentId,
+          isWebFetchLaunch: false,
+          canReadOutputFile: parentCanRead,
+          launchedByForkedSkill: fromSkillTool,
+        })
+      }
+      continue
+    }
+
+    // densable qi: system local_command → EPo forked-skill-launch
+    if (
+      d.type === 'system' &&
+      d.subtype === 'local_command' &&
+      typeof d.content === 'string'
+    ) {
+      for (const launched of leftoverParseForkedSkillLaunch(d.content)) {
+        if (
+          launched.agentId.startsWith(ORPHAN_SUMMARY_PREFIX) ||
+          asyncAgents.has(launched.agentId)
+        ) {
+          continue
+        }
+        asyncAgents.set(launched.agentId, {
+          agentId: launched.agentId,
+          description: launched.description,
+          isWebFetchLaunch: false,
+          canReadOutputFile: parentCanRead,
+          launchedByForkedSkill: true,
+        })
+      }
+      continue
+    }
+
+    // densable qi: attachment task_status local_bash running → bgShells
+    if (
+      d.type === 'attachment' &&
+      d.attachment?.type === 'task_status' &&
+      d.attachment.taskType === 'local_bash' &&
+      d.attachment.status === 'running' &&
+      d.attachment.shell !== undefined &&
+      typeof d.attachment.taskId === 'string' &&
+      !d.attachment.taskId.startsWith(ORPHAN_SUMMARY_PREFIX)
+    ) {
+      const tuid = d.attachment.shell.toolUseId
+      if (typeof tuid === 'string' && tuid.length > 0) {
+        bgShells.set(d.attachment.taskId, {
+          taskId: d.attachment.taskId,
+          toolUseId: tuid,
         })
       }
       continue
@@ -571,7 +1001,15 @@ export function scanAsyncAgentsFromMessages(
       d.attachment?.type === 'queued_command' &&
       typeof d.attachment.prompt === 'string'
     ) {
-      collectNotifiedTaskIdsFromText(d.attachment.prompt, notifiedTaskIds)
+      leftoverApplyOrphanSummaryMarkers(
+        leftoverCo(d.attachment.prompt, notifiedTaskIds),
+        {
+          agent: asyncAgents,
+          shell: bgShells,
+          workflow: workflows,
+        },
+        notifiedTaskIds,
+      )
     }
   }
 
@@ -593,7 +1031,12 @@ export async function enrichOrphanCandidatesWithDisk(
   const out: OrphanClassifyInput[] = []
   for (const a of agents) {
     if (a.redispatched) {
-      out.push({ ...a, mtimeMs: null, hasMeta: false })
+      out.push({ ...a, mtimeMs: null, hasMeta: false, fetchable: false })
+      continue
+    }
+    // densable OA — non-UUID agentId → {mtimeMs:null,hasMeta:!1,fetchable:!1}
+    if (toAgentId(a.agentId) === null) {
+      out.push({ ...a, mtimeMs: null, hasMeta: false, fetchable: false })
       continue
     }
     let mtimeMs: number | null = null
@@ -612,7 +1055,8 @@ export async function enrichOrphanCandidatesWithDisk(
       const { stat } = require('fs/promises') as typeof import('fs/promises')
       const { getPinnedStorageV5 } =
         require('./storageV5/index.js') as typeof import('./storageV5/index.js')
-      const path = getAgentTranscriptPath(asAgentId(a.agentId))
+      const branded = asAgentId(a.agentId)
+      const path = getAgentTranscriptPath(branded)
       try {
         // densable leftover `Ii` @228342935 — `pe()&&t?On(n,t).statMeta:yi`.
         const bind = bindSubagentTranscriptPersistence(
@@ -644,22 +1088,35 @@ export async function enrichOrphanCandidatesWithDisk(
           mtimeMs = null
         }
       }
-      let stoppedByUser = false
-      try {
-        const meta = await readAgentMetadata(asAgentId(a.agentId))
-        hasMeta = meta !== null && meta !== undefined
-        stoppedByUser = meta?.stoppedByUser === true
-      } catch {
-        hasMeta = false
-        stoppedByUser = false
+      // densable: hasMeta only when launchedByAgentTool||launchedByForkedSkill
+      // and mtime present and ux probe succeeds.
+      const launchOk =
+        a.launchedByAgentTool === true || a.launchedByForkedSkill === true
+      if (launchOk && mtimeMs !== null) {
+        try {
+          const meta = await readAgentMetadata(branded)
+          hasMeta = meta !== null && meta !== undefined
+        } catch {
+          hasMeta = false
+        }
       }
-      out.push({ ...a, mtimeMs, hasMeta, stoppedByUser })
+      out.push({
+        ...a,
+        mtimeMs,
+        hasMeta,
+        fetchable: mtimeMs === null && leftoverHasInternalAgentEventReader(),
+      })
       continue
     } catch {
       mtimeMs = null
       hasMeta = false
     }
-    out.push({ ...a, mtimeMs, hasMeta, stoppedByUser: false })
+    out.push({
+      ...a,
+      mtimeMs,
+      hasMeta,
+      fetchable: mtimeMs === null && leftoverHasInternalAgentEventReader(),
+    })
   }
   return out
 }
@@ -804,14 +1261,17 @@ export type OrphanClassifyResult =
   | {
       kind: 'stopped' | 'failed'
       entry: OrphanAgentEntry
+      /** densable Pe `o` / Zi `summary` — short title Sp paints. */
       summary: string
+      /** densable Pe `r` / Zi `body` `<note>` — long copy. Empty when none. */
+      note: string
     }
 
 /**
  * Official kqb per-agent decision (subset without lf registry write).
- * Auto-resume when: onDiskResumable callback path enabled + launchedByAgentTool
- * + hasMeta + fresh mtime. Else stopped if transcript mtime or redispatched;
- * failed if no transcript residue.
+ * Auto-resume when: onDiskResumable callback path enabled +
+ * (launchedByAgentTool||launchedByForkedSkill) + hasMeta + fresh mtime.
+ * Else stopped if redispatched || mtime || fetchable; failed if no residue.
  */
 export function classifyOrphanAgent(
   input: OrphanClassifyInput,
@@ -831,20 +1291,15 @@ export function classifyOrphanAgent(
       : null
   const hasMeta = input.hasMeta === true
   const desc = input.description ?? input.agentId
-
-  // Sidecar stoppedByUser → classify stopped (no auto-resume). densable only
-  // gates in Aye (orr); pre-classify avoids failed auto-resume noise on cold start.
-  if (input.stoppedByUser === true) {
-    return {
-      kind: 'stopped',
-      entry: input,
-      summary: `Background agent "${desc}" was stopped by the user and will not be auto-resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
-    }
-  }
+  // densable Q = Oe(`Background agent "${Wt(description)}"`)
+  const title = leftoverOrphanDidntFinish(
+    `Background agent "${escapeXml(desc)}"`,
+  )
 
   if (
     autoOk &&
-    input.launchedByAgentTool === true &&
+    (input.launchedByAgentTool === true ||
+      input.launchedByForkedSkill === true) &&
     hasMeta &&
     mtime !== null &&
     now - mtime < maxAge
@@ -857,24 +1312,28 @@ export function classifyOrphanAgent(
         outputFile: input.outputFile,
         redispatched: input.redispatched,
         launchedByAgentTool: input.launchedByAgentTool,
+        launchedByForkedSkill: input.launchedByForkedSkill,
+        isWebFetchLaunch: input.isWebFetchLaunch,
+        canReadOutputFile: input.canReadOutputFile,
       },
     }
   }
 
-  const hasTranscript = mtime !== null
+  const hasTranscript = mtime !== null || input.fetchable === true
   const status: 'stopped' | 'failed' =
     input.redispatched || hasTranscript ? 'stopped' : 'failed'
 
-  let summary: string
-  if (input.redispatched) {
-    summary = `No completion record was found for background agent "${desc}" after it was re-dispatched via SendMessage in the previous session. It may have been stopped (via the UI, an SDK interrupt, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check its worktree/output for partial work before assuming the task landed.`
-  } else if (hasTranscript) {
-    summary = `No completion record was found for background agent "${desc}" from the previous session. It may have been stopped, or it may have been running when the previous Claude Code process exited — either way its transcript is saved on disk, so its progress is not lost. Resume it by sending it a message with SendMessage, or check its worktree/output for partial work before assuming the task landed.`
-  } else {
-    summary = `Background agent "${desc}" was running when the previous Claude Code process exited and did not complete. Its in-process state was lost. Check its worktree/output for partial work before assuming the task landed.`
-  }
+  // densable ne — body uses "it", not the agent name (name lives in Q).
+  const note = leftoverOrphanStoppedNote(
+    input,
+    input.redispatched
+      ? 'redispatched'
+      : mtime !== null || input.fetchable === true
+        ? 'transcript'
+        : 'lost',
+  )
 
-  return { kind: status, entry: input, summary }
+  return { kind: status, entry: input, summary: title, note }
 }
 
 /**
@@ -882,11 +1341,12 @@ export function classifyOrphanAgent(
  */
 export function notifyOrphanAgentAutoResumed(entry: OrphanAgentEntry): string {
   const desc = entry.description ?? entry.agentId
-  const summary = `Background agent "${desc}" had no completion record after the previous Claude Code process exited, and was automatically restarted from its saved transcript. It is running in the background again; its result will arrive as a separate task notification.`
+  // densable qco: Pe title + note (not one fused summary).
   return notifyTaskNotification({
     taskId: entry.agentId,
-    summary,
-    outputFile: entry.outputFile,
+    summary: `Background agent "${desc}" was restarted after the previous session ended`,
+    note: 'It had no completion record after the previous Claude Code process exited, and was automatically restarted from its saved transcript. It is running in the background again; its result will arrive as a separate task notification.',
+    outputFile: leftoverPeOutputFile(entry),
     // No status — still running.
     emitSdk: false,
   })
@@ -897,14 +1357,29 @@ export function notifyOrphanAgentAutoResumed(entry: OrphanAgentEntry): string {
  */
 export function notifyOrphanAgentAlreadyCompleted(
   entry: OrphanAgentEntry,
+  live?: Map<string, { type?: string; webFetchSavedFiles?: unknown }>,
 ): string {
   const desc = entry.description ?? entry.agentId
-  const summary = `Background agent "${desc}" had already completed before the previous Claude Code process exited — only its completion notification was lost, so it was not restarted and no further task notification will arrive. Read its output file (and check its worktree, if any) for the result.`
+  const liveTask = live?.get(entry.agentId)
+  const webFetch =
+    entry.isWebFetchLaunch === true ||
+    (liveTask?.type === 'local_agent' &&
+      liveTask.webFetchSavedFiles !== undefined)
+  const painted: OrphanAgentEntry = webFetch
+    ? { ...entry, isWebFetchLaunch: true }
+    : entry
   return notifyTaskNotification({
     taskId: entry.agentId,
-    summary,
+    summary: `Background agent "${desc}" finished before the previous session ended, but its result was never reported`,
+    note: `It had already completed before the previous Claude Code process exited — only its completion notification was lost, so it was not restarted and no further task notification will arrive. ${
+      leftoverOrphanLandingHint(painted) === 'output'
+        ? 'Read its output file (and check its worktree, if any) for the result.'
+        : 'Send it a message with SendMessage to get its report.'
+    }`,
     status: 'completed',
-    outputFile: entry.outputFile,
+    outputFile: leftoverPeOutputFile(painted),
+    // densable Kco is Pe-only — no SDK task_notification.
+    emitSdk: false,
   })
 }
 
@@ -916,12 +1391,21 @@ export function notifyOrphanAgentAutoResumeFailed(
   reason: string,
 ): string {
   const desc = entry.description ?? entry.agentId
-  const summary = `Background agent "${desc}" from the previous session could not be automatically restarted: ${reason}. Its transcript may still be resumable by sending it a message with SendMessage; check its worktree/output for partial work before assuming the task landed.`
+  const hint = leftoverOrphanLandingHint(entry)
   return notifyTaskNotification({
     taskId: entry.agentId,
-    summary,
+    summary: `Background agent "${desc}" from the previous session couldn't be restarted: ${reason}`,
+    note: `It could not be automatically restarted. Its transcript may still be resumable by sending it a message with SendMessage${
+      hint === 'webfetch'
+        ? ', which is the only way to get its report.'
+        : hint === 'output'
+          ? '; check its worktree/output for partial work before assuming the task landed.'
+          : ' and asking for a status report before assuming the task landed.'
+    }`,
     status: 'stopped',
-    outputFile: entry.outputFile,
+    outputFile: leftoverPeOutputFile(entry),
+    // densable Yco is Pe-only — no SDK task_notification.
+    emitSdk: false,
   })
 }
 
@@ -941,15 +1425,48 @@ export function notifyOrphanAgentsBatch(
   const named = agents
     .map(a => `"${a.description ?? a.agentId}" (${a.agentId})`)
     .join(', ')
-  const summary =
+  // densable es: s=webFetch ids, u=all webFetch, f=every webFetch||!canRead.
+  const webFetchIds = agents
+    .filter(a => a.isWebFetchLaunch === true)
+    .map(a => a.agentId)
+  const allWebFetch = webFetchIds.length === agents.length
+  const noneReadable = agents.every(
+    a =>
+      a.isWebFetchLaunch === true || leftoverOrphanLandingHint(a) !== 'output',
+  )
+  const webFetchSuffix =
+    webFetchIds.length === 0 || allWebFetch
+      ? ''
+      : status === 'stopped'
+        ? ` ${webFetchIds.length === 1 ? 'Agent' : 'Agents'} ${webFetchIds.join(', ')} fetched web content and ${webFetchIds.length === 1 ? 'has' : 'have'} no worktree or output to check — resume ${webFetchIds.length === 1 ? 'it' : 'them'} with SendMessage only.`
+        : ` ${webFetchIds.length === 1 ? 'Agent' : 'Agents'} ${webFetchIds.join(', ')} fetched web content and ${webFetchIds.length === 1 ? 'has' : 'have'} nothing to check — launch ${webFetchIds.length === 1 ? 'it' : 'them'} again if still needed.`
+  const summary = `${leftoverOrphanDidntFinish(`${agents.length} background agents`)}: ${named}.${webFetchSuffix}`
+  const note =
     status === 'stopped'
-      ? `No completion record was found for ${agents.length} background agents from the previous session: ${named}. They may have been stopped, or they may have been running when the previous Claude Code process exited — either way their transcripts are saved on disk, so their progress is not lost. Resume any of them by sending a message to its id with SendMessage, or check its worktree/output for partial work before assuming the task landed.`
-      : `${agents.length} background agents were running when the previous Claude Code process exited and did not complete: ${named}. Their in-process state was lost. Check each agent's worktree/output for partial work before assuming the tasks landed.`
+      ? `No completion record was found for them in the previous session. They may have been stopped, or they may have been running when the previous Claude Code process exited — either way their transcripts are saved, so their progress is not lost. ${
+          allWebFetch
+            ? 'Resume any of them by sending a message to its id with SendMessage to get its report.'
+            : noneReadable
+              ? 'Resume any of them by sending a message to its id with SendMessage and ask for a status report before assuming the task landed.'
+              : 'Resume any of them by sending a message to its id with SendMessage, or check its worktree/output for partial work before assuming the task landed.'
+        }`
+      : `They were running when the previous Claude Code process exited and did not complete. Their in-process state was lost. ${
+          allWebFetch
+            ? 'Launch them again if their reports are still needed.'
+            : noneReadable
+              ? 'Do not assume the tasks landed; launch them again if their results are still needed.'
+              : "Check each agent's worktree/output for partial work before assuming the tasks landed."
+        }`
 
-  // Official Iqb: multiple <task-id> tags then one status + summary.
+  // Official Iqb/es: multiple <task-id> tags then status + summary + note.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { TASK_ID_TAG, TASK_NOTIFICATION_TAG, STATUS_TAG, SUMMARY_TAG } =
-    require('../constants/xml.js') as typeof import('../constants/xml.js')
+  const {
+    TASK_ID_TAG,
+    TASK_NOTIFICATION_TAG,
+    STATUS_TAG,
+    SUMMARY_TAG,
+    NOTE_TAG,
+  } = require('../constants/xml.js') as typeof import('../constants/xml.js')
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { enqueuePendingNotification } =
     require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
@@ -957,20 +1474,14 @@ export function notifyOrphanAgentsBatch(
   const { asAgentId } =
     require('../types/ids.js') as typeof import('../types/ids.js')
 
-  const esc = (s: string) =>
-    s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-
   const idLines = ids
-    .map(id => `<${TASK_ID_TAG}>${esc(id)}</${TASK_ID_TAG}>`)
+    .map(id => `<${TASK_ID_TAG}>${escapeXml(id)}</${TASK_ID_TAG}>`)
     .join('\n')
   const message = `<${TASK_NOTIFICATION_TAG}>
 ${idLines}
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${esc(summary)}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<${NOTE_TAG}>${escapeXml(note)}</${NOTE_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
 
   let targetAgentId: string | undefined
@@ -988,7 +1499,9 @@ ${idLines}
       mode: 'task-notification',
       agentId:
         targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
+      skipAttachments: true,
       priority: 'next',
+      shouldQuery: false,
     })
   } catch {
     /* best-effort */
@@ -1014,8 +1527,8 @@ export function processOrphanAgentCandidates(
   },
 ): {
   autoResume: OrphanAgentEntry[]
-  stopped: Array<{ entry: OrphanAgentEntry; summary: string }>
-  failed: Array<{ entry: OrphanAgentEntry; summary: string }>
+  stopped: Array<{ entry: OrphanAgentEntry; summary: string; note: string }>
+  failed: Array<{ entry: OrphanAgentEntry; summary: string; note: string }>
   skippedLive: string[]
   skippedNotified: string[]
   aggregateFailed: boolean
@@ -1055,7 +1568,7 @@ export function processOrphanAgentCandidates(
       for (const o of orphans) {
         emitOrphanLf(o.agentId, 'failed', {
           summary,
-          outputFile: o.outputFile,
+          outputFile: leftoverOrphanOutputFile(o),
         })
       }
       notifyOrphanKindBatch({
@@ -1072,6 +1585,7 @@ export function processOrphanAgentCandidates(
       failed: orphans.map(o => ({
         entry: o,
         summary,
+        note: '',
       })),
       skippedLive,
       skippedNotified,
@@ -1080,8 +1594,16 @@ export function processOrphanAgentCandidates(
   }
 
   const autoResume: OrphanAgentEntry[] = []
-  const stopped: Array<{ entry: OrphanAgentEntry; summary: string }> = []
-  const failed: Array<{ entry: OrphanAgentEntry; summary: string }> = []
+  const stopped: Array<{
+    entry: OrphanAgentEntry
+    summary: string
+    note: string
+  }> = []
+  const failed: Array<{
+    entry: OrphanAgentEntry
+    summary: string
+    note: string
+  }> = []
   for (const o of orphans) {
     const r = classifyOrphanAgent(o, {
       nowMs: opts?.nowMs,
@@ -1089,30 +1611,35 @@ export function processOrphanAgentCandidates(
     })
     if (r.kind === 'auto-resume') autoResume.push(r.entry)
     else if (r.kind === 'stopped')
-      stopped.push({ entry: r.entry, summary: r.summary })
-    else failed.push({ entry: r.entry, summary: r.summary })
+      stopped.push({ entry: r.entry, summary: r.summary, note: r.note })
+    else failed.push({ entry: r.entry, summary: r.summary, note: r.note })
   }
 
   if (opts?.notify !== false) {
-    // Official kqb: lf each stopped/failed in classify loop, then Ebn/Iqb.
+    // densable kqb: Di each with Lt; redispatched Pe immediately (not batch).
+    const batch: Record<
+      'stopped' | 'failed',
+      Array<{ entry: OrphanAgentEntry; summary: string; note: string }>
+    > = { stopped: [], failed: [] }
     for (const status of ['stopped', 'failed'] as const) {
       const list = status === 'stopped' ? stopped : failed
       for (const item of list) {
         emitOrphanLf(item.entry.agentId, status, {
           summary: item.summary,
-          outputFile: item.entry.outputFile,
+          outputFile: leftoverOrphanOutputFile(item.entry),
         })
+        if (item.entry.redispatched) {
+          leftoverNotifyOrphanPe(item.entry, status, item.summary, item.note)
+        } else {
+          batch[status].push(item)
+        }
       }
+    }
+    for (const status of ['stopped', 'failed'] as const) {
+      const list = batch[status]
       if (list.length === 1) {
         const only = list[0]!
-        // emitSdk false — lf already closed the bookend (c7c would no-op anyway).
-        notifyTaskNotification({
-          taskId: only.entry.agentId,
-          summary: only.summary,
-          status,
-          outputFile: only.entry.outputFile,
-          emitSdk: false,
-        })
+        leftoverNotifyOrphanPe(only.entry, status, only.summary, only.note)
       } else if (list.length > 1) {
         notifyOrphanAgentsBatch(
           status,
@@ -1132,21 +1659,39 @@ export function processOrphanAgentCandidates(
   }
 }
 
-/** Official Hqb single-shell summary. */
+/** Official Hqb single-shell densable `g=Oe("Background shell command")`. */
+export const ORPHAN_SHELL_STOPPED_TITLE =
+  "Background shell command didn't finish before the previous session ended"
+
+/** Official Hqb single-shell densable `h` note body. Nt() omits output-file check. */
 export const ORPHAN_SHELL_STOPPED_SUMMARY =
-  'No completion record was found for this background shell command from the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check the output file for partial results before assuming it completed.'
+  'No completion record was found for it in the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check the output file for partial results before assuming it completed.'
+
+function leftoverOrphanShellStoppedNote(): string {
+  const check = leftoverParentCanReadOutputFile()
+    ? ' Check the output file for partial results before assuming it completed.'
+    : ''
+  return `No completion record was found for it in the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited.${check}`
+}
 
 /**
  * Official Dqb single-workflow summary builder.
  */
-export function buildOrphanWorkflowStoppedSummary(
+export function buildOrphanWorkflowStoppedTitle(
   entry: OrphanWorkflowEntry,
 ): string {
   const name = entry.workflowName ? ` "${entry.workflowName}"` : ''
+  const run = entry.runId ? ` (run ${entry.runId})` : ''
+  return leftoverOrphanDidntFinish(`Background workflow${name}${run}`)
+}
+
+export function buildOrphanWorkflowStoppedSummary(
+  entry: OrphanWorkflowEntry,
+): string {
   const resumeHint = entry.runId
-    ? ` To pick up where it left off, relaunch with Workflow({scriptPath, resumeFromRunId: "${entry.runId}"}) — completed agent() calls return cached.`
+    ? ' To pick up where it left off, relaunch with Workflow({scriptPath, resumeFromRunId}) using the run id from the summary — completed agent() calls return cached.'
     : ''
-  return `No completion record was found for background workflow${name} from the previous session. It may have been stopped (via the UI or TaskStop — these leave no transcript marker), or it may have been running when the previous Claude Code process exited.${resumeHint}`
+  return `No completion record was found for it in the previous session. It may have been stopped (via the UI or TaskStop — these leave no transcript marker), or it may have been running when the previous Claude Code process exited.${resumeHint}`
 }
 
 /**
@@ -1167,8 +1712,13 @@ export function notifyOrphanKindBatch(opts: {
     id => `${ORPHAN_SUMMARY_PREFIX}_live__:${id}`,
   )
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { TASK_ID_TAG, TASK_NOTIFICATION_TAG, STATUS_TAG, SUMMARY_TAG } =
-    require('../constants/xml.js') as typeof import('../constants/xml.js')
+  const {
+    TASK_ID_TAG,
+    TASK_NOTIFICATION_TAG,
+    STATUS_TAG,
+    SUMMARY_TAG,
+    NOTE_TAG,
+  } = require('../constants/xml.js') as typeof import('../constants/xml.js')
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { enqueuePendingNotification } =
     require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
@@ -1176,31 +1726,30 @@ export function notifyOrphanKindBatch(opts: {
   const { asAgentId } =
     require('../types/ids.js') as typeof import('../types/ids.js')
 
-  const esc = (s: string) =>
-    s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-
   const allIds = [...shown, marker, ...liveMarkers]
   const idLines = allIds
-    .map(id => `<${TASK_ID_TAG}>${esc(id)}</${TASK_ID_TAG}>`)
+    .map(id => `<${TASK_ID_TAG}>${escapeXml(id)}</${TASK_ID_TAG}>`)
     .join('\n')
+  // densable Ut `h` — marked-status lives in the note, not the Sp title.
+  const checkOutput = leftoverParentCanReadOutputFile()
+    ? ' Check each worktree/output for partial work before assuming a task landed.'
+    : ''
   const why =
     opts.status === 'failed'
-      ? 'They were running when the previous Claude Code process exited and did not complete; their in-process state was lost. Check each worktree/output for partial work before assuming a task landed.'
-      : 'They may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or they may have been running when the previous Claude Code process exited.'
+      ? `They were running when the previous Claude Code process exited and did not complete; their in-process state was lost.${checkOutput} They have been marked failed.`
+      : 'They may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or they may have been running when the previous Claude Code process exited. They have been marked stopped.'
   const idNote =
     shown.length === opts.taskIds.length
       ? `Task ids: ${shown.join(', ')}.`
       : `First ${cap} task ids: ${shown.join(', ')}.`
-  const summary = `${opts.taskIds.length} background ${opts.label} task(s) from the previous session have no completion record. ${why} They have been marked ${opts.status}. ${idNote} Task ids in this notification beginning with "${ORPHAN_SUMMARY_PREFIX}" are internal scan markers, not tasks.`
+  const summary = `${leftoverOrphanDidntFinish(`${opts.taskIds.length} background ${opts.label} tasks`)}. ${idNote}`
+  const note = `No completion record was found for them in the previous session. ${why} Task ids in this notification beginning with "${ORPHAN_SUMMARY_PREFIX}" are internal scan markers, not tasks.`
 
   const message = `<${TASK_NOTIFICATION_TAG}>
 ${idLines}
 <${STATUS_TAG}>${opts.status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${esc(summary)}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<${NOTE_TAG}>${escapeXml(note)}</${NOTE_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
 
   let targetAgentId: string | undefined
@@ -1218,7 +1767,9 @@ ${idLines}
       mode: 'task-notification',
       agentId:
         targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
+      skipAttachments: true,
       priority: 'next',
+      shouldQuery: false,
     })
   } catch {
     /* best-effort */
@@ -1296,11 +1847,12 @@ export function processOrphanShells(
       const only = orphans[0]!
       emitOrphanLf(only.taskId, 'stopped', {
         toolUseId: only.toolUseId,
-        summary: ORPHAN_SHELL_STOPPED_SUMMARY,
+        summary: ORPHAN_SHELL_STOPPED_TITLE,
       })
       notifyTaskNotification({
         taskId: only.taskId,
-        summary: ORPHAN_SHELL_STOPPED_SUMMARY,
+        summary: ORPHAN_SHELL_STOPPED_TITLE,
+        note: leftoverOrphanShellStoppedNote(),
         status: 'stopped',
         // Official Hqb QO tool-use-id
         toolUseId: only.toolUseId,
@@ -1386,16 +1938,17 @@ export function processOrphanWorkflows(
     } else {
       // Official Dqb ≤hGo: cf + lf per workflow
       for (const w of orphans) {
-        const summary = buildOrphanWorkflowStoppedSummary(w)
+        const summary = buildOrphanWorkflowStoppedTitle(w)
+        const note = buildOrphanWorkflowStoppedSummary(w)
         emitOrphanLf(w.taskId, 'stopped', {
           toolUseId: w.toolUseId,
-          summary,
+          summary: escapeXml(summary),
         })
         notifyTaskNotification({
           taskId: w.taskId,
           summary,
+          note,
           status: 'stopped',
-          // Official Dqb QO tool-use-id
           toolUseId: w.toolUseId,
           emitSdk: false,
         })
@@ -1477,10 +2030,13 @@ export async function scheduleDeferredOrphanAutoResume(input: {
       if (r && r.alreadyCompleted) {
         alreadyCompleted++
         if (doNotify) {
-          notifyOrphanAgentAlreadyCompleted({
-            ...a,
-            outputFile: r.outputFile ?? a.outputFile,
-          })
+          notifyOrphanAgentAlreadyCompleted(
+            {
+              ...a,
+              outputFile: r.outputFile ?? a.outputFile,
+            },
+            leftoverLiveAgentTasks(input.getState),
+          )
         }
       } else {
         resumed++
