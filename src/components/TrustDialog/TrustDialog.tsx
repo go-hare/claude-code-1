@@ -268,9 +268,11 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
 
         <Select
           options={[
-            { label: ACCESSING_CONFIRM_LABEL, value: 'enable_all' },
             { label: ACCESSING_CANCEL_LABEL, value: 'exit' },
+            { label: ACCESSING_CONFIRM_LABEL, value: 'enable_all' },
           ]}
+          defaultValue="exit"
+          hideIndexes
           onChange={value => onChange(value as 'enable_all' | 'exit')}
           onCancel={() => onChange('exit')}
         />
