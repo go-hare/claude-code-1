@@ -6,6 +6,7 @@ import type {
   PluginAuthor,
   PluginManifest,
 } from '../utils/plugins/schemas.js'
+import type { MarketplaceSource } from '../utils/plugins/schemas.js'
 import type { HooksSettings } from '../utils/settings/types.js'
 
 export type { PluginAuthor, PluginManifest, CommandMetadata }
@@ -123,6 +124,16 @@ export type LoadedPlugin = {
    * densable Lh — builtin hooks register path (`folder` overlay or leftoverVo).
    */
   modulePath?: string
+  /**
+   * densable marketplace source of the catalog this plugin was loaded from.
+   * `Ejo` uses it to decide whether a managed plugin is seated.
+   */
+  marketplaceSource?: MarketplaceSource
+  /**
+   * densable `readInPlace` — true when the plugin is read from the marketplace
+   * folder itself, not a cache / archive / seed copy.
+   */
+  readInPlace?: boolean
 }
 
 export type PluginComponent =

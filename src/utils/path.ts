@@ -301,6 +301,195 @@ export function isDeviceOrNtNamespacePath(path: string): boolean {
   return isWindowsDeviceNamespacePath(path) || isNtObjectNamespacePath(path)
 }
 
+/**
+ * densable `LSe` — a path is a network location or device path, as spelled.
+ * Cross-root against the project root (`aze`), then `I5t` / darwin `p6`.
+ * `$.fs` refuses these before it touches the filesystem.
+ */
+export function isPluginFsNetworkOrDevicePath(
+  value: string,
+  projectRoot: string | null,
+): boolean {
+  const ancestors = posixAncestorPaths(value)
+  const rootAncestors =
+    projectRoot === null ? [] : posixAncestorPaths(projectRoot)
+  if (ancestors.some(segment => !rootAncestors.includes(segment))) return true
+  if (!isPluginFsNetworkUnion(value) && !isDarwinNetworkMountPath(value)) {
+    return false
+  }
+  if (isNetworkUncPath(value)) {
+    return projectRoot === null || !isPathInsideRoot(value, projectRoot)
+  }
+  const server = posixNetworkServerName(value)
+  const rootServer =
+    projectRoot === null ? null : posixNetworkServerName(projectRoot)
+  return server === null || server !== rootServer
+}
+
+/** densable `aze` — ancestor POSIX paths that land on `/net` or `/network/servers`. */
+function posixAncestorPaths(value: string): string[] {
+  if (!value.startsWith('/')) return []
+  const out: string[] = []
+  const stack: string[] = []
+  for (const segment of value.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      stack.pop()
+      continue
+    }
+    stack.push(segment)
+    if (isPosixNetworkAncestor(stack)) {
+      out.push(foldPosixNetworkPath(`/${stack.join('/')}`))
+    }
+  }
+  return out
+}
+
+/** densable `C` — `/net/<server>` or `/network/servers/<server>`. */
+function isPosixNetworkAncestor(segments: readonly string[]): boolean {
+  const head = foldAsciiUpper(segments[0] ?? '')
+  return (
+    (segments.length === 2 && head === 'NET') ||
+    (segments.length === 3 &&
+      head === 'NETWORK' &&
+      foldAsciiUpper(segments[1] ?? '') === 'SERVERS')
+  )
+}
+
+/** densable `O5t` — fold every segment but the last to upper, last to lower. */
+function foldPosixNetworkPath(value: string): string {
+  const parts = value.split('/').filter(Boolean)
+  if (parts.length === 0) return value
+  const last = parts.at(-1) ?? ''
+  return `/${[
+    ...parts.slice(0, -1).map(foldAsciiUpper),
+    last.replace(/[A-Z]/g, ch => ch.toLowerCase()),
+  ].join('/')}`
+}
+
+/** densable `RR` — strip bidi/format marks, then ASCII-upper. */
+function foldAsciiUpper(value: string): string {
+  return value.replace(/[‌-‏‪-‮⁪-⁯﻿]/g, '').toUpperCase()
+}
+
+/** densable `I5t` — UNC / device / automount union. */
+function isPluginFsNetworkUnion(value: string): boolean {
+  return (
+    isNetworkUncPath(value) ||
+    isPosixAutomountRoot(value, 'net') ||
+    isPosixAutomountRoot(value, 'network') ||
+    isWindowsDeviceNamespacePath(value) ||
+    isDarwinDotVolPath(value) ||
+    isNtObjectNamespacePathNormalized(value) ||
+    isNtGlobalDevicePath(value)
+  )
+}
+
+/** densable `B_` / `qM` — a single `/net` or `/network` root segment. */
+function isPosixAutomountRoot(value: string, root: 'net' | 'network'): boolean {
+  if (!value.startsWith('/')) return false
+  const stack: string[] = []
+  for (const segment of value.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      stack.pop()
+      continue
+    }
+    stack.push(segment)
+  }
+  return stack.length === 1 && stack[0]?.toLowerCase() === root
+}
+
+/** densable `nb` — `/.vol` / `/.file` / `/.nofollow` / `/.resolve`. */
+function isDarwinDotVolPath(value: string): boolean {
+  if (!/\/\.(?:vol|file|nofollow|resolve)(?:\/|$)/i.test(value)) return false
+  if (!value.startsWith('/')) return false
+  const stack: string[] = []
+  for (const segment of value.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      stack.pop()
+      continue
+    }
+    stack.push(segment)
+    if (
+      stack.length === 1 &&
+      /^\.(?:vol|file|nofollow|resolve)$/i.test(segment)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/** densable `Tdr` — `\GLOBAL??\` / `\GLOBALROOT\` / `\DosDevices\` / `\Device\`. */
+function isNtGlobalDevicePath(value: string): boolean {
+  return /^[\\/](GLOBAL\?\?|GLOBALROOT|DosDevices|Device)[\\/]/i.test(value)
+}
+
+/** densable `kX` — server name under a `/net` or `/network/servers` prefix. */
+function posixNetworkServerName(value: string): string | null {
+  if (!value.startsWith('/')) return null
+  const stack: string[] = []
+  for (const segment of value.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      stack.pop()
+      continue
+    }
+    stack.push(segment)
+    if (isPosixNetworkAncestor(stack)) {
+      return segment.replace(/[A-Z]/g, ch => ch.toLowerCase())
+    }
+  }
+  return null
+}
+
+/**
+ * densable `ste` inverted — true when a UNC path stays inside the project
+ * root. Device and NT spellings are never inside (gold `ste` returns true,
+ * so `LSe` refuses them).
+ */
+function isPathInsideRoot(value: string, root: string): boolean {
+  if (!isNetworkUncPath(value)) return false
+  if (isWindowsDeviceNamespacePath(value) || isNtObjectNamespacePath(value)) {
+    return false
+  }
+  const folded = stripWindowsLongPathPrefixXpr(value).toLowerCase()
+  const foldedRoot = stripWindowsLongPathPrefixXpr(root).toLowerCase()
+  return folded === foldedRoot || folded.startsWith(`${foldedRoot}\\`)
+}
+
+/**
+ * densable `p6` — darwin `/network/…` and a `/home/<user>` that is not this
+ * user's home. Other platforms are never a darwin network mount.
+ */
+function isDarwinNetworkMountPath(value: string): boolean {
+  if (process.platform !== 'darwin') return false
+  if (isPosixAutomountRoot(value, 'network') || isDarwinDotVolPath(value)) {
+    return true
+  }
+  if (!value.startsWith('/')) return false
+  const ancestors = posixAncestorPaths(value)
+  if (ancestors.some(segment => segment.startsWith('/NETWORK/'))) return true
+  const homes = ancestors.filter(segment => segment.startsWith('/HOME/'))
+  if (homes.length === 0) return false
+  const own = ownDarwinHomePrefix()
+  return homes.some(home => home !== own)
+}
+
+/** densable `bn` — `/home/<user>` of the current home directory, or null. */
+function ownDarwinHomePrefix(): string | null {
+  let home: string
+  try {
+    home = homedir()
+  } catch {
+    return null
+  }
+  const match = /^\/home\/([^/]+)/.exec(home)
+  return match ? `/HOME/${match[1]}` : null
+}
+
 // Re-export from the shared zero-dep source.
 export { sanitizePath } from './sessionStoragePortable.js'
 

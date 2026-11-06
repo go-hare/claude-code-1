@@ -16,6 +16,7 @@ import {
   getManagedEnabledPluginIds,
   type PluginHookTierOrder,
   resolvePluginHookTierOrder,
+  seatManagedPlugins,
 } from '../../plugins/bundled/secDefault.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
@@ -319,6 +320,9 @@ async function registerPluginHooksOnce(): Promise<void> {
       tier: 'user' as const,
     })
   }
+  // densable `YNo(),Ejo(ve)` then `aF()` — seat managed plugins before the
+  // managed-id filter so vouched ids survive into the hook tier.
+  seatManagedPlugins(enabled)
   const managedIds = getManagedEnabledPluginIds()
   const tierOrder = resolvePluginHookTierOrder()
   await loadFunctionHooksModules(

@@ -31,31 +31,44 @@ export const DIFF_PLUGIN_DESCRIPTION =
   'The diff panel as a plugin pane: /diff, the changed files and their hunks beside the transcript, refreshed as Claude edits'
 export const DIFF_GB_FEATURE = 'tengu_quiet_dolphin'
 
+/** densable `Olr` — desktop entrypoints for leftover `wGe`. */
 const DESKTOP_ENTRYPOINTS = new Set(['claude-desktop', 'claude-desktop-3p'])
 
-function isDesktopHostManagedBackground(): boolean {
+/**
+ * densable `W$` — `n().claudecode` from `Boolean(CLAUDECODE)`.
+ * Never export minify `W$`.
+ */
+function leftoverW$(): boolean {
+  return Boolean(process.env.CLAUDECODE)
+}
+
+/**
+ * densable `wGe` — `yE() !== undefined && Olr.has(yE()) && !n().childSession`.
+ * Never export minify `wGe`.
+ */
+function leftoverWge(): boolean {
   const entry = process.env.CLAUDE_CODE_ENTRYPOINT
-  const lineage =
-    Boolean(process.env.CLAUDE_CODE_HOST_GATEWAY_LINEAGE) &&
-    Boolean(process.env.CLAUDE_CODE_HOST_CREDS_FILE)
   return (
-    Boolean(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) &&
-    Boolean(process.env.CLAUDE_CODE_USE_GATEWAY) &&
-    ((entry !== undefined && DESKTOP_ENTRYPOINTS.has(entry)) || lineage)
+    entry !== undefined && DESKTOP_ENTRYPOINTS.has(entry) && !isChildSession()
   )
 }
 
 /**
+ * densable `Ive` — `wGe() && !W$()`. Not leftover `B$`.
+ * Never export minify `Ive`.
+ */
+function leftoverIve(): boolean {
+  return leftoverWge() && !leftoverW$()
+}
+
+/**
  * densable `ft` — `!Ce() || yE() === "claude-desktop" && Ive()`.
- * Never export minify `ft` / `Ive`.
+ * Never export minify `ft` / `Ive` / `W$`.
  */
 function leftoverFt(): boolean {
   if (getIsInteractive()) return true
-  const entry = process.env.CLAUDE_CODE_ENTRYPOINT
   return (
-    entry === 'claude-desktop' &&
-    !isChildSession() &&
-    !isDesktopHostManagedBackground()
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop' && leftoverIve()
   )
 }
 

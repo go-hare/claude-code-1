@@ -15,6 +15,7 @@ import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTo
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
+import { logEvent } from '../../services/analytics/index.js'
 import { logForDebugging } from '../debug.js'
 import { EFFORT_LEVELS, parseEffortValue } from '../effort.js'
 import {
@@ -39,7 +40,58 @@ import type { PluginManifest } from './schemas.js'
 import { walkPluginMarkdown } from './walkPluginMarkdown.js'
 
 const VALID_MEMORY_SCOPES: AgentMemoryScope[] = ['user', 'project', 'local']
+/** densable C5r */
+const BUILTIN_PLUGIN_AGENTS_DIR = 'agents'
+/** densable wIt — 1 MiB plugin-agent file cap */
+const PLUGIN_AGENT_MAX_BYTES = 1048576
 
+type BuiltinPluginAgentFile = {
+  filePath: string
+  namespace: string[]
+  text: string
+}
+
+/** densable SIt — ALL keys under agents/, not .md-only */
+function listBuiltinPluginAgentFiles(
+  pluginName: string,
+  files: Readonly<Record<string, string>>,
+): BuiltinPluginAgentFile[] {
+  return Object.entries(files)
+    .filter(([relPath]) => relPath.startsWith(`${BUILTIN_PLUGIN_AGENTS_DIR}/`))
+    .map(([relPath, text]) => ({
+      filePath: `builtin:${pluginName}/${relPath}`,
+      namespace: relPath.split('/').slice(1, -1),
+      text,
+    }))
+}
+
+/** densable Kgo */
+function builtinPluginAgentsSource(
+  pluginName: string,
+): { folder: string } | { files: BuiltinPluginAgentFile[] } | undefined {
+  const hooks = getBuiltinPluginDefinition(pluginName)?.hooksModule
+  if (hooks !== undefined && 'folder' in hooks) {
+    return { folder: join(hooks.folder, BUILTIN_PLUGIN_AGENTS_DIR) }
+  }
+  if (hooks !== undefined && 'files' in hooks) {
+    return { files: listBuiltinPluginAgentFiles(pluginName, hooks.files) }
+  }
+  return undefined
+}
+
+/** densable pO — skip non-regular / oversize files */
+async function readPluginAgentFileLimited(
+  fs: ReturnType<typeof getFsImplementation>,
+  filePath: string,
+): Promise<string | null> {
+  const stats = await fs.stat(filePath)
+  if (!stats.isFile() || stats.size > PLUGIN_AGENT_MAX_BYTES) {
+    return null
+  }
+  return fs.readFile(filePath, { encoding: 'utf-8' })
+}
+
+/** densable ADe */
 async function loadAgentsFromDirectory(
   agentsPath: string,
   pluginName: string,
@@ -47,6 +99,7 @@ async function loadAgentsFromDirectory(
   pluginPath: string,
   pluginManifest: PluginManifest,
   loadedPaths: Set<string>,
+  isRootOptional = false,
 ): Promise<AgentDefinition[]> {
   const agents: AgentDefinition[] = []
   await walkPluginMarkdown(
@@ -63,7 +116,7 @@ async function loadAgentsFromDirectory(
       )
       if (agent) agents.push(agent)
     },
-    { logLabel: 'agents' },
+    { logLabel: 'agents', isRootOptional },
   )
   return agents
 }
@@ -265,7 +318,15 @@ async function loadAgentFromFile(
     return null
   }
   try {
-    const content = await fs.readFile(filePath, { encoding: 'utf-8' })
+    // densable EIt / pO(wIt)
+    const content = await readPluginAgentFileLimited(fs, filePath)
+    if (content === null) {
+      logForDebugging(
+        `Skipping plugin agent ${filePath}: not a regular file or exceeds ${PLUGIN_AGENT_MAX_BYTES} byte limit`,
+        { level: 'warn' },
+      )
+      return null
+    }
     return parsePluginAgentMarkdown({
       filePath,
       content,
@@ -292,51 +353,43 @@ async function loadBuiltinPluginAgents(
   },
   loadedPaths: Set<string>,
 ): Promise<AgentDefinition[]> {
-  const hooks = getBuiltinPluginDefinition(plugin.name)?.hooksModule
-  if (hooks === undefined) return []
+  const source = builtinPluginAgentsSource(plugin.name)
+  if (source === undefined) return []
   const prefixName = externalBuiltinNamespaceName(plugin.name, plugin.source)
-  if ('folder' in hooks) {
-    const agentsDir = join(hooks.folder, 'agents')
-    try {
-      const stats = await getFsImplementation().stat(agentsDir)
-      if (!stats.isDirectory()) return []
-    } catch {
-      return []
-    }
+  if ('folder' in source) {
+    // densable TIt → ADe(..., isRootOptional: true); missing agents/ is OK
     return loadAgentsFromDirectory(
-      agentsDir,
+      source.folder,
       prefixName,
       plugin.source,
       plugin.path,
       plugin.manifest,
       loadedPaths,
+      true,
     )
   }
-  if ('files' in hooks) {
-    const out: AgentDefinition[] = []
-    for (const [relPath, text] of Object.entries(hooks.files)) {
-      if (!relPath.startsWith('agents/') || !relPath.endsWith('.md')) continue
-      const filePath = `builtin:${plugin.name}/${relPath}`
+  const loaded = await Promise.all(
+    source.files.map(async file => {
       try {
-        const parsed = parsePluginAgentMarkdown({
-          filePath,
-          content: text,
+        return parsePluginAgentMarkdown({
+          filePath: file.filePath,
+          content: file.text,
           pluginName: prefixName,
-          namespace: relPath.split('/').slice(1, -1),
+          namespace: file.namespace,
           sourceName: plugin.source,
           pluginPath: plugin.path,
           pluginManifest: plugin.manifest,
         })
-        if (parsed) out.push(parsed)
       } catch (error) {
-        logForDebugging(`Failed to load agent from ${filePath}: ${error}`, {
-          level: 'error',
-        })
+        logForDebugging(
+          `Failed to load agent from ${file.filePath}: ${error}`,
+          { level: 'error' },
+        )
+        return null
       }
-    }
-    return out
-  }
-  return []
+    }),
+  )
+  return loaded.filter(agent => agent !== null)
 }
 
 export const loadPluginAgents = memoize(
@@ -351,6 +404,7 @@ export const loadPluginAgents = memoize(
     }
 
     // Process plugins in parallel; each plugin has its own loadedPaths scope
+    let loadFailure: string | null = null
     const perPluginAgents = await Promise.all(
       enabled.map(async (plugin): Promise<AgentDefinition[]> => {
         // Track loaded file paths to prevent duplicates within this plugin
@@ -376,6 +430,7 @@ export const loadPluginAgents = memoize(
               )
             }
           } catch (error) {
+            loadFailure = 'plugin_load_agents_dir_failed'
             logForDebugging(
               `Failed to load agents from plugin ${plugin.name} default directory: ${error}`,
               { level: 'error' },
@@ -431,6 +486,7 @@ export const loadPluginAgents = memoize(
                   }
                   return []
                 } catch (error) {
+                  loadFailure = 'plugin_load_agents_path_failed'
                   logForDebugging(
                     `Failed to load agents from plugin ${plugin.name} custom path ${agentPath}: ${error}`,
                     { level: 'error' },
@@ -455,6 +511,15 @@ export const loadPluginAgents = memoize(
 
     const allAgents = perPluginAgents.flat()
     logForDebugging(`Total plugin agents loaded: ${allAgents.length}`)
+    // densable `m`/`y` — `tengu_feature_bad` with the failure code, else ok.
+    if (loadFailure) {
+      logEvent('tengu_feature_bad', {
+        feature_name: 'plugin_load_agents',
+        error_code: loadFailure,
+      })
+    } else {
+      logEvent('tengu_feature_ok', { feature_name: 'plugin_load_agents' })
+    }
     return allAgents
   },
 )

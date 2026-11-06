@@ -63,6 +63,7 @@ import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
 import { SURFACE_LIMITS } from './functionHooksSurfaceRuntime.js'
 import { createStore } from '../../state/store.js'
 import { isBareMode } from '../envUtils.js'
+import { isPluginFsNetworkOrDevicePath } from '../path.js'
 import {
   BUILTIN_MARKETPLACE_NAME,
   isBuiltinPluginId,
@@ -280,6 +281,29 @@ export type LoadedFunctionHooksModule = {
 }
 
 let loadedModules: LoadedFunctionHooksModule[] = []
+
+/**
+ * densable `Azn` — `yn` installs the late-load `session.start` callback
+ * (`Azn.set`); a module replace calls `Azn.get()?.(e)`. The callback lives
+ * here so the hub never imports the hooks module.
+ */
+let laterLoadedSessionStart:
+  | ((mods: readonly LoadedFunctionHooksModule[]) => void)
+  | undefined
+
+/** densable `Azn.set`. `undefined` clears the slot (`et(js(), e => e.set(void 0))`). */
+export function setLaterLoadedSessionStart(
+  callback: ((mods: readonly LoadedFunctionHooksModule[]) => void) | undefined,
+): void {
+  laterLoadedSessionStart = callback
+}
+
+/** densable `dse` / `Azn.get()?.(e)`. */
+export function notifyFunctionHooksModulesLoaded(
+  mods?: readonly LoadedFunctionHooksModule[],
+): void {
+  laterLoadedSessionStart?.(mods ?? loadedModules)
+}
 /** densable last hook that returned a `ui.render` tree (`Te` restamp). */
 let lastUiRenderPlugin = ''
 
@@ -448,6 +472,9 @@ function replaceLoadedFunctionHooksModules(
   setClientMessageCancelHandler(
     loadedModules.length > 0 ? cancelClientMessage : undefined,
   )
+  // densable `dse` — `Azn.get()?.(e)` after a module replace. `yn` owns the
+  // callback (`Azn.set`); this hub does not raise session.start itself.
+  notifyFunctionHooksModulesLoaded(loadedModules)
 }
 
 /** densable `cLo` — exact `classic.<event>` on a loaded module. */
@@ -657,12 +684,9 @@ const HOOK_BUDGET_MS = 5000
 const HOOK_DEFAULT_STEP_BUDGET_MS = 10_000
 /** densable `ki` — `prompt.edit` step budget. */
 const HOOK_PROMPT_EDIT_BUDGET_MS = 50
-/** Generous `command.run` step budget so `claude-test` browser helper startup has positive wait headroom. */
-const HOOK_COMMAND_RUN_BUDGET_MS = 30_000
 
 function budgetMsForHookEvent(event: string): number {
   if (event === 'prompt.edit') return HOOK_PROMPT_EDIT_BUDGET_MS
-  if (event === 'command.run') return HOOK_COMMAND_RUN_BUDGET_MS
   return HOOK_DEFAULT_STEP_BUDGET_MS
 }
 
@@ -878,6 +902,8 @@ export async function runFunctionHookChain(
     signal?: AbortSignal
     site?: FunctionHookHopSite
     budgetMs?: number
+    /** densable `$Ot` `withoutModuleHandlers` — skip plugin hooks, keep core. */
+    withoutModuleHandlers?: boolean
   },
 ): Promise<unknown> {
   if (hookDispatch.getStore() === undefined) {
@@ -891,6 +917,9 @@ export async function runFunctionHookChain(
         callOptions,
       ),
     )
+  }
+  if (callOptions?.withoutModuleHandlers === true) {
+    return tail(payload, callOptions.floors ?? EMPTY_HOP_FLOORS)
   }
   // densable F0/r1: classic events are `classic.<HookEvent>`; yOt
   // function events (`plugin.register`, `tool.call`, …) are the dotted name.
@@ -1836,48 +1865,74 @@ export async function runEngineCreateLocalInProcess(
 
 /** densable `engine.create` fold — initializes `$` extensions (e.g. `cc-plugin-telemetry` batcher). */
 export async function runEngineCreateFold(): Promise<unknown> {
-  const activeMods = loadedModules.filter(mod => mod.status !== 'unloaded')
-  const payload: Record<string, unknown> = {
-    plugins: activeMods.map(mod => mod.name),
-  }
-  const hookingMods = activeMods.filter(mod =>
-    (mod.hooks ?? []).some(
-      hook =>
-        functionHookPatternMatches(hook.pattern, 'engine.create') &&
-        matcherAllows(
-          hook.matcher,
-          payload,
-          'engine.create',
-          isBuiltinTierMod(mod),
-        ),
-    ),
-  )
-  if (hookingMods.length === 0) return undefined
-  const useWorker = Boolean(workerOwnsDispatch && functionHooksWorker)
-  const nativeHooking = hookingMods
-    .filter(mod => !(useWorker && mod.native !== true))
+  const remaining = loadedModules
+    .filter(mod => mod.status !== 'unloaded')
     .map(mod => mod.name)
-  const workerHooking = useWorker
-    ? hookingMods.filter(mod => mod.native !== true).map(mod => mod.name)
-    : []
+  const tried = new Set<string>()
   let folded: unknown
-  if (nativeHooking.length > 0) {
-    folded = await runFunctionHookChain(
-      'engine.create',
-      payload,
-      async () => pluginEngine({ name: 'core' }),
-      undefined,
-      nativeHooking,
+  while (true) {
+    const activeMods = loadedModules.filter(
+      mod => mod.status !== 'unloaded' && remaining.includes(mod.name),
     )
-  }
-  if (workerHooking.length > 0 && functionHooksWorker) {
-    const workerReply = await functionHooksWorker.engineCreate(
-      payload,
-      workerHooking,
+    const payload: Record<string, unknown> = {
+      plugins: activeMods.map(mod => mod.name),
+    }
+    const hookingMods = activeMods.filter(
+      mod =>
+        !tried.has(mod.name) &&
+        (mod.hooks ?? []).some(
+          hook =>
+            functionHookPatternMatches(hook.pattern, 'engine.create') &&
+            matcherAllows(
+              hook.matcher,
+              payload,
+              'engine.create',
+              isBuiltinTierMod(mod),
+            ),
+        ),
     )
-    if (folded === undefined) folded = workerReply.returned
+    if (hookingMods.length === 0 && tried.size === 0) return undefined
+    const useWorker = Boolean(workerOwnsDispatch && functionHooksWorker)
+    const nativeHooking = hookingMods
+      .filter(mod => !(useWorker && mod.native !== true))
+      .map(mod => mod.name)
+    const workerHooking = useWorker
+      ? hookingMods.filter(mod => mod.native !== true).map(mod => mod.name)
+      : []
+    try {
+      if (nativeHooking.length > 0) {
+        folded = await runFunctionHookChain(
+          'engine.create',
+          payload,
+          async () => pluginEngine({ name: 'core' }),
+          undefined,
+          nativeHooking,
+        )
+      }
+      if (workerHooking.length > 0 && functionHooksWorker) {
+        const workerReply = await functionHooksWorker.engineCreate(
+          payload,
+          workerHooking,
+        )
+        if (folded === undefined) folded = workerReply.returned
+      }
+      return folded
+    } catch (err) {
+      const failed =
+        hookingMods.find(mod => !tried.has(mod.name)) ?? hookingMods[0]
+      if (failed === undefined) throw err
+      const reason = err instanceof Error ? err.message : String(err)
+      logForDebugging(
+        `hooks module ${failed.name} failed in engine.create: ${reason}; unloaded, $ built again without it`,
+        { level: 'error' },
+      )
+      tried.add(failed.name)
+      await retireFunctionHooksModule(failed.name)
+      unloadModule(failed.name)
+      const failedAt = remaining.indexOf(failed.name)
+      if (failedAt >= 0) remaining.splice(failedAt, 1)
+    }
   }
-  return folded
 }
 
 /**
@@ -3967,13 +4022,90 @@ function argvFrom(value: unknown): string[] {
   return []
 }
 
+/** densable `tLe` — `$.process.run` stdout/stderr capture cap. */
+const PROCESS_RUN_CAPTURE_BYTES = 4_194_304
+/** densable `b$t` — default `$.process.run` timeout. */
+const PROCESS_RUN_DEFAULT_TIMEOUT_MS = 30_000
+/** densable `wpn` — hard cap on `$.process.run` timeout. */
+const PROCESS_RUN_TIMEOUT_CAP_MS = 600_000
+/** densable `k$t` — SIGTERM→SIGKILL grace. */
+const PROCESS_RUN_KILL_GRACE_MS = 2000
+
+type ProcessRunCapture = { text: string; isTruncated: boolean }
+
+function captureProcessStream(
+  stream: NodeJS.ReadableStream | null | undefined,
+  cap: number,
+): Promise<ProcessRunCapture> {
+  if (stream == null) {
+    return Promise.resolve({ text: '', isTruncated: false })
+  }
+  return new Promise(resolve => {
+    const chunks: Buffer[] = []
+    let taken = 0
+    let truncated = false
+    let settled = false
+    const onData = (chunk: Buffer | string) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+      const room = cap - taken
+      if (buf.byteLength > room) truncated = true
+      if (room <= 0) return
+      const slice = truncated ? buf.subarray(0, room) : buf
+      chunks.push(slice)
+      taken += slice.byteLength
+    }
+    const finish = () => {
+      if (settled) return
+      settled = true
+      stream.off('data', onData)
+      const joined = Buffer.concat(chunks)
+      resolve({
+        text: truncated
+          ? new TextDecoder().decode(joined, { stream: true })
+          : joined.toString('utf8'),
+        isTruncated: truncated,
+      })
+    }
+    stream.on('data', onData)
+    stream.once('end', finish)
+    stream.once('error', finish)
+    stream.once('close', finish)
+  })
+}
+
+function processRunFailedLine(err: unknown): string {
+  const code =
+    err !== null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined
+  const message = err instanceof Error ? err.message : String(err)
+  return `failed to start: ${code === undefined ? message : `${code}: ${message}`}`
+}
+
 async function runProcess(
   argv: unknown,
   init: Record<string, unknown> | undefined,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  plugin?: string,
+): Promise<{
+  exitCode: number
+  stdout: string
+  stderr: string
+  isStdoutTruncated: boolean
+  isStderrTruncated: boolean
+}> {
   const command = argvFrom(argv)
-  if (command.length === 0) return { exitCode: 1, stdout: '', stderr: '' }
-  const { spawnSync } = await import('child_process')
+  const empty = {
+    exitCode: 1,
+    stdout: '',
+    stderr: '',
+    isStdoutTruncated: false,
+    isStderrTruncated: false,
+  }
+  if (command.length === 0) return empty
+  const { spawn } = await import('child_process')
   let baseCwd = process.cwd()
   try {
     const { getCwd } = await import('../cwd.js')
@@ -3983,19 +4115,73 @@ async function runProcess(
   }
   const cwd =
     typeof init?.cwd === 'string' ? resolve(baseCwd, init.cwd) : baseCwd
-  const result = spawnSync(command[0]!, command.slice(1), {
-    encoding: 'utf8',
+  const timeoutMs = Math.min(
+    typeof init?.timeoutMs === 'number'
+      ? init.timeoutMs
+      : PROCESS_RUN_DEFAULT_TIMEOUT_MS,
+    PROCESS_RUN_TIMEOUT_CAP_MS,
+  )
+  const bin = command[0]!
+  const prefix =
+    plugin !== undefined && plugin !== ''
+      ? `${plugin}: $.process.run(${bin}) `
+      : `$.process.run(${bin}) `
+  const child = spawn(bin, command.slice(1), {
     cwd,
     env: isEventRecord(init?.env)
       ? { ...process.env, ...(init.env as Record<string, string>) }
       : process.env,
-    input: typeof init?.stdin === 'string' ? init.stdin : undefined,
-    timeout: typeof init?.timeoutMs === 'number' ? init.timeoutMs : undefined,
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
-  return {
-    exitCode: result.status ?? 1,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+  let timedOut = false
+  let aborted = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    aborted = true
+    child.kill('SIGTERM')
+    setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+      }
+    }, PROCESS_RUN_KILL_GRACE_MS).unref()
+    child.stdout?.destroy()
+    child.stderr?.destroy()
+  }, timeoutMs)
+  timer.unref()
+  if (typeof init?.stdin === 'string' && child.stdin !== null) {
+    child.stdin.once('error', () => {})
+    child.stdin.end(init.stdin)
+  } else {
+    child.stdin?.end()
+  }
+  try {
+    const closed = new Promise<number>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', code => resolve(code ?? 1))
+    })
+    const [stdout, stderr, exitCode] = await Promise.all([
+      captureProcessStream(child.stdout, PROCESS_RUN_CAPTURE_BYTES),
+      captureProcessStream(child.stderr, PROCESS_RUN_CAPTURE_BYTES),
+      closed,
+    ])
+    if (aborted && timedOut) {
+      throw new Error(`${prefix}aborted: still running after ${timeoutMs}ms`)
+    }
+    if (aborted) {
+      throw new Error(`${prefix}aborted`)
+    }
+    return {
+      exitCode,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      isStdoutTruncated: stdout.isTruncated,
+      isStderrTruncated: stderr.isTruncated,
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith(prefix)) throw err
+    throw new Error(`${prefix}${processRunFailedLine(err)}`)
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -4032,6 +4218,11 @@ async function fetchHttp(
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
     throw new Error(
       `${prefix}$.http.fetch: ${parsedUrl.href} refused: http or https only`,
+    )
+  }
+  if (parsedUrl.username !== '' || parsedUrl.password !== '') {
+    throw new Error(
+      `${prefix}$.http.fetch: ${parsedUrl.host} refused: credentials in the URL`,
     )
   }
   let authEntry: SessionAuthHandleEntry | undefined
@@ -4409,7 +4600,7 @@ export async function handleHostOp(
       : isEventRecord(args[1])
         ? args[1]
         : undefined
-    return runProcess(argv, init)
+    return runProcess(argv, init, plugin)
   }
   if (op === 'process.spawn') {
     const argv = rec ? rec.argv : args[0]
@@ -4542,15 +4733,7 @@ export async function handleHostOp(
     return undefined
   }
   if (op === 'fs.list') {
-    const { lstatSync, readdirSync, statSync } = await import('fs')
-    // Preserve legacy positional handleHostOp('fs.list', [dir]) test expectation
-    if (
-      rec === undefined &&
-      typeof args[0] === 'string' &&
-      plugin === undefined
-    ) {
-      return readdirSync(args[0])
-    }
+    const { readdirSync, statSync } = await import('fs')
     let baseCwd = process.cwd()
     try {
       const { getCwd } = await import('../cwd.js')
@@ -4560,6 +4743,22 @@ export async function handleHostOp(
     }
     const rawPath = pathFrom(args) ?? '.'
     const target = resolve(baseCwd, rawPath)
+    let projectRoot: string | null = null
+    try {
+      const { getProjectRoot } = await import('../../bootstrap/state.js')
+      projectRoot = getProjectRoot()
+    } catch {
+      projectRoot = null
+    }
+    if (
+      isPluginFsNetworkOrDevicePath(rawPath, projectRoot) ||
+      isPluginFsNetworkOrDevicePath(target, projectRoot)
+    ) {
+      const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+      throw new Error(
+        `${who}$.fs.list: ${rawPath} refused: a network location is not reached from here`,
+      )
+    }
     const entries = readdirSync(target, { withFileTypes: true })
     const listed: Array<{
       name: string
@@ -4569,38 +4768,30 @@ export async function handleHostOp(
       isLink: boolean
     }> = []
     for (const entry of entries) {
-      const full = join(target, entry.name)
-      let isLink = entry.isSymbolicLink()
-      if (!isLink) {
+      // densable `dOe(M)` — kind from the dirent, not the follow-stat.
+      const kind: 'file' | 'dir' | 'other' = entry.isFile()
+        ? 'file'
+        : entry.isDirectory()
+          ? 'dir'
+          : 'other'
+      let size = 0
+      let mtimeMs = 0
+      if (entry.isFile()) {
         try {
-          isLink = lstatSync(full).isSymbolicLink()
+          const st = statSync(join(target, entry.name))
+          size = st.size
+          mtimeMs = st.mtimeMs
         } catch {
-          // ignore lstat failure
+          // densable `fOe(...).catch(()=>{return})` — leave size/mtime 0
         }
       }
-      try {
-        const st = statSync(full)
-        const kind: 'file' | 'dir' | 'other' = st.isFile()
-          ? 'file'
-          : st.isDirectory()
-            ? 'dir'
-            : 'other'
-        listed.push({
-          name: entry.name,
-          kind,
-          size: kind === 'file' ? st.size : 0,
-          mtimeMs: st.mtimeMs,
-          isLink,
-        })
-      } catch {
-        listed.push({
-          name: entry.name,
-          kind: 'other',
-          size: 0,
-          mtimeMs: 0,
-          isLink,
-        })
-      }
+      listed.push({
+        name: entry.name,
+        kind,
+        size,
+        mtimeMs,
+        isLink: entry.isSymbolicLink(),
+      })
     }
     listed.sort((a, b) => a.name.localeCompare(b.name))
     return listed
@@ -10372,7 +10563,7 @@ function makeUiResolveTable(
         if (k === 'ref' || v === undefined || v === null) continue
         rest[k] = v
       }
-      const takesHover = name === 'Box' || name === 'Text' || name === 'Button'
+      const takesHover = name === 'Box' || name === 'Text'
       const hover = takesHover
         ? sanitizeHoverStyleRecord(rest.hover)
         : undefined
@@ -11768,21 +11959,31 @@ async function runPluginRegister(
   if (reason !== undefined) {
     hostCheck('plugin.register', reason, plugin)
   }
+  const traces = (
+    judged as {
+      __pluginRegisterTrace?: Array<{ plugin: string; returned?: unknown }>
+    }
+  ).__pluginRegisterTrace
+  const judgeNames =
+    traces
+      ?.map(trace => trace.plugin)
+      .filter(name => name !== '' && name !== 'core') ?? []
+  const judgedBy = judgeNames.length > 0 ? judgeNames.join(', ') : 'core alone'
+  const line = `plugin.register: ${shown.name} (${shown.tier}, ${shown.provenance}), judged by ${judgedBy}: `
   if (isEventRecord(judged) && typeof judged.refuse === 'string') {
     // densable bSt/g0n: by = last non-core hook that returned/caught {refuse}
-    const traces = (
-      judged as {
-        __pluginRegisterTrace?: Array<{ plugin: string; returned?: unknown }>
-      }
-    ).__pluginRegisterTrace
     const by = [...(traces ?? [])].reverse().find(trace => {
       const returned = trace.returned
       return isEventRecord(returned) && returned.refuse === judged.refuse
     })?.plugin
-    return by !== undefined
-      ? { by, reason: judged.refuse }
-      : { reason: judged.refuse }
+    const refused =
+      by !== undefined
+        ? { by, reason: judged.refuse }
+        : { reason: judged.refuse }
+    logForDebugging(`${line}${pluginRegisterRefusedLine(refused)}`)
+    return refused
   }
+  logForDebugging(`${line}admitted`)
   return { allow: true }
 }
 
@@ -11863,7 +12064,6 @@ async function runPromptFill(
   plugin?: string,
 ): Promise<{
   isFilled: boolean
-  ok: boolean
   refusal?: string
   text: string
   cursor: number
@@ -11915,7 +12115,6 @@ async function runPromptFill(
     savePromptInputCursorOffset(nextCursor)
     return {
       isFilled: true,
-      ok: true,
       text: nextText,
       cursor: nextCursor,
     }
@@ -11956,7 +12155,6 @@ async function runPromptFill(
   if (isEventRecord(out) && out.isFilled === false) {
     return {
       isFilled: false,
-      ok: false,
       ...(typeof out.refusal === 'string' && { refusal: out.refusal }),
       text: currentText,
       cursor: currentCursor,
@@ -11968,7 +12166,6 @@ async function runPromptFill(
   }
   return {
     isFilled: true,
-    ok: true,
     text: settled.text,
     cursor: settled.cursor,
   }
@@ -15480,7 +15677,6 @@ export type LeftoverHooksModule =
       folder: string
     }
 
-const leftoverHooksByName = new Map<string, LeftoverHooksModule>()
 const leftoverShipped = new Map<
   string,
   { register: (...args: unknown[]) => unknown }
@@ -15523,7 +15719,7 @@ const leftoverNe = {
     return leftoverScans.get(name)
   },
   source(name: string): unknown {
-    return leftoverShipped.get(name) ?? leftoverHooksByName.get(name)
+    return leftoverShipped.get(name)
   },
 }
 
@@ -15614,7 +15810,6 @@ export function leftoverFu(
 
 /**
  * densable uS — Ne keyed by leftoverVo; scan vs shipped if/else.
- * leftoverHooksByName is analog extra for listBuiltinFunctionHookPlugins.
  * Never export minify `uS`.
  */
 export function leftoverUs(plugin: {
@@ -15628,24 +15823,23 @@ export function leftoverUs(plugin: {
   const vo = leftoverVo(plugin.name)
   if ('scan' in hooks) leftoverNe.registerScan(vo, hooks.scan)
   else if ('shipped' in hooks) leftoverNe.register(vo, hooks.shipped)
-  // analog extra vs gold Ne-only: leftoverHooksByName feeds listBuiltinFunctionHookPlugins.
-  if (!('shipped' in hooks)) leftoverHooksByName.set(vo, hooks)
 }
 
-/** densable Ne.scan / Ne.source / Lh after uS. */
+/** densable Ne.scan / Ne.source / Lh after uS. leftover PZ still holds hooksModule. */
 export function leftoverBuiltinHooksModule(
   name: string,
 ): LeftoverHooksModule | undefined {
-  return leftoverHooksByName.get(leftoverVo(name))
-}
-
-function leftoverPluginNameFromVo(key: string): string {
-  const prefix = 'builtin:'
-  const suffix = `/${REGISTER_FILE}`
-  if (key.startsWith(prefix) && key.endsWith(suffix)) {
-    return key.slice(prefix.length, key.length - suffix.length)
+  try {
+    const { getBuiltinPluginDefinition } =
+      require('../../plugins/builtinPlugins.js') as typeof import('../../plugins/builtinPlugins.js')
+    const hooks = getBuiltinPluginDefinition(name)?.hooksModule
+    if (hooks !== undefined && !('shipped' in hooks)) {
+      return hooks
+    }
+  } catch {
+    // builtinPlugins optional during standalone tests
   }
-  return key
+  return undefined
 }
 
 function resolvePluginStorageId(pluginName: string): string {
@@ -15749,7 +15943,7 @@ async function admitUserPluginIfAllowed(
   const activeJudges = judges.filter(
     mod => mod.tier !== 'user' && mod.status !== 'unloaded',
   )
-  if (activeJudges.length === 0) return true
+  // densable leftover plugin.register still runs core when judges=0.
   let scannedEvents: string[] = []
   if (plugin.path !== '' && plugin.path !== BUILTIN_MARKETPLACE_NAME) {
     try {
@@ -15765,9 +15959,6 @@ async function admitUserPluginIfAllowed(
     root: plugin.path,
     provenance: plugin.source ?? plugin.name,
     uses: { events: scannedEvents, calls: [] },
-  }
-  if (!hasMatchingFunctionHook('plugin.register', shown, activeJudges)) {
-    return true
   }
   const prevLoaded = loadedModules
   const prevWorkerOwns = workerOwnsDispatch
@@ -16056,41 +16247,27 @@ export function scanFunctionHookSource(source: string): {
 
 export function listBuiltinFunctionHookPlugins(): FunctionHookPlugin[] {
   const listed: FunctionHookPlugin[] = []
-  let enabledSources: Set<string> | undefined
-  for (const key of leftoverHooksByName.keys()) {
-    const name = leftoverPluginNameFromVo(key)
-    try {
-      const { getBuiltinPluginDefinition, getBuiltinPlugins } =
-        require('../../plugins/builtinPlugins.js') as typeof import('../../plugins/builtinPlugins.js')
-      if (getBuiltinPluginDefinition(name) !== undefined) {
-        if (enabledSources === undefined) {
-          enabledSources = new Set(
-            getBuiltinPlugins().enabled.map(plugin => plugin.source),
-          )
-        }
-        if (!enabledSources.has(`${name}@${BUILTIN_MARKETPLACE_NAME}`)) {
-          continue
-        }
+  try {
+    const { getBuiltinPlugins } =
+      require('../../plugins/builtinPlugins.js') as typeof import('../../plugins/builtinPlugins.js')
+    for (const enabled of getBuiltinPlugins().enabled) {
+      const hooks = leftoverBuiltinHooksModule(enabled.name)
+      if (hooks === undefined) continue
+      const overlay = leftoverLh(enabled.name, hooks)
+      const plugin: FunctionHookPlugin = {
+        name: `builtin:${enabled.name}`,
+        path: overlay.path,
+        source: `${enabled.name}@${BUILTIN_MARKETPLACE_NAME}`,
+        tier: enabled.name === 'cc-plugin-sec-default' ? 'prepend' : 'builtin',
       }
-    } catch {
-      // builtinPlugins optional during standalone tests
+      const resolvedOpts = resolveEffectivePluginOptions(plugin)
+      if (Object.keys(resolvedOpts).length > 0) {
+        plugin.options = resolvedOpts
+      }
+      listed.push(plugin)
     }
-    const hooks = leftoverBuiltinHooksModule(name)
-    if (hooks === undefined) continue
-    const overlay = leftoverLh(name, hooks)
-    const tier: LoadedFunctionHooksModule['tier'] =
-      name === 'cc-plugin-sec-default' ? 'prepend' : 'builtin'
-    const plugin: FunctionHookPlugin = {
-      name: `builtin:${name}`,
-      path: overlay.path,
-      source: `${name}@${BUILTIN_MARKETPLACE_NAME}`,
-      tier,
-    }
-    const resolvedOpts = resolveEffectivePluginOptions(plugin)
-    if (Object.keys(resolvedOpts).length > 0) {
-      plugin.options = resolvedOpts
-    }
-    listed.push(plugin)
+  } catch {
+    // builtinPlugins optional during standalone tests
   }
   return listed
 }

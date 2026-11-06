@@ -202,7 +202,8 @@ function recordBuiltinPluginFailure(
       require('../services/analytics/index.js') as typeof import('../services/analytics/index.js')
     type Meta =
       import('../services/analytics/index.js').AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-    logEvent('tengu_feature_sad', {
+    // leftover m — tengu_feature_bad (not leftover p / tengu_feature_sad)
+    logEvent('tengu_feature_bad', {
       feature_name: 'plugin_bundled_register' as Meta,
       error_code: phase as Meta,
     })
@@ -446,7 +447,67 @@ function leftoverLhForBuiltin(
   }
 }
 
+/**
+ * densable Wh skill extras copied onto Command. Kept here (not command.ts)
+ * so builtinPlugins.ts stays the only production file in this wrap.
+ */
+type BuiltinPluginSkillPolicyGate = { policy: string }
+
+type BuiltinPluginSkillCommand = Command & {
+  disableBridgeInvocation?: boolean
+  terminalOriented?: boolean
+  policyGate?: BuiltinPluginSkillPolicyGate
+}
+
+type BuiltinPluginBundledSkill = Omit<
+  BundledSkillDefinition,
+  | 'description'
+  | 'menuDescription'
+  | 'argumentHint'
+  | 'whenToUse'
+  | 'disableModelInvocation'
+> & {
+  description: string | (() => string)
+  menuDescription?: string | (() => string)
+  argumentHint?: string | (() => string)
+  whenToUse?: string | (() => string)
+  disableModelInvocation?: boolean | (() => boolean)
+  disableBridgeInvocation?: boolean
+  terminalOriented?: boolean
+  argsMayContainSlashCommands?: boolean
+  onUserTypedArgs?: Extract<Command, { type: 'prompt' }>['onUserTypedArgs']
+  policyGate?:
+    | BuiltinPluginSkillPolicyGate
+    | (() => BuiltinPluginSkillPolicyGate | undefined)
+}
+
+/** densable Mwe / svn — install a getter when the source value is a function. */
+function defineCommandFieldGetter(
+  command: object,
+  key: string,
+  value: unknown,
+): void {
+  if (typeof value !== 'function') return
+  Object.defineProperty(command, key, {
+    get: value as () => unknown,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+/** densable ivn — policyGate getter when the source value is a function. */
+function defineCommandPolicyGateGetter(command: object, value: unknown): void {
+  if (typeof value !== 'function') return
+  Object.defineProperty(command, 'policyGate', {
+    get: value as () => unknown,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+/** densable Wh — bundled builtin-plugin skill → Command. */
 function skillDefinitionToCommand(definition: BundledSkillDefinition): Command {
+  const skill = definition as BuiltinPluginBundledSkill
   let wired = builtinPluginWiredSkills.get(definition)
   if (!wired) {
     const { wireSkillFilesExtraction } =
@@ -456,27 +517,35 @@ function skillDefinitionToCommand(definition: BundledSkillDefinition): Command {
     builtinPluginWiredSkills.set(definition, wired)
   }
   const { skillRoot, getPromptForCommand } = wired
-  return {
+  const command: BuiltinPluginSkillCommand = {
     type: 'prompt',
-    name: definition.name,
-    description: definition.description,
-    menuDescription: definition.menuDescription,
-    aliases: definition.aliases,
+    name: skill.name,
+    description:
+      typeof skill.description === 'function' ? '' : skill.description,
+    menuDescription:
+      typeof skill.menuDescription === 'function'
+        ? undefined
+        : skill.menuDescription,
+    aliases: skill.aliases,
     hasUserSpecifiedDescription: true,
-    allowedTools: definition.allowedTools ?? [],
-    ...(definition.getAllowedTools !== undefined
-      ? { getAllowedTools: definition.getAllowedTools }
-      : {}),
-    ...(definition.disallowedTools !== undefined
-      ? { disallowedTools: [...definition.disallowedTools] }
-      : {}),
-    argumentHint: definition.argumentHint,
-    whenToUse: definition.whenToUse,
-    subcommands: definition.subcommands,
-    subcommandsBareOnly: definition.subcommandsBareOnly,
-    model: definition.model,
-    disableModelInvocation: definition.disableModelInvocation ?? false,
-    userInvocable: definition.userInvocable ?? true,
+    allowedTools: skill.allowedTools ?? [],
+    getAllowedTools: skill.getAllowedTools,
+    disallowedTools: [...(skill.disallowedTools ?? [])],
+    argumentHint:
+      typeof skill.argumentHint === 'function' ? undefined : skill.argumentHint,
+    whenToUse:
+      typeof skill.whenToUse === 'function' ? undefined : skill.whenToUse,
+    subcommands: skill.subcommands,
+    subcommandsBareOnly: skill.subcommandsBareOnly,
+    model: skill.model,
+    disableModelInvocation:
+      typeof skill.disableModelInvocation === 'function'
+        ? true
+        : (skill.disableModelInvocation ?? false),
+    disableBridgeInvocation: skill.disableBridgeInvocation,
+    userInvocable: skill.userInvocable ?? true,
+    terminalOriented: skill.terminalOriented,
+    argsMayContainSlashCommands: skill.argsMayContainSlashCommands,
     contentLength: 0,
     // 'bundled' not 'builtin' — 'builtin' in Command.source means hardcoded
     // slash commands (/help, /clear). Using 'bundled' keeps these skills in
@@ -484,31 +553,33 @@ function skillDefinitionToCommand(definition: BundledSkillDefinition): Command {
     // exemption. The user-toggleable aspect is tracked on LoadedPlugin.isBuiltin.
     source: 'bundled',
     loadedFrom: 'bundled',
-    hooks: definition.hooks,
-    context: definition.context,
-    ...(definition.getContext !== undefined
-      ? { getContext: definition.getContext }
-      : {}),
-    agent: definition.agent,
-    ...(definition.background !== undefined
-      ? { background: definition.background }
-      : {}),
+    hooks: skill.hooks,
+    context: skill.context,
+    getContext: skill.getContext,
+    agent: skill.agent,
+    background: skill.background,
     skillRoot,
-    isEnabled: definition.isEnabled ?? (() => true),
-    ...(definition.requires !== undefined
-      ? { requires: definition.requires }
-      : {}),
-    isHidden: !(definition.userInvocable ?? true),
-    progressMessage: definition.progressMessage ?? 'running',
+    isEnabled: skill.isEnabled ?? (() => true),
+    policyGate:
+      typeof skill.policyGate === 'function' ? undefined : skill.policyGate,
+    requires: skill.requires,
+    isHidden: !(skill.userInvocable ?? true),
+    progressMessage: skill.progressMessage ?? 'running',
     getPromptForCommand,
-    ...(definition.getEffort !== undefined
-      ? { getEffort: definition.getEffort }
-      : {}),
-    ...(definition.getDefaultEffort !== undefined
-      ? { getDefaultEffort: definition.getDefaultEffort }
-      : {}),
-    ...(definition.getArgumentCompletions !== undefined
-      ? { getArgumentCompletions: definition.getArgumentCompletions }
-      : {}),
+    getEffort: skill.getEffort,
+    getDefaultEffort: skill.getDefaultEffort,
+    onUserTypedArgs: skill.onUserTypedArgs,
+    getArgumentCompletions: skill.getArgumentCompletions,
   }
+  defineCommandFieldGetter(command, 'description', skill.description)
+  defineCommandFieldGetter(command, 'menuDescription', skill.menuDescription)
+  defineCommandFieldGetter(command, 'argumentHint', skill.argumentHint)
+  defineCommandFieldGetter(command, 'whenToUse', skill.whenToUse)
+  defineCommandFieldGetter(
+    command,
+    'disableModelInvocation',
+    skill.disableModelInvocation,
+  )
+  defineCommandPolicyGateGetter(command, skill.policyGate)
+  return command
 }

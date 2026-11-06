@@ -784,6 +784,10 @@ async function dispatchCheckPermissionsAndCallTool(
           {
             signal: toolUseContext.abortController.signal,
             site: toolCallSite,
+            // densable `$Ot` — `withoutModuleHandlers: s.options.settingsHooksOff ? true : void 0`
+            ...(toolUseContext.options.settingsHooksOff === true
+              ? { withoutModuleHandlers: true as const }
+              : {}),
           },
         )
       } catch (err) {
@@ -816,14 +820,6 @@ async function dispatchCheckPermissionsAndCallTool(
       }
 
       const out = isPlainRecord(rawChainOut) ? rawChainOut : {}
-      if (typeof out.deny === 'string') {
-        return buildToolCallDenyMessages(
-          toolUseID,
-          out.deny,
-          assistantMessage.uuid,
-        )
-      }
-
       const matchedRun =
         typeof out.ref === 'number' ? coreRuns[out.ref - 1] : undefined
       const keptCoreResult =
@@ -831,6 +827,21 @@ async function dispatchCheckPermissionsAndCallTool(
         (out.result === undefined ||
           out.result === matchedRun.result ||
           pinValue(out.result) === pinValue(matchedRun.result))
+      // densable DVt @189565200: if (!ve) log hook-resolved without core.
+      if (!keptCoreResult) {
+        logForDebugging(
+          `tool.call ${tool.name} ${toolUseID}: resolved by a hooks module (` +
+            (out.deny === undefined ? 'result' : `deny: ${out.deny}`) +
+            ')',
+        )
+      }
+      if (typeof out.deny === 'string') {
+        return buildToolCallDenyMessages(
+          toolUseID,
+          out.deny,
+          assistantMessage.uuid,
+        )
+      }
 
       let finalMessages: MessageUpdateLazy[]
       if (keptCoreResult) {

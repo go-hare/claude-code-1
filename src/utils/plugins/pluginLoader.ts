@@ -2428,6 +2428,7 @@ async function loadPluginsFromMarketplaces({
             errors,
             installEntry?.installPath,
             warnings,
+            mktSource,
           )
         : loadPluginFromMarketplaceEntry(
             result.entry,
@@ -2479,6 +2480,7 @@ async function loadPluginFromMarketplaceEntryCacheOnly(
   errorsOut: PluginError[],
   installPath: string | undefined,
   warningsOut?: PluginWarning[],
+  marketplaceSource?: MarketplaceSource,
 ): Promise<LoadedPlugin | null> {
   let pluginPath: string
 
@@ -2548,6 +2550,10 @@ async function loadPluginFromMarketplaceEntryCacheOnly(
     errorsOut,
     pluginPath,
     warningsOut,
+    {
+      source: marketplaceSource,
+      installLocation: marketplaceInstallLocation,
+    },
   )
 }
 
@@ -2814,6 +2820,10 @@ async function loadPluginFromMarketplaceEntry(
     errorsOut,
     pluginPath,
     warningsOut,
+    {
+      source: marketplaceSource,
+      installLocation: marketplaceInstallLocation,
+    },
   )
 }
 
@@ -2832,6 +2842,7 @@ async function finishLoadingPluginFromPath(
   errorsOut: PluginError[],
   pluginPath: string,
   warningsOut?: PluginWarning[],
+  marketplace?: { source?: MarketplaceSource; installLocation?: string },
 ): Promise<LoadedPlugin | null> {
   const errors: PluginError[] = []
 
@@ -3105,6 +3116,21 @@ async function finishLoadingPluginFromPath(
         ...(plugin.hooksConfig || {}),
         ...(entry.hooks as HooksSettings),
       }
+    }
+  }
+
+  if (marketplace?.source !== undefined) {
+    plugin.marketplaceSource = marketplace.source
+    // densable `OVo` — read in place only for a relative-path source whose
+    // resolved path stays inside the marketplace directory. A cache, archive
+    // or seed copy is not seated.
+    if (
+      typeof entry.source === 'string' &&
+      marketplace.installLocation !== undefined
+    ) {
+      const root = resolve(marketplace.installLocation)
+      const resolved = resolve(pluginPath)
+      plugin.readInPlace = resolved === root || resolved.startsWith(root + sep)
     }
   }
 

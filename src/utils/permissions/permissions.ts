@@ -31,6 +31,8 @@ import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shou
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import { REPL_TOOL_NAME } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
+import { WEB_SEARCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebSearchTool/prompt.js'
 import type { AssistantMessage } from '../../types/message.js'
 import { extractOutputRedirections } from '../bash/commands.js'
 import { logForDebugging } from '../debug.js'
@@ -117,7 +119,15 @@ import {
   clearClassifierChecking,
   setClassifierChecking,
 } from '../classifierApprovals.js'
-import { isInProtectedNamespace } from '../envUtils.js'
+import { HEARTHBOT_MCP_SERVER_NAME } from '../../bridge/hearthbotMcp.js'
+import {
+  isHearthbotBareElicitationPinned,
+  isHearthbotCcrProxyUrl,
+} from '../../services/mcp/ccrInjectedMcp.js'
+import { isCliOwnedConfig } from '../../services/mcp/cliOwnedConfigs.js'
+import { getFeatureValueWithSource } from '../../services/analytics/growthbook.js'
+import { getBootstrapSession } from '../sessionRoot.js'
+import { isEnvTruthy, isInProtectedNamespace } from '../envUtils.js'
 import { executePermissionRequestHooks } from '../hooks.js'
 import {
   AUTO_REJECT_MESSAGE,
@@ -856,6 +866,54 @@ function isToolCheckDecisionValue(
   return value === 'allow' || value === 'ask' || value === 'deny'
 }
 
+/**
+ * densable `gzt` — connected hearthbot MCP that is dynamic, not CLI-owned,
+ * and a CCR hearthbot URL (`Jkn`).
+ */
+function isHearthbotProjectsMcpClient(client: unknown): boolean {
+  if (client === null || typeof client !== 'object') return false
+  const rec = client as { name?: unknown; config?: unknown }
+  if (rec.name !== HEARTHBOT_MCP_SERVER_NAME) return false
+  const config = rec.config
+  if (config === null || typeof config !== 'object') return false
+  const scoped = config as { scope?: unknown; url?: unknown }
+  if (scoped.scope !== 'dynamic' || isCliOwnedConfig(config)) return false
+  return typeof scoped.url === 'string' && isHearthbotCcrProxyUrl(scoped.url)
+}
+
+/** densable `Sbt(SS())` — any hearthbot Projects MCP on the session accessor. */
+function hasHearthbotProjectsMcpSession(): boolean {
+  const clients = getBootstrapSession().mcpSessionWiring.clientsFromAccessor()
+  if (!Array.isArray(clients)) return false
+  return clients.some(isHearthbotProjectsMcpClient)
+}
+
+/**
+ * densable `Uoe` @187630400 — plugin `tool.check` may only tighten WebFetch /
+ * WebSearch in a Projects session (env, hearthbot pin, or hearthbot MCP).
+ * Payload `bot_protected_tengu_atomic_magpie` kills the gate (local has no
+ * `hasUsedNonDefaultHost`; treat as default host).
+ */
+function pluginToolCheckCanOnlyTightenInProjects(toolName: string): boolean {
+  if (toolName !== WEB_FETCH_TOOL_NAME && toolName !== WEB_SEARCH_TOOL_NAME) {
+    return false
+  }
+  if (
+    !(
+      isHearthbotBareElicitationPinned() ||
+      isEnvTruthy(process.env.CLAUDE_CODE_PROJECTS_SESSION) ||
+      hasHearthbotProjectsMcpSession()
+    )
+  ) {
+    return false
+  }
+  const magpie = getFeatureValueWithSource(
+    'bot_protected_tengu_atomic_magpie',
+    false,
+  )
+  return !(magpie.value === true && magpie.source === 'payload')
+}
+
 function applyToolCheckHookResult<Input extends Record<string, unknown>>(
   rawResult: { decision: 'allow' | 'ask' | 'deny'; reason?: string },
   decided: PermissionDecision<Input> | undefined,
@@ -1000,6 +1058,21 @@ export async function evaluatePermissionWithToolCheck<
       markToolCheckEvaluatedForCall(context, toolUseID, input, {
         override: normalizedResult,
       })
+    }
+    if (
+      normalizedResult.decision !== 'deny' &&
+      pluginToolCheckCanOnlyTightenInProjects(tool.name)
+    ) {
+      decided ??= await evaluate()
+      if (
+        normalizedResult.decision === 'allow' ||
+        decided.behavior === 'deny'
+      ) {
+        logForDebugging(
+          `tool.check ${tool.name} ${toolUseID}: ignored a plugin's ${normalizedResult.decision} and kept the permission check's ${decided.behavior}; plugins can only tighten ${tool.name}'s permission in a Projects session`,
+        )
+        return decided
+      }
     }
     return applyToolCheckHookResult(
       normalizedResult,

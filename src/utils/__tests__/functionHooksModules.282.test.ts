@@ -205,7 +205,15 @@ describe('function-hooks classic pattern', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fn-hooks-fs-'))
     await handleHostOp('fs.write', [join(dir, 'a.txt'), 'hello'])
     expect(await handleHostOp('fs.read', [join(dir, 'a.txt')])).toBe('hello')
-    expect(await handleHostOp('fs.list', [dir])).toEqual(['a.txt'])
+    expect(await handleHostOp('fs.list', [dir])).toEqual([
+      {
+        name: 'a.txt',
+        kind: 'file',
+        size: 5,
+        mtimeMs: expect.any(Number),
+        isLink: false,
+      },
+    ])
     const st = (await handleHostOp('fs.stat', [join(dir, 'a.txt')])) as {
       isFile?: boolean
     }

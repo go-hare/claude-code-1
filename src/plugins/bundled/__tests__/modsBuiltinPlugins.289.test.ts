@@ -91,18 +91,12 @@ describe('densable 2.1.289 builtin mods plugins', () => {
     expect(hooksHost).toContain('{ module, folder: dir }')
     expect(hooksHost).toContain('leftoverNe.registerScan(vo, hooks.scan)')
     expect(hooksHost).toContain("else if ('shipped' in hooks)")
-    expect(hooksHost).toContain('leftoverBuiltinHooksModule(name)')
-    expect(hooksHost).toContain(
-      'return leftoverHooksByName.get(leftoverVo(name))',
-    )
-    expect(hooksHost).not.toContain(
-      'leftoverHooksByName.get(name) ?? leftoverHooksByName.get(leftoverVo(name))',
-    )
+    expect(hooksHost).toContain('leftoverBuiltinHooksModule')
+    expect(hooksHost).toContain('getBuiltinPluginDefinition(name)?.hooksModule')
+    expect(hooksHost).not.toContain('leftoverHooksByName')
     expect(hooksHost).toContain("'scan' in hooks")
     expect(hooksHost).toContain('leftoverShipped.set')
-    expect(hooksHost).toContain('leftoverHooksByName.set(vo, hooks)')
-    expect(hooksHost).toContain('function leftoverPluginNameFromVo')
-    expect(hooksHost).toContain('for (const key of leftoverHooksByName.keys())')
+    expect(hooksHost).toContain('getBuiltinPlugins().enabled')
 
     const builtinHost = readFileSync(
       join(root, 'src/plugins/builtinPlugins.ts'),
@@ -215,7 +209,11 @@ describe('densable 2.1.289 builtin mods plugins', () => {
       'utf8',
     )
     expect(diffSrc).toContain('function leftoverFt')
+    expect(diffSrc).toContain('function leftoverIve')
+    expect(diffSrc).toContain('function leftoverW$')
     expect(diffSrc).toContain('getIsInteractive()')
+    expect(diffSrc).toContain('Boolean(process.env.CLAUDECODE)')
+    expect(diffSrc).not.toContain('isDesktopHostManagedBackground')
     expect(diffSrc).toContain(
       'getFeatureValue_CACHED_MAY_BE_STALE(DIFF_GB_FEATURE, true)',
     )

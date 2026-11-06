@@ -28,9 +28,12 @@ import {
 } from './plugins/pluginOptionsStorage.js'
 import { getPluginDataDir } from './plugins/pluginDirectories.js'
 import {
+  getLoadedFunctionHooksModules,
   getPluginRegisteredCommands,
   hasMatchingFunctionHook,
   runFunctionHookChain,
+  setLaterLoadedSessionStart,
+  type LoadedFunctionHooksModule,
 } from './plugins/functionHooksModules.js'
 import {
   getSessionId,
@@ -5246,6 +5249,62 @@ export async function runUserPromptExpansionHook<
 /** Official `ees` — keepalive holder id (refcount only, not mainLoopRefcount). */
 const STARTUP_HOOK_HOLD = 'startup-hook-hold'
 
+type SessionStartLateLoadPayload = {
+  surface: string | null
+  isInteractive: boolean
+}
+
+/**
+ * densable `hn`. Unique English:
+ * `session.start: raised for ${name} (loaded later)`.
+ * Never export minify `hn`.
+ */
+function raiseSessionStartForLaterLoadedModules(
+  mods: readonly LoadedFunctionHooksModule[],
+  seen: WeakSet<LoadedFunctionHooksModule>,
+  payload: SessionStartLateLoadPayload,
+): void {
+  for (const mod of mods) {
+    if (seen.has(mod)) continue
+    seen.add(mod)
+    if (!hasMatchingFunctionHook('session.start', undefined, [mod])) continue
+    logForDebugging(`session.start: raised for ${mod.name} (loaded later)`)
+    const name = mod.name
+    const cwd = getCwd()
+    Promise.resolve()
+      .then(() =>
+        runFunctionHookChain(
+          'session.start',
+          {
+            cwd,
+            surface: payload.surface,
+            isInteractive: payload.isInteractive,
+          },
+          async () => ({ cwd }),
+          name,
+        ),
+      )
+      .catch((err: unknown) => {
+        logForDebugging(
+          `session.start: failed for ${name}: ${errorMessage(err)}`,
+          { level: 'error' },
+        )
+      })
+  }
+}
+
+/** densable `yn` `Azn.set`. Never export minify `yn`. */
+function armLaterLoadedSessionStart(
+  payload: SessionStartLateLoadPayload,
+): void {
+  const seen = new WeakSet<LoadedFunctionHooksModule>(
+    getLoadedFunctionHooksModules(),
+  )
+  setLaterLoadedSessionStart(mods =>
+    raiseSessionStartForLaterLoadedModules(mods, seen, payload),
+  )
+}
+
 export async function* executeSessionStartHooks(
   // densable 2.1.214 #47: source enum includes "fork"
   source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork',
@@ -5271,48 +5330,48 @@ export async function* executeSessionStartHooks(
       source !== 'clear' &&
       source !== 'compact' &&
       !isBareMode() &&
-      !shouldDisableAllHooksIncludingManaged() &&
-      hasMatchingFunctionHook('session.start')
+      !shouldDisableAllHooksIncludingManaged()
     ) {
-      const activeSessionId = sessionId ?? getSessionId()
       const isInteractive = !getIsNonInteractiveSession()
       const cwd = getCwd()
       const surface = isInteractive ? 'terminal' : null
-      logForDebugging(
-        `session.start: raised (surface ${surface ?? 'none'}, ${isInteractive ? 'interactive' : 'not interactive'})`,
-      )
-      try {
-        await runFunctionHookChain(
-          'session.start',
-          {
-            sessionId: activeSessionId,
-            isInteractive,
-            cwd,
-            surface,
-            source,
-            ...(model !== undefined ? { model } : {}),
-          },
-          async () => ({ cwd }),
-          undefined,
-          undefined,
-          signal ? { signal } : undefined,
-        )
-      } catch (err) {
+      // densable leftover `yn` — WeakSet snapshot + Azn.set, then session.start.
+      armLaterLoadedSessionStart({ surface, isInteractive })
+      if (hasMatchingFunctionHook('session.start')) {
         logForDebugging(
-          `session.start: failed: ${err instanceof Error ? err.message : String(err)}`,
-          { level: 'error' },
+          `session.start: raised (surface ${surface ?? 'none'}, ${isInteractive ? 'interactive' : 'not interactive'})`,
         )
-      }
-      if (getPluginRegisteredCommands().length > 0) {
-        const { clearCommandMemoizationCaches } = await import('../commands.js')
-        clearCommandMemoizationCaches()
         try {
-          const { notifySkillsInvalidated } = await import(
-            './skills/skillChangeDetector.js'
+          await runFunctionHookChain(
+            'session.start',
+            {
+              cwd,
+              surface,
+              isInteractive,
+            },
+            async () => ({ cwd }),
+            undefined,
+            undefined,
+            signal ? { signal } : undefined,
           )
-          notifySkillsInvalidated()
-        } catch {
-          // optional in isolated tests
+        } catch (err) {
+          logForDebugging(`session.start: failed: ${errorMessage(err)}`, {
+            level: 'error',
+          })
+        }
+        if (getPluginRegisteredCommands().length > 0) {
+          const { clearCommandMemoizationCaches } = await import(
+            '../commands.js'
+          )
+          clearCommandMemoizationCaches()
+          try {
+            const { notifySkillsInvalidated } = await import(
+              './skills/skillChangeDetector.js'
+            )
+            notifySkillsInvalidated()
+          } catch {
+            // optional in isolated tests
+          }
         }
       }
     }

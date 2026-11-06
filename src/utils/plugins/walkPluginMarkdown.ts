@@ -1,5 +1,6 @@
 import { join } from 'path'
 import { logForDebugging } from '../debug.js'
+import { isENOENT } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 
 const SKILL_MD_RE = /^skill\.md$/i
@@ -21,7 +22,12 @@ const SKILL_MD_RE = /^skill\.md$/i
 export async function walkPluginMarkdown(
   rootDir: string,
   onFile: (fullPath: string, namespace: string[]) => Promise<void>,
-  opts: { stopAtSkillDir?: boolean; logLabel?: string } = {},
+  opts: {
+    stopAtSkillDir?: boolean
+    logLabel?: string
+    /** densable dB — missing root is OK; nested scan errors still log. */
+    isRootOptional?: boolean
+  } = {},
 ): Promise<void> {
   const fs = getFsImplementation()
   const label = opts.logLabel ?? 'plugin'
@@ -58,6 +64,10 @@ export async function walkPluginMarkdown(
         }),
       )
     } catch (error) {
+      // densable dB: isRootOptional && M===e && W(K) (ENOENT)
+      if (opts.isRootOptional && dirPath === rootDir && isENOENT(error)) {
+        return
+      }
       logForDebugging(
         `Failed to scan ${label} directory ${dirPath}: ${error}`,
         { level: 'error' },

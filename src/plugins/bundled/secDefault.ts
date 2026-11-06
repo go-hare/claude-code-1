@@ -2,8 +2,16 @@
  * densable 2.1.289 yfe `cc-plugin-sec-default` (`ge` / `qjr` / `VG` / `ZEn` / `MEt`).
  */
 import { join } from 'path'
+import type { LoadedPlugin } from '../../types/plugin.js'
 import { getSubscriptionType } from '../../utils/auth.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { leftoverFu } from '../../utils/plugins/functionHooksModules.js'
+import {
+  foldPluginName,
+  marketplaceSuffixFromSource,
+} from '../../utils/plugins/pluginIdentifier.js'
+import { isMarketplaceSourceDeclaredInManagedSettings } from '../../utils/plugins/marketplaceHelpers.js'
+import { ALLOWED_OFFICIAL_MARKETPLACE_NAMES } from '../../utils/plugins/schemas.js'
 import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import {
   getSettingsForSource,
@@ -89,9 +97,33 @@ function hasManagedSettingsOnMachine(): boolean {
 }
 
 /**
- * densable `iF()` / `aF()` — plugin IDs enabled (`=== true`) in `policySettings.enabledPlugins`.
+ * densable `ASt` / `Rtr` — empty slot. `Ejo` writes `{managedIds, order}`
+ * after it vouches managed plugins; `iF` / `aF` / `VG` return the slot
+ * instead of recomputing. Cleared when policy settings change.
  */
-export function getManagedEnabledPluginIds(): Set<string> | null {
+type VouchedTierCache = {
+  managedIds: Set<string>
+  order: PluginHookTierOrder
+}
+let vouchedTierCache: VouchedTierCache | undefined
+
+/** densable `ASt()`. */
+function readVouchedTierCache(): VouchedTierCache | undefined {
+  return vouchedTierCache
+}
+
+/** densable `Rtr.set`. `undefined` clears the slot. */
+export function setVouchedTierCache(next: VouchedTierCache | undefined): void {
+  vouchedTierCache = next
+}
+
+/**
+ * densable `iF()` — plugin IDs enabled (`=== true`) in
+ * `policySettings.enabledPlugins`. A VG-cache hit returns `managedIds`.
+ */
+function collectManagedEnabledPluginIds(): Set<string> | null {
+  const cached = readVouchedTierCache()
+  if (cached) return new Set(cached.managedIds)
   const enabledPlugins = getSettingsForSource('policySettings')?.enabledPlugins
   if (!enabledPlugins) return null
   const ids = new Set<string>()
@@ -101,6 +133,84 @@ export function getManagedEnabledPluginIds(): Set<string> | null {
     }
   }
   return ids.size > 0 ? ids : null
+}
+
+/**
+ * densable `dt().vouchedManagedPluginIds`. `Ejo` fills this with the managed
+ * plugins it seated (read in place from a declared marketplace source).
+ */
+const vouchedManagedPluginIds = new Set<string>()
+
+/**
+ * densable `aF()` — `iF`, then keep `@builtin` or vouched ids. A VG-cache
+ * hit (`e===null||ASt()`) returns `iF` unfiltered.
+ */
+export function getManagedEnabledPluginIds(): Set<string> | null {
+  const managed = collectManagedEnabledPluginIds()
+  if (managed === null || readVouchedTierCache() !== undefined) return managed
+  const filtered = [...managed].filter(
+    id =>
+      marketplaceSuffixFromSource(id) === BUILTIN_MARKETPLACE_NAME ||
+      vouchedManagedPluginIds.has(foldPluginName(id)),
+  )
+  return filtered.length > 0 ? new Set(filtered) : null
+}
+
+const MANAGED_NOT_NAMED =
+  "is enabled by managed settings, but managed settings do not name the source its marketplace is registered from, so it is not treated as the organization's: its hooks module runs in the user tier. It is seated when the marketplace is registered from the source that managed settings declare for it under extraKnownMarketplaces."
+const MANAGED_NOT_IN_PLACE =
+  "is enabled by managed settings, but it is not read in place from a local folder its marketplace is registered from: it loads from a copy (the plugin cache, an archive or a seed directory), or that marketplace has no folder of its own. Nothing yet records which source a copy was taken from, so it is not treated as the organization's: its hooks module runs in the user tier, and does not load where only managed hooks may. It is seated when managed settings declare its marketplace under extraKnownMarketplaces as a local directory and that marketplace lists it by a relative path. A plugin delivered from a remote source gains the tier in a later release."
+
+/** densable `P` — seated when read in place from a declared marketplace. */
+function pluginSeatedFromDeclaredMarketplace(plugin: LoadedPlugin): boolean {
+  const marketplace = marketplaceSuffixFromSource(plugin.source)
+  const source = plugin.marketplaceSource
+  if (
+    marketplace === undefined ||
+    source === undefined ||
+    plugin.readInPlace !== true ||
+    ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(marketplace.toLowerCase())
+  ) {
+    return false
+  }
+  return isMarketplaceSourceDeclaredInManagedSettings(marketplace, source)
+}
+
+/**
+ * densable `Ejo` — warn for managed plugins that are not seated, then fill
+ * `vouchedManagedPluginIds`. `aF` keeps `@builtin` and these vouched ids.
+ */
+export function seatManagedPlugins(plugins: readonly LoadedPlugin[]): void {
+  const managed = new Set(
+    [...(collectManagedEnabledPluginIds() ?? [])].map(foldPluginName),
+  )
+  const enabled = plugins.filter(plugin =>
+    managed.has(foldPluginName(plugin.source)),
+  )
+  const unseated = enabled.filter(
+    plugin =>
+      marketplaceSuffixFromSource(plugin.source) !== BUILTIN_MARKETPLACE_NAME &&
+      !pluginSeatedFromDeclaredMarketplace(plugin),
+  )
+  for (const plugin of unseated) {
+    if (plugin.modulePath === undefined) continue
+    const label =
+      plugin.source.length > 300
+        ? `…${plugin.source.slice(-299)}`
+        : plugin.source
+    logForDebugging(
+      `${label} ${plugin.readInPlace === true ? MANAGED_NOT_NAMED : MANAGED_NOT_IN_PLACE}`,
+      { level: 'warn' },
+    )
+  }
+  const unseatedIds = new Set(
+    unseated.map(plugin => foldPluginName(plugin.source)),
+  )
+  vouchedManagedPluginIds.clear()
+  for (const plugin of enabled) {
+    const id = foldPluginName(plugin.source)
+    if (!unseatedIds.has(id)) vouchedManagedPluginIds.add(id)
+  }
 }
 
 function safeGetSubscriptionType():
@@ -147,6 +257,8 @@ export function seatSecDefaultPlugin(prependIds?: readonly string[]): {
  * densable `VG()` — resolve `prependPlugins` / `appendPlugins` tier order and `sec-default` seat.
  */
 export function resolvePluginHookTierOrder(): PluginHookTierOrder {
+  const cached = readVouchedTierCache()
+  if (cached) return cached.order
   const hasManaged = hasManagedSettingsOnMachine()
   const userSettings = getEnabledSettingSources().includes('userSettings')
     ? getSettingsForSource('userSettings')

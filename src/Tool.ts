@@ -303,6 +303,11 @@ export type ToolUseContext = {
      * from QueuedCommand.clientPlatform.
      */
     messageClientPlatform?: string
+    /**
+     * densable `s.options.settingsHooksOff` — policy `disableAllHooks`.
+     * `tool.call` passes `withoutModuleHandlers` when this is true.
+     */
+    settingsHooksOff?: boolean
   }
   /**
    * densable `promptShellHandOff` collector on the context root
