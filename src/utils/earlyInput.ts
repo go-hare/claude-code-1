@@ -245,6 +245,42 @@ export function stopCapturingEarlyInput(): void {
 }
 
 /**
+ * Detach the startup stdin listener without discarding buffered text.
+ *
+ * startCapturingEarlyInput() owns process.stdin from cli.tsx until the REPL
+ * calls consumeEarlyInput(). Setup dialogs (onboarding, trust) render before
+ * that, and their arrow keys are ESC sequences processChunk() drops — so the
+ * dialog looks focused but ↑/↓ do nothing until something else (a click that
+ * re-wakes the terminal) gets a byte through to Ink. Removing the listener
+ * lets Ink's readable handler take the stream; the buffer stays for the REPL.
+ * Raw mode is left on: Ink sets it again, and a false→true flip flickers
+ * Windows consoles.
+ */
+export function releaseEarlyInputCapture(): void {
+  if (!isCapturing) {
+    return
+  }
+
+  isCapturing = false
+
+  if (safetyTimer) {
+    clearTimeout(safetyTimer)
+    safetyTimer = null
+  }
+
+  if (readableHandler) {
+    process.stdin.removeListener('readable', readableHandler)
+    readableHandler = null
+  }
+
+  try {
+    process.stdin.unref()
+  } catch {
+    // stdin may already be destroyed
+  }
+}
+
+/**
  * Consume any early input that was captured.
  * Returns the captured input and clears the buffer.
  * Automatically stops capturing when called.

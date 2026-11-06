@@ -23,6 +23,8 @@ import {
   seedEarlyInput,
   consumeEarlyInput,
   hasEarlyInput,
+  releaseEarlyInputCapture,
+  isCapturingEarlyInput,
 } from '../earlyInput.js'
 
 // Reset buffer state before each test
@@ -58,6 +60,14 @@ describe('earlyInput public API', () => {
     seedEarlyInput('first')
     seedEarlyInput('second')
     expect(consumeEarlyInput()).toBe('second')
+  })
+
+  test('releaseEarlyInputCapture keeps seeded text for the REPL', () => {
+    seedEarlyInput('typed before the dialog')
+    releaseEarlyInputCapture()
+    expect(isCapturingEarlyInput()).toBe(false)
+    expect(hasEarlyInput()).toBe(true)
+    expect(consumeEarlyInput()).toBe('typed before the dialog')
   })
 })
 

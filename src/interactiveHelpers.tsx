@@ -15,7 +15,7 @@ import type { Command } from './commands.js';
 import { createStatsStore, type StatsStore } from './context/stats.js';
 import { getSystemContext } from './context.js';
 import { initializeTelemetryAfterTrust } from './entrypoints/init.js';
-import { isSynchronizedOutputSupported } from '@anthropic/ink';
+import { AlternateScreen, isSynchronizedOutputSupported } from '@anthropic/ink';
 import type { RenderOptions, Root, TextProps } from '@anthropic/ink';
 import { KeybindingSetup } from './keybindings/KeybindingProviderSetup.js';
 import { startDeferredPrefetches } from './main.js';
@@ -50,6 +50,9 @@ import {
 } from './utils/residualFinalEnvGates.js';
 import { getBaseRenderOptions } from './utils/renderOptions.js';
 import { isBgSession } from './utils/concurrentSessions.js';
+import { releaseEarlyInputCapture } from './utils/earlyInput.js';
+import { isFullscreenEnvEnabled, mouseTrackingProp } from './utils/fullscreen.js';
+import { getPlatform } from './utils/platform.js';
 import { hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
 import { getThemeSetting, saveThemeSetting } from './utils/themeSetting.js';
 
@@ -103,21 +106,29 @@ export async function exitWithMessage(
 }
 
 /**
- * Show a setup dialog wrapped in AppStateProvider + KeybindingSetup.
- * Reduces boilerplate in showSetupScreens() where every dialog needs these wrappers.
+ * densable sMn — V9e paints setup dialogs on the alt screen.
+ * Unmount writes 1049l and the main buffer stays the shell prompt. Without
+ * this, Esc paints the dialog onto the main buffer under the prompt.
  */
+function setupScreenHost(children: React.ReactNode): React.ReactNode {
+  if (!isFullscreenEnvEnabled()) return children;
+  return <AlternateScreen mouseTracking={mouseTrackingProp()}>{children}</AlternateScreen>;
+}
+
 export function showSetupDialog<T = void>(
   root: Root,
   renderer: (done: (result: T) => void) => React.ReactNode,
   options?: { onChangeAppState?: typeof onChangeAppState },
 ): Promise<T> {
-  return showDialog<T>(root, done => (
-    <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
-      <AppStateProvider onChangeAppState={options?.onChangeAppState}>
-        <KeybindingSetup>{renderer(done)}</KeybindingSetup>
-      </AppStateProvider>
-    </ThemeProvider>
-  ));
+  return showDialog<T>(root, done =>
+    setupScreenHost(
+      <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
+        <AppStateProvider onChangeAppState={options?.onChangeAppState}>
+          <KeybindingSetup>{renderer(done)}</KeybindingSetup>
+        </AppStateProvider>
+      </ThemeProvider>,
+    ),
+  );
 }
 
 /**
@@ -192,6 +203,16 @@ export async function showSetupScreens(
   ) {
     return setupScreensResult(false);
   }
+
+  // densable xcs — Windows / Windows Terminal alt-screen frames repaint fully.
+  if (getPlatform() === 'windows' || process.env.WT_SESSION) {
+    process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
+  }
+
+  // Startup capture still owns stdin here. Onboarding / trust / MCP dialogs
+  // need arrow keys; the capture treats ESC sequences as non-text and drops
+  // them. Detach the listener but keep typed text for the REPL prompt.
+  releaseEarlyInputCapture();
 
   const config = getGlobalConfig();
   let onboardingShown = false;
