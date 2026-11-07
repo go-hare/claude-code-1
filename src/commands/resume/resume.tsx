@@ -10,7 +10,8 @@ import { Spinner } from '../../components/Spinner.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { setClipboard } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Divider, Text } from '@anthropic/ink';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { LogOption } from '../../types/logs.js';
 import { agenticSessionSearch } from '../../utils/agenticSessionSearch.js';
@@ -80,6 +81,7 @@ function ResumeCommand({
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
+  const cancelledRef = React.useRef(false);
   // Inside FullscreenLayout's modal slot, use the modal's inner rows (already
   // minus transcript peek + divider) — floor(rows/2) collapses the list and
   // crushes the footer under default-on fullscreen (official 2.1.210 layout).
@@ -91,6 +93,7 @@ function ResumeCommand({
       setLoading(true);
       try {
         const allLogs = allProjects ? await loadAllProjectsMessageLogs() : await loadSameRepoMessageLogs(paths);
+        if (cancelledRef.current) return;
         const resumable = filterResumableSessions(allLogs, getSessionId());
         if (resumable.length === 0) {
           onDone('No conversations found to resume');
@@ -98,9 +101,13 @@ function ResumeCommand({
         }
         setLogs(resumable);
       } catch (_err) {
-        onDone('Failed to load conversations');
+        if (!cancelledRef.current) {
+          onDone('Failed to load conversations');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelledRef.current) {
+          setLoading(false);
+        }
       }
     },
     [onDone],
@@ -109,6 +116,8 @@ function ResumeCommand({
   React.useEffect(() => {
     async function init() {
       const paths = await getWorktreePaths(getOriginalCwd());
+      // densable ie(): Esc during the worktree lookup must not start a load.
+      if (cancelledRef.current) return;
       setWorktreePaths(paths);
       void loadLogs(false, paths);
     }
@@ -130,9 +139,11 @@ function ResumeCommand({
 
     // Load full messages for lite logs
     const fullLog = isLiteLog(log) ? await loadFullLog(log) : log;
+    if (cancelledRef.current) return;
 
     // densable MTs: null → resume here (same dir / worktree / deleted path)
     const command = await checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
+    if (cancelledRef.current) return;
     if (command) {
       const raw = await setClipboard(command);
       if (raw) process.stdout.write(raw);
@@ -158,23 +169,40 @@ function ResumeCommand({
   }
 
   function handleCancel() {
+    cancelledRef.current = true;
     onDone('Resume cancelled', { display: 'system' });
   }
 
-  if (loading) {
-    return (
-      <Box>
-        <Spinner />
-        <Text> Loading conversations…</Text>
-      </Box>
-    );
-  }
+  useKeybinding('confirm:no', handleCancel, {
+    context: 'Confirmation',
+    isActive: loading && !resuming,
+  });
 
-  if (resuming) {
+  if (loading || resuming) {
+    const statusBody = (
+      <>
+        <Text bold color="suggestion">
+          Resume session
+        </Text>
+        <Box marginTop={1}>
+          <Spinner />
+          <Text> {resuming ? 'Resuming conversation…' : 'Loading conversations…'}</Text>
+        </Box>
+      </>
+    );
+    if (insideModal) {
+      return (
+        <Box flexDirection="column" paddingX={1} flexShrink={0}>
+          {statusBody}
+        </Box>
+      );
+    }
     return (
-      <Box>
-        <Spinner />
-        <Text> Resuming conversation…</Text>
+      <Box flexDirection="column" paddingTop={1}>
+        <Divider color="suggestion" />
+        <Box flexDirection="column" paddingX={2}>
+          {statusBody}
+        </Box>
       </Box>
     );
   }
