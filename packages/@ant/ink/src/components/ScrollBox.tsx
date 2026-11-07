@@ -247,8 +247,13 @@ function ScrollBox({
       setClampBounds(min, max) {
         const el = domRef.current;
         if (!el) return;
+        // densable: unchanged min/max returns. A change marks dirty so the
+        // next frame clamps scrollTop; writing every call without dirty
+        // leaves scroll sitting in the spacer until the next wheel event.
+        if (el.scrollClampMin === min && el.scrollClampMax === max) return;
         el.scrollClampMin = min;
         el.scrollClampMax = max;
+        markDirty(el);
       },
       getDomElement() {
         return domRef.current;
@@ -287,8 +292,8 @@ function ScrollBox({
         overflowX: 'scroll',
         overflowY: 'scroll',
       }}
-      {...(stickyScroll ? { stickyScroll: true } : {})}
-      {...(followGrowth === false ? { followGrowth: false } : {})}
+      {...(stickyScroll !== undefined ? { stickyScroll } : {})}
+      {...(followGrowth !== undefined ? { followGrowth } : {})}
     >
       <Box flexDirection="column" flexGrow={1} flexShrink={0} width="100%">
         {children}

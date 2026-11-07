@@ -178,7 +178,11 @@ function tokenize(
         } else if (
           !forOutput &&
           code < 32 &&
-          (data.length < 64 || code === C0.BS)
+          // CR always peels, including chunks ≥64. ConPTY sends `text\r\n`
+          // in one read; leaving both bytes in the text token makes Enter
+          // submit and then insert a newline. Other C0 in a long chunk stays
+          // embedded so a paste is not split into keys.
+          (data.length < 64 || code === C0.BS || code === C0.CR)
         ) {
           flushText()
           i++

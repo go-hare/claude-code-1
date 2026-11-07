@@ -542,30 +542,40 @@ export function useVirtualScroll(
       }
 
       const needed = viewportH + 2 * overscan
-      const maxEnd = Math.min(n, start + MAX_MOUNTED_ITEMS)
+      let nonzero = 0
       let coverage = 0
       end = start
       while (
-        end < maxEnd &&
+        end < n &&
+        nonzero < MAX_MOUNTED_ITEMS &&
         (coverage < needed || offsets[end]! < effHi + viewportH + overscan)
       ) {
-        coverage +=
-          heightCache.current.get(itemKeys[end]!) ?? PESSIMISTIC_HEIGHT
+        const cached = heightCache.current.get(itemKeys[end]!)
+        if (cached !== 0) nonzero++
+        coverage += cached ?? PESSIMISTIC_HEIGHT
         end++
       }
     }
     // Same coverage guarantee for the atBottom path (it walked start back
     // by estimated offsets, which can undershoot if items are small).
+    // Walk-back stops once non-zero cached rows hit `ja`, so empty rows
+    // do not consume the cap.
     const needed = viewportH + 2 * overscanRows(viewportH)
-    const minStart = Math.max(0, end - MAX_MOUNTED_ITEMS)
+    let backNonzero = 0
+    for (let i = start; i < end; i++) {
+      if (heightCache.current.get(itemKeys[i]!) !== 0) backNonzero++
+    }
+    const minStart = backNonzero >= MAX_MOUNTED_ITEMS ? start : 0
     let coverage = 0
     for (let i = start; i < end; i++) {
       coverage += heightCache.current.get(itemKeys[i]!) ?? PESSIMISTIC_HEIGHT
     }
     while (start > minStart && coverage < needed) {
+      const cached = heightCache.current.get(itemKeys[start - 1]!)
+      if (cached !== 0 && backNonzero >= MAX_MOUNTED_ITEMS) break
       start--
-      coverage +=
-        heightCache.current.get(itemKeys[start]!) ?? PESSIMISTIC_HEIGHT
+      if (cached !== 0) backNonzero++
+      coverage += cached ?? PESSIMISTIC_HEIGHT
     }
     // Slide cap: limit how many NEW items mount this commit. Scrolling into
     // a fresh range would otherwise mount 194 items at PESSIMISTIC_HEIGHT=1
@@ -595,6 +605,7 @@ export function useVirtualScroll(
   // Decrement freeze AFTER range is computed. Don't update prevRangeRef
   // during freeze so both frozen renders reuse the ORIGINAL pre-resize
   // range (not the clamped-to-n version if messages changed mid-freeze).
+  const prevTailCount = itemTailRef.current.count
   if (freezeRendersRef.current > 0) {
     freezeRendersRef.current--
   } else {
@@ -620,6 +631,17 @@ export function useVirtualScroll(
   const dEnd = useDeferredValue(end)
   let effStart = start < dStart ? dStart : start
   let effEnd = end > dEnd ? dEnd : end
+  // densable delayed window: deferred end still sitting on the previous
+  // tail (deferredCount === deferredEnd), the list grew, and the viewport
+  // has already passed that offset. Snap to the live end. Otherwise a
+  // non-sticky append stays blank until the deferred value catches up.
+  if (
+    dEnd === prevTailCount &&
+    n > prevTailCount &&
+    scrollTop + viewportH > (offsets[dEnd] ?? 0)
+  ) {
+    effEnd = end
+  }
   // A large jump can make effStart > effEnd (start jumps forward while dEnd
   // still holds the old range's end). Skip deferral to avoid an inverted
   // range. Also skip when sticky — scrollToBottom needs the tail mounted
@@ -833,9 +855,15 @@ export function useVirtualScroll(
       if (!yoga) continue
       const h = yoga.getComputedHeight()
       const prevH = heightCache.current.get(key)
-      // densable $a: a drawPending node (or non-text child) is not an empty row.
+      // densable `$a`: a positive Yoga height is real even while a descendant
+      // is still drawing. Zero is an empty row only when the box has width,
+      // we already cached a non-zero height, and nothing is drawPending.
       const cacheable =
-        h > 0 || (yoga.getComputedWidth() > 0 && !subtreeDrawPending(el))
+        h > 0 ||
+        (yoga.getComputedWidth() > 0 &&
+          prevH !== undefined &&
+          prevH !== 0 &&
+          !subtreeDrawPending(el))
       if (cacheable && prevH !== h) {
         heightCache.current.set(key, h)
         anyChanged = true
@@ -882,13 +910,20 @@ export function useVirtualScroll(
         if (el) {
           itemRefs.current.set(key, el)
         } else {
-          const yoga = itemRefs.current.get(key)?.yogaNode
-          if (yoga && !skipMeasurementRef.current) {
+          const mounted = itemRefs.current.get(key)
+          const yoga = mounted?.yogaNode
+          if (yoga && !skipMeasurementRef.current && mounted) {
             const h = yoga.getComputedHeight()
-            if (
-              (h > 0 || yoga.getComputedWidth() > 0) &&
-              heightCache.current.get(key) !== h
-            ) {
+            const prevH = heightCache.current.get(key)
+            // Same `$a` guard as the layout measure: do not cache 0 for a
+            // node that is still drawing, and do not invent a first 0.
+            const cacheable =
+              h > 0 ||
+              (yoga.getComputedWidth() > 0 &&
+                prevH !== undefined &&
+                prevH !== 0 &&
+                !subtreeDrawPending(mounted))
+            if (cacheable && prevH !== h) {
               heightCache.current.set(key, h)
               offsetVersionRef.current++
             }

@@ -410,6 +410,9 @@ export type TimestampedHistoryEntry = {
   display: string
   timestamp: number
   resolve: () => Promise<HistoryEntry>
+  /** densable history search scope: session vs project vs everywhere. */
+  sessionId?: string
+  project?: string
 }
 
 /**
@@ -436,6 +439,8 @@ export async function* getTimestampedHistory(): AsyncGenerator<TimestampedHistor
       display: entry.display,
       timestamp: entry.timestamp,
       resolve: () => logEntryToHistoryEntry(entry),
+      sessionId: entry.sessionId,
+      project: entry.project,
     }
 
     if (seen.size >= MAX_HISTORY_ITEMS) return
