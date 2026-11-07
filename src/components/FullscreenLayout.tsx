@@ -62,8 +62,9 @@ function TranscriptOverlayPad({ collapsed, children }: { collapsed: boolean; chi
 }
 
 /**
- * densable Cc @207819647 — trailing mark on the modal divider row.
- * Gold paints nothing unless a notification is current.
+ * Current notification on the modal divider row.
+ * Paints nothing unless a notification is current. The trailing ▔ is omitted:
+ * terminals without that glyph draw it as a box.
  */
 function ModalDividerTail(): React.ReactNode {
   const current = useAppState(s => s.notifications.current);
@@ -73,7 +74,6 @@ function ModalDividerTail(): React.ReactNode {
     <Box flexShrink={0} maxWidth="100%" overflow="hidden">
       <Text> </Text>
       <NotificationBody notification={current} />
-      <Text color="permission"> ▔</Text>
     </Box>
   );
 }
