@@ -52,86 +52,90 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
   ) : null;
 
   return (
-    <Box paddingX={paddingX} flexDirection="row" gap={gap}>
-      <Box flexDirection="column" width={fixedWidth ? 24 : undefined}>
-        <Box>
-          <Text dimColor={dimColor}>! for shell mode</Text>
+    <Box paddingX={paddingX} flexDirection="column">
+      <Box flexDirection="row" gap={gap}>
+        <Box flexDirection="column" width={fixedWidth ? 24 : undefined}>
+          <Box>
+            <Text dimColor={dimColor}>! for shell mode</Text>
+          </Box>
+          <Box>
+            <Text dimColor={dimColor}>/ for commands</Text>
+          </Box>
+          <Box>
+            <Text dimColor={dimColor}>@ for file paths</Text>
+          </Box>
+          <Box>
+            <Text dimColor={dimColor}>/btw for side question</Text>
+          </Box>
         </Box>
-        <Box>
-          <Text dimColor={dimColor}>/ for commands</Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>@ for file paths</Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>/btw for side question</Text>
-        </Box>
-      </Box>
-      <Box flexDirection="column" width={fixedWidth ? 35 : undefined}>
-        <Box>
-          <Text dimColor={dimColor}>double tap esc to clear input</Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={cycleModeShortcut} action="auto-accept edits" />
-          </Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>{transcriptShortcut} for verbose output</Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={todosShortcut} action="toggle tasks" />
-          </Text>
-        </Box>
-        {terminalShortcutElement}
-        <Box>
-          <Text dimColor={dimColor}>{getNewlineInstructions()}</Text>
-        </Box>
-      </Box>
-      <Box flexDirection="column">
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={undoShortcut} action="undo" />
-          </Text>
-        </Box>
-        {getPlatform() !== 'windows' && (
+        <Box flexDirection="column" width={fixedWidth ? 35 : undefined}>
+          <Box>
+            <Text dimColor={dimColor}>double tap esc to clear input</Text>
+          </Box>
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut="ctrl + z" action="suspend" />
+              <KeyboardShortcutHint shortcut={cycleModeShortcut} action="auto-accept edits" />
             </Text>
           </Box>
-        )}
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={imagePasteShortcut} action="paste images" />
-          </Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={modelPickerShortcut} action="switch model" />
-          </Text>
-        </Box>
-        {isFastModeEnabled() && isFastModeAvailable() && (
+          <Box>
+            <Text dimColor={dimColor}>{transcriptShortcut} for verbose output</Text>
+          </Box>
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={fastModeShortcut} action="toggle fast mode" />
+              <KeyboardShortcutHint shortcut={todosShortcut} action="toggle tasks" />
             </Text>
           </Box>
-        )}
-        <Box>
-          <Text dimColor={dimColor}>
-            <KeyboardShortcutHint shortcut={stashShortcut} action="stash prompt" />
-          </Text>
-        </Box>
-        <Box>
-          <Text dimColor={dimColor}>{externalEditorShortcut} to edit in $EDITOR</Text>
-        </Box>
-        {isKeybindingCustomizationEnabled() && (
+          {terminalShortcutElement}
           <Box>
-            <Text dimColor={dimColor}>/keybindings to customize</Text>
+            <Text dimColor={dimColor}>{getNewlineInstructions()}</Text>
           </Box>
-        )}
+        </Box>
+        <Box flexDirection="column">
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={undoShortcut} action="undo" />
+            </Text>
+          </Box>
+          {getPlatform() !== 'windows' && (
+            <Box>
+              <Text dimColor={dimColor}>
+                <KeyboardShortcutHint shortcut="ctrl + z" action="suspend" />
+              </Text>
+            </Box>
+          )}
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={imagePasteShortcut} action="paste images" />
+            </Text>
+          </Box>
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={modelPickerShortcut} action="switch model" />
+            </Text>
+          </Box>
+          {isFastModeEnabled() && isFastModeAvailable() && (
+            <Box>
+              <Text dimColor={dimColor}>
+                <KeyboardShortcutHint shortcut={fastModeShortcut} action="toggle fast mode" />
+              </Text>
+            </Box>
+          )}
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={stashShortcut} action="stash prompt" />
+            </Text>
+          </Box>
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={externalEditorShortcut} action="edit in $EDITOR" />
+            </Text>
+          </Box>
+          {isKeybindingCustomizationEnabled() && (
+            <Box>
+              <Text dimColor={dimColor}>/keybindings to customize</Text>
+            </Box>
+          )}
+        </Box>
       </Box>
     </Box>
   );

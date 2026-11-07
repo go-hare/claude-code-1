@@ -1,5 +1,5 @@
 /**
- * densable 2.1.235 #15 — savedCursorOffset / acf / Oyr remount restore.
+ * densable 2.1.235 #15 — draft cursor / acf / Oyr remount restore.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
@@ -42,7 +42,7 @@ describe('densable 2.1.289 nD valueStore fields', () => {
   })
 })
 
-describe('densable 2.1.235 #15 savedCursorOffset', () => {
+describe('densable 2.1.235 #15 draft cursor', () => {
   test('acf save + remount restore mid-string offset', () => {
     savePromptInputCursorOffset(3)
     expect(getSavedPromptInputCursorOffset()).toBe(3)
@@ -86,7 +86,7 @@ describe('densable 2.1.235 #15 savedCursorOffset', () => {
     expect(normalizeVimModeForCursorRestore('INSERT')).toBe('INSERT')
   })
 
-  test('pyt setValue clears savedCursorOffset', () => {
+  test('pyt setValue clears the draft cursor', () => {
     savePromptInputCursorOffset(4)
     setPromptInputStoreValue('changed')
     expect(getSavedPromptInputCursorOffset()).toBeNull()

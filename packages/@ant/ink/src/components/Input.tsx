@@ -16,6 +16,8 @@ export type InputCaret = {
 type Props = {
   ref?: Ref<DOMElement>;
   autoFocus?: boolean;
+  /** densable Je `textEntry:!allowPrintableKeybindings`. */
+  textEntry?: boolean;
   disabled?: boolean;
   caret?: InputCaret;
   onKeyDown?: (event: KeyboardEvent) => void;
@@ -31,6 +33,7 @@ type Props = {
 export function Input({
   ref,
   autoFocus = false,
+  textEntry = false,
   disabled = false,
   caret,
   onKeyDown,
@@ -57,7 +60,7 @@ export function Input({
   }
 
   return (
-    <Box ref={setRef} tabIndex={0} autoFocus={autoFocus} onKeyDown={onKeyDown} onPaste={onPaste}>
+    <Box ref={setRef} tabIndex={0} autoFocus={autoFocus} textEntry={textEntry} onKeyDown={onKeyDown} onPaste={onPaste}>
       {children}
     </Box>
   );

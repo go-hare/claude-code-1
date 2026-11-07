@@ -183,6 +183,7 @@ export function BaseTextInput({
         ref={setBoxRef}
         autoFocus={isActive}
         disabled={!isActive}
+        textEntry={isActive}
         caret={caret}
         onKeyDown={isActive ? handleKeyDown : undefined}
         onPaste={isActive ? onPaste : undefined}
@@ -204,23 +205,23 @@ export function BaseTextInput({
     </Text>
   ) : null;
 
-  const valueNode = (
-    <Text aria-preserve-whitespace>
-      {showPlaceholder && props.placeholderElement ? (
-        props.placeholderElement
-      ) : showPlaceholder && renderedPlaceholder ? (
-        <Ansi>{renderedPlaceholder}</Ansi>
-      ) : (
+  const valueNode =
+    showPlaceholder && props.placeholderElement ? (
+      props.placeholderElement
+    ) : showPlaceholder && renderedPlaceholder ? (
+      <Ansi>{renderedPlaceholder}</Ansi>
+    ) : (
+      <Text aria-preserve-whitespace>
         <Ansi>{renderedValue}</Ansi>
-      )}
-    </Text>
-  );
+      </Text>
+    );
 
   return (
     <Input
       ref={setBoxRef}
       autoFocus={isActive}
       disabled={!isActive}
+      textEntry={isActive}
       caret={caret}
       onKeyDown={isActive ? handleKeyDown : undefined}
       onPaste={isActive ? onPaste : undefined}

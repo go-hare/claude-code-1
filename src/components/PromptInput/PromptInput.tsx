@@ -429,7 +429,7 @@ function PromptInput({
     show: boolean;
     key?: string;
   }>({ show: false });
-  // densable #15: remount restores savedCursorOffset (acf) + Oyr clamp in NORMAL.
+  // densable #15: remount restores the draft cursor + Oyr clamp in NORMAL.
   const vimEnabled = isVimModeEnabled();
   const [cursorOffset, setCursorOffset] = useState<number>(() =>
     resolveRemountCursorOffset({
@@ -2520,17 +2520,10 @@ function PromptInput({
         if (viewSelectionMode === 'selecting-agent') {
           return false;
         }
-        // When shells/tasks pill is focused, Enter is Footer openSelected — not
-        // chat:submit. Paste inserts the image pill without deselecting the
-        // footer, so Enter would open bashes and leave [Image #N] in the box.
-        // Prefer submitting any live draft (text or paste map) over the panel.
-        const draft = liveInputRef.current;
-        const draftHasImages = Object.values(pastedContentsRef.current).some(c => c.type === 'image');
-        if (draft.trim() !== '' || draftHasImages) {
-          selectFooterItem(null);
-          void onSubmit(draft);
-          return;
-        }
+        // densable footer:openSelected — Enter opens the selected pill.
+        // A draft does not submit from here. Paste clears footerSelection
+        // in insertTextAtCursor, so a just-pasted image is not stuck behind
+        // the pill.
         switch (footerItemSelected) {
           case 'companion':
             if (buddyEnabled) {
@@ -3342,14 +3335,14 @@ function PromptInput({
               );
             })()}
           </Text>
-          <Box flexDirection="row" width={promptInputColumns} tabIndex={-1} onClick={handleInputClick}>
+          <Box flexDirection="row" width={promptInputColumns}>
             <PromptInputModeIndicator
               mode={mode}
               isLoading={isLoading}
               viewingAgentName={viewingAgentName}
               viewingAgentColor={viewingAgentColor}
             />
-            <Box flexGrow={1} flexShrink={1}>
+            <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
               {textInputElement}
             </Box>
           </Box>
@@ -3371,8 +3364,6 @@ function PromptInput({
               })}
           width={promptInputColumns}
           flexShrink={0}
-          tabIndex={-1}
-          onClick={handleInputClick}
           borderText={hostBlocksKeys ? undefined : promptBorderText}
         >
           <PromptInputModeIndicator
@@ -3381,7 +3372,7 @@ function PromptInput({
             viewingAgentName={viewingAgentName}
             viewingAgentColor={viewingAgentColor}
           />
-          <Box flexGrow={1} flexShrink={1}>
+          <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
             {textInputElement}
           </Box>
         </Box>
@@ -3428,41 +3419,11 @@ function PromptInput({
         onSuppressDefaultHint={setPluginSuppressesHint}
       />
       {isFullscreenEnvEnabled() ? (
-        // position=absolute takes zero layout height so the spinner
-        // doesn't shift when a notification appears/disappears. Yoga
-        // anchors absolute children at the parent's content-box origin;
-        // marginTop=-1 pulls it into the marginTop=1 gap row above the
-        // prompt border. In brief mode there is no such gap (briefOwnsGap
-        // strips our marginTop) and BriefSpinner sits flush against the
-        // border — marginTop=-2 skips over the spinner content into
-        // BriefSpinner's own marginTop=1 blank row. height=1 +
-        // overflow=hidden clips multi-line notifications to a single row.
-        // flex-end anchors the bottom line so the visible row is always
-        // the most recent. Suppressed while the slash overlay or
-        // auto-mode opt-in dialog is up by height=0 (NOT unmount) — this
-        // Box renders later in tree order so it would paint over their
-        // bottom row. Keeping Notifications mounted prevents AutoUpdater's
-        // initial-check effect from re-firing on every slash-completion
-        // toggle (PR#22413).
-        // height MUST stay 1: this box is pulled into the single marginTop=1
-        // gap row above the prompt top border (marginTop=-1). height=2 +
-        // justifyContent=flex-end paints the latest notification ON the
-        // border line and erases ─ (e.g. "Image in clipboard · alt+v").
-        // Update status is already mirrored into the notification queue
-        // (Notifications.tsx), so a second visual row is unnecessary.
-        // Still 0 while slash suggestions are open.
-        <Box
-          position="absolute"
-          marginTop={briefOwnsGap ? -2 : -1}
-          height={suggestions.length === 0 ? 1 : 0}
-          width="100%"
-          paddingLeft={2}
-          paddingRight={1}
-          flexDirection="column"
-          alignItems="flex-end"
-          justifyContent="flex-end"
-          overflow="hidden"
-        >
+        // densable tot paints ToastStackView on the scroll column. This
+        // mount stays at height 0 so AutoUpdater's initial-check effect
+        // does not re-fire (PR#22413) and the prompt border is not the
+        // toast host.
+        <Box height={0} overflow="hidden">
           <Notifications
             apiKeyStatus={apiKeyStatus}
             autoUpdaterResult={autoUpdaterResult}

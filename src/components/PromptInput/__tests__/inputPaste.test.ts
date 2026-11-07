@@ -154,8 +154,8 @@ describe('resolveSubmitInputFromLive', () => {
 
   // With "2 shells" the tasks footer can be selected; paste inserts via N1
   // without onChange, so footerSelection stayed set and Enter opened bashes
-  // instead of submitting [Image #N]. Insert must clear footer, and
-  // footer:openSelected must prefer a live draft.
+  // instead of submitting [Image #N]. Insert clears the footer. Enter on a
+  // still-selected pill opens the panel and does not submit the draft.
   test('source: insertTextAtCursor clears footerSelection on paste', () => {
     const src = readFileSync(
       join(import.meta.dir, '../PromptInput.tsx'),
@@ -167,14 +167,17 @@ describe('resolveSubmitInputFromLive', () => {
     )
   })
 
-  test('source: footer:openSelected prefers live draft over bashes panel', () => {
+  test('source: footer:openSelected opens the pill and does not submit a draft', () => {
     const src = readFileSync(
       join(import.meta.dir, '../PromptInput.tsx'),
       'utf8',
     )
-    expect(src).toMatch(/'footer:openSelected':\s*\(\)\s*=>\s*\{/)
-    expect(src).toMatch(/draftHasImages/)
-    expect(src).toMatch(/void onSubmit\(draft\)/)
+    const start = src.indexOf("'footer:openSelected': () => {")
+    expect(start).toBeGreaterThan(0)
+    const body = src.slice(start, start + 1600)
+    expect(body).not.toMatch(/draftHasImages/)
+    expect(body).not.toMatch(/onSubmit\(draft\)/)
+    expect(body).toMatch(/case 'tasks':/)
   })
 
   test('source: leftover \\n does not type-to-exit the footer pill', () => {

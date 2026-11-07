@@ -2,8 +2,8 @@
  * densable 2.1.289 valueStore (`nD`) + 2.1.235 cursor sticky (`$4` / acf / Oyr / RgE).
  *
  * Gold `nD(host)` fields: value, active, launchWarning, linkSuppliedTexts,
- * submittedLinkPrefill, vimMode, stash. Local keeps savedCursorOffset for
- * PromptInput remount restore (gold uses P$ cursor field + acf).
+ * submittedLinkPrefill, vimMode, stash. Cursor lives on the draft (`cursor`),
+ * not a separate offset field.
  *
  * Survives PromptInput remount (e.g. ctrl+o transcript panel) so NORMAL-mode
  * cursor offset is restored instead of jumping to end.
@@ -35,7 +35,7 @@ export type PromptInputCursorState = {
   submittedLinkPrefill: string | null
   vimMode: VimMode
   stash: PromptDraftStash
-  savedCursorOffset: number | null
+  cursor: number | null
 }
 
 const initialState: PromptInputCursorState = {
@@ -46,7 +46,7 @@ const initialState: PromptInputCursorState = {
   submittedLinkPrefill: null,
   vimMode: 'INSERT',
   stash: null,
-  savedCursorOffset: null,
+  cursor: null,
 }
 
 const store = createStore<PromptInputCursorState>(initialState)
@@ -78,7 +78,7 @@ export function getPromptInputStoreValue(): string {
 }
 
 /**
- * densable `wLe` / pyt — set value and clear savedCursorOffset.
+ * densable `wLe` / pyt — set value and clear the draft cursor.
  * Emptying a non-empty draft clears launchWarning and may record
  * submittedLinkPrefill (gold deep-link path).
  */
@@ -100,10 +100,10 @@ export function setPromptInputStoreValue(value: string): void {
         submittedLinkPrefill: linkSuppliedTexts.has(trimmed)
           ? prev.value
           : null,
-        savedCursorOffset: null,
+        cursor: null,
       }
     }
-    return { ...prev, value, savedCursorOffset: null }
+    return { ...prev, value, cursor: null }
   })
 }
 
@@ -116,17 +116,15 @@ export function getPromptInputStoreStash(): PromptDraftStash {
   return store.getState().stash
 }
 
-/** densable acf — persist cursor offset across remount. */
+/** densable acf — persist the draft cursor across remount. */
 export function savePromptInputCursorOffset(offset: number): void {
   store.setState(prev =>
-    prev.savedCursorOffset === offset
-      ? prev
-      : { ...prev, savedCursorOffset: offset },
+    prev.cursor === offset ? prev : { ...prev, cursor: offset },
   )
 }
 
 export function getSavedPromptInputCursorOffset(): number | null {
-  return store.getState().savedCursorOffset
+  return store.getState().cursor
 }
 
 /** densable q4a / `_xt` */
