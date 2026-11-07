@@ -61,6 +61,8 @@ export type LogSelectorProps = {
   showAllProjects?: boolean;
   onToggleAllProjects?: () => void;
   onAgenticSearch?: (query: string, logs: LogOption[], signal?: AbortSignal) => Promise<LogOption[]>;
+  /** Reload in progress while a list is already shown. Gold paints " · Refreshing…". */
+  isLoading?: boolean;
 };
 
 type LogTreeNode = TreeNode<{ log: LogOption; indexInFiltered: number }>;
@@ -156,6 +158,7 @@ export function LogSelector({
   showAllProjects = false,
   onToggleAllProjects,
   onAgenticSearch,
+  isLoading = false,
 }: LogSelectorProps): React.ReactNode {
   const terminalSize = useTerminalSize();
   // Prefer modal inner size when hosted in FullscreenLayout's bottom pane so
@@ -890,8 +893,9 @@ export function LogSelector({
     }
   }, [focusedIndex, visibleCount, displayedLogs.length, onLoadMore]);
 
-  // Early return if no logs
-  if (logs.length === 0) {
+  // Gold: no toggle and nothing loaded → nothing to draw. With a toggle
+  // (ctrl+a) the frame stays so the empty copy and the hint can paint.
+  if (logs.length === 0 && !onToggleAllProjects) {
     return null;
   }
 
@@ -919,7 +923,7 @@ export function LogSelector({
     // Prefer explicit branch over maxHeight={undefined} (yoga checks `'maxHeight' in style`).
     if (Number.isFinite(maxHeight)) {
       return (
-        <Box flexDirection="column" maxHeight={maxHeight}>
+        <Box flexDirection="column" maxHeight={maxHeight - 1}>
           {renderPickerBody()}
         </Box>
       );
@@ -959,6 +963,7 @@ export function LogSelector({
                   ({focusedIndex} of {displayedLogs.length})
                 </Text>
               )}
+              {isLoading && <Text dimColor> · Refreshing…</Text>}
             </Text>
           </Box>
         )}
@@ -968,10 +973,23 @@ export function LogSelector({
           isTerminalFocused={isTerminalFocused}
           cursorOffset={searchCursorOffset}
         />
-        {filterIndicators.length > 0 && viewMode !== 'search' && (
-          <Box flexShrink={0} paddingLeft={2}>
-            <Text dimColor>
-              <Byline>{filterIndicators}</Byline>
+        {viewMode !== 'search' &&
+          (filterIndicators.length > 0 ? (
+            <Box flexShrink={0} paddingLeft={2}>
+              <Text dimColor>
+                <Byline>{filterIndicators}</Byline>
+              </Text>
+            </Box>
+          ) : (
+            // Gold keeps this row either way, so "current worktree" arriving
+            // does not push the title.
+            <Box flexShrink={0} height={1} />
+          ))}
+        {logs.length === 0 && viewMode === 'list' && !isLoading && !searchQuery.trim() && (
+          <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
+            <Text dimColor italic>
+              {showAllProjects ? 'No conversations found.' : 'No conversations found in this project.'}
+              {!showAllProjects && onToggleAllProjects ? ' · ctrl+a to show all projects' : ''}
             </Text>
           </Box>
         )}

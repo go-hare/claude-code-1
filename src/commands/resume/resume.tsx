@@ -82,6 +82,7 @@ function ResumeCommand({
   const [resuming, setResuming] = React.useState(false);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
   const cancelledRef = React.useRef(false);
+  const hasListRef = React.useRef(false);
   // Inside FullscreenLayout's modal slot, use the modal's inner rows (already
   // minus transcript peek + divider) — floor(rows/2) collapses the list and
   // crushes the footer under default-on fullscreen (official 2.1.210 layout).
@@ -90,15 +91,14 @@ function ResumeCommand({
 
   const loadLogs = React.useCallback(
     async (allProjects: boolean, paths: string[]) => {
-      setLoading(true);
+      // First load (no list yet) takes the small status frame. A reload while
+      // the list is up keeps the list and only marks it refreshing.
+      if (!hasListRef.current) setLoading(true);
       try {
         const allLogs = allProjects ? await loadAllProjectsMessageLogs() : await loadSameRepoMessageLogs(paths);
         if (cancelledRef.current) return;
         const resumable = filterResumableSessions(allLogs, getSessionId());
-        if (resumable.length === 0) {
-          onDone('No conversations found to resume');
-          return;
-        }
+        hasListRef.current = true;
         setLogs(resumable);
       } catch (_err) {
         if (!cancelledRef.current) {
@@ -178,7 +178,10 @@ function ResumeCommand({
     isActive: loading && !resuming,
   });
 
-  if (loading || resuming) {
+  // Gold ie(): while the first load is in flight (or a session is being
+  // resumed) the picker is not mounted. The list appears once, at its
+  // content height, instead of growing a row at a time.
+  if ((loading && logs.length === 0) || resuming) {
     const statusBody = (
       <>
         <Text bold color="suggestion">
@@ -190,6 +193,9 @@ function ResumeCommand({
         </Box>
       </>
     );
+    // Gold paints this content-sized while logs are empty. The list frame
+    // mounts only after logs arrive (empty logs return null), so do not
+    // reserve the list height here — that draws a blank box that then fills.
     if (insideModal) {
       return (
         <Box flexDirection="column" paddingX={1} flexShrink={0}>
@@ -217,6 +223,7 @@ function ResumeCommand({
       showAllProjects={showAllProjects}
       onToggleAllProjects={handleToggleAllProjects}
       onAgenticSearch={agenticSessionSearch}
+      isLoading={loading}
     />
   );
 }
