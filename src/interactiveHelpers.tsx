@@ -105,11 +105,7 @@ export async function exitWithMessage(
   process.exit(exitCode);
 }
 
-/**
- * densable sMn — V9e paints setup dialogs on the alt screen.
- * Unmount writes 1049l and the main buffer stays the shell prompt. Without
- * this, Esc paints the dialog onto the main buffer under the prompt.
- */
+/** Setup dialogs paint on the alt screen so Esc does not land on the main buffer. */
 function setupScreenHost(children: React.ReactNode): React.ReactNode {
   if (!isFullscreenEnvEnabled()) return children;
   return <AlternateScreen mouseTracking={mouseTrackingProp()}>{children}</AlternateScreen>;
@@ -204,14 +200,11 @@ export async function showSetupScreens(
     return setupScreensResult(false);
   }
 
-  // densable xcs — Windows / Windows Terminal alt-screen frames repaint fully.
   if (getPlatform() === 'windows' || process.env.WT_SESSION) {
     process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT ??= '1';
   }
 
-  // Startup capture still owns stdin here. Onboarding / trust / MCP dialogs
-  // need arrow keys; the capture treats ESC sequences as non-text and drops
-  // them. Detach the listener but keep typed text for the REPL prompt.
+  // Detach the startup listener but keep typed text for the REPL prompt.
   releaseEarlyInputCapture();
 
   const config = getGlobalConfig();

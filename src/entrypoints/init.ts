@@ -53,6 +53,7 @@ import {
   setThemeConfigCallbacks,
   subscribeSystemTheme,
 } from '@anthropic/ink'
+import { stopCapturingEarlyInput } from '../utils/earlyInput.js'
 import { setCachedSystemTheme } from '../utils/systemTheme.js'
 import { getThemeSetting, saveThemeSetting } from '../utils/themeSetting.js'
 
@@ -107,8 +108,11 @@ export const init = memoize(async (): Promise<void> => {
       resolveCustomThemeSetting(getThemeSetting()).overrides,
     )
     // densable Ym → Ink hasReleasedTerminal (no ink→src import).
+    // densable handleSetRawMode calls M6() directly. Ink cannot import src,
+    // so the same stop is the callback it already invokes.
     setAppCallbacks({
       isShutdownCommitted: isShuttingDown,
+      stopCapturingEarlyInput,
     })
     logForDiagnosticsNoPII('info', 'init_configs_enabled', {
       duration_ms: Date.now() - configsStart,

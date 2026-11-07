@@ -247,14 +247,9 @@ export function stopCapturingEarlyInput(): void {
 /**
  * Detach the startup stdin listener without discarding buffered text.
  *
- * startCapturingEarlyInput() owns process.stdin from cli.tsx until the REPL
- * calls consumeEarlyInput(). Setup dialogs (onboarding, trust) render before
- * that, and their arrow keys are ESC sequences processChunk() drops — so the
- * dialog looks focused but ↑/↓ do nothing until something else (a click that
- * re-wakes the terminal) gets a byte through to Ink. Removing the listener
- * lets Ink's readable handler take the stream; the buffer stays for the REPL.
- * Raw mode is left on: Ink sets it again, and a false→true flip flickers
- * Windows consoles.
+ * Setup dialogs render before the REPL consumes the buffer. Their arrow
+ * keys are ESC sequences this capture drops, so ↑/↓ do nothing until the
+ * listener is gone. Raw mode stays on: Ink sets it again.
  */
 export function releaseEarlyInputCapture(): void {
   if (!isCapturing) {
@@ -278,6 +273,11 @@ export function releaseEarlyInputCapture(): void {
   } catch {
     // stdin may already be destroyed
   }
+}
+
+/** Check if early input capture is currently active. */
+export function isCapturingEarlyInput(): boolean {
+  return isCapturing
 }
 
 /**
@@ -305,11 +305,4 @@ export function hasEarlyInput(): boolean {
  */
 export function seedEarlyInput(text: string): void {
   earlyInputBuffer = text
-}
-
-/**
- * Check if early input capture is currently active.
- */
-export function isCapturingEarlyInput(): boolean {
-  return isCapturing
 }
