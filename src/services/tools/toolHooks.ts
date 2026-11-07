@@ -53,6 +53,10 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
   mcpServerType: McpServerType,
   _mcpServerBaseUrl: string | undefined,
 ): AsyncGenerator<PostToolUseHooksResult<Output>> {
+  // densable: settingsHooksOff skips the whole PostToolUse chain.
+  // tool.call already drops module handlers; settings hooks must too.
+  // disableAllHooks is checked inside executeHooks.
+  if (toolUseContext.options.settingsHooksOff === true) return
   const postToolStartTime = Date.now()
   try {
     const appState = toolUseContext.getAppState()
@@ -214,6 +218,7 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
 ): AsyncGenerator<
   MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>
 > {
+  if (toolUseContext.options.settingsHooksOff === true) return
   const postToolStartTime = Date.now()
   try {
     const appState = toolUseContext.getAppState()
@@ -635,6 +640,7 @@ export async function* runPreToolUseHooks(
   // stop execution — densable may attach stopReason (ZFu infra default)
   | { type: 'stop'; stopReason?: string }
 > {
+  if (toolUseContext.options.settingsHooksOff === true) return
   const hookStartTime = Date.now()
   // Official `u` — deny only. Allow/ask do not suppress a latched defer.
   let deniedPermissionResult: PermissionResult | undefined

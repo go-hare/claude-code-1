@@ -3417,6 +3417,41 @@ function engineAudio(
   }
 }
 
+/**
+ * densable: every `$.fs` op refuses a network or device path before touching
+ * the filesystem. `list` already did; read/write/stat/exists/ancestors share it.
+ */
+async function refusePluginFsNetworkPath(
+  rawPath: string,
+  op: string,
+  plugin?: string,
+): Promise<void> {
+  let baseCwd = process.cwd()
+  try {
+    const { getCwd } = await import('../cwd.js')
+    baseCwd = getCwd()
+  } catch {
+    // fallback to process.cwd()
+  }
+  const target = resolve(baseCwd, rawPath)
+  let projectRoot: string | null = null
+  try {
+    const { getProjectRoot } = await import('../../bootstrap/state.js')
+    projectRoot = getProjectRoot()
+  } catch {
+    projectRoot = null
+  }
+  if (
+    isPluginFsNetworkOrDevicePath(rawPath, projectRoot) ||
+    isPluginFsNetworkOrDevicePath(target, projectRoot)
+  ) {
+    const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+    throw new Error(
+      `${who}$.${op}: ${rawPath} refused: a network location is not reached from here`,
+    )
+  }
+}
+
 /** densable `ag` `$.fs` including ancestors. */
 function engineFs(environmentId: string): Record<string, unknown> {
   return {
@@ -4722,6 +4757,7 @@ export async function handleHostOp(
   if (op === 'fs.read') {
     const path = pathFrom(args)
     if (typeof path !== 'string') return undefined
+    await refusePluginFsNetworkPath(path, 'fs.read', plugin)
     return readFileSync(path, 'utf8')
   }
   if (op === 'fs.write') {
@@ -4729,6 +4765,7 @@ export async function handleHostOp(
     const path = rec ? stringArg(rec.path) : stringArg(args[0])
     const text = rec ? rec.text : args[1]
     if (typeof path !== 'string') return undefined
+    await refusePluginFsNetworkPath(path, 'fs.write', plugin)
     writeFileSync(path, typeof text === 'string' ? text : String(text ?? ''))
     return undefined
   }
@@ -4742,23 +4779,8 @@ export async function handleHostOp(
       // fallback to process.cwd()
     }
     const rawPath = pathFrom(args) ?? '.'
+    await refusePluginFsNetworkPath(rawPath, 'fs.list', plugin)
     const target = resolve(baseCwd, rawPath)
-    let projectRoot: string | null = null
-    try {
-      const { getProjectRoot } = await import('../../bootstrap/state.js')
-      projectRoot = getProjectRoot()
-    } catch {
-      projectRoot = null
-    }
-    if (
-      isPluginFsNetworkOrDevicePath(rawPath, projectRoot) ||
-      isPluginFsNetworkOrDevicePath(target, projectRoot)
-    ) {
-      const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
-      throw new Error(
-        `${who}$.fs.list: ${rawPath} refused: a network location is not reached from here`,
-      )
-    }
     const entries = readdirSync(target, { withFileTypes: true })
     const listed: Array<{
       name: string
@@ -4800,6 +4822,7 @@ export async function handleHostOp(
     const { lstatSync, realpathSync, statSync } = await import('fs')
     const rawPath = pathFrom(args)
     if (typeof rawPath !== 'string') return undefined
+    await refusePluginFsNetworkPath(rawPath, 'fs.stat', plugin)
     let baseCwd = process.cwd()
     try {
       const { getCwd } = await import('../cwd.js')
@@ -4838,7 +4861,9 @@ export async function handleHostOp(
   if (op === 'fs.exists') {
     const { existsSync } = await import('fs')
     const path = pathFrom(args)
-    return typeof path === 'string' ? existsSync(path) : false
+    if (typeof path !== 'string') return false
+    await refusePluginFsNetworkPath(path, 'fs.exists', plugin)
+    return existsSync(path)
   }
   if (op === 'state.get') {
     const key = stateKey(readStateRef(args[0], 'get'))
@@ -12086,8 +12111,8 @@ async function runPromptFill(
   const currentCursor = Math.max(
     0,
     Math.min(
-      storeState.savedCursorOffset !== null
-        ? storeState.savedCursorOffset
+      storeState.cursor !== null
+        ? storeState.cursor
         : storeState.active || getPromptInputStoreValue() !== ''
           ? currentText.length
           : promptBoxCursor,
@@ -13195,6 +13220,10 @@ async function runFsAncestors(
   const root = getProjectRoot()
   const start =
     typeof input.of === 'string' && input.of !== '' ? input.of : root
+  await refusePluginFsNetworkPath(start, 'fs.ancestors', _plugin)
+  if (typeof input.below === 'string' && input.below !== '') {
+    await refusePluginFsNetworkPath(input.below, 'fs.ancestors', _plugin)
+  }
   const below =
     typeof input.below === 'string'
       ? input.below.endsWith(sep)

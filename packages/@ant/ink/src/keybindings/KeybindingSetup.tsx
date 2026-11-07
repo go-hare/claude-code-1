@@ -252,6 +252,12 @@ export function KeybindingSetup({
       const { input, key } = kmo(event);
       void input;
       void key;
+      // densable: focused node's textEntry===true and a single printable key
+      // is input, not a shortcut.
+      const target = event.target as { attributes?: { textEntry?: boolean } } | null;
+      if (target?.attributes?.textEntry === true && event.key.length === 1 && !event.ctrl && !event.meta) {
+        return;
+      }
       const parsed: ParsedKey = {
         kind: 'key',
         name: event.name,
