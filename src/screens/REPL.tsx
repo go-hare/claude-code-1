@@ -711,6 +711,7 @@ import { UltraplanChoiceDialog } from '../components/ultraplan/UltraplanChoiceDi
 import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDialog.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
+import { ToastStackView } from '../components/PromptInput/Notifications.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
 import {
   computeDiffSidebarWidth,
@@ -8471,6 +8472,7 @@ export function REPL({
         {transcriptScrollRef ? (
           <FullscreenLayout
             scrollRef={scrollRef}
+            transcriptOverlay={<ToastStackView />}
             scrollable={
               <>
                 {transcriptMessagesElement}
@@ -8719,9 +8721,7 @@ export function REPL({
           <PermissionDialogHostProvider value={permissionDialogHostValue}>
             <FullscreenLayout
               scrollRef={scrollRef}
-              bottomFloat={
-                buddyEnabled && companionVisible && !companionNarrow ? <CompanionFloatingBubble /> : undefined
-              }
+              transcriptOverlay={<ToastStackView />}
               modal={ozs}
               modalScrollRef={modalScrollRef}
               dividerYRef={dividerYRef}
@@ -10017,8 +10017,11 @@ export function REPL({
                       )}
                       {process.env.USER_TYPE === 'ant' && <DevBar />}
                     </Box>
-                    {buddyEnabled && !(companionNarrow && isFullscreenEnvEnabled()) && companionVisible ? (
-                      <CompanionSprite />
+                    {buddyEnabled && companionVisible ? (
+                      <Box flexDirection="column" alignItems="flex-end">
+                        {isFullscreenEnvEnabled() && !companionNarrow ? <CompanionFloatingBubble /> : null}
+                        {!(companionNarrow && isFullscreenEnvEnabled()) ? <CompanionSprite /> : null}
+                      </Box>
                     ) : null}
                   </Box>
                 </Box>

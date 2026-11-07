@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import { useCallback, useEffect } from 'react';
 import { useAppStateStore, useSetAppState } from '../state/AppState.js';
+import { dismissToastItem, holdToastItem, pushToast } from '../components/toastStore.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import type { Theme } from '../utils/theme.js';
 
@@ -17,6 +18,8 @@ type BaseNotification = {
   key: string;
   /** densable kind: contextual | feedback | warning | … (metadata only). */
   kind?: string;
+  /** densable toast source line. Not `kind`. */
+  plugin?: string;
   /** densable Nu `u.pinned` — sticky list, not the toast slot. */
   pinned?: boolean;
   /**
@@ -46,6 +49,11 @@ type BaseNotification = {
   heldDuringDiffPanel?: boolean;
   /** densable `requeueOnPreempt` — keep an immediate toast when preempted. */
   requeueOnPreempt?: boolean;
+  /** densable toast record. `leaving` is the exit, not the end of a hover. */
+  phase?: 'shown' | 'leaving';
+  shownAt?: number;
+  leavesAt?: number;
+  heldAt?: number;
 };
 
 type TextNotification = BaseNotification & {
@@ -85,6 +93,9 @@ export function useNotifications(): {
   addNotification: AddNotificationFn;
   removeNotification: RemoveNotificationFn;
   processQueue: () => void;
+  holdToast: (key: string, held: boolean) => void;
+  dismissToast: (key: string) => void;
+  patchNotification: (key: string, patch: Partial<Notification>) => void;
 } {
   const store = useAppStateStore();
   const setAppState = useSetAppState();
@@ -150,6 +161,11 @@ export function useNotifications(): {
 
   const addNotification = useCallback<AddNotificationFn>(
     (notif: Notification) => {
+      if (!notif.pinned) {
+        if ('text' in notif) {
+          pushToast(notif.key, notif.text, notif.plugin, notif.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+        }
+      }
       // densable Nu: pinned notices occupy the dedicated list, not current/queue.
       if (notif.pinned) {
         setAppState(prev => {
@@ -324,7 +340,34 @@ export function useNotifications(): {
     }
   }, []);
 
-  return { addNotification, removeNotification, processQueue };
+  const patchNotification = useCallback(
+    (key: string, patch: Partial<Notification>) => {
+      setAppState(prev => {
+        const apply = (notice: Notification | null): Notification | null =>
+          notice?.key === key ? { ...notice, ...patch } : notice;
+        return {
+          ...prev,
+          notifications: {
+            ...prev.notifications,
+            current: apply(prev.notifications.current),
+            queue: prev.notifications.queue.map(notice => apply(notice) ?? notice),
+          },
+        };
+      });
+    },
+    [setAppState],
+  );
+
+  /** The drawn toast is the store record, not the notification queue. */
+  const holdToast = useCallback((key: string, held: boolean) => {
+    holdToastItem(key, held);
+  }, []);
+
+  const dismissToast = useCallback((key: string) => {
+    dismissToastItem(key);
+  }, []);
+
+  return { addNotification, removeNotification, processQueue, holdToast, dismissToast, patchNotification };
 }
 
 const PRIORITIES: Record<Priority, number> = {
