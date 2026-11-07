@@ -7,7 +7,7 @@ import React, { useRef, useSyncExternalStore } from 'react';
 import { Box, Dialog, Text } from '@anthropic/ink';
 import { truncateGoalConditionForRender } from '@claude-code/builtin-tools/tools/ProposeGoalTool/canonicalize.js';
 import { getMainLoopBusy, subscribeMainLoopBusy } from '../../bootstrap/state.js';
-import { Select } from '../../components/CustomSelect/index.js';
+import { ConfirmSelect } from '../../components/ConfirmSelect.js';
 import { useAppState } from '../../state/AppState.js';
 import { firstLineOf } from '../../utils/stringUtils.js';
 
@@ -61,19 +61,16 @@ export function GoalProposalDialog({ payload, onAnswer }: Props): React.ReactNod
         the condition is met, and Claude keeps working until it is. {help}
       </Text>
       {replaceLine !== null && <Text dimColor>Approving replaces the current goal: {replaceLine}</Text>}
-      <Select
-        options={[
-          { value: 'cancel', label: 'Not now' },
-          { value: 'confirm', label: 'Set this goal' },
-        ]}
-        defaultFocusValue="cancel"
-        onChange={value => {
-          if (value === 'confirm') {
-            answer({ approved: true, explicit: true });
-          } else {
-            answer({ approved: false, explicit: true });
-          }
-        }}
+      <ConfirmSelect
+        hideIndexes
+        cancelFirst
+        focus="cancel"
+        confirmLabel="Set this goal"
+        cancelLabel="Not now"
+        windowMs={ANSWER_DEBOUNCE_MS}
+        openedAt={openedAt.current}
+        refuseInput={() => Date.now() - openedAt.current < ANSWER_DEBOUNCE_MS}
+        onConfirm={() => answer({ approved: true, explicit: true })}
         onCancel={() => answer({ approved: false, explicit: true })}
       />
     </Dialog>

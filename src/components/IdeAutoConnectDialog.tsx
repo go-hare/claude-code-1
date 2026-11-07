@@ -2,6 +2,8 @@ import React, { useCallback } from 'react';
 import { Text, Dialog } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { isSupportedTerminal } from '../utils/ide.js';
+import { useIsWithinWindow } from '../hooks/useRefuseWithin.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 import { Select } from './CustomSelect/index.js';
 
 type IdeAutoConnectDialogProps = {
@@ -9,6 +11,7 @@ type IdeAutoConnectDialogProps = {
 };
 
 export function IdeAutoConnectDialog({ onComplete }: IdeAutoConnectDialogProps): React.ReactNode {
+  const refuseInput = useIsWithinWindow();
   const handleSelect = useCallback(
     async (value: string) => {
       const autoConnect = value === 'yes';
@@ -32,7 +35,7 @@ export function IdeAutoConnectDialog({ onComplete }: IdeAutoConnectDialogProps):
 
   return (
     <Dialog title="Do you wish to enable auto-connect to IDE?" color="ide" onCancel={onComplete}>
-      <Select options={options} onChange={handleSelect} defaultValue={'yes'} />
+      <Select options={options} hideIndexes defaultFocusValue="no" refuseInput={refuseInput} onChange={handleSelect} />
       <Text dimColor>You can also configure this in /config or with the --ide flag</Text>
     </Dialog>
   );
@@ -68,11 +71,6 @@ export function IdeDisableAutoConnectDialog({ onComplete }: IdeDisableAutoConnec
     onComplete(false);
   }, [onComplete]);
 
-  const options = [
-    { label: 'No', value: 'no' },
-    { label: 'Yes', value: 'yes' },
-  ];
-
   return (
     <Dialog
       title="Do you wish to disable auto-connect to IDE?"
@@ -80,7 +78,13 @@ export function IdeDisableAutoConnectDialog({ onComplete }: IdeDisableAutoConnec
       onCancel={handleCancel}
       color="ide"
     >
-      <Select options={options} onChange={handleSelect} defaultValue={'no'} />
+      <ConfirmSelect
+        hideIndexes
+        cancelFirst
+        focus="cancel"
+        onConfirm={() => handleSelect('yes')}
+        onCancel={handleCancel}
+      />
     </Dialog>
   );
 }

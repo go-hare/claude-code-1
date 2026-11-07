@@ -8,7 +8,6 @@ import {
   type CommandResultDisplay,
   INTERNAL_ONLY_COMMANDS,
 } from '../../commands.js';
-import { useIsInsideModal } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Link, Text, Tab, Tabs, Pane } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
@@ -25,11 +24,6 @@ const HELP_FEEDBACK_FOOTER_MIN_ROWS = 44;
 
 export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   const { rows, columns } = useTerminalSize();
-  const maxHeight = Math.floor(rows / 2);
-  // Inside the modal slot, FullscreenLayout already caps height and Pane/Tabs
-  // use flexShrink=0 (see #23592) — our own height= constraint would clip the
-  // footer since Tabs won't shrink to fit. Let the modal slot handle sizing.
-  const insideModal = useIsInsideModal();
 
   const close = () => onClose('Help dialog dismissed', { display: 'system' });
   useKeybinding('help:dismiss', close, { context: 'Help' });
@@ -61,7 +55,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
     <Tab key="commands" id="commands" title="Commands">
       <Commands
         commands={builtinCommands}
-        maxHeight={maxHeight}
+        maxHeight={rows}
         columns={columns}
         title="Browse default commands"
         onCancel={close}
@@ -73,7 +67,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
     <Tab key="custom" id="custom" title="Custom commands">
       <Commands
         commands={customCommands}
-        maxHeight={maxHeight}
+        maxHeight={rows}
         columns={columns}
         title="Browse custom commands"
         emptyMessage="No custom commands found"
@@ -87,7 +81,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
       <Tab key="ant-only" id="ant-only" title="[ant-only]">
         <Commands
           commands={antOnlyCommands}
-          maxHeight={maxHeight}
+          maxHeight={rows}
           columns={columns}
           title="Browse ant-only commands"
           onCancel={close}
@@ -97,7 +91,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   }
 
   return (
-    <Box flexDirection="column" height={insideModal ? undefined : maxHeight}>
+    <Box flexDirection="column">
       <Pane color="professionalBlue">
         <Tabs title="Help" color="professionalBlue" defaultTab="general" navFromContent>
           {tabs}

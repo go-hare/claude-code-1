@@ -13,7 +13,7 @@ import { callTui, type TuiRelaunchCarryInput } from '../commands/tui/index.js';
 import { useAppStateStore } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
 import { markFullscreenUpsellFullySeen, recordFullscreenUpsellImpression } from '../utils/fullscreenUpsellGate.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 
 export type FullscreenUpsellDialogProps = {
   onDone: (result: 'accepted' | 'declined') => void;
@@ -87,10 +87,8 @@ export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps):
     onDone('declined');
   }
 
-  // densable 2.1.289 p8 @208494288: ye Dialog + three dimColor · bullets +
-  // qn {confirmLabel:"Yes, try it", cancelLabel:"Not now"}. Ink Dialog has no
-  // confirmLabel — Select stands in for qn. First-bullet second clause is
-  // ze=!hhe(); keep the full sentence (no reduced-motion analog).
+  // densable 2.1.289 p8 @208494727: qn focus is "cancel" when the dialog was
+  // dismissed, otherwise "confirm".
   return (
     <Dialog title="Try the new fullscreen renderer?" onCancel={() => handleSelect('decline')}>
       <Box flexDirection="column" gap={1}>
@@ -99,18 +97,11 @@ export function FullscreenUpsellDialog({ onDone }: FullscreenUpsellDialogProps):
           <Text dimColor>· Mouse support — click to move your cursor or expand results</Text>
           <Text dimColor>· Selected text auto-copies to your clipboard</Text>
         </Box>
-        <Select
-          options={[
-            {
-              label: 'Yes, try it',
-              value: 'accept' as const,
-            },
-            {
-              label: 'Not now',
-              value: 'decline' as const,
-            },
-          ]}
-          onChange={handleSelect}
+        <ConfirmSelect
+          confirmLabel="Yes, try it"
+          cancelLabel="Not now"
+          onConfirm={() => handleSelect('accept')}
+          onCancel={() => handleSelect('decline')}
         />
       </Box>
     </Dialog>

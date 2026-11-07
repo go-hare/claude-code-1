@@ -74,6 +74,49 @@ function hasBashPermission(rules: PermissionRule[]): boolean {
  * Get which setting sources have bash allow rules.
  * Returns an array of file paths that have bash permissions.
  */
+/** densable trust warning — allow rules declared by this folder. */
+export function getProjectAllowDisclosure(): {
+  sources: string[]
+  rules: string[]
+  rawCount: number
+} {
+  const sources: string[] = []
+  const rules: string[] = []
+  for (const [source, file] of [
+    ['projectSettings', '.claude/settings.json'],
+    ['localSettings', '.claude/settings.local.json'],
+  ] as const) {
+    const allow = getPermissionRulesForSource(source).filter(
+      rule => rule.ruleBehavior === 'allow',
+    )
+    if (allow.length === 0) continue
+    sources.push(file)
+    for (const rule of allow) rules.push(rule.ruleValue.toolName)
+  }
+  return { sources, rules, rawCount: rules.length }
+}
+
+/** densable trust warning — directories this folder adds to the workspace. */
+export function getProjectAddDirsDisclosure(): {
+  sources: string[]
+  dirs: string[]
+  rawCount: number
+} {
+  const sources: string[] = []
+  const dirs: string[] = []
+  for (const [source, file] of [
+    ['projectSettings', '.claude/settings.json'],
+    ['localSettings', '.claude/settings.local.json'],
+  ] as const) {
+    const added =
+      getSettingsForSource(source)?.permissions?.additionalDirectories ?? []
+    if (added.length === 0) continue
+    sources.push(file)
+    dirs.push(...added)
+  }
+  return { sources, dirs, rawCount: dirs.length }
+}
+
 export function getBashPermissionSources(): string[] {
   const sources: string[] = []
 

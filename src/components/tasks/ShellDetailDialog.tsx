@@ -18,6 +18,19 @@ type Props = {
 };
 
 const SHELL_DETAIL_TAIL_BYTES = 8192;
+/** Title, status, command, output label, caption, and both borders. */
+const SHELL_DETAIL_CHROME_ROWS = 16;
+
+/**
+ * Gold box is 12 rows. Only shrink when the terminal cannot hold the dialog
+ * plus a one-row transcript peek, so a normal window keeps its bottom edge
+ * without the dialog eating the transcript.
+ */
+function shellOutputBoxHeight(rows: number): number {
+  const room = rows - SHELL_DETAIL_CHROME_ROWS - 1;
+  if (room >= 12) return 12;
+  return Math.max(4, room);
+}
 
 type TaskOutputResult = {
   content: string;
@@ -39,7 +52,7 @@ async function getTaskOutput(shell: DeepImmutable<LocalShellTaskState>): Promise
 }
 
 export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props): React.ReactNode {
-  const { columns } = useTerminalSize();
+  const { columns, rows } = useTerminalSize();
 
   // Promise created in initializer (not during render). For running shells,
   // the effect timer replaces it periodically to pick up new output.
@@ -139,7 +152,7 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
         <Box flexDirection="column">
           <Text bold>Output:</Text>
           <Suspense fallback={<Text dimColor>Loading output…</Text>}>
-            <ShellOutputContent outputPromise={deferredOutputPromise} columns={columns} />
+            <ShellOutputContent outputPromise={deferredOutputPromise} columns={columns} rows={rows} />
           </Suspense>
         </Box>
       </Dialog>
@@ -150,9 +163,10 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
 type ShellOutputContentProps = {
   outputPromise: Promise<TaskOutputResult>;
   columns: number;
+  rows: number;
 };
 
-function ShellOutputContent({ outputPromise, columns }: ShellOutputContentProps): React.ReactNode {
+function ShellOutputContent({ outputPromise, columns, rows }: ShellOutputContentProps): React.ReactNode {
   const { content, bytesTotal } = use(outputPromise);
 
   if (!content) {
@@ -181,7 +195,14 @@ function ShellOutputContent({ outputPromise, columns }: ShellOutputContentProps)
 
   return (
     <>
-      <Box borderStyle="round" paddingX={1} flexDirection="column" height={12} maxWidth={columns - 6}>
+      <Box
+        borderStyle="round"
+        paddingX={1}
+        flexDirection="column"
+        height={shellOutputBoxHeight(rows)}
+        overflow="hidden"
+        maxWidth={columns - 6}
+      >
         {rendered.map((line, i) => (
           <Text key={i} wrap="truncate-end">
             {line}

@@ -3,7 +3,7 @@ import { logEvent } from 'src/services/analytics/index.js';
 import { Box, Link, Newline, Text } from '@anthropic/ink';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 import { Dialog } from '@anthropic/ink';
 
 type Props = {
@@ -70,12 +70,14 @@ export function BypassPermissionsModeDialog({ onAccept }: Props): React.ReactNod
         <Link url="https://code.claude.com/docs/en/security" />
       </Box>
 
-      <Select
-        options={[
-          { label: 'No, exit', value: 'decline' },
-          { label: 'Yes, I accept', value: 'accept' },
-        ]}
-        onChange={value => onChange(value as 'accept' | 'decline')}
+      <ConfirmSelect
+        hideIndexes
+        cancelFirst
+        focus="cancel"
+        confirmLabel="Yes, I accept"
+        cancelLabel="No, exit"
+        onConfirm={() => onChange('accept')}
+        onCancel={() => onChange('decline')}
       />
     </Dialog>
   );

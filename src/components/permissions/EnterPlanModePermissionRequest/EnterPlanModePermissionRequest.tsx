@@ -7,7 +7,7 @@ import {
 } from '../../../services/analytics/index.js';
 import { useAppState } from '../../../state/AppState.js';
 import { isPlanModeInterviewPhaseEnabled } from '../../../utils/planModeV2.js';
-import { Select } from '../../CustomSelect/index.js';
+import { ConfirmSelect } from '../../ConfirmSelect.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 
@@ -53,12 +53,11 @@ export function EnterPlanModePermissionRequest({
         </Box>
 
         <Box marginTop={1}>
-          <Select
-            options={[
-              { label: 'Yes, enter plan mode', value: 'yes' as const },
-              { label: 'No, start implementing now', value: 'no' as const },
-            ]}
-            onChange={handleResponse}
+          <ConfirmSelect
+            hideIndexes
+            confirmLabel="Yes, enter plan mode"
+            cancelLabel="No, start implementing now"
+            onConfirm={() => handleResponse('yes')}
             onCancel={() => handleResponse('no')}
           />
         </Box>

@@ -19,6 +19,7 @@ import { toInternalMessages } from '../../utils/messages/mappers.js';
 import { EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
 import { plural } from '../../utils/stringUtils.js';
 import { teleportResumeCodeSession } from '../../utils/teleport.js';
+import { ConfirmSelect } from '../ConfirmSelect.js';
 import { Select } from '../CustomSelect/select.js';
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { Message } from '../Message.js';
@@ -272,19 +273,17 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
             This archives the remote session and stops local tracking. The review will not complete and any findings so
             far are discarded.
           </Text>
-          <Select
-            options={[
-              { label: 'Stop ultrareview', value: 'stop' as const },
-              { label: 'Back', value: 'back' as const },
-            ]}
-            onChange={v => {
-              if (v === 'stop') {
-                onKill?.();
-                goBackOrClose();
-              } else {
-                setConfirmingStop(false);
-              }
+          <ConfirmSelect
+            hideIndexes
+            cancelFirst
+            focus="cancel"
+            confirmLabel="Stop ultrareview"
+            cancelLabel="Back"
+            onConfirm={() => {
+              onKill?.();
+              goBackOrClose();
             }}
+            onCancel={() => setConfirmingStop(false)}
           />
         </Box>
       </Dialog>

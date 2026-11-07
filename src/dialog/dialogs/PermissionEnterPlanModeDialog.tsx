@@ -14,7 +14,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 import { useAppState } from '../../state/AppState.js';
-import { Select } from '../../components/CustomSelect/index.js';
+import { ConfirmSelect } from '../../components/ConfirmSelect.js';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import {
@@ -59,12 +59,11 @@ export function PermissionEnterPlanModeDialog({ payload, answer }: DialogRendere
         </Box>
 
         <Box marginTop={1}>
-          <Select
-            options={[
-              { label: ENTER_PLAN_MODE_CONFIRM_LABEL, value: 'yes' as const },
-              { label: ENTER_PLAN_MODE_CANCEL_LABEL, value: 'no' as const },
-            ]}
-            onChange={handleChoice}
+          <ConfirmSelect
+            hideIndexes
+            confirmLabel={ENTER_PLAN_MODE_CONFIRM_LABEL}
+            cancelLabel={ENTER_PLAN_MODE_CANCEL_LABEL}
+            onConfirm={() => handleChoice('yes')}
             onCancel={() => handleChoice('no')}
           />
         </Box>

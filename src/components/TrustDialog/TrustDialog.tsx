@@ -11,10 +11,8 @@ import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolNa
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
-import { getFsImplementation } from '../../utils/fsOperations.js';
-import { findCanonicalGitRootUncached, findGitRootUncached } from '../../utils/git.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
-import { Select } from '../CustomSelect/index.js';
+import { ConfirmSelect, ConfirmSelectHint } from '../ConfirmSelect.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
 import {
   ACCESSING_CANCEL_LABEL,
@@ -24,12 +22,11 @@ import {
   ACCESSING_HEADERS_HELPER_TRUST_NOTE,
   ACCESSING_QUICK_SAFETY_CHECK,
   ACCESSING_WORKSPACE_TITLE,
-  CD_TRUST_REPO_PREFIX,
-  CD_TRUST_REPO_SUFFIX,
-  resolveTrustRootNote,
 } from './trustDialogCopy.js';
 import {
   formatEnglishSourceList,
+  getProjectAddDirsDisclosure,
+  getProjectAllowDisclosure,
   getApiKeyHelperSources,
   getAwsCommandsSources,
   getBashPermissionSources,
@@ -80,6 +77,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   const repoHelperSources = getRepoHeadersHelperSources(marketplaceHelperSources);
   const hasMarketplaceHeadersHelper = marketplaceHelperSources.length > 0;
   const hasRepoHeadersHelpers = repoHelperSources.length > 0;
+  const allowDisclosure = getProjectAllowDisclosure();
+  const addDirsDisclosure = getProjectAddDirsDisclosure();
 
   const hasSlashCommandBash =
     commands?.some(
@@ -148,12 +147,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
 
   function onChange(value: 'enable_all' | 'exit') {
     if (value === 'exit') {
-      // Set pendingExitCode to clear the screen before triggering shutdown.
-      // The useEffect above defers gracefulShutdownSync to the next tick
-      // so Ink can flush the empty frame first — otherwise
-      // cleanupTerminalModes races React's re-render and leaves
-      // residual TrustDialog content on the terminal.
-      setPendingExitCode(1);
+      gracefulShutdownSync(1);
       return;
     }
 
@@ -208,7 +202,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   useKeybinding(
     'confirm:no',
     () => {
-      setPendingExitCode(0);
+      gracefulShutdownSync(0);
     },
     { context: 'Confirmation' },
   );
@@ -219,46 +213,62 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
     return null;
   }
 
-  // Automatically resolve the trust dialog if there is nothing to be shown.
+  // densable: already trusted and no backstop → queueMicrotask(onDone), not setTimeout.
   if (hasTrustDialogAccepted) {
-    setTimeout(onDone);
+    queueMicrotask(onDone);
     return null;
   }
 
-  // densable 2.1.218: Accessing workspace body is 1:1 with SEA (Quick safety
-  // check + Claude Code'll…). Repo-root sentence is densable CdTrustPrompt copy
-  // (#28); densable Accessing itself does not include it — we show it when cwd
-  // is under a git root so the grant names the repository root.
-  // 2.1.234 #23: probe via I8e/rHo (uncached) so a negative LRU from "dir
-  // first seen before the repository existed" cannot omit the warning.
-  const cwdPath = getFsImplementation().cwd();
-  const { trustRoot, showRepoRootNote } = resolveTrustRootNote(
-    cwdPath,
-    findCanonicalGitRootUncached,
-    findGitRootUncached,
-  );
+  const cwdPath = getCwd();
 
   return (
     <PermissionDialog color="warning" titleColor="warning" title={ACCESSING_WORKSPACE_TITLE}>
       <Box flexDirection="column" gap={1} paddingTop={1}>
         <Text bold>{cwdPath}</Text>
-        {showRepoRootNote ? (
-          <Text>
-            {CD_TRUST_REPO_PREFIX} <Text bold>{trustRoot}</Text>
-            {CD_TRUST_REPO_SUFFIX}
-          </Text>
-        ) : null}
 
         <Text>{ACCESSING_QUICK_SAFETY_CHECK}</Text>
         <Text>{ACCESSING_CAPABILITY}</Text>
 
-        {hasRepoHeadersHelpers ? (
+        {allowDisclosure.rawCount > 0 || addDirsDisclosure.rawCount > 0 || hasRepoHeadersHelpers ? (
           <Box flexDirection="column">
-            <Text bold color="warning">
-              {ACCESSING_HEADERS_HELPER_PREFIX}
-              {formatEnglishSourceList(repoHelperSources)}
-            </Text>
-            <Text dimColor>{ACCESSING_HEADERS_HELPER_TRUST_NOTE}</Text>
+            {allowDisclosure.rawCount > 0 ? (
+              <Box flexDirection="column">
+                <Text bold color="warning">
+                  This folder pre-approves {allowDisclosure.rawCount} tool permission in{' '}
+                  {formatEnglishSourceList(allowDisclosure.sources)}:
+                </Text>
+                <Text>
+                  {'  '}
+                  {allowDisclosure.rules.length > 0
+                    ? formatEnglishSourceList(allowDisclosure.rules)
+                    : '(rule names contain unprintable characters)'}
+                </Text>
+              </Box>
+            ) : null}
+            {addDirsDisclosure.rawCount > 0 ? (
+              <Box flexDirection="column">
+                <Text bold color="warning">
+                  This folder adds {addDirsDisclosure.rawCount}{' '}
+                  {addDirsDisclosure.rawCount === 1 ? 'directory' : 'directories'} to the workspace in{' '}
+                  {formatEnglishSourceList(addDirsDisclosure.sources)}:
+                </Text>
+                <Text>
+                  {'  '}
+                  {addDirsDisclosure.dirs.length > 0
+                    ? formatEnglishSourceList(addDirsDisclosure.dirs)
+                    : '(directory names contain unprintable characters)'}
+                </Text>
+              </Box>
+            ) : null}
+            {hasRepoHeadersHelpers ? (
+              <Box flexDirection="column">
+                <Text bold color="warning">
+                  {ACCESSING_HEADERS_HELPER_PREFIX}
+                  {formatEnglishSourceList(repoHelperSources)}
+                </Text>
+                <Text dimColor>{ACCESSING_HEADERS_HELPER_TRUST_NOTE}</Text>
+              </Box>
+            ) : null}
           </Box>
         ) : null}
 
@@ -266,20 +276,17 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
           <Link url="https://code.claude.com/docs/en/security">Security guide</Link>
         </Text>
 
-        <Select
-          options={[
-            { label: ACCESSING_CANCEL_LABEL, value: 'exit' },
-            { label: ACCESSING_CONFIRM_LABEL, value: 'enable_all' },
-          ]}
-          defaultValue="exit"
+        <ConfirmSelect
           hideIndexes
-          onChange={value => onChange(value as 'enable_all' | 'exit')}
+          cancelFirst
+          focus="cancel"
+          confirmLabel={ACCESSING_CONFIRM_LABEL}
+          cancelLabel={ACCESSING_CANCEL_LABEL}
+          onConfirm={() => onChange('enable_all')}
           onCancel={() => onChange('exit')}
         />
 
-        <Text dimColor>
-          {exitState.pending ? <>Press {exitState.keyName} again to exit</> : <>Enter to confirm · Esc to cancel</>}
-        </Text>
+        <ConfirmSelectHint pending={exitState.pending} pendingKeyName={exitState.keyName ?? undefined} />
       </Box>
     </PermissionDialog>
   );

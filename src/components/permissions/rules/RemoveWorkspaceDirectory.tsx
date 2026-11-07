@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useCallback } from 'react';
-import { Select } from '../../../components/CustomSelect/select.js';
+import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Box, Text } from '@anthropic/ink';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { applyPermissionUpdate } from '../../../utils/permissions/PermissionUpdate.js';
@@ -32,31 +32,13 @@ export function RemoveWorkspaceDirectory({
     onRemove();
   }, [directoryPath, permissionContext, setPermissionContext, onRemove]);
 
-  const handleSelect = useCallback(
-    (value: string) => {
-      if (value === 'yes') {
-        handleRemove();
-      } else {
-        onCancel();
-      }
-    },
-    [handleRemove, onCancel],
-  );
-
   return (
     <Dialog title="Remove directory from workspace?" onCancel={onCancel} color="error">
       <Box marginX={2} flexDirection="column">
         <Text bold>{directoryPath}</Text>
       </Box>
       <Text>Claude Code will no longer have access to files in this directory.</Text>
-      <Select
-        onChange={handleSelect}
-        onCancel={onCancel}
-        options={[
-          { label: 'Yes', value: 'yes' },
-          { label: 'No', value: 'no' },
-        ]}
-      />
+      <ConfirmSelect hideIndexes focus="cancel" onConfirm={handleRemove} onCancel={onCancel} />
     </Dialog>
   );
 }

@@ -4,6 +4,7 @@
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import TextInput from '../../../components/TextInput.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -145,19 +146,15 @@ export function AutoModeRulesTab({
           Writing your own environment replaces the built-in default document. You can restore it later with
           /auto-mode-setup.
         </Text>
-        <Select
-          options={[
-            { label: 'Replace built-in environment', value: 'replace' },
-            { label: 'Cancel', value: 'cancel' },
-          ]}
-          onChange={value => {
-            if (value === 'replace') {
-              setInputValue(readEnvironmentDocument());
-              setCursorOffset(0);
-              setMode({ kind: 'env-editor' });
-              return;
-            }
-            cancel();
+        <ConfirmSelect
+          hideIndexes
+          focus="cancel"
+          confirmLabel="Replace built-in environment"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            setInputValue(readEnvironmentDocument());
+            setCursorOffset(0);
+            setMode({ kind: 'env-editor' });
           }}
           onCancel={cancel}
         />
@@ -227,16 +224,12 @@ export function AutoModeRulesTab({
         </Text>
         <Text>{mode.entry.text}</Text>
         {lastInSection ? <Text italic>This is the last extra rule in {sectionLabel(mode.entry.section)}.</Text> : null}
-        <Select
-          options={[
-            { label: 'Delete', value: 'delete' },
-            { label: 'Cancel', value: 'cancel' },
-          ]}
-          onChange={value => {
-            if (value !== 'delete') {
-              cancel();
-              return;
-            }
+        <ConfirmSelect
+          hideIndexes
+          focus="cancel"
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          onConfirm={() => {
             void deleteAutoModeRule(mode.entry.section, mode.entry.index, mode.entry.text)
               .then(() => {
                 refresh();

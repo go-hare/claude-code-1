@@ -6,6 +6,7 @@ import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { applyPermissionUpdate, persistPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from 'src/utils/permissions/PermissionUpdateSchema.js';
 import type { CommandResultDisplay } from '../../../commands.js';
+import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useSearchInput } from '../../../hooks/useSearchInput.js';
@@ -127,14 +128,7 @@ function RuleDetails({
         </Text>
         {ruleDescription}
         <Text>Are you sure you want to delete this permission rule?</Text>
-        <Select
-          onChange={_ => (_ === 'yes' ? onDelete() : onCancel())}
-          onCancel={onCancel}
-          options={[
-            { label: 'Yes', value: 'yes' },
-            { label: 'No', value: 'no' },
-          ]}
-        />
+        <ConfirmSelect hideIndexes focus="cancel" onConfirm={onDelete} onCancel={onCancel} />
       </Box>
       {footer}
     </>

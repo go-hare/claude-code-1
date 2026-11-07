@@ -6,7 +6,7 @@ import {
 import { Box, Dialog, Link, Text } from '@anthropic/ink';
 import type { ExternalClaudeMdInclude } from '../utils/claudemd.js';
 import { saveCurrentProjectConfig } from '../utils/config.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 
 /** densable phn source — dialog vs /config Jr toggle. */
 export type ExternalIncludesDecisionSource = 'dialog' | 'config_toggle';
@@ -96,12 +96,14 @@ export function ClaudeMdExternalIncludesDialog({
         <Link url="https://code.claude.com/docs/en/security" />{' '}
       </Text>
 
-      <Select
-        options={[
-          { label: 'Yes, allow external imports', value: 'yes' },
-          { label: 'No, disable external imports', value: 'no' },
-        ]}
-        onChange={value => handleSelection(value as 'yes' | 'no')}
+      <ConfirmSelect
+        hideIndexes
+        cancelFirst
+        focus="cancel"
+        confirmLabel="Yes, allow external imports"
+        cancelLabel="No, disable external imports"
+        onConfirm={() => handleSelection('yes')}
+        onCancel={() => handleSelection('no')}
       />
     </Dialog>
   );
