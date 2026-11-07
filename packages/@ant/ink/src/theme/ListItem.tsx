@@ -25,6 +25,23 @@ type ListItemProps = {
   children: ReactNode;
 
   /**
+   * densable `Ko` icon slot. Painted beside the label, not inside it,
+   * so focus color does not swallow the status glyph.
+   */
+  icon?: ReactNode;
+  /** densable `Ko` icon column. 0 means shrink to the glyph. */
+  iconWidth?: number;
+  /**
+   * densable `Ko` has no pointer column. Set when the row's first cell is
+   * the icon, not `IC`'s focus glyph.
+   */
+  hideIndicator?: boolean;
+  /** densable `Ko` facts column, after the name. */
+  meta?: readonly string[];
+  /** densable `Ko` facts column width. 0 shrinks to the text. */
+  metaWidth?: number;
+
+  /**
    * Optional description text displayed below the main content.
    */
   description?: string;
@@ -122,6 +139,11 @@ export function ListItem({
   isFocused,
   isSelected = false,
   children,
+  icon,
+  iconWidth = 0,
+  hideIndicator = false,
+  meta,
+  metaWidth = 0,
   description,
   showScrollDown,
   showScrollUp,
@@ -218,19 +240,39 @@ export function ListItem({
       onMouseLeave={onMouseLeave}
     >
       <Box flexDirection="row" gap={1}>
-        <Box flexShrink={0}>{renderIndicator()}</Box>
+        {hideIndicator ? null : <Box flexShrink={0}>{renderIndicator()}</Box>}
+        {icon != null ? (
+          <Box flexShrink={0} width={iconWidth > 0 ? iconWidth : undefined} marginRight={1}>
+            {icon}
+          </Box>
+        ) : null}
         {styled ? (
-          <Text color={textColor} dimColor={disabled}>
+          <Text color={textColor} dimColor={disabled} wrap="truncate-end">
             {children}
           </Text>
         ) : (
           children
         )}
-        {isSelected && !disabled && <Text color="success">{figures.tick}</Text>}
+        {meta !== undefined && meta.length > 0 ? (
+          <Box flexShrink={1} maxWidth={metaWidth > 0 ? metaWidth : undefined} marginLeft={1}>
+            <Text dimColor wrap="truncate-end">
+              {meta.join(' · ')}
+            </Text>
+          </Box>
+        ) : null}
+        {isSelected && !disabled && (
+          <Box flexShrink={0}>
+            <Text aria-label="(selected)" color="success">
+              {figures.tick}
+            </Text>
+          </Box>
+        )}
       </Box>
       {description && (
         <Box paddingLeft={2}>
-          <Text color="inactive">{description}</Text>
+          <Text color="inactive" wrap="truncate-end">
+            {description}
+          </Text>
         </Box>
       )}
     </Box>

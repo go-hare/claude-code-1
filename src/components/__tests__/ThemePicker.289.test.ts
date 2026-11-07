@@ -12,7 +12,10 @@ describe('densable 2.1.289 ThemePicker', () => {
   test('options are unnumbered and current theme is marked before the name', () => {
     expect(src).toContain('hideIndexes')
     expect(src).toContain('figures.tick')
-    expect(src).toContain('value === themeSetting ? `${figures.tick} ${label}`')
+    expect(src).toContain('aria-label="current:"')
+    expect(src).not.toContain(
+      'value === themeSetting ? `${figures.tick} ${label}`',
+    )
   })
 
   test('lists New custom theme… when onCustomTheme is set', () => {

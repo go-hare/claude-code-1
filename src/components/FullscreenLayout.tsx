@@ -40,6 +40,8 @@ import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fulls
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { useAppState } from '../state/AppState.js';
+import { NotificationBody } from './PromptInput/Notifications.js';
+import { TranscriptOverlayOffsetContext } from './transcriptOverlayOffset.js';
 import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
 import { plural } from '../utils/stringUtils.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
@@ -49,6 +51,29 @@ import type { StickyPrompt } from './VirtualMessageList.js';
 
 /** Rows of transcript context kept visible above the modal pane's ▔ divider. */
 const MODAL_TRANSCRIPT_PEEK = 2;
+
+/**
+ * densable tot `vkt` — sticky header occupies row 0, so overlay tops shift by 1.
+ */
+function TranscriptOverlayPad({ collapsed, children }: { collapsed: boolean; children: ReactNode }): React.ReactNode {
+  return <TranscriptOverlayOffsetContext value={collapsed ? 1 : 0}>{children}</TranscriptOverlayOffsetContext>;
+}
+
+/**
+ * densable Cc @207819647 — trailing mark on the modal divider row.
+ * Gold paints nothing unless a notification is current.
+ */
+function ModalDividerTail(): React.ReactNode {
+  const current = useAppState(s => s.notifications.current);
+  if (current === null) return null;
+  return (
+    <Box flexShrink={0} maxWidth="100%" overflow="hidden">
+      <Text> </Text>
+      <NotificationBody notification={current} />
+      <Text color="permission"> ▔</Text>
+    </Box>
+  );
+}
 /**
  * densable 2.1.289 tot `VCe` / `Ne`. Gold:
  *   `Ne=Zot()||XMn()?te-VCe:Math.floor(te/2)`
@@ -1376,6 +1401,19 @@ export type LeftoverModalHost = {
 export const LeftoverModalHostContext = createContext<LeftoverModalHost | null>(null);
 
 /**
+ * densable `Ue` — KVe's `{box, reserve}`. Separate from the rows host (`W_`)
+ * so publishing reserve does not replace the outer box or its reduced rows.
+ */
+export const KVeReserveContext = createContext<{
+  box: RefObject<DOMElement | null>;
+  rows: number;
+  reserve: number;
+} | null>(null);
+
+/** densable `W_` — the host with `rows` replaced. Not a bare number. */
+export const RowsHostContext = createContext<LeftoverModalHost | null>(null);
+
+/**
  * densable leftover chrome `Xt` — register `{rows, owed}` while inside tot We.
  */
 export function useLeftoverChromeClaim(hostRef: RefObject<DOMElement | null>, owed: number, enabled = true): void {
@@ -1427,11 +1465,11 @@ type Props = {
    * receives the leftover `max(0, Ne - measured height)`.
    */
   abovePrompt?: ReactNode;
-  /** Absolute-positioned content anchored at the bottom-right of the
-   *  ScrollBox area, floating over scrollback. Rendered inside the flexGrow
-   *  region (not the bottom slot) so the overflowY:hidden cap doesn't clip
-   *  it. Fullscreen only — used for the companion speech bubble. */
-  bottomFloat?: ReactNode;
+  /**
+   * densable tot `transcriptOverlay`. Gold paints `vkt` around it on the
+   * scroll column (after the pill), not inside ScrollBox. Null when unset.
+   */
+  transcriptOverlay?: ReactNode;
   /**
    * densable ozs / fCt — `{content, visible}`. Gold Tyn Bxc is a flex
    * sibling (not absolute). `visible` drives Uxc/Bxc display.
@@ -1683,7 +1721,7 @@ export function FullscreenLayout({
   scrollable,
   bottom,
   abovePrompt,
-  bottomFloat,
+  transcriptOverlay,
   modal,
   modalScrollRef,
   scrollRef,
@@ -1866,28 +1904,20 @@ export function FullscreenLayout({
                       </ScrollChromeContext>
                     </ScrollBox>
                     {pillNode}
-                    {bottomFloat != null && (
-                      <Box position="absolute" bottom={0} right={0} opaque>
-                        {bottomFloat}
-                      </Box>
-                    )}
+                    <TranscriptOverlayPad collapsed={padCollapsed}>{transcriptOverlay ?? null}</TranscriptOverlayPad>
                   </Box>
                 </TerminalSizeContext>
                 {sidebar != null &&
                   (sidebarWidth > 0 ? (
-                    <TerminalSizeContext value={{ columns: Math.max(1, sidebarWidth), rows: terminalRows }}>
-                      <Box
-                        flexDirection="column"
-                        width={sidebarWidth}
-                        height="100%"
-                        alignSelf="stretch"
-                        flexShrink={0}
-                        overflow="hidden"
-                        backgroundColor="composerSidebarBackground"
-                      >
-                        {sidebar}
-                      </Box>
-                    </TerminalSizeContext>
+                    <Box
+                      flexDirection="column"
+                      width={sidebarWidth}
+                      flexShrink={0}
+                      overflow="hidden"
+                      backgroundColor="composerSidebarBackground"
+                    >
+                      {sidebar}
+                    </Box>
                   ) : (
                     sidebar
                   ))}
@@ -1912,6 +1942,7 @@ export function FullscreenLayout({
                 width={dockWidth}
                 flexShrink={0}
                 overflow="hidden"
+                backgroundColor="composerSidebarBackground"
                 display={dockVisible ? 'flex' : 'none'}
               >
                 {dock}
@@ -1929,14 +1960,7 @@ export function FullscreenLayout({
             >
               <SuggestionsOverlay />
               <DialogOverlay />
-              <Box
-                ref={promptInnerRef}
-                flexDirection="column"
-                width="100%"
-                flexGrow={1}
-                flexShrink={0}
-                overflowY="hidden"
-              >
+              <Box ref={promptInnerRef} flexDirection="column" width="100%" flexGrow={1} flexShrink={0}>
                 <AbovePromptLeftoverContext value={leftoverYe}>
                   <LeftoverChromeSubscribeContext value={subscribeLeftoverChrome}>
                     {bottom}
@@ -1965,8 +1989,11 @@ export function FullscreenLayout({
                   overflow="hidden"
                   display={modalVisible ? 'flex' : 'none'}
                 >
-                  <Box flexShrink={0}>
-                    <Divider color="permission" char="▔" />
+                  <Box flexShrink={0} flexDirection="row" height={1} overflow="hidden">
+                    <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                      <Divider color="permission" char="▔" />
+                    </Box>
+                    <ModalDividerTail />
                   </Box>
                   <ModalScroller scrollRef={modalScrollRef} maxRows={terminalRows - MODAL_TRANSCRIPT_PEEK - 1}>
                     {modal.content}

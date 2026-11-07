@@ -2,17 +2,34 @@ import * as React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import figures from 'figures';
-import { Box, Text, usePreviewTheme, useTheme, useThemeSetting } from '@anthropic/ink';
+import {
+  Box,
+  StatusIcon,
+  Text,
+  stringWidth,
+  useApp,
+  usePreviewTheme,
+  useTheme,
+  useThemeSetting,
+  type DOMElement,
+} from '@anthropic/ink';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
-import { getCachedCustomThemes } from '../utils/customThemes.js';
+import { getCachedCustomThemes, parseCustomThemeRef } from '../utils/customThemes.js';
 import type { ThemeSetting } from '../utils/theme.js';
 import { CUSTOM_THEME_PREFIX } from '../utils/theme.js';
-import { Select } from './CustomSelect/index.js';
+import { ItemList } from './ItemList.js';
+import {
+  KVeReserveContext,
+  LeftoverModalHostContext,
+  RowsHostContext,
+  LEFTOVER_LIST_RESERVE,
+  leftoverChromeQ,
+} from './FullscreenLayout.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { getColorModuleUnavailableReason, getSyntaxTheme } from './StructuredDiff/colorDiff.js';
 import { StructuredDiff } from './StructuredDiff.js';
@@ -46,7 +63,7 @@ export function ThemePicker({
 }: ThemePickerProps): React.ReactNode {
   const [theme] = useTheme();
   const themeSetting = useThemeSetting();
-  const { columns } = useTerminalSize();
+  const { columns, rows } = useTerminalSize();
   const colorModuleUnavailableReason = getColorModuleUnavailableReason();
   const syntaxTheme = colorModuleUnavailableReason === null ? getSyntaxTheme(theme) : null;
   const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
@@ -57,6 +74,16 @@ export function ThemePicker({
   useRegisterKeybindingContext('ThemePicker');
 
   const syntaxToggleShortcut = useShortcutDisplay('theme:toggleSyntaxHighlighting', 'ThemePicker', 'ctrl+t');
+  const cancelTheme = skipExitHandling
+    ? () => {
+        cancelPreview();
+        onCancelProp?.();
+      }
+    : () => {
+        cancelPreview();
+        void gracefulShutdown(0);
+      };
+  useKeybinding('select:cancel', cancelTheme, { context: 'Select' });
 
   useKeybinding(
     'theme:toggleSyntaxHighlighting',
@@ -78,9 +105,11 @@ export function ThemePicker({
   const exitState = useExitOnCtrlCDWithKeybindings(skipExitHandling ? () => {} : undefined);
 
   const NEW_CUSTOM_THEME = '__new_custom_theme__';
-  const withCurrentMark = (label: string, value: string): string =>
-    value === themeSetting ? `${figures.tick} ${label}` : `  ${label}`;
-  const themeOptions: {
+  const [focusedValue, setFocusedValue] = React.useState<string | undefined>(themeSetting);
+  // densable XR + C.find(slug): ctrl+e only when custom:<slug> is a saved theme.
+  const focusedSlug = typeof focusedValue === 'string' ? parseCustomThemeRef(focusedValue) : null;
+  const editingCustom = focusedSlug !== null && getCachedCustomThemes().some(theme => theme.slug === focusedSlug);
+  const themeChoices: {
     label: string;
     value: ThemeSetting | typeof NEW_CUSTOM_THEME;
   }[] = [
@@ -110,13 +139,34 @@ export function ThemePicker({
     ...(onCustomTheme
       ? [{ label: 'New custom theme…', value: NEW_CUSTOM_THEME as ThemeSetting | typeof NEW_CUSTOM_THEME }]
       : []),
-  ].map(opt => ({
-    ...opt,
-    label: withCurrentMark(opt.label, opt.value),
-  })) as { label: string; value: ThemeSetting | typeof NEW_CUSTOM_THEME }[];
+  ];
+  // densable `sst()` — blank icon is as wide as the widest status glyph.
+  const blankIcon = ' '.repeat(Math.max(1, stringWidth(figures.tick), stringWidth(figures.cross)));
+  const themeOptions = themeChoices.map(opt => ({
+    label: opt.label,
+    value: opt.value,
+    icon:
+      opt.value === themeSetting ? (
+        <StatusIcon status="success" aria-label="current:" />
+      ) : (
+        <Text aria-hidden>{blankIcon}</Text>
+      ),
+    facts: typeof opt.value === 'string' && opt.value.startsWith(CUSTOM_THEME_PREFIX) ? (['user'] as const) : undefined,
+  }));
 
+  // densable NCe `ZV` — list box vs KVe/root. Added to reserve, not a shrink.
+  const measureRef = React.useRef<DOMElement | null>(null);
+  const leftoverHost = React.useContext(LeftoverModalHostContext);
+  const leftoverHostRef = React.useRef(leftoverHost);
+  leftoverHostRef.current = leftoverHost;
+  const { subscribeLayout } = useApp();
+  const readChrome = React.useCallback(() => {
+    const host = leftoverHostRef.current;
+    return Math.max(0, leftoverChromeQ(measureRef.current, host?.box.current ?? null, host === null) ?? 0);
+  }, []);
+  const measuredChrome = React.useSyncExternalStore(subscribeLayout, readChrome, () => 0);
   const content = (
-    <Box flexDirection="column" gap={1}>
+    <Box ref={measureRef} flexDirection="column" gap={1}>
       <Box flexDirection="column" gap={1}>
         {showIntroText ? (
           <Text>Let&apos;s get started.</Text>
@@ -129,47 +179,38 @@ export function ThemePicker({
           <Text bold>Choose the text style that looks best with your terminal</Text>
           {helpText && !showHelpTextBelow && <Text dimColor>{helpText}</Text>}
         </Box>
-        <Select
+        {/* hideIndexes: nn.Item has no index column. Gold nn does not pass visibleCount. */}
+        <ItemList
           options={themeOptions}
-          hideIndexes
-          onFocus={setting => {
-            if (setting === NEW_CUSTOM_THEME) return;
+          defaultFocusIndex={Math.max(
+            0,
+            themeOptions.findIndex(option => option.value === themeSetting),
+          )}
+          onFocus={index => {
+            const setting = themeOptions[index]?.value;
+            if (setting === undefined) return;
+            setFocusedValue(setting);
+            if (setting === NEW_CUSTOM_THEME) {
+              cancelPreview();
+              return;
+            }
             setPreviewTheme(setting as ThemeSetting);
           }}
-          onChange={(setting: string) => {
+          onSelect={index => {
+            const setting = themeOptions[index]?.value;
+            if (setting === undefined) return;
             if (setting === NEW_CUSTOM_THEME) {
-              onCustomTheme?.();
+              cancelPreview();
+              onCustomTheme?.(undefined);
               return;
             }
             savePreview();
             onThemeSelect(setting as ThemeSetting);
           }}
-          onCancel={
-            skipExitHandling
-              ? () => {
-                  cancelPreview();
-                  onCancelProp?.();
-                }
-              : async () => {
-                  cancelPreview();
-                  await gracefulShutdown(0);
-                }
-          }
-          visibleOptionCount={themeOptions.length}
-          defaultValue={themeSetting}
-          defaultFocusValue={themeSetting}
         />
       </Box>
       <Box flexDirection="column" width="100%">
-        <Box
-          flexDirection="column"
-          borderTop
-          borderBottom
-          borderLeft={false}
-          borderRight={false}
-          borderStyle="dashed"
-          borderColor="subtle"
-        >
+        <Box flexDirection="column" paddingX={0}>
           <StructuredDiff
             patch={{
               oldStart: 1,
@@ -186,7 +227,7 @@ export function ThemePicker({
             dim={false}
             filePath="demo.js"
             firstLine={null}
-            width={columns}
+            width={Math.max(0, columns - 6)}
           />
         </Box>
         <Text dimColor>
@@ -203,35 +244,78 @@ export function ThemePicker({
     </Box>
   );
 
-  // Only wrap in a box when not in onboarding
-  if (!showIntroText) {
-    return (
-      <>
-        <Box flexDirection="column">{content}</Box>
-        <Box marginTop={1}>
-          {showHelpTextBelow && helpText && (
-            <Box marginLeft={3}>
-              <Text dimColor>{helpText}</Text>
-            </Box>
-          )}
-          {!hideEscToCancel && (
-            <Box>
-              <Text dimColor italic>
-                {exitState.pending ? (
-                  <>Press {exitState.keyName} again to exit</>
-                ) : (
-                  <Byline>
-                    <KeyboardShortcutHint shortcut="Enter" action="select" />
-                    <KeyboardShortcutHint shortcut="Esc" action="cancel" />
-                  </Byline>
-                )}
-              </Text>
-            </Box>
-          )}
+  // densable NCe: footer is outside the measured box. `ee` is that chrome
+  // when not intro; hideEsc adds one more row. Both go into KVe reserve.
+  const footerChrome = showIntroText ? 0 : measuredChrome + (hideEscToCancel ? 1 : 0);
+  const hostRows = leftoverHost === null ? undefined : Math.max(0, (leftoverHost.rows ?? rows) - footerChrome);
+  const reserve = LEFTOVER_LIST_RESERVE + footerChrome;
+  const footer = !showIntroText && (
+    <Box marginTop={1}>
+      {showHelpTextBelow && helpText && (
+        <Box marginLeft={3}>
+          <Text dimColor>{helpText}</Text>
         </Box>
-      </>
-    );
-  }
+      )}
+      {!hideEscToCancel && (
+        <Box>
+          <Text dimColor italic>
+            {exitState.pending ? (
+              <>
+                Press {exitState.keyName} again to {skipExitHandling ? 'cancel' : 'exit'}
+              </>
+            ) : (
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="select" />
+                {editingCustom && onCustomTheme ? <KeyboardShortcutHint shortcut="ctrl+e" action="edit" /> : null}
+                <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+              </Byline>
+            )}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  );
+  return (
+    <RowsHost rows={hostRows}>
+      <KVeHost reserve={reserve}>
+        {content}
+        {footer}
+      </KVeHost>
+    </RowsHost>
+  );
+}
 
-  return content;
+/** densable `W_` — parent sees `rows` minus measured chrome. */
+function RowsHost({ rows, children }: { rows: number | undefined; children: React.ReactNode }): React.ReactNode {
+  const parent = React.useContext(LeftoverModalHostContext);
+  const box = React.useRef<DOMElement | null>(null);
+  const { rows: terminalRows } = useTerminalSize();
+  const published = rows ?? terminalRows;
+  const host = parent === null ? { box, rows: published } : { ...parent, box, rows: published };
+  return (
+    <RowsHostContext value={host}>
+      <Box ref={box} flexDirection="column">
+        {children}
+      </Box>
+    </RowsHostContext>
+  );
+}
+
+/** densable `KVe` — `{box, rows, reserve}`. Rows come from the surrounding host (`Bo`), not a fresh terminal read. */
+function KVeHost({ reserve, children }: { reserve: number; children: React.ReactNode }): React.ReactNode {
+  const box = React.useRef<DOMElement | null>(null);
+  const parent = React.useContext(LeftoverModalHostContext);
+  const reduced = React.useContext(RowsHostContext);
+  const { rows: terminalRows } = useTerminalSize();
+  const rows = reduced?.rows ?? parent?.rows ?? terminalRows;
+  const reserveHost = React.useMemo(() => ({ box, rows, reserve }), [rows, reserve]);
+  // densable `Ue` never writes the rows host. Rows stay on `W_` / the
+  // surrounding LeftoverModalHostContext.
+  return (
+    <KVeReserveContext value={reserveHost}>
+      <Box ref={box} flexDirection="column">
+        {children}
+      </Box>
+    </KVeReserveContext>
+  );
 }

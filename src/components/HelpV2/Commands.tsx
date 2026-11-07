@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { type Command, formatDescriptionWithSource } from '../../commands.js';
 import { truncate } from '../../utils/truncate.js';
 import { Box, Text, useTabHeaderFocus } from '@anthropic/ink';
-import { Select } from '../CustomSelect/select.js';
+import { ItemList } from '../ItemList.js';
 
 type Props = {
   commands: Command[];
@@ -45,14 +45,10 @@ export function Commands({ commands, maxHeight, columns, title, onCancel, emptyM
         <>
           <Text>{title}</Text>
           <Box marginTop={1}>
-            <Select
+            <ItemList
               options={options}
               visibleOptionCount={visibleCount}
-              onCancel={onCancel}
-              disableSelection
-              hideIndexes
-              layout="compact-vertical"
-              onUpFromFirstItem={focusHeader}
+              onCancel={headerFocused ? focusHeader : onCancel}
               isDisabled={headerFocused}
             />
           </Box>

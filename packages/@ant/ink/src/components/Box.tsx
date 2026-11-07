@@ -18,6 +18,10 @@ export type Props = Except<Styles, 'textWrap'> & {
    */
   tabIndex?: number;
   /**
+   * densable `textEntry`. When true, a single printable key is input, not a shortcut.
+   */
+  textEntry?: boolean;
+  /**
    * Focus this element when it mounts. Like the HTML `autofocus`
    * attribute — the FocusManager calls `focus(node)` during the
    * reconciler's `commitMount` phase.

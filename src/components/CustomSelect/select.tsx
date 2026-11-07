@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import figures from 'figures';
 import React, {
   createContext,
@@ -33,6 +34,7 @@ import {
   AbovePromptLeftoverContext,
   LeftoverModalHostContext,
   leftoverChromeLatch,
+  leftoverCompactVerticalColumnWidth,
   leftoverChromeQ,
   leftoverChromeWalkParents,
   leftoverFHostHeight,
@@ -117,7 +119,6 @@ import {
   leftoverNnItemLines,
   leftoverNnLiveWidth,
   leftoverVmnRn,
-  leftoverCompactVerticalColumnWidth,
   LeftoverNnDtContext,
   useLeftoverChromeClaim,
   type LeftoverScrollGrab,
@@ -169,7 +170,7 @@ function LeftoverIheHoverTrack({
 /** densable inner `oo` GXt + spareLines `le` + je placement. */
 const LEFTOVER_SCROLLBAR_ARROWS_MIN = 5;
 
-function LeftoverScrollbar({
+export function LeftoverScrollbar({
   offset,
   visible,
   total,
@@ -191,13 +192,7 @@ function LeftoverScrollbar({
   const grabRef = useRef<LeftoverScrollGrab | null>(null);
   const [thumbHover, setThumbHover] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trackH = height === undefined ? visible : height;
-  useEffect(() => {
-    return () => {
-      if (holdRef.current) clearTimeout(holdRef.current);
-    };
-  }, []);
   const hidden = leftoverScrollbarHidden(screenReader) || total <= visible || trackH < 1;
   if (hidden) return null;
   const showArrows = arrows && trackH >= LEFTOVER_SCROLLBAR_ARROWS_MIN;
@@ -208,35 +203,12 @@ function LeftoverScrollbar({
   const thumb = Array.from({ length: size }, () => figures.squareSmallFilled).join('\n');
   const thumbColor = leftoverThumbColor(thumbHover, dragging);
   const pointerOn = leftoverThumbPointerOn(onScrollTo !== undefined, dragging);
-  const stopHold = () => {
-    if (holdRef.current) {
-      clearTimeout(holdRef.current);
-      holdRef.current = null;
-    }
-  };
-  const startHold = (delta: number) => {
-    onScrollBy?.(delta);
-    stopHold();
-    const tick = () => {
-      holdRef.current = setTimeout(() => {
-        onScrollBy?.(delta);
-        tick();
-      }, LEFTOVER_FE_REPEAT_MS);
-    };
-    holdRef.current = setTimeout(tick, LEFTOVER_FE_REPEAT_INITIAL_MS);
-  };
   return (
     <Box flexDirection="column" flexShrink={0}>
-      {showArrows && leftoverArrowUpOn(offset) ? (
-        <Box
-          onPointer={(event: MouseActionEvent) => {
-            if (event.type === 'mousedown' && event.button === 0) startHold(-1);
-            if (event.type === 'mouseup') stopHold();
-          }}
-          onMouseLeave={stopHold}
-        >
-          <Text>{figures.arrowUp}</Text>
-        </Box>
+      {showArrows ? (
+        <FePress repeat onPress={onScrollBy && leftoverArrowUpOn(offset) ? () => onScrollBy(-1) : undefined}>
+          {figures.arrowUp}
+        </FePress>
       ) : null}
       <Box
         flexDirection="column"
@@ -264,17 +236,119 @@ function LeftoverScrollbar({
         <Text color={thumbColor}>{thumb}</Text>
         {below > 0 ? <Text dimColor>{pipe(below)}</Text> : null}
       </Box>
-      {showArrows && leftoverArrowDownOn(offset, visible, total) ? (
-        <Box
-          onPointer={(event: MouseActionEvent) => {
-            if (event.type === 'mousedown' && event.button === 0) startHold(1);
-            if (event.type === 'mouseup') stopHold();
-          }}
-          onMouseLeave={stopHold}
+      {showArrows ? (
+        <FePress
+          repeat
+          onPress={onScrollBy && leftoverArrowDownOn(offset, visible, total) ? () => onScrollBy(1) : undefined}
         >
-          <Text>{figures.arrowDown}</Text>
-        </Box>
+          {figures.arrowDown}
+        </FePress>
       ) : null}
+    </Box>
+  );
+}
+
+/**
+ * densable `fe` — click is `onClick` unless `repeat`, which is `onPointer`
+ * down/up. Repeat re-fires `onPress` on `Vn` after `zn`.
+ */
+export function FePress({
+  children,
+  paddingX = 0,
+  onPress,
+  repeat = false,
+}: {
+  children: string;
+  paddingX?: number;
+  onPress?: () => void;
+  repeat?: boolean;
+}): React.ReactNode {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const [repeatRow, setRepeatRow] = useState<number | null>(null);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startHold = (row: number) => {
+    setPressed(true);
+    setRepeatRow(row);
+    onPress?.();
+  };
+  useEffect(() => {
+    return () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      if (repeatTimer.current) clearTimeout(repeatTimer.current);
+    };
+  }, []);
+  const armed = onPress !== undefined;
+  useEffect(() => {
+    if (armed) return;
+    if (hovered) setHovered(false);
+    if (pressed) setPressed(false);
+    if (repeatRow !== null) setRepeatRow(null);
+  }, [armed, hovered, pressed, repeatRow]);
+  useEffect(() => {
+    if (repeatRow === null || !armed) return;
+    const tick = () => {
+      onPress?.();
+      repeatTimer.current = setTimeout(tick, LEFTOVER_FE_REPEAT_MS);
+    };
+    repeatTimer.current = setTimeout(tick, LEFTOVER_FE_REPEAT_INITIAL_MS);
+    return () => {
+      if (repeatTimer.current) clearTimeout(repeatTimer.current);
+    };
+  }, [repeatRow, armed, onPress]);
+  const onClick = (event: ClickEvent) => {
+    event.stopImmediatePropagation();
+    if (clickTimer.current !== null) return;
+    event.endClickChain();
+    setPressed(true);
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      setPressed(false);
+      onPress?.();
+    }, LEFTOVER_FE_CLICK_MS);
+  };
+  const onPointer = (event: MouseActionEvent) => {
+    if (event.type === 'mousedown' && event.button === 0) {
+      startHold(event.row);
+    } else if (event.type === 'mouseup') {
+      setPressed(false);
+      setRepeatRow(null);
+    }
+  };
+  // densable `she(o="tint")` — `me.level===0?"inverse":o`. Gold `$R` is
+  // `userMessageBackground`. Inverse hover flips only the first glyph.
+  const inverseStyle = chalk.level === 0;
+  const backgroundColor = inverseStyle ? undefined : pressed ? 'text' : hovered ? 'userMessageBackground' : undefined;
+  const [firstGlyph = '', ...restGlyphs] = children;
+  return (
+    <Box
+      flexShrink={1}
+      alignSelf="flex-start"
+      paddingX={paddingX}
+      backgroundColor={backgroundColor}
+      onClick={armed && !repeat ? onClick : undefined}
+      onPointer={armed && repeat ? onPointer : undefined}
+      onMouseEnter={armed ? () => setHovered(true) : undefined}
+      onMouseLeave={armed ? () => setHovered(false) : undefined}
+      hoverFollowsPaint={armed}
+      noSelect
+    >
+      <Text
+        color={pressed && !inverseStyle ? 'inverseText' : undefined}
+        dimColor={!pressed}
+        inverse={pressed && inverseStyle}
+        wrap="truncate-end"
+      >
+        {hovered && !pressed && inverseStyle ? (
+          <>
+            <Text inverse>{firstGlyph}</Text>
+            {restGlyphs.join('')}
+          </>
+        ) : (
+          children
+        )}
+      </Text>
     </Box>
   );
 }
@@ -390,7 +464,6 @@ function leftoverListFrame({
       nnDt,
       emptyMessage,
       optionCount,
-      onKeyDown,
       windowStart,
       hiddenBelow,
       wheelOn,
@@ -437,7 +510,6 @@ function leftoverDollarWt({
   nnDt,
   emptyMessage,
   optionCount,
-  onKeyDown,
   windowStart,
   hiddenBelow,
   wheelOn,
@@ -450,7 +522,6 @@ function leftoverDollarWt({
   nnDt: Set<DOMElement>;
   emptyMessage?: React.ReactNode;
   optionCount: number;
-  onKeyDown?: (event: KeyboardEvent) => void;
   windowStart: number;
   hiddenBelow?: React.ReactNode;
   wheelOn: boolean;
@@ -484,14 +555,14 @@ function leftoverDollarWt({
   return (
     <LeftoverIheWindowContext value={leftoverIheValue}>
       <LeftoverNnDtContext value={nnDt}>
-        <Box ref={hostRef} flexDirection="column" alignItems="stretch" tabIndex={0} onKeyDown={onKeyDown}>
+        <Box ref={hostRef} flexDirection="column" alignItems="stretch">
           {optionCount === 0 ? (
             emptyMessage != null ? (
               <Text dimColor>{emptyMessage}</Text>
             ) : null
           ) : (
             <>
-              <Box ref={fttRef} flexDirection="column" alignItems="stretch" onWheel={leftoverFttWheel}>
+              <Box ref={fttRef} flexDirection="column" onWheel={leftoverFttWheel}>
                 {children}
               </Box>
               {hiddenBelow ?? null}
@@ -689,12 +760,6 @@ function LeftoverCountHint({
   onPress?: (event: ClickEvent) => void;
 }): React.ReactNode {
   const dropsClick = useContext(LeftoverJeDropsContext);
-  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (delayRef.current) clearTimeout(delayRef.current);
-    };
-  }, []);
   if (count <= 0) return null;
   const glyph = direction === 'above' ? figures.arrowUp : figures.arrowDown;
   const label = `${glyph} ${count} more`;
@@ -708,11 +773,7 @@ function LeftoverCountHint({
         }
         event.stopImmediatePropagation();
         event.endClickChain();
-        if (delayRef.current) return;
-        delayRef.current = setTimeout(() => {
-          delayRef.current = null;
-          onPress?.(event);
-        }, LEFTOVER_FE_CLICK_MS);
+        onPress?.(event);
       }}
     >
       {onPress ? (
@@ -1584,7 +1645,7 @@ export function Select<T>({
               onClick={optionOnClick(option)}
               hoverStyle={hoverStyle}
               description={leftoverNn ? option.description : undefined}
-              icon={leftoverNn ? option.icon : undefined}
+              icon={option.icon}
               meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
               iconWidth={leftoverNn?.iconWidth}
               nameWidth={leftoverNn?.nameWidth}
@@ -1610,11 +1671,6 @@ export function Select<T>({
 
   if (layout === 'compact-vertical') {
     const maxIndexWidth = hideIndexes ? 0 : state.options.length.toString().length;
-    // Gold `$e` option wrap is column+flexShrink:0 only; yoga Stretch fills
-    // IC to the longest sibling. DualInk live Ask stays glyph-tight without
-    // an explicit floor — pin option column to longest title/desc (not
-    // terminal 100%, not ListItem stretch). Official bar ends at
-    // `Type something.`, not the question title row.
     const leftoverColumnWidth = leftoverCompactVerticalColumnWidth(
       options.map(option => ({
         type: option.type,
@@ -1764,7 +1820,7 @@ export function Select<T>({
               onClick={optionOnClick(option)}
               hoverStyle={hoverStyle}
               description={leftoverNn ? option.description : undefined}
-              icon={leftoverNn ? option.icon : undefined}
+              icon={option.icon}
               meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
               iconWidth={leftoverNn?.iconWidth}
               nameWidth={leftoverNn?.nameWidth}
@@ -2083,34 +2139,38 @@ export function Select<T>({
 
       return leftoverClip(
         option,
-        <SelectOption
-          key={String(option.value)}
-          isFocused={isFocused}
-          isSelected={isSelected}
-          shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
-          shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
-          onClick={optionOnClick(option)}
-          hoverStyle={hoverStyle}
-          description={leftoverNn && !inlineDescriptions ? option.description : undefined}
-          icon={leftoverNn ? option.icon : undefined}
-          meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
-          iconWidth={leftoverNn?.iconWidth}
-          nameWidth={leftoverNn?.nameWidth}
-          factsWidth={leftoverNn?.factsWidth}
-        >
-          <Box flexDirection="row" flexShrink={0}>
-            {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
-            <Text
-              dimColor={isOptionDisabled}
-              color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
-            >
-              {label}
-              {inlineDescriptions && option.description && (
-                <Text dimColor={isOptionDisabled || option.dimDescription !== false}> {option.description}</Text>
-              )}
-            </Text>
-          </Box>
-        </SelectOption>,
+        <>
+          <SelectOption
+            key={String(option.value)}
+            isFocused={isFocused}
+            isSelected={isSelected}
+            shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+            shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+            onClick={optionOnClick(option)}
+            hoverStyle={hoverStyle}
+            description={leftoverNn && !inlineDescriptions ? option.description : undefined}
+            icon={option.icon}
+            meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+            iconWidth={leftoverNn?.iconWidth}
+            nameWidth={leftoverNn?.nameWidth}
+            factsWidth={leftoverNn?.factsWidth}
+          >
+            <Box flexDirection="row" flexShrink={0}>
+              {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
+              <Text
+                dimColor={isOptionDisabled}
+                color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
+              >
+                {label}
+              </Text>
+            </Box>
+          </SelectOption>
+          {!inlineDescriptions && option.description ? (
+            <Box flexShrink={99} marginLeft={2}>
+              <Text wrap="wrap-trim">{option.description}</Text>
+            </Box>
+          ) : null}
+        </>,
       );
     }),
   });

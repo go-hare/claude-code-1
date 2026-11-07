@@ -21,6 +21,11 @@ type Props = {
    * @default false
    */
   withSpace?: boolean;
+  /**
+   * densable `Ze` `aria-label`. Overrides the status default (`current:`,
+   * `on:`, …). Lives on the glyph, not the colored wrapper.
+   */
+  'aria-label'?: string;
 };
 
 const STATUS_CONFIG: Record<
@@ -56,12 +61,13 @@ const STATUS_CONFIG: Record<
  *   Waiting for response
  * </Text>
  */
-export function StatusIcon({ status, withSpace = false }: Props): React.ReactNode {
+export function StatusIcon({ status, withSpace = false, 'aria-label': ariaLabel }: Props): React.ReactNode {
   const config = STATUS_CONFIG[status];
+  const label = ariaLabel ?? `${status}:`;
 
   return (
     <Text color={config.color} dimColor={!config.color}>
-      {config.icon}
+      <Text aria-label={label}>{config.icon}</Text>
       {withSpace && ' '}
     </Text>
   );

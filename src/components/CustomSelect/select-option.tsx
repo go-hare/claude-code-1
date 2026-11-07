@@ -122,8 +122,8 @@ export function SelectOption({
   const body = nn ? (
     <Box flexDirection="column" flexGrow={1} flexShrink={1}>
       <Box>
-        {iconWidth > 0 && icon !== undefined && icon !== null ? (
-          <Box flexShrink={0} width={iconWidth} marginRight={1}>
+        {icon !== undefined && icon !== null ? (
+          <Box flexShrink={0} width={iconWidth > 0 ? iconWidth : undefined} marginRight={1}>
             {icon}
           </Box>
         ) : null}
@@ -151,6 +151,11 @@ export function SelectOption({
           </Text>
         </Box>
       ) : null}
+    </Box>
+  ) : icon !== undefined && icon !== null ? (
+    <Box flexDirection="row" gap={1}>
+      <Box flexShrink={0}>{icon}</Box>
+      {children}
     </Box>
   ) : (
     children
