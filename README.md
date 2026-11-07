@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前 npm：**`2.7.300`**（2.7.299 重编：`MACRO.VERSION` 烙进二进制，与包版本一致）。`npm i -g @go-hare/claude-code`
+> 当前 npm：**`2.7.301`**（提示行通知与插件 toast 对齐 2.1.289；`/resume` 加载期间 Esc 不再继续加载）。`npm i -g @go-hare/claude-code`
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,9 +45,11 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.300** = 2.7.299 重编，二进制 `MACRO.VERSION` 与包版本一致），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**npm 包版本以 `package.json` / npm 为准**（当前发布线 **2.7.301**；二进制 `MACRO.VERSION` 与包版本一致），与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300）
+#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301）
+
+**2.7.301**：提示行通知与插件 toast 对齐 2.1.289——effort / 剪贴板提示留在提示行，不再进角落盒子；全屏插件 toast 只进栈；更新成功提示在 compact 警告出现时让位；`/resume` 在 worktree 查找期间按 Esc 不再继续加载。**不是** minify 1:1。
 
 **2.7.300**：2.7.299 重编。包版本与二进制里的 `MACRO.VERSION` 都是 `2.7.300`。内容与 2.7.299 相同。
 
