@@ -1,7 +1,7 @@
 import type * as React from 'react';
 import { useCallback, useEffect } from 'react';
 import { useAppStateStore, useSetAppState } from '../state/AppState.js';
-import { dismissToastItem, holdToastItem, pushToast } from '../components/toastStore.js';
+import { dismissToastItem, holdToastItem } from '../components/toastStore.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import type { Theme } from '../utils/theme.js';
 
@@ -78,6 +78,11 @@ const DEFAULT_TIMEOUT_MS = 8000;
 
 // Track current timeout to clear it when immediate notifications arrive
 let currentTimeoutId: NodeJS.Timeout | null = null;
+
+/** densable `che(u,r)` — notification visible unless held and not exempt. */
+export function isNotificationVisible(notice: Notification | null, hold: boolean): notice is Notification {
+  return notice !== null && (!hold || notice.exemptFromDiffPanelHold === true);
+}
 
 /** densable `p(u,r)` — keep preempted toast unless immediate without hold/requeue. */
 export function shouldRequeueOnPreempt(existing: Notification, incoming: Notification): boolean {
@@ -161,11 +166,6 @@ export function useNotifications(): {
 
   const addNotification = useCallback<AddNotificationFn>(
     (notif: Notification) => {
-      if (!notif.pinned) {
-        if ('text' in notif) {
-          pushToast(notif.key, notif.text, notif.plugin, notif.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-        }
-      }
       // densable Nu: pinned notices occupy the dedicated list, not current/queue.
       if (notif.pinned) {
         setAppState(prev => {
@@ -376,6 +376,11 @@ const PRIORITIES: Record<Priority, number> = {
   medium: 2,
   low: 3,
 };
+
+/** densable `eDt` — priority order for pinned notifications. */
+export function compareNotificationPriority(a: Notification, b: Notification): number {
+  return PRIORITIES[a.priority] - PRIORITIES[b.priority];
+}
 export function getNext(queue: Notification[]): Notification | undefined {
   if (queue.length === 0) return undefined;
   return queue.reduce((min, n) => (PRIORITIES[n.priority] < PRIORITIES[min.priority] ? n : min));

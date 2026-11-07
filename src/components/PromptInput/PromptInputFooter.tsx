@@ -58,6 +58,7 @@ type Props = {
   mcpClients?: MCPServerConnection[];
   isPasting?: boolean;
   isInputWrapped?: boolean;
+  hasStash?: boolean;
   messages: Message[];
   isSearching: boolean;
   historyQuery: string;
@@ -94,6 +95,7 @@ function PromptInputFooter({
   mcpClients,
   isPasting = false,
   isInputWrapped = false,
+  hasStash = false,
   messages,
   isSearching,
   historyQuery,
@@ -195,6 +197,7 @@ function PromptInputFooter({
               ideSelection={ideSelection}
               mcpClients={mcpClients}
               isInputWrapped={isInputWrapped}
+              hasStash={hasStash}
               isNarrow={isNarrow}
             />
           )}

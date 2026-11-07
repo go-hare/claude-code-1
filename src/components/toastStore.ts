@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto'
+
 /** densable toast record. Text only — no second React node, no pre-split lines. */
 export type ToastItem = {
   id: string
@@ -11,6 +13,8 @@ export type ToastItem = {
 
 const HOLD_MS = 30_000
 const FADE_MS = 240
+/** densable `A8` — stacked toast cap. */
+const TOAST_STACK_MAX = 50
 let items: ToastItem[] = []
 let pausedAt: number | undefined
 const listeners = new Set<() => void>()
@@ -31,16 +35,7 @@ export function getToasts(): ToastItem[] {
   return items
 }
 
-let toastSeq = 0
-
-/** `key#12` belongs to `key`. `ab#1` does not belong to `a`. */
-function toastKey(id: string): string {
-  const hash = id.lastIndexOf('#')
-  if (hash <= 0) return id
-  const tail = id.slice(hash + 1)
-  return /^\d+$/.test(tail) ? id.slice(0, hash) : id
-}
-
+/** densable `pRe` — push a stacked plugin toast (`$.ui.toast`). */
 export function pushToast(
   id: string,
   text: string,
@@ -48,44 +43,24 @@ export function pushToast(
   timeoutMs = HOLD_MS,
 ): void {
   const now = Date.now()
-  const same = items.findIndex(item => toastKey(item.id) === id)
-  if (same >= 0) {
-    publish(
-      items.map((item, index) =>
-        index === same
-          ? {
-              ...item,
-              plugin,
-              text,
-              phase: 'shown',
-              shownAt: now,
-              leavesAt: (pausedAt ?? now) + timeoutMs,
-            }
-          : item,
-      ),
-    )
-    return
-  }
-  toastSeq += 1
-  publish([
+  const next: ToastItem[] = [
     ...items,
     {
-      id: `${id}#${toastSeq}`,
+      id: id || randomUUID(),
       plugin,
       text,
       phase: 'shown',
       shownAt: now,
       leavesAt: (pausedAt ?? now) + timeoutMs,
     },
-  ])
+  ]
+  publish(next.length > TOAST_STACK_MAX ? next.slice(-TOAST_STACK_MAX) : next)
 }
 
-/** Drawn ids are `key#n`. Callers pass either that id or the notification key. */
 function toastIdFor(key: string): string | undefined {
   for (let index = items.length - 1; index >= 0; index--) {
     const item = items[index]
-    if (item !== undefined && (item.id === key || toastKey(item.id) === key))
-      return item.id
+    if (item !== undefined && item.id === key) return item.id
   }
   return undefined
 }

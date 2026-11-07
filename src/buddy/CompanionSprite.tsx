@@ -5,7 +5,6 @@ import { Box, Text, stringWidth } from '@anthropic/ink';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import type { AppState } from '../state/AppStateStore.js';
 import { getGlobalConfig } from '../utils/config.js';
-import { isFullscreenActive } from '../utils/fullscreen.js';
 import type { Theme } from '../utils/theme.js';
 import { getCompanion } from './companion.js';
 import { renderFace, renderSprite, spriteFrameCount } from './sprites.js';
@@ -50,43 +49,19 @@ function wrap(text: string, width: number): string[] {
   return lines;
 }
 
-function SpeechBubble({
-  text,
-  color,
-  fading,
-  tail,
-}: {
-  text: string;
-  color: keyof Theme;
-  fading: boolean;
-  tail: 'down' | 'right';
-}): React.ReactNode {
+function SpeechBubble({ text, color, fading }: { text: string; color: keyof Theme; fading: boolean }): React.ReactNode {
   const lines = wrap(text, 30);
   const borderColor = fading ? 'inactive' : color;
-  const bubble = (
-    <Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} width={34}>
-      {lines.map((l, i) => (
-        <Text key={i} italic dimColor={!fading} color={fading ? 'inactive' : undefined}>
-          {l}
-        </Text>
-      ))}
-    </Box>
-  );
-  if (tail === 'right') {
-    return (
-      <Box flexDirection="row" alignItems="center">
-        {bubble}
-        <Text color={borderColor}>─</Text>
-      </Box>
-    );
-  }
   return (
-    <Box flexDirection="column" alignItems="flex-end" marginRight={1}>
-      {bubble}
-      <Box flexDirection="column" alignItems="flex-end" paddingRight={6}>
-        <Text color={borderColor}>╲ </Text>
-        <Text color={borderColor}>╲</Text>
+    <Box flexDirection="row" alignItems="center">
+      <Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} width={34}>
+        {lines.map((l, i) => (
+          <Text key={i} italic dimColor={!fading} color={fading ? 'inactive' : undefined}>
+            {l}
+          </Text>
+        ))}
       </Box>
+      <Text color={borderColor}>─</Text>
     </Box>
   );
 }
@@ -103,8 +78,8 @@ function spriteColWidth(nameWidth: number): number {
 }
 
 // Width the sprite area consumes. PromptInput subtracts this so text wraps
-// correctly. In fullscreen the bubble floats over scrollback (no extra
-// width); in non-fullscreen it sits inline and needs BUBBLE_WIDTH more.
+// correctly. The speech bubble sits inline beside the sprite in both modes,
+// so a speaking companion also reserves BUBBLE_WIDTH.
 // Narrow terminals: 0 — REPL.tsx stacks the one-liner on its own row
 // (above input in fullscreen, below in scrollback), so no reservation.
 export function companionReservedColumns(terminalColumns: number, speaking: boolean): number {
@@ -113,7 +88,7 @@ export function companionReservedColumns(terminalColumns: number, speaking: bool
   if (!companion || getGlobalConfig().companionMuted) return 0;
   if (terminalColumns < MIN_COLS_FOR_FULL_SPRITE) return 0;
   const nameWidth = stringWidth(companion.name);
-  const bubble = speaking && !isFullscreenActive() ? BUBBLE_WIDTH : 0;
+  const bubble = speaking ? BUBBLE_WIDTH : 0;
   return spriteColWidth(nameWidth) + SPRITE_PADDING_X + bubble;
 }
 
@@ -247,61 +222,12 @@ export function CompanionSprite(): React.ReactNode {
     );
   }
 
-  // Fullscreen: bubble renders separately via CompanionFloatingBubble in
-  // FullscreenLayout's bottomFloat slot (the bottom slot's overflowY:hidden
-  // would clip a position:absolute overlay here). Sprite body only.
-  // Non-fullscreen: bubble sits inline beside the sprite (input shrinks)
-  // because floating into Static scrollback can't be cleared.
-  if (isFullscreenActive()) {
-    return (
-      <Box paddingX={1} flexShrink={0}>
-        {spriteColumn}
-      </Box>
-    );
-  }
+  // Bubble sits inline beside the sprite in both modes. PromptInput gives up
+  // BUBBLE_WIDTH while speaking, so it does not float over the scroll column.
   return (
     <Box flexDirection="row" alignItems="flex-end" paddingX={1} flexShrink={0}>
-      <SpeechBubble text={reaction} color={color} fading={fading} tail="right" />
+      <SpeechBubble text={reaction} color={color} fading={fading} />
       {spriteColumn}
     </Box>
-  );
-}
-
-// Floating bubble overlay for fullscreen mode. Mounted in FullscreenLayout's
-// bottomFloat slot (outside the overflowY:hidden clip) so it can extend into
-// the ScrollBox region. CompanionSprite owns the clear-after-10s timer; this
-// just reads companionReaction and renders the fade.
-export function CompanionFloatingBubble(): React.ReactNode {
-  const reaction = useAppState(s => s.companionReaction);
-  const [{ tick, forReaction }, setTick] = useState({
-    tick: 0,
-    forReaction: reaction,
-  });
-
-  // Reset tick synchronously when reaction changes (not in useEffect, which
-  // runs post-render and would show one stale-faded frame). Storing the
-  // reaction the tick is counting FOR alongside the tick itself means the
-  // fade computation never sees a tick from a previous reaction.
-  if (reaction !== forReaction) {
-    setTick({ tick: 0, forReaction: reaction });
-  }
-
-  useEffect(() => {
-    if (!reaction) return;
-    const timer = setInterval(set => set(s => ({ ...s, tick: s.tick + 1 })), TICK_MS, setTick);
-    return () => clearInterval(timer);
-  }, [reaction]);
-
-  if (!isBuddyEnabled() || !reaction) return null;
-  const companion = getCompanion();
-  if (!companion || getGlobalConfig().companionMuted) return null;
-
-  return (
-    <SpeechBubble
-      text={reaction}
-      color={RARITY_COLORS[companion.rarity]}
-      fading={tick >= BUBBLE_SHOW - FADE_WINDOW}
-      tail="down"
-    />
   );
 }

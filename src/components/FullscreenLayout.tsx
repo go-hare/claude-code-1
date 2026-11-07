@@ -40,6 +40,8 @@ import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fulls
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { useAppState } from '../state/AppState.js';
+import { isNotificationVisible } from '../context/notifications.js';
+import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import { NotificationBody } from './PromptInput/Notifications.js';
 import { TranscriptOverlayOffsetContext } from './transcriptOverlayOffset.js';
 import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
@@ -65,7 +67,8 @@ function TranscriptOverlayPad({ collapsed, children }: { collapsed: boolean; chi
  */
 function ModalDividerTail(): React.ReactNode {
   const current = useAppState(s => s.notifications.current);
-  if (current === null) return null;
+  const hold = useAppState(notificationsHoldToasts);
+  if (!isNotificationVisible(current, hold)) return null;
   return (
     <Box flexShrink={0} maxWidth="100%" overflow="hidden">
       <Text> </Text>
@@ -99,6 +102,9 @@ export const ScrollChromeContext = createContext<{
  * above-prompt box. PromptInput subtracts footer lines from this budget.
  */
 export const PromptChromeBudgetContext = createContext<number | undefined>(undefined);
+
+/** densable tot `Ckt` — visible dock width passed down to `X1` above-prompt hint row. */
+export const DockWidthContext = createContext(0);
 
 /**
  * densable tot leftover chrome claim (`zot` / `Hm`).
@@ -1963,7 +1969,7 @@ export function FullscreenLayout({
               <Box ref={promptInnerRef} flexDirection="column" width="100%" flexGrow={1} flexShrink={0}>
                 <AbovePromptLeftoverContext value={leftoverYe}>
                   <LeftoverChromeSubscribeContext value={subscribeLeftoverChrome}>
-                    {bottom}
+                    <DockWidthContext value={dockVisible ? dockWidth : 0}>{bottom}</DockWidthContext>
                   </LeftoverChromeSubscribeContext>
                 </AbovePromptLeftoverContext>
               </Box>

@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle';
+import figures from 'figures';
 import * as React from 'react';
 import {
   type ReactNode,
@@ -11,7 +12,12 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { type Notification, useNotifications } from 'src/context/notifications.js';
+import {
+  compareNotificationPriority,
+  isNotificationVisible,
+  type Notification,
+  useNotifications,
+} from 'src/context/notifications.js';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useAppState } from 'src/state/AppState.js';
 import { useVoiceState } from '../../context/voice.js';
@@ -43,6 +49,7 @@ import {
 import { notificationsHoldToasts } from '../../utils/replDiffMouseHost.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
+import { useCompactWarningSuppression } from '../../services/compact/compactWarningHook.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
 import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
@@ -285,8 +292,49 @@ type Props = {
   ideSelection: IDESelection | undefined;
   mcpClients?: MCPServerConnection[];
   isInputWrapped?: boolean;
+  hasStash?: boolean;
   isNarrow?: boolean;
 };
+
+/** densable `E1` — pinned notifications block rendered above the prompt border. */
+export function PinnedNotifications(): ReactNode {
+  const pinned = useAppState(s => s.notifications.pinned);
+  if (!pinned || pinned.length === 0) return null;
+  const sorted = pinned.slice().sort(compareNotificationPriority);
+  return (
+    <Box flexDirection="column" paddingX={2}>
+      {sorted.map(notice => (
+        <NotificationBody key={notice.key} notification={notice} />
+      ))}
+    </Box>
+  );
+}
+
+/** densable `zre` — `/goal active` indicator trailing the prompt notification row. */
+function ActiveGoalIndicator({ withSeparator }: { withSeparator: boolean }): ReactNode {
+  const setAt = useAppState(s => s.activeGoal?.setAt);
+  const [tick, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (setAt === undefined) return;
+    const elapsed = Math.max(0, Date.now() - setAt);
+    const step = elapsed < 60_000 ? 1000 : 60_000;
+    const delay = step - (elapsed % step);
+    const timer = setTimeout(bump, delay);
+    return () => clearTimeout(timer);
+  }, [setAt, tick]);
+  if (setAt === undefined) return null;
+  const elapsed = Math.max(0, Date.now() - setAt);
+  const suffix = elapsed < 1000 ? '' : ` (${formatDuration(elapsed, { mostSignificantOnly: true })})`;
+  return (
+    <Box flexShrink={0}>
+      {withSeparator ? <Text dimColor>{' · '}</Text> : null}
+      <Text color="permission">
+        <Text aria-hidden>{'◎ '}</Text>
+        {`/goal active${suffix}`}
+      </Text>
+    </Box>
+  );
+}
 
 export function NotificationBody({ notification }: { notification: Notification }): ReactNode {
   if ('segments' in notification && notification.segments) {
@@ -329,6 +377,7 @@ export function Notifications({
   ideSelection,
   mcpClients,
   isInputWrapped = false,
+  hasStash = false,
 }: Props): ReactNode {
   const tokenUsage = useMemo(() => {
     const messagesForTokenCount = getMessagesAfterCompactBoundary(messages);
@@ -340,6 +389,10 @@ export function Notifications({
   // would leak into this session's display (anthropics/claude-code#37596).
   const mainLoopModel = useMainLoopModel();
   const isShowingCompactMessage = calculateTokenWarningState(tokenUsage, mainLoopModel).isAboveWarningThreshold;
+  const suppressCompactWarning = useCompactWarningSuppression();
+  const isBriefOnlyState = useAppState(s => s.isBriefOnly);
+  const isBriefOnly = feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
+  const hold = useAppState(notificationsHoldToasts);
   const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const notifications = useAppState(s => s.notifications);
   const { addNotification, removeNotification } = useNotifications();
@@ -400,6 +453,31 @@ export function Notifications({
       removeNotification('external-editor-hint');
     }
   }, [shouldShowExternalEditorHint, editor, addNotification, removeNotification]);
+
+  // densable `Fo` — queue token-warning as an exempt medium notification so it
+  // rotates with current notifications instead of permanently occupying the 1-row slot.
+  useEffect(() => {
+    if (isShowingCompactMessage && !suppressCompactWarning && !isBriefOnly) {
+      addNotification({
+        key: 'token-warning',
+        jsx: <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />,
+        priority: 'medium',
+        timeoutMs: 18_000_000,
+        fold: (_acc, incoming) => incoming,
+        exemptFromDiffPanelHold: true,
+      });
+    } else {
+      removeNotification('token-warning');
+    }
+  }, [
+    isShowingCompactMessage,
+    suppressCompactWarning,
+    isBriefOnly,
+    tokenUsage,
+    mainLoopModel,
+    addNotification,
+    removeNotification,
+  ]);
 
   // Surface update status in the shared notification queue (fullscreen used to
   // clip the inline AutoUpdater row to a single height=1 slot).
@@ -473,31 +551,59 @@ export function Notifications({
     logError(new Error(`ui.toast threw while drawn: ${error.message}; no toast is drawn until the stack changes`));
   };
 
+  const showLoginNotice = apiKeyStatus === 'invalid' || apiKeyStatus === 'missing';
+  const showVerboseTokens = verbose && !showLoginNotice;
+  const currentVisible = isNotificationVisible(notifications.current, hold);
+  // densable nse `co=!Me` — success copy yields the row to the compact warning.
+  const showUpdaterSuccess = !isShowingCompactMessage;
+  // densable Ex `Xo` — left side is occupied when a notice is up OR an update is running.
+  const hasLeftContent = Boolean(
+    currentVisible ||
+      (isInOverageMode && !isTeamOrEnterprise) ||
+      showLoginNotice ||
+      showVerboseTokens ||
+      isAutoUpdating ||
+      shouldShowIdeSelection ||
+      debug ||
+      autoUpdaterResult !== null,
+  );
+
   return (
     <SentryErrorBoundary name="ui.toast" onError={onToastStackError}>
-      {/* densable Notifications column: alignItems flex-end, flexShrink 1, overflowX hidden. isNarrow is 0-hit in 239 SEA. */}
-      <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
-        <NotificationContent
-          ideSelection={ideSelection}
-          mcpClients={mcpClients}
-          notifications={notifications}
-          isInOverageMode={isInOverageMode ?? false}
-          isTeamOrEnterprise={isTeamOrEnterprise}
-          apiKeyStatus={apiKeyStatus}
-          debug={debug}
-          verbose={verbose}
-          tokenUsage={tokenUsage}
-          mainLoopModel={mainLoopModel}
-        />
-        {/* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */}
-        <AutoUpdaterWrapper
-          verbose={verbose}
-          onAutoUpdaterResult={onAutoUpdaterResult}
-          autoUpdaterResult={autoUpdaterResult}
-          isUpdating={isAutoUpdating}
-          onChangeIsUpdating={onChangeIsUpdating}
-          showSuccessMessage={true}
-        />
+      {/* densable Ex: row of [Nn, stashed, ActiveGoalIndicator]. */}
+      <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" flexShrink={0} overflowX="hidden">
+        <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
+          <NotificationContent
+            ideSelection={ideSelection}
+            mcpClients={mcpClients}
+            notifications={notifications}
+            hold={hold}
+            isInOverageMode={isInOverageMode ?? false}
+            isTeamOrEnterprise={isTeamOrEnterprise}
+            apiKeyStatus={apiKeyStatus}
+            debug={debug}
+            verbose={verbose}
+            tokenUsage={tokenUsage}
+            autoUpdaterElement={
+              /* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */
+              <AutoUpdaterWrapper
+                verbose={verbose}
+                onAutoUpdaterResult={onAutoUpdaterResult}
+                autoUpdaterResult={autoUpdaterResult}
+                isUpdating={isAutoUpdating}
+                onChangeIsUpdating={onChangeIsUpdating}
+                showSuccessMessage={showUpdaterSuccess}
+              />
+            }
+          />
+        </Box>
+        {hasStash && (
+          <Box flexShrink={0}>
+            <Text dimColor>{hasLeftContent ? ' · ' : ' '}</Text>
+            <Text dimColor>{figures.pointerSmall} stashed</Text>
+          </Box>
+        )}
+        <ActiveGoalIndicator withSeparator={hasLeftContent || hasStash} />
       </Box>
     </SentryErrorBoundary>
   );
@@ -507,13 +613,14 @@ function NotificationContent({
   ideSelection,
   mcpClients,
   notifications,
+  hold,
   isInOverageMode,
   isTeamOrEnterprise,
   apiKeyStatus,
   debug,
   verbose,
   tokenUsage,
-  mainLoopModel,
+  autoUpdaterElement,
 }: {
   ideSelection: IDESelection | undefined;
   mcpClients?: MCPServerConnection[];
@@ -522,13 +629,14 @@ function NotificationContent({
     queue: Notification[];
     pinned?: Notification[];
   };
+  hold: boolean;
   isInOverageMode: boolean;
   isTeamOrEnterprise: boolean;
   apiKeyStatus: VerificationStatus;
   debug: boolean;
   verbose: boolean;
   tokenUsage: number;
-  mainLoopModel: string;
+  autoUpdaterElement: ReactNode;
 }): ReactNode {
   // Poll apiKeyHelper inflight state to show slow-helper notice.
   // Gated on configuration — most users never set apiKeyHelper, so the
@@ -555,8 +663,6 @@ function NotificationContent({
   const voiceEnabled = feature('VOICE_MODE') ? voiceEnabledRaw : false;
   const voiceErrorRaw = useVoiceState(s => s.voiceError);
   const voiceError = feature('VOICE_MODE') ? voiceErrorRaw : null;
-  const isBriefOnlyState = useAppState(s => s.isBriefOnly);
-  const isBriefOnly = feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
 
   // When voice is actively recording or processing, replace all
   // notifications with just the voice indicator.
@@ -566,15 +672,6 @@ function NotificationContent({
 
   return (
     <>
-      <IdeStatusIndicator ideSelection={ideSelection} mcpClients={mcpClients} />
-      {notifications.current && <NotificationBody notification={notifications.current} />}
-      {(notifications.pinned?.length ?? 0) > 0 && (
-        <Box flexDirection="column" paddingX={2}>
-          {notifications.pinned!.map(notice => (
-            <NotificationBody key={notice.key} notification={notice} />
-          ))}
-        </Box>
-      )}
       {isInOverageMode && !isTeamOrEnterprise && (
         <Box>
           <Text dimColor wrap="truncate">
@@ -625,7 +722,8 @@ function NotificationContent({
           </Text>
         </Box>
       )}
-      {!isBriefOnly && <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />}
+      {autoUpdaterElement}
+      <IdeStatusIndicator ideSelection={ideSelection} mcpClients={mcpClients} />
       {feature('VOICE_MODE')
         ? voiceEnabled &&
           voiceError && (
@@ -638,6 +736,7 @@ function NotificationContent({
         : null}
       <MemoryUsageIndicator />
       <SandboxPromptFooterHint />
+      {isNotificationVisible(notifications.current, hold) && <NotificationBody notification={notifications.current} />}
     </>
   );
 }

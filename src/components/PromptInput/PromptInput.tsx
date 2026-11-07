@@ -12,7 +12,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { PromptChromeBudgetContext } from '../FullscreenLayout.js';
+import { DockWidthContext, PromptChromeBudgetContext } from '../FullscreenLayout.js';
 import { useNotifications } from 'src/context/notifications.js';
 import { useCommandQueue } from 'src/hooks/useCommandQueue.js';
 import { type IDEAtMentioned, useIdeAtMentioned } from 'src/hooks/useIdeAtMentioned.js';
@@ -44,7 +44,7 @@ import { getNativeCSIuTerminalDisplayName } from '../../commands/terminalSetup/t
 import { type Command, hasCommand } from '../../commands.js';
 import { useIsModalOverlayActive } from '../../context/overlayContext.js';
 import { useHasBlockingOpenDialogs } from '../../dialog/DialogStoreContext.js';
-import { useSetPromptOverlayDialog } from '../../context/promptOverlayContext.js';
+import { usePromptOverlayDialog, useSetPromptOverlayDialog } from '../../context/promptOverlayContext.js';
 import {
   formatImageRef,
   formatPastedTextRef,
@@ -209,12 +209,11 @@ import VimTextInput from '../VimTextInput.js';
 import { dismissExitHintIfShowing } from './dismissExitHintIfShowing.js';
 import { getModeFromInput, getValueFromInput } from './inputModes.js';
 import { mergePastedContentsDualWrite, resolveSubmitInputFromLive } from './inputPaste.js';
-import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications } from './Notifications.js';
+import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications, PinnedNotifications } from './Notifications.js';
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
 import { PromptInputModeIndicator } from './PromptInputModeIndicator.js';
 import { PromptInputQueuedCommands } from './PromptInputQueuedCommands.js';
-import { PromptInputStashNotice } from './PromptInputStashNotice.js';
 import { useMaybeTruncateInput } from './useMaybeTruncateInput.js';
 import { usePromptInputPlaceholder } from './usePromptInputPlaceholder.js';
 import { useShowFastIconHint } from './useShowFastIconHint.js';
@@ -2975,6 +2974,8 @@ function PromptInput({
   // slot's overflowY:hidden clip (same pattern as SuggestionsOverlay).
   // Must be called before early returns below to satisfy rules-of-hooks.
   useSetPromptOverlayDialog(null);
+  const dockWidth = useContext(DockWidthContext);
+  const overlayDialog = usePromptOverlayDialog();
 
   // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
   // Hook must run unconditionally — placed before the early returns below
@@ -3293,6 +3294,9 @@ function PromptInput({
       }
     : buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive);
 
+  const hasStash = stashedPrompt !== undefined;
+  const aboveNotificationWidth = dockWidth > 0 ? Math.max(0, promptInputColumns - dockWidth) : '100%';
+
   return (
     <Box flexDirection="column" marginTop={briefOwnsGap ? 0 : 1}>
       {!isFullscreenEnvEnabled() && (
@@ -3303,7 +3307,7 @@ function PromptInput({
           <Text dimColor>Waiting for permission…</Text>
         </Box>
       )}
-      <PromptInputStashNotice hasStash={stashedPrompt !== undefined} />
+      <PinnedNotifications />
       {swarmBanner ? (
         <>
           <Text color={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}>
@@ -3404,6 +3408,7 @@ function PromptInput({
         mcpClients={mcpClients}
         isPasting={isPasting}
         isInputWrapped={isInputWrapped}
+        hasStash={hasStash}
         messages={messages}
         isSearching={isSearchingHistory}
         historyQuery={historyQuery}
@@ -3419,11 +3424,19 @@ function PromptInput({
         onSuppressDefaultHint={setPluginSuppressesHint}
       />
       {isFullscreenEnvEnabled() ? (
-        // densable tot paints ToastStackView on the scroll column. This
-        // mount stays at height 0 so AutoUpdater's initial-check effect
-        // does not re-fire (PR#22413) and the prompt border is not the
-        // toast host.
-        <Box height={0} overflow="hidden">
+        // densable X1 — absolute 1-row slot in the gap above the prompt border.
+        // Kept mounted at height 0 while slash suggestions or overlay dialogs
+        // are open so AutoUpdater does not re-fire its initial check (PR#22413).
+        <Box
+          position="absolute"
+          marginTop={briefOwnsGap ? -2 : -1}
+          height={suggestions.length === 0 && !overlayDialog ? 1 : 0}
+          width={aboveNotificationWidth}
+          paddingX={2}
+          flexDirection="column"
+          justifyContent="flex-end"
+          overflow="hidden"
+        >
           <Notifications
             apiKeyStatus={apiKeyStatus}
             autoUpdaterResult={autoUpdaterResult}
@@ -3436,6 +3449,7 @@ function PromptInput({
             ideSelection={ideSelection}
             mcpClients={mcpClients}
             isInputWrapped={isInputWrapped}
+            hasStash={hasStash}
           />
         </Box>
       ) : null}

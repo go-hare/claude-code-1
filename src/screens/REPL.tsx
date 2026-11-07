@@ -700,7 +700,7 @@ import { TungstenLiveMonitor } from '@claude-code/builtin-tools/tools/TungstenTo
 // For full browser interaction use Claude-in-Chrome MCP tools.
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js';
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
-import { CompanionSprite, CompanionFloatingBubble, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
+import { CompanionSprite, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
 import { isBuddyEnabled } from '../buddy/enabled.js';
 import { DevBar } from '../components/DevBar.js';
 // Session manager removed - using AppState now
@@ -712,6 +712,7 @@ import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDi
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { ToastStackView } from '../components/PromptInput/Notifications.js';
+import { getToasts, pushToast } from '../components/toastStore.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
 import {
   computeDiffSidebarWidth,
@@ -2373,6 +2374,11 @@ export function REPL({
       isToolWithheldByDenyRule: tool => Boolean(getDenyRuleForTool(store.getState().toolPermissionContext, tool)),
     });
     setUiToastShowHandler(toast => {
+      if (isFullscreenEnvEnabled()) {
+        pushToast(randomUUID(), toast.text, toast.plugin, toast.timeoutMs ?? 4000);
+        logForDebugging(`$.ui.toast: stacked (${getToasts().length} up)`);
+        return;
+      }
       addNotification({
         key: `plugin-toast-${randomUUID()}`,
         kind: 'event',
@@ -8472,7 +8478,6 @@ export function REPL({
         {transcriptScrollRef ? (
           <FullscreenLayout
             scrollRef={scrollRef}
-            transcriptOverlay={<ToastStackView />}
             scrollable={
               <>
                 {transcriptMessagesElement}
@@ -10017,11 +10022,8 @@ export function REPL({
                       )}
                       {process.env.USER_TYPE === 'ant' && <DevBar />}
                     </Box>
-                    {buddyEnabled && companionVisible ? (
-                      <Box flexDirection="column" alignItems="flex-end">
-                        {isFullscreenEnvEnabled() && !companionNarrow ? <CompanionFloatingBubble /> : null}
-                        {!(companionNarrow && isFullscreenEnvEnabled()) ? <CompanionSprite /> : null}
-                      </Box>
+                    {buddyEnabled && companionVisible && !(companionNarrow && isFullscreenEnvEnabled()) ? (
+                      <CompanionSprite />
                     ) : null}
                   </Box>
                 </Box>
