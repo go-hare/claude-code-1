@@ -26,6 +26,7 @@ declare module 'react' {
       'ink-box': {
         ref?: Ref<DOMElement>
         tabIndex?: number
+        textEntry?: boolean
         autoFocus?: boolean
         /** densable accessibility bag */
         accessibility?: DOMAccessibility

@@ -1,15 +1,35 @@
 import * as React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import AccessibilityContext from '../components/AccessibilityContext.js';
+import { ClockContext } from '../components/ClockContext.js';
+import { type ClickEvent, MOUNT_SETTLE_MS } from '../core/events/click-event.js';
+import type { KeyboardEvent } from '../core/events/keyboard-event.js';
+import type { WheelEvent } from '../core/events/wheel-event.js';
+import { clamp } from '../core/layout/geometry.js';
 import { useSearchInput } from '../hooks/useSearchInput.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import type { KeyboardEvent } from '../core/events/keyboard-event.js';
-import { clamp } from '../core/layout/geometry.js';
 import { Box, Text, useTerminalFocus } from '../index.js';
-import { SearchBox } from './SearchBox.js';
 import { Byline } from './Byline.js';
 import { KeyboardShortcutHint } from './KeyboardShortcutHint.js';
 import { ListItem } from './ListItem.js';
 import { Pane } from './Pane.js';
+import { SearchBox } from './SearchBox.js';
+
+function useStrayPickerClickGuard(): (event: ClickEvent) => boolean {
+  const clock = useContext(ClockContext);
+  const [mountedAt] = useState(() => clock?.now() ?? Date.now());
+  return useCallback(
+    (event: ClickEvent) => {
+      const now = clock?.now() ?? Date.now();
+      if (event.isWindowActivation || now - mountedAt < MOUNT_SETTLE_MS) {
+        event.dropAsStray();
+        return true;
+      }
+      return false;
+    },
+    [clock, mountedAt],
+  );
+}
 
 type PickerAction<T> = {
   /** Hint label shown in the byline, e.g. "mention" → "Tab to mention". */
@@ -18,7 +38,7 @@ type PickerAction<T> = {
 };
 
 type Props<T> = {
-  title: string;
+  title: React.ReactNode;
   placeholder?: string;
   initialQuery?: string;
   items: readonly T[];
@@ -51,6 +71,8 @@ type Props<T> = {
    */
   onFocus?: (item: T | undefined) => void;
   onCancel: () => void;
+  /** Optional external key that resets focus and window to 0 when changed. */
+  resetKey?: unknown;
   /** Shown when items is empty. Caller bakes loading/searching state into this. */
   emptyMessage?: string | ((query: string) => string);
   /**
@@ -59,6 +81,7 @@ type Props<T> = {
    */
   matchLabel?: string;
   selectAction?: string;
+  cancelAction?: string;
   extraHints?: React.ReactNode;
 };
 
@@ -67,6 +90,11 @@ const DEFAULT_VISIBLE = 8;
 // rows) + hints. matchLabel adds +1 when present, accounted for separately.
 const CHROME_ROWS = 10;
 const MIN_VISIBLE = 2;
+
+type PickerState = {
+  focus: number;
+  window: number;
+};
 
 export function FuzzyPicker<T>({
   title,
@@ -85,21 +113,28 @@ export function FuzzyPicker<T>({
   onShiftTab,
   onFocus,
   onCancel,
+  resetKey,
   emptyMessage = 'No results',
   matchLabel,
   selectAction = 'select',
+  cancelAction = 'cancel',
   extraHints,
 }: Props<T>): React.ReactNode {
   const isTerminalFocused = useTerminalFocus();
   const { rows, columns } = useTerminalSize();
-  // densable 247 $t: je(lt) 3-tuple — Enter/Tab read ke().focus, not snapshot P.
-  const [focusedIndex, setFocusedIndexState] = useState(0);
+  // densable 289 iAt @208925027: independent {focus, window} state + live focus ref (247 $t).
+  const [pickerState, setPickerState] = useState<PickerState>({ focus: 0, window: 0 });
+  const stateLive = useRef<PickerState>({ focus: 0, window: 0 });
   const focusedIndexLive = useRef(0);
-  const setFocusedIndex = (action: React.SetStateAction<number>): void => {
-    const next = typeof action === 'function' ? action(focusedIndexLive.current) : action;
+  const updatePickerState = (action: React.SetStateAction<PickerState>): void => {
+    const resolved = typeof action === 'function' ? action(stateLive.current) : action;
+    const next = resolved.focus;
+    stateLive.current = resolved;
     focusedIndexLive.current = next;
-    setFocusedIndexState(next);
+    setPickerState(resolved);
   };
+  const { focus: focusedIndex, window: windowStart } = pickerState;
+  const [hoveredItem, setHoveredItem] = useState<T | undefined>(undefined);
 
   // Cap visibleCount so the picker never exceeds the terminal height. When it
   // overflows, each re-render (arrow key, ctrl+p) mis-positions the cursor-up
@@ -109,9 +144,40 @@ export function FuzzyPicker<T>({
   // Full hint row with onTab+onShiftTab is ~100 chars and wraps inconsistently
   // below that. Compact mode drops shift+tab and shortens labels.
   const compact = columns < 120;
+  const maxWindow = Math.max(0, items.length - visibleCount);
 
-  const step = (delta: 1 | -1) => {
-    setFocusedIndex(i => clamp(i + delta, 0, items.length - 1));
+  const step = (delta: number) => {
+    setHoveredItem(undefined);
+    updatePickerState(prev => {
+      const nextFocus = clamp(prev.focus + delta, 0, items.length - 1);
+      return {
+        focus: nextFocus,
+        window:
+          nextFocus < prev.window
+            ? nextFocus
+            : nextFocus >= prev.window + visibleCount
+              ? nextFocus - visibleCount + 1
+              : prev.window,
+      };
+    });
+  };
+
+  const scrollWindow = (delta: number) => {
+    updatePickerState(prev => ({
+      ...prev,
+      window: clamp(prev.window + delta, 0, maxWindow),
+    }));
+  };
+
+  const handleWheel = (event: WheelEvent) => {
+    if (event.deltaY === 0) return;
+    const down = event.deltaY > 0;
+    if (direction === 'up') {
+      scrollWindow(down ? -1 : 1);
+    } else {
+      scrollWindow(down ? 1 : -1);
+    }
+    event.stopImmediatePropagation();
   };
 
   // onKeyDown fires after useSearchInput's useInput, so onExit must be a
@@ -139,6 +205,13 @@ export function FuzzyPicker<T>({
       step(direction === 'up' ? -1 : 1);
       return;
     }
+    if (e.key === 'pageup' || e.key === 'pagedown') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const pageDir = e.key === 'pagedown' ? 1 : -1;
+      step((direction === 'up' ? -pageDir : pageDir) * visibleCount);
+      return;
+    }
     if (e.key === 'return') {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -162,21 +235,34 @@ export function FuzzyPicker<T>({
 
   useEffect(() => {
     onQueryChange(query);
-    setFocusedIndex(0);
+    updatePickerState({ focus: 0, window: 0 });
+    setHoveredItem(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   useEffect(() => {
-    setFocusedIndex(i => clamp(i, 0, items.length - 1));
-  }, [items.length]);
+    updatePickerState(prev => ({
+      focus: clamp(prev.focus, 0, items.length - 1),
+      window: clamp(prev.window, 0, maxWindow),
+    }));
+    setHoveredItem(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, maxWindow]);
+
+  useEffect(() => {
+    if (resetKey === undefined) return;
+    updatePickerState({ focus: 0, window: 0 });
+    setHoveredItem(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
 
   const focused = items[focusedIndex];
+  const previewTarget = hoveredItem ?? focused;
   useEffect(() => {
-    onFocus?.(focused);
+    onFocus?.(previewTarget);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused]);
+  }, [previewTarget]);
 
-  const windowStart = clamp(focusedIndex - visibleCount + 1, 0, items.length - visibleCount);
   const visible = items.slice(windowStart, windowStart + visibleCount);
 
   const emptyText = typeof emptyMessage === 'function' ? emptyMessage(query) : emptyMessage;
@@ -202,13 +288,15 @@ export function FuzzyPicker<T>({
       getKey={getKey}
       renderItem={renderItem}
       emptyText={emptyText}
+      onItemClick={onSelect}
+      onItemHover={setHoveredItem}
     />
   );
 
   const preview =
-    renderPreview && focused ? (
+    renderPreview && previewTarget ? (
       <Box flexDirection="column" flexGrow={1}>
-        {renderPreview(focused)}
+        {renderPreview(previewTarget)}
       </Box>
     ) : null;
 
@@ -238,7 +326,7 @@ export function FuzzyPicker<T>({
   const inputAbove = direction !== 'up';
   return (
     <Pane color="permission">
-      <Box flexDirection="column" gap={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
+      <Box flexDirection="column" gap={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown} onWheel={handleWheel}>
         <Text bold color="permission">
           {title}
         </Text>
@@ -250,8 +338,7 @@ export function FuzzyPicker<T>({
             <KeyboardShortcutHint shortcut="↑/↓" action={compact ? 'nav' : 'navigate'} />
             <KeyboardShortcutHint shortcut="Enter" action={compact ? firstWord(selectAction) : selectAction} />
             {onTab && <KeyboardShortcutHint shortcut="Tab" action={onTab.action} />}
-            {onShiftTab && !compact && <KeyboardShortcutHint shortcut="shift+tab" action={onShiftTab.action} />}
-            <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+            <KeyboardShortcutHint shortcut="Esc" action={cancelAction} />
             {extraHints}
           </Byline>
         </Text>
@@ -266,6 +353,8 @@ type ListProps<T> = Pick<Props<T>, 'visibleCount' | 'direction' | 'getKey' | 're
   total: number;
   focusedIndex: number;
   emptyText: string;
+  onItemClick: (item: T) => void;
+  onItemHover: (item: T | undefined) => void;
 };
 
 function List<T>({
@@ -278,7 +367,12 @@ function List<T>({
   getKey,
   renderItem,
   emptyText,
+  onItemClick,
+  onItemHover,
 }: ListProps<T>): React.ReactNode {
+  const isStrayClick = useStrayPickerClickGuard();
+  const isScreenReaderEnabled = useContext(AccessibilityContext);
+
   if (visible.length === 0) {
     return (
       <Box height={visibleCount} flexShrink={0}>
@@ -296,9 +390,15 @@ function List<T>({
       <ListItem
         key={getKey(item)}
         isFocused={isFocused}
+        declareCursor={isScreenReaderEnabled}
         showScrollUp={direction === 'up' ? atHighEdge : atLowEdge}
         showScrollDown={direction === 'up' ? atLowEdge : atHighEdge}
         styled={false}
+        onClick={event => {
+          if (isStrayClick(event)) return;
+          onItemClick(item);
+        }}
+        onMouseEnter={() => onItemHover(item)}
       >
         {renderItem(item, isFocused)}
       </ListItem>
@@ -306,7 +406,12 @@ function List<T>({
   });
 
   return (
-    <Box height={visibleCount} flexShrink={0} flexDirection={direction === 'up' ? 'column-reverse' : 'column'}>
+    <Box
+      height={visibleCount}
+      flexShrink={0}
+      flexDirection={direction === 'up' ? 'column-reverse' : 'column'}
+      onMouseLeave={() => onItemHover(undefined)}
+    >
       {rows}
     </Box>
   );

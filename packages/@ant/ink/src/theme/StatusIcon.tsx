@@ -1,19 +1,24 @@
 import figures from 'figures';
 import React from 'react';
+import { stringWidth } from '../core/stringWidth.js';
 import { Text } from '../index.js';
 
-type Status = 'success' | 'error' | 'warning' | 'info' | 'pending' | 'loading';
+export type StatusIconStatus =
+  | 'success'
+  | 'error'
+  | 'warning'
+  | 'info'
+  | 'pending'
+  | 'loading'
+  | 'running'
+  | 'on'
+  | 'off';
+
+type Status = StatusIconStatus;
 
 type Props = {
   /**
    * The status to display. Determines both the icon and color.
-   *
-   * - `success`: Green checkmark (✓)
-   * - `error`: Red cross (✗)
-   * - `warning`: Yellow warning symbol (⚠)
-   * - `info`: Blue info symbol (ℹ)
-   * - `pending`: Dimmed circle (○)
-   * - `loading`: Dimmed ellipsis (…)
    */
   status: Status;
   /**
@@ -28,42 +33,34 @@ type Props = {
   'aria-label'?: string;
 };
 
+const RUNNING_ICON = process.platform === 'darwin' ? '⏺' : '●';
+
 const STATUS_CONFIG: Record<
   Status,
   {
     icon: string;
     color: 'success' | 'error' | 'warning' | 'suggestion' | undefined;
+    ariaLabel: string;
   }
 > = {
-  success: { icon: figures.tick, color: 'success' },
-  error: { icon: figures.cross, color: 'error' },
-  warning: { icon: figures.warning, color: 'warning' },
-  info: { icon: figures.info, color: 'suggestion' },
-  pending: { icon: figures.circle, color: undefined },
-  loading: { icon: '…', color: undefined },
+  success: { icon: figures.tick, color: 'success', ariaLabel: 'done:' },
+  error: { icon: figures.cross, color: 'error', ariaLabel: 'failed:' },
+  warning: { icon: figures.warning, color: 'warning', ariaLabel: 'warning:' },
+  info: { icon: figures.info, color: 'suggestion', ariaLabel: 'note:' },
+  pending: { icon: figures.circle, color: undefined, ariaLabel: 'pending:' },
+  loading: { icon: '…', color: undefined, ariaLabel: 'loading:' },
+  running: { icon: RUNNING_ICON, color: undefined, ariaLabel: 'running:' },
+  on: { icon: figures.tick, color: 'success', ariaLabel: 'on:' },
+  off: { icon: figures.circle, color: undefined, ariaLabel: 'off:' },
 };
 
-/**
- * Renders a status indicator icon with appropriate color.
- *
- * @example
- * // Success indicator
- * <StatusIcon status="success" />
- *
- * @example
- * // Error with trailing space for text
- * <Text><StatusIcon status="error" withSpace />Failed to connect</Text>
- *
- * @example
- * // Status line pattern
- * <Text>
- *   <StatusIcon status="pending" withSpace />
- *   Waiting for response
- * </Text>
- */
+export function getStatusIconMaxWidth(): number {
+  return Math.max(...Object.values(STATUS_CONFIG).map(c => stringWidth(c.icon)));
+}
+
 export function StatusIcon({ status, withSpace = false, 'aria-label': ariaLabel }: Props): React.ReactNode {
   const config = STATUS_CONFIG[status];
-  const label = ariaLabel ?? `${status}:`;
+  const label = ariaLabel ?? config.ariaLabel;
 
   return (
     <Text color={config.color} dimColor={!config.color}>

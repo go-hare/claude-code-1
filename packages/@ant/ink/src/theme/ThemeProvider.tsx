@@ -2,7 +2,14 @@ import { feature } from 'bun:bundle';
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import useStdin from '../hooks/use-stdin.js';
 import { getSystemThemeName, subscribeSystemTheme, type SystemTheme } from './systemTheme.js';
-import { isBuiltinThemeName, setCustomThemeOverrides, type ThemeName, type ThemeSetting } from './theme-types.js';
+import {
+  getTheme,
+  isBuiltinThemeName,
+  setCustomThemeOverrides,
+  type Theme,
+  type ThemeName,
+  type ThemeSetting,
+} from './theme-types.js';
 
 // -- Config persistence injection --
 // Business layer provides these via setThemeConfigCallbacks().
@@ -43,6 +50,9 @@ type ThemeContextValue = {
   cancelPreview: () => void;
   /** The resolved theme to render with. Never 'auto'. */
   currentTheme: ThemeName;
+  resolvedTheme: Theme;
+  activeThemeOverrides: Record<string, unknown> | undefined;
+  setPreviewOverrides: (overrides: Record<string, unknown> | null) => void;
 };
 
 // Non-'auto' default so useTheme() works without a provider (tests, tooling).
@@ -55,6 +65,9 @@ const ThemeContext = createContext<ThemeContextValue>({
   savePreview: () => {},
   cancelPreview: () => {},
   currentTheme: DEFAULT_THEME,
+  resolvedTheme: getTheme(DEFAULT_THEME),
+  activeThemeOverrides: undefined,
+  setPreviewOverrides: () => {},
 });
 
 type Props = {
@@ -74,6 +87,7 @@ function defaultSaveTheme(setting: ThemeSetting): void {
 export function ThemeProvider({ children, initialState, onThemeSave = defaultSaveTheme }: Props) {
   const [themeSetting, setThemeSetting] = useState(initialState ?? defaultInitialTheme);
   const [previewTheme, setPreviewTheme] = useState<ThemeSetting | null>(null);
+  const [previewOverrides, setPreviewOverrides] = useState<Record<string, unknown> | null>(null);
 
   // densable C7t: `[ht,V]=g(()=>(i??T)==="auto"?Zle():"dark")` then
   // `Re=()=>{if(m!=="auto")return; return V(Zle()),jat(()=>V(Zle()))}`.
@@ -90,9 +104,9 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
   const { internal_querier } = useStdin();
 
   // densable C7t Re: if(m!=="auto") return; V(Zle()); return jat(()=>V(Zle())).
-  // Subscribe only — seed is the useState initializer (first render = Zle).
   useLayoutEffect(() => {
     if (activeSetting !== 'auto') return;
+    setSystemTheme(getSystemThemeName());
     return subscribeSystemTheme(setSystemTheme);
   }, [activeSetting]);
 
@@ -117,10 +131,17 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
 
   const resolvedCustom = useMemo(() => _resolveCustomTheme(activeSetting), [activeSetting]);
   const currentTheme: ThemeName = activeSetting === 'auto' ? systemTheme : resolvedCustom.base;
+  const activeThemeOverrides = previewOverrides ?? resolvedCustom.overrides;
 
   // Official src writes overrides during render so preview is not a frame late.
-  setCustomThemeOverrides(resolvedCustom.overrides);
+  setCustomThemeOverrides(activeThemeOverrides);
   useEffect(() => () => setCustomThemeOverrides(undefined), []);
+
+  const resolvedTheme = useMemo(
+    () => getTheme(currentTheme),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentTheme, activeThemeOverrides],
+  );
 
   const value = useMemo<ThemeContextValue>(
     () => ({
@@ -150,13 +171,15 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
         }
       },
       cancelPreview: () => {
-        if (previewTheme !== null) {
-          setPreviewTheme(null);
-        }
+        setPreviewTheme(null);
+        setPreviewOverrides(null);
       },
       currentTheme,
+      resolvedTheme,
+      activeThemeOverrides,
+      setPreviewOverrides,
     }),
-    [themeSetting, previewTheme, currentTheme, onThemeSave],
+    [themeSetting, previewTheme, currentTheme, resolvedTheme, activeThemeOverrides, onThemeSave],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -182,4 +205,12 @@ export function useThemeSetting(): ThemeSetting {
 export function usePreviewTheme() {
   const { setPreviewTheme, savePreview, cancelPreview } = useContext(ThemeContext);
   return { setPreviewTheme, savePreview, cancelPreview };
+}
+
+export function useResolvedTheme(): Theme {
+  return useContext(ThemeContext).resolvedTheme;
+}
+
+export function useActiveThemeOverrides(): Record<string, unknown> | undefined {
+  return useContext(ThemeContext).activeThemeOverrides;
 }

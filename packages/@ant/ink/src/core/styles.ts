@@ -114,12 +114,12 @@ export type Styles = {
   /**
    * Left margin.
    */
-  readonly marginLeft?: number
+  readonly marginLeft?: number | 'auto'
 
   /**
    * Right margin.
    */
-  readonly marginRight?: number
+  readonly marginRight?: number | 'auto'
 
   /**
    * Padding on all sides. Equivalent to setting `paddingTop`, `paddingBottom`, `paddingLeft` and `paddingRight`.
@@ -473,11 +473,19 @@ const applyMarginStyles = (node: LayoutNode, style: Styles): void => {
   }
 
   if ('marginLeft' in style) {
-    node.setMargin(LayoutEdge.Start, style.marginLeft || 0)
+    if (style.marginLeft === 'auto') {
+      node.setMarginAuto(LayoutEdge.Start)
+    } else {
+      node.setMargin(LayoutEdge.Start, style.marginLeft || 0)
+    }
   }
 
   if ('marginRight' in style) {
-    node.setMargin(LayoutEdge.End, style.marginRight || 0)
+    if (style.marginRight === 'auto') {
+      node.setMarginAuto(LayoutEdge.End)
+    } else {
+      node.setMargin(LayoutEdge.End, style.marginRight || 0)
+    }
   }
 
   if ('marginTop' in style) {
@@ -733,20 +741,30 @@ const applyBorderStyles = (
       resolved.borderRight !== false ? borderWidth : 0,
     )
   } else {
-    // Handle individual border property changes (when only borderX changes without borderStyle).
-    // Skip undefined values — they mean the prop was removed or never set,
-    // not that a border should be enabled.
-    if ('borderTop' in style && style.borderTop !== undefined) {
-      node.setBorder(LayoutEdge.Top, style.borderTop === false ? 0 : 1)
+    const borderWidth = resolved.borderStyle ? 1 : 0
+    if ('borderTop' in style) {
+      node.setBorder(
+        LayoutEdge.Top,
+        style.borderTop === false ? 0 : borderWidth,
+      )
     }
-    if ('borderBottom' in style && style.borderBottom !== undefined) {
-      node.setBorder(LayoutEdge.Bottom, style.borderBottom === false ? 0 : 1)
+    if ('borderBottom' in style) {
+      node.setBorder(
+        LayoutEdge.Bottom,
+        style.borderBottom === false ? 0 : borderWidth,
+      )
     }
-    if ('borderLeft' in style && style.borderLeft !== undefined) {
-      node.setBorder(LayoutEdge.Left, style.borderLeft === false ? 0 : 1)
+    if ('borderLeft' in style) {
+      node.setBorder(
+        LayoutEdge.Left,
+        style.borderLeft === false ? 0 : borderWidth,
+      )
     }
-    if ('borderRight' in style && style.borderRight !== undefined) {
-      node.setBorder(LayoutEdge.Right, style.borderRight === false ? 0 : 1)
+    if ('borderRight' in style) {
+      node.setBorder(
+        LayoutEdge.Right,
+        style.borderRight === false ? 0 : borderWidth,
+      )
     }
   }
 }

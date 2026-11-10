@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useContext } from 'react';
+import AccessibilityContext from '../components/AccessibilityContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { stringWidth } from '../core/stringWidth.js';
 import { Ansi, Text } from '../index.js';
@@ -78,7 +79,16 @@ export function Divider({
   titleAlign = 'center',
 }: DividerProps): React.ReactNode {
   const { columns: terminalWidth } = useTerminalSize();
+  const isScreenReader = useContext(AccessibilityContext);
   const effectiveWidth = Math.max(0, (width ?? terminalWidth) - padding);
+
+  if (isScreenReader) {
+    return title ? (
+      <Text color={color} dimColor={!color}>
+        <Ansi>{title}</Ansi>
+      </Text>
+    ) : null;
+  }
 
   if (title) {
     const titleWidth = stringWidth(title) + 2; // +2 for spaces around title

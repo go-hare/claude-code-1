@@ -40,6 +40,8 @@ type ListItemProps = {
   meta?: readonly string[];
   /** densable `Ko` facts column width. 0 shrinks to the text. */
   metaWidth?: number;
+  /** densable `Ko` name column width when facts are present. */
+  nameWidth?: number;
 
   /**
    * Optional description text displayed below the main content.
@@ -71,6 +73,12 @@ type ListItemProps = {
    * @default false
    */
   disabled?: boolean;
+
+  /**
+   * densable `IC` `idle`: keeps the `❯` pointer dimmed while focus is parked elsewhere (e.g. Tabs header).
+   * @default false
+   */
+  idle?: boolean;
 
   /**
    * Whether this ListItem should declare the terminal cursor position.
@@ -144,11 +152,13 @@ export function ListItem({
   hideIndicator = false,
   meta,
   metaWidth = 0,
+  nameWidth,
   description,
   showScrollDown,
   showScrollUp,
   styled = true,
   disabled = false,
+  idle = false,
   declareCursor,
   onClick,
   hovered = false,
@@ -160,12 +170,12 @@ export function ListItem({
   // densable `IC` `oi`.
   function renderIndicator(): ReactNode {
     if (disabled) {
-      return <Text> </Text>;
+      return <Text aria-hidden> </Text>;
     }
 
     if (isFocused) {
       return (
-        <Text color="suggestion" inverse={inverse}>
+        <Text aria-hidden color={idle ? undefined : 'suggestion'} dimColor={idle} inverse={inverse}>
           {figures.pointer}
         </Text>
       );
@@ -173,7 +183,7 @@ export function ListItem({
 
     if (showScrollDown) {
       return (
-        <Text dimColor inverse={inverse}>
+        <Text aria-label="(more below)" dimColor inverse={inverse}>
           {figures.arrowDown}
         </Text>
       );
@@ -181,17 +191,25 @@ export function ListItem({
 
     if (showScrollUp) {
       return (
-        <Text dimColor inverse={inverse}>
+        <Text aria-label="(more above)" dimColor inverse={inverse}>
           {figures.arrowUp}
         </Text>
       );
     }
 
     if (hovered) {
-      return <Text dimColor>{figures.pointer}</Text>;
+      return (
+        <Text aria-hidden dimColor>
+          {figures.pointer}
+        </Text>
+      );
     }
 
-    return <Text inverse={inverse}> </Text>;
+    return (
+      <Text aria-hidden inverse={inverse}>
+        {' '}
+      </Text>
+    );
   }
 
   // Determine text color based on state
@@ -208,7 +226,7 @@ export function ListItem({
       return 'success';
     }
 
-    if (isFocused) {
+    if (isFocused && !idle) {
       return 'suggestion';
     }
 
@@ -242,11 +260,21 @@ export function ListItem({
       <Box flexDirection="row" gap={1}>
         {hideIndicator ? null : <Box flexShrink={0}>{renderIndicator()}</Box>}
         {icon != null ? (
-          <Box flexShrink={0} width={iconWidth > 0 ? iconWidth : undefined} marginRight={1}>
+          <Box flexShrink={0} width={iconWidth > 0 ? iconWidth : undefined}>
             {icon}
           </Box>
         ) : null}
-        {styled ? (
+        {meta !== undefined && meta.length > 0 && nameWidth !== undefined ? (
+          <Box flexShrink={0} width={nameWidth} marginRight={2}>
+            {styled ? (
+              <Text color={textColor} dimColor={disabled} wrap="truncate-end">
+                {children}
+              </Text>
+            ) : (
+              children
+            )}
+          </Box>
+        ) : styled ? (
           <Text color={textColor} dimColor={disabled} wrap="truncate-end">
             {children}
           </Text>
@@ -254,7 +282,7 @@ export function ListItem({
           children
         )}
         {meta !== undefined && meta.length > 0 ? (
-          <Box flexShrink={1} maxWidth={metaWidth > 0 ? metaWidth : undefined} marginLeft={1}>
+          <Box flexShrink={1} maxWidth={metaWidth > 0 ? metaWidth : undefined}>
             <Text dimColor wrap="truncate-end">
               {meta.join(' · ')}
             </Text>
@@ -269,7 +297,7 @@ export function ListItem({
         )}
       </Box>
       {description && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={(hideIndicator ? 0 : 2) + (icon != null && iconWidth > 0 ? iconWidth + 1 : 0)}>
           <Text color="inactive" wrap="truncate-end">
             {description}
           </Text>

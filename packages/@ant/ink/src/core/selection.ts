@@ -19,8 +19,8 @@ import type { Screen, StylePool } from './screen.js'
 import { CellWidth, cellAt, cellAtIndex, setCellStyleId } from './screen.js'
 import {
   hasElidedSep,
-  isSoftWrapContinuation,
   softWrapContentEnd,
+  softWrapStartCol,
 } from './softWrap.js'
 
 type Point = { col: number; row: number }
@@ -280,6 +280,9 @@ function wordBoundsAt(
 
   const startCell = cellAt(screen, c, row)
   if (!startCell) return null
+  // densable bg @193256819: delegate plain-text URL bounds before charClass run.
+  const urlMatch = matchPlainTextUrlAt(screen, c, row)
+  if (urlMatch) return { lo: urlMatch.lo, hi: urlMatch.hi }
   const cls = charClass(startCell.char)
 
   // Expand left: include cells of the same class, stop at noSelect or
@@ -364,6 +367,55 @@ function isUrlChar(c: string): boolean {
   return code >= 0x21 && code <= 0x7e && !URL_BOUNDARY.has(c)
 }
 
+function urlCellChar(screen: Screen, col: number, row: number): string | null {
+  if (screen.noSelect[row * screen.width + col] === 1) return null
+  const cell = cellAt(screen, col, row)
+  return cell && cell.width === CellWidth.Narrow && isUrlChar(cell.char)
+    ? cell.char
+    : null
+}
+
+function scanUrlRunOnRow(
+  screen: Screen,
+  row: number,
+  col: number,
+  minCol: number,
+  maxCol: number,
+): { lo: number; hi: number; text: string } | null {
+  if (col < minCol || col > maxCol) return null
+  const center = urlCellChar(screen, col, row)
+  if (center === null) return null
+  let lo = col
+  let left = ''
+  while (lo > minCol) {
+    const ch = urlCellChar(screen, lo - 1, row)
+    if (ch === null) break
+    left = ch + left
+    lo--
+  }
+  let hi = col
+  let right = ''
+  while (hi < maxCol) {
+    const ch = urlCellChar(screen, hi + 1, row)
+    if (ch === null) break
+    right += ch
+    hi++
+  }
+  return { lo, hi, text: left + center + right }
+}
+
+function softWrapRowBounds(
+  screen: Screen,
+  row: number,
+): { start: number; end: number } {
+  const cur = screen.softWrap[row]!
+  const next = row + 1 < screen.height ? screen.softWrap[row + 1]! : 0
+  return {
+    start: cur !== 0 ? softWrapStartCol(cur) : 0,
+    end: next !== 0 ? softWrapContentEnd(next) : screen.width,
+  }
+}
+
 /**
  * Scan the screen buffer for a plain-text URL at (col, row). Mirrors the
  * terminal's native Cmd+Click URL detection, which fullscreen mode's mouse
@@ -375,49 +427,108 @@ export function findPlainTextUrlAt(
   col: number,
   row: number,
 ): string | undefined {
+  return matchPlainTextUrlAt(screen, col, row)?.url
+}
+
+/**
+ * densable `xg` @193257710 — match plain-text URL across soft-wrapped rows,
+ * reject `'…'`-truncated URLs, and return same-row `[lo, hi]` bounds for `bg`.
+ */
+function matchPlainTextUrlAt(
+  screen: Screen,
+  col: number,
+  row: number,
+): { url: string; lo: number; hi: number } | undefined {
   if (row < 0 || row >= screen.height) return undefined
   const width = screen.width
-  const noSelect = screen.noSelect
-  const rowOff = row * width
 
   let c = col
   if (c > 0) {
     const cell = cellAt(screen, c, row)
     if (cell && cell.width === CellWidth.SpacerTail) c -= 1
   }
-  if (c < 0 || c >= width || noSelect[rowOff + c] === 1) return undefined
+  if (c < 0 || c >= width) return undefined
 
-  const startCell = cellAt(screen, c, row)
-  if (!startCell || !isUrlChar(startCell.char)) return undefined
-
-  // Expand left/right to the bounds of the URL-char run. URLs are ASCII
-  // (CellWidth.Narrow, 1 codeunit), so hitting a non-ASCII/wide/spacer
-  // cell is a boundary — no need to step over spacers like wordBoundsAt.
-  let lo = c
-  while (lo > 0) {
-    const prev = lo - 1
-    if (noSelect[rowOff + prev] === 1) break
-    const pc = cellAt(screen, prev, row)
-    if (!pc || pc.width !== CellWidth.Narrow || !isUrlChar(pc.char)) break
-    lo = prev
-  }
-  let hi = c
-  while (hi < width - 1) {
-    const next = hi + 1
-    if (noSelect[rowOff + next] === 1) break
-    const nc = cellAt(screen, next, row)
-    if (!nc || nc.width !== CellWidth.Narrow || !isUrlChar(nc.char)) break
-    hi = next
+  const sw = screen.softWrap
+  const bounds = softWrapRowBounds(screen, row)
+  const inContent = c >= bounds.start && c < bounds.end
+  let minCol: number
+  let maxCol: number
+  if (inContent) {
+    minCol = bounds.start
+    maxCol = bounds.end - 1
+  } else if (c >= bounds.end) {
+    minCol = bounds.end
+    maxCol = width - 1
+  } else {
+    minCol = 0
+    maxCol = bounds.start - 1
   }
 
-  let token = ''
-  for (let i = lo; i <= hi; i++) token += cellAt(screen, i, row)!.char
+  const run = scanUrlRunOnRow(screen, row, c, minCol, maxCol)
+  if (!run) return undefined
+
+  let token = run.text
+  let clickIdx = c - run.lo
+  let endRow = row
+  let endHi = run.hi
+  let startRow = row
+  let startLo = run.lo
+
+  if (inContent) {
+    while (endRow + 1 < screen.height) {
+      const nextPacked = sw[endRow + 1]!
+      if (
+        nextPacked === 0 ||
+        endHi + 1 !== softWrapContentEnd(nextPacked) ||
+        hasElidedSep(nextPacked)
+      ) {
+        break
+      }
+      const nextBounds = softWrapRowBounds(screen, endRow + 1)
+      const nextRun = scanUrlRunOnRow(
+        screen,
+        endRow + 1,
+        nextBounds.start,
+        nextBounds.start,
+        nextBounds.end - 1,
+      )
+      if (!nextRun) break
+      token += nextRun.text
+      endRow++
+      endHi = nextRun.hi
+    }
+    while (startRow > 0) {
+      const curPacked = sw[startRow]!
+      const prevEnd = softWrapContentEnd(curPacked)
+      if (
+        curPacked === 0 ||
+        startLo !== softWrapStartCol(curPacked) ||
+        prevEnd === 0 ||
+        hasElidedSep(curPacked)
+      ) {
+        break
+      }
+      const prevBounds = softWrapRowBounds(screen, startRow - 1)
+      const prevRun = scanUrlRunOnRow(
+        screen,
+        startRow - 1,
+        prevEnd - 1,
+        prevBounds.start,
+        prevEnd - 1,
+      )
+      if (!prevRun) break
+      token = prevRun.text + token
+      clickIdx += prevRun.text.length
+      startRow--
+      startLo = prevRun.lo
+    }
+  }
 
   // 1 cell = 1 char across [lo, hi] (ASCII-only run), so string index =
   // column offset. Find the last scheme anchor at or before the click —
   // a run like `https://a.com,https://b.com` has two, and clicking the
   // second should return the second URL, not the greedy match of both.
-  const clickIdx = c - lo
   const schemeRe = /(?:https?|file):\/\//g
   let urlStart = -1
   let urlEnd = token.length
@@ -429,6 +540,9 @@ export function findPlainTextUrlAt(
     urlStart = m.index
   }
   if (urlStart < 0) return undefined
+  if (urlEnd === token.length && endHi + 1 < width) {
+    if (cellAt(screen, endHi + 1, endRow)?.char === '…') return undefined
+  }
   let url = token.slice(urlStart, urlEnd)
 
   // Strip trailing sentence punctuation. For closers () ] }, only strip
@@ -456,7 +570,12 @@ export function findPlainTextUrlAt(
   // urlStart already guarantees click >= URL start; check right edge.
   if (clickIdx >= urlStart + url.length) return undefined
 
-  return url
+  const prefixLen = clickIdx - (c - run.lo)
+  const lo = run.lo + Math.max(0, urlStart - prefixLen)
+  const hi =
+    run.lo + Math.min(run.hi - run.lo, urlStart + url.length - 1 - prefixLen)
+
+  return { url, lo, hi }
 }
 
 /**
@@ -720,65 +839,20 @@ export function shiftAnchor(
  * (useHasSelection) — the caller is inside onRender so it can't use
  * notifySelectionChange (recursion), must fire listeners directly.
  */
+/**
+ * densable `Tg` @193260414 — follow-scroll delegates to `shiftSelection` so
+ * rows captured into `scrolledOffAbove` remain copyable even after both
+ * endpoints scroll above `minRow` (`leftoverGsSelectionBothEndsOff` suppresses
+ * the ghost on-screen cell highlight instead of calling `clearSelection`).
+ */
 export function shiftSelectionForFollow(
   s: SelectionState,
   dRow: number,
   minRow: number,
   maxRow: number,
+  width = Number.POSITIVE_INFINITY,
 ): boolean {
-  if (!s.anchor) return false
-  // Mirror shiftSelection: compute raw (unclamped) positions from virtual
-  // if set, else current. This handles BOTH the update path (virtual already
-  // set from a prior keyboard scroll) AND the initialize path (first clamp
-  // happens HERE via follow-scroll, no prior keyboard scroll). Without the
-  // initialize path, follow-scroll-first leaves virtual undefined even
-  // though the clamp below occurred → a later PgUp computes debt from the
-  // clamped row instead of the true pre-clamp row and never pops the
-  // accumulator — getSelectedText double-counts the off-screen rows.
-  const rawAnchor = (s.virtualAnchorRow ?? s.anchor.row) + dRow
-  const rawFocus = s.focus
-    ? (s.virtualFocusRow ?? s.focus.row) + dRow
-    : undefined
-  if (rawAnchor < minRow && rawFocus !== undefined && rawFocus < minRow) {
-    clearSelection(s)
-    return true
-  }
-  // Clamp from raw, not p.row+dRow — so a virtual position coming back
-  // in-bounds lands at the TRUE position, not the stale clamped one.
-  const anchorOut = rawAnchor < minRow || rawAnchor > maxRow
-  const vAnchorCol = s.virtualAnchorCol ?? s.anchor.col
-  s.anchor = {
-    col: anchorOut ? s.anchor.col : vAnchorCol,
-    row: clamp(rawAnchor, minRow, maxRow),
-  }
-  if (s.focus && rawFocus !== undefined) {
-    const focusOut = rawFocus < minRow || rawFocus > maxRow
-    const vFocusCol = s.virtualFocusCol ?? s.focus.col
-    s.focus = {
-      col: focusOut ? s.focus.col : vFocusCol,
-      row: clamp(rawFocus, minRow, maxRow),
-    }
-    s.virtualFocusCol = focusOut ? vFocusCol : undefined
-  }
-  s.virtualAnchorRow = anchorOut ? rawAnchor : undefined
-  s.virtualAnchorCol = anchorOut ? vAnchorCol : undefined
-  s.virtualFocusRow =
-    rawFocus !== undefined && (rawFocus < minRow || rawFocus > maxRow)
-      ? rawFocus
-      : undefined
-  // anchorSpan not virtual-tracked (word/line extend, irrelevant to
-  // keyboard-scroll round-trip) — plain clamp from current row.
-  if (s.anchorSpan) {
-    const shift = (p: Point): Point => ({
-      col: p.col,
-      row: clamp(p.row + dRow, minRow, maxRow),
-    })
-    s.anchorSpan = {
-      lo: shift(s.anchorSpan.lo),
-      hi: shift(s.anchorSpan.hi),
-      kind: s.anchorSpan.kind,
-    }
-  }
+  shiftSelection(s, dRow, minRow, maxRow, width)
   return false
 }
 
@@ -848,23 +922,51 @@ export function isCellSelected(
   return true
 }
 
-/** Extract text from one screen row. When the next row is a soft-wrap
- *  continuation (screen.softWrap[row+1] packed ≠ 0), clamp to that row's
- *  content-end (high 16 bits) and skip the trailing trim so the
- *  word-separator space survives the join. densable `iv`. */
+/** densable `Rs` @193263000 — softWrap startCol falls inside the active pane. */
+function isSoftWrapInRange(
+  packed: number | undefined,
+  range: { lo: number; hi: number },
+): boolean {
+  if (!(packed !== undefined && packed > 0)) return false
+  const startCol = softWrapStartCol(packed)
+  return startCol >= range.lo && startCol <= range.hi
+}
+
+/** Extract text from one screen row. densable `Ng` @193263082: strips
+ *  soft-wrap continuation indent (`< wrapStart`), reinserts elided separator
+ *  space when joining onto a prior row, and clamps to `contentEnd - 1` when
+ *  the next row continues the same logical line. */
 function extractRowText(
   screen: Screen,
   row: number,
   colStart: number,
   colEnd: number,
+  hasPriorLine: boolean,
+  range: { lo: number; hi: number },
 ): string {
   const noSelect = screen.noSelect
   const rowOff = row * screen.width
-  const nextPacked = row + 1 < screen.height ? screen.softWrap[row + 1]! : 0
+  const curPacked = isSoftWrapInRange(screen.softWrap[row], range)
+    ? screen.softWrap[row]!
+    : 0
+  const nextPacked =
+    row + 1 < screen.height &&
+    isSoftWrapInRange(screen.softWrap[row + 1], range)
+      ? screen.softWrap[row + 1]!
+      : 0
   const contentEnd = softWrapContentEnd(nextPacked)
   const lastCol = contentEnd > 0 ? Math.min(colEnd, contentEnd - 1) : colEnd
-  let line = ''
-  for (let col = colStart; col <= lastCol; col++) {
+  const wrapStart = curPacked !== 0 ? softWrapStartCol(curPacked) : 0
+  const firstCol = curPacked !== 0 ? Math.max(colStart, wrapStart) : colStart
+  let line =
+    hasPriorLine &&
+    curPacked !== 0 &&
+    hasElidedSep(curPacked) &&
+    colStart <= wrapStart &&
+    colEnd >= wrapStart
+      ? ' '
+      : ''
+  for (let col = firstCol; col <= lastCol; col++) {
     // Skip cells marked noSelect (gutters, line numbers, diff sigils).
     // Check before cellAt to avoid the decode cost for excluded cells.
     if (noSelect[rowOff + col] === 1) continue
@@ -921,21 +1023,19 @@ export function getSelectedText(s: SelectionState, screen: Screen): string {
     joinRows(lines, s.scrolledOffAbove[i]!, s.scrolledOffAboveSW[i])
   }
 
-  const range = selectionColRange(s, screen.width)
-  for (let row = start.row; row <= end.row; row++) {
-    // densable Ur: middle rows stay in the Cy pane, not 0..width-1.
-    const rowStart =
-      row === start.row ? Math.max(start.col, range.lo) : range.lo
-    const rowEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
-    const packed = sw[row]!
-    const isCont = isSoftWrapContinuation(packed)
-    // densable iv: reinsert elided leading space at soft-wrap joins
-    const prefix = isCont && hasElidedSep(packed) ? ' ' : ''
-    joinRows(
-      lines,
-      prefix + extractRowText(screen, row, rowStart, rowEnd),
-      isCont,
-    )
+  if (!leftoverGsSelectionBothEndsOff(s)) {
+    const range = selectionColRange(s, screen.width)
+    for (let row = start.row; row <= end.row; row++) {
+      // densable Ur: middle rows stay in the Cy pane, not 0..width-1.
+      const rowStart =
+        row === start.row ? Math.max(start.col, range.lo) : range.lo
+      const rowEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
+      joinRows(
+        lines,
+        extractRowText(screen, row, rowStart, rowEnd, lines.length > 0, range),
+        isSoftWrapInRange(sw[row], range),
+      )
+    }
   }
 
   for (let i = 0; i < s.scrolledOffBelow.length; i++) {
@@ -969,7 +1069,7 @@ export function captureScrolledRows(
   side: 'above' | 'below',
 ): void {
   const b = selectionBounds(s)
-  if (!b || firstRow > lastRow) return
+  if (!b || firstRow > lastRow || leftoverGsSelectionBothEndsOff(s)) return
   const { start, end } = b
   // Intersect [firstRow, lastRow] with [start.row, end.row]. Rows outside
   // the selection aren't captured — they weren't selected.
@@ -986,8 +1086,11 @@ export function captureScrolledRows(
     const colStart =
       row === start.row ? Math.max(start.col, range.lo) : range.lo
     const colEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
-    captured.push(extractRowText(screen, row, colStart, colEnd))
-    capturedSW.push(isSoftWrapContinuation(sw[row]!))
+    const hasPriorLine = row > start.row || s.scrolledOffAbove.length > 0
+    captured.push(
+      extractRowText(screen, row, colStart, colEnd, hasPriorLine, range),
+    )
+    capturedSW.push(isSoftWrapInRange(sw[row], range))
   }
 
   if (side === 'above') {
@@ -995,9 +1098,9 @@ export function captureScrolledRows(
     // the on-screen content in reading order).
     s.scrolledOffAbove.push(...captured)
     s.scrolledOffAboveSW.push(...capturedSW)
-    // densable zd: reset to Ur lo/hi (not 0/width-1) so the next tick
-    // stays in the Cy pane.
+    // densable zd @193264048: preserve virtualAnchorCol before resetting to Ur lo/hi.
     if (s.anchor && s.anchor.row === start.row && lo === start.row) {
+      s.virtualAnchorCol ??= s.anchor.col
       s.anchor = { col: range.lo, row: s.anchor.row }
       if (s.anchorSpan) {
         s.anchorSpan = {
@@ -1013,6 +1116,7 @@ export function captureScrolledRows(
     s.scrolledOffBelow.unshift(...captured)
     s.scrolledOffBelowSW.unshift(...capturedSW)
     if (s.anchor && s.anchor.row === end.row && hi === end.row) {
+      s.virtualAnchorCol ??= s.anchor.col
       s.anchor = { col: range.hi, row: s.anchor.row }
       if (s.anchorSpan) {
         s.anchorSpan = {
@@ -1047,7 +1151,7 @@ export function applySelectionOverlay(
   stylePool: StylePool,
 ): void {
   const b = selectionBounds(selection)
-  if (!b) return
+  if (!b || leftoverGsSelectionBothEndsOff(selection)) return
   const { start, end } = b
   const width = screen.width
   const noSelect = screen.noSelect
@@ -1057,7 +1161,8 @@ export function applySelectionOverlay(
     // wrapping into the /diff sibling pane).
     const colStart =
       row === start.row ? Math.max(start.col, range.lo) : range.lo
-    const colEnd = row === end.row ? Math.min(end.col, range.hi) : range.hi
+    const colEnd =
+      row === end.row ? Math.min(end.col, width - 1, range.hi) : range.hi
     const rowOff = row * width
     for (let col = colStart; col <= colEnd; col++) {
       const idx = rowOff + col

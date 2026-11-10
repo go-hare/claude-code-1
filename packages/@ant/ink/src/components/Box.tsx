@@ -36,6 +36,10 @@ export type Props = Except<Styles, 'textWrap'> & {
    * `accessibility={{ preserveWhitespace: true }}`.
    */
   'aria-preserve-whitespace'?: boolean;
+  'aria-hidden'?: boolean;
+  'aria-label'?: string;
+  'aria-role'?: string;
+  'aria-state'?: Record<string, boolean | undefined>;
   /**
    * Fired on left-button click (press + release without drag). Only works
    * inside `<AlternateScreen>` where mouse tracking is enabled — no-op
@@ -109,9 +113,14 @@ function Box({
   flexShrink = 1,
   ref,
   tabIndex,
+  textEntry,
   autoFocus,
   accessibility: accessibilityProp,
   'aria-preserve-whitespace': ariaPreserveWhitespace,
+  'aria-hidden': ariaHidden,
+  'aria-label': ariaLabel,
+  'aria-role': ariaRole,
+  'aria-state': ariaState,
   onClick,
   onPointer,
   onFocus,
@@ -140,8 +149,12 @@ function Box({
   warn.ifNotInteger(style.marginY, 'marginY');
   warn.ifNotInteger(style.marginTop, 'marginTop');
   warn.ifNotInteger(style.marginBottom, 'marginBottom');
-  warn.ifNotInteger(style.marginLeft, 'marginLeft');
-  warn.ifNotInteger(style.marginRight, 'marginRight');
+  if (style.marginLeft !== 'auto') {
+    warn.ifNotInteger(style.marginLeft, 'marginLeft');
+  }
+  if (style.marginRight !== 'auto') {
+    warn.ifNotInteger(style.marginRight, 'marginRight');
+  }
   warn.ifNotInteger(style.padding, 'padding');
   warn.ifNotInteger(style.paddingX, 'paddingX');
   warn.ifNotInteger(style.paddingY, 'paddingY');
@@ -153,13 +166,29 @@ function Box({
   warn.ifNotInteger(style.columnGap, 'columnGap');
   warn.ifNotInteger(style.rowGap, 'rowGap');
 
+  const hasAria =
+    ariaHidden !== undefined ||
+    ariaLabel !== undefined ||
+    ariaRole !== undefined ||
+    ariaState !== undefined ||
+    ariaPreserveWhitespace !== undefined;
   const accessibility: DOMAccessibility | undefined =
-    accessibilityProp ?? (ariaPreserveWhitespace ? { preserveWhitespace: true } : undefined);
+    accessibilityProp ??
+    (hasAria
+      ? {
+          ...(ariaHidden !== undefined && { hidden: ariaHidden }),
+          ...(ariaLabel !== undefined && { label: ariaLabel }),
+          ...(ariaRole !== undefined && { role: ariaRole }),
+          ...(ariaState !== undefined && { state: ariaState }),
+          ...(ariaPreserveWhitespace !== undefined && { preserveWhitespace: ariaPreserveWhitespace }),
+        }
+      : undefined);
 
   return (
     <ink-box
       ref={ref}
       tabIndex={tabIndex}
+      {...(textEntry !== undefined && { textEntry })}
       autoFocus={autoFocus}
       accessibility={accessibility}
       onClick={onClick}

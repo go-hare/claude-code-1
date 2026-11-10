@@ -37,11 +37,16 @@ export type Props = BaseStylesWithoutColors &
   ThemedColorProps & {
     ref?: Ref<DOMElement>;
     tabIndex?: number;
+    textEntry?: boolean;
     autoFocus?: boolean;
     /** densable accessibility bag */
     accessibility?: DOMAccessibility;
     /** densable aria-preserve-whitespace shorthand */
     'aria-preserve-whitespace'?: boolean;
+    'aria-hidden'?: boolean;
+    'aria-label'?: string;
+    'aria-role'?: string;
+    'aria-state'?: Record<string, boolean | undefined>;
     onClick?: (event: ClickEvent) => void;
     /** densable `onPointer` — gold `Wl` / DualInk pointer path. */
     onPointer?: (event: MouseActionEvent) => void;
@@ -63,6 +68,8 @@ export type Props = BaseStylesWithoutColors &
     /** densable plugin drawing identity for Ide keyRows (cEe). */
     elementKey?: string;
     elementPlugin?: string;
+    drawPending?: boolean;
+    hotkey?: string;
   };
 
 /**

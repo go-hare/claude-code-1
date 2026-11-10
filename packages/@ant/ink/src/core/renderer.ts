@@ -12,7 +12,11 @@ import renderNodeToOutput, {
   resetRenderFrameContext,
   vanishedOverflowingAbsoluteBlit,
 } from './render-node-to-output.js'
-import { createScreen, type StylePool } from './screen.js'
+import {
+  clipRightEdgeWideGraphemes,
+  createScreen,
+  type StylePool,
+} from './screen.js'
 
 export type RenderOptions = {
   frontFrame: Frame
@@ -147,6 +151,9 @@ export default function createRenderer(
     })
 
     const renderedScreen = output.get()
+    if (isTTY && renderedScreen.width === terminalWidth) {
+      clipRightEdgeWideGraphemes(renderedScreen)
+    }
 
     // Drain continuation: render cleared scrollbox.dirty, so next frame's
     // root blit would skip the subtree. markDirty walks ancestors so the

@@ -1,7 +1,10 @@
 import type { DOMElement } from './dom.js'
 import { FocusEvent } from './events/focus-event.js'
+import { nodeCache } from './node-cache.js'
 
 const MAX_FOCUS_STACK = 32
+
+export type FocusDirection = 'up' | 'down' | 'left' | 'right'
 
 /**
  * DOM-like focus manager for the Ink terminal UI.
@@ -147,6 +150,36 @@ export class FocusManager {
     this.moveFocus(-1, root)
   }
 
+  /**
+   * densable `focusDirection` @193174703 — spatial directional focus transfer.
+   */
+  focusDirection(direction: FocusDirection, root: DOMElement): boolean {
+    if (!this.enabled) return false
+    if (!this.activeElement) {
+      this.moveFocus(1, root)
+      return true
+    }
+    const fromRect = resolveFocusRect(this.activeElement)
+    if (!fromRect) return false
+    let best: DOMElement | null = null
+    let bestDist = Number.POSITIVE_INFINITY
+    for (const candidate of collectTabbable(root)) {
+      if (isInTree(this.activeElement, candidate)) continue
+      const candidateRect = resolveFocusRect(candidate)
+      if (!candidateRect) continue
+      const dist = spatialFocusDistance(fromRect, candidateRect, direction)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = candidate
+      }
+    }
+    if (best) {
+      this.focus(best)
+      return true
+    }
+    return false
+  }
+
   private moveFocus(direction: 1 | -1, root: DOMElement): void {
     if (!this.enabled) return
 
@@ -190,7 +223,81 @@ function walkTree(node: DOMElement, result: DOMElement[]): void {
   }
 }
 
-function isInTree(node: DOMElement, root: DOMElement): boolean {
+function pointToSpanDistance(
+  point: number,
+  start: number,
+  size: number,
+): number {
+  if (point < start) return start - point
+  if (point > start + size) return point - (start + size)
+  return 0
+}
+
+function spanOverlap(
+  aStart: number,
+  aSize: number,
+  bStart: number,
+  bSize: number,
+): number {
+  return Math.max(
+    0,
+    Math.min(aStart + aSize, bStart + bSize) - Math.max(aStart, bStart),
+  )
+}
+
+function spatialFocusDistance(
+  from: { x: number; y: number; width: number; height: number },
+  to: { x: number; y: number; width: number; height: number },
+  direction: FocusDirection,
+): number {
+  const fromCenterX = from.x + from.width / 2
+  const fromCenterY = from.y + from.height / 2
+  const toCenterX = to.x + to.width / 2
+  const toCenterY = to.y + to.height / 2
+  const horizontal = direction === 'left' || direction === 'right'
+  const sign = direction === 'right' || direction === 'down' ? 1 : -1
+  const primary =
+    (horizontal ? toCenterX - fromCenterX : toCenterY - fromCenterY) * sign
+  if (primary <= 0) return Number.POSITIVE_INFINITY
+  const crossGap = horizontal
+    ? pointToSpanDistance(fromCenterY, to.y, to.height)
+    : pointToSpanDistance(fromCenterX, to.x, to.width)
+  const overlap = horizontal
+    ? spanOverlap(from.y, from.height, to.y, to.height)
+    : spanOverlap(from.x, from.width, to.x, to.width)
+  return primary + (horizontal ? 2 : 0.5) * crossGap - overlap
+}
+
+function resolveFocusRect(
+  node: DOMElement,
+): { x: number; y: number; width: number; height: number } | undefined {
+  const cached = node.cachedLayout ?? nodeCache.get(node)
+  if (cached) return cached
+  const yoga = node.yogaNode
+  if (!yoga) return undefined
+  let x = yoga.getComputedLeft()
+  let y = yoga.getComputedTop()
+  let parent = node.parentNode
+  while (parent) {
+    const parentCached = parent.cachedLayout ?? nodeCache.get(parent)
+    if (parentCached) {
+      return {
+        x: parentCached.x + x,
+        y: parentCached.y + y,
+        width: yoga.getComputedWidth(),
+        height: yoga.getComputedHeight(),
+      }
+    }
+    if (parent.yogaNode) {
+      x += parent.yogaNode.getComputedLeft()
+      y += parent.yogaNode.getComputedTop()
+    }
+    parent = parent.parentNode
+  }
+  return undefined
+}
+
+export function isInTree(node: DOMElement, root: DOMElement): boolean {
   let current: DOMElement | undefined = node
   while (current) {
     if (current === root) return true

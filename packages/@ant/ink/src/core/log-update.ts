@@ -24,6 +24,7 @@ import {
   CURSOR_HOME,
   scrollDown as csiScrollDown,
   scrollUp as csiScrollUp,
+  eraseToEndOfLine,
   RESET_SCROLL_REGION,
   setScrollRegion,
 } from './termio/csi.js'
@@ -40,10 +41,12 @@ type Options = {
 
 const CARRIAGE_RETURN = { type: 'carriageReturn' } as const
 const NEWLINE = { type: 'stdout', content: '\n' } as const
+const ERASE_IN_LINE = { type: 'stdout', content: eraseToEndOfLine() } as const
 
 export class LogUpdate {
   private state: State
   private forceReset = false
+  private scrolledOutRows = new WeakMap<Frame, number>()
 
   constructor(private readonly options: Options) {
     this.state = {
@@ -59,12 +62,13 @@ export class LogUpdate {
     return this.getRenderOpsForDone(prevFrame)
   }
 
-  // densable: reset(){this.state.previousOutput="",this.forceReset=!1}
+  // densable: reset(){this.state.previousOutput="",this.forceReset=!1,this.scrolledOutRows=new WeakMap}
   // Called on SIGCONT / resetFramesForAltScreen / repaint. Must clear
   // forceReset so a stale forceFullReset cannot Sj_/pj8 after blank seed.
   reset(): void {
     this.state.previousOutput = ''
     this.forceReset = false
+    this.scrolledOutRows = new WeakMap()
   }
 
   forceFullReset(): void {
@@ -250,9 +254,6 @@ export class LogUpdate {
     // This early full-reset check only applies in "steady state" (not growing).
     // For growing, the viewportY calculation below (with cursorRestoreScroll)
     // catches unreachable scrollback rows in the diff loop instead.
-    const cursorAtBottom = prev.cursor.y >= prev.screen.height
-    const isGrowing = next.screen.height > prev.screen.height
-    // prevHadScrollback / scrollbackY computed in densable preamble above.
     const isShrinking = next.screen.height < prev.screen.height
     const nextFitsViewport = next.screen.height <= prev.viewport.height
 
@@ -273,42 +274,6 @@ export class LogUpdate {
         undefined,
         scrollbackY,
       )
-    }
-
-    if (
-      prev.screen.height >= prev.viewport.height &&
-      prev.screen.height > 0 &&
-      cursorAtBottom &&
-      !isGrowing
-    ) {
-      // viewportY = rows in scrollback from content overflow
-      // +1 for the row pushed by cursor-restore scroll
-      const viewportY = prev.screen.height - prev.viewport.height
-      const scrollbackRows = viewportY + 1
-
-      let scrollbackChangeY = -1
-      diffEach(prev.screen, next.screen, (_x, y) => {
-        if (y < scrollbackRows) {
-          scrollbackChangeY = y
-          return true // early exit
-        }
-      })
-      if (scrollbackChangeY >= 0) {
-        const prevLine = readLine(prev.screen, scrollbackChangeY)
-        const nextLine = readLine(next.screen, scrollbackChangeY)
-        return fullResetSequence_CAUSES_FLICKER(
-          next,
-          'offscreen',
-          stylePool,
-          altScreen,
-          {
-            triggerY: scrollbackChangeY,
-            prevLine,
-            nextLine,
-          },
-          scrollbackY,
-        )
-      }
     }
 
     const screen = new VirtualScreen(prev.cursor, next.viewport.width)
@@ -357,17 +322,22 @@ export class LogUpdate {
     // this, the diff loop treats that row as reachable — but the cursor clamps
     // at viewport top, causing writes to land 1 row off and garbling the output.
     const cursorRestoreScroll = prevHadScrollback ? 1 : 0
-    const viewportY = growing
-      ? Math.max(
-          0,
-          prev.screen.height - prev.viewport.height + cursorRestoreScroll,
-        )
-      : Math.max(prev.screen.height, next.screen.height) -
-        next.viewport.height +
-        cursorRestoreScroll
+    const viewportY = Math.max(
+      growing
+        ? prev.screen.height - prev.viewport.height + cursorRestoreScroll
+        : Math.max(prev.screen.height, next.screen.height) -
+            next.viewport.height +
+            cursorRestoreScroll,
+      this.scrolledOutRows.get(prev) ?? 0,
+    )
+    const nextViewportStartY = next.screen.height - next.viewport.height + 1
 
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink
+    let lastRowY = -1
+    let lastNonEmptyCol = -1
+    let scannedRow = false
+    let erasedToEndOfLine = false
 
     // First pass: render changes to existing rows (rows < prev.screen.height)
     let needsFullReset = false
@@ -382,10 +352,13 @@ export class LogUpdate {
       // advance 2 columns when we write the wide character itself.
       // SpacerTail: Second cell of a wide character
       // SpacerHead: Marks line-end position where wide char wraps to next line
+      if (added && added.width === CellWidth.SpacerTail) {
+        return
+      }
       if (
         added &&
-        (added.width === CellWidth.SpacerTail ||
-          added.width === CellWidth.SpacerHead)
+        added.width === CellWidth.SpacerHead &&
+        isEmptyCellAt(prev.screen, x, y)
       ) {
         return
       }
@@ -410,9 +383,55 @@ export class LogUpdate {
       // If the cell outside the viewport range has changed, we need to reset
       // because we can't move the cursor there to draw.
       if (y < viewportY) {
-        needsFullReset = true
-        resetTriggerY = y
-        return true // early exit
+        if (altScreen || shrinking || y >= nextViewportStartY) {
+          needsFullReset = true
+          resetTriggerY = y
+          return true // early exit
+        }
+        return
+      }
+
+      if (y !== lastRowY) {
+        currentHyperlink = transitionHyperlink(
+          screen.diff,
+          currentHyperlink,
+          undefined,
+        )
+        lastRowY = y
+        lastNonEmptyCol = -1
+        scannedRow = false
+        erasedToEndOfLine = false
+      }
+
+      if (removed && isEmptyCellAt(next.screen, x, y)) {
+        if (!scannedRow) {
+          scannedRow = true
+          if (y < next.screen.height) {
+            for (let col = next.screen.width - 1; col > x; col--) {
+              if (!isEmptyCellAt(next.screen, col, y)) {
+                lastNonEmptyCol = col
+                break
+              }
+            }
+          }
+        }
+        if (x > lastNonEmptyCol) {
+          if (erasedToEndOfLine) return
+          erasedToEndOfLine = true
+          moveCursorTo(screen, x, y)
+          const styleIdToReset = currentStyleId
+          const hyperlinkToReset = currentHyperlink
+          currentStyleId = stylePool.none
+          currentHyperlink = undefined
+          screen.txn(() => {
+            const patches: Diff = []
+            transitionStyle(patches, stylePool, styleIdToReset, stylePool.none)
+            transitionHyperlink(patches, hyperlinkToReset, undefined)
+            patches.push(ERASE_IN_LINE)
+            return [patches, { dx: 0, dy: 0 }]
+          })
+          return
+        }
       }
 
       moveCursorTo(screen, x, y)
@@ -522,6 +541,10 @@ export class LogUpdate {
       })
     } else {
       moveCursorTo(screen, next.cursor.x, next.cursor.y)
+    }
+
+    if (viewportY > 0) {
+      this.scrolledOutRows.set(next, viewportY)
     }
 
     const elapsed = performance.now() - startTime

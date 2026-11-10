@@ -1,4 +1,5 @@
 import supportsHyperlinksLib from 'supports-hyperlinks'
+import { attacherCaps } from './termio/osc.js'
 
 // Additional terminals that support OSC 8 hyperlinks but aren't detected by supports-hyperlinks.
 // Checked against both TERM_PROGRAM and LC_TERMINAL (the latter is preserved inside tmux).
@@ -9,11 +10,12 @@ export const ADDITIONAL_HYPERLINK_TERMINALS = [
   'alacritty',
   'iTerm.app',
   'iTerm2',
+  'WarpTerminal',
 ]
 
 type EnvLike = Record<string, string | undefined>
 
-type SupportsHyperlinksOptions = {
+export type SupportsHyperlinksOptions = {
   env?: EnvLike
   stdoutSupported?: boolean
 }
@@ -38,20 +40,35 @@ function forceHyperlinkOverride(env: EnvLike): boolean | undefined {
 }
 
 /**
+ * densable `tAe` @192908005 — explicit attacher or FORCE_HYPERLINK override,
+ * or undefined when neither is set (allows Link `assumeSupport` to respect
+ * `FORCE_HYPERLINK=0`).
+ */
+export function getForcedHyperlinkSupport(
+  options?: SupportsHyperlinksOptions,
+): boolean | undefined {
+  const caps = (attacherCaps() as { hyperlinks?: boolean } | null)?.hyperlinks
+  if (caps !== undefined) return caps
+  const env = options?.env ?? process.env
+  return forceHyperlinkOverride(env)
+}
+
+/**
  * Returns whether stdout supports OSC 8 hyperlinks.
  * Extends the supports-hyperlinks library with additional terminal detection.
- * densable 2.1.217: FORCE_HYPERLINK=0 exits hyperlink mode; set forces on.
+ * densable 2.1.289 `G_` @192908005: WarpTerminal, JetBrains-JediTerm,
+ * WT_SESSION outside tmux, tmux >= 3.4.
  * @param options Optional overrides for testing (env, stdoutSupported)
  */
 export function supportsHyperlinks(
   options?: SupportsHyperlinksOptions,
 ): boolean {
-  const env = options?.env ?? process.env
-
-  const forced = forceHyperlinkOverride(env)
+  const forced = getForcedHyperlinkSupport(options)
   if (forced !== undefined) {
     return forced
   }
+
+  const env = options?.env ?? process.env
 
   const stdoutSupported =
     options?.stdoutSupported ?? supportsHyperlinksLib.stdout
@@ -63,6 +80,23 @@ export function supportsHyperlinks(
   const termProgram = env['TERM_PROGRAM']
   if (termProgram && ADDITIONAL_HYPERLINK_TERMINALS.includes(termProgram)) {
     return true
+  }
+
+  if (env['TERMINAL_EMULATOR'] === 'JetBrains-JediTerm') {
+    return true
+  }
+
+  if (env['WT_SESSION'] && termProgram !== 'tmux' && !env['TMUX']) {
+    return true
+  }
+
+  if (termProgram === 'tmux') {
+    const [majorStr, minorStr] = (env['TERM_PROGRAM_VERSION'] ?? '').split('.')
+    const major = Number.parseInt(majorStr ?? '', 10)
+    const minor = Number.parseInt(minorStr ?? '', 10)
+    if (major > 3 || (major === 3 && minor >= 4)) {
+      return true
+    }
   }
 
   // LC_TERMINAL is set by some terminals (e.g. iTerm2) and preserved inside tmux,

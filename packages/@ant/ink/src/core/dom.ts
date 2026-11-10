@@ -394,14 +394,12 @@ export const setAttribute = (
   markDirty(node)
 }
 
-/** densable `jus` — set accessibility bag without going through attributes. */
+/** densable `od` — set accessibility bag without going through attributes. */
 export const setAccessibility = (
   node: DOMElement,
   accessibility: DOMAccessibility | undefined,
 ): void => {
-  if (node.accessibility === accessibility) return
   node.accessibility = accessibility
-  markDirty(node)
 }
 
 export const setStyle = (node: DOMNode, style: Styles): void => {
@@ -454,7 +452,7 @@ function shallowEqual<T extends object>(
 
   // Compare each property
   for (const key of aKeys) {
-    if (a[key] !== b[key]) return false
+    if (!Object.hasOwn(b, key) || a[key] !== b[key]) return false
   }
 
   return true

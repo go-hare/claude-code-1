@@ -1,11 +1,32 @@
 import chalk from 'chalk'
 import cliBoxes, { type Boxes, type BoxStyle } from 'cli-boxes'
-import { applyColor } from './colorize.js'
-import type { DOMNode } from './dom.js'
 import { logForDebugging } from '../utils/debug.js'
+import { applyColor, applyTextStyles } from './colorize.js'
+import type { DOMNode } from './dom.js'
 import type Output from './output.js'
 import { stringWidth } from './stringWidth.js'
 import type { Color } from './styles.js'
+import { expandTabsForWrap } from './tabstops.js'
+import sliceAnsiFallback from './utils/sliceAnsi.js'
+
+function sliceAnsi(text: string, start: number, end?: number): string {
+  const bunSlice =
+    typeof Bun !== 'undefined' && typeof Bun.sliceAnsi === 'function'
+      ? Bun.sliceAnsi
+      : undefined
+  return bunSlice
+    ? bunSlice(text, start, end)
+    : sliceAnsiFallback(text, start, end)
+}
+
+function sliceFit(text: string, start: number, end: number): string {
+  let sliced = sliceAnsi(text, start, end)
+  while (end > start && stringWidth(sliced) > end - start) {
+    end--
+    sliced = sliceAnsi(text, start, end)
+  }
+  return sliced
+}
 
 export type BorderTextOptions = {
   content: string // Pre-rendered string with ANSI color codes
@@ -26,6 +47,16 @@ export const CUSTOM_BORDER_STYLES = {
     bottomLeft: ' ',
     bottomRight: ' ',
   },
+  quote: {
+    top: ' ',
+    left: '▎',
+    right: ' ',
+    bottom: ' ',
+    topLeft: ' ',
+    topRight: ' ',
+    bottomLeft: ' ',
+    bottomRight: ' ',
+  },
 } as const
 
 export type BorderStyle =
@@ -40,11 +71,16 @@ function embedTextInBorder(
   offset: number = 0,
   borderChar: string,
 ): [before: string, text: string, after: string] {
+  text = expandTabsForWrap(text)
   const textLength = stringWidth(text)
   const borderLength = borderLine.length
 
   if (textLength >= borderLength - 2) {
-    return ['', text.substring(0, borderLength), '']
+    const truncated = sliceFit(text, 0, borderLength)
+    const pad = borderChar.repeat(
+      Math.max(0, borderLength - stringWidth(truncated)),
+    )
+    return ['', truncated, pad]
   }
 
   let position: number
@@ -60,9 +96,10 @@ function embedTextInBorder(
   // Ensure position is valid
   position = Math.max(1, Math.min(position, borderLength - textLength - 1))
 
-  const before = borderLine.substring(0, 1) + borderChar.repeat(position - 1)
+  const before =
+    borderLine.substring(0, 1) + borderChar.repeat(Math.max(0, position - 1))
   const after =
-    borderChar.repeat(borderLength - position - textLength - 1) +
+    borderChar.repeat(Math.max(0, borderLength - position - textLength - 1)) +
     borderLine.substring(borderLength - 1)
 
   return [before, text, after]
@@ -80,11 +117,21 @@ function styleBorderLine(
   return styled
 }
 
+function applyBorderBackground(
+  segment: string,
+  backgroundColor: Color | undefined,
+): string {
+  return backgroundColor
+    ? applyTextStyles(segment, { backgroundColor })
+    : segment
+}
+
 const renderBorder = (
   x: number,
   y: number,
   node: DOMNode,
   output: Output,
+  boxBackgroundColor?: Color,
 ): void => {
   if (node.style.borderStyle) {
     const width = Math.floor(node.yogaNode!.getComputedWidth())
@@ -223,19 +270,31 @@ const renderBorder = (
     const offsetY = showTopBorder ? 1 : 0
 
     if (topBorder) {
-      output.write(x, y, topBorder)
+      output.write(x, y, applyBorderBackground(topBorder, boxBackgroundColor))
     }
 
     if (showLeftBorder) {
-      output.write(x, y + offsetY, leftBorder)
+      output.write(
+        x,
+        y + offsetY,
+        applyBorderBackground(leftBorder, boxBackgroundColor),
+      )
     }
 
     if (showRightBorder) {
-      output.write(x + width - 1, y + offsetY, rightBorder)
+      output.write(
+        x + width - 1,
+        y + offsetY,
+        applyBorderBackground(rightBorder, boxBackgroundColor),
+      )
     }
 
     if (bottomBorder) {
-      output.write(x, y + height - 1, bottomBorder)
+      output.write(
+        x,
+        y + height - 1,
+        applyBorderBackground(bottomBorder, boxBackgroundColor),
+      )
     }
   }
 }

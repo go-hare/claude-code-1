@@ -4,7 +4,7 @@ import type { DOMElement } from '../core/dom.js';
 import type { KeyboardEvent } from '../core/events/keyboard-event.js';
 import type { PasteEvent } from '../core/events/paste-event.js';
 import { useDeclaredCursor } from '../hooks/use-declared-cursor.js';
-import Box from './Box.js';
+import Box, { type Props as BoxProps } from './Box.js';
 
 export type InputCaret = {
   line: number;
@@ -13,10 +13,11 @@ export type InputCaret = {
   visible?: boolean;
 };
 
-type Props = {
+type Props = Omit<BoxProps, 'ref' | 'tabIndex' | 'autoFocus' | 'textEntry' | 'onKeyDown' | 'onPaste' | 'children'> & {
   ref?: Ref<DOMElement>;
   autoFocus?: boolean;
-  /** densable Je `textEntry:!allowPrintableKeybindings`. */
+  /** densable Je @197224580 `textEntry:!allowPrintableKeybindings`. */
+  allowPrintableKeybindings?: boolean;
   textEntry?: boolean;
   disabled?: boolean;
   caret?: InputCaret;
@@ -26,19 +27,21 @@ type Props = {
 };
 
 /**
- * densable `Je` / wire `n7`.
+ * densable `Je` / wire `n7` @197224580.
  * Gold: caret → Vb({line, column, active: caret!==void 0, visible: caret.visible}).
  * Do not export minify `n7` / `Je`.
  */
 export function Input({
   ref,
   autoFocus = false,
-  textEntry = false,
+  allowPrintableKeybindings = false,
+  textEntry: textEntryProp,
   disabled = false,
   caret,
   onKeyDown,
   onPaste,
   children,
+  ...boxProps
 }: Props): ReactNode {
   const declared = useDeclaredCursor({
     line: caret?.line ?? 0,
@@ -56,11 +59,25 @@ export function Input({
   );
 
   if (disabled) {
-    return <Box ref={setRef}>{children}</Box>;
+    return (
+      <Box ref={setRef} {...boxProps}>
+        {children}
+      </Box>
+    );
   }
 
+  const textEntry = textEntryProp ?? !allowPrintableKeybindings;
+
   return (
-    <Box ref={setRef} tabIndex={0} autoFocus={autoFocus} textEntry={textEntry} onKeyDown={onKeyDown} onPaste={onPaste}>
+    <Box
+      ref={setRef}
+      tabIndex={0}
+      autoFocus={autoFocus}
+      textEntry={textEntry}
+      onKeyDown={onKeyDown}
+      onPaste={onPaste}
+      {...boxProps}
+    >
       {children}
     </Box>
   );

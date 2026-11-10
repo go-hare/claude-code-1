@@ -24,12 +24,19 @@ import {
   squashTextNodesToSegments,
 } from './squash-text-nodes.js'
 import type { Color } from './styles.js'
-import { isXtermJs } from './terminal.js'
 import {
   SoftWrapKind,
   type SoftWrapKind as SoftWrapKindValue,
 } from './softWrap.js'
 import { stringWidth } from './stringWidth.js'
+import {
+  expandTabsForWrap,
+  hasEscOrC1,
+  sanitizeBidiControls,
+} from './tabstops.js'
+import { isXtermJs } from './terminal.js'
+import { createTokenizer } from './termio/tokenize.js'
+import sliceAnsiFallback from './utils/sliceAnsi.js'
 import { widestLine } from './widest-line.js'
 import wrapText from './wrap-text.js'
 
@@ -968,6 +975,29 @@ function buildCharToSegmentMap(segments: StyledSegment[]): number[] {
   return map
 }
 
+function buildCharToSegmentScratch(
+  frameCtx: RenderFrameContext,
+  segments: StyledSegment[],
+): Uint32Array {
+  let totalLen = 0
+  for (let i = 0; i < segments.length; i++) {
+    totalLen += segments[i]!.text.length
+  }
+  if (frameCtx.segmentMapScratch.length < totalLen) {
+    frameCtx.segmentMapScratch = new Uint32Array(
+      Math.max(totalLen, frameCtx.segmentMapScratch.length * 2),
+    )
+  }
+  const map = frameCtx.segmentMapScratch.subarray(0, totalLen)
+  let offset = 0
+  for (let i = 0; i < segments.length; i++) {
+    const end = offset + segments[i]!.text.length
+    map.fill(i, offset, end)
+    offset = end
+  }
+  return map
+}
+
 /**
  * densable `Bd` — apply styles to wrapped text by mapping each character
  * back to its original segment. Preserves per-segment styles across wraps.
@@ -980,7 +1010,7 @@ function buildCharToSegmentMap(segments: StyledSegment[]): number[] {
 function applyStylesToWrappedText(
   wrappedPlain: string,
   segments: StyledSegment[],
-  charToSegment: number[],
+  charToSegment: ArrayLike<number>,
   originalPlain: string,
   trimEnabled: boolean = false,
   softWrapKinds?: readonly SoftWrapKindValue[],
@@ -1153,6 +1183,212 @@ function wrapWithSoftWrap(
     softWrap.pop()
   }
   return { wrapped: outLines.join('\n'), softWrap }
+}
+
+const DEFAULT_TAB_INTERVAL = 8
+const TAB_OR_LF_RE = /(\t|\n)/
+const ESC_OR_CSI_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable uR ESC/CSI
+  /[\x1b\x9b]/g
+const C1_STRING_RE = /[\x90\x98\x9d-\x9f]/g
+const LEFTOVER_SEQ_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable _R leftover seq
+  /^\x1b[P\]X^_k]/
+const DCS_OR_APC_ST_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable mR DCS/APC ST
+  /^\x1b[P_].*\x07$|\x9c/s
+
+type OutputToken = { type: 'text' | 'sequence'; value: string }
+
+function tokenizeForTabExpand(text: string, last: boolean): OutputToken[] {
+  const tokenizer = createTokenizer({ forOutput: true })
+  const tokens: OutputToken[] = tokenizer.feed(text)
+  const leftover = tokenizer.buffer()
+  if (leftover !== '') {
+    tokens.push({
+      type: last && !LEFTOVER_SEQ_RE.test(leftover) ? 'sequence' : 'text',
+      value: leftover,
+    })
+  }
+  return tokens
+}
+
+function tabExpandableText(token: OutputToken): string | undefined {
+  if (
+    token.type === 'text' ||
+    token.value.includes('\n') ||
+    DCS_OR_APC_ST_RE.test(token.value)
+  ) {
+    return token.value.replace(ESC_OR_CSI_RE, '\x18').replace(C1_STRING_RE, '')
+  }
+  if (token.value.startsWith('\x1Bk')) {
+    return token.value.replace(/\x9b/g, '\x18').replace(C1_STRING_RE, '')
+  }
+  return undefined
+}
+
+function expandSequenceTabLines(
+  lines: readonly string[],
+): string[] | undefined {
+  const needed = lines.some((line, i) => {
+    if (!hasEscOrC1(line)) return false
+    const last = i === lines.length - 1
+    return tokenizeForTabExpand(line, last).some(token => {
+      const rewritten = tabExpandableText(token)
+      return (rewritten ?? token.value) !== token.value
+    })
+  })
+  if (!needed) return undefined
+  let column = 0
+  return lines.map((rawLine, i) => {
+    const line = sanitizeBidiControls(rawLine)
+    let out = ''
+    for (const token of tokenizeForTabExpand(line, i === lines.length - 1)) {
+      const expandable = tabExpandableText(token)
+      if (expandable === undefined) {
+        out += token.value
+        continue
+      }
+      for (const part of expandable.split(TAB_OR_LF_RE)) {
+        if (part === '\t') {
+          const spaces = DEFAULT_TAB_INTERVAL - (column % DEFAULT_TAB_INTERVAL)
+          out += ' '.repeat(spaces)
+          column += spaces
+        } else if (part === '\n') {
+          out += part
+          column = 0
+        } else {
+          out += part
+          column += stringWidth(part)
+        }
+      }
+    }
+    return out
+  })
+}
+
+function joinSegmentTexts(segments: StyledSegment[]): string {
+  const texts = segments.map(s => s.text)
+  const expanded = expandSequenceTabLines(texts)
+  if (expanded === undefined) return texts.join('')
+  for (const [idx, seg] of segments.entries()) {
+    seg.text = expanded[idx] ?? ''
+  }
+  return expanded.join('')
+}
+
+const ELLIPSIS = '…'
+
+function sliceAnsi(text: string, start: number, end?: number): string {
+  const bunSlice =
+    typeof Bun !== 'undefined' && typeof Bun.sliceAnsi === 'function'
+      ? Bun.sliceAnsi
+      : undefined
+  return bunSlice
+    ? bunSlice(text, start, end)
+    : sliceAnsiFallback(text, start, end)
+}
+
+function sliceFit(text: string, start: number, end: number): string {
+  let sliced = sliceAnsi(text, start, end)
+  while (end > start && stringWidth(sliced) > end - start) {
+    end--
+    sliced = sliceAnsi(text, start, end)
+  }
+  return sliced
+}
+
+function truncateParts(
+  text: string,
+  columns: number,
+  position: 'start' | 'middle' | 'end',
+): { head: string; tail: string } | null {
+  const sanitized = expandTabsForWrap(text)
+  const length = stringWidth(sanitized)
+  if (length <= columns) return null
+  if (columns === 1) return { head: '', tail: '' }
+  if (position === 'start') {
+    return { head: '', tail: sliceFit(sanitized, length - columns + 1, length) }
+  }
+  if (position === 'middle') {
+    const half = Math.floor(columns / 2)
+    return {
+      head: sliceFit(sanitized, 0, half),
+      tail: sliceFit(sanitized, length - (columns - half) + 1, length),
+    }
+  }
+  return { head: sliceFit(sanitized, 0, columns - 1), tail: '' }
+}
+
+function truncateStyledSegments(
+  plainText: string,
+  maxWidth: number,
+  segments: StyledSegment[],
+  charToSegment: ArrayLike<number>,
+  position: 'start' | 'middle',
+): string {
+  if (maxWidth < 1) return ''
+  const sanitized = expandTabsForWrap(plainText)
+  const parts = truncateParts(sanitized, maxWidth, position)
+  if (parts === null) {
+    return applyStylesToWrappedText(
+      sanitized,
+      segments,
+      charToSegment,
+      plainText,
+    )
+  }
+  const { head, tail } = parts
+  const truncated = head + ELLIPSIS + tail
+  if (
+    sanitized !== plainText ||
+    !plainText.startsWith(head) ||
+    !plainText.endsWith(tail)
+  ) {
+    return applyStylesToWrappedText(
+      truncated,
+      segments,
+      charToSegment,
+      plainText,
+    )
+  }
+  const headLen = head.length
+  const tailStart = plainText.length - tail.length
+  const segmentAt = (idx: number): number =>
+    idx < headLen
+      ? (charToSegment[idx] ?? 0)
+      : idx === headLen
+        ? (charToSegment[Math.max(0, tailStart - 1)] ?? 0)
+        : (charToSegment[tailStart + (idx - headLen - 1)] ?? 0)
+  const lines = truncated.split('\n')
+  let lineOffset = 0
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx]!
+    let styledLine = ''
+    let runStart = 0
+    let runSegIdx = line.length > 0 ? segmentAt(lineOffset) : -1
+    for (let k = 1; k <= line.length; k++) {
+      const nextSegIdx = k < line.length ? segmentAt(lineOffset + k) : -1
+      if (nextSegIdx !== runSegIdx) {
+        const seg = segments[runSegIdx]
+        const slice = line.slice(runStart, k)
+        if (seg) {
+          let styled = applyTextStyles(slice, seg.styles)
+          if (seg.hyperlink) {
+            styled = wrapWithOsc8Link(styled, seg.hyperlink)
+          }
+          styledLine += styled
+        } else {
+          styledLine += slice
+        }
+        runStart = k
+        runSegIdx = nextSegIdx
+      }
+    }
+    lines[lineIdx] = styledLine
+    lineOffset += line.length + 1
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -1457,7 +1693,7 @@ function renderNodeToOutput(
       )
 
       // First, get plain text to check if wrapping is needed
-      const plainText = segments.map(s => s.text).join('')
+      const plainText = joinSegmentTexts(segments)
 
       if (plainText.length > 0) {
         // Upstream Ink uses getMaxWidth(yogaNode) unclamped here. That
@@ -1469,10 +1705,16 @@ function renderNodeToOutput(
         // setCellAt's bounds check.
         const maxWidth = Math.min(getMaxWidth(yogaNode), output.width - x)
         const textWrap = node.style.textWrap ?? 'wrap'
+        const expandedText =
+          textWrap === 'wrap' ||
+          textWrap === 'wrap-trim' ||
+          textWrap === 'wrap-stream'
+            ? plainText
+            : expandTabsForWrap(plainText)
 
         // densable: wrap-stream always runs the wrap path (hide incomplete last line)
         const needsWrapping =
-          textWrap === 'wrap-stream' || widestLine(plainText) > maxWidth
+          textWrap === 'wrap-stream' || widestLine(expandedText) > maxWidth
 
         let text: string
         let softWrap: SoftWrapKindValue[] | undefined
@@ -1495,13 +1737,26 @@ function renderNodeToOutput(
               return styled
             })
             .join('\n')
+        } else if (
+          needsWrapping &&
+          (textWrap === 'truncate-start' ||
+            textWrap === 'truncate-middle' ||
+            textWrap === 'middle')
+        ) {
+          text = truncateStyledSegments(
+            plainText,
+            maxWidth,
+            segments,
+            buildCharToSegmentScratch(ctx, segments),
+            textWrap === 'truncate-start' ? 'start' : 'middle',
+          )
         } else if (needsWrapping) {
           // Multiple segments with wrapping: wrap plain text first, then re-apply
           // each segment's styles based on character positions. This preserves
           // per-segment styles even when text wraps across lines.
           const w = wrapWithSoftWrap(plainText, maxWidth, textWrap)
           softWrap = w.softWrap
-          const charToSegment = buildCharToSegmentMap(segments)
+          const charToSegment = buildCharToSegmentScratch(ctx, segments)
           text = applyStylesToWrappedText(
             w.wrapped,
             segments,
@@ -1514,9 +1769,21 @@ function renderNodeToOutput(
           // wrapWithOsc8Link, similar to how styles are applied per-run.
         } else {
           // No wrapping needed: apply styles directly
+          const expandedChanged = expandedText !== plainText
+          let rawOffset = 0
+          let expandedOffset = 0
           text = segments
             .map(segment => {
-              let styledText = applyTextStyles(segment.text, segment.styles)
+              let segText = segment.text
+              if (expandedChanged) {
+                rawOffset += segment.text.length
+                const nextExpandedOffset = expandTabsForWrap(
+                  plainText.slice(0, rawOffset),
+                ).length
+                segText = expandedText.slice(expandedOffset, nextExpandedOffset)
+                expandedOffset = nextExpandedOffset
+              }
+              let styledText = applyTextStyles(segText, segment.styles)
               if (segment.hyperlink) {
                 styledText = wrapWithOsc8Link(styledText, segment.hyperlink)
               }
@@ -1980,11 +2247,22 @@ function renderNodeToOutput(
             output.shift(top, bottom, delta)
             const edgeTop = leftoverGsWin.edgeTop
             const edgeBottom = leftoverGsWin.edgeBottom
-            // Snapshot dirty children before the first pass — the first
-            // pass clears dirty flags, and edge-spanning children would be
-            // missed by the second pass without this snapshot.
+            // Snapshot dirty children and pre-edge cachedLayouts before the
+            // first pass — the first pass clears dirty flags and stamps new
+            // cachedLayout.y/height on edge-straddling children, which would
+            // corrupt cumHeightShift and shiftedY in the second pass.
             const dirtyChildren = content.dirty
               ? new Set(content.childNodes.filter(c => (c as DOMElement).dirty))
+              : null
+            const preEdgeCachedLayouts = dirtyChildren
+              ? new Map(
+                  content.childNodes.map(c => [
+                    c as DOMElement,
+                    (c as DOMElement).cachedLayout
+                      ? { ...(c as DOMElement).cachedLayout! }
+                      : undefined,
+                  ]),
+                )
               : null
             if (leftoverGsWin.paintEdge) {
               output.clear({
@@ -2067,8 +2345,12 @@ function renderNodeToOutput(
                 const childH = cy.getComputedHeight()
                 const childBottom = childTop + childH
                 if (isDirty) {
-                  const prev = childElem.cachedLayout
-                  cumHeightShift += childH - (prev ? prev.height : 0)
+                  const prev =
+                    preEdgeCachedLayouts?.get(childElem) ??
+                    childElem.cachedLayout
+                  if (prev !== undefined) {
+                    cumHeightShift += childH - prev.height
+                  }
                 }
                 // Skip culled children (outside viewport)
                 if (
@@ -2087,7 +2369,9 @@ function renderNodeToOutput(
                 // yogaTop happens to net out). No cache → blit never
                 // painted it → render.
                 if (!isDirty) {
-                  const childCached = childElem.cachedLayout
+                  const childCached =
+                    preEdgeCachedLayouts?.get(childElem) ??
+                    childElem.cachedLayout
                   if (childCached) {
                     const shiftedY = Math.floor(childCached.y) - delta
                     if (shiftedY === screenY) continue
@@ -2309,7 +2593,8 @@ function renderNodeToOutput(
         output.unclip()
       }
 
-      renderBorder(x, y, node, output)
+      // densable Gs @193331510: yv(H, L, n, u, M) — M is inheritedBackgroundColor
+      renderBorder(x, y, node, output, inheritedBackgroundColor)
     } else if (node.nodeName === 'ink-root') {
       node.hasEscapingDescendant = renderChildren(
         node,

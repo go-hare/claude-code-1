@@ -421,7 +421,11 @@ export {
 } from './theme/Pane.js'
 export { ProgressBar } from './theme/ProgressBar.js'
 export { Ratchet } from './theme/Ratchet.js'
-export { StatusIcon } from './theme/StatusIcon.js'
+export {
+  StatusIcon,
+  getStatusIconMaxWidth,
+  type StatusIconStatus,
+} from './theme/StatusIcon.js'
 export { Tabs, Tab, useTabsWidth, useTabHeaderFocus } from './theme/Tabs.js'
 // Single ModalContext instance — FullscreenLayout provides; Pane/Tabs consume.
 // Do not re-create this context in app code (double-divider bug).

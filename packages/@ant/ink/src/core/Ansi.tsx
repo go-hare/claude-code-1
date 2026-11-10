@@ -8,6 +8,8 @@ type Props = {
   children: string;
   /** When true, force all text to be rendered with dim styling */
   dimColor?: boolean;
+  /** When true, force all text to be rendered with italic styling */
+  italic?: boolean;
   /**
    * densable Sh tailWrap → Text wrap. Used by StreamingMarkdown for
    * hideTrailingLine (wrap-stream on incomplete live line).
@@ -35,14 +37,12 @@ type SpanProps = {
  *
  * Memoized to prevent re-renders when parent changes but children string is the same.
  */
-export const Ansi = React.memo(function Ansi({ children, dimColor, wrap }: Props): React.ReactNode {
+export const Ansi = React.memo(function Ansi({ children, dimColor, italic, wrap }: Props): React.ReactNode {
   if (typeof children !== 'string') {
-    return dimColor ? (
-      <Text dim wrap={wrap}>
+    return (
+      <Text dim={Boolean(dimColor)} italic={Boolean(italic)} wrap={wrap}>
         {String(children)}
       </Text>
-    ) : (
-      <Text wrap={wrap}>{String(children)}</Text>
     );
   }
 
@@ -57,20 +57,21 @@ export const Ansi = React.memo(function Ansi({ children, dimColor, wrap }: Props
   }
 
   if (spans.length === 1 && !hasAnyProps(spans[0]!.props)) {
-    return dimColor ? (
-      <Text dim wrap={wrap}>
+    return (
+      <Text dim={Boolean(dimColor)} italic={Boolean(italic)} wrap={wrap}>
         {spans[0]!.text}
       </Text>
-    ) : (
-      <Text wrap={wrap}>{spans[0]!.text}</Text>
     );
   }
 
   const content = spans.map((span, i) => {
     const hyperlink = span.props.hyperlink;
-    // When dimColor is forced, override the span's dim prop
+    // When dimColor/italic is forced, override the span's dim/italic prop
     if (dimColor) {
       span.props.dim = true;
+    }
+    if (italic) {
+      span.props.italic = true;
     }
     const hasTextProps = hasAnyTextProps(span.props);
 
@@ -116,12 +117,10 @@ export const Ansi = React.memo(function Ansi({ children, dimColor, wrap }: Props
     );
   });
 
-  return dimColor ? (
-    <Text dim wrap={wrap}>
+  return (
+    <Text dim={Boolean(dimColor)} italic={Boolean(italic)} wrap={wrap}>
       {content}
     </Text>
-  ) : (
-    <Text wrap={wrap}>{content}</Text>
   );
 });
 

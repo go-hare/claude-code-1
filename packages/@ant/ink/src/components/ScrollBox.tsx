@@ -126,7 +126,7 @@ function ScrollBox({
     // contributed to 1402ms max frame gaps during scroll drain.
     // noop — injected by business layer via onScrollActivity callback
     markDirty(el);
-    markCommitStart();
+    markCommitStart(el);
     notify();
     if (renderQueuedRef.current) return;
     renderQueuedRef.current = true;
@@ -277,10 +277,7 @@ function ScrollBox({
   // after the initial commit, which is too late for the first frame.
   return (
     <ink-box
-      ref={el => {
-        domRef.current = el;
-        if (el) el.scrollTop ??= 0;
-      }}
+      ref={domRef}
       style={{
         flexWrap: 'nowrap',
         flexDirection: style.flexDirection ?? 'row',

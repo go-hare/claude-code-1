@@ -34,7 +34,11 @@ type Props = Omit<BoxProps, 'noSelect'> & {
  */
 export function NoSelect({ children, fromLeftEdge, ...boxProps }: PropsWithChildren<Props>): React.ReactNode {
   return (
-    <Box {...boxProps} noSelect={fromLeftEdge ? 'from-left-edge' : true}>
+    <Box
+      alignSelf={fromLeftEdge ? 'stretch' : undefined}
+      {...boxProps}
+      noSelect={fromLeftEdge ? 'from-left-edge' : true}
+    >
       {children}
     </Box>
   );

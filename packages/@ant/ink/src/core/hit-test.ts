@@ -121,7 +121,8 @@ export function bubbleClick(
 
   // Click-to-focus: find the closest focusable ancestor and focus it.
   // root is always ink-root, which owns the FocusManager.
-  if (root.focusManager) {
+  // densable tv @193291404: skip handleClickFocus on window-activation clicks.
+  if (root.focusManager && !event.isWindowActivation) {
     let focusTarget: DOMElement | undefined = target
     while (focusTarget) {
       if (typeof focusTarget.attributes['tabIndex'] === 'number') {
@@ -242,24 +243,57 @@ function hoverHandlersApply(node: DOMElement, cellIsBlank: boolean): boolean {
 /**
  * densable `ev` — first non-empty column walking from `col` toward `bound`.
  */
+function findFirstNonEmptyCol(
+  screen: Screen,
+  row: number,
+  col: number,
+  bound: number,
+  step: -1 | 1,
+): number | undefined {
+  for (let c = col + step; c !== bound; c += step) {
+    if (!isEmptyCellAt(screen, c, row)) return c
+  }
+  return undefined
+}
+
 /**
- * densable `Ls` — blank for hover: empty cell, unless ink-text / ink-raw-ansi
- * layout still hit-tests to this node on both sides of the empty span.
- * Uses `nodeCache.get(node)` (not a cachedLayout field).
+ * densable `Ls` @193292629 — blank for hover: empty cell, unless ink-text /
+ * ink-raw-ansi layout still hit-tests to this node on both sides of the empty
+ * span. A text hit is not blank when surrounded by glyphs belonging to `hit`.
  */
 export function cellIsBlankForHover(
-  _root: DOMElement,
+  root: DOMElement,
   screen: Screen,
   hit: DOMElement | null | undefined,
   col: number,
   row: number,
 ): boolean {
   if (!isEmptyCellAt(screen, col, row)) return false
-  // DualInk leftoverGs blit can empty the cell buffer while yoga still hits
-  // ink-text. Gold Ls both-sides walk then treats the whole Thought-for /
-  // Message-from row as blank. A text hit is not blank.
-  // Gold only walks for text hits; any other hit on an empty cell is blank.
-  return !(hit?.nodeName === 'ink-text' || hit?.nodeName === 'ink-raw-ansi')
+  const rect =
+    hit?.nodeName === 'ink-text' || hit?.nodeName === 'ink-raw-ansi'
+      ? layoutRect(hit)
+      : undefined
+  if (!rect) return true
+  const left = findFirstNonEmptyCol(
+    screen,
+    row,
+    col,
+    Math.floor(rect.x) - 1,
+    -1,
+  )
+  const right = findFirstNonEmptyCol(
+    screen,
+    row,
+    col,
+    Math.ceil(rect.x + rect.width),
+    1,
+  )
+  return !(
+    left !== undefined &&
+    right !== undefined &&
+    hitTest(root, left, row) === hit &&
+    hitTest(root, right, row) === hit
+  )
 }
 
 function resolveHoverBlank(

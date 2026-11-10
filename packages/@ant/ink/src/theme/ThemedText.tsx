@@ -17,9 +17,9 @@ export type Props = {
   readonly color?: keyof Theme | Color;
 
   /**
-   * Same as `color`, but for background. Must be a theme key.
+   * Same as `color`, but for background. Accepts a theme key or raw color value.
    */
-  readonly backgroundColor?: keyof Theme;
+  readonly backgroundColor?: keyof Theme | Color;
 
   /**
    * Dim the color using the theme's inactive color.
@@ -64,6 +64,10 @@ export type Props = {
    * line materialize so VoiceOver does not announce "new line" for caret space.
    */
   readonly 'aria-preserve-whitespace'?: boolean;
+  readonly 'aria-hidden'?: boolean;
+  readonly 'aria-label'?: string;
+  readonly 'aria-role'?: string;
+  readonly 'aria-state'?: Record<string, boolean | undefined>;
 
   /** densable accessibility bag — forwarded to base Text. */
   readonly accessibility?: DOMAccessibility;
@@ -103,6 +107,10 @@ export default function ThemedText({
   inverse = false,
   wrap = 'wrap',
   'aria-preserve-whitespace': ariaPreserveWhitespace,
+  'aria-hidden': ariaHidden,
+  'aria-label': ariaLabel,
+  'aria-role': ariaRole,
+  'aria-state': ariaState,
   accessibility,
   onMouseEnter,
   onMouseLeave,
@@ -120,7 +128,7 @@ export default function ThemedText({
       : dimColor
         ? (theme.inactive as Color)
         : resolveColor(color, theme);
-  const resolvedBackgroundColor = backgroundColor ? (theme[backgroundColor] as Color) : undefined;
+  const resolvedBackgroundColor = resolveColor(backgroundColor, theme);
 
   return (
     <Text
@@ -133,6 +141,10 @@ export default function ThemedText({
       inverse={inverse}
       wrap={wrap}
       aria-preserve-whitespace={ariaPreserveWhitespace}
+      aria-hidden={ariaHidden}
+      aria-label={ariaLabel}
+      aria-role={ariaRole}
+      aria-state={ariaState}
       accessibility={accessibility}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}

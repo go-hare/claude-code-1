@@ -266,8 +266,13 @@ export function recordYogaMs(ms: number): void {
 export function getLastYogaMs(): number {
   return _lastYogaMs
 }
-export function markCommitStart(): void {
+export function markCommitStart(node?: DOMElement): void {
   _commitStart = performance.now()
+  if (node) {
+    let cur = node
+    while (cur.parentNode) cur = cur.parentNode
+    cur.scrollCommitStartedAt = _commitStart
+  }
 }
 export function getLastCommitMs(): number {
   return _lastCommitMs
@@ -468,9 +473,12 @@ const reconciler = createReconciler<
 
         setAttribute(node, key, value as DOMNodeAttribute)
       }
-      // densable: if(g)sy(n,R7t(n))
+      // densable: if(g)sy(n,R7t(n)); if(y?.autoFocus===!0)Xk(n).handleAutoFocus(n)
       if (rawModeHandlersChanged) {
         syncRawModeHold(node, getRootNode(node))
+      }
+      if (props['autoFocus'] === true) {
+        getFocusManager(node).handleAutoFocus(node)
       }
     }
 

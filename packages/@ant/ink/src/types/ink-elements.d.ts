@@ -17,6 +17,7 @@ declare global {
       'ink-box': {
         ref?: Ref<DOMElement>
         tabIndex?: number
+        textEntry?: boolean
         autoFocus?: boolean
         accessibility?: DOMAccessibility
         onClick?: (event: ClickEvent) => void

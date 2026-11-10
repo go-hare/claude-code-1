@@ -46,6 +46,10 @@ type BaseProps = {
    * line materialize so VoiceOver does not announce "new line" for caret space.
    */
   readonly 'aria-preserve-whitespace'?: boolean;
+  readonly 'aria-hidden'?: boolean;
+  readonly 'aria-label'?: string;
+  readonly 'aria-role'?: string;
+  readonly 'aria-state'?: Record<string, boolean | undefined>;
 
   /** densable accessibility bag (alternative to individual aria-* props). */
   readonly accessibility?: DOMAccessibility;
@@ -137,6 +141,10 @@ export default function Text({
   inverse = false,
   wrap = 'wrap',
   'aria-preserve-whitespace': ariaPreserveWhitespace,
+  'aria-hidden': ariaHidden,
+  'aria-label': ariaLabel,
+  'aria-role': ariaRole,
+  'aria-state': ariaState,
   accessibility: accessibilityProp,
   onMouseEnter,
   onMouseLeave,
@@ -159,9 +167,24 @@ export default function Text({
     ...(inverse && { inverse }),
   };
 
-  // densable TYr: aria-preserve-whitespace → accessibility.preserveWhitespace
+  // densable TYr: aria-* → accessibility
+  const hasAria =
+    ariaHidden !== undefined ||
+    ariaLabel !== undefined ||
+    ariaRole !== undefined ||
+    ariaState !== undefined ||
+    ariaPreserveWhitespace !== undefined;
   const accessibility: DOMAccessibility | undefined =
-    accessibilityProp ?? (ariaPreserveWhitespace ? { preserveWhitespace: true } : undefined);
+    accessibilityProp ??
+    (hasAria
+      ? {
+          ...(ariaHidden !== undefined && { hidden: ariaHidden }),
+          ...(ariaLabel !== undefined && { label: ariaLabel }),
+          ...(ariaRole !== undefined && { role: ariaRole }),
+          ...(ariaState !== undefined && { state: ariaState }),
+          ...(ariaPreserveWhitespace !== undefined && { preserveWhitespace: ariaPreserveWhitespace }),
+        }
+      : undefined);
 
   return (
     <ink-text

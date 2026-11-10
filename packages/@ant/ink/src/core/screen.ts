@@ -10,9 +10,37 @@ import {
   type Size,
   unionRect,
 } from './layout/geometry.js'
+import { stringWidth } from './stringWidth.js'
 import { BEL, ESC, SEP } from './termio/ansi.js'
 import * as warn from './warn.js'
 import { isAtlasTrackingEnabled, trackAtlasKey } from './xtermAtlas.js'
+
+const logForDebugging = (_message: string, _opts?: { level?: string }) => {}
+
+function boldDimResetPrefix(
+  fromCodes: AnsiCode[],
+  toCodes: AnsiCode[],
+): string {
+  let fromBits = 0
+  let toBits = 0
+  for (const code of fromCodes) {
+    if (code.code === '\x1b[1m') fromBits |= 1
+    else if (code.code === '\x1b[2m') fromBits |= 2
+  }
+  for (const code of toCodes) {
+    if (code.code === '\x1b[1m') toBits |= 1
+    else if (code.code === '\x1b[2m') toBits |= 2
+  }
+  if (fromBits & ~toBits && toBits) {
+    const surviving = fromBits & toBits
+    return (
+      '\x1b[22m' +
+      (surviving & 1 ? '\x1b[1m' : '') +
+      (surviving & 2 ? '\x1b[2m' : '')
+    )
+  }
+  return ''
+}
 
 // --- Shared Pools (interning for memory efficiency) ---
 
@@ -52,7 +80,14 @@ export class CharPool {
   get(index: number): string {
     return this.strings[index] ?? ' '
   }
+
+  get size(): number {
+    return this.strings.length
+  }
 }
+
+const COMPACTION_MIN_STYLES = 512
+const TRANSITION_CACHE_MAX = 8192
 
 // Hyperlink string pool shared across all screens.
 // Index 0 = no hyperlink.
@@ -73,6 +108,10 @@ export class HyperlinkPool {
 
   get(id: number): string | undefined {
     return id === 0 ? undefined : this.strings[id]
+  }
+
+  get size(): number {
+    return this.strings.length
   }
 }
 
@@ -115,48 +154,39 @@ export class StylePool {
   private ids = new Map<string, number>()
   private styles: AnsiCode[][] = []
   private transitionCache = new Map<number, string>()
+  private overflowWarned = false
+  private generationCount = 0
   readonly none: number
 
   constructor() {
     this.none = this.intern([])
   }
 
-  private static readonly CACHE_MAX = 1000
+  get size(): number {
+    return this.styles.length
+  }
 
-  /**
-   * Evict oldest entries from derivative caches when they exceed the limit.
-   * ids/styles are never evicted (id is an array index).
-   */
-  private evictCacheIfNeeded(): void {
-    if (this.transitionCache.size > StylePool.CACHE_MAX) {
-      const keys = this.transitionCache.keys()
-      for (
-        let i = 0;
-        i < this.transitionCache.size - StylePool.CACHE_MAX;
-        i++
-      ) {
-        const k = keys.next().value
-        if (k !== undefined) this.transitionCache.delete(k)
-      }
-    }
-    if (this.inverseCache.size > StylePool.CACHE_MAX) {
-      const keys = this.inverseCache.keys()
-      for (let i = 0; i < this.inverseCache.size - StylePool.CACHE_MAX; i++) {
-        const k = keys.next().value
-        if (k !== undefined) this.inverseCache.delete(k)
-      }
-    }
-    if (this.currentMatchCache.size > StylePool.CACHE_MAX) {
-      const keys = this.currentMatchCache.keys()
-      for (
-        let i = 0;
-        i < this.currentMatchCache.size - StylePool.CACHE_MAX;
-        i++
-      ) {
-        const k = keys.next().value
-        if (k !== undefined) this.currentMatchCache.delete(k)
-      }
-    }
+  get overflowed(): boolean {
+    return this.overflowWarned
+  }
+
+  get transitionCacheSize(): number {
+    return this.transitionCache.size
+  }
+
+  get isNearCapacity(): boolean {
+    return this.overflowWarned || this.styles.length > NEAR_CAPACITY_STYLE_COUNT
+  }
+
+  needsCompaction(liveStylesCount: number): boolean {
+    return (
+      this.overflowWarned ||
+      this.styles.length > Math.max(COMPACTION_MIN_STYLES, 2 * liveStylesCount)
+    )
+  }
+
+  get generation(): number {
+    return this.generationCount
   }
 
   /**
@@ -173,12 +203,22 @@ export class StylePool {
     let id = this.ids.get(key)
     if (id === undefined) {
       const rawId = this.styles.length
+      if (rawId > MAX_STYLE_COUNT) {
+        if (!this.overflowWarned) {
+          this.overflowWarned = true
+          logForDebugging(
+            `StylePool exhausted ${MAX_STYLE_COUNT} unique styles — further ` +
+              'style combinations render unstyled to avoid packed-cell aliasing',
+            { level: 'warn' },
+          )
+        }
+        return this.none
+      }
       this.styles.push(styles.length === 0 ? [] : styles)
       id =
         (rawId << 1) |
         (styles.length > 0 && hasVisibleSpaceEffect(styles) ? 1 : 0)
       this.ids.set(key, id)
-      this.evictCacheIfNeeded()
     }
     return id
   }
@@ -198,7 +238,18 @@ export class StylePool {
     const key = fromId * 0x100000 + toId
     let str = this.transitionCache.get(key)
     if (str === undefined) {
-      str = ansiCodesToString(diffAnsiCodes(this.get(fromId), this.get(toId)))
+      if (this.transitionCache.size >= TRANSITION_CACHE_MAX) {
+        this.transitionCache.clear()
+      }
+      const fromCodes = this.get(fromId)
+      const toCodes = this.get(toId)
+      const prefix = boldDimResetPrefix(fromCodes, toCodes)
+      const diff = diffAnsiCodes(fromCodes, toCodes)
+      str =
+        prefix +
+        ansiCodesToString(
+          prefix ? diff.filter(c => c.code !== '\x1b[22m') : diff,
+        )
       this.transitionCache.set(key, str)
     }
     return str
@@ -300,6 +351,28 @@ export class StylePool {
     }
     return id
   }
+
+  compact(): (oldId: number) => number {
+    const oldStyles = this.styles
+    this.ids = new Map()
+    this.styles = []
+    this.transitionCache.clear()
+    this.inverseCache.clear()
+    this.currentMatchCache.clear()
+    this.selectionBgCache.clear()
+    this.overflowWarned = false
+    this.generationCount++
+    this.intern([])
+    const remapped = new Int32Array(oldStyles.length).fill(-1)
+    return (oldId: number): number => {
+      const rawIdx = oldId >>> 1
+      const cached = remapped[rawIdx]
+      if (cached !== undefined && cached !== -1) return cached
+      const newId = this.intern(oldStyles[rawIdx] ?? [])
+      if (rawIdx < remapped.length) remapped[rawIdx] = newId
+      return newId
+    }
+  }
 }
 
 // endCodes that produce visible effects on space characters
@@ -380,6 +453,10 @@ const STYLE_SHIFT = 17
 const HYPERLINK_SHIFT = 2
 const HYPERLINK_MASK = 0x7fff // 15 bits
 const WIDTH_MASK = 3 // 2 bits
+const MAX_STYLE_ID = (1 << (32 - STYLE_SHIFT)) - 1
+// 14-bit styleId cap (16383; 7679 in older notes)
+const MAX_STYLE_COUNT = MAX_STYLE_ID >>> 1
+const NEAR_CAPACITY_STYLE_COUNT = MAX_STYLE_COUNT >>> 1
 
 // Pack styleId, hyperlinkId, and width into a single Int32
 function packWord1(
@@ -601,30 +678,36 @@ export function migrateScreenPools(
   screen: Screen,
   charPool: CharPool,
   hyperlinkPool: HyperlinkPool,
+  remapStyle?: (oldStyleId: number) => number,
 ): void {
   const oldCharPool = screen.charPool
   const oldHyperlinkPool = screen.hyperlinkPool
-  if (oldCharPool === charPool && oldHyperlinkPool === hyperlinkPool) return
+  const migrateChars = oldCharPool !== charPool
+  const migrateLinks = oldHyperlinkPool !== hyperlinkPool
+  if (!migrateChars && !migrateLinks && !remapStyle) return
 
   const size = screen.width * screen.height
   const cells = screen.cells
 
   // Re-intern chars and hyperlinks in a single pass, stride by 2
   for (let ci = 0; ci < size << 1; ci += 2) {
-    // Re-intern charId (word0)
-    const oldCharId = cells[ci]!
-    cells[ci] = charPool.intern(oldCharPool.get(oldCharId))
+    if (migrateChars) {
+      const oldCharId = cells[ci]!
+      cells[ci] = charPool.intern(oldCharPool.get(oldCharId))
+    }
 
-    // Re-intern hyperlinkId (packed in word1)
     const word1 = cells[ci + 1]!
     const oldHyperlinkId = (word1 >>> HYPERLINK_SHIFT) & HYPERLINK_MASK
-    if (oldHyperlinkId !== 0) {
-      const oldStr = oldHyperlinkPool.get(oldHyperlinkId)
-      const newHyperlinkId = hyperlinkPool.intern(oldStr)
-      // Repack word1 with new hyperlinkId, preserving styleId and width
-      const styleId = word1 >>> STYLE_SHIFT
+    const oldStyleId = word1 >>> STYLE_SHIFT
+    const newHyperlinkId =
+      migrateLinks && oldHyperlinkId !== 0
+        ? hyperlinkPool.intern(oldHyperlinkPool.get(oldHyperlinkId))
+        : oldHyperlinkId
+    const newStyleId =
+      remapStyle && oldStyleId !== 0 ? remapStyle(oldStyleId) : oldStyleId
+    if (newHyperlinkId !== oldHyperlinkId || newStyleId !== oldStyleId) {
       const width = word1 & WIDTH_MASK
-      cells[ci + 1] = packWord1(styleId, newHyperlinkId, width)
+      cells[ci + 1] = packWord1(newStyleId, newHyperlinkId, width)
     }
   }
 
@@ -861,6 +944,39 @@ export function setCellAt(
   }
 }
 
+function isMultiCodepointGrapheme(char: string): boolean {
+  return char.length > 2
+}
+
+export function clipRightEdgeWideGraphemes(screen: Screen): void {
+  const damage = screen.damage
+  if (!damage) return
+  const maxCol = Math.min(screen.width - 2, damage.x + damage.width - 1)
+  const maxRow = Math.min(screen.height, damage.y + damage.height)
+  for (let y = damage.y; y < maxRow; y++) {
+    for (let x = damage.x; x <= maxCol; x++) {
+      if (
+        (screen.cells[((y * screen.width + x) << 1) + 1]! & WIDTH_MASK) !==
+        CellWidth.Wide
+      ) {
+        continue
+      }
+      const cell = cellAt(screen, x, y)
+      if (!cell || !isMultiCodepointGrapheme(cell.char)) continue
+      const charWidth = Math.max(2, stringWidth(cell.char))
+      if (x + charWidth < screen.width) continue
+      for (let col = x; col < screen.width; col++) {
+        setCellAt(screen, col, y, {
+          char: col === x ? '…' : ' ',
+          styleId: cell.styleId,
+          width: CellWidth.Narrow,
+          hyperlink: cell.hyperlink,
+        })
+      }
+    }
+  }
+}
+
 /**
  * Replace the styleId of a cell in-place without disturbing char, width,
  * or hyperlink. Preserves empty cells as-is (char stays ' '). Tracks damage
@@ -884,7 +1000,20 @@ export function setCellStyleId(
   // Expand damage so diffEach scans this cell
   const d = screen.damage
   if (d) {
-    screen.damage = unionRect(d, { x, y, width: 1, height: 1 })
+    const right = d.x + d.width
+    const bottom = d.y + d.height
+    if (x < d.x) {
+      d.width += d.x - x
+      d.x = x
+    } else if (x >= right) {
+      d.width = x - d.x + 1
+    }
+    if (y < d.y) {
+      d.height += d.y - y
+      d.y = y
+    } else if (y >= bottom) {
+      d.height = y - d.y + 1
+    }
   } else {
     screen.damage = { x, y, width: 1, height: 1 }
   }
@@ -959,45 +1088,90 @@ export function blitRegion(
     }
   }
 
-  // Compute damage once for the whole region
+  const checkLeft = regionX > 0
+  const checkRight = maxX < dst.width
+  let expandedLeft = false
+  let expandedRight = 0
+  if (checkLeft || checkRight) {
+    let leftCI = (regionY * dst.width + regionX - 1) << 1
+    let rightCI = (regionY * dst.width + maxX - 1) << 1
+    for (let y = regionY; y < maxY; y++) {
+      if (checkLeft) {
+        const firstInRegionWidth = dstCells[leftCI + 3]! & WIDTH_MASK
+        if ((dstCells[leftCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
+          if (firstInRegionWidth !== CellWidth.SpacerTail) {
+            dstCells[leftCI] = EMPTY_CHAR_INDEX
+            dstCells[leftCI + 1] = packWord1(
+              dst.emptyStyleId,
+              0,
+              CellWidth.Narrow,
+            )
+            expandedLeft = true
+          }
+        } else if (firstInRegionWidth === CellWidth.SpacerTail) {
+          dstCells[leftCI + 2] = EMPTY_CHAR_INDEX
+          dstCells[leftCI + 3] = packWord1(
+            dst.emptyStyleId,
+            0,
+            CellWidth.Narrow,
+          )
+        }
+      }
+      if (checkRight) {
+        if ((dstCells[rightCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
+          if (
+            maxX + 1 < dst.width &&
+            (dstCells[rightCI + 3]! & WIDTH_MASK) === CellWidth.Wide &&
+            (dstCells[rightCI + 5]! & WIDTH_MASK) === CellWidth.SpacerTail
+          ) {
+            dstCells[rightCI + 4] = EMPTY_CHAR_INDEX
+            dstCells[rightCI + 5] = packWord1(
+              dst.emptyStyleId,
+              0,
+              CellWidth.Narrow,
+            )
+            expandedRight = 2
+          } else if (expandedRight < 1) {
+            expandedRight = 1
+          }
+          dstCells[rightCI + 2] = SPACER_CHAR_INDEX
+          dstCells[rightCI + 3] = packWord1(
+            dst.emptyStyleId,
+            0,
+            CellWidth.SpacerTail,
+          )
+        } else if (
+          (dstCells[rightCI + 3]! & WIDTH_MASK) ===
+          CellWidth.SpacerTail
+        ) {
+          dstCells[rightCI + 2] = EMPTY_CHAR_INDEX
+          dstCells[rightCI + 3] = packWord1(
+            dst.emptyStyleId,
+            0,
+            CellWidth.Narrow,
+          )
+          if (expandedRight < 1) {
+            expandedRight = 1
+          }
+        }
+      }
+      leftCI += dstStride
+      rightCI += dstStride
+    }
+  }
+
+  const damageMinX = expandedLeft ? regionX - 1 : regionX
+  const damageMaxX = maxX + expandedRight
   const regionRect = {
-    x: regionX,
+    x: damageMinX,
     y: regionY,
-    width: rowLen,
+    width: damageMaxX - damageMinX,
     height: maxY - regionY,
   }
   if (dst.damage) {
     dst.damage = unionRect(dst.damage, regionRect)
   } else {
     dst.damage = regionRect
-  }
-
-  // Handle wide char at right edge: spacer might be outside blit region
-  // but still within dst bounds. Per-row check only at the boundary column.
-  if (maxX < dst.width) {
-    let srcLastCI = (regionY * src.width + (maxX - 1)) << 1
-    let dstSpacerCI = (regionY * dst.width + maxX) << 1
-    let wroteSpacerOutsideRegion = false
-    for (let y = regionY; y < maxY; y++) {
-      if ((srcCells[srcLastCI + 1]! & WIDTH_MASK) === CellWidth.Wide) {
-        dstCells[dstSpacerCI] = SPACER_CHAR_INDEX
-        dstCells[dstSpacerCI + 1] = packWord1(
-          dst.emptyStyleId,
-          0,
-          CellWidth.SpacerTail,
-        )
-        wroteSpacerOutsideRegion = true
-      }
-      srcLastCI += srcStride
-      dstSpacerCI += dstStride
-    }
-    // Expand damage to include SpacerTail column if we wrote any
-    if (wroteSpacerOutsideRegion && dst.damage) {
-      const rightEdge = dst.damage.x + dst.damage.width
-      if (rightEdge === maxX) {
-        dst.damage = { ...dst.damage, width: dst.damage.width + 1 }
-      }
-    }
   }
 }
 
