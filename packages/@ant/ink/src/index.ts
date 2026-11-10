@@ -413,6 +413,7 @@ export { Divider } from './theme/Divider.js'
 export { FuzzyPicker } from './theme/FuzzyPicker.js'
 export { ListItem } from './theme/ListItem.js'
 export { LoadingState } from './theme/LoadingState.js'
+export { setSpinnerReducedMotionGetter } from './theme/Spinner.js'
 export {
   Pane,
   PANE_PADDING_X_INLINE,

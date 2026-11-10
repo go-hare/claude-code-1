@@ -6,11 +6,9 @@ import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js';
 import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js';
 import { LogSelector } from '../../components/LogSelector.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
-import { Spinner } from '../../components/Spinner.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { setClipboard } from '@anthropic/ink';
-import { Box, Pane, Text } from '@anthropic/ink';
+import { Box, LoadingState, Pane, setClipboard, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { LogOption } from '../../types/logs.js';
@@ -90,7 +88,6 @@ function ResumeCommand({
   const sessionLogResultRef = React.useRef<SessionLogResult | null>(null);
   const loadingMoreRef = React.useRef(false);
   const logCountRef = React.useRef(0);
-  const hasListRef = React.useRef(false);
   // Inside FullscreenLayout's modal slot, use the modal's inner rows (already
   // minus transcript peek + divider) — floor(rows/2) collapses the list and
   // crushes the footer under default-on fullscreen (official 2.1.210 layout).
@@ -99,6 +96,8 @@ function ResumeCommand({
 
   const loadLogs = React.useCallback(
     async (allProjects: boolean, paths: string[]) => {
+      // densable ie() `j`: every load (first paint and Ctrl+A) sets loading
+      // before the await, so the list unmounts and the two-line frame shows.
       setLoading(true);
       sessionLogResultRef.current = null;
       try {
@@ -109,7 +108,6 @@ function ResumeCommand({
         sessionLogResultRef.current = result;
         const resumable = filterResumableSessions(result.logs, getSessionId());
         logCountRef.current = resumable.length;
-        hasListRef.current = true;
         setLogs(resumable);
       } catch (_err) {
         if (!cancelledRef.current) {
@@ -233,18 +231,17 @@ function ResumeCommand({
     isActive: loading && !resuming,
   });
 
-  // Gold ie(): while the first load is in flight (or a session is being
-  // resumed) the picker is not mounted. The list appears once, at its
-  // content height, instead of growing a row at a time.
-  if ((loading && !hasListRef.current && logs.length === 0) || resuming) {
+  // densable ie(): `if (loading || resuming)` the picker is not mounted.
+  // Ctrl+A reloads take the same two-line frame; the list returns at its
+  // content height once loading clears.
+  if (loading || resuming) {
     return (
       <Pane color="suggestion">
         <Text bold color="suggestion">
           Resume session
         </Text>
         <Box marginTop={1}>
-          <Spinner />
-          <Text> {resuming ? 'Resuming conversation…' : 'Loading conversations…'}</Text>
+          <LoadingState message={resuming ? 'Resuming conversation…' : 'Loading conversations…'} />
         </Box>
       </Pane>
     );
@@ -262,7 +259,6 @@ function ResumeCommand({
       showAllProjects={showAllProjects}
       onToggleAllProjects={handleToggleAllProjects}
       onAgenticSearch={agenticSessionSearch}
-      isLoading={loading}
     />
   );
 }

@@ -50,6 +50,7 @@ import { initUser } from '../utils/user.js'
 import { initLangfuse, shutdownLangfuse } from '../services/langfuse/index.js'
 import {
   setAppCallbacks,
+  setSpinnerReducedMotionGetter,
   setThemeConfigCallbacks,
   subscribeSystemTheme,
 } from '@anthropic/ink'
@@ -114,6 +115,11 @@ export const init = memoize(async (): Promise<void> => {
       isShutdownCommitted: isShuttingDown,
       stopCapturingEarlyInput,
     })
+    // densable Ws `Em(Ko(cr))` — LoadingState spinner honors prefersReducedMotion.
+    const { getInitialSettings } = await import('../utils/settings/settings.js')
+    setSpinnerReducedMotionGetter(
+      () => getInitialSettings().prefersReducedMotion === true,
+    )
     logForDiagnosticsNoPII('info', 'init_configs_enabled', {
       duration_ms: Date.now() - configsStart,
     })

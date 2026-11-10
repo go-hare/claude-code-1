@@ -40,6 +40,7 @@ import { sanitizeSessionTitle } from '../utils/sessionTitleSanitize.js';
 import { getTheme } from '../utils/theme.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/select.js';
+import { EmptyState } from './EmptyState.js';
 import { SearchBox } from './SearchBox.js';
 import { SessionPreview } from './SessionPreview.js';
 import TextInput from './TextInput.js';
@@ -57,7 +58,7 @@ export type LogSelectorProps = {
   showAllProjects?: boolean;
   onToggleAllProjects?: () => void;
   onAgenticSearch?: (query: string, logs: LogOption[], signal?: AbortSignal) => Promise<LogOption[]>;
-  /** Reload in progress while a list is already shown. Gold paints " · Refreshing…". */
+  /** densable iYt `F`. Empty copy is withheld while a reload is in flight. */
   isLoading?: boolean;
   reloadGeneration?: number;
   currentSessionId?: string;
@@ -208,6 +209,7 @@ export function LogSelector({
     query: searchQuery,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    handlePaste: handleSearchPaste,
   } = useSearchInput({
     isActive: viewMode === 'search',
     onExit: () => {
@@ -738,35 +740,54 @@ export function LogSelector({
   const handlePaste = React.useCallback(
     (event: PasteEvent) => {
       if (viewMode === 'search') {
-        const firstLine = (event.text.split(/\r\n|\r|\n/, 2)[0] ?? '').trim();
-        if (firstLine) {
-          setSearchQuery(searchQuery.slice(0, searchCursorOffset) + firstLine + searchQuery.slice(searchCursorOffset));
-        }
+        handleSearchPaste(event);
         return;
       }
       const firstLine = (event.text.split(/\r\n|\r|\n/, 2)[0] ?? '').trim();
       if (viewMode === 'preview' || viewMode === 'rename' || !focusedLog || !firstLine) {
         return;
       }
+      event.preventDefault();
       setViewMode('search');
       setSearchQuery(firstLine);
       logEvent('tengu_session_search_toggled', { enabled: true });
     },
-    [viewMode, focusedLog, searchQuery, searchCursorOffset, setSearchQuery],
+    [viewMode, focusedLog, handleSearchPaste, setSearchQuery],
   );
 
   const handleEmptyListKeyDown = React.useCallback(
     (event: KeyboardEvent) => {
-      if (
-        viewMode === 'list' &&
-        displayedLogs.length === 0 &&
-        (event.key === 'up' || event.key === 'down' || event.key === 'return')
-      ) {
+      if (viewMode === 'preview' || viewMode === 'rename') {
+        return;
+      }
+      if (viewMode === 'search') {
+        if (event.ctrl && event.key === 'n') {
+          event.preventDefault();
+        } else if (event.ctrl && event.key === 'a' && onToggleAllProjects && logs.length === 0) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (displayedLogs.length === 0 && (event.key === 'up' || event.key === 'down' || event.key === 'return')) {
         event.preventDefault();
         setViewMode('search');
+        return;
+      }
+      const keyIsNotCtrlOrMeta = !event.ctrl && !event.meta;
+      const lowerKey = event.key.toLowerCase();
+      if (
+        (event.ctrl && lowerKey === 'a' && onToggleAllProjects) ||
+        (event.ctrl && lowerKey === 'b') ||
+        (event.ctrl && lowerKey === 'w' && hasMultipleWorktrees) ||
+        (lowerKey === '/' && keyIsNotCtrlOrMeta) ||
+        (event.ctrl && lowerKey === 'r' && focusedLog) ||
+        (((event.key === ' ' && keyIsNotCtrlOrMeta) || (event.ctrl && lowerKey === 'v')) && focusedLog) ||
+        (!event.defaultPrevented && keyIsNotCtrlOrMeta && event.key.length === 1 && event.key !== ' ')
+      ) {
+        event.preventDefault();
       }
     },
-    [viewMode, displayedLogs.length],
+    [viewMode, displayedLogs.length, onToggleAllProjects, logs.length, hasMultipleWorktrees, focusedLog],
   );
 
   // densable iYt Pe / Rt / Mt / Tn / Ot
@@ -844,7 +865,6 @@ export function LogSelector({
               ({focusedIndex} of {displayedLogs.length})
             </Text>
           )}
-          {isLoading && <Text dimColor> · Refreshing…</Text>}
         </Text>
       </Box>
       <SearchBox
@@ -872,23 +892,24 @@ export function LogSelector({
         !isSearching &&
         !isLoading && (
           <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
-            <Text dimColor>No sessions match &quot;{searchQuery}&quot;.</Text>
+            <EmptyState>No sessions match &quot;{searchQuery}&quot;.</EmptyState>
           </Box>
         )}
       {logs.length === 0 && viewMode === 'list' && !isLoading && !searchQuery.trim() && (
-        <Box paddingLeft={1} marginBottom={1} flexShrink={0} flexDirection="column">
-          <Text dimColor>
+        <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
+          <EmptyState
+            hint={
+              showAllProjects ? undefined : (
+                <KeyboardShortcutHint
+                  shortcut="ctrl+a"
+                  action="show all projects"
+                  format={{ modCase: 'title', charCase: 'upper' }}
+                />
+              )
+            }
+          >
             {showAllProjects ? 'No conversations found.' : 'No conversations found in this project.'}
-          </Text>
-          {!showAllProjects && onToggleAllProjects && (
-            <Text dimColor>
-              <KeyboardShortcutHint
-                shortcut="Ctrl+A"
-                action="show all projects"
-                format={{ modCase: 'title', charCase: 'upper' }}
-              />
-            </Text>
-          )}
+          </EmptyState>
         </Box>
       )}
       {viewMode === 'rename' && focusedLog ? (

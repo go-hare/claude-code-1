@@ -47,6 +47,7 @@ import { getSettingSourceName, isSettingSourceEnabled, type SettingSource } from
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { countCharInString, plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
+import { EmptyState } from '../EmptyState.js';
 import { ItemList } from '../ItemList.js';
 import { SearchBox } from '../SearchBox.js';
 
@@ -73,18 +74,6 @@ const OVERRIDE_PRECEDENCE: Record<SkillOverrideMode, number> = {
 };
 
 const LOCK_SETTING_SOURCES = ['policySettings', 'flagSettings'] as const;
-
-function EmptyState({ children, hint }: { children: React.ReactNode; hint?: React.ReactNode }): React.ReactNode {
-  if (!hint) {
-    return <Text dimColor>{children}</Text>;
-  }
-  return (
-    <Box flexDirection="column">
-      <Text dimColor>{children}</Text>
-      <Text dimColor>{hint}</Text>
-    </Box>
-  );
-}
 
 function isSkillDialogCommand(cmd: Command): cmd is SkillCommand {
   return (

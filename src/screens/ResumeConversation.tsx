@@ -5,10 +5,9 @@ import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { getOriginalCwd, getSessionId, switchSession } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
 import { LogSelector } from '../components/LogSelector.js';
-import { Spinner } from '../components/Spinner.js';
 import { restoreCostStateForSession } from '../cost-tracker.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
-import { AlternateScreen, Box, setClipboard, Text, useSelection, useTerminalTitle } from '@anthropic/ink';
+import { AlternateScreen, Box, LoadingState, setClipboard, Text, useSelection, useTerminalTitle } from '@anthropic/ink';
 import { useSelectionClearKeybinding } from '../components/ScrollKeybindingHandler.js';
 import { isFullscreenEnvEnabled, mouseTrackingProp } from '../utils/fullscreen.js';
 import {
@@ -434,10 +433,7 @@ export function ResumeConversation({
   if (loading && !hasListRef.current && (logs.length === 0 || filteredLogs.length === 0)) {
     return (
       <PickerScreenWrapper>
-        <Box>
-          <Spinner />
-          <Text> Loading conversations…</Text>
-        </Box>
+        <LoadingState message="Loading conversations…" />
       </PickerScreenWrapper>
     );
   }
@@ -449,10 +445,7 @@ export function ResumeConversation({
   if (resuming) {
     return (
       <PickerScreenWrapper>
-        <Box>
-          <Spinner />
-          <Text> Resuming conversation…</Text>
-        </Box>
+        <LoadingState message="Resuming conversation…" />
       </PickerScreenWrapper>
     );
   }

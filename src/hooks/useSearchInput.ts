@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { KeyboardEvent, useInput } from '@anthropic/ink'
+import { KeyboardEvent, type PasteEvent, useInput } from '@anthropic/ink'
 // backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
 import {
   Cursor,
@@ -36,7 +36,9 @@ type UseSearchInputReturn = {
   query: string
   setQuery: (q: string) => void
   cursorOffset: number
+  setCursorOffset: (offset: number) => void
   handleKeyDown: (e: KeyboardEvent) => void
+  handlePaste: (e: PasteEvent) => void
 }
 
 function isKillKey(e: KeyboardEvent, readline: boolean): boolean {
@@ -368,6 +370,20 @@ export function useSearchInput({
     }
   }
 
+  const handlePaste = (e: PasteEvent): void => {
+    if (!isActive || e.text.length === 0) return
+    e.preventDefault()
+    const line = e.text.split(/\r\n|\r|\n/, 2)[0] ?? ''
+    if (line.length === 0) return
+    const newCursor = Cursor.fromText(
+      query,
+      effectiveColumns,
+      cursorOffset,
+    ).insert(line)
+    setQueryState(newCursor.text)
+    setCursorOffset(newCursor.offset)
+  }
+
   // Backward-compat bridge: existing consumers don't yet wire handleKeyDown
   // to <Box onKeyDown>. Subscribe via useInput and adapt InputEvent →
   // KeyboardEvent until all 11 call sites are migrated (separate PRs).
@@ -379,5 +395,12 @@ export function useSearchInput({
     { isActive },
   )
 
-  return { query, setQuery, cursorOffset, handleKeyDown }
+  return {
+    query,
+    setQuery,
+    cursorOffset,
+    setCursorOffset,
+    handleKeyDown,
+    handlePaste,
+  }
 }
