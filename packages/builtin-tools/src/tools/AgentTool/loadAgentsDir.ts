@@ -154,6 +154,7 @@ export type BaseAgentDefinition = {
    * session agent.
    */
   omitClaudeMd?: boolean
+  fromAdditionalDirectory?: boolean
 }
 
 // Built-in agents - dynamic prompts only, no static systemPrompt field
@@ -220,7 +221,14 @@ export function getActiveAgentsFromList(
   const builtInAgents = allAgents.filter(a => a.source === 'built-in')
   const pluginAgents = allAgents.filter(a => a.source === 'plugin')
   const userAgents = allAgents.filter(a => a.source === 'userSettings')
-  const projectAgents = allAgents.filter(a => a.source === 'projectSettings')
+  const projectAgents = [
+    ...allAgents.filter(
+      a => a.source === 'projectSettings' && a.fromAdditionalDirectory,
+    ),
+    ...allAgents.filter(
+      a => a.source === 'projectSettings' && !a.fromAdditionalDirectory,
+    ),
+  ]
   const managedAgents = allAgents.filter(a => a.source === 'policySettings')
   const flagAgents = allAgents.filter(a => a.source === 'flagSettings')
 
@@ -241,7 +249,9 @@ export function getActiveAgentsFromList(
     }
   }
 
-  return Array.from(agentMap.values())
+  return Array.from(agentMap.values()).sort((a, b) =>
+    a.agentType.localeCompare(b.agentType),
+  )
 }
 
 /**
@@ -502,6 +512,13 @@ export function parseAgentFromJson(
   source: SettingSource = 'flagSettings',
 ): CustomAgentDefinition | null {
   try {
+    if (name.startsWith('-')) {
+      logForDebugging(
+        `Agent '${name}' has an invalid name: names must not start with '-'`,
+        { level: 'error' },
+      )
+      return null
+    }
     const parsed = AgentJsonSchema().parse(definition)
 
     let tools = parseAgentToolsFromFrontmatter(parsed.tools)

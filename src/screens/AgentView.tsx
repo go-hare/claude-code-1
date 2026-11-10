@@ -15,11 +15,18 @@
  * - Repo grouping labels
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { randomUUID } from 'crypto';
 import { feature } from 'bun:bundle';
+import figures from 'figures';
 import {
   Box,
+  Byline,
+  KeyboardShortcutHint,
+  Link,
+  ScrollBox,
+  type ScrollBoxHandle,
+  type DOMElement,
   Text,
   useInput,
   useKeybindings,
@@ -67,6 +74,7 @@ import {
   parsePrRef,
   buildStateModeFlatRows,
   buildSimpleModeFlatRows,
+  simpleStatusBand,
   buildDirectoryModeFlatRows,
   buildCustomGroupModeFlatRows,
   buildFleetFooterHints,
@@ -226,7 +234,7 @@ import { getCwd } from '../utils/cwd.js';
 import { getAuthTokenSource } from '../utils/auth.js';
 import { truncatePathMiddle } from '../utils/truncate.js';
 import { stringWidth } from '@anthropic/ink';
-import { formatRelativeTimeAgo } from '../utils/format.js';
+import { formatDuration, formatNumber, truncateToWidth } from '../utils/format.js';
 import { listTemplates, type TemplateInfo } from '../jobs/templates.js';
 import { listRoutines, type RoutineInfo } from '../jobs/routines.js';
 import {
@@ -276,6 +284,11 @@ const EMPTY_STATE_EXAMPLES =
 const REPL_HINT =
   'Press \u2192 to return to your session anytime. Type a task below to dispatch a session alongside it. Sessions keep running even after you close the terminal';
 const REPL_HINT_VIA_LEFT_SUFFIX = ' \u2014 run `claude agents` to manage them';
+const ORIGIN_MOVED_BANNER =
+  'Your conversation moved to the background — enter opens it · esc returns to it · ctrl+c twice quits';
+const EMPTY_STATE_BANNER =
+  'A different way to work with Claude: hand off a bigger task than you would chat through, and Claude organizes it in the sections above so you know when it needs you.';
+const RESERVED_GROUP_NAMES = new Set(['pinned', '(ungrouped)', 'ungrouped', 'earlier', 'past']);
 const DISPATCH_PLACEHOLDER = 'describe a task for a new session';
 /** Official Hre — custom-group bucket for jobs with no group. */
 const UNGROUPED_LABEL = '(ungrouped)';
@@ -426,6 +439,72 @@ type ViewMode = 'list' | 'rename' | 'reply' | 'group';
 type FocusArea = 'list' | 'dispatch';
 type GroupMode = 'state' | 'directory' | 'group';
 
+function truncateFromStart(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (stringWidth(text) <= maxWidth) return text;
+  if (maxWidth === 1) return '…';
+  let acc = '';
+  let used = 0;
+  const chars = [...text];
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const ch = chars[i]!;
+    const w = stringWidth(ch);
+    if (used + w + 1 > maxWidth) break;
+    acc = ch + acc;
+    used += w;
+  }
+  return `…${acc}`;
+}
+
+/**
+ * Official To (@197626850): inline text editor with inverse cursor block.
+ */
+function renderInlineEditor(text: string, cursor: number, maxWidth: number, selected = false): React.ReactNode {
+  if (selected && text) {
+    const fitted = truncateFromStart(text, Math.max(maxWidth - 1, 1));
+    return (
+      <>
+        <Text inverse>{fitted}</Text>
+        <Text inverse> </Text>
+      </>
+    );
+  }
+  const safeCursor = Math.max(0, Math.min(text.length, cursor));
+  let segStart = text.length;
+  let segEnd = text.length;
+  const segmenter = new Intl.Segmenter();
+  for (const { segment, index } of segmenter.segment(text)) {
+    if (index + segment.length > safeCursor) {
+      segStart = index;
+      segEnd = index + segment.length;
+      break;
+    }
+  }
+  const cursorChar = text.slice(segStart, segEnd) || ' ';
+  const after = text.slice(segEnd);
+  const before = truncateFromStart(
+    text.slice(0, segStart),
+    Math.max(0, maxWidth - stringWidth(cursorChar) - (after ? 1 : 0)),
+  );
+  return (
+    <>
+      <Text>{before}</Text>
+      <Text inverse>{cursorChar}</Text>
+      <Text>{after}</Text>
+    </>
+  );
+}
+
+type InlineGroupEditing = {
+  draft: string;
+  cursor: number;
+  selected: boolean;
+  reserved: boolean;
+  isNew: boolean;
+  ungroup: boolean;
+  addTo?: string;
+};
+
 // ---------------------------------------------------------------------------
 // Session row component
 // ---------------------------------------------------------------------------
@@ -436,6 +515,7 @@ function SessionRow({
   isOrigin,
   showSelectionBg,
   isRenaming,
+  inlineRenaming,
   isDeletePending,
   isJustKilled,
   isUngroupPending,
@@ -445,7 +525,11 @@ function SessionRow({
   loopKickCount,
   liveStatus,
   renameValue,
+  renameCursor,
+  groupEditing,
   cols,
+  termWidth,
+  rowRef,
   onSelect,
   onOpen,
 }: {
@@ -459,6 +543,7 @@ function SessionRow({
    */
   showSelectionBg?: boolean;
   isRenaming: boolean;
+  inlineRenaming?: boolean;
   isDeletePending: boolean;
   /** densable cy.justKilled — first Ctrl+X ran stop; second deletes. */
   isJustKilled?: boolean;
@@ -474,7 +559,11 @@ function SessionRow({
   /** Official Ss `status:xs(at)` — leftover glyph overlay only, not list grouping. */
   liveStatus?: string;
   renameValue: string;
+  renameCursor?: number;
+  groupEditing?: InlineGroupEditing;
   cols: FleetColumnWidths;
+  termWidth: number;
+  rowRef?: React.Ref<DOMElement>;
   onSelect?: () => void;
   onOpen?: () => void;
 }): React.ReactElement {
@@ -484,7 +573,7 @@ function SessionRow({
   const glyphBand = liveStatus === 'busy' ? 'active' : liveStatus === 'waiting' ? 'blocked' : band;
   const { color, dim } = glyphColor(glyphBand, activity, session);
   const icon = pickIcon(band, activity, session.pinned);
-  const name = isRenaming ? renameValue : jobLabel(session);
+  const name = jobLabel(session);
   const age = formatJobAge(session.startedAt);
   const artifact = sessionArtifactLabel(session);
 
@@ -527,6 +616,7 @@ function SessionRow({
     // inside a padded list parent can overflow the terminal by 1 col and clip
     // the rightmost age unit ("19s" → "19", "1s" wraps to "s1").
     <Box
+      ref={rowRef}
       backgroundColor={isSelected && showSelectionBg ? 'userMessageBackground' : undefined}
       onMouseEnter={onSelect}
       onClick={onOpen}
@@ -539,14 +629,57 @@ function SessionRow({
             {icon}
             {'  '}
           </Text>
-          <Text bold={!!isOrigin} dimColor={!isSelected && !isOrigin}>
-            {name}
+          <Text bold={!!isOrigin} dimColor={!isSelected && !isOrigin && !inlineRenaming && !isRenaming}>
+            {inlineRenaming || isRenaming
+              ? renderInlineEditor(renameValue, renameCursor ?? renameValue.length, cols.label)
+              : name}
           </Text>
         </Text>
       </Box>
       {/* Detail column (flex) */}
       <Box flexGrow={1} width={0} paddingLeft={2}>
-        {heldInTerminal && !isDeletePending && !isUngroupPending ? (
+        {groupEditing ? (
+          <Text wrap={'truncate' as never}>
+            <Text dimColor>group: </Text>
+            {renderInlineEditor(
+              groupEditing.draft,
+              groupEditing.cursor,
+              Math.max(
+                8,
+                Math.max(
+                  16,
+                  termWidth - (cols.label + 2) - (cols.artifact > 0 ? cols.artifact + 4 : 0) - (cols.age + 4) - 4,
+                ) -
+                  stringWidth('group: ') -
+                  (Math.max(
+                    16,
+                    termWidth - (cols.label + 2) - (cols.artifact > 0 ? cols.artifact + 4 : 0) - (cols.age + 4) - 4,
+                  ) -
+                    stringWidth('group: ') -
+                    stringWidth(' (reserved name)') >=
+                  24
+                    ? stringWidth(' (reserved name)')
+                    : 0),
+              ),
+              groupEditing.selected,
+            )}
+            {groupEditing.reserved ? (
+              <Text color="error"> (reserved name)</Text>
+            ) : Math.max(
+                16,
+                termWidth - (cols.label + 2) - (cols.artifact > 0 ? cols.artifact + 4 : 0) - (cols.age + 4) - 4,
+              ) -
+                stringWidth('group: ') -
+                stringWidth(' (reserved name)') <
+              24 ? null : groupEditing.isNew ? (
+              <Text dimColor> (new group)</Text>
+            ) : groupEditing.ungroup ? (
+              <Text dimColor> (ungroup)</Text>
+            ) : groupEditing.addTo ? (
+              <Text dimColor> (add to {groupEditing.addTo})</Text>
+            ) : null}
+          </Text>
+        ) : heldInTerminal && !isDeletePending && !isUngroupPending ? (
           <Text wrap={'truncate' as never}>
             <Text color={'suggestion' as never}>{FLEET_HELD_IN_TERMINAL_LABEL}</Text>
             <Text dimColor>{FLEET_HELD_IN_TERMINAL_HINT}</Text>
@@ -561,13 +694,14 @@ function SessionRow({
         ) : (
           <Text
             dimColor={!isDeletePending && !isUngroupPending}
-            color={isDeletePending || isUngroupPending ? ('error' as never) : undefined}
+            color={isUngroupPending ? ('warning' as never) : isDeletePending ? ('error' as never) : undefined}
             wrap={'truncate' as never}
           >
             {detail}
           </Text>
         )}
         {loopKickCount &&
+        !groupEditing &&
         !isDeletePending &&
         !isUngroupPending &&
         !heldInTerminal &&
@@ -606,6 +740,354 @@ function SessionRow({
         </Text>
       </Box>
       {isRenaming && <Text>{' \u2588'}</Text>}
+    </Box>
+  );
+}
+
+/**
+ * Official Il (@197656620) — Peek / Preview bottom overlay.
+ */
+function FleetPeekPanel({
+  session,
+  jobState,
+  liveStatus,
+  isPending,
+  deleteArmed,
+  renamingOrGrouping,
+  replyInput,
+  replyCursor,
+  peekMode,
+  replyError,
+  termWidth,
+  termRows,
+}: {
+  session: SessionEntry;
+  jobState: BgJobState | undefined;
+  liveStatus: string | undefined;
+  isPending: boolean;
+  deleteArmed: boolean;
+  renamingOrGrouping: boolean;
+  replyInput: string;
+  replyCursor: number;
+  peekMode: 'prompt' | 'bash';
+  replyError: string | null;
+  termWidth: number;
+  termRows: number;
+}): React.ReactElement {
+  const [now, setNow] = useState(() => Date.now());
+  const band = deriveBand(session);
+  const activity = deriveActivity(session, fleetPrStatuses.prStatuses);
+  const glyphBand = liveStatus === 'busy' ? 'active' : liveStatus === 'waiting' ? 'blocked' : band;
+  const { color: waitingColor } = glyphColor(glyphBand, activity, session);
+
+  const isTerminal =
+    session.status === 'completed' ||
+    session.status === 'done' ||
+    session.status === 'failed' ||
+    session.status === 'killed' ||
+    session.status === 'stopped';
+  const rawNeeds = !isTerminal ? (jobState?.needs ?? session.waitingFor ?? '').trim() || undefined : undefined;
+  const questions =
+    (jobState?.tempo === 'blocked' || band === 'blocked') && jobState?.block?.questions?.length
+      ? jobState.block.questions
+      : undefined;
+
+  const children = useMemo(
+    () => fleetJobChildren(jobState?.children ?? session.children),
+    [jobState?.children, session.children],
+  );
+  const childHrefs = useMemo(() => children.map(c => c.href), [children]);
+
+  const outputEntries = useMemo(() => {
+    if (rawNeeds || !jobState?.output) return [];
+    const isBareChildLink = (val: string): boolean =>
+      childHrefs.some(href => {
+        const at = val.indexOf(href);
+        return at >= 0 && !/\w/.test(val[at + href.length] ?? '') && val.length - href.length < 16;
+      });
+    return Object.entries(jobState.output).filter(([, val]) => typeof val === 'string' && !isBareChildLink(val));
+  }, [rawNeeds, jobState?.output, childHrefs]);
+
+  const contentKind: 'questions' | 'needs' | 'output' | 'detail' = questions
+    ? 'questions'
+    : rawNeeds
+      ? 'needs'
+      : outputEntries.length > 0
+        ? 'output'
+        : 'detail';
+  const isWaiting = contentKind === 'questions' || contentKind === 'needs';
+
+  const updatedMs = useMemo(() => {
+    const parsed = jobState?.updatedAt ? Date.parse(jobState.updatedAt) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : (session.updatedAt ?? session.startedAt);
+  }, [jobState?.updatedAt, session.updatedAt, session.startedAt]);
+
+  useEffect(() => {
+    if (!isWaiting) return;
+    const ms = Date.now() - updatedMs < 60_000 ? 1000 : 30_000;
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [isWaiting, updatedMs]);
+
+  const waitingDuration = isWaiting ? formatDuration(Math.max(0, now - updatedMs), { mostSignificantOnly: true }) : '';
+  const budgetText = useMemo(() => {
+    const b = jobState?.budget;
+    if (b && typeof b === 'object' && 'spent' in b && 'target' in b) {
+      const spent = typeof b.spent === 'number' ? b.spent : 0;
+      const target = typeof b.target === 'number' ? b.target : 0;
+      if (target > 0 || spent > 0) {
+        return `${formatNumber(spent)}/${formatNumber(target)} tokens`;
+      }
+    }
+    return '';
+  }, [jobState?.budget]);
+
+  const isBash = peekMode === 'bash';
+  const suggestedReply =
+    (jobState?.tempo === 'blocked' || band === 'blocked') && !questions && jobState?.suggestedReply
+      ? jobState.suggestedReply.replace(/\s+/g, ' ').trim() || undefined
+      : undefined;
+
+  const questionRows = questions ? 2 + (questions[0]?.options.length ?? 0) : 0;
+  const statusMetaRows = isWaiting || budgetText !== '' ? 1 : 0;
+  const replyNewlines = countNewlines(replyInput);
+  const bodyMaxHeight = Math.max(
+    5,
+    termRows -
+      8 -
+      Math.min(children.length, 8) -
+      questionRows -
+      statusMetaRows -
+      replyNewlines -
+      (replyError ? 1 : 0) -
+      1,
+  );
+  const usedRows =
+    (contentKind === 'questions'
+      ? questionRows
+      : contentKind === 'output'
+        ? outputEntries.length * Math.min(3, bodyMaxHeight)
+        : Math.min(5, bodyMaxHeight)) +
+    statusMetaRows +
+    replyNewlines +
+    (replyError ? 1 : 0) +
+    1;
+  const childCap = Math.max(8, termRows - 8 - usedRows);
+  const visibleChildren = children.slice(0, childCap);
+  const hiddenChildren = children.length - visibleChildren.length;
+  const outputKeyWidth = Math.max(0, ...outputEntries.map(([k]) => stringWidth(k)));
+
+  const detailText = (jobState?.detail ?? session.lastMessage ?? '').trim();
+  const isSettled = isFleetBhSettled({ state: session.daemonState, tempo: session.tempo });
+
+  const placeholder = questions
+    ? `press 1-${questions[0]?.options.length ?? 2} or type your answer`
+    : suggestedReply && !isBash
+      ? suggestedReply
+      : 'reply';
+
+  return (
+    <Box position="absolute" bottom={0} left={0} right={0} flexDirection="column" opaque>
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={isBash ? 'bashBorder' : undefined}
+        borderDimColor={!isBash}
+        paddingX={1}
+        minHeight={5}
+        width="100%"
+      >
+        {contentKind === 'questions' && questions ? (
+          <Box flexDirection="column">
+            <Box>
+              <Box flexGrow={1} width={0}>
+                <Text bold wrap="truncate">
+                  {questions[0]!.question.replace(/\s+/g, ' ').trim()}
+                </Text>
+              </Box>
+              {questions.length > 1 && (
+                <Box flexShrink={0} paddingLeft={1}>
+                  <Text dimColor>+{questions.length - 1} more · enter to open</Text>
+                </Box>
+              )}
+            </Box>
+            {questions[0]!.options.map((opt, idx) => (
+              <Box key={opt.label} paddingLeft={2}>
+                <Box width={3} flexShrink={0}>
+                  <Text dimColor>{idx + 1}.</Text>
+                </Box>
+                <Box flexGrow={1} width={0}>
+                  <Text wrap="truncate">
+                    {opt.label.replace(/\s+/g, ' ').trim()}
+                    {opt.description ? <Text dimColor> · {opt.description.replace(/\s+/g, ' ').trim()}</Text> : null}
+                  </Text>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        ) : contentKind === 'needs' ? (
+          <Box maxHeight={bodyMaxHeight} overflowY="hidden">
+            <Text wrap="wrap">{rawNeeds}</Text>
+          </Box>
+        ) : contentKind === 'output' ? (
+          <Box flexDirection="column">
+            {outputEntries.map(([key, val]) => (
+              <Box key={key}>
+                {outputEntries.length > 1 && (
+                  <Box width={outputKeyWidth + 2} flexShrink={0}>
+                    <Text dimColor>{key}</Text>
+                  </Box>
+                )}
+                <Box flexGrow={1} width={0} maxHeight={bodyMaxHeight} overflowY="hidden">
+                  <Text wrap="wrap">{val}</Text>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Box maxHeight={bodyMaxHeight} overflowY="hidden">
+            <Text wrap="wrap" dimColor={!detailText}>
+              {detailText || jobLabel(session)}
+            </Text>
+          </Box>
+        )}
+
+        {visibleChildren.length > 0 && (
+          <Box flexDirection="column">
+            {visibleChildren.map(child => {
+              const prMatch = /\/(?:pull|-\/merge_requests)\/(\d+)/.exec(child.href);
+              const prNumber = prMatch ? Number(prMatch[1]) : undefined;
+              const prEntry = fleetPrStatuses.prStatuses.get(child.href) ?? null;
+              const isDraft = prEntry?.state === 'DRAFT';
+              const reviewState = prReviewStateFromEntry(prEntry);
+              const statusTokens: Array<{ text: string; color?: 'success' | 'error' | 'warning' | 'merged' }> = [];
+              if (prEntry) {
+                if (prEntry.state === 'MERGED') statusTokens.push({ text: 'merged', color: 'merged' });
+                else if (prEntry.state === 'CLOSED') statusTokens.push({ text: 'closed', color: 'error' });
+                else {
+                  if (prEntry.checks.failed > 0) statusTokens.push({ text: 'checks failing', color: 'error' });
+                  else if (prEntry.checks.pending > 0) statusTokens.push({ text: 'checks pending', color: 'warning' });
+                  if (prEntry.review === 'APPROVED') statusTokens.push({ text: 'approved', color: 'success' });
+                  else if (prEntry.review === 'CHANGES_REQUESTED') {
+                    statusTokens.push({ text: 'changes requested', color: 'error' });
+                  }
+                }
+              }
+              return (
+                <Box key={child.href}>
+                  <Box flexGrow={1} width={0}>
+                    <Text wrap="truncate">
+                      {prNumber !== undefined ? (
+                        <PrBadge
+                          number={prNumber}
+                          url={child.href}
+                          reviewState={reviewState === 'draft' ? undefined : reviewState}
+                        />
+                      ) : (
+                        <Text color={child.kind === 'frame' ? 'claude' : undefined} dimColor={child.kind !== 'frame'}>
+                          {child.kind === 'frame' ? 'artifact' : 'PR'}
+                        </Text>
+                      )}
+                      {prEntry?.title ? (
+                        <>
+                          {' '}
+                          <Link url={child.href}>
+                            <Text color={isDraft ? 'inactive' : undefined}>
+                              {prEntry.title}
+                              {isDraft ? ' (draft)' : ''}
+                            </Text>
+                          </Link>
+                        </>
+                      ) : null}
+                    </Text>
+                  </Box>
+                  {prEntry && prEntry.additions + prEntry.deletions > 0 && (
+                    <Box flexShrink={0} paddingLeft={1}>
+                      <Link url={`${child.href}/files`}>
+                        <Text>
+                          <Text color="success">+{prEntry.additions}</Text>{' '}
+                          <Text color="error">-{prEntry.deletions}</Text>
+                        </Text>
+                      </Link>
+                    </Box>
+                  )}
+                  {statusTokens.length > 0 && (
+                    <Box flexShrink={0} paddingLeft={1}>
+                      {statusTokens.map((tok, i) => (
+                        <React.Fragment key={i}>
+                          {i > 0 && <Text> </Text>}
+                          <Text color={tok.color} dimColor={!tok.color}>
+                            {tok.text}
+                          </Text>
+                        </React.Fragment>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              );
+            })}
+            {hiddenChildren > 0 && (
+              <Box paddingLeft={2}>
+                <Text dimColor>… {hiddenChildren} more</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {statusMetaRows > 0 && (
+          <Box paddingLeft={2}>
+            <Text wrap="truncate">
+              <Byline>
+                {isWaiting && <Text color={(waitingColor ?? undefined) as never}>waiting {waitingDuration}</Text>}
+                {budgetText !== '' && <Text dimColor>{budgetText}</Text>}
+              </Byline>
+            </Text>
+          </Box>
+        )}
+
+        <Box flexGrow={1} />
+        <Box marginTop={1}>
+          <LineView
+            query={replyInput}
+            cursorOffset={replyCursor}
+            placeholder={placeholder}
+            prefix={isBash ? '!' : figures.pointer}
+            prefixColor={isBash ? 'bashBorder' : undefined}
+            prefixDim={!replyInput.trim()}
+            isFocused={!renamingOrGrouping}
+            width="100%"
+            borderless
+          />
+        </Box>
+        {replyError && (
+          <Text color="error" dimColor wrap="truncate">
+            {replyError}
+          </Text>
+        )}
+      </Box>
+
+      <Box paddingLeft={2}>
+        <Text dimColor>
+          {renamingOrGrouping ? (
+            <Byline>
+              <KeyboardShortcutHint shortcut="enter" action="save" />
+              <KeyboardShortcutHint shortcut="esc" action="cancel" />
+            </Byline>
+          ) : (
+            <Byline>
+              {isBash && <Text color="bashBorder">! for shell mode</Text>}
+              {(replyInput.trim() || (!isBash && !isPending)) && (
+                <KeyboardShortcutHint
+                  shortcut="enter"
+                  action={replyInput.trim() ? 'send' : isSettled ? 'resume' : 'open'}
+                />
+              )}
+              <KeyboardShortcutHint shortcut={replyInput.trim() || isBash ? 'esc' : 'space'} action="close" />
+              <KeyboardShortcutHint shortcut="ctrl+x" action={deleteArmed ? 'confirm' : 'delete'} />
+            </Byline>
+          )}
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -660,6 +1142,10 @@ function AgentViewApp({
     [dispatchDefaults, dispatchExtraArgs],
   );
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [jobStatesBySessionId, setJobStatesBySessionId] = useState<ReadonlyMap<string, BgJobState>>(() => new Map());
+  const scrollRef = useRef<ScrollBoxHandle>(null);
+  const focusedRowRef = useRef<DOMElement>(null);
+  const groupSuggestionsRef = useRef<DOMElement>(null);
   /** densable #t.terminalHolders — interactive peers holding a session. */
   const [terminalHolders, setTerminalHolders] = useState<ReadonlyMap<string, number>>(() => new Map());
   /** densable Fh leftover-missing fields — AgentView.refresh is gc.load / #O / #P. */
@@ -719,7 +1205,17 @@ function AgentViewApp({
   const [focusArea, setFocusArea] = useState<FocusArea>('list');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [renameValue, setRenameValue] = useState('');
+  const [renameCursor, setRenameCursor] = useState(0);
   const [groupValue, setGroupValue] = useState('');
+  const [groupCursor, setGroupCursor] = useState(0);
+  const [groupPristine, setGroupPristine] = useState(false);
+  const [groupPickIdx, setGroupPickIdx] = useState(-1);
+  const peekReplyDraftsRef = useRef<Record<string, string>>({});
+  const [peekReplyInput, setPeekReplyInput] = useState('');
+  const [peekReplyCursor, setPeekReplyCursor] = useState(0);
+  const [peekMode, setPeekMode] = useState<'prompt' | 'bash'>('prompt');
+  const [peekReplyError, setPeekReplyError] = useState<string | null>(null);
+  const peekSendingRef = useRef(false);
   // Per-group fold state
   const [foldedGroups, setFoldedGroups] = useState<Set<string>>(() => new Set());
   const canonicalLauncherCwd = useMemo(() => resolveFleetCanonicalLauncherCwd(), []);
@@ -900,9 +1396,11 @@ function AgentViewApp({
   const dispatchingRef = useRef(false);
   /** densable attach.newSessionOpening / beginNewSession generation. */
   const newSessionOpeningRef = useRef(false);
+  const [newSessionOpening, setNewSessionOpening] = useState(false);
   const newSessionAttemptRef = useRef(0);
   /** densable attach.attachingJobId. */
   const attachingJobIdRef = useRef<string | null>(null);
+  const [sessionModel, setSessionModel] = useState<string | undefined>(undefined);
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
   const refreshGenerationRef = useRef(0);
@@ -956,9 +1454,11 @@ function AgentViewApp({
     }
   }, [sessions.length, focusArea, restoreSessionId]);
 
-  // Header display values (densable: XG model label + hxe path truncate)
+  // Header display values (densable: Wa sessionModel / dispatchDefaults.model / getMainLoopModel + hxe path truncate)
   const termWidth = process.stdout.columns ?? 80;
-  const modelDisplay = renderModelName(getMainLoopModel());
+  const modelDisplay = sessionModel
+    ? `${renderModelName(sessionModel)} (session)`
+    : renderModelName(dispatchDefaults?.model ?? getMainLoopModel());
 
   // -------------------------------------------------------------------------
   // Voice integration (push-to-talk in reply mode)
@@ -1281,6 +1781,7 @@ function AgentViewApp({
       setLoopKicks(nextKicks);
 
       // Official load `#r>0` → overlaidLoadLanded true. Leftover view is attached.
+      setJobStatesBySessionId(new Map(jobs.map(j => [j.state.sessionId, j.state])));
       setOverlaidLoadLanded(true);
       setSessions(sortSessions(entries));
     } catch (e) {
@@ -1519,10 +2020,70 @@ function AgentViewApp({
   );
 
   // Soft-archived sessions live under Earlier; main bands exclude them.
-  const { active: mainSessions, earlier: earlierSessions } = React.useMemo(
+  const { active: rawMainSessions, earlier: rawEarlierSessions } = React.useMemo(
     () => partitionArchivedSessions(listSessions),
     [listSessions],
   );
+  const queryIsFilter = dispatchMode !== 'bash' && /^(?:[asong]:(?!\\))/i.test(dispatchInput.trimStart());
+  const { filtered: mainSessions, earlierVisible: earlierSessions } = React.useMemo(() => {
+    if (!queryIsFilter) {
+      return { filtered: rawMainSessions, earlierVisible: rawEarlierSessions };
+    }
+    let templateFilter: string | undefined;
+    let stateFilter: string | undefined;
+    let nameFilter: string | undefined;
+    let groupFilter: string | undefined;
+    let outputFilter: string | undefined;
+    const textTokens: string[] = [];
+    for (const token of dispatchInput.trim().split(/\s+/)) {
+      const lower = token.toLowerCase();
+      const prefix = /^(?:[asong]:(?!\\))/i.test(token) ? lower[0] : undefined;
+      const val = lower.slice(2);
+      if (prefix === 'a') templateFilter = val || undefined;
+      else if (prefix === 's') stateFilter = val || undefined;
+      else if (prefix === 'n') nameFilter = val || undefined;
+      else if (prefix === 'g') groupFilter = val || undefined;
+      else if (prefix === 'o') outputFilter = val;
+      else textTokens.push(token);
+    }
+    const textFilter = textTokens.join(' ').toLowerCase();
+    const filtered = rawMainSessions.filter(s => {
+      if (templateFilter && !(s.template ?? '').toLowerCase().startsWith(templateFilter)) return false;
+      if (nameFilter && !(s.name ?? '').toLowerCase().includes(nameFilter)) return false;
+      if (
+        groupFilter &&
+        !(s.group ?? '').toLowerCase().startsWith(groupFilter) &&
+        !(s.pinned && 'pinned'.startsWith(groupFilter))
+      ) {
+        return false;
+      }
+      if (outputFilter !== undefined && !(s.lastMessage ?? '').toLowerCase().includes(outputFilter)) {
+        return false;
+      }
+      if (stateFilter) {
+        const band = deriveBand(s);
+        const stateStr = (s.daemonState ?? s.status ?? '').toLowerCase();
+        if (!stateStr.startsWith(stateFilter) && !band.startsWith(stateFilter)) {
+          return false;
+        }
+      }
+      if (textFilter) {
+        const haystack = [s.name, s.lastMessage, s.waitingFor].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(textFilter)) return false;
+      }
+      return true;
+    });
+    const hasNonTextFilter = Boolean(templateFilter || stateFilter || groupFilter || outputFilter !== undefined);
+    const earlierVisible = hasNonTextFilter
+      ? []
+      : rawEarlierSessions.filter(
+          s =>
+            (!textFilter || (s.name ?? '').toLowerCase().includes(textFilter)) &&
+            (!nameFilter || (s.name ?? '').toLowerCase().includes(nameFilter)),
+        );
+    return { filtered, earlierVisible };
+  }, [rawMainSessions, rawEarlierSessions, queryIsFilter, dispatchInput]);
+  const filtered = mainSessions;
   const pinned = mainSessions.filter(s => s.pinned);
   const unpinned = mainSessions.filter(s => !s.pinned);
   const blocked = unpinned.filter(s => deriveBand(s) === 'blocked');
@@ -1665,6 +2226,41 @@ function AgentViewApp({
   const statsBlocked = mainSessions.filter(s => deriveStatsBand(s) === 'blocked').length;
   const statsActive = mainSessions.filter(s => deriveStatsBand(s) === 'active').length;
   const statsCompleted = mainSessions.filter(s => deriveStatsBand(s) === 'completed').length + earlierSessions.length;
+  const simpleWorkingCount = React.useMemo(() => {
+    if (!simpleBuilt) return 0;
+    let working = 0;
+    for (const s of mainSessions) {
+      if (simpleStatusBand(s) !== 'live') continue;
+      const ls = fleetLiveStatus(
+        {
+          id: s.short ?? '',
+          state: {
+            state: s.daemonState,
+            tempo: s.tempo,
+            sessionId: s.sessionId,
+            resumeSessionId: s.resumeSessionId,
+            template: s.template,
+            respawnFlags: s.respawnFlags,
+            backend: s.backend,
+          },
+        },
+        {
+          statuses,
+          holders: terminalHolders,
+          pendings,
+          heldInTerminal:
+            terminalHolderOf(
+              { backend: s.backend, sessionId: s.sessionId, resumeSessionId: s.resumeSessionId },
+              terminalHolders,
+            ) !== undefined,
+        },
+      );
+      if (ls === 'busy' || ls === 'shell' || s.status === 'busy' || s.tempo === 'active') {
+        working++;
+      }
+    }
+    return working;
+  }, [simpleBuilt, mainSessions, statuses, terminalHolders, pendings]);
 
   // Flat row list: headers selectable; official state order + doneCap fold.
   const flatRows: FleetFlatRow[] = React.useMemo(() => {
@@ -1729,8 +2325,11 @@ function AgentViewApp({
 
   const currentRow = flatRows[selectedIndex] as FleetFlatRow | undefined;
   const selectedSession = currentRow?.kind === 'job' || currentRow?.kind === 'earlier' ? currentRow.session : undefined;
-  // densable LUt: hxe(path, max(Ys-11-(model?width+3:0), 10))
-  const rawCwd = selectedSession?.cwd || getCwd();
+  // densable Wa/LUt: hxe(path, max(Ys-11-(model?width+3:0), 10))
+  const launcherCwd = getCwd();
+  const targetCwd = selectedSession?.cwd || launcherCwd;
+  const rawCwd = targetCwd;
+  const isCustomTargetCwd = targetCwd !== launcherCwd && targetCwd !== canonicalLauncherCwd;
   const modelWidth = stringWidth(modelDisplay);
   const pathBudget = Math.max(termWidth - 11 - (modelWidth > 0 ? modelWidth + 3 : 0), 10);
   const cwdDisplay = truncatePathMiddle(rawCwd, pathBudget);
@@ -1852,6 +2451,95 @@ function AgentViewApp({
     }
   }, [flatRows.length, selectedIndex]);
 
+  // Official fl: scroll focused row into view inside main ScrollBox
+  useLayoutEffect(() => {
+    if (!focusedRowRef.current || mouseSelectedIndex === selectedIndex) return;
+    if (selectedIndex === 0) {
+      scrollRef.current?.scrollTo(0);
+      return;
+    }
+    const offset = currentRow?.kind === 'header' ? -1 : 0;
+    scrollRef.current?.scrollToElement(focusedRowRef.current, offset, { block: 'nearest' });
+  }, [selectedIndex, mouseSelectedIndex, termRows, currentRow?.kind]);
+
+  // Close preview if focused row is no longer a job
+  useEffect(() => {
+    if (previewOpen && !selectedSession) {
+      setPreviewOpen(false);
+    }
+  }, [previewOpen, selectedSession]);
+
+  // Sync per-job peek reply draft when focused job changes while preview is open
+  const selectedPeekKey = selectedSession?.short ?? selectedSession?.sessionId ?? '';
+  useEffect(() => {
+    if (!previewOpen || !selectedPeekKey) return;
+    const saved = peekReplyDraftsRef.current[selectedPeekKey] ?? '';
+    const isBash = saved.startsWith('!');
+    const body = isBash ? saved.slice(1) : saved;
+    setPeekMode(isBash ? 'bash' : 'prompt');
+    setPeekReplyInput(body);
+    setPeekReplyCursor(body.length);
+    setPeekReplyError(null);
+  }, [previewOpen, selectedPeekKey]);
+
+  useEffect(() => {
+    if (!previewOpen || !selectedPeekKey) return;
+    const serialized = peekMode === 'bash' ? `!${peekReplyInput}` : peekReplyInput;
+    if (serialized) {
+      peekReplyDraftsRef.current[selectedPeekKey] = serialized;
+    } else {
+      delete peekReplyDraftsRef.current[selectedPeekKey];
+    }
+  }, [previewOpen, selectedPeekKey, peekReplyInput, peekMode]);
+
+  const existingGroupNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) {
+      if (s.group?.trim()) set.add(s.group.trim());
+    }
+    return set;
+  }, [sessions]);
+
+  const matchingGroupSuggestions = useMemo(() => {
+    if (viewMode !== 'group') return [];
+    const cur = selectedSession?.group?.trim();
+    const trimmed = groupValue.trim();
+    const lower = trimmed.toLowerCase();
+    return [...existingGroupNames]
+      .filter(g => g !== cur && g.toLowerCase().startsWith(lower))
+      .sort((a, b) => {
+        const aExactCase = a.startsWith(trimmed);
+        const bExactCase = b.startsWith(trimmed);
+        return aExactCase !== bExactCase ? (aExactCase ? -1 : 1) : a.localeCompare(b);
+      });
+  }, [viewMode, selectedSession?.group, groupValue, existingGroupNames]);
+
+  useEffect(() => {
+    const trimmed = groupValue.trim();
+    const cur = selectedSession?.group?.trim() ?? '';
+    setGroupPickIdx(
+      viewMode === 'group' && trimmed !== '' && trimmed !== cur && matchingGroupSuggestions.length > 0 ? 0 : -1,
+    );
+  }, [viewMode, groupValue, selectedSession?.group, matchingGroupSuggestions.length]);
+
+  const groupSuggestionsOpen =
+    viewMode === 'group' &&
+    !groupPristine &&
+    groupValue.trim() !== '' &&
+    groupValue.trim() !== (selectedSession?.group?.trim() ?? '') &&
+    matchingGroupSuggestions.length > 0;
+
+  useLayoutEffect(() => {
+    if (groupSuggestionsOpen && groupSuggestionsRef.current) {
+      scrollRef.current?.scrollToElement(groupSuggestionsRef.current, 0, { block: 'nearest' });
+    }
+  }, [groupSuggestionsOpen, groupPickIdx]);
+
+  const onlyOrigin = useMemo(
+    () => mainSessions.length === 0 || mainSessions.every(s => isOriginSession(s)),
+    [mainSessions, isOriginSession],
+  );
+
   // -------------------------------------------------------------------------
   // Actions
   // -------------------------------------------------------------------------
@@ -1956,6 +2644,26 @@ function AgentViewApp({
         // densable: bare /resume opens past-session picker → bg resume
         if (quitToken === '/resume' || quitToken.startsWith('/resume ')) {
           await openResumePicker();
+          return;
+        }
+        if (quitToken === '/model' || quitToken.startsWith('/model ')) {
+          const arg = dispatchInput.trim().slice(6).trim();
+          if (arg.toLowerCase() === 'default') {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionModel(undefined);
+            setError(null);
+            setInfo('Model reset to default for this session');
+          } else if (arg) {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionModel(arg);
+            setError(null);
+            setInfo(`Model set to ${arg} (session-scoped, not persisted)`);
+          } else {
+            setError(null);
+            setInfo('Usage: /model <name> — session-scoped, not persisted');
+          }
           return;
         }
         // densable Lc fleetHostCall — slash with host bag before free-form intent.
@@ -2189,7 +2897,9 @@ function AgentViewApp({
   const handleRenameStart = useCallback(() => {
     const session = getSelectedSession();
     if (!session) return;
-    setRenameValue(session.name ?? '');
+    const initial = session.name ?? '';
+    setRenameValue(initial);
+    setRenameCursor(initial.length);
     setViewMode('rename');
   }, [getSelectedSession]);
 
@@ -2339,7 +3049,11 @@ function AgentViewApp({
   const handleGroupStart = useCallback(() => {
     const session = getSelectedSession();
     if (!session) return;
-    setGroupValue(session.group ?? '');
+    const initial = session.group ?? '';
+    setGroupValue(initial);
+    setGroupCursor(initial.length);
+    setGroupPristine(Boolean(initial));
+    setGroupPickIdx(-1);
     setViewMode('group');
   }, [getSelectedSession]);
 
@@ -2348,13 +3062,21 @@ function AgentViewApp({
     if (!session) return;
     const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
     if (!short) return;
+    const picked = groupPickIdx >= 0 ? matchingGroupSuggestions[groupPickIdx] : undefined;
+    const candidate = picked ?? groupValue;
+    if (candidate.trim() && RESERVED_GROUP_NAMES.has(candidate.trim().toLowerCase())) {
+      return;
+    }
     const { patchBgJobState } = await import('../daemon/jobState.js');
-    const next = normalizeFleetGroupName(groupValue);
+    const next = normalizeFleetGroupName(candidate);
     patchBgJobState(short, { group: next });
     setViewMode('list');
     setGroupValue('');
+    setGroupCursor(0);
+    setGroupPristine(false);
+    setGroupPickIdx(-1);
     await refresh();
-  }, [getSelectedSession, groupValue, refresh]);
+  }, [getSelectedSession, groupPickIdx, matchingGroupSuggestions, groupValue, refresh]);
 
   const handleUngroup = useCallback(async () => {
     const session = getSelectedSession();
@@ -2559,6 +3281,7 @@ function AgentViewApp({
       }
       const attempt = ++newSessionAttemptRef.current;
       newSessionOpeningRef.current = true;
+      setNewSessionOpening(true);
       dispatchingRef.current = true;
       setError(null);
       const isCurrent = () => attempt === newSessionAttemptRef.current;
@@ -2603,6 +3326,7 @@ function AgentViewApp({
         );
         if (!isCurrent()) return;
         newSessionOpeningRef.current = false;
+        setNewSessionOpening(false);
         if (!job) {
           setError(FLEET_NEW_SESSION_PENDING_MSG);
           return;
@@ -2632,6 +3356,7 @@ function AgentViewApp({
         if (isCurrent()) {
           dispatchingRef.current = false;
           newSessionOpeningRef.current = false;
+          setNewSessionOpening(false);
         }
       }
     },
@@ -2648,15 +3373,22 @@ function AgentViewApp({
    * attach-origin must NOT run here — open→attach→2J remount blacks the list
    * for seconds when origin is dead (e.g. "exit 1 before init").
    */
+  const cancelNewSessionOpening = useCallback(() => {
+    if (!newSessionOpeningRef.current) return false;
+    newSessionAttemptRef.current += 1;
+    newSessionOpeningRef.current = false;
+    setNewSessionOpening(false);
+    dispatchingRef.current = false;
+    return true;
+  }, []);
+
   const handleEscExit = useCallback(() => {
+    if (cancelNewSessionOpening()) return;
     const decision = decideOriginEscAction({
       originJobId: enteredViaLeftArrow ? originSessionId : undefined,
       originRowPresent: originSessionPresent,
     });
-    // densable JH: always done. Only resume-hint differs for left-arrow exit paths.
     if (decision.kind === 'exit-with-hint' || decision.kind === 'attach-origin') {
-      // Left-arrow origin: exit fleet; user resumes via claude --resume (densable).
-      // Do not attach-origin (would unmount + PTY attach + remount → multi-second black).
       forceExit({ resumeHintRequested: true });
       return;
     }
@@ -2665,7 +3397,7 @@ function AgentViewApp({
       return;
     }
     forceExit();
-  }, [enteredViaLeftArrow, originSessionId, originSessionPresent, forceExit]);
+  }, [cancelNewSessionOpening, enteredViaLeftArrow, originSessionId, originSessionPresent, forceExit]);
 
   const openJobBySlot = useCallback(
     (slot: number) => {
@@ -2807,13 +3539,13 @@ function AgentViewApp({
   useInput((input, key) => {
     // densable /resume past-session overlay key handling
     if (resumePicker) {
-      if (key.escape) {
+      if (key.escape || (key.ctrl && input === 'c') || key.meta) {
         setResumePicker(null);
         return;
       }
       const entries = resumePicker.entries;
       if (entries && entries.length > 0) {
-        if (key.upArrow) {
+        if (key.upArrow || (key.ctrl && input === 'p')) {
           setResumePicker(p =>
             p
               ? {
@@ -2824,7 +3556,7 @@ function AgentViewApp({
           );
           return;
         }
-        if (key.downArrow) {
+        if (key.downArrow || (key.ctrl && input === 'n')) {
           setResumePicker(p =>
             p
               ? {
@@ -2901,46 +3633,241 @@ function AgentViewApp({
       return;
     }
 
-    // Official Tuu peek: onAttach / onReply close preview.
+    // Official Il (@197656620) peek panel input handling
     if (previewOpen) {
-      if (key.return && selectedSession) {
-        setPreviewOpen(false);
-        const short = selectedSession.short ?? selectedSession.sessionId?.slice(0, 8) ?? '';
-        void checkAndAttach(short, selectedSession, onAction, setError);
+      if (input === 'x' && key.ctrl && selectedSession) {
+        if (deleteConfirmSessionId === selectedSession.sessionId) {
+          clearDeleteArm();
+          setPreviewOpen(false);
+          void handleDelete();
+        } else {
+          const band = deriveBand(selectedSession);
+          if (band === 'blocked' || band === 'active') {
+            void handleStopThenArmDelete(selectedSession);
+          } else {
+            armDeleteConfirm(selectedSession.sessionId);
+          }
+        }
         return;
       }
-      if (input === ' ' && selectedSession && deriveBand(selectedSession) === 'blocked') {
-        setPreviewOpen(false);
-        setViewMode('reply');
-        setReplyInput('');
+      if (isFleetDispatchNewlineKey(key, input)) {
+        setPeekReplyInput(v => v.slice(0, peekReplyCursor) + '\n' + v.slice(peekReplyCursor));
+        setPeekReplyCursor(c => c + 1);
         return;
+      }
+      if (key.return && selectedSession) {
+        const trimmed = peekReplyInput.trim();
+        if (!trimmed && peekMode === 'prompt') {
+          setPreviewOpen(false);
+          const short = selectedSession.short ?? selectedSession.sessionId?.slice(0, 8) ?? '';
+          void checkAndAttach(short, selectedSession, onAction, setError);
+          return;
+        }
+        if (trimmed && !peekSendingRef.current) {
+          const payload = peekMode === 'bash' ? `!${trimmed}` : trimmed;
+          const targetSession = selectedSession;
+          const draftKey = targetSession.short ?? targetSession.sessionId ?? '';
+          peekSendingRef.current = true;
+          setPeekReplyError(null);
+          void (async () => {
+            try {
+              const res = await sendReplyToSession(targetSession, payload);
+              if (res.ok) {
+                delete peekReplyDraftsRef.current[draftKey];
+                setPeekReplyInput('');
+                setPeekReplyCursor(0);
+                setPeekMode('prompt');
+                setPreviewOpen(false);
+              } else {
+                setPeekReplyError(res.error);
+              }
+            } finally {
+              peekSendingRef.current = false;
+            }
+          })();
+        }
+        return;
+      }
+      const peekJobState = selectedSession ? jobStatesBySessionId.get(selectedSession.sessionId) : undefined;
+      const peekQuestions =
+        selectedSession &&
+        (peekJobState?.tempo === 'blocked' || deriveBand(selectedSession) === 'blocked') &&
+        peekJobState?.block?.questions?.length
+          ? peekJobState.block.questions
+          : undefined;
+      const peekSuggested =
+        selectedSession &&
+        (peekJobState?.tempo === 'blocked' || deriveBand(selectedSession) === 'blocked') &&
+        !peekQuestions &&
+        peekJobState?.suggestedReply
+          ? peekJobState.suggestedReply.replace(/\s+/g, ' ').trim() || undefined
+          : undefined;
+
+      if (peekMode === 'prompt' && !peekReplyInput) {
+        if (input === ' ' && !key.ctrl && !key.meta) {
+          setPreviewOpen(false);
+          return;
+        }
+        if (key.rightArrow && !key.shift && selectedSession) {
+          setPreviewOpen(false);
+          const short = selectedSession.short ?? selectedSession.sessionId?.slice(0, 8) ?? '';
+          void checkAndAttach(short, selectedSession, onAction, setError);
+          return;
+        }
+        if (key.tab && peekSuggested) {
+          setPeekReplyInput(peekSuggested);
+          setPeekReplyCursor(peekSuggested.length);
+          return;
+        }
+        if (input === '!' && !key.ctrl && !key.meta) {
+          setPeekMode('bash');
+          return;
+        }
+        if (input >= '1' && input <= '9' && !key.ctrl && !key.meta && peekQuestions?.[0]) {
+          const picked = peekQuestions[0].options[Number(input) - 1]?.label.replace(/\s+/g, ' ').trim();
+          if (picked) {
+            setPeekReplyInput(picked);
+            setPeekReplyCursor(picked.length);
+            return;
+          }
+        }
+      } else if (peekMode === 'bash' && !peekReplyInput && key.backspace) {
+        setPeekMode('prompt');
+        return;
+      }
+
+      if (key.leftArrow) {
+        setPeekReplyCursor(c => Math.max(0, c - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setPeekReplyCursor(c => Math.min(peekReplyInput.length, c + 1));
+        return;
+      }
+      if (key.home || (key.ctrl && input === 'a')) {
+        setPeekReplyCursor(0);
+        return;
+      }
+      if (key.end || (key.ctrl && input === 'e')) {
+        setPeekReplyCursor(peekReplyInput.length);
+        return;
+      }
+      if (key.backspace) {
+        if (peekReplyCursor > 0) {
+          setPeekReplyInput(v => v.slice(0, peekReplyCursor - 1) + v.slice(peekReplyCursor));
+          setPeekReplyCursor(c => Math.max(0, c - 1));
+        }
+        return;
+      }
+      if (key.delete) {
+        setPeekReplyInput(v => v.slice(0, peekReplyCursor) + v.slice(peekReplyCursor + 1));
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        const clean = input.replace(/\r\n|\r/g, '\n');
+        setPeekReplyInput(v => v.slice(0, peekReplyCursor) + clean + v.slice(peekReplyCursor));
+        setPeekReplyCursor(c => c + clean.length);
       }
       return;
     }
 
-    // Group assign mode (official ct.kind === 'assign')
+    // Group assign mode (official ct.kind === 'assign', inline inside detail cell)
     if (viewMode === 'group') {
       if (key.escape) {
         setViewMode('list');
         setGroupValue('');
+        setGroupCursor(0);
+        setGroupPristine(false);
+        setGroupPickIdx(-1);
         return;
       }
       if (key.return) {
         void handleGroupConfirm();
         return;
       }
-      if (key.backspace || key.delete) {
-        setGroupValue(v => v.slice(0, -1));
+      if (groupPristine) {
+        if (key.backspace || key.delete || (key.ctrl && (input === 'u' || input === 'w' || input === 'k'))) {
+          setGroupValue('');
+          setGroupCursor(0);
+          setGroupPristine(false);
+          return;
+        }
+        if (key.leftArrow || key.rightArrow || key.home || key.end) {
+          setGroupPristine(false);
+          if (key.leftArrow || key.home) setGroupCursor(0);
+          else setGroupCursor(groupValue.length);
+          return;
+        }
+        if (input && !key.ctrl && !key.meta && !key.tab && !key.upArrow && !key.downArrow) {
+          setGroupValue(input);
+          setGroupCursor(input.length);
+          setGroupPristine(false);
+          return;
+        }
+        return;
+      }
+      if (key.downArrow) {
+        if (matchingGroupSuggestions.length > 0) {
+          setGroupPickIdx(i => Math.min(i + 1, matchingGroupSuggestions.length - 1));
+        }
+        return;
+      }
+      if (key.upArrow) {
+        setGroupPickIdx(i => Math.max(i - 1, -1));
+        return;
+      }
+      if (key.leftArrow && groupPickIdx >= 0) {
+        setGroupPickIdx(-1);
+        return;
+      }
+      if (key.tab) {
+        const picked = matchingGroupSuggestions[Math.max(groupPickIdx, 0)];
+        if (picked !== undefined) {
+          setGroupValue(picked);
+          setGroupCursor(picked.length);
+          setGroupPickIdx(-1);
+        }
+        return;
+      }
+      if (key.leftArrow) {
+        setGroupCursor(c => Math.max(0, c - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setGroupCursor(c => Math.min(groupValue.length, c + 1));
+        return;
+      }
+      if (key.home || (key.ctrl && input === 'a')) {
+        setGroupCursor(0);
+        return;
+      }
+      if (key.end || (key.ctrl && input === 'e')) {
+        setGroupCursor(groupValue.length);
+        return;
+      }
+      if (key.backspace) {
+        setGroupPickIdx(-1);
+        if (groupCursor > 0) {
+          setGroupValue(v => v.slice(0, groupCursor - 1) + v.slice(groupCursor));
+          setGroupCursor(c => Math.max(0, c - 1));
+        }
+        return;
+      }
+      if (key.delete) {
+        setGroupPickIdx(-1);
+        setGroupValue(v => v.slice(0, groupCursor) + v.slice(groupCursor + 1));
         return;
       }
       if (input && !key.ctrl && !key.meta) {
-        setGroupValue(v => v + input);
+        setGroupPickIdx(-1);
+        setGroupValue(v => v.slice(0, groupCursor) + input + v.slice(groupCursor));
+        setGroupCursor(c => c + input.length);
         return;
       }
       return;
     }
 
-    // Rename mode
+    // Rename mode (inline inside label cell)
     if (viewMode === 'rename') {
       if (key.escape) {
         setViewMode('list');
@@ -2950,12 +3877,39 @@ function AgentViewApp({
         void handleRenameConfirm();
         return;
       }
-      if (key.backspace || key.delete) {
-        setRenameValue(v => v.slice(0, -1));
+      if (key.upArrow || key.downArrow) {
+        return;
+      }
+      if (key.leftArrow) {
+        setRenameCursor(c => Math.max(0, c - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setRenameCursor(c => Math.min(renameValue.length, c + 1));
+        return;
+      }
+      if (key.home || (key.ctrl && input === 'a')) {
+        setRenameCursor(0);
+        return;
+      }
+      if (key.end || (key.ctrl && input === 'e')) {
+        setRenameCursor(renameValue.length);
+        return;
+      }
+      if (key.backspace) {
+        if (renameCursor > 0) {
+          setRenameValue(v => v.slice(0, renameCursor - 1) + v.slice(renameCursor));
+          setRenameCursor(c => Math.max(0, c - 1));
+        }
+        return;
+      }
+      if (key.delete) {
+        setRenameValue(v => v.slice(0, renameCursor) + v.slice(renameCursor + 1));
         return;
       }
       if (input && !key.ctrl && !key.meta) {
-        setRenameValue(v => v + input);
+        setRenameValue(v => v.slice(0, renameCursor) + input + v.slice(renameCursor));
+        setRenameCursor(c => c + input.length);
         return;
       }
       return;
@@ -3478,9 +4432,18 @@ function AgentViewApp({
         }
       })()}
     >
-      <Box flexDirection="column" flexGrow={1} onKeyDownCapture={selectionKeyDownCapture}>
-        {/* Top: scrollable list area */}
-        <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        onKeyDownCapture={selectionKeyDownCapture}
+        onWheel={e => {
+          if (previewOpen) return;
+          e.preventDefault();
+          scrollRef.current?.scrollBy(e.deltaY > 0 ? 3 : -3);
+        }}
+      >
+        {/* Top: scrollable list area (2.1.289 fl ScrollBox) */}
+        <ScrollBox ref={scrollRef} flexDirection="column" flexGrow={1} paddingTop={1} stickyScroll={false}>
           {/* Header — densable Od_/WB exact (2.1.211):
               gap:2 marginBottom:1; !wpe && Ys>=70 && <KB/>;
               text col = flexDirection column only.
@@ -3495,31 +4458,45 @@ function AgentViewApp({
             <Box flexDirection="column" flexShrink={1} minWidth={0}>
               {!compactHeader && (
                 <>
-                  <Text>
+                  <Text wrap={simpleView ? 'truncate' : undefined}>
                     <Text bold>Claude Code</Text> <Text dimColor>v{MACRO.VERSION}</Text>
                   </Text>
                   <Text dimColor wrap="truncate">
-                    {[modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}
+                    {modelDisplay}
+                    {modelDisplay && cwdDisplay ? ' · ' : ''}
+                    {cwdDisplay && (
+                      <Text color={isCustomTargetCwd ? 'suggestion' : undefined} dimColor={!isCustomTargetCwd}>
+                        {cwdDisplay}
+                      </Text>
+                    )}
+                    {false && [modelDisplay, cwdDisplay].filter(Boolean).join(' \u00b7 ')}
                   </Text>
                 </>
               )}
-              <Text dimColor wrap="truncate">
-                {[`${statsBlocked} awaiting input`, `${statsActive} working`, `${statsCompleted} completed`].join(
-                  ' \u00b7 ',
-                )}
-              </Text>
+              {simpleBuilt ? (
+                <Text dimColor wrap="truncate">
+                  <Byline>
+                    {simpleBuilt.needsCount > 0 && `${simpleBuilt.needsCount} needs you`}
+                    {simpleWorkingCount > 0 && `${simpleWorkingCount} working`}
+                    {simpleBuilt.liveCount - simpleWorkingCount > 0 &&
+                      `${simpleBuilt.liveCount - simpleWorkingCount} idle`}
+                    {simpleBuilt.needsCount + simpleBuilt.liveCount === 0 && 'nothing running'}
+                  </Byline>
+                </Text>
+              ) : (
+                <Text dimColor wrap="truncate">
+                  {[`${statsBlocked} awaiting input`, `${statsActive} working`, `${statsCompleted} completed`].join(
+                    ' \u00b7 ',
+                  )}
+                </Text>
+              )}
             </Box>
           </Box>
 
-          {/* Empty state (official P9H when Bj empty / every-origin) */}
-          {sessions.length === 0 && overlaidLoadLanded && !error && !simpleView && (
-            <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
-              <Text dimColor>
-                {originSessionPresent
-                  ? `${REPL_HINT}${enteredViaLeftArrow ? REPL_HINT_VIA_LEFT_SUFFIX : ''}`
-                  : EMPTY_STATE_HINT}
-              </Text>
-              <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
+          {/* Official Wa (@197626140) origin banner */}
+          {currentSessionId !== undefined && (
+            <Box marginBottom={1} paddingLeft={1}>
+              <Text dimColor>{ORIGIN_MOVED_BANNER}</Text>
             </Box>
           )}
 
@@ -3557,7 +4534,12 @@ function AgentViewApp({
                     : '';
                 // marginTop only between groups (skip if previous row was same group's job — headers always start group)
                 return (
-                  <Box key={`h:${row.group}`} flexDirection="column" marginTop={isFirst ? 0 : 1}>
+                  <Box
+                    key={`h:${row.group}`}
+                    ref={isRowSelected ? focusedRowRef : undefined}
+                    flexDirection="column"
+                    marginTop={isFirst ? 0 : 1}
+                  >
                     <Box
                       backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
                       onMouseEnter={() => {
@@ -3601,9 +4583,11 @@ function AgentViewApp({
                         {row.group === 'done' && isFleetPastSessionsEnabled() && count === 0
                           ? ' · looking for past sessions…'
                           : ''}
-                        {ungroupConfirmSessionId === `group:${row.group.slice(6)}` && row.group.startsWith('group:')
-                          ? ' · ctrl+x again to ungroup'
-                          : ''}
+                        {ungroupConfirmSessionId === `group:${row.group.slice(6)}` && row.group.startsWith('group:') ? (
+                          <Text color="warning"> · ctrl+x again to ungroup</Text>
+                        ) : (
+                          ''
+                        )}
                       </Text>
                     </Box>
                     {!!stateDesc && groupMode === 'state' && (
@@ -3618,6 +4602,7 @@ function AgentViewApp({
                 return (
                   <Box
                     key="newsession"
+                    ref={isRowSelected ? focusedRowRef : undefined}
                     backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
                       selectRowByMouse(idx);
@@ -3636,6 +4621,11 @@ function AgentViewApp({
                       {'+  '}
                       <Text underline={isRowSelected}>new session</Text>
                     </Text>
+                    {newSessionOpening && (
+                      <Text dimColor wrap={'truncate' as never}>
+                        {'  opening… · esc to cancel'}
+                      </Text>
+                    )}
                   </Box>
                 );
               }
@@ -3643,6 +4633,7 @@ function AgentViewApp({
                 return (
                   <Box
                     key={`fold:${row.group}`}
+                    ref={isRowSelected ? focusedRowRef : undefined}
                     paddingLeft={2}
                     backgroundColor={showSelectionBg ? 'userMessageBackground' : undefined}
                     onMouseEnter={() => {
@@ -3670,137 +4661,174 @@ function AgentViewApp({
               }
               const session = row.kind === 'job' || row.kind === 'earlier' ? row.session : undefined;
               if (!session) return null;
+              const isGroupEditingRow = viewMode === 'group' && isRowSelected;
+              const trimmedGroupDraft = groupValue.trim();
+              const isReservedGroup =
+                trimmedGroupDraft !== '' && RESERVED_GROUP_NAMES.has(trimmedGroupDraft.toLowerCase());
+              const isNewGroup =
+                !groupPristine &&
+                trimmedGroupDraft !== '' &&
+                !isReservedGroup &&
+                !existingGroupNames.has(trimmedGroupDraft) &&
+                groupPickIdx < 0;
+              const isUngroupEdit =
+                !groupPristine && trimmedGroupDraft === '' && groupPickIdx < 0 && Boolean(session.group);
+              const addToTarget = groupPristine
+                ? undefined
+                : groupPickIdx >= 0
+                  ? matchingGroupSuggestions[groupPickIdx]
+                  : existingGroupNames.has(trimmedGroupDraft) && trimmedGroupDraft !== (session.group ?? '')
+                    ? trimmedGroupDraft
+                    : undefined;
+              const groupDropdownWinStart = Math.max(
+                0,
+                Math.min(groupPickIdx - 1, matchingGroupSuggestions.length - 4),
+              );
+              const groupDropdownSlice = matchingGroupSuggestions.slice(
+                groupDropdownWinStart,
+                groupDropdownWinStart + 4,
+              );
+              const groupDropdownMore =
+                matchingGroupSuggestions.length - groupDropdownWinStart - groupDropdownSlice.length;
+
               return (
-                <SessionRow
-                  key={`${session.sessionId}-${session.pid}`}
-                  session={session}
-                  isSelected={isRowSelected}
-                  isOrigin={isOriginSession(session)}
-                  showSelectionBg={showSelectionBg}
-                  isRenaming={viewMode === 'rename' && isRowSelected}
-                  isDeletePending={deleteConfirmSessionId === session.sessionId}
-                  isJustKilled={justKilledSessionId === session.sessionId}
-                  isUngroupPending={ungroupConfirmSessionId === session.sessionId}
-                  heldInTerminal={
-                    terminalHolderOf(
+                <React.Fragment key={`${session.sessionId}-${session.pid}`}>
+                  <SessionRow
+                    session={session}
+                    rowRef={isRowSelected ? focusedRowRef : undefined}
+                    isSelected={isRowSelected}
+                    isOrigin={isOriginSession(session)}
+                    showSelectionBg={showSelectionBg}
+                    isRenaming={false}
+                    inlineRenaming={viewMode === 'rename' && isRowSelected}
+                    isDeletePending={deleteConfirmSessionId === session.sessionId}
+                    isJustKilled={justKilledSessionId === session.sessionId}
+                    isUngroupPending={ungroupConfirmSessionId === session.sessionId}
+                    heldInTerminal={
+                      terminalHolderOf(
+                        {
+                          backend: session.backend,
+                          sessionId: session.sessionId,
+                          resumeSessionId: session.resumeSessionId,
+                        },
+                        terminalHolders,
+                      ) !== undefined
+                    }
+                    logTail={logTails[session.short ?? '']}
+                    deleteRefused={deleteRefusals.get(session.short ?? '')}
+                    loopKickCount={
+                      loopJobIds.has(session.short ?? '') ? loopKicks.get(session.sessionId)?.count : undefined
+                    }
+                    liveStatus={fleetLiveStatus(
                       {
-                        backend: session.backend,
-                        sessionId: session.sessionId,
-                        resumeSessionId: session.resumeSessionId,
+                        id: session.short ?? '',
+                        state: {
+                          state: session.daemonState,
+                          tempo: session.tempo,
+                          sessionId: session.sessionId,
+                          resumeSessionId: session.resumeSessionId,
+                          template: session.template,
+                          respawnFlags: session.respawnFlags,
+                          backend: session.backend,
+                        },
                       },
-                      terminalHolders,
-                    ) !== undefined
-                  }
-                  logTail={logTails[session.short ?? '']}
-                  deleteRefused={deleteRefusals.get(session.short ?? '')}
-                  loopKickCount={
-                    loopJobIds.has(session.short ?? '') ? loopKicks.get(session.sessionId)?.count : undefined
-                  }
-                  liveStatus={fleetLiveStatus(
-                    {
-                      id: session.short ?? '',
-                      state: {
-                        state: session.daemonState,
-                        tempo: session.tempo,
-                        sessionId: session.sessionId,
-                        resumeSessionId: session.resumeSessionId,
-                        template: session.template,
-                        respawnFlags: session.respawnFlags,
-                        backend: session.backend,
+                      {
+                        statuses,
+                        holders: terminalHolders,
+                        pendings,
+                        heldInTerminal:
+                          terminalHolderOf(
+                            {
+                              backend: session.backend,
+                              sessionId: session.sessionId,
+                              resumeSessionId: session.resumeSessionId,
+                            },
+                            terminalHolders,
+                          ) !== undefined,
                       },
-                    },
-                    {
-                      statuses,
-                      holders: terminalHolders,
-                      pendings,
-                      heldInTerminal:
-                        terminalHolderOf(
-                          {
-                            backend: session.backend,
-                            sessionId: session.sessionId,
-                            resumeSessionId: session.resumeSessionId,
-                          },
-                          terminalHolders,
-                        ) !== undefined,
-                    },
+                    )}
+                    renameValue={renameValue}
+                    renameCursor={renameCursor}
+                    groupEditing={
+                      isGroupEditingRow
+                        ? {
+                            draft: groupValue,
+                            cursor: groupCursor,
+                            selected: groupPristine,
+                            reserved: !groupPristine && isReservedGroup,
+                            isNew: isNewGroup,
+                            ungroup: isUngroupEdit,
+                            addTo: addToTarget,
+                          }
+                        : undefined
+                    }
+                    cols={cols}
+                    termWidth={termWidth}
+                    onSelect={() => {
+                      selectRowByMouse(idx);
+                    }}
+                    onOpen={() => {
+                      const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
+                      void checkAndAttach(short, session, onAction, setError);
+                    }}
+                  />
+                  {isGroupEditingRow && groupSuggestionsOpen && (
+                    <Box ref={groupSuggestionsRef} flexDirection="column" paddingLeft={cols.label + 4 + 7 - 2}>
+                      {groupDropdownWinStart > 0 && (
+                        <Text dimColor>
+                          {'  … '}
+                          {groupDropdownWinStart} above
+                        </Text>
+                      )}
+                      {groupDropdownSlice.map((g, gIdx) => {
+                        const picked = groupDropdownWinStart + gIdx === groupPickIdx;
+                        return (
+                          <Text key={g} color={picked ? 'suggestion' : undefined} dimColor={!picked} wrap="truncate">
+                            {picked ? figures.pointer : ' '} {g}
+                          </Text>
+                        );
+                      })}
+                      {groupDropdownMore > 0 && (
+                        <Text dimColor>
+                          {'  … '}
+                          {groupDropdownMore} more
+                        </Text>
+                      )}
+                    </Box>
                   )}
-                  renameValue={renameValue}
-                  cols={cols}
-                  onSelect={() => {
-                    selectRowByMouse(idx);
-                  }}
-                  onOpen={() => {
-                    const short = session.short ?? session.sessionId?.slice(0, 8) ?? '';
-                    void checkAndAttach(short, session, onAction, setError);
-                  }}
-                />
+                </React.Fragment>
               );
             })}
-            {/* Official P9H under list when every visible job is the origin session */}
-            {originSessionPresent && sessions.length > 0 && sessions.every(s => isOriginSession(s)) && !error && (
-              <Box flexDirection="column" marginTop={1} paddingLeft={1}>
-                <Text dimColor>{`${REPL_HINT}${enteredViaLeftArrow ? REPL_HINT_VIA_LEFT_SUFFIX : ''}`}</Text>
-                <Text dimColor>{EMPTY_STATE_EXAMPLES}</Text>
-              </Box>
-            )}
-          </Box>
-        </Box>
-
-        {/* Bottom: fixed input area */}
-        <Box flexShrink={0} flexDirection="column">
-          {/* densable /resume past-session overlay (Tt) */}
-          {resumePicker && (
-            <Box flexDirection="column" borderStyle="round" paddingX={1} marginX={1} marginBottom={1}>
-              <Text bold>Resume a past session</Text>
-              {resumePicker.entries === null ? (
-                <Text dimColor>Looking for past sessions…</Text>
-              ) : resumePicker.failed ? (
-                <Text dimColor>{"Couldn't load past sessions — press esc, then try /resume again"}</Text>
-              ) : resumePicker.entries.length === 0 ? (
-                <Text dimColor>No past sessions to resume</Text>
-              ) : (
-                <Box flexDirection="column">
-                  {resumePicker.entries.map((entry, idx) => {
-                    const selected = idx === resumePicker.selected;
-                    return (
-                      <Box key={entry.sessionId}>
-                        <Text
-                          bold={selected}
-                          backgroundColor={selected ? 'userMessageBackground' : undefined}
-                          wrap={'truncate' as never}
-                        >
-                          {entry.title}
-                          <Text dimColor>
-                            {' · '}
-                            {formatRelativeTimeAgo(entry.modified, { style: 'short' })}
-                          </Text>
-                        </Text>
-                      </Box>
-                    );
-                  })}
+            {filtered.length === 0 &&
+              !!dispatchInput &&
+              queryIsFilter &&
+              (simpleView || earlierSessions.length === 0) && (
+                <Box paddingLeft={2}>
+                  <Text dimColor>no sessions match</Text>
                 </Box>
               )}
-              <Text dimColor>↑/↓ to navigate · enter to resume as a background session · esc to close</Text>
-            </Box>
-          )}
+          </Box>
+        </ScrollBox>
 
-          {/* Official Tuu peek — previewOpen shows focused job + attach/reply. */}
-          {previewOpen && !resumePicker && !helpOpen && (
-            <Box flexDirection="column" borderStyle="round" paddingX={1} marginX={1} marginBottom={1}>
-              <Text bold>
-                {selectedSession
-                  ? selectedSession.name || selectedSession.short || selectedSession.sessionId?.slice(0, 8) || 'agent'
-                  : 'No agent selected'}
-              </Text>
-              {selectedSession && (
-                <Text dimColor>
-                  {deriveBand(selectedSession)}
-                  {selectedSession.cwd ? ` · ${selectedSession.cwd}` : ''}
-                </Text>
-              )}
-              <Text dimColor>enter attach · space reply · esc close</Text>
-            </Box>
-          )}
+        {/* Bottom: fixed input area (2.1.289 Bl + Ml) */}
+        <Box flexShrink={0} flexDirection="column" marginTop={1}>
+          {/* Official Bl (@197670280) onboarding / empty banner */}
+          {((sessions.length === 0 && overlaidLoadLanded && !error && !simpleView) ||
+            (onlyOrigin && overlaidLoadLanded && !error && !simpleView)) &&
+            !dispatchInput && (
+              <Box paddingLeft={1} marginBottom={1}>
+                <Text dimColor>{EMPTY_STATE_BANNER}</Text>
+              </Box>
+            )}
+          {!simpleView &&
+            groupMode === 'group' &&
+            existingGroupNames.size === 0 &&
+            filtered.length > 0 &&
+            !dispatchInput && (
+              <Box paddingLeft={1} marginBottom={1}>
+                <Text dimColor>No groups yet — press g on a session to tag it.</Text>
+              </Box>
+            )}
 
           {/* Help overlay (official ? shortcuts) */}
           {helpOpen && !resumePicker && (
@@ -3813,8 +4841,8 @@ function AgentViewApp({
             </Box>
           )}
 
-          {/* Group assign mode */}
-          {viewMode === 'group' && !resumePicker && (
+          {/* Group assign mode is inline inside SessionRow (2.1.289 us @197629500) */}
+          {false && viewMode === 'group' && !resumePicker && (
             <Box paddingLeft={2} flexDirection="column">
               <Box>
                 <Text bold>{'group \u276f '}</Text>
@@ -3835,8 +4863,8 @@ function AgentViewApp({
             </Box>
           )}
 
-          {/* Dispatch input */}
-          {viewMode === 'list' && !helpOpen && !resumePicker && !previewOpen && (
+          {/* Dispatch input — hidden in simpleView; single horizontal border Box (Bl @197671700) */}
+          {!simpleView && viewMode !== 'reply' && !helpOpen && !resumePicker && !previewOpen && (
             <Box flexDirection="column">
               {suggestions.length > 0 && (
                 <SuggestionList
@@ -3868,47 +4896,146 @@ function AgentViewApp({
                 />
               )}
               <Box
+                flexDirection="column"
                 borderStyle="round"
                 borderLeft={false}
                 borderRight={false}
-                borderTop={true}
-                borderBottom={false}
-                borderDimColor
-                height={1}
-              />
-              <LineView
-                query={dispatchInput}
-                cursorOffset={cursorOffset}
-                placeholder={dispatchMode === 'bash' ? 'run a bash command in a new session' : DISPATCH_PLACEHOLDER}
-                prefix={dispatchMode === 'bash' ? '!' : '\u276f'}
-                prefixDim={!composerActive}
-                prefixColor={dispatchMode === 'bash' ? 'bashBorder' : undefined}
-                isFocused={composerActive}
-                width="100%"
-                borderless
-              />
-              <Box
-                borderStyle="round"
-                borderLeft={false}
-                borderRight={false}
-                borderTop={true}
-                borderBottom={false}
-                borderDimColor
-                height={1}
-              />
+                borderColor={dispatchMode === 'bash' ? 'bashBorder' : undefined}
+                borderDimColor={dispatchMode !== 'bash'}
+              >
+                <LineView
+                  query={dispatchInput}
+                  cursorOffset={cursorOffset}
+                  placeholder={dispatchMode === 'bash' ? 'run a bash command in a new session' : DISPATCH_PLACEHOLDER}
+                  prefix={dispatchMode === 'bash' ? '!' : '\u276f'}
+                  prefixDim={!composerActive}
+                  prefixColor={dispatchMode === 'bash' ? 'bashBorder' : undefined}
+                  isFocused={composerActive}
+                  width="100%"
+                  borderless
+                />
+              </Box>
             </Box>
           )}
 
           {/* Keyboard hints — FleetView footer. Arm message stays prominent.
-              densable: resume overlay owns its own footer line. */}
-          {!resumePicker && (
-            <Box paddingLeft={2} height={1} flexShrink={0}>
+              densable: resume/peek overlays own their own footer line. */}
+          {!resumePicker && !previewOpen && (
+            <Box paddingLeft={simpleView ? 1 : 2} height={1} flexShrink={0}>
               <Text dimColor={!exitArmed} color={exitArmed ? 'warning' : undefined} wrap={'truncate' as never}>
                 {footerHints}
               </Text>
             </Box>
           )}
         </Box>
+
+        {/* Official Ml (@197666150) /resume past-session opaque bottom overlay, windowed to 8 items */}
+        {resumePicker &&
+          (() => {
+            const entries = resumePicker.entries;
+            const winStart = entries ? Math.max(0, Math.min(resumePicker.selected - 3, entries.length - 8)) : 0;
+            const winSlice = entries ? entries.slice(winStart, winStart + 8) : [];
+            const winMore = entries ? entries.length - winStart - winSlice.length : 0;
+            const nowMs = Date.now();
+            return (
+              <Box position="absolute" bottom={0} left={0} right={0} flexDirection="column" opaque>
+                <Box flexDirection="column" borderStyle="round" paddingX={1}>
+                  <Text bold>Resume a past session</Text>
+                  {entries === null ? (
+                    <Text dimColor>Looking for past sessions…</Text>
+                  ) : resumePicker.failed ? (
+                    <Text dimColor>{"Couldn't load past sessions — press esc, then try /resume again"}</Text>
+                  ) : entries.length === 0 ? (
+                    <Text dimColor>No past sessions to resume</Text>
+                  ) : (
+                    <>
+                      {winStart > 0 && (
+                        <Text dimColor>
+                          {'  … '}
+                          {winStart} above
+                        </Text>
+                      )}
+                      {winSlice.map((entry, idx) => {
+                        const selected = winStart + idx === resumePicker.selected;
+                        const relAge = formatDuration(Math.max(0, nowMs - entry.modified.getTime()), {
+                          mostSignificantOnly: true,
+                        });
+                        return (
+                          <Box key={entry.sessionId}>
+                            <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                              <Text
+                                color={selected ? 'suggestion' : undefined}
+                                dimColor={!selected}
+                                wrap={'truncate' as never}
+                              >
+                                {selected ? figures.pointer : ' '} {entry.title}
+                              </Text>
+                            </Box>
+                            <Box flexShrink={0} marginLeft={1}>
+                              <Text dimColor>{relAge}</Text>
+                            </Box>
+                          </Box>
+                        );
+                      })}
+                      {winMore > 0 && (
+                        <Text dimColor>
+                          {'  … '}
+                          {winMore} more
+                        </Text>
+                      )}
+                    </>
+                  )}
+                  <Text dimColor>↑/↓ to navigate · enter to resume as a background session · esc to close</Text>
+                </Box>
+              </Box>
+            );
+          })()}
+
+        {/* Official Ml + Il (@197656620) Peek / Preview opaque bottom overlay */}
+        {previewOpen && selectedSession && !resumePicker && !helpOpen && (
+          <FleetPeekPanel
+            key={selectedSession.short ?? selectedSession.sessionId}
+            session={selectedSession}
+            jobState={jobStatesBySessionId.get(selectedSession.sessionId)}
+            liveStatus={fleetLiveStatus(
+              {
+                id: selectedSession.short ?? '',
+                state: {
+                  state: selectedSession.daemonState,
+                  tempo: selectedSession.tempo,
+                  sessionId: selectedSession.sessionId,
+                  resumeSessionId: selectedSession.resumeSessionId,
+                  template: selectedSession.template,
+                  respawnFlags: selectedSession.respawnFlags,
+                  backend: selectedSession.backend,
+                },
+              },
+              {
+                statuses,
+                holders: terminalHolders,
+                pendings,
+                heldInTerminal:
+                  terminalHolderOf(
+                    {
+                      backend: selectedSession.backend,
+                      sessionId: selectedSession.sessionId,
+                      resumeSessionId: selectedSession.resumeSessionId,
+                    },
+                    terminalHolders,
+                  ) !== undefined,
+              },
+            )}
+            isPending={pendings.some(p => p.id === (selectedSession.short ?? ''))}
+            deleteArmed={deleteConfirmSessionId === selectedSession.sessionId}
+            renamingOrGrouping={viewMode === 'rename' || viewMode === 'group'}
+            replyInput={peekReplyInput}
+            replyCursor={peekReplyCursor}
+            peekMode={peekMode}
+            replyError={peekReplyError}
+            termWidth={termWidth}
+            termRows={termRows}
+          />
+        )}
       </Box>
     </AlternateScreen>
   );

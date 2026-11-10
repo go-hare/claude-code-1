@@ -1207,6 +1207,7 @@ export type Tool<
     options: {
       shouldAnimate: boolean
       tools: Tools
+      addMargin?: boolean
     },
   ): React.ReactNode | null
 }

@@ -44,7 +44,7 @@ export function TaskListV2({ tasks, isStandalone = false }: Props): React.ReactN
   if (previousCompletedIdsRef.current === null) {
     previousCompletedIdsRef.current = new Set(tasks.filter(t => t.status === 'completed').map(t => t.id));
   }
-  const maxDisplay = rows <= 10 ? 0 : Math.min(10, Math.max(3, rows - 14));
+  const maxDisplay = rows <= 10 ? 0 : Math.min(5, Math.max(3, rows - 14));
 
   // Update completion timestamps: reset when a task transitions to completed
   const currentCompletedIds = new Set(tasks.filter(t => t.status === 'completed').map(t => t.id));

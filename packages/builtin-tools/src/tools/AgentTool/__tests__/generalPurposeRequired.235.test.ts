@@ -89,13 +89,17 @@ describe('densable 2.1.235 #6 general-purpose omit gate', () => {
     expect(src).toContain('requestedNormalized')
     expect(src).toContain('OMITTED')
     // Must gate before effectiveType default, not after not-found.
-    const omitGateIdx = src.indexOf(
-      'if (subagent_type === undefined && !forkPathWouldBeTaken)',
+    const omitGateIdx = Math.max(
+      src.indexOf('if (subagent_type === undefined && !forkPathWouldBeTaken)'),
+      src.indexOf('if (subagent_type === undefined)'),
     )
     // biome may collapse the assignment to one line — accept either layout
     const effectiveIdx = Math.max(
       src.indexOf('const effectiveType =\n      subagent_type ??'),
       src.indexOf('const effectiveType = subagent_type ??'),
+      src.indexOf(
+        'const effectiveType = isForkPath ? undefined : (subagent_type ??',
+      ),
     )
     expect(omitGateIdx).toBeGreaterThan(-1)
     expect(effectiveIdx).toBeGreaterThan(omitGateIdx)

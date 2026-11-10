@@ -10,6 +10,7 @@ import { formatNumber, truncateToWidth } from '../../utils/format.js';
 
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { toInkColor } from '../../utils/ink.js';
+import { formatTaskModelEffort } from './BackgroundTask.js';
 import { renderToolActivity } from './renderToolActivity.js';
 import { describeTeammateActivity } from './taskStatusUtils.js';
 
@@ -35,6 +36,7 @@ export function InProcessTeammateDetailDialog({
     teammate.status === 'running',
     1000,
     teammate.totalPausedMs ?? 0,
+    teammate.endTime,
   );
 
   // Restore confirm:yes (Enter/y) dismissal — Dialog handles confirm:no (Esc)
@@ -52,10 +54,10 @@ export function InProcessTeammateDetailDialog({
     } else if (e.key === 'left' && onBack) {
       e.preventDefault();
       onBack();
-    } else if (e.key === 'x' && teammate.status === 'running' && onKill) {
+    } else if (e.key === 'x' && !e.ctrl && !e.meta && teammate.status === 'running' && onKill) {
       e.preventDefault();
       onKill();
-    } else if (e.key === 'f' && teammate.status === 'running' && onForeground) {
+    } else if (e.key === 'f' && !e.ctrl && !e.meta && teammate.status === 'running' && onForeground) {
       e.preventDefault();
       onForeground();
     }
@@ -66,6 +68,9 @@ export function InProcessTeammateDetailDialog({
   // Prefer the larger of result vs live progress (0 must not hide rebuilt progress).
   const tokenCount = Math.max(teammate.result?.totalTokens ?? 0, teammate.progress?.tokenCount ?? 0);
   const toolUseCount = Math.max(teammate.result?.totalToolUseCount ?? 0, teammate.progress?.toolUseCount ?? 0);
+  const teammateEffort =
+    'effort' in teammate && teammate.effort !== undefined ? teammate.effort : teammate.selectedAgent?.effort;
+  const modelEffort = formatTaskModelEffort(teammate.model, teammateEffort);
 
   const displayPrompt = truncateToWidth(teammate.prompt, 300);
 
@@ -93,6 +98,7 @@ export function InProcessTeammateDetailDialog({
             · {toolUseCount} {toolUseCount === 1 ? 'tool' : 'tools'}
           </>
         )}
+        {modelEffort && <> · {modelEffort}</>}
       </Text>
     </Text>
   );

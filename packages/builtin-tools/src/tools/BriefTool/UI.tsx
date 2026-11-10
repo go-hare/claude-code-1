@@ -1,12 +1,15 @@
 import figures from 'figures';
+import { isAbsolute } from 'path';
 import React from 'react';
+import { FilePathLink } from 'src/components/FilePathLink.js';
 import { Markdown } from 'src/components/Markdown.js';
 import { BLACK_CIRCLE } from 'src/constants/figures.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@anthropic/ink';
 import type { ProgressMessage } from 'src/types/message.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';
 import { formatBriefTimestamp } from 'src/utils/formatBriefTimestamp.js';
+import { isUncPath } from 'src/utils/hooks/fileChangedWatcher.js';
 import type { Output } from './BriefTool.js';
 
 export function renderToolUseMessage(): React.ReactNode {
@@ -61,15 +64,12 @@ export function renderToolResultMessage(
     );
   }
 
-  // Default view: dropTextInBriefTurns (Messages.tsx) hides the redundant
-  // assistant text that would otherwise precede this — SendUserMessage is the
-  // only text-like content in its turn. No gutter mark; read as plain text.
-  // userFacingName() returns '' so UserToolSuccessMessage drops its columns-5
-  // width constraint and AssistantToolUseMessage renders null (no tool chrome).
-  // Empty minWidth={2} box mirrors AssistantTextMessage's ⏺ gutter spacing.
+  // densable oT default view: non-selectable ⏺ gutter + column.
   return (
     <Box flexDirection="row" marginTop={1}>
-      <Box minWidth={2} />
+      <NoSelect fromLeftEdge minWidth={2}>
+        <Text color="text">{BLACK_CIRCLE}</Text>
+      </NoSelect>
       <Box flexDirection="column">
         {output.message ? <Markdown>{output.message}</Markdown> : null}
         <AttachmentList attachments={output.attachments} />
@@ -88,15 +88,20 @@ export function AttachmentList({ attachments }: AttachmentListProps): React.Reac
   }
   return (
     <Box flexDirection="column" marginTop={1}>
-      {attachments.map(att => (
-        <Box key={att.path} flexDirection="row">
-          <Text dimColor>
-            {figures.pointerSmall} {att.isImage ? '[image]' : '[file]'}{' '}
-          </Text>
-          <Text>{getDisplayPath(att.path)}</Text>
-          <Text dimColor> ({formatFileSize(att.size)})</Text>
-        </Box>
-      ))}
+      {attachments.map(att => {
+        const extra = att as { pathValidated?: boolean; file_uuid?: string };
+        const canLink = isAbsolute(att.path) && Boolean(extra.pathValidated) && !isUncPath(att.path);
+        const display = getDisplayPath(att.path);
+        return (
+          <Box key={extra.file_uuid ?? att.path} flexDirection="row">
+            <Text dimColor>
+              {figures.pointerSmall} {att.isImage ? '[image]' : '[file]'}{' '}
+            </Text>
+            {canLink ? <FilePathLink filePath={att.path}>{display}</FilePathLink> : <Text>{display}</Text>}
+            <Text dimColor> ({formatFileSize(att.size)})</Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 }

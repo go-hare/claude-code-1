@@ -196,7 +196,7 @@ export function isParkedIdleWindowSubagent(
  * densable jYe — nearest ancestor that is still a visible panel local_agent
  * and is not iHs. in_process_teammate has no parent chain.
  */
-function nearestNonParkedPanelAncestorId(
+export function nearestNonParkedPanelAncestorId(
   tasks: Record<string, TaskState | undefined>,
   task: PanelAgentTask,
 ): string | undefined {
@@ -216,7 +216,7 @@ function nearestNonParkedPanelAncestorId(
 /**
  * densable sXc — viewed task plus jYe ancestor chain of gpe nodes.
  */
-function viewingPanelAncestorIds(
+export function viewingPanelAncestorIds(
   tasks: Record<string, TaskState | undefined>,
   viewingAgentTaskId: string | undefined,
 ): Set<string> {

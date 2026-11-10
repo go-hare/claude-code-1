@@ -1,5 +1,6 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
+import { OutputLine } from 'src/components/shell/OutputLine.js';
 import { Text } from '@anthropic/ink';
 import { jsonParse } from 'src/utils/slowOperations.js';
 import type { Input, SendMessageToolOutput } from './SendMessageTool.js';
@@ -14,24 +15,61 @@ export function renderToolUseMessage(input: Partial<Input>): React.ReactNode {
   return null;
 }
 
+function formatInlineHandback(handback: {
+  displayName: string;
+  content: ReadonlyArray<{ type: string; text?: string }>;
+}): string {
+  const texts = handback.content
+    .filter(block => block.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text!)
+    .join('\n');
+  return `Resumed agent ${handback.displayName}. Result:\n\n${texts || '(no text output)'}`;
+}
+
 export function renderToolResultMessage(
   content: SendMessageToolOutput | string,
   _progressMessages: unknown,
   { verbose }: { verbose: boolean },
 ): React.ReactNode {
-  const result: SendMessageToolOutput = typeof content === 'string' ? jsonParse(content) : content;
+  let parsed: unknown = content;
+  if (typeof content === 'string') {
+    try {
+      parsed = jsonParse(content);
+    } catch {
+      return <OutputLine content={content} verbose={verbose} />;
+    }
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) {
+    return typeof content === 'string' ? <OutputLine content={content} verbose={verbose} /> : null;
+  }
+
+  const result = parsed as SendMessageToolOutput & {
+    display?: string;
+    inlineHandback?: {
+      displayName: string;
+      content: ReadonlyArray<{ type: string; text?: string }>;
+    };
+    message?: string;
+  };
 
   if ('routing' in result && result.routing) {
     return null;
   }
 
-  if ('request_id' in result && 'target' in result) {
+  if ('request_id' in result && result.request_id !== undefined && 'target' in result && result.target !== undefined) {
+    return null;
+  }
+
+  const text = result.display ?? (result.inlineHandback ? formatInlineHandback(result.inlineHandback) : result.message);
+
+  if (text === undefined) {
     return null;
   }
 
   return (
     <MessageResponse>
-      <Text dimColor>{result.message}</Text>
+      <Text dimColor>{text}</Text>
     </MessageResponse>
   );
 }

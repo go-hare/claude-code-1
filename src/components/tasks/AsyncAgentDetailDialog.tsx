@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { getIsInteractive } from 'src/bootstrap/state.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
 import { type KeyboardEvent, Box, Text, useTheme } from '@anthropic/ink';
@@ -10,6 +11,7 @@ import { formatNumber } from '../../utils/format.js';
 import { extractTag } from '../../utils/messages.js';
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { UserPlanMessage } from '../messages/UserPlanMessage.js';
+import { formatTaskModelEffort } from './BackgroundTask.js';
 import { renderToolActivity } from './renderToolActivity.js';
 import { getTaskStatusColor, getTaskStatusIcon } from './taskStatusUtils.js';
 
@@ -20,15 +22,40 @@ type Props = {
   onBack?: () => void;
   /** densable Qzc onForeground — DW(agent) → pje. */
   onForeground?: () => void;
+  killAllAgentsShortcut?: string;
 };
 
-export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onForeground }: Props): React.ReactNode {
+function canStopCompletedAgent(agent: DeepImmutable<LocalAgentTaskState>): boolean {
+  return (
+    agent.status === 'completed' &&
+    'keepaliveReasons' in agent &&
+    agent.keepaliveReasons instanceof Set &&
+    agent.keepaliveReasons.size > 0 &&
+    getIsInteractive()
+  );
+}
+
+export function AsyncAgentDetailDialog({
+  agent,
+  onDone,
+  onKillAgent,
+  onBack,
+  onForeground,
+  killAllAgentsShortcut,
+}: Props): React.ReactNode {
   const [theme] = useTheme();
 
   // Get tools for rendering activity messages
   const tools = useMemo(() => getTools(getEmptyToolPermissionContext()), []);
 
-  const elapsedTime = useElapsedTime(agent.startTime, agent.status === 'running', 1000, agent.totalPausedMs ?? 0);
+  const elapsedTime = useElapsedTime(
+    agent.startTime,
+    agent.status === 'running',
+    1000,
+    agent.totalPausedMs ?? 0,
+    agent.endTime,
+  );
+  const canStop = agent.status === 'running' || canStopCompletedAgent(agent);
 
   // Restore confirm:yes (Enter/y) dismissal — Dialog handles confirm:no (Esc)
   // internally but does NOT auto-wire confirm:yes.
@@ -51,10 +78,10 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
     } else if (e.key === 'left' && onBack) {
       e.preventDefault();
       onBack();
-    } else if (e.key === 'x' && agent.status === 'running' && onKillAgent) {
+    } else if (e.key === 'x' && !e.ctrl && !e.meta && canStop && onKillAgent) {
       e.preventDefault();
       onKillAgent();
-    } else if (e.key === 'f' && onForeground) {
+    } else if (e.key === 'f' && !e.ctrl && !e.meta && onForeground) {
       e.preventDefault();
       onForeground();
     }
@@ -69,6 +96,9 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
   // (last-message finalize) while progress already has the rebuilt multi-turn total.
   const tokenCount = Math.max(agent.result?.totalTokens ?? 0, agent.progress?.tokenCount ?? 0);
   const toolUseCount = Math.max(agent.result?.totalToolUseCount ?? 0, agent.progress?.toolUseCount ?? 0);
+  // 2.1.289 EVe replaces 2.1.243 {agent.model && <> · {agent.model}</>}{agent.effort && <> · {agent.effort}</>}
+  // with trailing `model (effort)` after elapsed · tokens · tools.
+  const modelEffort = formatTaskModelEffort(agent.model, agent.effort);
 
   const title = (
     <Text>
@@ -88,8 +118,6 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
       )}
       <Text dimColor>
         {elapsedTime}
-        {agent.model && <> · {agent.model}</>}
-        {agent.effort && <> · {agent.effort}</>}
         {tokenCount !== undefined && tokenCount > 0 && <> · {formatNumber(tokenCount)} tokens</>}
         {toolUseCount !== undefined && toolUseCount > 0 && (
           <>
@@ -97,6 +125,7 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
             · {toolUseCount} {toolUseCount === 1 ? 'tool' : 'tools'}
           </>
         )}
+        {modelEffort && <> · {modelEffort}</>}
       </Text>
     </Text>
   );
@@ -115,8 +144,11 @@ export function AsyncAgentDetailDialog({ agent, onDone, onKillAgent, onBack, onF
             <Byline>
               {onBack && <KeyboardShortcutHint shortcut="←" action="go back" />}
               <KeyboardShortcutHint shortcut="Esc/Enter/Space" action="close" />
-              {agent.status === 'running' && onKillAgent && <KeyboardShortcutHint shortcut="x" action="stop" />}
+              {canStop && onKillAgent && <KeyboardShortcutHint shortcut="x" action="stop" />}
               {onForeground && <KeyboardShortcutHint shortcut="f" action="foreground" />}
+              {canStop && killAllAgentsShortcut && (
+                <KeyboardShortcutHint shortcut={killAllAgentsShortcut.toLowerCase()} action="stop all agents" />
+              )}
             </Byline>
           )
         }

@@ -1,8 +1,6 @@
 import { feature } from 'bun:bundle';
-import figures from 'figures';
 import React, { type ReactNode, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { getIsInteractive } from 'src/bootstrap/state.js';
-import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
@@ -25,29 +23,38 @@ import type { LocalWorkflowTaskState } from 'src/tasks/LocalWorkflowTask/LocalWo
 import type { MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js';
 import { killMonitorWs, type MonitorWsTaskState } from 'src/tasks/MonitorWsTask/MonitorWsTask.js';
 import { RemoteAgentTask, type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { stopUltraplan } from '../../commands/ultraplan.js';
 import { isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { intersperse } from 'src/utils/array.js';
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js';
 import { IDLE_WINDOW_KEEPALIVE_REASON } from 'src/utils/task/framework.js';
+import { Box, Byline, Dialog, KeyboardShortcutHint, type KeyboardEvent, Text } from '@anthropic/ink';
 import type { CommandResultDisplay } from '../../commands.js';
+import { stopUltraplan } from '../../commands/ultraplan.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import type { ExitState } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js';
+import type { AppState } from '../../state/AppStateStore.js';
 import { count } from '../../utils/array.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { toInkColor } from '../../utils/ink.js';
+import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+import { ConfirmSelect } from '../ConfirmSelect.js';
+import { ItemList } from '../ItemList.js';
 import { AsyncAgentDetailDialog } from './AsyncAgentDetailDialog.js';
-import { BackgroundTask as BackgroundTaskComponent } from './BackgroundTask.js';
 import { AutoModeScanDetailDialog } from './AutoModeScanDetailDialog.js';
+import { getBackgroundTaskItemPresentation } from './BackgroundTask.js';
 import { DreamDetailDialog } from './DreamDetailDialog.js';
 import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
 import { RemoteSessionDetailDialog } from './RemoteSessionDetailDialog.js';
+import { RemoteSessionProgress } from './RemoteSessionProgress.js';
 import { ShellDetailDialog } from './ShellDetailDialog.js';
+import { describeTeammateActivity } from './taskStatusUtils.js';
 
-type ViewState = { mode: 'list' } | { mode: 'detail'; itemId: string };
+type ViewState = { mode: 'list' } | { mode: 'detail'; itemId: string } | { mode: 'confirmStopReview'; itemId: string };
 
 type Props = {
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -59,12 +66,22 @@ type Props = {
   promptVisibleBelow?: boolean;
 };
 
+const SYSTEM_TASKS_LABEL = 'System tasks';
+
 /**
- * densable t5c — Enter / auto-open may open a detail host.
- * Official excludes mcp_task (no local type) and monitor_ws (list + x only).
+ * densable wF — Enter / auto-open may open a detail host.
+ * Official excludes mcp_task (no local type), monitor_ws (list + x only), and
+ * the folded self_managed_tasks row.
  */
 export function canOpenBackgroundTaskDetail(type: string): boolean {
-  return type !== 'mcp_task' && type !== 'monitor_ws';
+  return type !== 'mcp_task' && type !== 'monitor_ws' && type !== 'self_managed_tasks';
+}
+
+/**
+ * densable dSe — ambient self-managed monitor_ws task folded under System tasks.
+ */
+export function isSelfManagedBackgroundTask(task: TaskState): boolean {
+  return task.type === 'monitor_ws' && task.ambient === true && task.frameLive?.explicit !== true;
 }
 
 /**
@@ -192,13 +209,20 @@ type ListItem =
       type: 'leader';
       label: string;
       status: 'running';
+    }
+  | {
+      id: string;
+      type: 'self_managed_tasks';
+      label: string;
+      status: 'running';
+      size: number;
+      firstTaskId: string;
     };
 
 // WORKFLOW_SCRIPTS is ant-only (build_flags.yaml). Static imports would leak
 // ~1.3K lines into external builds. Gate with feature() + require so the
 // bundler can dead-code-eliminate the branch.
 /* eslint-disable @typescript-eslint/no-require-imports */
-// densable: Tasks detail uses WorkflowDetailDialog (fv_) over task.workflowProgress.
 const workflowTaskModule = feature('WORKFLOW_SCRIPTS')
   ? (require('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js') as typeof import('src/tasks/LocalWorkflowTask/LocalWorkflowTask.js'))
   : null;
@@ -221,13 +245,72 @@ const MonitorMcpDetailDialog = feature('MONITOR_TOOL')
   : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-// Helper to get filtered background tasks (excludes foregrounded local_agent)
-function getSelectableBackgroundTasks(
-  tasks: Record<string, TaskState> | undefined,
-  foregroundedTaskId: string | undefined,
-): TaskState[] {
-  const backgroundTasks = Object.values(tasks ?? {}).filter(isBackgroundTasksDialogRow);
-  return backgroundTasks.filter(task => !(task.type === 'local_agent' && task.id === foregroundedTaskId));
+async function stopRemoteReview(
+  taskId: string,
+  source: 'task_list' | 'task_detail',
+  setAppState: (f: (prev: AppState) => AppState) => void,
+): Promise<void> {
+  await RemoteAgentTask.kill(taskId, setAppState);
+  logEvent('tengu_review_remote_stopped', {
+    source: source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+  enqueuePendingNotification({
+    value:
+      'Ultrareview stopped. Run /ultrareview to start a new review, which uses one of your free ultrareviews or bills as usage credits.',
+    mode: 'task-notification',
+  });
+  enqueuePendingNotification({
+    value:
+      'The user stopped the ultrareview session above. Do not respond to the stop notification — wait for their next message.',
+    mode: 'task-notification',
+    isMeta: true,
+  });
+}
+
+function ConfirmStopReviewDialog({ onStop, onBack }: { onStop: () => void; onBack: () => void }): React.ReactNode {
+  const handledRef = useRef(false);
+  const handleChoice = (choice: 'stop' | 'back') => {
+    if (handledRef.current) return;
+    handledRef.current = true;
+    if (choice === 'stop') onStop();
+    else onBack();
+  };
+  return (
+    <Dialog
+      title="Stop ultrareview?"
+      onCancel={onBack}
+      color="background"
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="Enter" action="select" />
+          <KeyboardShortcutHint shortcut="Esc" action="go back" />
+        </Byline>
+      }
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text dimColor>
+          This archives the cloud session and stops local tracking. The review will not complete and any findings so far
+          are discarded.
+        </Text>
+        <ConfirmSelect
+          confirmLabel="Stop ultrareview"
+          cancelLabel="Back"
+          cancelFirst
+          focus="cancel"
+          hideIndexes
+          onConfirm={() => handleChoice('stop')}
+          onCancel={() => handleChoice('back')}
+        />
+      </Box>
+    </Dialog>
+  );
+}
+
+// Helper to get filtered background tasks (excludes self-managed ambient monitors)
+function getSelectableBackgroundTasks(tasks: Record<string, TaskState> | undefined): TaskState[] {
+  return Object.values(tasks ?? {}).filter(
+    task => isBackgroundTasksDialogRow(task) && !isSelfManagedBackgroundTask(task),
+  );
 }
 
 export function BackgroundTasksDialog({
@@ -238,9 +321,8 @@ export function BackgroundTasksDialog({
   promptVisibleBelow = false,
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
-  const foregroundedTaskId = useAppState(s => s.foregroundedTaskId);
-  const showSpinnerTree = useAppState(s => s.expandedView) === 'teammates';
   const setAppState = useSetAppState();
+  const { rows: termRows } = useTerminalSize();
   const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
   const typedTasks = tasks as Record<string, TaskState> | undefined;
 
@@ -254,7 +336,7 @@ export function BackgroundTasksDialog({
       skippedListOnMount.current = true;
       return { mode: 'detail', itemId: initialDetailTaskId };
     }
-    const allItems = getSelectableBackgroundTasks(typedTasks, foregroundedTaskId);
+    const allItems = getSelectableBackgroundTasks(typedTasks);
     const only = allItems.length === 1 ? allItems[0] : undefined;
     // densable xCs: se && t5c(se.type) && !(local_agent && Zqg(se))
     if (
@@ -267,9 +349,13 @@ export function BackgroundTasksDialog({
     }
     return { mode: 'list' };
   });
-  // densable 247: vm(0) 3-tuple — confirm:yes / keydown read Ie[ce()], not Ce[N].
+
+  const [showSystemTasks, setShowSystemTasks] = useState(false);
+
+  // densable 247: live index ref so same-tick focus + select/keydown reads latest item.
   const [selectedIndex, setSelectedIndexState] = useState<number>(0);
   const selectedIndexLive = useRef(0);
+  const selectedIdRef = useRef<string | undefined>(undefined);
   const setSelectedIndex = (action: React.SetStateAction<number>): void => {
     const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
     selectedIndexLive.current = next;
@@ -287,14 +373,18 @@ export function BackgroundTasksDialog({
     agentTasks,
     completedAgentTasks,
     teammateTasks,
+    teams,
     workflowTasks,
     mcpMonitors,
     dreamTasks,
     autoModeScanTasks,
+    selfManagedTasks,
+    rows,
     allSelectableItems,
   } = useMemo(() => {
     // densable r5c — running/pending bO plus parked-idle completed local_agent
     const backgroundTasks = Object.values(typedTasks ?? {}).filter(isBackgroundTasksDialogRow);
+    const selfManagedIds = new Set(backgroundTasks.filter(isSelfManagedBackgroundTask).map(t => t.id));
     const allItems = backgroundTasks.map(toListItem);
     const sorted = allItems.sort((a, b) => {
       const aStatus = a.status;
@@ -305,19 +395,41 @@ export function BackgroundTasksDialog({
       const bTime = 'task' in b ? b.task.startTime : 0;
       return bTime - aTime;
     });
-    const bash = sorted.filter(item => item.type === 'local_bash');
-    const remote = sorted.filter(item => item.type === 'remote_agent');
-    // Exclude foregrounded task - it's being viewed in the main UI, not a background task
-    const agents = sorted.filter(item => item.type === 'local_agent' && item.id !== foregroundedTaskId);
+    const visibleItems = sorted.filter(item => !selfManagedIds.has(item.id));
+    const rawSelfManaged = sorted.filter(item => selfManagedIds.has(item.id));
+    const firstSelfManaged = rawSelfManaged[0];
+    const selfManaged: ListItem[] =
+      showSystemTasks || firstSelfManaged === undefined
+        ? rawSelfManaged
+        : [
+            {
+              id: '__self_managed_tasks__',
+              type: 'self_managed_tasks',
+              label: SYSTEM_TASKS_LABEL,
+              status: 'running',
+              size: rawSelfManaged.length,
+              firstTaskId: firstSelfManaged.id,
+            },
+          ];
+
+    const bash = visibleItems.filter(item => item.type === 'local_bash');
+    const remote = visibleItems.filter(item => item.type === 'remote_agent');
+    const agents = visibleItems.filter(item => item.type === 'local_agent');
     const agent = agents.filter(item => !isCompletedAgentListItem(item));
     const completed = agents.filter(isCompletedAgentListItem);
-    const workflows = sorted.filter(item => item.type === 'local_workflow');
-    const monitorMcp = sorted.filter(item => item.type === 'monitor_mcp' || item.type === 'monitor_ws');
-    const dreamTasks = sorted.filter(item => item.type === 'dream');
-    const autoModeScanTasks = sorted.filter(item => item.type === 'auto_mode_scan');
-    // In spinner-tree mode, exclude teammates from the dialog (they appear in the tree)
-    const teammates = showSpinnerTree ? [] : sorted.filter(item => item.type === 'in_process_teammate');
-    // Add leader entry when there are teammates, so users can foreground back to leader
+    const workflows = visibleItems.filter(item => item.type === 'local_workflow');
+    const monitorMcp = visibleItems.filter(item => item.type === 'monitor_mcp' || item.type === 'monitor_ws');
+    const dream = visibleItems.filter(item => item.type === 'dream');
+    const autoModeScan = visibleItems.filter(item => item.type === 'auto_mode_scan');
+
+    const teamMap = new Map<string, Extract<ListItem, { type: 'in_process_teammate' }>[]>();
+    for (const item of visibleItems) {
+      if (item.type !== 'in_process_teammate') continue;
+      const group = teamMap.get(item.task.identity.teamName);
+      if (group) group.push(item);
+      else teamMap.set(item.task.identity.teamName, [item]);
+    }
+    const teammates = [...teamMap.values()].flat();
     const leaderItem: ListItem[] =
       teammates.length > 0
         ? [
@@ -329,6 +441,32 @@ export function BackgroundTasksDialog({
             },
           ]
         : [];
+    const teamEntries = [...teamMap.entries()];
+    const listRows: ListItem[] = [
+      ...teamEntries.flatMap(([, members]) => [...leaderItem, ...members]),
+      ...bash,
+      ...monitorMcp,
+      ...remote,
+      ...agent,
+      ...completed,
+      ...workflows,
+      ...dream,
+      ...autoModeScan,
+      ...selfManaged,
+    ];
+    const selectableItems: ListItem[] = [
+      ...leaderItem,
+      ...teammates,
+      ...bash,
+      ...monitorMcp,
+      ...remote,
+      ...agent,
+      ...completed,
+      ...workflows,
+      ...dream,
+      ...autoModeScan,
+      ...selfManaged,
+    ];
     return {
       bashTasks: bash,
       remoteSessions: remote,
@@ -336,96 +474,94 @@ export function BackgroundTasksDialog({
       completedAgentTasks: completed,
       workflowTasks: workflows,
       mcpMonitors: monitorMcp,
-      dreamTasks,
-      autoModeScanTasks,
+      dreamTasks: dream,
+      autoModeScanTasks: autoModeScan,
+      selfManagedTasks: selfManaged,
       teammateTasks: [...leaderItem, ...teammates],
-      // densable xCs I: leader → teammates → bash → monitors → remote →
-      // agents → completed → workflows → dream → auto_mode_scan
-      allSelectableItems: [
-        ...leaderItem,
-        ...teammates,
-        ...bash,
-        ...monitorMcp,
-        ...remote,
-        ...agent,
-        ...completed,
-        ...workflows,
-        ...dreamTasks,
-        ...autoModeScanTasks,
-      ],
+      teams: teamEntries,
+      rows: listRows,
+      allSelectableItems: selectableItems,
     };
-  }, [typedTasks, foregroundedTaskId, showSpinnerTree]);
+  }, [typedTasks, showSystemTasks]);
 
-  const currentSelection = allSelectableItems[selectedIndex] ?? null;
-  const prevSelectableIdsRef = useRef<string[]>([]);
+  const currentSelection =
+    (selectedIdRef.current ? allSelectableItems.find(i => i.id === selectedIdRef.current) : undefined) ??
+    rows[selectedIndex] ??
+    allSelectableItems[selectedIndex] ??
+    null;
+
+  const prevRowsRef = useRef<ListItem[] | null>(null);
   const ignoreNextKillRef = useRef(false);
+  const optionToRowIndexRef = useRef<Map<number, number>>(new Map());
 
-  // densable xCs: keep the cursor on the same id when the list mutates; the
-  // following x is ignored so a shifted row is not killed by accident.
+  // densable sAt: keep the cursor on the same id when the list mutates; the
+  // following x is ignored if the focused row vanished so a shifted row is not
+  // killed by accident.
   useEffect(() => {
-    const ids = allSelectableItems.map(item => item.id);
-    const prev = prevSelectableIdsRef.current;
-    prevSelectableIdsRef.current = ids;
-    if (prev.length === 0) return;
-    const prevId = prev[selectedIndex];
-    if (prevId !== undefined && ids[selectedIndex] === prevId) return;
-    if (prevId !== undefined) {
-      const next = ids.indexOf(prevId);
-      if (next !== -1) {
-        setSelectedIndex(next);
-        return;
-      }
-    }
-    setSelectedIndex(Math.max(0, Math.min(selectedIndex, Math.max(ids.length - 1, 0))));
-    ignoreNextKillRef.current = true;
-  }, [allSelectableItems, selectedIndex]);
-
-  // Use configurable keybindings for standard navigation and confirm/cancel.
-  // confirm:no is handled by Dialog's onCancel prop.
-  useKeybindings(
-    {
-      'confirm:previous': () => {
-        ignoreNextKillRef.current = false;
-        setSelectedIndex(prev => Math.max(0, prev - 1));
-      },
-      'confirm:next': () => {
-        ignoreNextKillRef.current = false;
-        setSelectedIndex(prev => Math.min(allSelectableItems.length - 1, prev + 1));
-      },
-      'confirm:yes': () => {
-        const current = allSelectableItems[selectedIndexLive.current];
-        if (current) {
-          if (current.type === 'leader') {
-            exitTeammateView(setAppState);
-            onDone('Viewing leader', { display: 'system' });
-          } else if (isCompletedAgentListItem(current)) {
-            // densable kCs → pje: completed parked agent is foregrounded, not detailed
-            enterTeammateView(current.id, setAppState);
-            onDone('Viewing agent', { display: 'system' });
-          } else if (canOpenBackgroundTaskDetail(current.type)) {
-            setViewState({ mode: 'detail', itemId: current.id });
-          }
-        }
-      },
-    },
-    { context: 'Confirmation', isActive: viewState.mode === 'list' },
-  );
-
-  // Component-specific shortcuts (x=stop, f=foreground, right=zoom) shown in UI.
-  // These are task-type and status dependent, not standard dialog keybindings.
-  const handleKeyDown = (e: KeyboardEvent) => {
-    // Only handle input when in list mode
-    if (viewState.mode !== 'list') return;
-
-    if (e.key === 'left') {
-      e.preventDefault();
-      onDone('Background dialog dismissed', { display: 'skip' });
+    if (prevRowsRef.current === null) {
+      prevRowsRef.current = rows;
+      selectedIdRef.current = rows[0]?.id;
       return;
     }
+    prevRowsRef.current = rows;
+    const prevId = selectedIdRef.current;
+    if (prevId !== undefined) {
+      const nextIdx = rows.findIndex(r => r.id === prevId);
+      if (nextIdx !== -1) {
+        if (nextIdx !== selectedIndexLive.current) {
+          setSelectedIndex(nextIdx);
+        }
+        return;
+      }
+      ignoreNextKillRef.current = true;
+    }
+    const clamped = Math.max(0, Math.min(selectedIndexLive.current, Math.max(rows.length - 1, 0)));
+    selectedIdRef.current = rows[clamped]?.id;
+    setSelectedIndex(clamped);
+  }, [rows]);
 
-    // Compute current selection at the time of the key press
-    const currentSelection = allSelectableItems[selectedIndexLive.current];
-    if (!currentSelection) return; // everything below requires a selection
+  const handleRowFocus = (rawIndex: number): void => {
+    const index = optionToRowIndexRef.current.get(rawIndex) ?? rawIndex;
+    const nextId = rows[index]?.id;
+    const prevId = selectedIdRef.current;
+    const rowsChanged = prevRowsRef.current !== rows;
+    selectedIdRef.current = nextId;
+    prevRowsRef.current = rows;
+    if (!rowsChanged) {
+      ignoreNextKillRef.current = false;
+    } else if (prevId !== undefined && prevId !== nextId) {
+      ignoreNextKillRef.current = !rows.some(r => r.id === prevId);
+    }
+    setSelectedIndex(index);
+  };
+
+  const handleRowSelect = (rawIndex: number): void => {
+    const index = optionToRowIndexRef.current.get(rawIndex) ?? rawIndex;
+    setSelectedIndex(index);
+    const current = rows[index] ?? allSelectableItems[selectedIndexLive.current];
+    if (!current) return;
+    if (current.type === 'self_managed_tasks') {
+      selectedIdRef.current = current.firstTaskId;
+      setShowSystemTasks(true);
+    } else if (current.type === 'leader') {
+      exitTeammateView(setAppState);
+      onDone('Viewing leader', { display: 'system' });
+    } else if (isCompletedAgentListItem(current)) {
+      // densable kCs → pje: completed unparked agent is foregrounded, not detailed
+      enterTeammateView(current.id, setAppState);
+      onDone('Viewing agent', { display: 'system' });
+    } else if (canOpenBackgroundTaskDetail(current.type)) {
+      setViewState({ mode: 'detail', itemId: current.id });
+    }
+  };
+
+  // Component-specific shortcuts (x=stop, f=foreground) shown in UI.
+  // Note: left arrow no longer dismisses the list dialog in 2.1.289 (Esc only).
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (viewState.mode !== 'list') return;
+
+    const currentSelection = rows[selectedIndexLive.current] ?? allSelectableItems[selectedIndexLive.current];
+    if (!currentSelection) return;
 
     if (e.key === 'x' && !e.ctrl && !e.meta) {
       e.preventDefault();
@@ -443,8 +579,6 @@ export function BackgroundTasksDialog({
       } else if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
         void killTeammateTask(currentSelection.id);
       } else if (currentSelection.type === 'local_workflow' && currentSelection.status === 'running') {
-        // densable: service.kill aborts run binding + agents (no-op if unbound);
-        // always also task-kill (idempotent) so list selection terminates.
         const runId = currentSelection.task.workflowRunId ?? currentSelection.id;
         try {
           const { getWorkflowService } =
@@ -468,6 +602,8 @@ export function BackgroundTasksDialog({
       } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
         if (currentSelection.task.isUltraplan) {
           void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
+        } else if (currentSelection.task.isRemoteReview) {
+          setViewState({ mode: 'confirmStopReview', itemId: currentSelection.id });
         } else {
           void killRemoteAgentTask(currentSelection.id);
         }
@@ -484,7 +620,6 @@ export function BackgroundTasksDialog({
         isPanelAgentTask(currentSelection.task) &&
         !isCompletedAgentListItem(currentSelection)
       ) {
-        // densable xCs f: DW(task) && !kCs
         e.preventDefault();
         enterTeammateView(currentSelection.id, setAppState);
         onDone('Viewing agent', { display: 'system' });
@@ -501,10 +636,8 @@ export function BackgroundTasksDialog({
   }
 
   async function killAgentTask(taskId: string): Promise<void> {
-    // densable ySr: if isObserver → H1e (Fjr+kill); else hAe + XV + gtf
     const snapshot = toolUseContext.getAppState().tasks?.[taskId] as LocalAgentTaskState | undefined;
     if (snapshot?.type === 'local_agent' && snapshot.isObserver) {
-      // densable ySr OH: H1e with source=user (Fjr + kill)
       try {
         const { stopTask } = await import('src/tasks/stopTask.js');
         await stopTask(taskId, {
@@ -548,22 +681,13 @@ export function BackgroundTasksDialog({
     await RemoteAgentTask.kill(taskId, setAppState);
   }
 
-  // Wrap onDone in useEffectEvent to get a stable reference that always calls
-  // the current onDone callback without causing the effect to re-fire.
   const onDoneEvent = useEffectEvent(onDone);
 
   useEffect(() => {
     if (viewState.mode !== 'list') {
       const task = (typedTasks ?? {})[viewState.itemId];
-      // Workflow tasks get a grace: their detail view stays open through
-      // completion so the user sees the final state before eviction.
       if (!task || (task.type !== 'local_workflow' && !isBackgroundTasksDialogRow(task))) {
-        // Task was removed or is no longer a background task (e.g. killed).
-        // If we skipped the list on mount, close the dialog entirely.
         if (skippedListOnMount.current) {
-          // Defer to next tick: calling onDone synchronously unmounts this
-          // component while it's still inside useEffect, causing React to
-          // detect a hooks count mismatch ("Rendered fewer hooks than expected").
           queueMicrotask(() => {
             onDoneEvent('Background dialog dismissed', {
               display: 'skip',
@@ -576,12 +700,7 @@ export function BackgroundTasksDialog({
     }
   }, [viewState, typedTasks, onDoneEvent]);
 
-  // Helper to go back to list view (or close dialog if we skipped list on
-  // mount AND there's still only ≤1 item). Checking current count prevents
-  // the stale-state trap: if you opened with 1 task (auto-skipped to detail),
-  // then a second task started, 'back' should show the list — not close.
   const goBackToList = () => {
-    // densable xCs U: onBack → else skip-on-mount && ≤1 → dismiss → else list
     if (onBack) {
       onBack();
     } else if (skippedListOnMount.current && allSelectableItems.length <= 1) {
@@ -592,6 +711,8 @@ export function BackgroundTasksDialog({
     }
   };
 
+  const hasMultipleRunningLocalAgents = count(agentTasks, t => t.status === 'running') > 1;
+
   // If an item is selected, show the appropriate view
   if (viewState.mode !== 'list' && typedTasks) {
     const task = typedTasks[viewState.itemId];
@@ -599,7 +720,18 @@ export function BackgroundTasksDialog({
       return null;
     }
 
-    // Detail mode - show appropriate detail dialog
+    if (viewState.mode === 'confirmStopReview') {
+      return (
+        <ConfirmStopReviewDialog
+          onStop={() => {
+            void stopRemoteReview(viewState.itemId, 'task_list', setAppState);
+            setViewState({ mode: 'list' });
+          }}
+          onBack={() => setViewState({ mode: 'list' })}
+        />
+      );
+    }
+
     switch (task.type) {
       case 'local_bash':
         return (
@@ -626,6 +758,7 @@ export function BackgroundTasksDialog({
                 : undefined
             }
             onBack={goBackToList}
+            killAllAgentsShortcut={hasMultipleRunningLocalAgents ? killAgentsShortcut : undefined}
             key={`agent-${task.id}`}
           />
         );
@@ -641,7 +774,9 @@ export function BackgroundTasksDialog({
                 ? undefined
                 : task.isUltraplan
                   ? () => void stopUltraplan(task.id, task.sessionId, setAppState)
-                  : () => void killRemoteAgentTask(task.id)
+                  : task.isRemoteReview
+                    ? () => void stopRemoteReview(task.id, 'task_detail', setAppState)
+                    : () => void killRemoteAgentTask(task.id)
             }
             key={`session-${task.id}`}
           />
@@ -665,14 +800,11 @@ export function BackgroundTasksDialog({
           />
         );
       case 'local_workflow': {
-        // densable: WorkflowDetailDialog (fv_) — phases/agents from task.workflowProgress.
         if (!WorkflowDetailDialog) return null;
         const onKill =
           task.status === 'running'
             ? () => {
                 const runId = task.workflowRunId ?? task.id;
-                // service.kill aborts run binding + agents; no-ops if unbound.
-                // Always fall through to task kill (idempotent) so UI/task state terminate.
                 try {
                   const { getWorkflowService } =
                     require('../../workflow/service.js') as typeof import('../../workflow/service.js');
@@ -686,8 +818,6 @@ export function BackgroundTasksDialog({
         const onSkip =
           task.status === 'running'
             ? (agentId: string) => {
-                // Prefer densable yqK path via service (abort in-flight controller);
-                // fall back to pendingAgentAction when run binding is gone.
                 const n = Number(agentId);
                 const runId = task.workflowRunId ?? task.id;
                 if (Number.isFinite(n)) {
@@ -729,6 +859,7 @@ export function BackgroundTasksDialog({
           <WorkflowDetailDialog
             key={`workflow-${task.id}`}
             task={task}
+            onDone={onDone}
             onBack={goBackToList}
             onKill={onKill}
             onSkipAgent={onSkip}
@@ -821,6 +952,9 @@ export function BackgroundTasksDialog({
     ...(!currentSelection || canOpenBackgroundTaskDetail(currentSelection.type)
       ? [<KeyboardShortcutHint key="enter" shortcut="Enter" action="view" />]
       : []),
+    ...(currentSelection?.type === 'self_managed_tasks'
+      ? [<KeyboardShortcutHint key="show" shortcut="Enter" action="show" />]
+      : []),
     ...((currentSelection?.type === 'in_process_teammate' && currentSelection.status === 'running') ||
     (currentSelection?.type === 'local_agent' &&
       isPanelAgentTask(currentSelection.task) &&
@@ -840,13 +974,12 @@ export function BackgroundTasksDialog({
     (currentSelection?.type === 'local_agent' && isStoppableCompletedKeepaliveAgent(currentSelection.task))
       ? [
           <KeyboardShortcutHint key="kill" shortcut="x" action="stop" />,
-          // densable Z: running local_agent count > 1; hint only when selected is local_agent
-          ...(currentSelection.type === 'local_agent' && count(agentTasks, t => t.status === 'running') > 1
+          ...(currentSelection.type === 'local_agent' && hasMultipleRunningLocalAgents
             ? [<KeyboardShortcutHint key="kill-all" shortcut={killAgentsShortcut} action="stop all agents" />]
             : []),
         ]
       : []),
-    <KeyboardShortcutHint key="esc" shortcut="←/Esc" action="close" />,
+    <KeyboardShortcutHint key="esc" shortcut="Esc" action="close" />,
   ];
 
   const handleCancel = () => onDone('Background dialog dismissed', { display: 'skip' });
@@ -857,6 +990,190 @@ export function BackgroundTasksDialog({
     }
     return <Byline>{actions}</Byline>;
   }
+
+  const sections = useMemo(
+    () =>
+      [
+        {
+          key: 'agents',
+          items: teammateTasks,
+          heading:
+            bashTasks.length > 0 ||
+            remoteSessions.length > 0 ||
+            agentTasks.length > 0 ||
+            completedAgentTasks.length > 0 ? (
+              <Text dimColor>
+                <Text bold>{'  '}Agents</Text> ({count(teammateTasks, i => i.type !== 'leader')})
+              </Text>
+            ) : null,
+        },
+        {
+          key: 'shells',
+          items: bashTasks,
+          heading:
+            teammateTasks.length > 0 ||
+            remoteSessions.length > 0 ||
+            agentTasks.length > 0 ||
+            completedAgentTasks.length > 0 ? (
+              <Text dimColor>
+                <Text bold>{'  '}Shells</Text> ({bashTasks.length})
+              </Text>
+            ) : null,
+        },
+        {
+          key: 'monitors',
+          items: mcpMonitors,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Monitors</Text> ({mcpMonitors.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'cloud-agents',
+          items: remoteSessions,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Cloud agents</Text> ({remoteSessions.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'local-agents',
+          items: agentTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Local agents</Text> ({agentTasks.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'completed',
+          items: completedAgentTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Completed</Text> ({completedAgentTasks.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'workflows',
+          items: workflowTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Dynamic workflows</Text> ({workflowTasks.length})
+            </Text>
+          ),
+        },
+        { key: 'dream', items: dreamTasks, heading: null },
+        { key: 'auto-mode-scan', items: autoModeScanTasks, heading: null },
+        {
+          key: 'self-managed',
+          items: selfManagedTasks,
+          heading: showSystemTasks ? (
+            <Text dimColor>
+              <Text bold>
+                {'  '}
+                {SYSTEM_TASKS_LABEL}
+              </Text>{' '}
+              ({selfManagedTasks.length})
+            </Text>
+          ) : null,
+        },
+      ].filter(section => section.items.length > 0),
+    [
+      teammateTasks,
+      bashTasks,
+      mcpMonitors,
+      remoteSessions,
+      agentTasks,
+      completedAgentTasks,
+      workflowTasks,
+      dreamTasks,
+      autoModeScanTasks,
+      selfManagedTasks,
+      showSystemTasks,
+    ],
+  );
+
+  const { itemListOptions, optionToRowIndex, rowToOptionIndex } = useMemo(() => {
+    const options: Array<{
+      label: ReactNode;
+      value: string;
+      icon?: ReactNode;
+      facts?: readonly string[];
+      heading?: boolean;
+    }> = [];
+    const optToRow = new Map<number, number>();
+    const rowToOpt = new Map<number, number>();
+    const leader = teammateTasks.find(i => i.type === 'leader');
+    let rowIdx = 0;
+
+    sections.forEach((section, sectionIdx) => {
+      if (sectionIdx > 0) {
+        options.push({
+          heading: true,
+          value: `${section.key}-gap`,
+          label: '',
+        });
+      }
+      if (section.heading) {
+        options.push({
+          heading: true,
+          value: `${section.key}-heading`,
+          label: section.heading,
+        });
+      }
+      if (section.key === 'agents') {
+        for (const [teamName, members] of teams) {
+          options.push({
+            heading: true,
+            value: `${teamName}-team`,
+            label: `Team: ${teamName} (${members.length + (leader ? 1 : 0)})`,
+          });
+          if (leader) {
+            const optIdx = options.length;
+            optToRow.set(optIdx, rowIdx);
+            rowToOpt.set(rowIdx, optIdx);
+            rowIdx++;
+            options.push(buildItemListOption(leader, `${leader.id}-${teamName}`));
+          }
+          for (const member of members) {
+            const optIdx = options.length;
+            optToRow.set(optIdx, rowIdx);
+            rowToOpt.set(rowIdx, optIdx);
+            rowIdx++;
+            options.push(buildItemListOption(member, member.id));
+          }
+        }
+      } else {
+        for (const item of section.items) {
+          const optIdx = options.length;
+          optToRow.set(optIdx, rowIdx);
+          rowToOpt.set(rowIdx, optIdx);
+          rowIdx++;
+          options.push(buildItemListOption(item, item.id));
+        }
+      }
+    });
+
+    return { itemListOptions: options, optionToRowIndex: optToRow, rowToOptionIndex: rowToOpt };
+  }, [sections, teammateTasks, teams]);
+
+  optionToRowIndexRef.current = optionToRowIndex;
+
+  const defaultFocusIndex = useMemo(() => {
+    const rowIdx = (() => {
+      if (selectedIdRef.current) {
+        const found = rows.findIndex(r => r.id === selectedIdRef.current);
+        if (found !== -1) return found;
+      }
+      return Math.min(selectedIndex, Math.max(0, rows.length - 1));
+    })();
+    return rowToOptionIndex.get(rowIdx) ?? rowIdx;
+  }, [rows, selectedIndex, rowToOptionIndex]);
+
+  const visibleOptionCount = Math.min(itemListOptions.length, Math.max(7, Math.floor(termRows / 2)));
 
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
@@ -871,192 +1188,80 @@ export function BackgroundTasksDialog({
           <Text dimColor>No tasks currently running</Text>
         ) : (
           <Box flexDirection="column">
-            {teammateTasks.length > 0 && (
-              <Box flexDirection="column">
-                {(bashTasks.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0 ||
-                  completedAgentTasks.length > 0) && (
-                  <Text dimColor>
-                    <Text bold>{'  '}Agents</Text> ({count(teammateTasks, i => i.type !== 'leader')})
-                  </Text>
-                )}
-                <Box flexDirection="column">
-                  <TeammateTaskGroups teammateTasks={teammateTasks} currentSelectionId={currentSelection?.id} />
-                </Box>
-              </Box>
-            )}
-
-            {bashTasks.length > 0 && (
-              <Box flexDirection="column" marginTop={teammateTasks.length > 0 ? 1 : 0}>
-                {(teammateTasks.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0 ||
-                  completedAgentTasks.length > 0) && (
-                  <Text dimColor>
-                    <Text bold>{'  '}Shells</Text> ({bashTasks.length})
-                  </Text>
-                )}
-                <Box flexDirection="column">
-                  {bashTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {mcpMonitors.length > 0 && (
-              <Box flexDirection="column" marginTop={teammateTasks.length > 0 || bashTasks.length > 0 ? 1 : 0}>
-                <Text dimColor>
-                  <Text bold>{'  '}Monitors</Text> ({mcpMonitors.length})
-                </Text>
-                <Box flexDirection="column">
-                  {mcpMonitors.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {remoteSessions.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={teammateTasks.length > 0 || bashTasks.length > 0 || mcpMonitors.length > 0 ? 1 : 0}
-              >
-                <Text dimColor>
-                  <Text bold>{'  '}Cloud agents</Text> ({remoteSessions.length})
-                </Text>
-                <Box flexDirection="column">
-                  {remoteSessions.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {agentTasks.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={
-                  teammateTasks.length > 0 ||
-                  bashTasks.length > 0 ||
-                  mcpMonitors.length > 0 ||
-                  remoteSessions.length > 0
-                    ? 1
-                    : 0
-                }
-              >
-                <Text dimColor>
-                  <Text bold>{'  '}Local agents</Text> ({agentTasks.length})
-                </Text>
-                <Box flexDirection="column">
-                  {agentTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {completedAgentTasks.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={
-                  teammateTasks.length > 0 ||
-                  bashTasks.length > 0 ||
-                  mcpMonitors.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0
-                    ? 1
-                    : 0
-                }
-              >
-                <Text dimColor>
-                  <Text bold>{'  '}Completed</Text> ({completedAgentTasks.length})
-                </Text>
-                <Box flexDirection="column">
-                  {completedAgentTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {workflowTasks.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={
-                  teammateTasks.length > 0 ||
-                  bashTasks.length > 0 ||
-                  mcpMonitors.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0 ||
-                  completedAgentTasks.length > 0
-                    ? 1
-                    : 0
-                }
-              >
-                <Text dimColor>
-                  <Text bold>{'  '}Dynamic workflows</Text> ({workflowTasks.length})
-                </Text>
-                <Box flexDirection="column">
-                  {workflowTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {dreamTasks.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={
-                  teammateTasks.length > 0 ||
-                  bashTasks.length > 0 ||
-                  mcpMonitors.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0 ||
-                  completedAgentTasks.length > 0 ||
-                  workflowTasks.length > 0
-                    ? 1
-                    : 0
-                }
-              >
-                <Box flexDirection="column">
-                  {dreamTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {autoModeScanTasks.length > 0 && (
-              <Box
-                flexDirection="column"
-                marginTop={
-                  teammateTasks.length > 0 ||
-                  bashTasks.length > 0 ||
-                  mcpMonitors.length > 0 ||
-                  remoteSessions.length > 0 ||
-                  agentTasks.length > 0 ||
-                  completedAgentTasks.length > 0 ||
-                  workflowTasks.length > 0 ||
-                  dreamTasks.length > 0
-                    ? 1
-                    : 0
-                }
-              >
-                <Box flexDirection="column">
-                  {autoModeScanTasks.map(item => (
-                    <Item key={item.id} item={item} isSelected={item.id === currentSelection?.id} />
-                  ))}
-                </Box>
-              </Box>
-            )}
+            <ItemList
+              options={itemListOptions}
+              defaultFocusIndex={defaultFocusIndex}
+              visibleOptionCount={visibleOptionCount}
+              onFocus={handleRowFocus}
+              onSelect={handleRowSelect}
+            />
           </Box>
         )}
       </Dialog>
     </Box>
   );
+}
+
+function buildItemListOption(
+  item: ListItem,
+  valueKey: string,
+): {
+  label: ReactNode;
+  value: string;
+  icon?: ReactNode;
+  facts?: readonly string[];
+} {
+  if (item.type === 'self_managed_tasks') {
+    return {
+      value: valueKey,
+      label: (
+        <Text>
+          {item.label}
+          <Text dimColor>{` · ${item.size} hidden`}</Text>
+        </Text>
+      ),
+    };
+  }
+  if (item.type === 'leader') {
+    return {
+      value: valueKey,
+      label: `@${TEAM_LEAD_NAME}`,
+    };
+  }
+  const presentation = getBackgroundTaskItemPresentation(item.task);
+  if (presentation) {
+    return {
+      value: valueKey,
+      label: presentation.label,
+      icon: presentation.icon,
+      facts: presentation.facts,
+    };
+  }
+  if (item.type === 'remote_agent') {
+    return {
+      value: valueKey,
+      label: (
+        <Text>
+          <RemoteSessionProgress session={item.task} />
+        </Text>
+      ),
+    };
+  }
+  if (item.type === 'in_process_teammate') {
+    return {
+      value: valueKey,
+      label: (
+        <Text wrap="truncate-end">
+          <Text color={toInkColor(item.task.identity.color)}>@{item.task.identity.agentName}</Text>
+          <Text dimColor>: {describeTeammateActivity(item.task)}</Text>
+        </Text>
+      ),
+    };
+  }
+  return {
+    value: valueKey,
+    label: item.label,
+  };
 }
 
 function toListItem(task: TaskState): ListItem {
@@ -1134,69 +1339,4 @@ function toListItem(task: TaskState): ListItem {
         task,
       };
   }
-}
-
-function Item({ item, isSelected }: { item: ListItem; isSelected: boolean }): ReactNode {
-  const { columns } = useTerminalSize();
-  // Dialog border (2) + padding (2) + pointer prefix (2) + name/status overhead (~20)
-  const maxActivityWidth = Math.max(30, columns - 26);
-  // In coordinator mode, use grey pointer instead of blue
-  const useGreyPointer = isCoordinatorMode();
-
-  return (
-    <Box flexDirection="row">
-      <Text dimColor={useGreyPointer && isSelected}>{isSelected ? figures.pointer + ' ' : '  '}</Text>
-      <Text color={isSelected && !useGreyPointer ? 'suggestion' : undefined}>
-        {item.type === 'leader' ? (
-          <Text>@{TEAM_LEAD_NAME}</Text>
-        ) : (
-          <BackgroundTaskComponent task={item.task} maxActivityWidth={maxActivityWidth} />
-        )}
-      </Text>
-    </Box>
-  );
-}
-
-function TeammateTaskGroups({
-  teammateTasks,
-  currentSelectionId,
-}: {
-  teammateTasks: ListItem[];
-  currentSelectionId: string | undefined;
-}): ReactNode {
-  // Separate leader from teammates, group teammates by team
-  const leaderItems = teammateTasks.filter(i => i.type === 'leader');
-  const teammateItems = teammateTasks.filter(i => i.type === 'in_process_teammate');
-  const teams = new Map<string, typeof teammateItems>();
-  for (const item of teammateItems) {
-    const teamName = item.task.identity.teamName;
-    const group = teams.get(teamName);
-    if (group) {
-      group.push(item);
-    } else {
-      teams.set(teamName, [item]);
-    }
-  }
-  const teamEntries = [...teams.entries()];
-  return (
-    <>
-      {teamEntries.map(([teamName, items]) => {
-        const memberCount = items.length + leaderItems.length;
-        return (
-          <Box key={teamName} flexDirection="column">
-            <Text dimColor>
-              {'  '}Team: {teamName} ({memberCount})
-            </Text>
-            {/* Render leader first within each team */}
-            {leaderItems.map(item => (
-              <Item key={`${item.id}-${teamName}`} item={item} isSelected={item.id === currentSelectionId} />
-            ))}
-            {items.map(item => (
-              <Item key={item.id} item={item} isSelected={item.id === currentSelectionId} />
-            ))}
-          </Box>
-        );
-      })}
-    </>
-  );
 }

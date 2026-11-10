@@ -1,6 +1,6 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Text } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import { truncate } from 'src/utils/format.js';
 import type { CreateOutput } from './CronCreateTool.js';
 import type { DeleteOutput } from './CronDeleteTool.js';
@@ -54,11 +54,19 @@ export function renderListResultMessage(output: ListOutput): React.ReactNode {
   }
   return (
     <MessageResponse>
-      {output.jobs.map(j => (
-        <Text key={j.id}>
-          <Text bold>{j.id}</Text> <Text dimColor>{j.humanSchedule}</Text>
-        </Text>
-      ))}
+      <Box flexDirection="column">
+        {output.jobs.map(j => (
+          <Text key={j.id}>
+            <Text bold>{j.id}</Text>{' '}
+            <Text dimColor>
+              {j.humanSchedule}
+              {j.recurring ? ' (recurring)' : ' (one-shot)'}
+              {j.durable === false ? ' [session-only]' : ''}
+              {j.prompt ? `: ${truncate(j.prompt, 60, true)}` : ''}
+            </Text>
+          </Text>
+        ))}
+      </Box>
     </MessageResponse>
   );
 }

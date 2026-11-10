@@ -63,14 +63,32 @@ function isCollapsedWritePath(filePath: string): boolean {
   return isScratchpadFile(filePath) || isAutoMemPath(filePath);
 }
 
+function ReplacedUndiffedNotice(): React.ReactNode {
+  return <Text dimColor> — previous content replaced (no diff shown)</Text>;
+}
+
+/** densable ae — large file overwrite that omitted structuredPatch and originalFile. */
+function isUndiffedLargeOverwrite({ type, content, structuredPatch, originalFile }: Output): boolean {
+  return (
+    type === 'update' &&
+    Array.isArray(structuredPatch) &&
+    structuredPatch.length === 0 &&
+    originalFile === null &&
+    typeof content === 'string' &&
+    content !== ''
+  );
+}
+
 function FileWriteToolCreatedMessage({
   filePath,
   content,
   verbose,
+  replacedUndiffedContent = false,
 }: {
   filePath: string;
   content: string;
   verbose: boolean;
+  replacedUndiffedContent?: boolean;
 }): React.ReactNode {
   const { columns } = useTerminalSize();
   const contentWithFallback = content || '(No content)';
@@ -91,6 +109,7 @@ function FileWriteToolCreatedMessage({
         <Text>
           Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} to{' '}
           <Text bold>{verbose ? filePath : relative(getCwd(), filePath)}</Text>
+          {replacedUndiffedContent && <ReplacedUndiffedNotice />}
         </Text>
         <Box
           flexDirection="column"
@@ -116,9 +135,10 @@ export function userFacingName(input: Partial<{ file_path: string; content: stri
   return 'Write';
 }
 
-/** densable Yo0 — wrap-aware create truncation. `update` is never truncated. */
-export function isResultTruncated({ type, content }: Output, options?: { columns?: number }): boolean {
-  if (type !== 'create') return false;
+/** densable rt — wrap-aware truncation for create or undiffed large overwrite. */
+export function isResultTruncated(output: Output, options?: { columns?: number }): boolean {
+  const { type, content } = output;
+  if (type !== 'create' && !isUndiffedLargeOverwrite(output)) return false;
   if (typeof content !== 'string') return false;
   const columns = options?.columns;
   if (columns === undefined) {
@@ -287,10 +307,27 @@ export function renderToolUseErrorMessage(
 }
 
 export function renderToolResultMessage(
-  { filePath, content, structuredPatch, type, originalFile }: Output,
-  _progressMessagesForMessage: ProgressMessage<ToolProgressData>[],
+  output: Output,
+  progressMessagesForMessage: ProgressMessage<ToolProgressData>[],
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
+  return renderFileWriteResult(output, progressMessagesForMessage, { style, verbose });
+}
+
+function renderFileWriteResult(
+  output: Output,
+  progressMessagesForMessage: ProgressMessage<ToolProgressData>[],
+  {
+    style,
+    verbose,
+    replacedUndiffedContent = false,
+  }: {
+    style?: 'condensed';
+    verbose: boolean;
+    replacedUndiffedContent?: boolean;
+  },
+): React.ReactNode {
+  const { filePath, content, structuredPatch, type, originalFile } = output;
   // Official densable: empty path → null before create/update branching.
   if (!filePath) {
     return null;
@@ -317,6 +354,7 @@ export function renderToolResultMessage(
           <Text>
             Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} to{' '}
             <Text bold>{relative(getCwd(), filePath)}</Text>
+            {replacedUndiffedContent && <ReplacedUndiffedNotice />}
           </Text>
         );
       } else if (!verbose && isCollapsedWritePath(filePath)) {
@@ -325,15 +363,30 @@ export function renderToolResultMessage(
         return (
           <MessageResponse>
             <Text>
-              Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} <CtrlOToExpand />
+              Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')}
+              {replacedUndiffedContent && <ReplacedUndiffedNotice />} <CtrlOToExpand />
             </Text>
           </MessageResponse>
         );
       }
 
-      return <FileWriteToolCreatedMessage filePath={filePath} content={content} verbose={verbose} />;
+      return (
+        <FileWriteToolCreatedMessage
+          filePath={filePath}
+          content={content}
+          verbose={verbose}
+          replacedUndiffedContent={replacedUndiffedContent}
+        />
+      );
     }
     case 'update': {
+      if (isUndiffedLargeOverwrite(output)) {
+        return renderFileWriteResult({ ...output, type: 'create' }, progressMessagesForMessage, {
+          style,
+          verbose,
+          replacedUndiffedContent: true,
+        });
+      }
       const isPlanFile = filePath.startsWith(getPlansDirectory());
       return (
         <FileEditToolUpdatedMessage

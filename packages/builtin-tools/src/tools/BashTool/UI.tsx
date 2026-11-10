@@ -176,7 +176,7 @@ export function renderToolResultMessage(
     verbose,
     theme: _theme,
     tools: _tools,
-    style: _style,
+    style,
   }: {
     verbose: boolean;
     theme: ThemeName;
@@ -186,7 +186,7 @@ export function renderToolResultMessage(
 ): React.ReactNode {
   const lastProgress = progressMessagesForMessage.at(-1);
   const timeoutMs = lastProgress?.data?.timeoutMs;
-  return <BashToolResultMessage content={content} verbose={verbose} timeoutMs={timeoutMs} />;
+  return <BashToolResultMessage content={content} verbose={verbose} timeoutMs={timeoutMs} style={style} />;
 }
 
 export function renderToolUseErrorMessage(

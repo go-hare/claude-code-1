@@ -42,7 +42,10 @@ export function BackgroundTaskStatus({
   const runningTasks = useMemo(
     () =>
       (Object.values(tasks ?? {}) as TaskState[]).filter(
-        t => isBackgroundTask(t) && !(process.env.USER_TYPE === 'ant' && isPanelAgentTask(t)),
+        t =>
+          isBackgroundTask(t) &&
+          !(t.type === 'monitor_ws' && t.ambient === true && t.frameLive?.explicit !== true) &&
+          !(process.env.USER_TYPE === 'ant' && isPanelAgentTask(t)),
       ),
     [tasks],
   );
@@ -175,9 +178,11 @@ export function BackgroundTaskStatus({
     return null;
   }
 
+  const handleOpenDialog = useMemo(() => (onOpenDialog ? () => onOpenDialog() : undefined), [onOpenDialog]);
+
   return (
     <>
-      <SummaryPill selected={tasksSelected} onClick={onOpenDialog}>
+      <SummaryPill selected={tasksSelected} onClick={handleOpenDialog}>
         {getPillLabel(runningTasks)}
       </SummaryPill>
       {pillNeedsCta(runningTasks) && <Text dimColor> · {figures.arrowDown} to view</Text>}

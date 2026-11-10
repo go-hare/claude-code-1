@@ -10,12 +10,131 @@
  *   --json         (output session list as JSON and exit)
  */
 
-import type { SessionEntry } from './bg/engine.js'
+import { realpath } from 'fs/promises'
+import { isAbsolute, relative, resolve } from 'path'
+import type { BgJobState } from '../daemon/jobState.js'
 
 export interface AgentViewAction {
   type: 'attach' | 'create' | 'kill' | 'done'
   sessionId?: string
   prompt?: string
+}
+
+function normalizeAgentJsonStatus(status: string): 'idle' | 'waiting' | 'busy' {
+  return status === 'idle' ? 'idle' : status === 'waiting' ? 'waiting' : 'busy'
+}
+
+function deriveAgentJsonState(
+  job: BgJobState,
+  liveStatus: string | undefined,
+  hasBlockingInFlightFn: (state: BgJobState) => boolean,
+): 'working' | 'blocked' | 'done' | 'failed' | 'stopped' {
+  if (liveStatus === 'busy') return 'working'
+  const rawState = job.state as string
+  const isSuccess = rawState === 'done' || rawState === 'success'
+  const isFailure =
+    rawState === 'failed' || rawState === 'failure' || rawState === 'crashed'
+  const isTerminal = isSuccess || isFailure || rawState === 'stopped'
+  if (isTerminal && !(isSuccess && hasBlockingInFlightFn(job))) {
+    return isSuccess ? 'done' : isFailure ? 'failed' : 'stopped'
+  }
+  if (job.tempo === 'blocked' || liveStatus === 'waiting') return 'blocked'
+  return 'working'
+}
+
+export async function printAgentsJson(
+  cwdFilter?: string,
+  includeAll?: boolean,
+): Promise<void> {
+  const resolvedFilter = cwdFilter
+    ? await realpath(resolve(cwdFilter)).catch(() => resolve(cwdFilter))
+    : undefined
+  const matchesCwd = (target: string | undefined): boolean => {
+    if (!resolvedFilter) return true
+    if (!target) return false
+    const rel = relative(resolvedFilter, target)
+    return rel.split(/[/\\]/, 1)[0] !== '..' && !isAbsolute(rel)
+  }
+
+  const [{ listAllJobs, hasBlockingInFlight }, { listAllLiveSessions }] =
+    await Promise.all([
+      import('../daemon/jobState.js'),
+      import('../utils/udsClient.js'),
+    ])
+  const [liveSessions, jobs] = await Promise.all([
+    listAllLiveSessions().catch(() => []),
+    listAllJobs(),
+  ])
+
+  const bgByJobId = new Map<string, (typeof liveSessions)[number]>()
+  for (const s of liveSessions) {
+    if (s.kind === 'bg' && s.jobId) {
+      bgByJobId.set(s.jobId, s)
+    }
+  }
+
+  const out: Array<Record<string, unknown>> = []
+  const seenPids = new Set<number>()
+
+  for (const { short, state: job } of jobs) {
+    if (job.archived) continue
+    const live = bgByJobId.get(short)
+    if (live) seenPids.add(live.pid)
+    if (!matchesCwd(job.originCwd ?? job.cwd)) continue
+    const state = deriveAgentJsonState(job, live?.status, hasBlockingInFlight)
+    if (!includeAll && !live && state !== 'working' && state !== 'blocked') {
+      continue
+    }
+    const rawName =
+      live?.name ??
+      job.name ??
+      (job as { displayIntent?: string }).displayIntent ??
+      job.intent
+    const name = rawName?.replace(/\s+/g, ' ').trim() || undefined
+    const createdMs = Date.parse(job.createdAt)
+    out.push({
+      ...(live ? { pid: live.pid } : {}),
+      id: short,
+      cwd: live?.cwd ?? job.cwd,
+      kind: 'background',
+      startedAt:
+        live?.startedAt ?? (Number.isFinite(createdMs) ? createdMs : 0),
+      sessionId: live?.sessionId ?? job.sessionId,
+      ...(name ? { name } : {}),
+      ...(live?.status
+        ? { status: normalizeAgentJsonStatus(live.status) }
+        : {}),
+      ...(live?.status === 'waiting' && live.waitingFor
+        ? { waitingFor: live.waitingFor }
+        : {}),
+      state,
+    })
+  }
+
+  for (const s of liveSessions) {
+    if ((s.kind !== 'interactive' && s.kind !== 'bg') || seenPids.has(s.pid)) {
+      continue
+    }
+    if (s.kind === 'bg' && s.jobId) continue
+    if (s.parkedJobId !== undefined) continue
+    if (!matchesCwd(s.cwd)) continue
+    const name = s.name?.replace(/\s+/g, ' ').trim() || undefined
+    out.push({
+      pid: s.pid,
+      cwd: s.cwd,
+      kind: s.kind === 'bg' ? 'background' : 'interactive',
+      startedAt: s.startedAt ?? 0,
+      ...(s.sessionId ? { sessionId: s.sessionId } : {}),
+      ...(name ? { name } : {}),
+      ...(s.status ? { status: normalizeAgentJsonStatus(s.status) } : {}),
+      ...(s.status === 'waiting' && s.waitingFor
+        ? { waitingFor: s.waitingFor }
+        : {}),
+    })
+  }
+
+  out.sort((a, b) => Number(a.startedAt ?? 0) - Number(b.startedAt ?? 0))
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n')
 }
 
 // Flags that get forwarded to dispatched sessions.
@@ -58,41 +177,13 @@ function extractPassthroughArgs(args: string[]): string[] {
 export async function agentsMain(args: string[]): Promise<void> {
   // --json flag: output job list as JSON (same source as FleetView dashboard)
   if (args.includes('--json')) {
-    const { listAllJobs } = await import('../daemon/jobState.js')
-    const jobs = await listAllJobs()
-    const sessions: SessionEntry[] = jobs.map(({ short, state: job }) => {
-      const createdMs = Date.parse(job.createdAt)
-      const updatedMs = Date.parse(job.updatedAt)
-      return {
-        pid: job.pid ?? 0,
-        sessionId: job.sessionId,
-        short,
-        cwd: job.cwd,
-        startedAt: Number.isFinite(createdMs) ? createdMs : Date.now(),
-        kind: 'bg',
-        name: job.name,
-        status:
-          job.state === 'working'
-            ? job.tempo === 'blocked'
-              ? 'waiting'
-              : 'busy'
-            : job.state === 'blocked'
-              ? 'waiting'
-              : job.state,
-        updatedAt: Number.isFinite(updatedMs) ? updatedMs : Date.now(),
-        engine: 'detached',
-        lastMessage: job.detail || undefined,
-        waitingFor:
-          job.needs || job.block?.questions?.[0]?.question || undefined,
-        pinned: job.pinned,
-        gitBranch: job.worktreeBranch,
-        group: job.group,
-        archived: job.archived,
-        sortOrder: job.sortOrder,
-        agent: job.agent,
-      }
-    })
-    process.stdout.write(JSON.stringify(sessions, null, 2) + '\n')
+    let cwdFilter: string | undefined
+    const cwdIdx = args.indexOf('--cwd')
+    if (cwdIdx >= 0 && cwdIdx + 1 < args.length) {
+      cwdFilter = args[cwdIdx + 1]
+    }
+    const includeAll = args.includes('--all') || args.includes('-a')
+    await printAgentsJson(cwdFilter, includeAll)
     return
   }
 

@@ -14,7 +14,7 @@ import { ASK_USER_QUESTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/As
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/constants.js';
 import { openBrowser } from '../../utils/browser.js';
 import { errorMessage } from '../../utils/errors.js';
-import { formatDuration, truncateToWidth } from '../../utils/format.js';
+import { truncateToWidth } from '../../utils/format.js';
 import { toInternalMessages } from '../../utils/messages/mappers.js';
 import { EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
 import { plural } from '../../utils/stringUtils.js';
@@ -35,9 +35,9 @@ type Props = {
 };
 
 // Compact one-line summary: tool name + first meaningful string arg.
-export function formatToolUseSummary(name: string, input: unknown): string {
+export function formatToolUseSummary(name: string, input: unknown, maxLen = 60): string {
   if (name === EXIT_PLAN_MODE_V2_TOOL_NAME) {
-    return 'Review the plan in Claude Code on the web';
+    return 'Review the plan in your browser';
   }
   if (!input || typeof input !== 'object') return name;
   if (name === ASK_USER_QUESTION_TOOL_NAME && 'questions' in input) {
@@ -51,14 +51,14 @@ export function formatToolUseSummary(name: string, input: unknown): string {
             : null;
       if (q) {
         const oneLine = q.replace(/\s+/g, ' ').trim();
-        return `Answer in browser: ${truncateToWidth(oneLine, 50)}`;
+        return `Answer in browser: ${truncateToWidth(oneLine, maxLen - 10)}`;
       }
     }
   }
   for (const v of Object.values(input)) {
     if (typeof v === 'string' && v.trim()) {
       const oneLine = v.replace(/\s+/g, ' ').trim();
-      return `${name} ${truncateToWidth(oneLine, 60)}`;
+      return `${name} ${truncateToWidth(oneLine, maxLen)}`;
     }
   }
   return name;
@@ -104,32 +104,33 @@ function UltraplanSessionDetail({ session, onDone, onBack, onKill }: Omit<Props,
   }, [session.log]);
 
   const sessionUrl = getRemoteTaskSessionUrl(session.sessionId);
-  const goBackOrClose = onBack ?? (() => onDone('Remote session details dismissed', { display: 'system' }));
+  const goBackOrClose = onBack ?? (() => onDone('Cloud session details dismissed', { display: 'system' }));
   const [confirmingStop, setConfirmingStop] = useState(false);
 
   if (confirmingStop) {
     return (
       <Dialog title="Stop ultraplan?" onCancel={() => setConfirmingStop(false)} color="background">
         <Box flexDirection="column" gap={1}>
-          <Text dimColor>This will terminate the Claude Code on the web session.</Text>
-          <Select
-            options={[
-              { label: 'Terminate session', value: 'stop' as const },
-              { label: 'Back', value: 'back' as const },
-            ]}
-            onChange={v => {
-              if (v === 'stop') {
-                onKill?.();
-                goBackOrClose();
-              } else {
-                setConfirmingStop(false);
-              }
+          <Text dimColor>This will terminate the cloud session.</Text>
+          <ConfirmSelect
+            cancelFirst
+            focus="cancel"
+            hideIndexes
+            confirmLabel="Terminate session"
+            cancelLabel="Back"
+            onConfirm={() => {
+              onKill?.();
+              goBackOrClose();
             }}
+            onCancel={() => setConfirmingStop(false)}
           />
         </Box>
       </Dialog>
     );
   }
+
+  const openLabel =
+    phase === 'plan_ready' ? 'Review in browser' : phase === 'needs_input' ? 'Answer in browser' : 'Open in browser';
 
   return (
     <Dialog
@@ -161,10 +162,19 @@ function UltraplanSessionDetail({ session, onDone, onBack, onKill }: Omit<Props,
         <Select
           options={[
             {
-              label: 'Review in Claude Code on the web',
+              label: openLabel,
               value: 'open' as const,
+              ...(phase === 'plan_ready' ? { description: 'Approve, edit, or comment on the plan' } : {}),
             },
-            ...(onKill && running ? [{ label: 'Stop ultraplan', value: 'stop' as const }] : []),
+            ...(onKill && running
+              ? [
+                  {
+                    label: 'Stop ultraplan',
+                    value: 'stop' as const,
+                    ...(phase === 'plan_ready' ? { description: 'Discard the generated plan' } : {}),
+                  },
+                ]
+              : []),
             { label: 'Back', value: 'back' as const },
           ]}
           onChange={v => {
@@ -259,7 +269,7 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
   // like the clock was stuck.
   const elapsedTime = useElapsedTime(session.startTime, running, 1000, 0, session.endTime);
 
-  const handleClose = () => onDone('Remote session details dismissed', { display: 'system' });
+  const handleClose = () => onDone('Cloud session details dismissed', { display: 'system' });
   const goBackOrClose = onBack ?? handleClose;
 
   const sessionUrl = getRemoteTaskSessionUrl(session.sessionId);
@@ -382,6 +392,9 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
       .slice(-3);
   }, [session]);
 
+  const running = session.status === 'running' || session.status === 'pending';
+  const elapsedTime = useElapsedTime(session.startTime, running, 1000, 0, session.endTime);
+
   // Review sessions get the stage-pipeline view; everything else keeps the
   // generic label/value + recent-messages dialog below.
   if (session.isUltraplan) {
@@ -392,18 +405,18 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
     return <ReviewSessionDetail session={session} onDone={onDone} onBack={onBack} onKill={onKill} />;
   }
 
-  const handleClose = () => onDone('Remote session details dismissed', { display: 'system' });
+  const handleClose = () => onDone('Cloud session details dismissed', { display: 'system' });
 
   // Component-specific shortcuts shown in UI hints (t=teleport, space=dismiss,
   // left=back). These are state-dependent actions, not standard dialog keybindings.
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === ' ') {
       e.preventDefault();
-      onDone('Remote session details dismissed', { display: 'system' });
+      onDone('Cloud session details dismissed', { display: 'system' });
     } else if (e.key === 'left' && onBack) {
       e.preventDefault();
       onBack();
-    } else if (e.key === 't' && !isTeleporting) {
+    } else if (e.key === 't' && !e.ctrl && !e.meta && !isTeleporting) {
       e.preventDefault();
       void handleTeleport();
     } else if (e.key === 'return') {
@@ -435,7 +448,7 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
       <Dialog
-        title="Remote session details"
+        title="Cloud session details"
         onCancel={handleClose}
         color="background"
         inputGuide={exitState =>
@@ -462,7 +475,7 @@ export function RemoteSessionDetailDialog({ session, toolUseContext, onDone, onB
             )}
           </Text>
           <Text>
-            <Text bold>Runtime</Text>: {formatDuration((session.endTime ?? Date.now()) - session.startTime)}
+            <Text bold>Runtime</Text>: {elapsedTime}
           </Text>
           <Text wrap="truncate-end">
             <Text bold>Title</Text>: {displayTitle}

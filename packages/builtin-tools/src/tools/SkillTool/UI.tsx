@@ -11,7 +11,7 @@ import { MessageResponse } from 'src/components/MessageResponse.js';
 import { Box, Text } from '@anthropic/ink';
 import type { Tools } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
-import { buildSubagentLookups, EMPTY_LOOKUPS } from 'src/utils/messages.js';
+import { buildSubagentLookups } from 'src/utils/messages.js';
 import { plural } from 'src/utils/stringUtils.js';
 import type { inputSchema, Output, Progress } from './SkillTool.js';
 
@@ -26,7 +26,7 @@ export function renderToolResultMessage(output: Output): React.ReactNode {
     return (
       <MessageResponse height={1}>
         <Text>
-          <Byline>{['Done']}</Byline>
+          <Byline>{[(output as { background?: boolean }).background ? 'Running in the background' : 'Done']}</Byline>
         </Text>
       </MessageResponse>
     );
@@ -89,7 +89,7 @@ export function renderToolUseProgressMessage(
   const displayedMessages = verbose ? progressMessages : progressMessages.slice(-MAX_PROGRESS_MESSAGES_TO_SHOW);
 
   const hiddenCount = progressMessages.length - displayedMessages.length;
-  const { inProgressToolUseIDs } = buildSubagentLookups(progressMessages.map(pm => pm.data));
+  const { lookups, inProgressToolUseIDs } = buildSubagentLookups(progressMessages.map(pm => pm.data));
 
   return (
     <MessageResponse>
@@ -99,7 +99,7 @@ export function renderToolUseProgressMessage(
             <Box key={progressMessage.uuid} height={1} overflow="hidden">
               <MessageComponent
                 message={progressMessage.data.message}
-                lookups={EMPTY_LOOKUPS}
+                lookups={lookups}
                 addMargin={false}
                 tools={tools}
                 commands={[]}

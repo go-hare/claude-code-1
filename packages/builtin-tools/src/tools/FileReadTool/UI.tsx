@@ -1,4 +1,5 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
+import { basename } from 'path';
 import * as React from 'react';
 import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
@@ -133,9 +134,12 @@ export function renderToolResultMessage(output: Output): React.ReactNode {
       );
     }
     case 'file_unchanged': {
+      const source = (output as { source?: string }).source;
+      const label =
+        source === 'seeded' ? `Already in context (${basename(output.file.filePath)})` : 'Unchanged since last read';
       return (
         <MessageResponse height={1}>
-          <Text dimColor>Unchanged since last read</Text>
+          <Text dimColor>{label}</Text>
         </MessageResponse>
       );
     }

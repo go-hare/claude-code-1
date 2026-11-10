@@ -2,13 +2,12 @@ import React, { Suspense, use, useDeferredValue, useEffect, useState } from 'rea
 import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LocalShellTaskState } from '../../tasks/LocalShellTask/guards.js';
 import { formatDuration, formatFileSize, truncateToWidth } from '../../utils/format.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { getTaskOutputPath } from '../../utils/task/diskOutput.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 
 type Props = {
   shell: DeepImmutable<LocalShellTaskState>;
@@ -18,19 +17,7 @@ type Props = {
 };
 
 const SHELL_DETAIL_TAIL_BYTES = 8192;
-/** Title, status, command, output label, caption, and both borders. */
-const SHELL_DETAIL_CHROME_ROWS = 16;
-
-/**
- * Gold box is 12 rows. Only shrink when the terminal cannot hold the dialog
- * plus a one-row transcript peek, so a normal window keeps its bottom edge
- * without the dialog eating the transcript.
- */
-function shellOutputBoxHeight(rows: number): number {
-  const room = rows - SHELL_DETAIL_CHROME_ROWS - 1;
-  if (room >= 12) return 12;
-  return Math.max(4, room);
-}
+const TABLE_COLUMN_GAP = 2;
 
 type TaskOutputResult = {
   content: string;
@@ -52,7 +39,7 @@ async function getTaskOutput(shell: DeepImmutable<LocalShellTaskState>): Promise
 }
 
 export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props): React.ReactNode {
-  const { columns, rows } = useTerminalSize();
+  const { columns } = useTerminalSize();
 
   // Promise created in initializer (not during render). For running shells,
   // the effect timer replaces it periodically to pick up new output.
@@ -93,7 +80,7 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
     } else if (e.key === 'left' && onBack) {
       e.preventDefault();
       onBack();
-    } else if (e.key === 'x' && shell.status === 'running' && onKillShell) {
+    } else if (e.key === 'x' && !e.ctrl && !e.meta && shell.status === 'running' && onKillShell) {
       e.preventDefault();
       onKillShell();
     }
@@ -102,6 +89,28 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
   // Truncate command if too long (for display purposes)
   const isMonitor = shell.kind === 'monitor';
   const displayCommand = truncateToWidth(shell.command, 280);
+  const commandLabel = isMonitor ? 'Script:' : 'Command:';
+  const tableWidth = Math.max(12, columns - 6);
+  const labelColWidth = Math.max(stringWidth('Status:'), stringWidth('Runtime:'), stringWidth(commandLabel));
+  const valueColWidth = Math.max(1, tableWidth - labelColWidth - TABLE_COLUMN_GAP);
+
+  const statusCell =
+    shell.status === 'running' ? (
+      <Text color="background">
+        {shell.status}
+        {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
+      </Text>
+    ) : shell.status === 'completed' ? (
+      <Text color="success">
+        {shell.status}
+        {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
+      </Text>
+    ) : (
+      <Text color="error">
+        {shell.status}
+        {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
+      </Text>
+    );
 
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
@@ -122,37 +131,36 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
         }
       >
         <Box flexDirection="column">
-          <Text>
-            <Text bold>Status:</Text>{' '}
-            {shell.status === 'running' ? (
-              <Text color="background">
-                {shell.status}
-                {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
-              </Text>
-            ) : shell.status === 'completed' ? (
-              <Text color="success">
-                {shell.status}
-                {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
-              </Text>
-            ) : (
-              <Text color="error">
-                {shell.status}
-                {shell.result?.code !== undefined && ` (exit code: ${shell.result.code})`}
-              </Text>
-            )}
-          </Text>
-          <Text>
-            <Text bold>Runtime:</Text> {formatDuration((shell.endTime ?? Date.now()) - shell.startTime)}
-          </Text>
-          <Text wrap="wrap">
-            <Text bold>{isMonitor ? 'Script:' : 'Command:'}</Text> {displayCommand}
-          </Text>
+          <Box flexDirection="row" columnGap={TABLE_COLUMN_GAP} flexWrap="wrap">
+            <Box width={labelColWidth} flexShrink={0}>
+              <Text bold>Status:</Text>
+            </Box>
+            <Box width={valueColWidth} flexGrow={1} flexShrink={0} maxWidth={valueColWidth}>
+              {statusCell}
+            </Box>
+          </Box>
+          <Box flexDirection="row" columnGap={TABLE_COLUMN_GAP} flexWrap="wrap">
+            <Box width={labelColWidth} flexShrink={0}>
+              <Text bold>Runtime:</Text>
+            </Box>
+            <Box width={valueColWidth} flexGrow={1} flexShrink={0} maxWidth={valueColWidth}>
+              <Text>{formatDuration((shell.endTime ?? Date.now()) - shell.startTime)}</Text>
+            </Box>
+          </Box>
+          <Box flexDirection="row" columnGap={TABLE_COLUMN_GAP} flexWrap="wrap">
+            <Box width={labelColWidth} flexShrink={0}>
+              <Text bold>{commandLabel}</Text>
+            </Box>
+            <Box width={valueColWidth} flexGrow={1} flexShrink={0} maxWidth={valueColWidth}>
+              <Text wrap="wrap">{displayCommand}</Text>
+            </Box>
+          </Box>
         </Box>
 
         <Box flexDirection="column">
           <Text bold>Output:</Text>
           <Suspense fallback={<Text dimColor>Loading output…</Text>}>
-            <ShellOutputContent outputPromise={deferredOutputPromise} columns={columns} rows={rows} />
+            <ShellOutputContent outputPromise={deferredOutputPromise} columns={columns} />
           </Suspense>
         </Box>
       </Dialog>
@@ -163,10 +171,9 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
 type ShellOutputContentProps = {
   outputPromise: Promise<TaskOutputResult>;
   columns: number;
-  rows: number;
 };
 
-function ShellOutputContent({ outputPromise, columns, rows }: ShellOutputContentProps): React.ReactNode {
+function ShellOutputContent({ outputPromise, columns }: ShellOutputContentProps): React.ReactNode {
   const { content, bytesTotal } = use(outputPromise);
 
   if (!content) {
@@ -195,14 +202,7 @@ function ShellOutputContent({ outputPromise, columns, rows }: ShellOutputContent
 
   return (
     <>
-      <Box
-        borderStyle="round"
-        paddingX={1}
-        flexDirection="column"
-        height={shellOutputBoxHeight(rows)}
-        overflow="hidden"
-        maxWidth={columns - 6}
-      >
+      <Box borderStyle="round" paddingX={1} flexDirection="column" height={12} overflow="hidden" maxWidth={columns - 6}>
         {rendered.map((line, i) => (
           <Text key={i} wrap="truncate-end">
             {line}

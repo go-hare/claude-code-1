@@ -288,7 +288,59 @@ export function leftoverAskDeclinedLine(question: { question: string; options: A
   return `· ${question.question} (${question.options.map(option => option.label).join(' / ')})`;
 }
 
-function AskUserQuestionResultMessage({ answers }: { answers: Output['answers'] }): React.ReactNode {
+function AskUserQuestionAfkResultMessage({
+  questions,
+  answers,
+  timeoutMs,
+}: {
+  questions: Output['questions'];
+  answers: Output['answers'];
+  timeoutMs: number;
+}): React.ReactNode {
+  const entries = Object.entries(answers);
+  const hasAnswers = entries.length > 0;
+  const seconds = Math.round(timeoutMs / 1000);
+  const continuationText = hasAnswers ? 'continued with the answers selected so far' : 'continued without an answer';
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="row">
+        <Text color={getModeColor('default')}>{BLACK_CIRCLE}&nbsp;</Text>
+        <Text>Claude asked:</Text>
+      </Box>
+      <MessageResponse>
+        <Box flexDirection="column">
+          {hasAnswers
+            ? entries.map(([questionText, answer]) => (
+                <Text key={questionText} color="inactive">
+                  · {questionText} → {answer}
+                </Text>
+              ))
+            : questions.map(question => (
+                <Text key={question.question} color="inactive">
+                  {leftoverAskDeclinedLine(question)}
+                </Text>
+              ))}
+          <Text dimColor>
+            {BLACK_CIRCLE} No response after {seconds}s — {continuationText}
+          </Text>
+        </Box>
+      </MessageResponse>
+    </Box>
+  );
+}
+
+function AskUserQuestionResultMessage({
+  answers,
+  response,
+}: {
+  answers: Output['answers'];
+  response?: Output['response'];
+}): React.ReactNode {
+  const entries = Object.entries(answers);
+  const hasContent = Boolean(response) || entries.length > 0;
+  if (!hasContent) {
+    return null;
+  }
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box flexDirection="row">
@@ -297,11 +349,13 @@ function AskUserQuestionResultMessage({ answers }: { answers: Output['answers'] 
       </Box>
       <MessageResponse>
         <Box flexDirection="column">
-          {Object.entries(answers).map(([questionText, answer]) => (
-            <Text key={questionText} color="inactive">
-              · {questionText} → {answer}
-            </Text>
-          ))}
+          {!response &&
+            entries.map(([questionText, answer]) => (
+              <Text key={questionText} color="inactive">
+                · {questionText} → {answer}
+              </Text>
+            ))}
+          {response && <Text color="inactive">· {response}</Text>}
         </Box>
       </MessageResponse>
     </Box>
@@ -388,8 +442,11 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseProgressMessage() {
     return null;
   },
-  renderToolResultMessage({ answers }, _toolUseID) {
-    return <AskUserQuestionResultMessage answers={answers} />;
+  renderToolResultMessage({ questions, answers, response, afkTimeoutMs }, _toolUseID) {
+    if (afkTimeoutMs !== undefined) {
+      return <AskUserQuestionAfkResultMessage questions={questions} answers={answers} timeoutMs={afkTimeoutMs} />;
+    }
+    return <AskUserQuestionResultMessage answers={answers} response={response} />;
   },
   renderToolUseRejectedMessage({ questions }) {
     // densable `Zh` @207573135 — title + MessageResponse option summary.
