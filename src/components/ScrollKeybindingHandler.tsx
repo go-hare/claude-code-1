@@ -16,6 +16,7 @@ import {
   selectionOwnsScroll,
 } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
+import { useAppState } from '../state/AppState.js';
 import { getSessionsSinceLastShown, recordTipShown } from '../services/tips/tipHistory.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { logForDebugging } from '../utils/debug.js';
@@ -105,6 +106,10 @@ type Props = {
    *  task:background/kill-agents (none are mounted, or they mount after
    *  this component so stopImmediatePropagation wins). */
   isModal?: boolean;
+  /** densable cM `yieldsPageKeysWhenContentFits` — when driving `modalScrollRef`,
+   *  return `false` on PgUp/PgDn if the outer modal scroller fits so inner lists
+   *  (`Select`, `FuzzyPicker`, `/resume`) receive PgUp/PgDn. */
+  yieldsPageKeysWhenContentFits?: boolean;
 };
 
 // Official 2.1.210 FSp densable constants (OSp/hP_/gP_/yP_/_P_/bP_/SP_/EP_/
@@ -712,8 +717,16 @@ const AUTOSCROLL_MAX_TICKS = 200; // 10s @ 50ms
  * Scrolling breaks sticky mode; Ctrl+End re-enables it. Wheeling down at
  * the bottom also re-enables sticky so new content follows naturally.
  */
-export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal = false }: Props): React.ReactNode {
+export function ScrollKeybindingHandler({
+  scrollRef,
+  isActive,
+  onScroll,
+  isModal = false,
+  yieldsPageKeysWhenContentFits = false,
+}: Props): React.ReactNode {
   const selection = useSelection();
+  const historySearchOpen = useAppState(s => s.activeOverlays.has('history-search'));
+  const effectiveActive = isActive && !historySearchOpen;
   const { addNotification } = useNotifications();
   const { internal_eventEmitter } = useStdin();
   // densable `f` / `p` — last auto-copied text + per-session tip show count.
@@ -901,6 +914,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       'scroll:pageUp': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (yieldsPageKeysWhenContentFits && s.getScrollHeight() <= s.getViewportHeight()) return false;
         if (trackTelemetry) recordPageJump();
         const d = -Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
@@ -910,6 +924,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       'scroll:pageDown': () => {
         const s = scrollRef.current;
         if (!s) return;
+        if (yieldsPageKeysWhenContentFits && s.getScrollHeight() <= s.getViewportHeight()) return false;
         if (trackTelemetry) recordPageJump();
         const d = Math.max(1, Math.floor(s.getViewportHeight() / 2));
         translateSelectionForJump(s, d);
@@ -967,11 +982,11 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
       },
       'selection:copy': copyAndToast,
     },
-    { context: 'Scroll', isActive },
+    { context: 'Scroll', isActive: effectiveActive },
   );
 
   // densable 2.1.234 #2 / h8i — separate registration (also agents view).
-  useSelectionClearKeybinding(selection, isActive);
+  useSelectionClearKeybinding(selection, effectiveActive);
 
   // densable 2.1.239 #30 — S() named extend actions (not raw useInput).
   useKeybindings(
@@ -1001,7 +1016,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
           ? false
           : undefined,
     },
-    { context: 'Scroll', isActive },
+    { context: 'Scroll', isActive: effectiveActive },
   );
 
   // scroll:halfPage*/fullPage* have no default key bindings — ctrl+u/d/b/f
@@ -1047,7 +1062,7 @@ export function ScrollKeybindingHandler({ scrollRef, isActive, onScroll, isModal
         notifyScroll(sticky, s);
       },
     },
-    { context: 'Scroll', isActive },
+    { context: 'Scroll', isActive: effectiveActive },
   );
 
   // Modal pager keys — transcript mode only. less/tmux copy-mode lineage:

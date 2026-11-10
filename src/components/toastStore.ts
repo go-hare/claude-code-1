@@ -11,17 +11,45 @@ export type ToastItem = {
   heldAt?: number
 }
 
-const HOLD_MS = 30_000
-const FADE_MS = 240
+export const TOAST_HOLD_MAX_MS = 30_000
+export const TOAST_FADE_MS = 240
+const HOLD_MS = TOAST_HOLD_MAX_MS
+const FADE_MS = TOAST_FADE_MS
 /** densable `A8` — stacked toast cap. */
 const TOAST_STACK_MAX = 50
 let items: ToastItem[] = []
 let pausedAt: number | undefined
+let pendingExpiryTimer: ReturnType<typeof setTimeout> | undefined
 const listeners = new Set<() => void>()
 
-function publish(next: ToastItem[]): void {
+/** densable `M8` — wake at the earliest `leavesAt` or `heldAt + 30_000`. */
+function scheduleExpiry(now: number): void {
+  if (pendingExpiryTimer !== undefined) {
+    clearTimeout(pendingExpiryTimer)
+    pendingExpiryTimer = undefined
+  }
+  if (pausedAt !== undefined || items.length === 0) return
+  let earliest = Infinity
+  for (const item of items) {
+    const wakeAt =
+      (item.heldAt ?? item.leavesAt) + (item.heldAt === undefined ? 0 : HOLD_MS)
+    if (wakeAt < earliest) earliest = wakeAt
+  }
+  if (!Number.isFinite(earliest)) return
+  pendingExpiryTimer = setTimeout(
+    () => {
+      pendingExpiryTimer = undefined
+      expireToasts(Date.now())
+    },
+    Math.max(1, earliest - now),
+  )
+  pendingExpiryTimer.unref?.()
+}
+
+function publish(next: ToastItem[], now = Date.now()): void {
   items = next
   for (const listener of listeners) listener()
+  scheduleExpiry(now)
 }
 
 export function subscribeToasts(listener: () => void): () => void {
@@ -69,14 +97,15 @@ export function holdToastItem(key: string, held: boolean): void {
   const id = toastIdFor(key)
   if (id === undefined) return
   const now = Date.now()
-  publish(
-    items.map(item => {
-      if (item.id !== id) return item
-      if (held) return { ...item, phase: 'shown', heldAt: now }
-      const extra = item.heldAt === undefined ? 0 : now - item.heldAt
-      return { ...item, heldAt: undefined, leavesAt: item.leavesAt + extra }
-    }),
-  )
+  let changed = false
+  const next = items.map(item => {
+    if (item.id !== id || (item.heldAt !== undefined) === held) return item
+    changed = true
+    if (held) return { ...item, phase: 'shown' as const, heldAt: now }
+    const extra = item.heldAt === undefined ? 0 : now - item.heldAt
+    return { ...item, heldAt: undefined, leavesAt: item.leavesAt + extra }
+  })
+  if (changed) publish(next, now)
 }
 
 /** Click removes the toast. Expiry is what enters `leaving`. */
@@ -91,17 +120,23 @@ export function pauseToasts(paused: boolean): void {
   if (paused) {
     if (pausedAt !== undefined) return
     pausedAt = now
+    scheduleExpiry(now)
     return
   }
   if (pausedAt === undefined) return
   const extra = now - pausedAt
   pausedAt = undefined
+  if (extra === 0) {
+    scheduleExpiry(now)
+    return
+  }
   publish(
     items.map(item => ({
       ...item,
       leavesAt: item.leavesAt + extra,
       ...(item.heldAt !== undefined ? { heldAt: item.heldAt + extra } : {}),
     })),
+    now,
   )
 }
 
@@ -110,7 +145,7 @@ export function pauseToasts(paused: boolean): void {
  * A hover that has lasted 30s is released first, then judged the same way.
  */
 export function expireToasts(now: number): void {
-  let next = items
+  const next = items
   let changed = false
   const stepped: ToastItem[] = []
   for (const item of next) {
@@ -139,7 +174,8 @@ export function expireToasts(now: number): void {
     }
     kept.push(item)
   }
-  if (changed) publish(kept)
+  if (changed) publish(kept, now)
+  else scheduleExpiry(now)
 }
 
 export function dropToast(id: string): void {

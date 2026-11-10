@@ -11,12 +11,17 @@
  *
  * Plugin-facing host maps gold `requestId` → `instance_id` (ui_read_selection name).
  */
-import type { DOMElement, SelectionState } from '@anthropic/ink'
+import { instances, type DOMElement, type SelectionState } from '@anthropic/ink'
 
 export type UiSelectionAnswer = {
   text: string
   /** densable engine requestId for the transcript row; product name `instance_id`. */
   instance_id?: string
+}
+
+export type UiSelection = {
+  text: string
+  requestId?: string
 }
 
 export type SelectionRowSpan = {
@@ -62,7 +67,7 @@ export function selectionFullyInViewport(
   )
 }
 
-/** densable `Rb` — absolute top; subtract scrollTop on overflow:scroll ancestors. */
+/** densable `Rb` — absolute top; subtract scrollTopRendered on overflow:scroll ancestors. */
 export function absoluteYogaTop(node: DOMElement): number | undefined {
   let top = 0
   let cur: DOMElement | undefined = node
@@ -71,7 +76,8 @@ export function absoluteYogaTop(node: DOMElement): number | undefined {
     const scrolling =
       cur !== node && (cur.style.overflowY ?? cur.style.overflow) === 'scroll'
     top +=
-      cur.yogaNode.getComputedTop() - (scrolling ? (cur.scrollTop ?? 0) : 0)
+      cur.yogaNode.getComputedTop() -
+      (scrolling ? (cur.scrollTopRendered ?? 0) : 0)
     cur = cur.parentNode
   }
   return top
@@ -122,6 +128,26 @@ export function selectionAnswer(
   return { text, instance_id: requestId }
 }
 
+/** densable `iqn(e, n)` — `{ text }` or `{ text, requestId }`. */
+export function toUiSelection(
+  answer:
+    | { text?: unknown; requestId?: unknown; instance_id?: unknown }
+    | undefined,
+): UiSelection | undefined {
+  if (!answer || typeof answer.text !== 'string' || answer.text === '') {
+    return undefined
+  }
+  const requestId =
+    typeof answer.requestId === 'string' && answer.requestId !== ''
+      ? answer.requestId
+      : typeof answer.instance_id === 'string' && answer.instance_id !== ''
+        ? answer.instance_id
+        : undefined
+  return requestId !== undefined
+    ? { text: answer.text, requestId }
+    : { text: answer.text }
+}
+
 /** densable `j0` — tool_use id / tool_use_id / else uuid. */
 export function messageSelectionRequestId(message: {
   type?: string
@@ -161,13 +187,101 @@ export type UiSelectionRowHolding = (
   selection: SelectionState,
 ) => string | undefined
 
+export type UiSelectionSource = {
+  selection?: SelectionState
+  isAltScreenActive?: boolean
+  hasTextSelection?: () => boolean
+  getSelectedText?: () => string
+  subscribeToSelectionTakeDown?: (cb: () => void) => () => void
+  subscribeToSelectionChange?: (cb: () => void) => () => void
+}
+
 let rowHolding: UiSelectionRowHolding | undefined
+let keptSelection: UiSelectionAnswer | undefined
+let keptTakenAfter = 0
+let selectionRuns = 0
+let boundSelectionSource: UiSelectionSource | undefined
+let unbindSelectionSource: (() => void) | undefined
+
+function readSourceSelectionAnswer(
+  source: UiSelectionSource | undefined,
+): UiSelectionAnswer | undefined {
+  if (!source || typeof source.getSelectedText !== 'function') return undefined
+  const text =
+    typeof source.hasTextSelection === 'function' && !source.hasTextSelection()
+      ? ''
+      : source.getSelectedText()
+  if (typeof text !== 'string' || text === '') return undefined
+  const requestId =
+    rowHolding !== undefined && source.selection !== undefined
+      ? rowHolding(source.selection)
+      : undefined
+  return selectionAnswer(text, requestId)
+}
+
+/** densable `YX` — drop snapshotted selection. */
+export function clearKeptUiSelection(): void {
+  keptSelection = undefined
+}
+
+/** densable `rVe` — mark start of a prompt/command run. */
+export function beginKeptSelectionRun(): number {
+  selectionRuns += 1
+  return selectionRuns
+}
+
+/** densable `oVe` — clear kept selection once a run started after takedown finishes. */
+export function endKeptSelectionRun(run: number | undefined): void {
+  if (run !== undefined && run > keptTakenAfter) {
+    keptSelection = undefined
+  }
+}
+
+export function getKeptUiSelection(): UiSelectionAnswer | undefined {
+  return keptSelection
+}
+
+/** densable `Prs` / `Cb` / `xb` — subscribe takedown + selection change on Ink instance. */
+export function bindUiSelectionSource(
+  source: UiSelectionSource | undefined,
+): void {
+  if (boundSelectionSource === source) return
+  unbindSelectionSource?.()
+  unbindSelectionSource = undefined
+  boundSelectionSource = source
+  keptSelection = undefined
+  if (!source) return
+  const unsubTakeDown = source.subscribeToSelectionTakeDown?.(() => {
+    const answer = readSourceSelectionAnswer(source)
+    if (answer === undefined) return
+    keptSelection = answer
+    keptTakenAfter = selectionRuns
+  })
+  const unsubChange = source.subscribeToSelectionChange?.(() => {
+    if (
+      keptSelection !== undefined &&
+      source.hasTextSelection?.() === true &&
+      (source.getSelectedText?.() ?? '') !== ''
+    ) {
+      keptSelection = undefined
+    }
+  })
+  unbindSelectionSource = () => {
+    unsubTakeDown?.()
+    unsubChange?.()
+  }
+}
 
 /** densable VirtualMessageList `rowHolding` registration for the FH host. */
 export function setUiSelectionRowHolding(
   next: UiSelectionRowHolding | undefined,
 ): void {
   rowHolding = next
+  if (next === undefined) {
+    bindUiSelectionSource(undefined)
+  } else {
+    bindUiSelectionSource(instances.get(process.stdout))
+  }
 }
 
 export function getUiSelectionRowHolding(): UiSelectionRowHolding | undefined {

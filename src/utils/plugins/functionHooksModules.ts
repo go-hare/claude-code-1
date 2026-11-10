@@ -40,6 +40,7 @@ import {
   setClientFaultReporter,
   setClientMessagePostHandler,
   setClientMessageCancelHandler,
+  setClientPressBridge,
   setClientTerminalSize,
   setPluginSurfaceModules,
   type ClientFaultReport,
@@ -52,8 +53,13 @@ import { KITTY_PLACEHOLDER_MAX } from './kittyGraphics.js'
 import { createSignal } from '../signal.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
 import {
+  beginKeptSelectionRun,
+  bindUiSelectionSource,
+  endKeptSelectionRun,
+  getKeptUiSelection,
   getUiSelectionRowHolding,
   selectionAnswer,
+  toUiSelection,
 } from './uiSelectionRowHolding.js'
 import {
   scrollTranscriptByRequestId,
@@ -414,6 +420,8 @@ export function setLoadedFunctionHooksModules(
   pluginFocusSites.clear()
   focusSiteDraws.clear()
   pressHandlers.clear()
+  clientPressHandlesByPlugin.clear()
+  pluginToastLastAt.clear()
   resolvedTables.clear()
   resolvedByKey.clear()
   finalizedEnvironments.clear()
@@ -927,6 +935,18 @@ export async function runFunctionHookChain(
   if (event === 'ui.render' || needle === 'classic.ui.render') {
     lastUiRenderPlugin = ''
   }
+  const selectionRun =
+    event === 'command.run' || event === 'prompt.submit'
+      ? beginKeptSelectionRun()
+      : undefined
+  if (selectionRun !== undefined && event === 'prompt.submit') {
+    endKeptSelectionRun(pendingPromptSelectionRun)
+    pendingPromptSelectionRun = selectionRun
+  }
+  if (event === 'turn.complete' || event === 'turn.end') {
+    endKeptSelectionRun(pendingPromptSelectionRun)
+    pendingPromptSelectionRun = undefined
+  }
   if (
     (event === 'session.compact' || needle === 'classic.session.compact') &&
     Object.hasOwn(payload, 'messages')
@@ -1013,20 +1033,28 @@ export async function runFunctionHookChain(
               .filter(mod => mod.status !== 'unloaded' && mod.native !== true)
               .filter(mod => only === undefined || mod.name === only)
               .map(mod => mod.name)
-      const reply = await functionHooksWorker.dispatch(
-        event,
-        payload,
-        workerEnvironments,
-        tail,
-        only,
-        {
+      const reply = await functionHooksWorker
+        .dispatch(event, payload, workerEnvironments, tail, only, {
           ...(callOptions?.origin !== undefined && {
             origin: callOptions.origin,
           }),
           ...(outerHookOrigin.length > 0 && { hookOrigin: outerHookOrigin }),
           ...(initialFloors.length > 0 && { floors: initialFloors }),
-        },
-      )
+        })
+        .finally(() => {
+          if (event === 'command.run') endKeptSelectionRun(selectionRun)
+        })
+      if (
+        event === 'prompt.submit' &&
+        isEventRecord(reply.returned) &&
+        (reply.returned.drop !== undefined ||
+          reply.returned.block !== undefined)
+      ) {
+        endKeptSelectionRun(selectionRun)
+        if (pendingPromptSelectionRun === selectionRun) {
+          pendingPromptSelectionRun = undefined
+        }
+      }
       if (event === 'ui.render' || needle === 'classic.ui.render') {
         lastUiRenderPlugin =
           pluginFromDrawing(reply.returned) ??
@@ -1396,15 +1424,29 @@ export async function runFunctionHookChain(
   const rootTraceNode: HookTraceNode = {}
   // densable `gSt`: nested evaluateUiRender from a hook skips sBo cache.
   return hookEvalAls.run(true, () =>
-    callAt(0, payload, initialFloors, rootTraceNode).then(returned => {
-      if (event === 'plugin.register' && isEventRecord(returned)) {
-        Object.defineProperty(returned, '__pluginRegisterTrace', {
-          value: traces,
-          enumerable: false,
-        })
-      }
-      return returned
-    }),
+    callAt(0, payload, initialFloors, rootTraceNode)
+      .then(returned => {
+        if (
+          event === 'prompt.submit' &&
+          isEventRecord(returned) &&
+          (returned.drop !== undefined || returned.block !== undefined)
+        ) {
+          endKeptSelectionRun(selectionRun)
+          if (pendingPromptSelectionRun === selectionRun) {
+            pendingPromptSelectionRun = undefined
+          }
+        }
+        if (event === 'plugin.register' && isEventRecord(returned)) {
+          Object.defineProperty(returned, '__pluginRegisterTrace', {
+            value: traces,
+            enumerable: false,
+          })
+        }
+        return returned
+      })
+      .finally(() => {
+        if (event === 'command.run') endKeptSelectionRun(selectionRun)
+      }),
   )
 }
 
@@ -3724,9 +3766,9 @@ function pluginEngine(
       async selection() {
         const raw = await hostOp(environmentId, 'ui.selection', [{}])
         if (!raw || typeof raw !== 'object') return undefined
-        const text = (raw as { text?: unknown }).text
-        if (typeof text !== 'string' || text === '') return undefined
-        return raw
+        return toUiSelection(
+          raw as { text?: unknown; requestId?: unknown; instance_id?: unknown },
+        )
       },
       scroll(input: unknown) {
         const rec = isEventRecord(input) ? input : {}
@@ -4467,9 +4509,22 @@ export async function handleHostOp(
         plugin,
       )
     }
+    const pluginName = plugin ?? ''
+    const toastText = String(rec?.text ?? '')
+    const now = Date.now()
+    if (
+      now - (pluginToastLastAt.get(pluginName) ?? Number.NEGATIVE_INFINITY) <
+      UI_TOAST_COOLDOWN_MS
+    ) {
+      logForDebugging(
+        `$.ui.toast (${pluginName}): within ${UI_TOAST_COOLDOWN_MS}ms of the last; dropped: ${toastText}`,
+      )
+      return undefined
+    }
+    pluginToastLastAt.set(pluginName, now)
     uiToastShowHandler?.({
-      plugin: plugin ?? '',
-      text: String(rec?.text ?? ''),
+      plugin: pluginName,
+      text: toastText,
       ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
     })
     return undefined
@@ -4479,6 +4534,10 @@ export async function handleHostOp(
       const textCheck = hostTextCheck(rec.text)
       if (textCheck !== undefined) hostCheck(op, textCheck, plugin)
     }
+    runUiStatus(
+      plugin ?? '',
+      typeof rec?.text === 'string' ? rec.text : undefined,
+    )
     return undefined
   }
   if (op === 'ui.notice') {
@@ -11228,11 +11287,12 @@ function runUiHost(
       )
     }
     if (event === 'ui.render') {
-      bumpFaultRenderFv()
-      bumpRasterFrames()
       // densable `budgets.renders.invalidate(r.plugin)` (`jis`).
       if (typeof plugin === 'string' && plugin !== '') {
         invalidatePluginRender(plugin)
+      } else {
+        bumpFaultRenderFv()
+        bumpRasterFrames()
       }
     }
     return undefined
@@ -11411,9 +11471,8 @@ function runUiHost(
     return runUiFocus({ ...input, plugin: plugin ?? input.plugin }, plugin)
   }
   if (op === 'ui.selection') {
-    // densable 2.1.289 AAt/Ga text-only: { text } or undefined when empty.
-    // instance_id/requestId row mapping deferred (no local rowHolding host yet).
-    return runUiSelection()
+    // densable 2.1.289 Ga / xrs: { text, requestId? } or undefined when empty.
+    return toUiSelection(runUiSelection())
   }
   if (op === 'ui.copy') {
     if (typeof input.text !== 'string') {
@@ -13113,19 +13172,23 @@ function osc52Payload(text: string): string {
   return `\x1b]52;c;${encoded}\x07`
 }
 
+let pendingPromptSelectionRun: number | undefined
+
 /**
- * densable 2.1.289 `ui.selection` terminal core (`Ga`).
+ * densable 2.1.289 `ui.selection` terminal core (`Ga` / `xrs`).
  * Gold: `iqn(text, rowHolding(selection))` → `{ text }` or `{ text, requestId }`.
- * Product field for the row id is `instance_id` (ui_read_selection schema name).
  */
 function runUiSelection(): { text: string; instance_id?: string } | undefined {
   const ink = instances.get(process.stdout)
   if (!ink || typeof ink.getSelectedText !== 'function') return undefined
+  bindUiSelectionSource(ink)
   const text =
     typeof ink.hasTextSelection === 'function' && !ink.hasTextSelection()
       ? ''
       : ink.getSelectedText()
-  if (typeof text !== 'string' || text === '') return undefined
+  if (typeof text !== 'string' || text === '') {
+    return ink.isAltScreenActive ? getKeptUiSelection() : undefined
+  }
   const holding = getUiSelectionRowHolding()
   const requestId =
     holding !== undefined && ink.selection !== undefined
@@ -13538,10 +13601,48 @@ const recordedPresses: Array<{
 
 /** densable worker `x` — handle → press callback. */
 const pressHandlers = new Map<string, (event: unknown) => unknown>()
+let nextClientPressHandle = 0
+const clientPressHandlesByPlugin = new Map<string, Set<number>>()
 
 function pressSlot(environmentId: string, handle: unknown): string {
   return `${environmentId}\0${JSON.stringify(handle)}`
 }
+
+setClientPressBridge({
+  hold(plugin, run) {
+    const handle = -++nextClientPressHandle
+    pressHandlers.set(pressSlot(plugin, handle), run)
+    const set = clientPressHandlesByPlugin.get(plugin) ?? new Set<number>()
+    set.add(handle)
+    clientPressHandlesByPlugin.set(plugin, set)
+    return handle
+  },
+  release(plugin, handles) {
+    const set = clientPressHandlesByPlugin.get(plugin)
+    for (const handle of handles) {
+      pressHandlers.delete(pressSlot(plugin, handle))
+      set?.delete(handle)
+    }
+    if (set?.size === 0) clientPressHandlesByPlugin.delete(plugin)
+  },
+  forget(plugin) {
+    if (plugin === undefined) {
+      for (const [owner, handles] of clientPressHandlesByPlugin) {
+        for (const handle of handles) {
+          pressHandlers.delete(pressSlot(owner, handle))
+        }
+      }
+      clientPressHandlesByPlugin.clear()
+      return
+    }
+    const set = clientPressHandlesByPlugin.get(plugin)
+    if (!set) return
+    for (const handle of set) {
+      pressHandlers.delete(pressSlot(plugin, handle))
+    }
+    clientPressHandlesByPlugin.delete(plugin)
+  },
+})
 
 /**
  * densable worker `press`: look up the held handler or refuse.
@@ -13589,7 +13690,10 @@ export function releasePresses(
   handles: unknown[],
   site?: { component: string; requestId: string },
 ): void {
-  if (handles.length === 0) return
+  const hookHandles = handles.filter(
+    handle => !(typeof handle === 'number' && handle < 0),
+  )
+  if (hookHandles.length === 0) return
   const mod = loadedModules.find(
     item => item.name === environmentId && item.status !== 'unloaded',
   )
@@ -13601,11 +13705,11 @@ export function releasePresses(
     )
     return
   }
-  for (const handle of handles) {
+  for (const handle of hookHandles) {
     pressHandlers.delete(pressSlot(environmentId, handle))
   }
   if (mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
-    functionHooksWorker.releasePresses(environmentId, handles)
+    functionHooksWorker.releasePresses(environmentId, hookHandles)
   }
 }
 
@@ -13682,8 +13786,71 @@ let uiToastShowHandler:
   | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
   | undefined
 
+let uiStatusHandler:
+  | ((input: { plugin: string; text: string | undefined }) => void)
+  | undefined
+
 /** densable `dLe` — ui.toast timeoutMs upper bound. */
 const UI_TOAST_TIMEOUT_MS_MAX = 60_000
+/** densable `yIe` — per-plugin `budgets.toasts` cooldown (`Goo`). */
+const UI_TOAST_COOLDOWN_MS = 2000
+const pluginToastLastAt = new Map<string, number>()
+
+/** densable `I9e(plugin, text)` — status/toast text prefix. */
+export function formatPluginStatusText(plugin: string, text: string): string {
+  const cleanPlugin = plugin.replace(/[\r\n\t]+/g, ' ').trim() || 'unnamed'
+  const cleanText = text.replace(/[\r\n\t]+/g, ' ')
+  return `${cleanPlugin}: ${cleanText}`
+}
+
+/** densable `oRt` + REPL `status(v, M)` — add/remove pinned status notification. */
+function runUiStatus(plugin: string, text: string | undefined): void {
+  const label = text ?? '(cleared)'
+  if (!uiStatusHandler && !functionHooksAppStateWriter) {
+    logForDebugging(
+      `$.ui.status (${plugin}): no session bound; dropped: ${label}`,
+    )
+    return
+  }
+  logForDebugging(`$.ui.status (${plugin}): ${label}`)
+  if (uiStatusHandler) {
+    uiStatusHandler({ plugin, text })
+    return
+  }
+  const key = `plugin-status-${plugin}`
+  functionHooksAppStateWriter?.(prev => {
+    const isCurrent = prev.notifications.current?.key === key
+    const inQueue = prev.notifications.queue.some(n => n.key === key)
+    const inPinned = prev.notifications.pinned.some(n => n.key === key)
+    if (text === undefined && !isCurrent && !inQueue && !inPinned) {
+      return prev
+    }
+    const filteredPinned = prev.notifications.pinned.filter(n => n.key !== key)
+    const nextPinned =
+      text !== undefined
+        ? [
+            ...filteredPinned,
+            {
+              key,
+              kind: 'event',
+              text: formatPluginStatusText(plugin, text),
+              priority: 'low' as const,
+              pinned: true,
+            },
+          ]
+        : filteredPinned
+    return {
+      ...prev,
+      notifications: {
+        current: isCurrent ? null : prev.notifications.current,
+        queue: inQueue
+          ? prev.notifications.queue.filter(n => n.key !== key)
+          : prev.notifications.queue,
+        pinned: nextPinned,
+      },
+    }
+  })
+}
 
 let functionHooksAppStateReader: (() => AppState | undefined) | undefined
 
@@ -13717,6 +13884,16 @@ export function setUiToastShowHandler(
     | undefined,
 ): void {
   uiToastShowHandler = handler
+  pluginToastLastAt.clear()
+}
+
+/** densable `oRt` — optional status host override (default uses AppState pinned notifications). */
+export function setUiStatusHandler(
+  handler:
+    | ((input: { plugin: string; text: string | undefined }) => void)
+    | undefined,
+): void {
+  uiStatusHandler = handler
 }
 
 export function setFunctionHooksAppStateReader(
@@ -14909,8 +15086,9 @@ function noteAbortedUiRender(
 }
 
 type HdPluginBump = {
-  bump: (plugin: string, at?: number) => void
+  bump: (plugin: string, at?: number, silent?: boolean) => void
   call: (plugin: string) => boolean
+  reset: () => void
 }
 
 /**
@@ -14932,13 +15110,17 @@ function scheduleHdPluginBump(
     opts?.intervalMs ??
     (pace === 'live' ? FAULT_RENDER_LIVE_MS : FAULT_RENDER_STEADY_MS)
 
-  function bump(plugin: string, at = nowFn()): void {
+  function bump(plugin: string, at = nowFn(), silent = false): void {
     const timer = pending.get(plugin)
     if (timer !== undefined) clearTimeout(timer)
     pending.delete(plugin)
     lastAt.set(plugin, at)
     bumpHdPlugin(plugin, pace)
     opts?.onBump?.(plugin, at)
+    if (!silent) {
+      invalidateRender('ui.render')
+      bumpRasterFrames()
+    }
   }
 
   function call(plugin: string): boolean {
@@ -14956,13 +15138,19 @@ function scheduleHdPluginBump(
     return false
   }
 
-  return { bump, call }
+  function reset(): void {
+    for (const timer of pending.values()) clearTimeout(timer)
+    pending.clear()
+    lastAt.clear()
+  }
+
+  return { bump, call, reset }
 }
 
 /** densable `jis()` live/steady pair; steady `onBump` is live.bump. */
 const hdPluginLiveBump = scheduleHdPluginBump('live')
 const hdPluginSteadyBump = scheduleHdPluginBump('steady', {
-  onBump: (plugin, at) => hdPluginLiveBump.bump(plugin, at),
+  onBump: (plugin, at) => hdPluginLiveBump.bump(plugin, at, true),
 })
 
 /** densable `Amt` — flush one fold: Qc `\0state` then one staleListener bump. */
@@ -14981,6 +15169,7 @@ function flushClientFaultFolds(pace: ClientFaultFoldPace, now: number): void {
   fold.stale.clear()
   if (readers.size === 0) return
   for (const instanceKey of readers.keys()) qcFaultSite(instanceKey)
+  invalidateRender('ui.render')
   bumpRasterFrames()
 }
 
@@ -15187,9 +15376,7 @@ function clientFaultLue(site: ClientFaultSite): string {
   const hd = faultRenderVersions
   const names = uiRenderPluginNames(site)
   const pace = clientFaultPace(site)
-  let stamp = String(
-    hd.get(FAULT_RENDER_FV) ?? getRenderVersion(FAULT_RENDER_FV),
-  )
+  let stamp = String(hd.get(FAULT_RENDER_FV) ?? 0)
   for (const name of names) {
     const key = pace === 'live' ? `${name}${FAULT_RENDER_LIVE}` : name
     stamp += `\0${name}\0${hd.get(key) ?? 0}`
@@ -15225,6 +15412,7 @@ function releaseClientFaultMount(md: string): void {
 /** densable `xS` — `Qc` then staleListeners (`bumpRasterFrames`). */
 function invalidateClientFaultSite(site: ClientFaultSite): void {
   qcFaultSite(clientFaultSiteKey(site))
+  invalidateRender('ui.render')
   bumpRasterFrames()
 }
 
@@ -15243,6 +15431,8 @@ function resetClientFaultRuns(): void {
     if (fold.pending !== undefined) clearTimeout(fold.pending)
     session.folds[pace] = emptyClientFaultFold()
   }
+  hdPluginLiveBump.reset()
+  hdPluginSteadyBump.reset()
   session.faultRuns.clear()
   session.mounted.clear()
   session.readers.clear()
@@ -15374,12 +15564,18 @@ function drainClientMessages(): void {
   }
 }
 
+/** densable `Vh` — 16ms coalesce window for `Wbr` (`Je`). */
+const CLIENT_MESSAGE_COALESCE_MS = 16
+
 export function enqueueClientMessage(
   post: ClientMessageEnqueue,
   reply: (value: unknown) => void,
 ): void {
   clientMessagePosts.set(post.id, { post, reply })
-  clientMessageDrain ??= setTimeout(drainClientMessages, 0)
+  clientMessageDrain ??= setTimeout(
+    drainClientMessages,
+    CLIENT_MESSAGE_COALESCE_MS,
+  )
 }
 
 export function cancelClientMessage(id: string): void {

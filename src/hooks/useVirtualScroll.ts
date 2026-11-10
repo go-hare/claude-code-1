@@ -220,6 +220,15 @@ export function useVirtualScroll(
     count: 0,
     lastKey: undefined,
   })
+  const gcStateRef = useRef<{
+    len: number
+    first: string | undefined
+    last: string | undefined
+  }>({
+    len: 0,
+    first: undefined,
+    last: undefined,
+  })
   const lastRangeAnchorRef = useRef<{
     sticky: boolean
     scrollTop: number
@@ -266,7 +275,9 @@ export function useVirtualScroll(
     const ratio = prevColumns.current / columns
     prevColumns.current = columns
     for (const [k, h] of heightCache.current) {
-      heightCache.current.set(k, Math.max(1, Math.round(h * ratio)))
+      if (h !== 0) {
+        heightCache.current.set(k, Math.max(1, Math.round(h * ratio)))
+      }
     }
     offsetVersionRef.current++
     skipMeasurementRef.current = true
@@ -382,6 +393,16 @@ export function useVirtualScroll(
   // itemRefs self-cleans via ref(null) on unmount.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
   useMemo(() => {
+    const prev = gcStateRef.current
+    const first = itemKeys[0]
+    const appendedOnly =
+      itemKeys.length >= prev.len &&
+      first === prev.first &&
+      itemKeys[prev.len - 1] === prev.last
+    prev.len = itemKeys.length
+    prev.first = first
+    prev.last = itemKeys.at(-1)
+    if (appendedOnly) return
     const live = new Set(itemKeys)
     let dirty = false
     for (const k of heightCache.current.keys()) {
@@ -533,7 +554,14 @@ export function useVirtualScroll(
         if (p && p[0] < start) {
           for (let i = p[0]; i < Math.min(start, p[1]); i++) {
             const k = itemKeys[i]!
-            if (itemRefs.current.has(k) && !heightCache.current.has(k)) {
+            const el = itemRefs.current.get(k)
+            if (
+              el &&
+              !heightCache.current.has(k) &&
+              !(
+                el.yogaNode?.getComputedHeight() === 0 && subtreeDrawPending(el)
+              )
+            ) {
               start = i
               break
             }
@@ -605,7 +633,6 @@ export function useVirtualScroll(
   // Decrement freeze AFTER range is computed. Don't update prevRangeRef
   // during freeze so both frozen renders reuse the ORIGINAL pre-resize
   // range (not the clamped-to-n version if messages changed mid-freeze).
-  const prevTailCount = itemTailRef.current.count
   if (freezeRendersRef.current > 0) {
     freezeRendersRef.current--
   } else {
@@ -613,89 +640,83 @@ export function useVirtualScroll(
     itemTailRef.current = { count: n, lastKey: itemKeys.at(-1) }
     lastRangeAnchorRef.current = { sticky: isSticky, scrollTop }
   }
-  // useDeferredValue lets React render with the OLD range first (cheap —
-  // all memo hits) then transition to the NEW range (expensive — fresh
-  // mounts with marked.lexer + formatToken). The urgent render keeps Ink
-  // painting at input rate; fresh mounts happen in a non-blocking
-  // background render. This is React's native time-slicing: the 62ms
-  // fresh-mount block becomes interruptible. The clamp (setClampBounds)
-  // already handles viewport pinning so there's no visual artifact from
-  // the deferred range lagging briefly behind scrollTop.
-  //
-  // Only defer range GROWTH (start moving earlier / end moving later adds
-  // fresh mounts). Shrinking is cheap (unmount = remove fiber, no parse)
-  // and the deferred value lagging shrink causes stale overscan to stay
-  // mounted one extra tick — harmless but fails tests checking exact
-  // range after measurement-driven tightening.
   const dStart = useDeferredValue(start)
   const dEnd = useDeferredValue(end)
+  const dCount = useDeferredValue(n)
   let effStart = start < dStart ? dStart : start
   let effEnd = end > dEnd ? dEnd : end
-  // densable delayed window: deferred end still sitting on the previous
-  // tail (deferredCount === deferredEnd), the list grew, and the viewport
-  // has already passed that offset. Snap to the live end. Otherwise a
-  // non-sticky append stays blank until the deferred value catches up.
-  if (
-    dEnd === prevTailCount &&
-    n > prevTailCount &&
-    scrollTop + viewportH > (offsets[dEnd] ?? 0)
-  ) {
-    effEnd = end
-  }
-  // A large jump can make effStart > effEnd (start jumps forward while dEnd
-  // still holds the old range's end). Skip deferral to avoid an inverted
-  // range. Also skip when sticky — scrollToBottom needs the tail mounted
-  // NOW so scrollTop=maxScroll lands on content, not bottomSpacer. The
-  // deferred dEnd (still at old range) would render an incomplete tail,
-  // maxScroll stays at the old content height, and "jump to bottom" stops
-  // short. Sticky snap is a single frame, not continuous scroll — the
-  // time-slicing benefit doesn't apply.
   if (effStart > effEnd || isSticky) {
     effStart = start
     effEnd = end
   }
-  // Scrolling DOWN (pendingDelta > 0): bypass effEnd deferral so the tail
-  // mounts immediately. Without this, the clamp (based on effEnd) holds
-  // scrollTop short of the real bottom — user scrolls down, hits clampMax,
-  // stops, React catches up effEnd, clampMax widens, but the user already
-  // released. Feels stuck-before-bottom. effStart stays deferred so
-  // scroll-UP keeps time-slicing (older messages parse on mount — the
-  // expensive direction).
   if (pendingDelta > 0) {
     effEnd = end
   }
-  // Final O(viewport) enforcement. The intermediate caps (maxEnd=start+
-  // MAX_MOUNTED_ITEMS, slide cap, deferred-intersection) bound [start,end]
-  // but the deferred+bypass combinations above can let [effStart,effEnd]
-  // slip: e.g. during sustained PageUp when concurrent mode interleaves
-  // dStart updates with effEnd=end bypasses across commits, the effective
-  // window can drift wider than either immediate or deferred alone. On a
-  // 10K-line resumed session this showed as +270MB RSS during PageUp spam
-  // (yoga Node constructor + createWorkInProgress fiber alloc proportional
-  // to scroll distance). Trim the far edge — by viewport position — to keep
-  // fiber count O(viewport) regardless of deferred-value scheduling.
+  if (pendingDelta < 0) {
+    effStart = start
+  }
+  // Never let deferred effStart/effEnd expose topSpacer or bottomSpacer inside
+  // the visible viewport [viewLo, viewHi] (e.g. when a running script's 50ms
+  // urgent updates preempt React's useDeferredValue render, or on the frame
+  // after pendingDelta drains to 0 before dEnd/dStart catches up).
+  if (!isSticky && viewportH > 0 && scrollTop >= 0) {
+    const viewLo = Math.max(
+      0,
+      Math.min(scrollTop, scrollTop + pendingDelta) - listOriginRef.current,
+    )
+    const viewHi =
+      Math.max(
+        0,
+        Math.max(scrollTop, scrollTop + pendingDelta) - listOriginRef.current,
+      ) + viewportH
+    if (effStart > start && (offsets[effStart] ?? 0) > viewLo) {
+      effStart = start
+    }
+    if (effEnd < end && (offsets[effEnd] ?? 0) < viewHi) {
+      effEnd = end
+    }
+  }
+  // densable delayed window: deferred end still sitting on the previous
+  // tail (dEnd >= dCount && dCount < n) while the viewport has already
+  // passed that offset (including listOrigin). Snap to the live end.
+  if (
+    effEnd < end &&
+    dCount < n &&
+    dEnd >= dCount &&
+    scrollTop + viewportH > listOriginRef.current + (offsets[effEnd] ?? 0)
+  ) {
+    effEnd = end
+  }
+  // Final O(viewport) enforcement: count only non-zero-height items against
+  // MAX_MOUNTED_ITEMS so empty 0-height rows do not consume the fiber cap.
   if (effEnd - effStart > MAX_MOUNTED_ITEMS) {
-    // Sticky must keep the TAIL. Zero-height cached rows let the sticky
-    // walk-back reach 0; first-paint scrollTop is still 0 before Ink pins
-    // maxScroll. Position-based trim then cuts the tail (effEnd = start+ja)
-    // → first ja messages mount, sticky follow pins to THAT content, the
-    // transcript sits at the top of a long session, and isSticky() hides
-    // Jump-to-bottom. Gold ScrollBox sticky pin + tail walk require the
-    // live end to stay mounted.
-    if (isSticky) {
-      effStart = effEnd - MAX_MOUNTED_ITEMS
-    } else {
-      // Trim side is decided by viewport POSITION, not pendingDelta direction.
-      // pendingDelta drains to 0 between frames while dStart/dEnd lag under
-      // concurrent scheduling; a direction-based trim then flips from "trim
-      // tail" to "trim head" mid-settle, bumping effStart → effTopSpacer →
-      // clampMin → setClampBounds yanks scrollTop down → scrollback vanishes.
-      // Position-based: keep whichever end the viewport is closer to.
-      const mid = (offsets[effStart]! + offsets[effEnd]!) / 2
-      if (scrollTop - listOriginRef.current < mid) {
-        effEnd = effStart + MAX_MOUNTED_ITEMS
+    let excess = -MAX_MOUNTED_ITEMS
+    for (let i = effStart; i < effEnd; i++) {
+      if (heightCache.current.get(itemKeys[i]!) !== 0) excess++
+    }
+    if (excess > 0) {
+      if (isSticky) {
+        if (excess === effEnd - effStart - MAX_MOUNTED_ITEMS) {
+          effStart = effEnd - MAX_MOUNTED_ITEMS
+        } else {
+          while (excess > 0) {
+            if (heightCache.current.get(itemKeys[effStart]!) !== 0) excess--
+            effStart++
+          }
+        }
       } else {
-        effStart = effEnd - MAX_MOUNTED_ITEMS
+        const mid = (offsets[effStart]! + offsets[effEnd]!) / 2
+        if (scrollTop - listOriginRef.current < mid) {
+          while (excess > 0) {
+            effEnd--
+            if (heightCache.current.get(itemKeys[effEnd]!) !== 0) excess--
+          }
+        } else {
+          while (excess > 0) {
+            if (heightCache.current.get(itemKeys[effStart]!) !== 0) excess--
+            effStart++
+          }
+        }
       }
     }
   }
@@ -856,14 +877,11 @@ export function useVirtualScroll(
       const h = yoga.getComputedHeight()
       const prevH = heightCache.current.get(key)
       // densable `$a`: a positive Yoga height is real even while a descendant
-      // is still drawing. Zero is an empty row only when the box has width,
-      // we already cached a non-zero height, and nothing is drawPending.
+      // is still drawing. Zero is an empty row when the box has width, we did
+      // not already cache 0, and nothing is drawPending.
       const cacheable =
         h > 0 ||
-        (yoga.getComputedWidth() > 0 &&
-          prevH !== undefined &&
-          prevH !== 0 &&
-          !subtreeDrawPending(el))
+        (yoga.getComputedWidth() > 0 && prevH !== 0 && !subtreeDrawPending(el))
       if (cacheable && prevH !== h) {
         heightCache.current.set(key, h)
         anyChanged = true
@@ -916,11 +934,10 @@ export function useVirtualScroll(
             const h = yoga.getComputedHeight()
             const prevH = heightCache.current.get(key)
             // Same `$a` guard as the layout measure: do not cache 0 for a
-            // node that is still drawing, and do not invent a first 0.
+            // node that is still drawing.
             const cacheable =
               h > 0 ||
               (yoga.getComputedWidth() > 0 &&
-                prevH !== undefined &&
                 prevH !== 0 &&
                 !subtreeDrawPending(mounted))
             if (cacheable && prevH !== h) {

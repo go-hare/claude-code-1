@@ -209,6 +209,8 @@ const STICKY_TEXT_CAP = 500;
  *  Messages.tsx filters and reorders, REPL can't compute externally). */
 export type JumpHandle = {
   jumpToIndex: (i: number) => void;
+  nextMessage?: () => void;
+  prevMessage?: () => void;
   setSearchQuery: (q: string) => void;
   nextMatch: () => void;
   prevMatch: () => void;
@@ -354,7 +356,6 @@ function computeStickyPromptText(msg: RenderableMessage): string | null {
 type VirtualItemProps = {
   itemKey: string;
   msg: RenderableMessage;
-  idx: number;
   measureRef: (key: string) => (el: DOMElement | null) => void;
   expanded: boolean | undefined;
   hovered: boolean;
@@ -362,7 +363,7 @@ type VirtualItemProps = {
   onClickK: (msg: RenderableMessage, cellIsBlank: boolean) => void;
   onEnterK: (k: string) => void;
   onLeaveK: (k: string) => void;
-  renderItem: (msg: RenderableMessage, idx: number) => React.ReactNode;
+  children: React.ReactNode;
 };
 
 // Item wrapper with stable click handlers. The per-item closures were the
@@ -381,7 +382,6 @@ type VirtualItemProps = {
 function VirtualItem({
   itemKey: k,
   msg,
-  idx,
   measureRef,
   expanded,
   hovered,
@@ -389,17 +389,16 @@ function VirtualItem({
   onClickK,
   onEnterK,
   onLeaveK,
-  renderItem,
+  children,
 }: VirtualItemProps): React.ReactNode {
   return (
     <Box
       ref={measureRef(k)}
       flexDirection="column"
-      backgroundColor={expanded || hovered ? 'userMessageBackgroundHover' : undefined}
+      backgroundColor={expanded ? 'userMessageBackgroundHover' : undefined}
       // bg here masks useVirtualScroll's one-frame offset lag on expand —
       // don't move to the margined Box inside. paddingBottom mirrors the
-      // tinted marginTop. Hover tint is DualInk analog (gold nqe undims
-      // dimColor; ThemedText stays HEAD — Ink does not hot-reload).
+      // tinted marginTop.
       paddingBottom={expanded ? 1 : undefined}
       onClick={
         clickable
@@ -414,7 +413,7 @@ function VirtualItem({
       hoverIgnoresBlankCells={!expanded}
     >
       <TextHoverColorContext.Provider value={hovered && !expanded ? 'text' : undefined}>
-        {renderItem(msg, idx)}
+        {children}
       </TextHoverColorContext.Provider>
     </Box>
   );
@@ -465,7 +464,9 @@ export function VirtualMessageList({
     onLayout: onVirtualLayout,
     scrollToIndex,
   } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
-  const [start, end] = range;
+  const [rawStart, rawEnd] = range;
+  const end = Math.min(rawEnd, messages.length);
+  const start = Math.min(rawStart, end);
 
   // Unmeasured (undefined height) falls through — assume visible.
   const isVisible = useCallback(
@@ -831,14 +832,14 @@ export function VirtualMessageList({
     // 1+ without viewportTop (FullscreenLayout has paddingTop=1 on the
     // ScrollBox, plus any header above).
     const vpTop = s.getViewportTop();
-    let lo = top - s.getScrollTop();
+    let lo = top - (s.getScrollTop() + s.getPendingDelta());
     const vp = s.getViewportHeight();
     let screenRow = vpTop + lo + p.row;
     // Off viewport → scroll to bring it in (HEADROOM from top).
     // scrollTo commits sync; read-back after gives fresh lo.
     if (screenRow < vpTop || screenRow >= vpTop + vp) {
       s.scrollTo(Math.max(0, top + p.row - HEADROOM));
-      lo = top - s.getScrollTop();
+      lo = top - (s.getScrollTop() + s.getPendingDelta());
       screenRow = vpTop + lo + p.row;
     }
     setPositions?.({ positions, rowOffset: vpTop + lo, currentIdx: idx });
@@ -1002,16 +1003,95 @@ export function VirtualMessageList({
   }
   stepRef.current = step;
 
+  const promptJumpIdxRef = useRef<number | null>(null);
+
+  function findPromptFrom(from: number, dir: 1 | -1): number {
+    const { messages: msgs } = jumpState.current;
+    for (let i = from + dir; i >= 0 && i < msgs.length; i += dir) {
+      if (stickyPromptText(msgs[i]!) !== null) return i;
+    }
+    return -1;
+  }
+
+  function findCurrentScrollIndex(): number {
+    const s = scrollRef.current;
+    const { offsets: offs, start: st, getItemTop: getTop, messages: msgs } = jumpState.current;
+    const len = msgs.length;
+    if (!s || len === 0) return -1;
+    const targetTop = s.getScrollTop() + HEADROOM;
+    const firstTop = getTop(st);
+    if (firstTop >= 0 && firstTop <= targetTop) {
+      let cur = st;
+      for (let i = st; i < len; i++) {
+        const top = getTop(i);
+        if (top < 0 || top > targetTop) break;
+        cur = i;
+      }
+      return cur;
+    }
+    const origin = firstTop >= 0 ? firstTop - offs[st]! : 0;
+    const relTop = targetTop - origin;
+    let lo = 0;
+    let hi = len - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (offs[mid]! <= relTop) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function scrollToMessageIndex(idx: number): void {
+    const s = scrollRef.current;
+    const { messages: msgs, getItemTop: getTop, scrollToIndex: scrollIdx } = jumpState.current;
+    if (!s || idx < 0 || idx >= msgs.length) return;
+    releaseReveal();
+    if (getTop(idx) >= 0) {
+      s.scrollTo(targetFor(idx));
+    } else {
+      scrollIdx(idx);
+    }
+  }
+
   useImperativeHandle(
     jumpRef,
     () => ({
       // Non-search jump (sticky header click, etc). No scan, no positions.
       jumpToIndex: (i: number) => {
         const s = scrollRef.current;
-        if (s) s.scrollTo(targetFor(i));
+        if (s) {
+          releaseReveal();
+          s.scrollTo(targetFor(i));
+        }
+      },
+      nextMessage: () => {
+        const cur = promptJumpIdxRef.current ?? findCurrentScrollIndex();
+        if (cur < 0) return;
+        const next = findPromptFrom(cur, 1);
+        if (next < 0) return;
+        scrollToMessageIndex(next);
+        promptJumpIdxRef.current = next;
+      },
+      prevMessage: () => {
+        const prevJump = promptJumpIdxRef.current;
+        const cur = prevJump ?? findCurrentScrollIndex();
+        if (cur < 0) return;
+        if (prevJump === null && stickyPromptText(jumpState.current.messages[cur]!) === null) {
+          const prev = findPromptFrom(cur, -1);
+          if (prev >= 0) {
+            scrollToMessageIndex(prev);
+            promptJumpIdxRef.current = prev;
+          }
+          return;
+        }
+        const prev = findPromptFrom(cur, -1);
+        if (prev < 0) return;
+        scrollToMessageIndex(prev);
+        promptJumpIdxRef.current = prev;
       },
       setSearchQuery: (q: string) => {
         // New search invalidates everything.
+        releaseReveal();
         scanRequestRef.current = null;
         elementPositions.current = { msgIdx: -1, positions: [] };
         startPtrRef.current = -1;
@@ -1028,7 +1108,9 @@ export function VirtualMessageList({
         if (lq) {
           const msgs = jumpState.current.messages;
           for (let i = 0; i < msgs.length; i++) {
-            const text = extractSearchText(msgs[i]!);
+            const msg = msgs[i];
+            if (msg === undefined) continue;
+            const text = extractSearchText(msg);
             let pos = text.indexOf(lq);
             let cnt = 0;
             while (pos >= 0) {
@@ -1092,6 +1174,7 @@ export function VirtualMessageList({
         scanRequestRef.current = null;
         elementPositions.current = { msgIdx: -1, positions: [] };
         startPtrRef.current = -1;
+        promptJumpIdxRef.current = null;
       },
       warmSearchIndex: async () => {
         if (indexWarmed.current) return 0;
@@ -1104,7 +1187,8 @@ export function VirtualMessageList({
           const t0 = performance.now();
           const end = Math.min(i + CHUNK, msgs.length);
           for (let j = i; j < end; j++) {
-            extractSearchText(msgs[j]!);
+            const msg = msgs[j];
+            if (msg !== undefined) extractSearchText(msg);
           }
           workMs += performance.now() - t0;
         }
@@ -1119,7 +1203,7 @@ export function VirtualMessageList({
     // Closures over refs + callbacks. scrollRef stable; others are
     // useCallback([]) or prop-drilled from REPL (stable).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scrollRef],
+    [scrollRef, extractSearchText],
   );
 
   // StickyTracker goes AFTER the list content. It returns null (no DOM node)
@@ -1151,21 +1235,36 @@ export function VirtualMessageList({
     handlersRef.current.setHoveredKey(prev => (prev === k ? null : prev));
   }, []);
 
+  // densable Ro (@207941328): per-item rendered element cache keyed by itemKey.
+  // When renderItem identity is stable across scroll and hover renders,
+  // unchanged mounted items reuse their previous ReactNode so VirtualItem's
+  // TextHoverColorContext.Provider can bail out without re-invoking renderItem.
+  const rowCacheRef = useRef<{
+    renderItem: Props['renderItem'];
+    rows: Map<string, { msg: RenderableMessage; row: React.ReactNode }>;
+  } | null>(null);
+  const prevRows = rowCacheRef.current?.renderItem === renderItem ? rowCacheRef.current.rows : undefined;
+  const nextRows = new Map<string, { msg: RenderableMessage; row: React.ReactNode }>();
+  rowCacheRef.current = { renderItem, rows: nextRows };
+
   return (
     <>
       <Box ref={spacerRef} height={topSpacer} flexShrink={0} />
       {messages.slice(start, end).map((msg, i) => {
         const idx = start + i;
+        if (msg === undefined) return null;
         const k = keys[idx]!;
         const clickable = !!onItemClick && (isItemClickable?.(msg) ?? true);
         const hovered = clickable && hoveredKey === k;
         const expanded = isItemExpanded?.(msg);
+        const prevEntry = prevRows?.get(k);
+        const entry = prevEntry !== undefined && prevEntry.msg === msg ? prevEntry : { msg, row: renderItem(msg, idx) };
+        nextRows.set(k, entry);
         return (
           <VirtualItem
             key={k}
             itemKey={k}
             msg={msg}
-            idx={idx}
             measureRef={measureRef}
             expanded={expanded}
             hovered={hovered}
@@ -1173,8 +1272,9 @@ export function VirtualMessageList({
             onClickK={onClickK}
             onEnterK={onEnterK}
             onLeaveK={onLeaveK}
-            renderItem={renderItem}
-          />
+          >
+            {entry.row}
+          </VirtualItem>
         );
       })}
       {bottomSpacer > 0 && <Box height={bottomSpacer} flexShrink={0} />}
@@ -1188,6 +1288,7 @@ export function VirtualMessageList({
           getItemTop={getItemTop}
           getItemElement={getItemElement}
           scrollRef={scrollRef}
+          releaseReveal={releaseReveal}
         />
       )}
     </>
@@ -1233,6 +1334,7 @@ function StickyTracker({
   getItemTop,
   getItemElement,
   scrollRef,
+  releaseReveal,
 }: {
   messages: RenderableMessage[];
   start: number;
@@ -1241,6 +1343,7 @@ function StickyTracker({
   getItemTop: (index: number) => number;
   getItemElement: (index: number) => DOMElement | null;
   scrollRef: RefObject<ScrollBoxHandle | null>;
+  releaseReveal: () => void;
 }): null {
   const { setStickyPrompt } = useContext(ScrollChromeContext);
   // Fine-grained subscription — snapshot is unquantized scrollTop+delta so
@@ -1365,7 +1468,8 @@ function StickyTracker({
     setStickyPrompt({
       text: collapsed,
       scrollTo: () => {
-        // densable: a("clicked"); b="armed"; scrollToElement / estimate
+        // densable: T(); a("clicked"); b="armed"; scrollToElement / estimate
+        releaseReveal();
         setStickyPrompt('clicked');
         suppress.current = 'armed';
         const el = getItemElement(capturedIdx);

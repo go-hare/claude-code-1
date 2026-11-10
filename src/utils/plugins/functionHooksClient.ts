@@ -126,6 +126,21 @@ export function setClientMessageCancelHandler(
   clientMessageCancelHandler = handler
 }
 
+/** densable `xYe` (`TP()`) — bridge Client surface held handles into `pressHandlers`. */
+export type ClientPressBridge = {
+  hold: (plugin: string, run: (event: unknown) => void) => number
+  release: (plugin: string, handles: readonly number[]) => void
+  forget: (plugin?: string) => void
+}
+
+let clientPressBridge: ClientPressBridge | undefined
+
+export function setClientPressBridge(
+  bridge: ClientPressBridge | undefined,
+): void {
+  clientPressBridge = bridge
+}
+
 export type ClientInstance = {
   id: string
   plugin: string
@@ -207,6 +222,7 @@ type ClientRecord = {
   columns: number
   rows: number
   surface: SurfaceHandle | undefined
+  held: Array<{ surfaceHandle: number; environmentHandle: number }>
   snapshot: ClientSnapshot
   listeners: Set<() => void>
   holders: number
@@ -321,10 +337,12 @@ export function forgetPluginSurfaceModules(plugin?: string): void {
   if (plugin === undefined) {
     pluginSurfaces.clear()
     environments.clear()
+    clientPressBridge?.forget()
     return
   }
   pluginSurfaces.delete(plugin)
   environments.delete(plugin)
+  clientPressBridge?.forget(plugin)
 }
 
 /** densable `FS.moduleFor` lookup of scanned surface modules. */
@@ -433,6 +451,22 @@ function failRecord(
   })
 }
 
+function releaseRecordHeld(
+  record: ClientRecord,
+  list: ReadonlyArray<{ surfaceHandle: number; environmentHandle: number }>,
+): void {
+  if (list.length === 0) return
+  clientPressBridge?.release(
+    record.plugin,
+    list.map(item => item.surfaceHandle),
+  )
+  try {
+    record.surface?.dropHeld(list.map(item => item.environmentHandle))
+  } catch {
+    /* gold T */
+  }
+}
+
 function unmountSurface(record: ClientRecord): void {
   record.mountGeneration += 1
   record.isDirty = false
@@ -440,6 +474,9 @@ function unmountSurface(record: ClientRecord): void {
     clearImmediate(record.renderTimer)
     record.renderTimer = undefined
   }
+  const prevHeld = record.held
+  record.held = []
+  releaseRecordHeld(record, prevHeld)
   try {
     record.surface?.unmount()
   } catch {
@@ -461,15 +498,47 @@ function paint(record: ClientRecord): void {
   if (!surface || record.isDestroyed) return
   record.isDirty = false
   record.isRendering = true
+  const nextHeld: Array<{ surfaceHandle: number; environmentHandle: number }> =
+    []
+  let tree: unknown
   try {
-    const tree = stampHeldPress(record.plugin, surface.render())
-    record.renderedAt = clientTerminalStamp()
-    setSnapshot(record, { status: 'drawn', tree })
+    tree = stampHeldPress(record.plugin, surface.render(), (envHandle, key) => {
+      if (!clientPressBridge) return envHandle
+      const surfaceHandle = clientPressBridge.hold(record.plugin, event => {
+        resetUnprompted(record.plugin)
+        if (!record.surface || record.isDestroyed) return
+        const baseEvent = {
+          plugin: record.plugin,
+          element: key,
+          component: record.component,
+          requestId: record.requestId,
+          surface: record.surfaceName,
+        }
+        const payload =
+          event !== null && typeof event === 'object'
+            ? { ...baseEvent, ...(event as Record<string, unknown>) }
+            : baseEvent
+        try {
+          record.surface.runHeld(envHandle, payload)
+        } catch (err) {
+          failRecord(record, errorMessage(err), 'run')
+        }
+      })
+      nextHeld.push({ surfaceHandle, environmentHandle: envHandle })
+      return surfaceHandle
+    })
   } catch (err) {
+    releaseRecordHeld(record, nextHeld)
     failRecord(record, errorMessage(err), 'render')
+    return
   } finally {
     record.isRendering = false
   }
+  const prevHeld = record.held
+  record.held = nextHeld
+  releaseRecordHeld(record, prevHeld)
+  record.renderedAt = clientTerminalStamp()
+  setSnapshot(record, { status: 'drawn', tree })
 }
 
 /** densable `de` — skip reason for in-frame measure storm. */
@@ -581,7 +650,11 @@ function schedule(record: ClientRecord): void {
 }
 
 /** densable `xe`/`ge` — stamp `{plugin,handle}` press from trampoline `held`. */
-function stampHeldPress(plugin: string, tree: unknown): unknown {
+function stampHeldPress(
+  plugin: string,
+  tree: unknown,
+  mapHandle: (handle: number, elementKey: string) => number = handle => handle,
+): unknown {
   const walk = (node: unknown): unknown => {
     if (typeof node !== 'object' || node === null) return node
     if (Array.isArray(node)) return node.map(walk)
@@ -590,8 +663,14 @@ function stampHeldPress(plugin: string, tree: unknown): unknown {
     if (rec.props !== undefined) out.props = rec.props
     if (rec.hover !== undefined) out.hover = rec.hover
     if (typeof rec.held === 'number') {
-      out.press = { plugin, handle: rec.held }
-    } else if (Array.isArray(rec.children)) {
+      const propsRec =
+        typeof rec.props === 'object' && rec.props !== null
+          ? (rec.props as Record<string, unknown>)
+          : undefined
+      const elementKey = typeof propsRec?.key === 'string' ? propsRec.key : ''
+      out.press = { plugin, handle: mapHandle(rec.held, elementKey) }
+    }
+    if (Array.isArray(rec.children)) {
       out.children = rec.children.map(walk)
     }
     return out
@@ -1543,6 +1622,7 @@ function createRecord(input: {
     columns: 0,
     rows: 0,
     surface: undefined,
+    held: [],
     snapshot: LOADING,
     listeners: new Set(),
     holders: 1,

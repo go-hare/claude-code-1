@@ -1,8 +1,12 @@
 import {
   Box,
   Button,
+  ClockContext,
   Link,
+  MOUNT_SETTLE_MS,
+  NoSelect,
   Text,
+  getFocusManager,
   stringWidth,
   useInput,
   useKeybinding,
@@ -28,11 +32,12 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ComponentType,
   type ErrorInfo,
   type ReactNode,
   type RefObject,
 } from 'react';
-import { AbovePromptLeftoverContext, leftoverPluginBandBudget } from './FullscreenLayout.js';
+import { AbovePromptLeftoverContext, dockLitStore, leftoverPluginBandBudget } from './FullscreenLayout.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../utils/render/invalidateAllRenders.js';
@@ -51,6 +56,7 @@ import {
   focusPane,
   getPaneRemountGeneration,
   getPanesState,
+  getPanesTerminalSize,
   getPluginDrawingTrees,
   getPluginScrollSite,
   getRasterFrameVersion,
@@ -85,7 +91,7 @@ import {
   DETACHED_CLIENT,
   type ClientInstance,
 } from '../utils/plugins/functionHooksClient.js';
-import { useIsOverlayActive } from '../context/overlayContext.js';
+import { useIsOverlayActive, useRegisterOverlay } from '../context/overlayContext.js';
 import { useHasOpenDialogs } from '../dialog/DialogStoreContext.js';
 import { logForDebugging } from '../utils/debug.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
@@ -97,10 +103,19 @@ import {
   setPromptInputStoreValue,
   subscribePromptInputCursorStore,
 } from '../utils/promptInputCursorStore.js';
+import { parsePatch, type StructuredPatchHunk } from 'diff';
 import TextInput from './TextInput.js';
-import { HighlightedCode } from './HighlightedCode.js';
+import { HighlightedCode as BaseHighlightedCode } from './HighlightedCode.js';
 import { Markdown } from './Markdown.js';
+
+const HighlightedCode = BaseHighlightedCode as unknown as ComponentType<
+  ComponentProps<typeof BaseHighlightedCode> & { startLine?: number; lineNumbers?: boolean }
+>;
+export { dockLitStore };
 import { PluginImage, PluginRaster } from './PluginRaster.js';
+import { StructuredDiff } from './StructuredDiff.js';
+import { intersperse } from '../utils/array.js';
+import { truncateToWidth } from '../utils/format.js';
 import { cleanPromptHintText, resolvePromptHintText } from './PromptInput/PromptInputFooterSuggestions.js';
 import { encodePluginLinkHref, encodePluginLinkLabel } from '../utils/plugins/pluginLinkHref.js';
 import { Jmn, L1t, tellerOf, tellerOfPlugin } from '../utils/plugins/pluginDrawError.js';
@@ -135,6 +150,7 @@ const AZERTY_DIGIT: ReadonlyMap<string, string> = new Map([
   ["'", '4'],
   ['(', '5'],
   ['-', '6'],
+  ['§', '6'],
   ['è', '7'],
   ['_', '8'],
   ['ç', '9'],
@@ -753,7 +769,15 @@ export function PluginDimButton({
 }): ReactNode {
   const [hover, setHover] = useState(false);
   return (
-    <Box onClick={onAction} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <Box
+      onClick={event => {
+        event.stopImmediatePropagation();
+        if (event.isWindowActivation) return;
+        onAction();
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <Text inverse={hover || isHeld} dimColor={!hover && !isHeld}>
         {label}
       </Text>
@@ -766,7 +790,7 @@ export function PluginDimButton({
  */
 export function PluginBandCollapseHandle({ onCollapse }: { onCollapse: () => void }): ReactNode {
   return (
-    <Box position="absolute" top={0} right={MARK_EDGE_COLUMNS} width={COLLAPSE_HANDLE_COLUMNS}>
+    <Box position="absolute" top={0} right={MARK_EDGE_COLUMNS}>
       <PluginDimButton label="[-]" onAction={onCollapse} />
     </Box>
   );
@@ -1147,10 +1171,9 @@ export function PluginPaneCloseMark({
       position="absolute"
       top={0}
       right={inset}
-      width={CLOSE_MARK_COLUMNS}
       onClick={event => {
-        if (event.isWindowActivation) return;
         event.stopImmediatePropagation();
+        if (event.isWindowActivation) return;
         onClose();
       }}
       onMouseEnter={() => setHover(true)}
@@ -1349,10 +1372,8 @@ export function PluginRowGrip({
   /** densable pee `Ie` / grip lit — paints inline round-border top. */
   onLit?: (lit: boolean) => void;
 }): ReactNode {
-  const [lit, setLit] = useState(false);
   const drag = useRef<{ at: number; cells: number; now: number } | null>(null);
   const setGripLit = (next: boolean): void => {
-    setLit(next);
     onLit?.(next);
   };
   return (
@@ -1384,27 +1405,41 @@ export function PluginRowGrip({
           if (held !== null && held.now !== held.cells) onSettle();
         }
       }}
-    >
-      <Text dimColor={!lit}> </Text>
-    </Box>
+    />
   );
 }
 
 /**
- * densable `oL` / `LT` / `dv`: 1-col left border grip.
- * Drag resizes dock columns; mouse-up calls keepRoom.
+ * densable `TL` / `Pw`: 1-col left border grip.
+ * Drag resizes dock columns; mouse-up calls keepRoom. Lit on hover/drag or focused pane.
  */
 export function PluginDockGrip({
   columns,
   onResize,
   onSettle,
+  isFocused,
 }: {
   columns: number;
   onResize: (next: number) => number;
   onSettle: () => void;
+  isFocused?: boolean;
 }): ReactNode {
   const [lit, setLit] = useState(false);
   const drag = useRef<{ at: number; cells: number; now: number } | null>(null);
+  const dialogOpen = useHasOpenDialogs();
+  const panesFocused = useSyncExternalStore(
+    subscribePanes,
+    () => getPanesState().focusedId !== null,
+    () => getPanesState().focusedId !== null,
+  );
+  const isGripLit = !dialogOpen && lit;
+  useEffect(() => {
+    dockLitStore.setState(() => isGripLit);
+    return () => {
+      dockLitStore.setState(() => false);
+    };
+  }, [isGripLit]);
+  const gripLit = isGripLit || (isFocused ?? panesFocused);
   return (
     <Box
       flexShrink={0}
@@ -1414,22 +1449,22 @@ export function PluginDockGrip({
       borderRight={false}
       borderTop={false}
       borderBottom={false}
-      borderLeftDimColor={!lit}
-      borderLeftColor={lit ? 'suggestion' : undefined}
+      borderLeftDimColor={!gripLit}
+      borderLeftColor={gripLit ? 'suggestion' : undefined}
       onMouseEnter={() => setLit(true)}
       onMouseLeave={() => {
         setLit(false);
       }}
       onPointer={event => {
         if (event.type === 'mousedown') {
-          if (event.button !== 0) return;
+          if (event.button !== 0 || dialogOpen) return;
           drag.current = { at: event.col, cells: columns, now: columns };
           setLit(true);
           return;
         }
         if (event.type === 'mousedrag') {
           const held = drag.current;
-          if (held === undefined || held === null) return;
+          if (held === undefined || held === null || dialogOpen) return;
           held.now = onResize(held.cells + held.at - event.col);
           return;
         }
@@ -1464,9 +1499,19 @@ export function PluginPaneKeyResize({
   /** densable iee `maxOffset>0` — mEe pixel scroll. False lets aee We cycle focus. */
   pixelScroll?: boolean;
 }): ReactNode {
+  const paneFocused = useSyncExternalStore(
+    subscribePanes,
+    () => {
+      const state = getPanesState();
+      const shown = getShownPluginPane();
+      return shown !== undefined ? state.focusedId === shown.id : state.focusedId !== null;
+    },
+    () => false,
+  );
   const fieldHeld = useSyncExternalStore(subscribePaneFieldHeld, paneFieldHeldNow, paneFieldHeldNow);
-  const paneActive = isActive && !fieldHeld;
-  const fieldActive = isActive && fieldHeld;
+  const focusedActive = isActive && paneFocused;
+  const paneActive = focusedActive && !fieldHeld;
+  const fieldActive = focusedActive && fieldHeld;
   const pixelActive = paneActive && pixelScroll;
   useRegisterKeybindingContext('Pane', paneActive);
   useRegisterKeybindingContext('PaneField', fieldActive);
@@ -2787,6 +2832,113 @@ type BoxLayout = {
   >]: ComponentProps<typeof Box>[K];
 };
 
+/** densable `oqn` — standard named terminal colors mapped to hex (`rdn`/`He`). */
+const NAMED_TO_HEX: Readonly<Record<string, string>> = {
+  black: '#000000',
+  red: '#e5484d',
+  green: '#46a758',
+  yellow: '#f5d90a',
+  blue: '#3e63dd',
+  magenta: '#d6409f',
+  cyan: '#05a2c2',
+  white: '#ffffff',
+  gray: '#8b8d98',
+  grey: '#8b8d98',
+  blackBright: '#6e6e6e',
+  redBright: '#ff6369',
+  greenBright: '#5bd07f',
+  yellowBright: '#ffe629',
+  blueBright: '#5b8def',
+  magentaBright: '#ee6ac2',
+  cyanBright: '#3ec2e0',
+  whiteBright: '#ffffff',
+};
+
+function resolvePluginColor(color: string): string {
+  return Object.hasOwn(NAMED_TO_HEX, color) ? NAMED_TO_HEX[color]! : color;
+}
+
+/** densable `Le` — hover scope refcount store (`plugin\0scope` → count). */
+const pluginHoverGroupsStore = createStore<Map<string, number>>(new Map());
+
+function adjustPluginHoverGroup(groupKey: string, delta: number): void {
+  pluginHoverGroupsStore.setState(prev => {
+    const nextCount = (prev.get(groupKey) ?? 0) + delta;
+    const next = new Map(prev);
+    if (nextCount > 0) next.set(groupKey, nextCount);
+    else next.delete(groupKey);
+    return next;
+  });
+}
+
+function usePluginHoverScope(
+  plugin: string | undefined,
+  hover: Record<string, unknown> | undefined,
+): {
+  isScoped: boolean;
+  isHot: boolean;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+} {
+  const scope = typeof hover?.scope === 'string' && hover.scope !== '' ? hover.scope : undefined;
+  const groupKey = plugin !== undefined && plugin !== '' && scope !== undefined ? `${plugin}\0${scope}` : undefined;
+  const isHot = useSyncExternalStore(
+    pluginHoverGroupsStore.subscribe,
+    () => (groupKey !== undefined ? (pluginHoverGroupsStore.getState().get(groupKey) ?? 0) > 0 : false),
+    () => false,
+  );
+  const heldKeyRef = useRef<string | undefined>(undefined);
+  const enter = useCallback((key: string | undefined) => {
+    if (key !== undefined && heldKeyRef.current === undefined) {
+      heldKeyRef.current = key;
+      adjustPluginHoverGroup(key, 1);
+    }
+  }, []);
+  const leave = useCallback(() => {
+    const held = heldKeyRef.current;
+    if (held !== undefined) {
+      heldKeyRef.current = undefined;
+      adjustPluginHoverGroup(held, -1);
+    }
+  }, []);
+  useEffect(() => {
+    if (heldKeyRef.current !== undefined && heldKeyRef.current !== groupKey) {
+      leave();
+      enter(groupKey);
+    }
+  }, [groupKey, enter, leave]);
+  useEffect(() => leave, [leave]);
+  return {
+    isScoped: groupKey !== undefined,
+    isHot,
+    onMouseEnter: () => enter(groupKey),
+    onMouseLeave: leave,
+  };
+}
+
+function textStyleFrom(props: Record<string, unknown> | undefined): Partial<ComponentProps<typeof Text>> {
+  if (props === undefined) return {};
+  return {
+    ...(boolProp(props, 'bold') !== undefined && { bold: boolProp(props, 'bold') }),
+    ...(boolProp(props, 'dimColor') !== undefined && { dimColor: boolProp(props, 'dimColor') }),
+    ...(boolProp(props, 'italic') !== undefined && { italic: boolProp(props, 'italic') }),
+    ...(boolProp(props, 'underline') !== undefined && { underline: boolProp(props, 'underline') }),
+    ...(boolProp(props, 'strikethrough') !== undefined && { strikethrough: boolProp(props, 'strikethrough') }),
+    ...(boolProp(props, 'inverse') !== undefined && { inverse: boolProp(props, 'inverse') }),
+    ...(typeof props.color === 'string' && {
+      color: resolvePluginColor(props.color) as ComponentProps<typeof Text>['color'],
+    }),
+    ...(typeof props.backgroundColor === 'string' && {
+      backgroundColor: resolvePluginColor(props.backgroundColor) as ComponentProps<typeof Text>['backgroundColor'],
+    }),
+    ...((props.wrap === 'wrap' ||
+      props.wrap === 'truncate' ||
+      props.wrap === 'truncate-start' ||
+      props.wrap === 'truncate-middle' ||
+      props.wrap === 'truncate-end') && { wrap: props.wrap }),
+  };
+}
+
 function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   if (props === undefined) return {};
   const out: BoxLayout = {};
@@ -2873,13 +3025,13 @@ function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
     out.borderStyle = props.borderStyle as BoxLayout['borderStyle'];
   }
   if (typeof props.borderColor === 'string') {
-    out.borderColor = props.borderColor as BoxLayout['borderColor'];
+    out.borderColor = resolvePluginColor(props.borderColor) as BoxLayout['borderColor'];
   }
   if (typeof props.borderDimColor === 'boolean') {
     out.borderDimColor = props.borderDimColor;
   }
   if (typeof props.backgroundColor === 'string') {
-    out.backgroundColor = props.backgroundColor as BoxLayout['backgroundColor'];
+    out.backgroundColor = resolvePluginColor(props.backgroundColor) as BoxLayout['backgroundColor'];
   }
   return out;
 }
@@ -2906,49 +3058,200 @@ export function openListRows(open: { highlight: number } | null, optionCount: nu
   return open === null ? 0 : selectWindow(optionCount, open.highlight).rows;
 }
 
+/** densable `Jr` / `$t` — ranked `props.action` keybinding fallback seats (`bs`: Pane=2 > AbovePrompt=1 > 0). */
+type PluginActionKeySeat = {
+  action: string;
+  rank: number;
+  seq: number;
+  plugin: string;
+  handle: unknown;
+};
+
+const pluginActionKeySeats = (() => {
+  const list: PluginActionKeySeat[] = [];
+  let seq = 0;
+  const remove = (seat: PluginActionKeySeat): void => {
+    const idx = list.indexOf(seat);
+    if (idx >= 0) list.splice(idx, 1);
+  };
+  return {
+    add(seat: PluginActionKeySeat) {
+      remove(seat);
+      seat.seq = ++seq;
+      list.push(seat);
+    },
+    remove,
+    winnerOf(action: string): PluginActionKeySeat | undefined {
+      return list
+        .filter(item => item.action === action)
+        .reduce<PluginActionKeySeat | undefined>(
+          (best, cur) =>
+            best === undefined || cur.rank > best.rank || (cur.rank === best.rank && cur.seq > best.seq) ? cur : best,
+          undefined,
+        );
+    },
+  };
+})();
+
+function actionComponentRank(component: string | undefined): number {
+  return component === 'Pane' ? 2 : component === 'AbovePrompt' ? 1 : 0;
+}
+
+/** densable `qt` / `Ut` — register fallback keybinding for Button `props.action`. */
+function PluginButtonActionKeys({
+  plugin,
+  handle,
+  action,
+  component,
+}: {
+  plugin: string;
+  handle: unknown;
+  action: string;
+  component?: string;
+}): ReactNode {
+  const keybindingContext = useOptionalKeybindingContext();
+  const dialogOpen = useHasOpenDialogs();
+  const rank = actionComponentRank(component);
+  const [seat] = useState<PluginActionKeySeat>(() => ({
+    action,
+    rank,
+    seq: 0,
+    plugin,
+    handle,
+  }));
+  const bindings = keybindingContext?.bindings;
+  const contexts = useMemo(
+    () => [...new Set((bindings ?? []).filter(b => b.action === action).map(b => b.context))],
+    [action, bindings],
+  );
+  useLayoutEffect(() => {
+    seat.plugin = plugin;
+    seat.handle = handle;
+    seat.rank = rank;
+  });
+  useEffect(() => {
+    seat.action = action;
+    pluginActionKeySeats.add(seat);
+    return () => pluginActionKeySeats.remove(seat);
+  }, [action, seat]);
+  useEffect(() => {
+    if (!keybindingContext || dialogOpen) return;
+    const unsubs = contexts.map(ctx =>
+      keybindingContext.registerHandler({
+        action,
+        context: ctx,
+        handler: () => {
+          const winner = pluginActionKeySeats.winnerOf(action);
+          if (winner === undefined) return;
+          firePress(winner.plugin, winner.handle);
+        },
+      }),
+    );
+    return () => {
+      for (const unsub of unsubs) unsub();
+    };
+  }, [keybindingContext, action, contexts, dialogOpen]);
+  useInput(
+    (input, key, event) => {
+      if (!keybindingContext || dialogOpen) return;
+      const toCheck = [...new Set([...keybindingContext.activeContexts, ...contexts, 'Global'])];
+      const resolved = keybindingContext.resolve(input, key, toCheck);
+      if (resolved.type !== 'match' || resolved.action !== action) return;
+      const winner = pluginActionKeySeats.winnerOf(action);
+      if (winner === undefined) return;
+      keybindingContext.setPendingChord(null);
+      firePress(winner.plugin, winner.handle);
+      event.stopImmediatePropagation();
+    },
+    { isActive: !dialogOpen && contexts.length > 0 },
+  );
+  return null;
+}
+
+/** densable `NMn` — release Ink focus if activeElement is inside `node`. */
+function releaseButtonInkFocus(node: DOMElement | null): void {
+  if (!node) return;
+  try {
+    const fm = getFocusManager(node);
+    let cur: DOMElement | undefined = fm.activeElement ?? undefined;
+    while (cur && cur !== node) cur = cur.parentNode;
+    if (cur === node) fm.blur();
+  } catch {
+    /* detached node */
+  }
+}
+
 function PluginPressButton({
   plugin,
   handle,
   element,
   label,
   hotkey,
+  action,
   plain,
   dimColor,
   variant,
+  hover,
+  component,
 }: {
   plugin: string;
   handle: unknown;
   element?: string;
   label: string;
   hotkey?: string;
+  action?: string;
   plain?: boolean;
   dimColor?: boolean;
   variant?: string;
+  hover?: Record<string, unknown>;
+  component?: string;
 }): ReactNode {
-  const clicked = useContext(ClickedPressContext);
   const focusedPress = useContext(FocusedPressContext);
   const reportHeldFocus = useContext(HeldFocusRefContext);
   const hasKeyboardFocus = focusedPress !== null && focusedPress.plugin === plugin && focusedPress.handle === handle;
+  const boxRef = useRef<DOMElement | null>(null);
+  const [boxHovered, setBoxHovered] = useState(false);
+  const hoverScope = usePluginHoverScope(plugin, hover);
+  const hoverLit = hover !== undefined && (hoverScope.isScoped ? hoverScope.isHot : boxHovered);
+  const hoverTextOverrides = hoverLit ? textStyleFrom(hover) : {};
   return (
     <Box
-      ref={hasKeyboardFocus ? reportHeldFocus : undefined}
+      ref={boxRef}
       flexShrink={0}
       alignSelf="flex-start"
       {...(element !== undefined && { elementKey: element, elementPlugin: plugin })}
       {...(hotkey !== undefined && { hotkey })}
       onClick={event => {
-        if (event.isWindowActivation) return;
-        clicked?.({ plugin, handle });
-        firePress(plugin, handle);
+        releaseButtonInkFocus(boxRef.current);
+        event.stopImmediatePropagation();
       }}
+      {...(hover !== undefined && {
+        onMouseEnter: () => {
+          setBoxHovered(true);
+          hoverScope.onMouseEnter();
+        },
+        onMouseLeave: () => {
+          setBoxHovered(false);
+          hoverScope.onMouseLeave();
+        },
+      })}
     >
-      <Button tabIndex={-1} flexShrink={0} alignSelf="flex-start" onAction={() => firePress(plugin, handle)}>
+      {action !== undefined && (
+        <PluginButtonActionKeys plugin={plugin} handle={handle} action={action} component={component} />
+      )}
+      <Button
+        ref={hasKeyboardFocus ? reportHeldFocus : undefined}
+        tabIndex={-1}
+        flexShrink={0}
+        alignSelf="flex-start"
+        onAction={() => firePress(plugin, handle)}
+      >
         {state => {
           const inverse = state.focused || state.hovered || hasKeyboardFocus;
           const dim = dimColor === true && !inverse;
           if (plain === true) {
             return (
-              <Text inverse={inverse} dimColor={dim}>
+              <Text inverse={inverse} dimColor={dim} {...hoverTextOverrides}>
                 {hotkey === undefined ? (
                   label
                 ) : (
@@ -2962,7 +3265,13 @@ function PluginPressButton({
             );
           }
           return (
-            <Text inverse={inverse} bold dimColor={dim} color={variant === 'primary' ? 'suggestion' : undefined}>
+            <Text
+              inverse={inverse}
+              bold
+              dimColor={dim}
+              color={variant === 'primary' ? 'suggestion' : undefined}
+              {...hoverTextOverrides}
+            >
               {`[ ${label} ]`}
             </Text>
           );
@@ -3204,7 +3513,7 @@ function PluginPressInput({
   const empty = shown === '';
   const prefix = label === undefined ? '' : `${label}: `;
   const submit = ` ⏎ ${submitLabel ?? 'submit'}`;
-  const fieldColumns = Math.max(4, columns - stringWidth(prefix) - stringWidth(submit));
+  const fieldColumns = Math.max(12, columns - stringWidth(prefix) - stringWidth(submit));
   return (
     <Box
       ref={hasKeyboardFocus ? reportHeldFocus : undefined}
@@ -3310,11 +3619,11 @@ function PluginPressSelect({
       }}
     >
       <Text wrap="truncate-end">
-        {prefix !== '' && <Text>{prefix}</Text>}
+        {prefix !== '' && <Text bold={hasKeyboardFocus}>{prefix}</Text>}
         {current === undefined ? (
           <Text dimColor>none</Text>
         ) : (
-          <Text inverse={!isOpen}>{current.label ?? current.value}</Text>
+          <Text inverse={hasKeyboardFocus && !isOpen}>{current.label ?? current.value}</Text>
         )}
         <Text dimColor>{isOpen ? ' ▴' : ' ▾'}</Text>
       </Text>
@@ -3328,56 +3637,191 @@ function PluginPressSelect({
   );
 }
 
-function PluginCode({ source, format }: { source?: unknown; format?: unknown }): ReactNode {
-  const text = typeof source === 'string' ? source : '';
-  const filePath = typeof format === 'string' && format !== '' ? format : 'code';
+const PLUGIN_CODE_DEFAULT_COLUMNS = 80;
+const PLUGIN_DIFF_MAX_LINE = 1_000_000_000;
+
+function sanitizePluginCodeText(line: string): string {
+  return line.replace(/\t/g, '  ').replace(/[؜‪-‮⁦-⁩]/gu, '�');
+}
+
+function pluginDiffGutterWidth(hunk: StructuredPatchHunk): number {
+  return `+ ${Math.max(hunk.oldStart + hunk.oldLines - 1, hunk.newStart + hunk.newLines - 1, 1)} `.length;
+}
+
+function parsePluginDiffHunks(source: string): StructuredPatchHunk[] | undefined {
+  let patches: ReturnType<typeof parsePatch>;
+  try {
+    patches = parsePatch(source);
+  } catch {
+    return undefined;
+  }
+  const hunks = patches
+    .flatMap(patch => patch.hunks)
+    .map(hunk => ({
+      ...hunk,
+      lines: hunk.lines.filter(line => !line.startsWith('\\')),
+    }));
+  if (hunks.length === 0) return undefined;
+  const invalid = hunks.some(
+    ({ oldStart, oldLines, newStart, newLines }) =>
+      ![oldStart, oldLines, newStart, newLines].every(
+        value => Number.isSafeInteger(value) && value >= 0 && value <= PLUGIN_DIFF_MAX_LINE,
+      ),
+  );
+  return invalid ? undefined : hunks;
+}
+
+function formatPluginDiffHunks(hunks: StructuredPatchHunk[], width: number, truncate: boolean): StructuredPatchHunk[] {
+  return hunks.map(hunk => {
+    const budget = Math.max(1, width - pluginDiffGutterWidth(hunk));
+    return {
+      ...hunk,
+      lines: hunk.lines.map(line => {
+        const prefix = line.slice(0, 1);
+        const rest = sanitizePluginCodeText(line.slice(1));
+        return prefix + (truncate ? truncateToWidth(rest, budget) : rest);
+      }),
+    };
+  });
+}
+
+function clipPluginCodeLines(source: string, width: number, startLine: number | undefined): string {
+  const lines = source.replace(/\n$/, '').split('\n');
+  const gutter = startLine !== undefined ? String(startLine + lines.length - 1).length + 2 : 0;
+  const budget = Math.max(1, width - gutter);
+  return lines.map(line => truncateToWidth(sanitizePluginCodeText(line), budget)).join('\n');
+}
+
+function PluginCode({
+  source,
+  language,
+  path,
+  startLine,
+  format,
+  wrap,
+}: {
+  source?: unknown;
+  language?: unknown;
+  path?: unknown;
+  startLine?: unknown;
+  format?: unknown;
+  wrap?: unknown;
+}): ReactNode {
+  const rawText = typeof source === 'string' ? source : '';
+  const lang = typeof language === 'string' && language !== '' ? language : undefined;
+  const codePath = typeof path === 'string' ? path : undefined;
+  const start =
+    typeof startLine === 'number' && Number.isSafeInteger(startLine) && startLine >= 1 ? startLine : undefined;
+  // densable `Ye`: language → `source.${language}`; else `path ?? ""`.
+  const filePath = lang !== undefined ? `source.${lang}` : (codePath ?? '');
+  const codeBoxRef = useRef<DOMElement | null>(null);
+  const measuredWidth = useYogaMeasure(() =>
+    codeBoxRef.current ? Math.floor(measureElement(codeBoxRef.current).width) : 0,
+  );
   // densable 2.1.289: highlight once at the pane's final width, not a
   // provisional 80-column pass and not a 0-width measure of an empty box.
   const bodyColumns = useContext(PaneBodyColumnsContext);
-  const width = bodyColumns !== null && bodyColumns > 2 ? bodyColumns : undefined;
+  const fallbackWidth = bodyColumns !== null && bodyColumns > 0 ? bodyColumns : PLUGIN_CODE_DEFAULT_COLUMNS;
+  const width = measuredWidth > 0 ? measuredWidth : fallbackWidth;
+  const truncate = wrap === 'truncate-end';
+  const parsedHunks = useMemo(() => (format === 'diff' ? parsePluginDiffHunks(rawText) : undefined), [rawText, format]);
+  const hunks = useMemo(
+    () => (parsedHunks === undefined ? undefined : formatPluginDiffHunks(parsedHunks, width, truncate)),
+    [parsedHunks, width, truncate],
+  );
+  const text = useMemo(
+    () => (truncate ? clipPluginCodeLines(rawText, width, start) : rawText),
+    [rawText, width, start, truncate],
+  );
   return (
-    <Box flexDirection="column" flexGrow={1} flexShrink={1} {...(width !== undefined ? { width } : {})}>
-      {text === '' ? <Text>{text}</Text> : <HighlightedCode code={text} filePath={filePath} width={width} />}
+    <Box ref={codeBoxRef} flexDirection="column" flexGrow={1} flexShrink={1}>
+      {hunks !== undefined ? (
+        intersperse(
+          hunks.map((hunk, i) => (
+            <Box flexDirection="column" key={`hunk-${i}`}>
+              <StructuredDiff patch={hunk} dim={false} width={width} filePath={filePath} firstLine={null} />
+            </Box>
+          )),
+          i => (
+            <NoSelect fromLeftEdge key={`ellipsis-${i}`}>
+              <Text dimColor>...</Text>
+            </NoSelect>
+          ),
+        )
+      ) : text === '' ? (
+        <Text>{text}</Text>
+      ) : (
+        // <HighlightedCode code={text} filePath={filePath} width={width} />
+        <HighlightedCode
+          code={text}
+          filePath={filePath}
+          width={width}
+          startLine={start}
+          lineNumbers={start !== undefined}
+        />
+      )}
     </Box>
   );
+}
+
+function normalizeMarkdownLinkHref(href: string): string {
+  const candidate = /^www\./i.test(href) ? `http://${href}` : href;
+  try {
+    return new URL(candidate).href;
+  } catch {
+    return candidate;
+  }
+}
+
+function isPressableMarkdownLink(href: string, pressableLinks: unknown): boolean {
+  if (pressableLinks === undefined || pressableLinks === true) return true;
+  if (!Array.isArray(pressableLinks)) return false;
+  const target = normalizeMarkdownLinkHref(href);
+  return pressableLinks.some(item => typeof item === 'string' && normalizeMarkdownLinkHref(item) === target);
 }
 
 function PluginMarkdown({
   text,
   dimColor,
   press,
+  elementKey,
   pressableLinks,
 }: {
   text: string;
   dimColor?: boolean;
   press?: { plugin: string; handle: unknown };
+  elementKey?: string;
   pressableLinks?: unknown;
 }): ReactNode {
+  const clock = useContext(ClockContext);
+  const [mountedAt] = useState(() => clock?.now() ?? Date.now());
   const body = (
     <Markdown dimColor={dimColor} stripPromptTags={false}>
       {text}
     </Markdown>
   );
   if (press === undefined) {
-    return <Box flexDirection="column">{body}</Box>;
+    return elementKey === undefined ? (
+      body
+    ) : (
+      <Box flexDirection="column" elementKey={elementKey}>
+        {body}
+      </Box>
+    );
   }
   return (
     <Box
       flexDirection="column"
+      {...(elementKey !== undefined && { elementKey })}
       elementPlugin={press.plugin}
       onClick={event => {
         const href = event.hyperlinkUrl;
-        if (href === undefined) {
+        if (href === undefined || event.mods.ctrl || event.mods.alt || !isPressableMarkdownLink(href, pressableLinks)) {
           event.allowDefault();
           return;
         }
-        if (pressableLinks !== undefined && pressableLinks !== true) {
-          if (!Array.isArray(pressableLinks) || !pressableLinks.includes(href)) {
-            event.allowDefault();
-            return;
-          }
-        }
-        if (event.isWindowActivation) {
+        const now = clock?.now() ?? Date.now();
+        if (event.isWindowActivation || now - mountedAt < MOUNT_SETTLE_MS) {
           event.dropAsStray();
           return;
         }
@@ -3482,18 +3926,22 @@ function PluginClient({
 }): ReactNode {
   const instanceRef = useRef<ClientInstance>(DETACHED_CLIENT);
   const [snapshot, setSnapshot] = useState(() => DETACHED_CLIENT.getSnapshot());
+  const [initialProps] = useState(() => props);
+  const lastPropsRef = useRef<unknown>(initialProps);
   const boxRef = useRef<DOMElement | null>(null);
   const measuredWidth = useYogaMeasure(() => measurePluginClientBox(boxRef.current).width);
   const measuredHeight = useYogaMeasure(() => measurePluginClientBox(boxRef.current).height);
   useLayoutEffect(() => {
     const instance = acquirePluginClient({
       plugin,
+      component,
       key: elementKey ?? '',
       module: moduleName,
       requestId,
-      props,
+      props: initialProps,
     });
     instanceRef.current = instance;
+    lastPropsRef.current = initialProps;
     setSnapshot(instance.getSnapshot());
     const unsub = instance.subscribe(() => setSnapshot(instance.getSnapshot()));
     return () => {
@@ -3501,10 +3949,11 @@ function PluginClient({
       instance.release();
       instanceRef.current = DETACHED_CLIENT;
     };
-  }, [plugin, moduleName, elementKey, requestId, props]);
+  }, [plugin, component, moduleName, elementKey, requestId, initialProps]);
   useLayoutEffect(() => {
-    const instance = instanceRef.current;
-    instance.setProps(props);
+    if (Object.is(lastPropsRef.current, props)) return;
+    lastPropsRef.current = props;
+    instanceRef.current.setProps(props);
   }, [props]);
   useLayoutEffect(() => {
     // densable `Xt(()=>{i.laidOut()})` — layout mark, not snapshot-driven.
@@ -3662,6 +4111,7 @@ function HoverBox({
   isInline,
   props,
   hover,
+  plugin,
   elementKey,
   elementPlugin,
   children,
@@ -3669,20 +4119,52 @@ function HoverBox({
   isInline: boolean;
   props: Record<string, unknown>;
   hover: Record<string, unknown>;
+  plugin?: string;
   elementKey?: string;
   elementPlugin?: string;
   children: ReactNode;
 }): ReactNode {
   const [hot, setHot] = useState(false);
-  const layout = { ...layoutFrom(props), ...(hot ? layoutFrom(hover) : {}) };
+  const scope = usePluginHoverScope(plugin ?? elementPlugin, hover);
+  const active = scope.isScoped ? scope.isHot : hot;
+  if (isInline) {
+    const textProps = {
+      ...textStyleFrom(props),
+      ...(active ? textStyleFrom(hover) : {}),
+    };
+    return (
+      <Text
+        {...textProps}
+        hoverFollowsPaint={true}
+        onMouseEnter={() => {
+          setHot(true);
+          scope.onMouseEnter();
+        }}
+        onMouseLeave={() => {
+          setHot(false);
+          scope.onMouseLeave();
+        }}
+      >
+        {children}
+      </Text>
+    );
+  }
+  const layout = { ...layoutFrom(props), ...(active ? layoutFrom(hover) : {}) };
   return (
     <Box
       {...layout}
       {...(elementKey !== undefined && { elementKey })}
       {...(elementPlugin !== undefined && { elementPlugin })}
-      flexDirection={isInline ? 'row' : (layout.flexDirection ?? 'column')}
-      onMouseEnter={() => setHot(true)}
-      onMouseLeave={() => setHot(false)}
+      flexDirection={layout.flexDirection ?? 'column'}
+      hoverFollowsPaint={true}
+      onMouseEnter={() => {
+        setHot(true);
+        scope.onMouseEnter();
+      }}
+      onMouseLeave={() => {
+        setHot(false);
+        scope.onMouseLeave();
+      }}
     >
       {children}
     </Box>
@@ -3700,7 +4182,7 @@ function childList(node: Record<string, unknown>, props: Record<string, unknown>
  */
 export function DrawingNode({
   node,
-  plugin,
+  plugin: fallbackPlugin,
   requestId,
   index,
   engine,
@@ -3723,7 +4205,7 @@ export function DrawingNode({
       <DrawingNode
         key={i}
         node={child}
-        plugin={plugin}
+        plugin={fallbackPlugin}
         requestId={requestId}
         index={i}
         engine={engine}
@@ -3736,7 +4218,8 @@ export function DrawingNode({
   const props = isRecord(node.props) ? node.props : node;
   const type = typeof node.type === 'string' ? node.type : undefined;
   const key = (typeof props.key === 'string' && props.key) || (typeof node.key === 'string' && node.key) || undefined;
-  const owner = stampedPlugin(node, plugin);
+  const plugin = stampedPlugin(node, fallbackPlugin);
+  const owner = plugin;
   const req =
     (typeof props.requestId === 'string' && props.requestId) ||
     (typeof node.requestId === 'string' && node.requestId) ||
@@ -3746,11 +4229,33 @@ export function DrawingNode({
   const rows = typeof props.rows === 'number' ? props.rows : typeof node.rows === 'number' ? node.rows : 1;
   const cells = typeof props.cells === 'string' ? props.cells : typeof node.cells === 'string' ? node.cells : undefined;
   if (type === 'Raster' && key && req) {
-    return <PluginRaster plugin={owner} requestId={req} elementKey={key} columns={columns} rows={rows} cells={cells} />;
+    return (
+      <PluginRaster
+        key={`raster:${plugin}:${key}`}
+        plugin={plugin}
+        requestId={req}
+        elementKey={key}
+        columns={columns}
+        rows={rows}
+        cells={cells}
+      />
+    );
   }
   if (type === 'Image' && key && req) {
     const alt = typeof props.alt === 'string' ? props.alt : typeof node.alt === 'string' ? node.alt : undefined;
-    return <PluginImage plugin={owner} requestId={req} elementKey={key} columns={columns} rows={rows} alt={alt} />;
+    const imageSource = isRecord(props.source) ? props.source : isRecord(node.source) ? node.source : undefined;
+    return (
+      <PluginImage
+        key={`image:${plugin}:${key}`}
+        plugin={plugin}
+        requestId={req}
+        elementKey={key}
+        source={imageSource}
+        columns={columns}
+        rows={rows}
+        alt={alt}
+      />
+    );
   }
   if (type === 'Button') {
     const press = pressOf(node, owner);
@@ -3758,6 +4263,7 @@ export function DrawingNode({
     const childLabel = childList(node, props)
       .filter((child): child is string => typeof child === 'string')
       .join('');
+    const buttonHover = isRecord(node.hover) ? node.hover : isRecord(props.hover) ? props.hover : undefined;
     return (
       <PluginPressButton
         plugin={press.plugin}
@@ -3765,9 +4271,12 @@ export function DrawingNode({
         element={key}
         label={stringProp(props, node, 'label') ?? childLabel}
         hotkey={stringProp(props, node, 'hotkey')}
+        action={stringProp(props, node, 'action')}
         plain={boolProp(props, 'plain')}
         dimColor={boolProp(props, 'dimColor')}
         variant={stringProp(props, node, 'variant')}
+        hover={buttonHover}
+        component={component}
       />
     );
   }
@@ -3813,7 +4322,16 @@ export function DrawingNode({
     );
   }
   if (type === 'Code') {
-    return <PluginCode source={props.source} format={props.format} />;
+    return (
+      <PluginCode
+        source={props.source}
+        language={props.language}
+        path={props.path}
+        startLine={props.startLine}
+        format={props.format}
+        wrap={props.wrap}
+      />
+    );
   }
   if (type === 'Markdown') {
     const text = stringProp(props, node, 'text') ?? '';
@@ -3822,15 +4340,16 @@ export function DrawingNode({
         text={text}
         dimColor={boolProp(props, 'dimColor')}
         press={'press' in node ? pressOf(node, owner) : undefined}
+        elementKey={key}
         pressableLinks={props.pressableLinks}
       />
     );
   }
   if (type === 'Client') {
-    const client = isRecord(node.client) ? node.client : undefined;
     return (
       <PluginClient
-        plugin={typeof client?.plugin === 'string' ? client.plugin : owner}
+        key={`client:${plugin}:${key}`}
+        plugin={plugin}
         moduleName={stringProp(props, node, 'module') ?? ''}
         elementKey={key}
         requestId={req}
@@ -3883,6 +4402,10 @@ export function DrawingNode({
       </Link>
     );
   }
+  const groupPlugin =
+    isRecord(node.group) && typeof node.group.plugin === 'string' && node.group.plugin !== ''
+      ? node.group.plugin
+      : owner;
   const hover = isRecord(node.hover) ? node.hover : isRecord(props.hover) ? props.hover : undefined;
   if (type === 'Box' && key !== undefined) {
     const live = seenKeys === undefined || !seenKeys.has(key);
@@ -3896,6 +4419,7 @@ export function DrawingNode({
           isInline={false}
           props={layoutProps}
           hover={hover}
+          plugin={groupPlugin}
           elementKey={String(key)}
           elementPlugin={owner}
         >
@@ -3924,27 +4448,11 @@ export function DrawingNode({
           : mapped.length === 0
             ? null
             : undefined;
-    const textProps: Partial<ComponentProps<typeof Text>> = {
-      ...(boolProp(props, 'bold') !== undefined && { bold: boolProp(props, 'bold') }),
-      ...(boolProp(props, 'dimColor') !== undefined && { dimColor: boolProp(props, 'dimColor') }),
-      ...(boolProp(props, 'italic') !== undefined && { italic: boolProp(props, 'italic') }),
-      ...(boolProp(props, 'underline') !== undefined && { underline: boolProp(props, 'underline') }),
-      ...(boolProp(props, 'strikethrough') !== undefined && { strikethrough: boolProp(props, 'strikethrough') }),
-      ...(boolProp(props, 'inverse') !== undefined && { inverse: boolProp(props, 'inverse') }),
-      ...(typeof props.color === 'string' && { color: props.color as ComponentProps<typeof Text>['color'] }),
-      ...(typeof props.backgroundColor === 'string' && {
-        backgroundColor: props.backgroundColor as ComponentProps<typeof Text>['backgroundColor'],
-      }),
-      ...((props.wrap === 'wrap' ||
-        props.wrap === 'truncate' ||
-        props.wrap === 'truncate-start' ||
-        props.wrap === 'truncate-middle' ||
-        props.wrap === 'truncate-end') && { wrap: props.wrap }),
-    };
+    const textProps = textStyleFrom(props);
     if (hover !== undefined) {
       return (
-        <HoverBox isInline props={props} hover={hover}>
-          <Text {...textProps}>{text !== undefined ? text : mapped}</Text>
+        <HoverBox isInline props={props} hover={hover} plugin={groupPlugin}>
+          {text !== undefined ? text : mapped}
         </HoverBox>
       );
     }
@@ -3952,7 +4460,7 @@ export function DrawingNode({
   }
   if (hover !== undefined) {
     return (
-      <HoverBox isInline={false} props={props} hover={hover}>
+      <HoverBox isInline={false} props={props} hover={hover} plugin={groupPlugin}>
         {mapped}
       </HoverBox>
     );
@@ -4307,11 +4815,16 @@ export function PluginPaneDockHost({
 }): ReactNode {
   const hostRef = useRef<DOMElement | null>(null);
   const hostRows = useYogaMeasure(() => measurePluginClientBox(hostRef.current).height);
+  const isFocused = useSyncExternalStore(
+    subscribePanes,
+    () => getPanesState().focusedId !== null,
+    () => getPanesState().focusedId !== null,
+  );
   if (width <= 0) return null;
   const columns = Math.max(0, width - DOCK_GRIP_COLUMNS);
   return (
     <Box ref={hostRef} flexGrow={1} flexDirection="row" width={width}>
-      <PluginDockGrip columns={width} onResize={onResize} onSettle={onSettle} />
+      <PluginDockGrip columns={width} onResize={onResize} onSettle={onSettle} isFocused={isFocused} />
       <Box flexGrow={1} flexDirection="column" width={columns}>
         <PluginPaneSite
           fill
@@ -4450,10 +4963,19 @@ function PluginPaneSiteBody({
     contentRows: paneTreeRows,
     maxOffset: paneMaxOffset,
   });
+  const terminalSize = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const panesViewport = getPanesTerminalSize();
+  const paneViewportInfo = {
+    columns: panesViewport?.conversationColumns ?? terminalSize.columns,
+    rows: panesViewport?.rows ?? terminalSize.rows,
+    isFullscreen,
+  };
   const input = {
     surface: 'terminal',
     component: 'Pane',
     requestId: pane.id,
+    viewport: paneViewportInfo,
     props: {
       title: pane.title,
       isFocused: pane.isFocused,
@@ -4465,7 +4987,7 @@ function PluginPaneSiteBody({
   };
   const { drawn } = useRenderDrawing(
     input,
-    `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${JSON.stringify(viewingAgentView)}`,
+    `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${String(paneViewportInfo.columns)}\0${String(paneViewportInfo.rows)}\0${String(isFullscreen)}\0${JSON.stringify(viewingAgentView)}`,
   );
   const paneHeldRows = useHeldSiteRows({
     isOff: siteIsOff(hasMatchingFunctionHook('ui.render', { component: 'Pane' }), input),
@@ -4687,6 +5209,12 @@ function PluginPaneSiteBody({
   useRegisterKeybindingContext('PaneField', paneFieldActive);
   useRegisterKeybindingContext('AbovePromptInput', inputFocused);
   useRegisterKeybindingContext('AbovePromptSelect', selectFocused);
+  useRegisterOverlay('above-prompt-input', inputFocused);
+  useRegisterOverlay('above-prompt-select', selectFocused);
+  useLayoutEffect(() => {
+    setPaneFieldHeld(paneFieldActive);
+    return () => setPaneFieldHeld(false);
+  }, [paneFieldActive]);
   const ringLive = paneHeld && (paneFocusables.length > 0 || engineHeld !== null);
   useKeybinding('abovePrompt:next', paneRing['abovePrompt:next'], {
     context: paneRingContext,
@@ -4928,9 +5456,9 @@ function PluginPaneSiteBody({
                 focusPane(pane.id);
               }}
               {...((columns ?? pane.columns) !== undefined && { width: columns ?? pane.columns })}
-              {...(rows !== undefined ? { height: rows } : {})}
+              {...(rows !== undefined ? (fill ? { height: rows } : { maxHeight: rows }) : {})}
               {...(!fill && rows === undefined && (pane.bodyRows > 0 ? pane.bodyRows : pane.rows) !== undefined
-                ? { height: pane.bodyRows > 0 ? pane.bodyRows : pane.rows }
+                ? { maxHeight: pane.bodyRows > 0 ? pane.bodyRows : pane.rows }
                 : {})}
             >
               <Box
@@ -5019,12 +5547,14 @@ export function PluginAbovePromptSite({
   promptEmpty?: boolean;
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
   // densable `_Ee` `bt` from tot leftover `f5` (`Pe`), not a second floor(rows/2).
   const leftoverOf = useContext(AbovePromptLeftoverContext);
   const { addNotification } = useNotifications();
   const [aboveResetKey, setAboveResetKey] = useState(0);
   const bandCollapsed = useBandCollapsed();
   const panesFocusRequest = useSyncExternalStore(subscribePanes, () => getPanesState().focusRequest);
+  const panesOpenCount = useSyncExternalStore(subscribePanes, () => getPanesState().open.length);
   const contentRef = useRef<DOMElement | null>(null);
   const leftoverHostRef = useRef<DOMElement | null>(null);
   const heldFocusRef = useRef<{ node: DOMElement; index: number } | null>(null);
@@ -5183,11 +5713,18 @@ export function PluginAbovePromptSite({
 
   const viewingAgentView = useViewingAgentView();
   const aboveBodyColumns = Math.max(0, columns - COLLAPSE_HANDLE_COLUMNS);
+  const panesViewport = getPanesTerminalSize();
+  const aboveViewport = {
+    columns: panesViewport?.conversationColumns ?? columns,
+    rows: panesViewport?.rows ?? rows,
+    isFullscreen,
+  };
   const { drawn, drawnPlugin, markThrown } = useRenderDrawing(
     {
       surface: 'terminal',
       component: 'AbovePrompt',
       requestId: BAND_REQUEST_ID,
+      viewport: aboveViewport,
       props: {
         hasSurvey,
         isWorking,
@@ -5198,7 +5735,7 @@ export function PluginAbovePromptSite({
         view: viewingAgentView,
       },
     },
-    `${String(isWorking)}\0${String(hasSurvey)}\0${String(columns)}\0${String(rows)}\0${String(settledBudget)}\0${String(bandCollapsed)}\0${String(offset)}\0${String(bodyRows)}\0${JSON.stringify(viewingAgentView)}`,
+    `${String(isWorking)}\0${String(hasSurvey)}\0${String(aboveViewport.columns)}\0${String(aboveViewport.rows)}\0${String(isFullscreen)}\0${String(settledBudget)}\0${String(bandCollapsed)}\0${String(offset)}\0${String(bodyRows)}\0${JSON.stringify(viewingAgentView)}`,
   );
   const hasPluginTree =
     drawn !== undefined &&
@@ -5331,6 +5868,8 @@ export function PluginAbovePromptSite({
   useRegisterKeybindingContext('AbovePrompt', ringActive && !inputFocused && !selectFocused);
   useRegisterKeybindingContext('AbovePromptInput', inputFocused);
   useRegisterKeybindingContext('AbovePromptSelect', selectFocused);
+  useRegisterOverlay('above-prompt-input', inputFocused);
+  useRegisterOverlay('above-prompt-select', selectFocused);
 
   useKeybinding(
     'abovePrompt:toggle',
@@ -5376,15 +5915,54 @@ export function PluginAbovePromptSite({
       ),
     [focusables, bandHost],
   );
+  // densable `OZ(Nn)` — first autoFocus index, or 0 when focusables exist.
+  const entryIndex = useMemo(() => {
+    if (focusables.length === 0) return null;
+    const auto = focusables.findIndex(row => row.isAutoFocus);
+    return Math.max(0, auto);
+  }, [focusables]);
+  const fromNullBandFocus = nextBandFocus({ focus: null, count: focusables.length });
+  // densable `vn`: transition null→'band', then act(moveByPerson or Ie+Jt).
+  const focusBandStep = useCallback(
+    (pick: (wasNull: boolean) => number | 'band' | null) => {
+      const wasNull = focusIndexRef.current === null;
+      if (wasNull) clearFocusIndex('band');
+      bandHost.act(() => {
+        const chosen = pick(wasNull);
+        if (typeof chosen === 'number') {
+          bandHost.moveByPerson({
+            index: chosen,
+            apply: () => landFocusIndex(chosen),
+          });
+        } else if (chosen !== null) {
+          landFocusIndex(chosen);
+        } else {
+          setFocusPlaceBump(n => n + 1);
+        }
+      });
+    },
+    [bandHost, clearFocusIndex],
+  );
+  // densable `Kr`: click or element click focuses band (jumping to OZ on initial focus).
+  const focusBandByClick = useCallback(
+    (index: number | null) => {
+      if (!bandLiveGate || bandBlocked || bandCollapsed) return;
+      focusPane(null);
+      const target = index ?? (focusIndexRef.current === null ? entryIndex : null);
+      if (target === null) {
+        if (focusIndexRef.current === null && fromNullBandFocus !== null) {
+          clearFocusIndex(fromNullBandFocus);
+        }
+        return;
+      }
+      focusBandStep(() => target);
+    },
+    [bandLiveGate, bandBlocked, bandCollapsed, entryIndex, fromNullBandFocus, focusBandStep, clearFocusIndex],
+  );
+
   const bandClickedPress = useMemo(
-    () =>
-      clickFocusByPress(focusables, index => {
-        bandHost.moveByPerson({
-          index,
-          apply: () => landFocusIndex(index),
-        });
-      }),
-    [focusables, bandHost],
+    () => clickFocusByPress(focusables, index => focusBandByClick(index)),
+    [focusables, focusBandByClick],
   );
   const ringContext = pluginFieldContext(focusedTag, 'AbovePrompt');
   // densable Chat `abovePrompt:focus` — never a4n(true); pending focusRequest
@@ -5397,7 +5975,10 @@ export function PluginAbovePromptSite({
       // densable `sr=!h&&(Nn.length>0||no)` — survey off + focusables or cue.
       const bandLive = !hasSurvey && hasPluginTree && !bandCollapsed && (focusables.length > 0 || hasCue);
       const bandNext = nextBandFocus({ focus: focusIndex, count: focusables.length });
-      const canBandStep = bandLive && panes.focusedId === null && bandNext !== null;
+      const liveBandNext = nextBandFocus({ focus: focusIndexRef.current, count: focusables.length }) ?? bandNext;
+      const canBandStep = bandLive && panes.focusedId === null && liveBandNext !== null;
+      const pickAutoOrStep = (wasNull: boolean, step: number | 'band' | null) =>
+        wasNull && typeof step === 'number' ? (entryIndex ?? step) : step;
 
       if (panes.focusedId !== null) {
         // densable u3($Fr($r)) — last pane yields null and clears focus.
@@ -5405,9 +5986,9 @@ export function PluginAbovePromptSite({
         return;
       }
       if (canBandStep) {
-        if (typeof bandNext === 'number' || bandNext === 'band') {
-          landFocusIndex(bandNext);
-        }
+        focusBandStep(wasNull =>
+          pickAutoOrStep(wasNull, nextBandFocus({ focus: focusIndexRef.current, count: focusables.length })),
+        );
         return;
       }
       if (panes.open.length > 0) {
@@ -5418,16 +5999,16 @@ export function PluginAbovePromptSite({
       }
       if (bandLive) {
         const fromNull = nextBandFocus({ focus: null, count: focusables.length });
-        if (typeof fromNull === 'number' || fromNull === 'band') {
-          landFocusIndex(fromNull);
-        }
+        focusBandStep(wasNull => pickAutoOrStep(wasNull, fromNull));
+        return;
       }
+      return false;
     },
     {
       context: 'Chat',
       isActive:
-        getPanesState().focusedId !== null ||
-        getPanesState().open.length > 0 ||
+        panesFocusedId !== null ||
+        panesOpenCount > 0 ||
         (!hasSurvey && hasPluginTree && !bandCollapsed && (focusables.length > 0 || hasCue)),
     },
   );
@@ -5702,7 +6283,17 @@ export function PluginAbovePromptSite({
                 overflowY="hidden"
                 onWheel={hasCue && !bandBlocked ? bandWheel : undefined}
               >
-                <Box flexDirection="column" flexShrink={0} maxHeight={windowRows + listRows} overflowY="hidden">
+                <Box
+                  flexDirection="column"
+                  flexShrink={0}
+                  maxHeight={windowRows + listRows}
+                  overflowY="hidden"
+                  onClick={event => {
+                    if (event.hyperlinkUrl !== undefined) event.allowDefault();
+                    if (event.isWindowActivation || event.droppedAsStray) return;
+                    focusBandByClick(null);
+                  }}
+                >
                   {/* densable `fEe` — marginTop=-offset; keptColumns=DZ under CollapseHandle. */}
                   <Box
                     ref={node => {

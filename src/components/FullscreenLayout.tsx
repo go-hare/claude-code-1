@@ -15,7 +15,12 @@ import React, {
 } from 'react';
 import { fileURLToPath } from 'url';
 import { ModalContext } from '../context/modalContext.js';
-import { PromptOverlayProvider, usePromptOverlay, usePromptOverlayDialog } from '../context/promptOverlayContext.js';
+import {
+  PromptOverlayProvider,
+  usePromptOverlay,
+  usePromptOverlayAnchorMarginTop,
+  usePromptOverlayDialog,
+} from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
   AxcScrollAnchor,
@@ -29,6 +34,7 @@ import {
   instances,
   stringWidth,
   useApp,
+  useSelection,
   useTerminalFocus,
   type DOMElement,
 } from '@anthropic/ink';
@@ -40,6 +46,7 @@ import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fulls
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { useAppState } from '../state/AppState.js';
+import { createStore } from '../state/store.js';
 import { isNotificationVisible } from '../context/notifications.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import { NotificationBody } from './PromptInput/Notifications.js';
@@ -48,8 +55,9 @@ import { recordJumpToBottomClick } from '../utils/scrollTelemetry.js';
 import { plural } from '../utils/stringUtils.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
 import { ModalScroller } from './ModalScroller.js';
-import PromptInputFooterSuggestions from './PromptInput/PromptInputFooterSuggestions.js';
+import PromptInputFooterSuggestions, { type SuggestionItem } from './PromptInput/PromptInputFooterSuggestions.js';
 import type { StickyPrompt } from './VirtualMessageList.js';
+import { getPanesState, subscribePanes } from '../utils/plugins/functionHooksModules.js';
 
 /** Rows of transcript context kept visible above the modal pane's ▔ divider. */
 const MODAL_TRANSCRIPT_PEEK = 2;
@@ -1513,6 +1521,8 @@ type Props = {
    */
   dock?: ReactNode;
   dockWidth?: number;
+  /** densable tot `dockTail` (`Nc`) — fills the prompt anchor margin gap under `dock`. */
+  dockTail?: ReactNode;
 };
 
 /**
@@ -1740,6 +1750,7 @@ export function FullscreenLayout({
   sidebarWidth = 0,
   dock,
   dockWidth = 0,
+  dockTail,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
   // densable tot `Zot()||XMn()` — only history-search / elicitation take rows-2.
@@ -1756,6 +1767,7 @@ export function FullscreenLayout({
     : Math.max(1, Math.floor(terminalRows / 2));
   const abovePromptRef = useRef<DOMElement | null>(null);
   const aboveInnerRef = useRef<DOMElement | null>(null);
+  const promptContainerRef = useRef<DOMElement | null>(null);
   const promptInnerRef = useRef<DOMElement | null>(null);
   const leftoverModalBoxRef = useRef<DOMElement | null>(null);
   const leftoverModalHost = useMemo(
@@ -1769,6 +1781,12 @@ export function FullscreenLayout({
   // densable `gt=Math.max(0,Ne-pt)` — always, even when T is undefined.
   // Gold always mounts `$e` (abovePrompt wrapper); pt is that box's yoga height.
   const promptMaxHeight = Math.max(0, bottomMaxHeight - abovePromptHeight);
+  const modalVisible = modal?.visible ?? false;
+  const { clearSelection } = useSelection();
+  useLayoutEffect(() => {
+    if (!modalVisible) return;
+    return clearSelection;
+  }, [modalVisible, clearSelection]);
   // Scroll-derived chrome state lives HERE, not in REPL. StickyTracker
   // writes via ScrollChromeContext; pillVisible subscribes directly to
   // ScrollBox. Both change rarely (pill flips once per threshold crossing,
@@ -1847,6 +1865,7 @@ export function FullscreenLayout({
     const headerPrompt = sticky != null && sticky !== 'clicked' ? sticky : null;
     const padCollapsed = sticky != null;
     const mainColumns = Math.max(1, columns - sidebarWidth - dockWidth);
+    const abovePromptColumns = Math.max(1, columns - dockWidth);
     const dockVisible = dock != null && dockWidth > 0;
     const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
@@ -1859,7 +1878,6 @@ export function FullscreenLayout({
         }}
       />
     ) : null;
-    const modalVisible = modal?.visible ?? false;
     // densable tot `Ye` / leftover `Pe` — `_Ee` budgets from this, not a
     // second `floor(rows/2)`. Modal or missing prompt inner → null
     // (gold `Fe||We==null`).
@@ -1879,9 +1897,24 @@ export function FullscreenLayout({
       if (ye === null) return null;
       return leftoverClaims.reduce(leftoverChromeReduce, ye);
     };
+    const abovePromptBox = (
+      <Box
+        ref={abovePromptRef}
+        flexDirection="column"
+        flexShrink={0}
+        width="100%"
+        maxHeight={bottomMaxHeight}
+        overflowY="hidden"
+        display={modalVisible ? 'none' : 'flex'}
+      >
+        <Box ref={aboveInnerRef} flexDirection="column" flexShrink={0} width="100%">
+          <AbovePromptLeftoverContext value={leftoverOf}>{abovePrompt}</AbovePromptLeftoverContext>
+        </Box>
+      </Box>
+    );
 
     return (
-      <PromptOverlayProvider>
+      <PromptOverlayProvider container={promptContainerRef}>
         <Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">
           {/* $xc — scroll + sidebar row */}
           <Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">
@@ -1910,7 +1943,9 @@ export function FullscreenLayout({
                       </ScrollChromeContext>
                     </ScrollBox>
                     {pillNode}
-                    <TranscriptOverlayPad collapsed={padCollapsed}>{transcriptOverlay ?? null}</TranscriptOverlayPad>
+                    <TranscriptOverlayPad collapsed={headerPrompt != null}>
+                      {transcriptOverlay ?? null}
+                    </TranscriptOverlayPad>
                   </Box>
                 </TerminalSizeContext>
                 {sidebar != null &&
@@ -1928,19 +1963,13 @@ export function FullscreenLayout({
                     sidebar
                   ))}
               </Box>
-              <Box
-                ref={abovePromptRef}
-                flexDirection="column"
-                flexShrink={0}
-                width="100%"
-                maxHeight={bottomMaxHeight}
-                overflowY="hidden"
-                display={modalVisible ? 'none' : 'flex'}
-              >
-                <Box ref={aboveInnerRef} flexDirection="column" flexShrink={0} width="100%">
-                  <AbovePromptLeftoverContext value={leftoverOf}>{abovePrompt}</AbovePromptLeftoverContext>
-                </Box>
-              </Box>
+              {dockWidth > 0 ? (
+                <TerminalSizeContext value={{ columns: abovePromptColumns, rows: terminalRows }}>
+                  {abovePromptBox}
+                </TerminalSizeContext>
+              ) : (
+                abovePromptBox
+              )}
             </Box>
             {dock != null && (
               <Box
@@ -1958,21 +1987,30 @@ export function FullscreenLayout({
           {/* Uxc — prompt chrome (hidden while ozs visible). maxHeight is Ne minus measured abovePrompt. */}
           <PromptChromeBudgetContext value={promptMaxHeight}>
             <Box
+              ref={promptContainerRef}
               flexDirection="column"
               flexShrink={0}
               width="100%"
               maxHeight={promptMaxHeight}
               display={modalVisible ? 'none' : 'flex'}
             >
-              <SuggestionsOverlay />
-              <DialogOverlay />
-              <Box ref={promptInnerRef} flexDirection="column" width="100%" flexGrow={1} flexShrink={0}>
+              <Box
+                ref={promptInnerRef}
+                flexDirection="column"
+                width="100%"
+                flexGrow={1}
+                flexShrink={0}
+                overflowY="hidden"
+              >
                 <AbovePromptLeftoverContext value={leftoverYe}>
                   <LeftoverChromeSubscribeContext value={subscribeLeftoverChrome}>
                     <DockWidthContext value={dockVisible ? dockWidth : 0}>{bottom}</DockWidthContext>
                   </LeftoverChromeSubscribeContext>
                 </AbovePromptLeftoverContext>
               </Box>
+              {dockVisible && <DockTail width={dockWidth}>{dockTail}</DockTail>}
+              <SuggestionsOverlay rowsAbove={abovePromptHeight} />
+              <DialogOverlay rowsAbove={abovePromptHeight} />
             </Box>
           </PromptChromeBudgetContext>
           {/* Bxc — ozs pane */}
@@ -2041,7 +2079,7 @@ export function FullscreenLayout({
         </ModalContext>
       ) : null;
     return (
-      <PromptOverlayProvider>
+      <PromptOverlayProvider container={promptContainerRef}>
         <AxcStickyHost
           scrollRef={scrollRef}
           scrollable={
@@ -2051,11 +2089,12 @@ export function FullscreenLayout({
             </ScrollChromeContext>
           }
           bottom={
-            <>
+            <Box ref={promptContainerRef} flexDirection="column" width="100%">
+              {abovePrompt}
+              {bottom}
               <SuggestionsOverlay />
               <DialogOverlay />
-              {bottom}
-            </>
+            </Box>
           }
           overlay={overlayNode}
         />
@@ -2063,10 +2102,11 @@ export function FullscreenLayout({
     );
   }
 
-  // Gold else: Fragment{[C9t{b9t}, v9t, fCt?.content]} — no overlay.
+  // Gold else: Fragment{[C9t{b9t}, T, M, E?.content]} — no overlay.
   return (
     <>
-      {scrollable}
+      <ScrollChromeContext value={chromeCtx}>{scrollable}</ScrollChromeContext>
+      {abovePrompt}
       {bottom}
       {modal?.content}
     </>
@@ -2159,6 +2199,58 @@ function StickyPromptHeader({ text, onClick }: { text: string; onClick: () => vo
   );
 }
 
+/** densable `xw.dockLitStore` (`CL`) — shared dock grip hover/drag state. */
+export const dockLitStore = createStore(false);
+
+/** densable `JZ` / `Pw` — left `│` dock rule over the prompt anchor margin gap. */
+function DefaultDockRule(): React.ReactNode {
+  const dockLit = useSyncExternalStore(dockLitStore.subscribe, dockLitStore.getState, () => false);
+  const paneFocused = useSyncExternalStore(
+    subscribePanes,
+    () => getPanesState().focusedId !== null,
+    () => false,
+  );
+  const isLit = dockLit || paneFocused;
+  return (
+    <Box flexGrow={1} flexDirection="row">
+      <Box
+        flexShrink={0}
+        width={1}
+        borderStyle="single"
+        borderLeft
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        borderLeftDimColor={!isLit}
+        borderLeftColor={isLit ? 'suggestion' : undefined}
+      />
+    </Box>
+  );
+}
+
+/**
+ * densable `Nc` — fills `composerSidebarBackground` + left `│` border over the
+ * `anchorMarginTop` gap under the right-hand plugin pane dock.
+ */
+function DockTail({ width, children }: { width: number; children?: ReactNode }): React.ReactNode {
+  const anchorMarginTop = usePromptOverlayAnchorMarginTop();
+  if (anchorMarginTop <= 0) return null;
+  return (
+    <Box
+      position="absolute"
+      top={0}
+      right={0}
+      width={width}
+      height={anchorMarginTop}
+      flexDirection="column"
+      overflow="hidden"
+      backgroundColor="composerSidebarBackground"
+    >
+      {children ?? <DefaultDockRule />}
+    </Box>
+  );
+}
+
 // Slash-command suggestion overlay — see promptOverlayContext.tsx for why
 // it's portaled. Scroll-smear from floating over the DECSTBM region is
 // repaired at the Ink layer (absoluteRectsPrev in render-node-to-output.ts).
@@ -2167,16 +2259,33 @@ function StickyPromptHeader({ text, onClick }: { text: string; onClick: () => vo
 // even when the overlay extends above the viewport. We omit minHeight and
 // flex-end here: they would create empty padding rows that shift visible
 // items down into the prompt area when the list has fewer items than max.
-function SuggestionsOverlay(): React.ReactNode {
+function SuggestionsOverlay({ rowsAbove = 0 }: { rowsAbove?: number }): React.ReactNode {
   const data = usePromptOverlay();
-  if (!data || data.suggestions.length === 0) return null;
+  const anchorMarginTop = usePromptOverlayAnchorMarginTop();
+  const marginBottom = rowsAbove > 0 ? rowsAbove : -anchorMarginTop;
+  if (!data || (data.suggestions.length === 0 && !data.emptyMessage)) return null;
   return (
-    <Box position="absolute" bottom="100%" left={0} right={0} paddingX={2} paddingTop={1} flexDirection="column" opaque>
+    <Box
+      position="absolute"
+      bottom="100%"
+      marginBottom={marginBottom}
+      left={0}
+      right={0}
+      paddingX={2}
+      paddingTop={1}
+      flexDirection="column"
+      opaque
+    >
       <PromptInputFooterSuggestions
         suggestions={data.suggestions}
         selectedSuggestion={data.selectedSuggestion}
         maxColumnWidth={data.maxColumnWidth}
+        emptyMessage={data.emptyMessage}
+        hoveredId={data.hoveredId}
+        onSelect={data.onSelect}
+        onHoverChange={data.onHoverChange}
         overlay
+        noPad
       />
     </Box>
   );
@@ -2185,11 +2294,13 @@ function SuggestionsOverlay(): React.ReactNode {
 // Dialog portaled from PromptInput (AutoModeOptInDialog) — same clip-escape
 // pattern as SuggestionsOverlay. Renders later in tree order so it paints
 // over suggestions if both are ever up (they shouldn't be).
-function DialogOverlay(): React.ReactNode {
+function DialogOverlay({ rowsAbove = 0 }: { rowsAbove?: number }): React.ReactNode {
   const node = usePromptOverlayDialog();
+  const anchorMarginTop = usePromptOverlayAnchorMarginTop();
+  const marginBottom = rowsAbove > 0 ? rowsAbove : -anchorMarginTop;
   if (!node) return null;
   return (
-    <Box position="absolute" bottom="100%" left={0} right={0} opaque>
+    <Box position="absolute" bottom="100%" marginBottom={marginBottom} left={0} right={0} opaque>
       {node}
     </Box>
   );

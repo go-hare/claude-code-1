@@ -203,7 +203,7 @@ describe('REPL densable ozs / RPs wiring', () => {
     expect(replSrc).toContain("visible: modalChrome === 'visible'")
     expect(replSrc).toContain('toolJsxCentered')
     expect(replSrc).toContain('{ content: toolJSX!.jsx, visible: true')
-    expect(replSrc).toContain('suppressReason: dialogSuppressReason')
+    expect(replSrc).toContain('suppressReason={dialogSuppressReason}')
   })
 
   test('placeholder/scroll gate on densable kZt (not bare occupyModalSlot)', () => {
@@ -286,7 +286,9 @@ describe('FullscreenLayout densable Tyn visible gate', () => {
     const elseStart = layoutSrc.indexOf('// Gold else:')
     const qvt = layoutSrc.slice(qvtStart, elseStart)
     expect(qvt).toContain('<AxcStickyHost')
-    expect(qvt).toContain('<Box flexDirection="column" paddingX={2}>')
+    expect(qvt).toMatch(
+      /<Box(?: ref=\{leftoverModalBoxRef\})? flexDirection="column" paddingX=\{2\}>/,
+    )
     expect(qvt).toContain('{modal.content}')
     expect(qvt).not.toContain('Divider')
     expect(qvt).not.toContain('char="▔"')

@@ -1,5 +1,5 @@
 import { Box, Text, useApp } from '@anthropic/ink';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefCallback } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefCallback } from 'react';
 import {
   attachImageWidgetSwap,
   attachRasterWidgetPaint,
@@ -124,12 +124,21 @@ export function PluginRaster(props: PluginRasterProps): ReactNode {
   const rawRef = useRef<RawAnsiNode | null>(null);
   const schedulerRef = useRef<PaintScheduler | null>(null);
   const [paintedAnsi, setPaintedAnsi] = useState<string | undefined>(undefined);
+  const prevInitialRef = useRef<{ words: Uint32Array; palette: RasterPalette }>({
+    words: initialWords,
+    palette,
+  });
+  let currentPaintedAnsi = paintedAnsi;
+  if (prevInitialRef.current.words !== initialWords || prevInitialRef.current.palette !== palette) {
+    prevInitialRef.current = { words: initialWords, palette };
+    currentPaintedAnsi = undefined;
+  }
 
   const bindRaw: RefCallback<unknown> = node => {
     rawRef.current = (node as RawAnsiNode | null) ?? null;
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const size = { columns, rows };
     const scheduler = createPaintScheduler(words => {
       const ansi = rasterWordsToAnsi(words, size.columns, size.rows, palette);
@@ -152,7 +161,17 @@ export function PluginRaster(props: PluginRasterProps): ReactNode {
     };
   }, [plugin, elementKey, columns, rows, requestId, palette]);
 
-  const ansi = paintedAnsi ?? rasterWordsToAnsi(initialWords, columns, rows, palette);
+  useLayoutEffect(() => {
+    schedulerRef.current?.cancel();
+    setPaintedAnsi(undefined);
+    scheduleIfIncomplete(schedulerRef.current, palette, initialWords);
+  }, [initialWords, palette]);
+
+  const initialAnsi = useMemo(
+    () => rasterWordsToAnsi(initialWords, columns, rows, palette),
+    [initialWords, columns, rows, palette],
+  );
+  const ansi = currentPaintedAnsi ?? initialAnsi;
   return (
     <Box flexShrink={0} width={columns} height={rows} overflow="hidden" elementKey={elementKey} elementPlugin={plugin}>
       <ink-raw-ansi ref={bindRaw} rawText={ansi} rawWidth={columns} rawHeight={rows} />
@@ -164,6 +183,7 @@ export type PluginImageProps = {
   plugin: string;
   requestId: string;
   elementKey: string;
+  source?: unknown;
   columns: number;
   rows: number;
   alt?: string;
@@ -174,10 +194,18 @@ export type PluginImageProps = {
  * no sink / no id → dim alt. Widget swap transmits (`Zmo`/`Qt`); host `umt` already ran.
  */
 export function PluginImage(props: PluginImageProps): ReactNode {
-  const { plugin, requestId, elementKey, columns, rows, alt = 'image' } = props;
+  const { plugin, requestId, elementKey, source: initialSource, columns, rows, alt = 'image' } = props;
   const { terminalImages } = useApp();
+  const [allocated, setAllocated] = useState<{ id: number; images: NonNullable<typeof terminalImages> } | undefined>(
+    undefined,
+  );
   const [kittyId, setKittyId] = useState<number | undefined>(undefined);
   const [kittyProbe, setKittyProbe] = useState(0);
+  const transmittedRef = useRef<{
+    sourceKey: string | undefined;
+    source: unknown;
+    box: string | undefined;
+  }>({ sourceKey: undefined, source: undefined, box: undefined });
   const imageColumns = columns;
   const imageRows = rows;
   const placeholder = useMemo(() => {
@@ -196,7 +224,7 @@ export function PluginImage(props: PluginImageProps): ReactNode {
     });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // densable `ko`: allocate(k, xo) on `HC().terminalImages` when yo() has bits.
     const bits = kittyImageIdBits();
     const triedAllocate = terminalImages !== null && bits !== undefined;
@@ -204,7 +232,7 @@ export function PluginImage(props: PluginImageProps): ReactNode {
       terminalImages === null || bits === undefined
         ? undefined
         : terminalImages.allocate(bits, createKittyRefusedLogger({ plugin, requestId, key: elementKey }));
-    setKittyId(id);
+    setAllocated(id !== undefined && terminalImages !== null ? { id, images: terminalImages } : undefined);
     const detach = attachImageWidgetSwap(plugin, requestId, elementKey, source => {
       if (terminalImages === null) return 'the Image is not drawn under a terminal root';
       // Probe still open, or this terminal cannot draw placeholders: keep alt
@@ -222,6 +250,13 @@ export function PluginImage(props: PluginImageProps): ReactNode {
         resend: !consumed,
       });
       if (!ok) return KITTY_SINK_REFUSED;
+      transmittedRef.current = {
+        ...transmittedRef.current,
+        source,
+        box: `${columns}x${rows}`,
+      };
+      setKittyId(id);
+      bumpRasterFrames();
       return undefined;
     });
     noteDrawnElement(plugin, requestId, elementKey);
@@ -229,10 +264,49 @@ export function PluginImage(props: PluginImageProps): ReactNode {
     return () => {
       detach();
       if (id !== undefined) terminalImages?.free(id);
+      transmittedRef.current = { sourceKey: undefined, source: undefined, box: undefined };
+      setAllocated(undefined);
       setKittyId(undefined);
       bumpRasterFrames();
     };
   }, [plugin, requestId, elementKey, columns, rows, terminalImages, kittyProbe]);
+
+  useLayoutEffect(() => {
+    if (allocated === undefined) return;
+    let sourceKey: string | undefined;
+    if (initialSource !== undefined) {
+      try {
+        sourceKey = JSON.stringify(initialSource);
+      } catch {
+        sourceKey = undefined;
+      }
+    }
+    const box = `${columns}x${rows}`;
+    const sourceChanged = sourceKey !== transmittedRef.current.sourceKey;
+    const activeSource = sourceChanged ? initialSource : (transmittedRef.current.source ?? initialSource);
+    if (activeSource === undefined) {
+      if (sourceChanged) {
+        transmittedRef.current = { sourceKey: undefined, source: undefined, box: undefined };
+        setKittyId(undefined);
+      }
+      return;
+    }
+    const activeConsumed = isKittyShmSource(activeSource);
+    if (!sourceChanged && (box === transmittedRef.current.box || activeConsumed)) return;
+    try {
+      const ok = allocated.images.transmit(
+        allocated.id,
+        imageId => encodeKittyTransmit(imageId, activeSource, columns, rows),
+        { resend: !activeConsumed },
+      );
+      transmittedRef.current = { sourceKey, source: activeSource, box };
+      setKittyId(ok ? allocated.id : undefined);
+      bumpRasterFrames();
+    } catch {
+      transmittedRef.current = { sourceKey, source: activeSource, box };
+      setKittyId(undefined);
+    }
+  }, [allocated, initialSource, columns, rows]);
 
   // densable `To`: no id → dim alt Text; else sized overflow box + ink-raw-ansi placeholders.
   if (kittyId === undefined || placeholderFailed || placeholder === undefined) {
