@@ -1,11 +1,27 @@
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { OutputLine } from 'src/components/shell/OutputLine.js';
 import { Text } from '@anthropic/ink';
+import { sanitizeDisplayText, sanitizeDisplayTextInner } from 'src/utils/displaySanitize.js';
+import { getGraphemeSegmenter } from 'src/utils/intl.js';
 import { jsonParse } from 'src/utils/slowOperations.js';
 import type { Input, SendMessageToolOutput } from './SendMessageTool.js';
 
+const DEFAULT_IGNORABLE_RE = /\p{DI}/gu;
+
 export function renderToolUseMessage(input: Partial<Input>): React.ReactNode {
+  if (typeof input.to === 'string' && input.to.startsWith('did:') && typeof input.message === 'string') {
+    const clean = (s: string) =>
+      sanitizeDisplayTextInner(stripAnsi(s).replace(DEFAULT_IGNORABLE_RE, ''), false)
+        .replace(/[\s⠀]+/g, ' ')
+        .trim();
+    const msg = clean(input.message);
+    const segments = Array.from(getGraphemeSegmenter().segment(msg), s => s.segment);
+    const count = segments.length;
+    const truncated = count > 200 ? `${segments.slice(0, 200).join('')}… [${count} chars total]` : msg;
+    return sanitizeDisplayText(`${clean(input.to)} ← "${truncated}"`);
+  }
   if (typeof input.message !== 'object' || input.message === null) {
     return null;
   }

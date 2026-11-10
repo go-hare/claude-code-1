@@ -315,9 +315,11 @@ describe('filterFoldedLoopNoopMessages', () => {
 })
 
 describe('createLoopHealthyMetaMessage', () => {
-  test('pluralizes wakeups', () => {
+  test('pluralizes wakeups and sets turnCompanion', () => {
     const one = createLoopHealthyMetaMessage(1)
     const many = createLoopHealthyMetaMessage(3)
+    expect(one.turnCompanion).toBe(true)
+    expect(many.turnCompanion).toBe(true)
     expect(String((one.message as { content?: string }).content)).toContain(
       '1 prior /loop wakeup found nothing',
     )

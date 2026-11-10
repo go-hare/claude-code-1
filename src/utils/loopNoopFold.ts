@@ -76,7 +76,7 @@ function formatCronFireTime(d: Date): string {
       minute: '2-digit',
     })
     .replace(/,? at |, /, ' ')
-    .replace(/ ([AP]M)/, (_, ampm: string) => ampm.toLowerCase())
+    .replace(/[  ]([AP]M)/i, (_, ampm: string) => ampm.toLowerCase())
 }
 
 /**
@@ -229,10 +229,13 @@ export function createLoopScheduledTaskFireMessage(
 
 /** densable `aQT` — meta healthy-loop notice for the model. */
 export function createLoopHealthyMetaMessage(streak: number): Message {
-  return createUserMessage({
-    content: `[${streak} prior /loop ${plural(streak, 'wakeup')} found nothing actionable; loop is healthy.]`,
-    isMeta: true,
-  })
+  return {
+    ...createUserMessage({
+      content: `[${streak} prior /loop ${plural(streak, 'wakeup')} found nothing actionable; loop is healthy.]`,
+      isMeta: true,
+    }),
+    turnCompanion: true,
+  }
 }
 
 /**

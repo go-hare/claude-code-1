@@ -35,7 +35,7 @@ import {
   type PanelListItem,
   viewingPanelAncestorIds,
 } from '../utils/panelIdleSummary.js';
-import { evictTerminalTask } from '../utils/task/framework.js';
+import { evictTerminalTask, isParkedKeepaliveAgent } from '../utils/task/framework.js';
 import { isTerminalStatus } from './tasks/taskStatusUtils.js';
 
 const PANEL_WINDOW_SIZE = 5;
@@ -387,7 +387,9 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
       ...workflowItems.map(item => stringWidth(item.row.name)),
     ),
   );
-  const statusPartsList = visibleTasks.map(row => (isIdleSummaryRow(row) ? undefined : getAgentStatusParts(row, now)));
+  const statusPartsList = visibleTasks.map(row =>
+    isIdleSummaryRow(row) ? undefined : getAgentStatusParts(row, now, nameByAgentId.has(row.id)),
+  );
   const statusWidth = Math.max(
     0,
     ...statusPartsList.map((parts, idx) =>
@@ -553,39 +555,59 @@ type AgentStatusParts = {
 };
 
 /** densable $Ae / yZ Pe — elapsed + tokens, no pause/play glyph. */
-function getAgentStatusParts(task: PanelAgentTask, now: number): AgentStatusParts {
+export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName = false): AgentStatusParts {
   const isTeammate = isInProcessTeammateTask(task);
-  const isIdleTeammate = isTeammate && task.isIdle;
-  const localAgent = !isTeammate && isLocalAgentTask(task) ? (task as LocalAgentTaskState) : null;
+  const queuedCount = isTeammate
+    ? task.pendingUserMessages.length
+    : (task as LocalAgentTaskState).pendingMessages.length;
+  const queuedText = queuedCount > 0 ? `${queuedCount} queued` : '';
+  const tokenCount = task.progress?.tokenCount;
+  const lastActivity = task.progress?.lastActivity;
+  const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
+  const tokenText = tokenCount !== undefined && tokenCount > 0 ? `${arrow} ${formatNumber(tokenCount)} tokens` : '';
+
+  if (isTeammate) {
+    if (task.status === 'running' && task.awaitingPlanApproval) {
+      return { elapsed: 'awaiting approval', tokenText: '', queuedText, queuedCount };
+    }
+    if (task.isIdle) {
+      return { elapsed: 'idle', tokenText: '', queuedText, queuedCount };
+    }
+    if (isTerminalStatus(task.status)) {
+      const endTime = task.endTime ?? now;
+      return {
+        elapsed: formatDuration(Math.max(0, endTime - task.startTime)),
+        tokenText,
+        queuedText,
+        queuedCount,
+      };
+    }
+    return {
+      elapsed: formatDuration(Math.max(0, now - task.startTime)),
+      tokenText,
+      queuedText,
+      queuedCount,
+    };
+  }
+
+  const localAgent = isLocalAgentTask(task) ? (task as LocalAgentTaskState) : null;
   const isAdopting = localAgent !== null && Boolean(localAgent.adoptResumePending || localAgent.resuming);
-  const isIdleLocalAgent = localAgent !== null && !isAdopting && Boolean(localAgent.isIdle);
-  const isIdleRow = isIdleTeammate || isIdleLocalAgent;
-  const isPanelActive = localAgent !== null ? isLocalAgentPanelActive(localAgent) : !isTerminalStatus(task.status);
-  const isRunning = isPanelActive && !isIdleRow;
+  if (isAdopting) {
+    return { elapsed: 'resuming', tokenText, queuedText, queuedCount };
+  }
+  const isRunning = !isTerminalStatus(task.status);
+  if (isRunning && Boolean(localAgent?.isIdle)) {
+    return { elapsed: 'waiting', tokenText: '', queuedText, queuedCount };
+  }
+  if (task.status === 'completed' && hasName && !isParkedKeepaliveAgent(task)) {
+    return { elapsed: 'idle', tokenText: '', queuedText, queuedCount };
+  }
   const pausedMs = (task as LocalAgentTaskState).totalPausedMs ?? 0;
   const elapsedMs = Math.max(
     0,
     isRunning ? now - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
   );
-  const elapsed = isAdopting
-    ? 'resuming'
-    : isIdleTeammate
-      ? 'idle'
-      : isIdleLocalAgent
-        ? 'waiting'
-        : isTeammate && task.awaitingPlanApproval && task.status === 'running'
-          ? 'awaiting approval'
-          : formatDuration(elapsedMs);
-  const tokenCount = task.progress?.tokenCount;
-  const lastActivity = task.progress?.lastActivity;
-  const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
-  const tokenText =
-    !isIdleRow && tokenCount !== undefined && tokenCount > 0 ? `${arrow} ${formatNumber(tokenCount)} tokens` : '';
-  const queuedCount = isTeammate
-    ? task.pendingUserMessages.length
-    : (task as LocalAgentTaskState).pendingMessages.length;
-  const queuedText = queuedCount > 0 ? `${queuedCount} queued` : '';
-  return { elapsed, tokenText, queuedText, queuedCount };
+  return { elapsed: formatDuration(elapsedMs), tokenText, queuedText, queuedCount };
 }
 
 function statusPartsWidth(parts: AgentStatusParts): number {
@@ -657,7 +679,8 @@ function AgentLine({
   onClick,
 }: AgentLineProps): React.ReactNode {
   const [hover, setHover] = React.useState(false);
-  const { elapsed, tokenText, queuedText, queuedCount } = statusParts ?? getAgentStatusParts(task, Date.now());
+  const { elapsed, tokenText, queuedText, queuedCount } =
+    statusParts ?? getAgentStatusParts(task, Date.now(), name !== undefined);
   // densable yZ: Tr(v.progress?.summary??"")||Tr(v.description)
   const displayDescription = panelOneLine(task.progress?.summary ?? '') || panelOneLine(task.description);
   const highlighted = isSelected || hover;

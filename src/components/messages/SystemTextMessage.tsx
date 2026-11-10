@@ -15,6 +15,8 @@ const teamMemSaved = feature('TEAMMEM') ? (require('./teamMemSaved.js') as typeo
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { turnCompletionVerbFromUuid } from '../../constants/turnCompletionVerbs.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { isMainThreadQueuedCommand } from '../../bootstrap/state.js';
+import { isTerminalTaskStatus } from '../../Task.js';
 import type {
   SystemMessage,
   SystemStopHookSummaryMessage,
@@ -23,14 +25,104 @@ import type {
   SystemThinkingMessage,
   SystemMemorySavedMessage,
 } from '../../types/message.js';
-import { formatDuration, formatNumber, formatSecondsShort } from '../../utils/format.js';
+import type { QueuedCommand } from '../../types/textInputTypes.js';
+import { formatDuration, formatNumber } from '../../utils/format.js';
+import { getCommandQueue } from '../../utils/messageQueueManager.js';
 import { formatTurnDoneAt } from '../../utils/timeFormat.js';
 import { getGlobalConfig } from '../../utils/config.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { getPillLabel } from '../../tasks/pillLabel.js';
-import { isBackgroundTask } from '../../tasks/types.js';
+import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { useSelectedMessageBg } from '../messageActions.js';
+
+/**
+ * densable 2.1.289 xCe (@207711830): count local_agent with isBackgrounded
+ * that are running or isTerminal && !notified, local_workflow that are
+ * running or isTerminal && !notified, plus queued task-notification items.
+ */
+export function countPendingTurnDurationWork({
+  tasks,
+  queuedCommands = [],
+}: {
+  tasks: Record<string, TaskState>;
+  queuedCommands?: readonly QueuedCommand[];
+}): {
+  pendingAgents: number;
+  pendingWorkflows: number;
+} {
+  const pendingAgents = new Set<string>();
+  const pendingWorkflows = new Set<string>();
+  const addTask = (task: TaskState): void => {
+    if (task.type === 'local_agent' && task.isBackgrounded) {
+      pendingAgents.add(task.id);
+    } else if (task.type === 'local_workflow') {
+      pendingWorkflows.add(task.id);
+    }
+  };
+  for (const task of Object.values(tasks)) {
+    if (task.status === 'running' || (isTerminalTaskStatus(task.status) && !task.notified)) {
+      addTask(task);
+    }
+  }
+  for (const cmd of queuedCommands) {
+    if (cmd.mode !== 'task-notification' || !isMainThreadQueuedCommand(cmd) || cmd.taskId === undefined) {
+      continue;
+    }
+    const task = tasks[cmd.taskId];
+    if (task) {
+      addTask(task);
+    }
+  }
+  return {
+    pendingAgents: pendingAgents.size,
+    pendingWorkflows: pendingWorkflows.size,
+  };
+}
+
+/**
+ * densable 2.1.289 Umr (@207712030): resolve turn_duration fields and
+ * backgroundWaitStartTime across background agent/workflow waits.
+ */
+export function resolveTurnDurationWithBackgroundWait({
+  tasks,
+  queuedCommands = [],
+  turnDurationMs,
+  turnStartTime,
+  now,
+  backgroundWaitStartTime,
+}: {
+  tasks: Record<string, TaskState>;
+  queuedCommands?: readonly QueuedCommand[];
+  turnDurationMs: number;
+  turnStartTime: number;
+  now: number;
+  backgroundWaitStartTime: number | null;
+}): {
+  durationMs: number;
+  pendingBackgroundAgentCount: number | undefined;
+  pendingWorkflowCount: number | undefined;
+  backgroundWaitStartTime: number | null;
+} {
+  const { pendingAgents, pendingWorkflows } = countPendingTurnDurationWork({
+    tasks,
+    queuedCommands,
+  });
+  if (pendingAgents > 0 || pendingWorkflows > 0) {
+    return {
+      durationMs: turnDurationMs,
+      pendingBackgroundAgentCount: pendingAgents > 0 ? pendingAgents : undefined,
+      pendingWorkflowCount: pendingWorkflows > 0 ? pendingWorkflows : undefined,
+      backgroundWaitStartTime: backgroundWaitStartTime ?? turnStartTime,
+    };
+  }
+  return {
+    durationMs: backgroundWaitStartTime !== null ? now - backgroundWaitStartTime : turnDurationMs,
+    pendingBackgroundAgentCount: undefined,
+    pendingWorkflowCount: undefined,
+    backgroundWaitStartTime: null,
+  };
+}
 
 type Props = {
   message: SystemMessage;
@@ -241,40 +333,25 @@ function StopHookSummaryMessage({
   const stopReason = message.stopReason as string | undefined;
   const { columns } = useTerminalSize();
 
-  // Prefer wall-clock time when available (hooks run in parallel)
-  const totalDurationMs = message.totalDurationMs ?? hookInfos.reduce((sum, h) => sum + (h.durationMs ?? 0), 0);
-  const isAnt = process.env.USER_TYPE === 'ant';
-
-  // Only show summary if there are errors or continuation was prevented
-  // For ants: also show when hooks took > 500ms
-  // Non-stop hooks (e.g. PreToolUse) are pre-filtered by the caller
+  // Only show summary if there are errors, additional context, continuation was prevented, or a hookLabel is present
   if (hookErrors.length === 0 && hookAdditionalContext.length === 0 && !preventedContinuation && !message.hookLabel) {
-    if (!isAnt || totalDurationMs < HOOK_TIMING_DISPLAY_THRESHOLD_MS) {
-      return null;
-    }
+    return null;
   }
 
-  const totalStr = isAnt && totalDurationMs > 0 ? ` (${formatSecondsShort(totalDurationMs)})` : '';
   // Non-stop hooks (e.g. PreToolUse) render as a child line without bullet
   if (message.hookLabel) {
     return (
       <Box flexDirection="column" width="100%">
         <Text dimColor>
           <Text aria-hidden>{'  ⎿  '}</Text>Ran {hookCount} {message.hookLabel} {hookCount === 1 ? 'hook' : 'hooks'}
-          {totalStr}
         </Text>
         {isTranscriptMode &&
-          hookInfos.map((info, idx) => {
-            const durationStr =
-              isAnt && info.durationMs !== undefined ? ` (${formatSecondsShort(info.durationMs)})` : '';
-            return (
-              <Text key={`cmd-${idx}`} dimColor>
-                <Text aria-hidden>{'     ⎿ '}</Text>
-                {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
-                {durationStr}
-              </Text>
-            );
-          })}
+          hookInfos.map((info, idx) => (
+            <Text key={`cmd-${idx}`} dimColor>
+              <Text aria-hidden>{'     ⎿ '}</Text>
+              {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
+            </Text>
+          ))}
       </Box>
     );
   }
@@ -287,7 +364,6 @@ function StopHookSummaryMessage({
       <Box flexDirection="column" width={columns - 10}>
         <Text>
           Ran <Text bold>{hookCount}</Text> {message.hookLabel ?? 'stop'} {hookCount === 1 ? 'hook' : 'hooks'}
-          {totalStr}
           {!verbose && hookInfos.length > 0 && (
             <>
               {' '}
@@ -297,17 +373,12 @@ function StopHookSummaryMessage({
         </Text>
         {verbose &&
           hookInfos.length > 0 &&
-          hookInfos.map((info, idx) => {
-            const durationStr =
-              isAnt && info.durationMs !== undefined ? ` (${formatSecondsShort(info.durationMs)})` : '';
-            return (
-              <Text key={`cmd-${idx}`} dimColor>
-                <Text aria-hidden>⎿ &nbsp;</Text>
-                {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
-                {durationStr}
-              </Text>
-            );
-          })}
+          hookInfos.map((info, idx) => (
+            <Text key={`cmd-${idx}`} dimColor>
+              <Text aria-hidden>⎿ &nbsp;</Text>
+              {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
+            </Text>
+          ))}
         {preventedContinuation && stopReason && (
           <Text>
             <Text aria-hidden dimColor>
@@ -384,25 +455,39 @@ function TurnDurationMessage({
   // densable ig(uuid): hash-stable verb; remount must not reshuffle history.
   const uuid = typeof message.uuid === 'string' ? message.uuid : '';
   const verb = turnCompletionVerbFromUuid(uuid);
+  const liveTasks = useAppStateMaybeOutsideOfProvider(s => s.tasks);
+  // densable 2.1.289 vg (@207720380): check live pending status on mount via useState initializer.
+  const [mountSnapshot] = useState(() => {
+    const live = countPendingTurnDurationWork({
+      tasks: liveTasks ?? {},
+      queuedCommands: getCommandQueue(),
+    });
+    const rawTimestamp = message.timestamp;
+    const timestampDate =
+      typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number'
+        ? new Date(rawTimestamp)
+        : rawTimestamp instanceof Date
+          ? rawTimestamp
+          : undefined;
+    return {
+      hasPendingAgents: liveTasks === null ? true : live.pendingAgents > 0,
+      hasPendingWorkflows: liveTasks === null ? true : live.pendingWorkflows > 0,
+      showTurnDuration: getGlobalConfig().showTurnDuration ?? true,
+      doneAt:
+        timestampDate !== undefined && !Number.isNaN(timestampDate.getTime()) ? formatTurnDoneAt(timestampDate) : '',
+    };
+  });
+  const { hasPendingAgents, hasPendingWorkflows, showTurnDuration, doneAt } = mountSnapshot;
   const pending = message as unknown as { pendingBackgroundAgentCount?: unknown; pendingWorkflowCount?: unknown };
   const pendingAgents =
-    typeof pending.pendingBackgroundAgentCount === 'number' ? pending.pendingBackgroundAgentCount : 0;
-  const pendingWorkflows = typeof pending.pendingWorkflowCount === 'number' ? pending.pendingWorkflowCount : 0;
+    hasPendingAgents && typeof pending.pendingBackgroundAgentCount === 'number'
+      ? pending.pendingBackgroundAgentCount
+      : 0;
+  const pendingWorkflows =
+    hasPendingWorkflows && typeof pending.pendingWorkflowCount === 'number' ? pending.pendingWorkflowCount : 0;
   const waitingForBg = pendingAgents > 0 || pendingWorkflows > 0;
 
-  const showTurnDuration = getGlobalConfig().showTurnDuration ?? true;
-
   const duration = formatDuration(message.durationMs as number);
-  // densable 2.1.289 kVe(timestamp) → ` · done ${j}` (today: hour numeric, no am/pm).
-  const rawTimestamp = message.timestamp;
-  const timestampDate =
-    typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number'
-      ? new Date(rawTimestamp)
-      : rawTimestamp instanceof Date
-        ? rawTimestamp
-        : undefined;
-  const doneAt =
-    timestampDate !== undefined && !Number.isNaN(timestampDate.getTime()) ? formatTurnDoneAt(timestampDate) : '';
   const hasBudget = message.budgetLimit !== undefined;
   const budgetSuffix = (() => {
     if (!hasBudget) return '';

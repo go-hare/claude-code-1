@@ -6753,6 +6753,7 @@ export function createStopHookSummaryMessage(
   toolUseID?: string,
   hookLabel?: string,
   totalDurationMs?: number,
+  hookAdditionalContext?: string[],
 ): SystemStopHookSummaryMessage {
   return {
     type: 'system',
@@ -6760,6 +6761,7 @@ export function createStopHookSummaryMessage(
     hookCount,
     hookInfos,
     hookErrors,
+    hookAdditionalContext,
     preventedContinuation,
     stopReason,
     hasOutput,

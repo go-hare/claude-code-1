@@ -7,6 +7,7 @@ function makeHookSummary(
     hookCount: number
     hookInfos: any[]
     hookErrors: any[]
+    hookAdditionalContext: string[]
     preventedContinuation: boolean
     hasOutput: boolean
     totalDurationMs: number
@@ -19,6 +20,7 @@ function makeHookSummary(
     hookCount: overrides.hookCount ?? 1,
     hookInfos: overrides.hookInfos ?? [],
     hookErrors: overrides.hookErrors ?? [],
+    hookAdditionalContext: overrides.hookAdditionalContext,
     preventedContinuation: overrides.preventedContinuation ?? false,
     hasOutput: overrides.hasOutput ?? false,
     totalDurationMs: overrides.totalDurationMs ?? 10,
@@ -83,6 +85,16 @@ describe('collapseHookSummaries', () => {
     ]
     const result = collapseHookSummaries(messages)
     expect(result[0].hookErrors).toHaveLength(2)
+  })
+
+  test('merges hookAdditionalContext arrays', () => {
+    const messages = [
+      makeHookSummary({ hookLabel: 'A', hookAdditionalContext: ['ctx1'] }),
+      makeHookSummary({ hookLabel: 'A' }),
+      makeHookSummary({ hookLabel: 'A', hookAdditionalContext: ['ctx2'] }),
+    ]
+    const result = collapseHookSummaries(messages)
+    expect((result[0] as any).hookAdditionalContext).toEqual(['ctx1', 'ctx2'])
   })
 
   test('takes max totalDurationMs', () => {

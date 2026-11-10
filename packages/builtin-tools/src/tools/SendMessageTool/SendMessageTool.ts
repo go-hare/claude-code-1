@@ -1109,7 +1109,6 @@ function resolveSendMessageOriginAndBody(
       : displayName,
   )
   const bodyEscaped = escapeAgentMessageBody(message)
-  const envelopeFrom = name || from
   return {
     origin: {
       kind: 'peer',
@@ -1119,7 +1118,7 @@ function resolveSendMessageOriginAndBody(
       body: bodyEscaped,
       lineage: 'descendant',
     },
-    body: wrapAgentMessageEnvelope(envelopeFrom, message),
+    body: wrapAgentMessageEnvelope(from, message),
   }
 }
 

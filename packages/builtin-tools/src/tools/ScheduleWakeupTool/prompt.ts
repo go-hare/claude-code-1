@@ -16,6 +16,7 @@ import {
 import { isClaudeAISubscriber } from 'src/utils/auth.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
+import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
 import { CRON_DELETE_TOOL_NAME } from '../ScheduleCronTool/prompt.js'
 import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
@@ -29,6 +30,34 @@ export {
   AUTONOMOUS_LOOP_SENTINEL,
   SCHEDULE_WAKEUP_DESCRIPTION,
   SCHEDULE_WAKEUP_TOOL_NAME,
+}
+
+/** densable `xyn` — status update timing & channel guidance for /loop ticks. */
+export function buildLoopTickStatusGuidance({
+  preArmStatus,
+  briefMode,
+}: {
+  preArmStatus: boolean
+  briefMode: boolean
+}): string {
+  const modeGuidance = briefMode
+    ? `This session is in brief mode: plain response text is treated as unread — send the update via ${BRIEF_TOOL_NAME} with \`status: 'proactive'\`; an update left in plain text or thinking never reaches the user.`
+    : 'This must be ordinary visible response text — the user cannot see your thinking/reasoning, so an update written only there is invisible to them.'
+  const timingGuidance = preArmStatus
+    ? ` ${briefMode ? 'Send' : 'Write'} it immediately BEFORE calling ${SCHEDULE_WAKEUP_TOOL_NAME} — on this model the turn ends as soon as that tool returns, so an update after the call never goes out.`
+    : ' Make it the last thing in the turn, then end the turn.'
+  return `${modeGuidance}${timingGuidance}`
+}
+
+/** densable `Pyn` — outcome guidance when the loop stops or ends. */
+export function buildLoopEndOutcomeGuidance({
+  briefMode,
+}: {
+  briefMode: boolean
+}): string {
+  return briefMode
+    ? `send the loop's outcome to the user via ${BRIEF_TOOL_NAME} (\`status: 'proactive'\`) — plain response text is treated as unread in this session`
+    : "write the loop's outcome for the user as ordinary visible response text"
 }
 
 /** densable `Cfr` — 243 default-on (same as `loopDynamic.isLoopNoopFoldEnabled`). */

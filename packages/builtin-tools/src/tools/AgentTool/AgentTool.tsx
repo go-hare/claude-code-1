@@ -2506,7 +2506,7 @@ taskId: ${data.taskId}
 session_url: ${data.sessionUrl}
 output_file: ${data.outputFile} (final results land here only after the completion notification; until then it holds a partial, still-growing event log)
 The agent is running in the cloud. You will be notified automatically when it completes. Do not report or predict its results before that notification arrives.
-In your own words, briefly tell the user what you launched and end your response.`,
+In your own words, briefly tell the user what you launched — do not echo this tool result — and end your response.`,
           },
         ],
       };
@@ -2571,6 +2571,22 @@ Do NOT ${FILE_READ_TOOL_NAME} or tail this file via the shell tool — it is the
           content: provenanced,
         };
       }
+      const trailer = `agentId: ${data.agentId} (use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent)${worktreeInfoText}
+<usage>subagent_tokens: ${data.totalTokens}
+tool_uses: ${data.totalToolUseCount}
+duration_ms: ${data.totalDurationMs}</usage>`;
+      if (provenanced !== contentOrMarker && provenanced.length === 1) {
+        return {
+          tool_use_id: toolUseID,
+          type: 'tool_result',
+          content: [
+            {
+              type: 'text',
+              text: `${provenanced[0]!.text}\n${trailer}`,
+            },
+          ],
+        };
+      }
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
@@ -2578,10 +2594,7 @@ Do NOT ${FILE_READ_TOOL_NAME} or tail this file via the shell tool — it is the
           ...provenanced,
           {
             type: 'text',
-            text: `agentId: ${data.agentId} (use SendMessage with to: '${data.agentId}' to continue this agent)${worktreeInfoText}
-<usage>total_tokens: ${data.totalTokens}
-tool_uses: ${data.totalToolUseCount}
-duration_ms: ${data.totalDurationMs}</usage>`,
+            text: trailer,
           },
         ],
       };

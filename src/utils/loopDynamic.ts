@@ -96,7 +96,7 @@ export function isLoopKeepaliveGateEnabled(): boolean {
   }
   return getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_kairos_loop_keepalive',
-    false,
+    true,
   )
 }
 
@@ -295,6 +295,9 @@ export function scheduleDynamicWakeup(
     prompt,
     createdAt,
     kind: 'loop',
+    scheduledFor: targetMs,
+    reason: opts.reason,
+    ...(viaKeepalive && { keepalive: true }),
   }
   addSessionCronTask(task)
   setLoopChainStartedAt(prompt, {

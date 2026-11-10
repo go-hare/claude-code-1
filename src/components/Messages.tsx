@@ -489,6 +489,65 @@ const MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE = 30;
 const MAX_MESSAGES_WITHOUT_VIRTUALIZATION = 200;
 const MESSAGE_CAP_STEP = 50;
 
+function isHumanTurnOrigin(origin: { kind?: string } | undefined): boolean {
+  return origin === undefined || origin.kind === 'human';
+}
+
+/**
+ * densable 2.1.289 xd (@207890283) — fold consecutive turn_duration messages
+ * with identical non-zero (pendingBackgroundAgentCount, pendingWorkflowCount)
+ * when not in verbose/transcript mode.
+ */
+export function collapseDuplicateTurnDurationMessages<T extends RenderableMessage>(
+  messages: T[],
+  skipCollapse: boolean,
+): T[] {
+  if (skipCollapse) return messages;
+  let lastAgents = 0;
+  let lastWorkflows = 0;
+  let out: T[] | null = null;
+  for (const [idx, msg] of messages.entries()) {
+    if (msg.type === 'system' && msg.subtype === 'turn_duration') {
+      const m = msg as unknown as {
+        pendingBackgroundAgentCount?: number;
+        pendingWorkflowCount?: number;
+        budgetLimit?: number;
+        briefHiddenCount?: number;
+      };
+      const agents = m.pendingBackgroundAgentCount ?? 0;
+      const workflows = m.pendingWorkflowCount ?? 0;
+      const isDuplicate =
+        (agents > 0 || workflows > 0) &&
+        agents === lastAgents &&
+        workflows === lastWorkflows &&
+        m.budgetLimit === undefined &&
+        (m.briefHiddenCount ?? 0) === 0;
+      lastAgents = agents;
+      lastWorkflows = workflows;
+      if (isDuplicate) {
+        out ??= messages.slice(0, idx);
+        continue;
+      }
+    } else if (
+      msg.type === 'user'
+        ? !msg.isMeta &&
+          msg.toolUseResult === undefined &&
+          !msg.isCompactSummary &&
+          isHumanTurnOrigin(msg.origin as { kind?: string } | undefined)
+        : msg.type === 'attachment' &&
+          msg.attachment.type === 'queued_command' &&
+          msg.attachment.isMeta !== true &&
+          msg.attachment.commandMode !== 'task-notification' &&
+          isHumanTurnOrigin(msg.attachment.origin as { kind?: string } | undefined)
+    ) {
+      lastAgents = 0;
+      lastWorkflows = 0;
+    }
+    out?.push(msg);
+  }
+  return out ?? messages;
+}
+
 /** densable Vb — cap non-virtualized slice to Math.min(200, rows) in fullscreen. */
 function getNonVirtualizedMessageCap(rows: number, isFullscreen: boolean): number {
   return isFullscreen ? Math.min(MAX_MESSAGES_WITHOUT_VIRTUALIZATION, rows) : MAX_MESSAGES_WITHOUT_VIRTUALIZATION;
@@ -1024,7 +1083,14 @@ const MessagesImpl = ({
   // async agent toolStats for focus transcript summary
   const appStore = useAppStateStore();
 
-  const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
+  const messagesBeforeLoopFold = useMemo(
+    () => (verbose || isTranscriptMode ? messages : filterFoldedLoopNoopMessages(messages)),
+    [messages, verbose, isTranscriptMode],
+  );
+  const normalizedMessages = useMemo(
+    () => normalizeMessages(messagesBeforeLoopFold).filter(isNotEmptyMessage),
+    [messagesBeforeLoopFold],
+  );
 
   const [transcriptProgressSplitter] = useState(() => new TranscriptProgressSplitter());
   const [rowLookupsProjector] = useState(() => new RowLookupsProjector());
@@ -1185,21 +1251,25 @@ const MessagesImpl = ({
 
     const hasTruncatedMessages = shouldTruncate && briefFiltered.length > MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE;
 
-    const { messages: groupedMessages } = applyGrouping(messagesToShow as MessageType[], tools, verbose);
+    // densable 2.1.289 bd (@207950450) — hide messages folded by UXm loop noop-fold
+    // fire lines BEFORE applyGrouping and collapseReadSearchGroups; skip when verbose || isTranscriptMode.
+    const loopUnfolded =
+      verbose || isTranscriptMode
+        ? (messagesToShow as MessageType[])
+        : filterFoldedLoopNoopMessages(messagesToShow as MessageType[]);
 
-    // densable sGf — hide messages folded by UXm loop noop-fold fire lines.
-    const collapsedBase = filterFoldedLoopNoopMessages(
-      collapseBackgroundBashNotifications(
-        collapseHookSummaries(
-          collapseTeammateShutdowns(
-            collapseReadSearchGroups(groupedMessages, tools, {
-              expandRows: isTranscriptMode && virtualScrollRuntimeGate,
-              cache: collapseCache,
-            }),
-          ),
+    const { messages: groupedMessages } = applyGrouping(loopUnfolded, tools, verbose);
+
+    const collapsedBase = collapseBackgroundBashNotifications(
+      collapseHookSummaries(
+        collapseTeammateShutdowns(
+          collapseReadSearchGroups(groupedMessages, tools, {
+            expandRows: isTranscriptMode && virtualScrollRuntimeGate,
+            cache: collapseCache,
+          }),
         ),
-        verbose,
       ),
+      verbose,
     );
     // Focus transcript re-collapse + toolStats + pendingText + briefHiddenCount.
     const getAgentToolStats = (agentId: string): BriefToolStats | undefined => {
@@ -1209,7 +1279,7 @@ const MessagesImpl = ({
       if (task?.type === 'local_agent') return task.result?.toolStats;
       return undefined;
     };
-    const collapsed =
+    const afterFocus =
       focusTranscriptActive && !isTranscriptMode
         ? (filterForFocusTranscript(collapsedBase as Parameters<typeof filterForFocusTranscript>[0], {
             tools,
@@ -1217,6 +1287,7 @@ const MessagesImpl = ({
             getAgentToolStats,
           }) as typeof collapsedBase)
         : collapsedBase;
+    const collapsed = collapseDuplicateTurnDurationMessages(afterFocus, verbose || isTranscriptMode);
 
     const lookupsKey = computeMessageStructureKey(transcript, messagesToShow as MessageType[]);
     const currentLastAssistantMsgId = (() => {

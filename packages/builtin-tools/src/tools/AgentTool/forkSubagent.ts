@@ -7,6 +7,10 @@ import {
   FORK_DIRECTIVE_PREFIX,
 } from 'src/constants/xml.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -62,6 +66,10 @@ export function isForkSubagentProductEnabled(): boolean {
   else source = 'default'
   if (source === 'disabled') return false
   forkProductSource = source
+  logEvent('tengu_fork_subagent_enabled', {
+    source:
+      source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
   return true
 }
 
@@ -98,7 +106,7 @@ export const FORK_SUBAGENT_TYPE = 'fork'
 export const FORK_AGENT = {
   agentType: FORK_SUBAGENT_TYPE,
   whenToUse:
-    'Selected explicitly via `subagent_type` fork. Inherits the parent conversation and system prompt.',
+    'Fork — inherits full conversation context. Selected explicitly via subagent_type: "fork" when the fork gate is on; never the default.',
   tools: ['*'],
   maxTurns: 200,
   model: 'inherit',

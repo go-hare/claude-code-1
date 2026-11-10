@@ -225,4 +225,26 @@ describe('IdleReturnController densable 2.1.246 F$', () => {
     ).toBe(true)
     h.controller.dispose()
   })
+
+  test('does not fire duplicate OS notifications for the same lastQueryCompletionTime when overlay toggles', () => {
+    const h = harness({ lastQueryCompletionTime: 1, tokens: 50_000 })
+    h.time.advance(60_000 + 1)
+    expect(h.idleNotifs).toHaveLength(1)
+    h.controller.setLocalOverlayShowing(true)
+    h.controller.setLocalOverlayShowing(false)
+    h.time.advance(60_000 + 1)
+    expect(h.idleNotifs).toHaveLength(1)
+    h.controller.dispose()
+  })
+
+  test('onOtherTurnComplete resets hint timer from latest turn completion', () => {
+    const h = harness({ lastQueryCompletionTime: 1, tokens: 150_000 })
+    h.time.advance(50 * 60_000)
+    h.controller.onOtherTurnComplete()
+    h.time.advance(30 * 60_000)
+    expect(h.notifications).toEqual([])
+    h.time.advance(45 * 60_000 + 1)
+    expect(h.notifications).toHaveLength(1)
+    h.controller.dispose()
+  })
 })

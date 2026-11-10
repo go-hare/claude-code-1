@@ -39,6 +39,7 @@ import { fetchSession } from '../../utils/teleport/api.js';
 import { archiveRemoteSession, pollRemoteSessionEvents } from '../../utils/teleport.js';
 import type { UltraplanPhase } from '../../utils/ultraplan/ccrSession.js';
 import type { TodoList } from '../../utils/todo/types.js';
+import { escapeXml } from '../../utils/xml.js';
 
 export type RemoteAgentTaskState = TaskStateBase & {
   type: 'remote_agent';
@@ -283,12 +284,13 @@ function enqueueRemoteNotification(
   const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
 
   const outputPath = getTaskOutputPath(taskId);
+  const summary = `Remote task "${title}" ${statusText}`;
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>Remote task "${title}" ${statusText}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`;
 
   enqueuePendingNotification({ value: message, mode: 'task-notification' });
@@ -314,13 +316,14 @@ function enqueueRichRemoteNotification(
   const statusText = status === 'completed' ? 'completed successfully' : status === 'failed' ? 'failed' : 'was stopped';
   const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
   const outputPath = getTaskOutputPath(taskId);
+  const summary = `Remote task "${title}" ${statusText}`;
 
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>Remote task "${title}" ${statusText}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 The remote agent produced the following structured outcome. Summarize the key changes for the user:
 
@@ -514,11 +517,12 @@ ${reviewContent}${nudge}`;
 function enqueueRemoteReviewFailureNotification(taskId: string, reason: string, setAppState: SetAppState): void {
   if (!markTaskNotified(taskId, setAppState)) return;
 
+  const summary = `Cloud review failed: ${reason}`;
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>failed</${STATUS_TAG}>
-<${SUMMARY_TAG}>Cloud review failed: ${reason}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 Cloud review did not produce output (${reason}). Tell the user to retry /code-review ultra, or use /review for a local review instead.`;
 

@@ -92,6 +92,48 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
+const TASK_UPDATE_ID_ALIASES = ['id', 'task_id'] as const
+const TASK_UPDATE_ACTIVE_FORM_ALIASES = ['active_form'] as const
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+export function coerceTaskUpdateInput(input: unknown): {
+  input: z.infer<InputSchema>
+  shapeClass: string
+} | null {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return null
+  }
+  const shapeParts: string[] = []
+  const reshaped: Record<string, unknown> = {
+    ...(input as Record<string, unknown>),
+  }
+  const aliasPairs: ReadonlyArray<[readonly string[], string]> = [
+    [TASK_UPDATE_ID_ALIASES, 'taskId'],
+    [TASK_UPDATE_ACTIVE_FORM_ALIASES, 'activeForm'],
+  ]
+  for (const [aliases, target] of aliasPairs) {
+    for (const alias of aliases) {
+      if (
+        alias in reshaped &&
+        !(target in reshaped) &&
+        isNonEmptyString(reshaped[alias])
+      ) {
+        reshaped[target] = reshaped[alias]
+        delete reshaped[alias]
+        shapeParts.push(`alias_${alias}`)
+      }
+    }
+  }
+  if (shapeParts.length === 0) return null
+  return {
+    input: reshaped as z.infer<InputSchema>,
+    shapeClass: shapeParts.join('+'),
+  }
+}
+
 export const TaskUpdateTool = buildTool({
   name: TASK_UPDATE_TOOL_NAME,
   searchHint: 'update a task',
@@ -111,6 +153,7 @@ export const TaskUpdateTool = buildTool({
   userFacingName() {
     return 'TaskUpdate'
   },
+  coerceInput: coerceTaskUpdateInput,
   shouldDefer: true,
   // densable 2.1.233 Eee: h5() && uX()
   isEnabled() {
@@ -120,9 +163,10 @@ export const TaskUpdateTool = buildTool({
     return true
   },
   toAutoClassifierInput(input) {
-    const parts = [input.taskId]
-    if (input.status) parts.push(input.status)
-    if (input.subject) parts.push(input.subject)
+    const coerced = coerceTaskUpdateInput(input)?.input ?? input
+    const parts = [coerced.taskId]
+    if (coerced.status) parts.push(coerced.status)
+    if (coerced.subject) parts.push(coerced.subject)
     return parts.join(' ')
   },
   renderToolUseMessage() {

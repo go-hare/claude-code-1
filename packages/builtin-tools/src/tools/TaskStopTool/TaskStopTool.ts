@@ -6,14 +6,16 @@ import { isParkedKeepaliveAgent } from 'src/utils/task/framework.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.js'
-import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
+import { renderToolResultMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
     task_id: z
       .string()
       .optional()
-      .describe('The ID of the background task to stop'),
+      .describe(
+        'The ID of the background task to stop. Agent-team teammates and named background agents are also accepted by agent ID or name.',
+      ),
     // shell_id is accepted for backward compatibility with the deprecated KillShell tool
     shell_id: z.string().optional().describe('Deprecated: use task_id instead'),
   }),
@@ -40,11 +42,11 @@ export type Output = z.infer<OutputSchema>
 export const TaskStopTool = buildTool({
   name: TASK_STOP_TOOL_NAME,
   searchHint: 'kill a running background task',
-  // KillShell is the deprecated name - kept as alias for backward compatibility
+  // KillShell / KillBash are deprecated names - kept as aliases for backward compatibility
   // with existing transcripts and SDK users
-  aliases: ['KillShell'],
+  aliases: ['KillShell', 'KillBash'],
   maxResultSizeChars: 100_000,
-  userFacingName: () => (process.env.USER_TYPE === 'ant' ? '' : 'Stop Task'),
+  userFacingName: () => 'Stop Task',
   get inputSchema(): InputSchema {
     return inputSchema()
   },
@@ -124,12 +126,11 @@ export const TaskStopTool = buildTool({
       content: jsonStringify(output),
     }
   },
-  renderToolUseMessage,
+  renderToolUseMessage() {
+    return ''
+  },
   renderToolResultMessage,
-  async call(
-    { task_id, shell_id },
-    { getAppState, setAppState, abortController, agentId },
-  ) {
+  async call({ task_id, shell_id }, { getAppState, setAppState, agentId }) {
     // Support both task_id and shell_id (deprecated KillShell compat)
     const id = task_id ?? shell_id
     if (!id) {
@@ -139,16 +140,23 @@ export const TaskStopTool = buildTool({
     // densable H1e / TaskStop call (~0xe201e9a):
     // pNe({ callerAgentId, killedBy:"parent" }) — NO source:"user".
     // parent kill → BRt "was stopped by Claude"; jCe only when source==="user".
-    const result = await stopTask(id, {
+    const result = (await stopTask(id, {
       getAppState,
       setAppState,
       callerAgentId: agentId,
       killedBy: 'parent',
-    })
+    })) as {
+      taskId: string
+      taskType: string
+      command: string | undefined
+      note?: string
+    }
 
     return {
       data: {
-        message: `Successfully stopped task: ${result.taskId} (${result.command})`,
+        message: result.note
+          ? `Task ${result.taskId} ${result.note}`
+          : `Successfully stopped task: ${result.taskId} (${result.command})`,
         task_id: result.taskId,
         task_type: result.taskType,
         command: result.command,

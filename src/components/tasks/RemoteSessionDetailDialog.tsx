@@ -6,7 +6,7 @@ import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { DIAMOND_FILLED, DIAMOND_OPEN } from '../../constants/figures.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
-import { type KeyboardEvent, Box, Link, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, Link, StatusIcon, Text } from '@anthropic/ink';
 import type { RemoteAgentTaskState } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { getRemoteTaskSessionUrl } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
@@ -21,7 +21,6 @@ import { plural } from '../../utils/stringUtils.js';
 import { teleportResumeCodeSession } from '../../utils/teleport.js';
 import { ConfirmSelect } from '../ConfirmSelect.js';
 import { Select } from '../CustomSelect/select.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { Message } from '../Message.js';
 import { formatReviewStageCounts, RemoteSessionProgress } from './RemoteSessionProgress.js';
 import { AssistantMessage } from 'src/types/message.js';
@@ -108,6 +107,7 @@ function UltraplanSessionDetail({ session, onDone, onBack, onKill }: Omit<Props,
   const [confirmingStop, setConfirmingStop] = useState(false);
 
   if (confirmingStop) {
+    const confirmLabel = phase === 'plan_ready' ? 'Terminate session and discard plan' : 'Terminate session';
     return (
       <Dialog title="Stop ultraplan?" onCancel={() => setConfirmingStop(false)} color="background">
         <Box flexDirection="column" gap={1}>
@@ -116,7 +116,7 @@ function UltraplanSessionDetail({ session, onDone, onBack, onKill }: Omit<Props,
             cancelFirst
             focus="cancel"
             hideIndexes
-            confirmLabel="Terminate session"
+            confirmLabel={confirmLabel}
             cancelLabel="Back"
             onConfirm={() => {
               onKill?.();
@@ -233,7 +233,12 @@ function StagePipeline({
           </React.Fragment>
         );
       })}
-      {completed && <Text color="success"> ✓</Text>}
+      {completed && (
+        <Text>
+          {' '}
+          <StatusIcon status="success" />
+        </Text>
+      )}
     </Text>
   );
 }
@@ -277,10 +282,24 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
 
   if (confirmingStop) {
     return (
-      <Dialog title="Stop ultrareview?" onCancel={() => setConfirmingStop(false)} color="background">
+      <Dialog
+        title="Stop ultrareview?"
+        onCancel={() => setConfirmingStop(false)}
+        color="background"
+        inputGuide={exitState =>
+          exitState.pending ? (
+            <Text>Press {exitState.keyName} again to exit</Text>
+          ) : (
+            <Byline>
+              <KeyboardShortcutHint shortcut="Enter" action="select" />
+              <KeyboardShortcutHint shortcut="Esc" action="go back" />
+            </Byline>
+          )
+        }
+      >
         <Box flexDirection="column" gap={1}>
           <Text dimColor>
-            This archives the remote session and stops local tracking. The review will not complete and any findings so
+            This archives the cloud session and stops local tracking. The review will not complete and any findings so
             far are discarded.
           </Text>
           <ConfirmSelect
@@ -370,7 +389,7 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
           </Link>
         </Box>
 
-        <Select options={options} onChange={handleSelect} />
+        <Select options={options} defaultFocusValue={completed ? 'dismiss' : 'back'} onChange={handleSelect} />
       </Box>
     </Dialog>
   );

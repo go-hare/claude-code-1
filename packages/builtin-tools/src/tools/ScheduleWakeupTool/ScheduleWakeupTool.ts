@@ -17,21 +17,43 @@ import {
   scheduleModelWakeup,
   stopDynamicLoop,
 } from 'src/utils/loopDynamic.js'
+import {
+  firstPartyNameToCanonical,
+  getMainLoopModel,
+} from 'src/utils/model/model.js'
+import { modelHasCatalogCapability } from 'src/utils/model/modelCatalogCapabilities.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
-import { CRON_DELETE_TOOL_NAME } from '../ScheduleCronTool/prompt.js'
+import { isBriefEnabled } from '../BriefTool/BriefTool.js'
+import { BRIEF_TOOL_NAME } from '../BriefTool/prompt.js'
+import {
+  CRON_CREATE_TOOL_NAME,
+  CRON_DELETE_TOOL_NAME,
+} from '../ScheduleCronTool/prompt.js'
 import { TASK_STOP_TOOL_NAME } from '../TaskStopTool/prompt.js'
 import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
   AUTONOMOUS_LOOP_SENTINEL,
-  SCHEDULE_WAKEUP_DESCRIPTION,
-  SCHEDULE_WAKEUP_TOOL_NAME,
+  buildLoopEndOutcomeGuidance,
   buildScheduleWakeupPrompt,
   buildScheduleWakeupSearchHint,
   resolveScheduleWakeupCacheGuidance,
+  SCHEDULE_WAKEUP_DESCRIPTION,
+  SCHEDULE_WAKEUP_TOOL_NAME,
 } from './prompt.js'
 
 /** densable `Tw` — Monitor tool wire name (no shared constant export). */
 const MONITOR_TOOL_NAME = 'Monitor'
+
+function hasFable5Mitigations(canonical: string, raw?: string): boolean {
+  const cap =
+    modelHasCatalogCapability(canonical, 'fable_5_mitigations') ??
+    (raw !== undefined
+      ? modelHasCatalogCapability(raw, 'fable_5_mitigations')
+      : undefined)
+  if (cap !== undefined) return cap
+  if (canonical === 'claude-mythos-5') return true
+  return false
+}
 
 /** densable `H3o` */
 export class ScheduleWakeupInputError extends Error {
@@ -110,10 +132,12 @@ export const ScheduleWakeupTool = buildTool({
   name: SCHEDULE_WAKEUP_TOOL_NAME,
   // densable searchHint via EU / CronDelete
   searchHint: buildScheduleWakeupSearchHint(),
+  backgrounding: 'never',
   // densable maxResultSizeChars:1000
   maxResultSizeChars: 1000,
-  // densable shouldDefer:!0
-  shouldDefer: true,
+  // densable 2.1.289 shouldDefer:!1
+  shouldDefer: false,
+  whenToUse: `schedules when this session resumes work, 60 to 3600 seconds from now. Use it, not ${CRON_CREATE_TOOL_NAME}, to pace a /loop that has no interval.`,
 
   get inputSchema(): InputSchema {
     return inputSchema()
@@ -243,8 +267,10 @@ export const ScheduleWakeupTool = buildTool({
       stopped,
       cancelledWakeups,
     } = content
+    const briefMode = isBriefEnabled()
+    const outcomeHint = `Then ${buildLoopEndOutcomeGuidance({ briefMode })} — and end the turn.`
     if (stopped === true) {
-      const monitorHint = `If you armed a ${MONITOR_TOOL_NAME} for this loop, ${TASK_STOP_TOOL_NAME} it now; otherwise nothing more to do this turn.`
+      const monitorHint = `If you armed a ${MONITOR_TOOL_NAME} for this loop, ${TASK_STOP_TOOL_NAME} it now. ${outcomeHint}`
       if (cancelledWakeups === 0) {
         return {
           tool_use_id: toolUseID,
@@ -266,8 +292,7 @@ export const ScheduleWakeupTool = buildTool({
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content:
-          'Wakeup not scheduled. Either the /loop dynamic runtime gate is off or the loop reached its maximum duration — the loop has ended; do not re-issue.',
+        content: `Wakeup not scheduled. The loop reached its maximum duration — the loop has ended; do not re-issue. ${outcomeHint}`,
       }
     }
     const time = new Date(scheduledFor).toTimeString().slice(0, 8)
@@ -278,10 +303,18 @@ export const ScheduleWakeupTool = buildTool({
     const clampNote = wasClamped
       ? ` (clamped to ${clampedDelaySeconds}s from your requested value)`
       : ''
+    const statusAction = briefMode
+      ? `send it now via ${BRIEF_TOOL_NAME} (\`status: 'proactive'\`) — plain response text is treated as unread in this session`
+      : 'write it now as ordinary response text'
+    const model = getMainLoopModel()
+    const preArm = hasFable5Mitigations(firstPartyNameToCanonical(model), model)
+    const statusHint = preArm
+      ? `When this call is your only tool call, the turn ends when it returns — there is no post-arm slot for a status update, so ${briefMode ? `send the per-tick update via ${BRIEF_TOOL_NAME} (\`status: 'proactive'\`)` : 'write the per-tick update as ordinary response text'} immediately BEFORE calling ${SCHEDULE_WAKEUP_TOOL_NAME}. If you are reading this mid-turn, end the turn now — the harness re-invokes you when the wakeup fires or a task-notification arrives.`
+      : `If you owe the user a status update this tick, ${statusAction}; then end the turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.`
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: `Next wakeup scheduled for ${time} (in ${inSeconds}s)${clampNote}. Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.`,
+      content: `Next wakeup scheduled for ${time} (in ${inSeconds}s)${clampNote}. ${statusHint}`,
     }
   },
-} satisfies ToolDef<InputSchema, ScheduleWakeupOutput>)
+} satisfies ToolDef<InputSchema, ScheduleWakeupOutput> & { whenToUse: string })

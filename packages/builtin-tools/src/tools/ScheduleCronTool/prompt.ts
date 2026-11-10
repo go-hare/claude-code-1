@@ -1,5 +1,8 @@
 import { feature } from 'bun:bundle'
-import { getFeatureValue_CACHED_WITH_REFRESH } from 'src/services/analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  getFeatureValue_CACHED_WITH_REFRESH,
+} from 'src/services/analytics/growthbook.js'
 import { DEFAULT_CRON_JITTER_CONFIG } from 'src/utils/cronTasks.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 
@@ -85,6 +88,14 @@ export function buildCronCreateDescription(durableEnabled: boolean): string {
     : 'Schedule a prompt to run at a future time within this Claude session — either recurring on a cron schedule, or once at a specific time.'
 }
 
+export function buildCronDurableFieldDescription(
+  durableEnabled: boolean,
+): string {
+  return durableEnabled
+    ? 'true = persist to .claude/scheduled_tasks.json and survive restarts. false (default) = in-memory only, dies when this Claude session ends. Use true only when the user asks the task to survive across sessions.'
+    : 'Has no effect — durable persistence is not available. All jobs are session-only (in-memory, gone when this Claude session ends).'
+}
+
 export function buildCronCreatePrompt(durableEnabled: boolean): string {
   const durabilitySection = durableEnabled
     ? `## Durability
@@ -93,6 +104,17 @@ By default (durable: false) the job lives only in this Claude session — nothin
     : `## Session-only
 
 Jobs live only in this Claude session — nothing is written to disk, and the job is gone when Claude exits.`
+
+  const notForLiveWatchingSection = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_amber_sentinel',
+    false,
+  )
+    ? `
+## Not for live watching
+
+${CRON_CREATE_TOOL_NAME} re-runs a prompt at fixed wall-clock intervals. To watch a log file, process, or command output and be notified the moment something changes, use the Monitor tool instead — Monitor streams events as they happen; cron polls on a schedule.
+`
+    : ''
 
   const durableRuntimeNote = durableEnabled
     ? 'Durable jobs persist to .claude/scheduled_tasks.json and survive session restarts — on next launch they resume automatically. One-shot durable tasks that were missed while the REPL was closed are surfaced for catch-up. Session-only jobs die with the process. '
@@ -124,7 +146,7 @@ Every user who asks for "9am" gets \`0 9\`, and every user who asks for "hourly"
 Only use minute 0 or 30 when the user names that exact time and clearly means it ("at 9:00 sharp", "at half past", coordinating with a meeting). When in doubt, nudge a few minutes early or late — the user will not notice, and the fleet will.
 
 ${durabilitySection}
-
+${notForLiveWatchingSection}
 ## Runtime behavior
 
 Jobs only fire while the REPL is idle (not mid-query). ${durableRuntimeNote}The scheduler adds a small deterministic jitter on top of whatever you pick: recurring tasks fire up to 10% of their period late (max 15 min); one-shot tasks landing on :00 or :30 fire up to 90 s early. Picking an off-minute is still the bigger lever.

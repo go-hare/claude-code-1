@@ -343,5 +343,5 @@ function formatCronFireTime(d: Date): string {
       minute: '2-digit',
     })
     .replace(/,? at |, /, ' ')
-    .replace(/ ([AP]M)/, (_, ampm) => ampm.toLowerCase())
+    .replace(/[  ]([AP]M)/i, (_, ampm) => ampm.toLowerCase())
 }

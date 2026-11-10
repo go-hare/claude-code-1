@@ -11,6 +11,9 @@
 
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { isBriefEnabled } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
+import { BRIEF_TOOL_NAME } from '@claude-code/builtin-tools/tools/BriefTool/prompt.js'
+import { buildLoopTickStatusGuidance } from '@claude-code/builtin-tools/tools/ScheduleWakeupTool/prompt.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logEvent } from '../services/analytics/index.js'
@@ -20,6 +23,8 @@ import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
   AUTONOMOUS_LOOP_SENTINEL,
 } from './loopDynamic.js'
+import { firstPartyNameToCanonical, getMainLoopModel } from './model/model.js'
+import { modelHasCatalogCapability } from './model/modelCatalogCapabilities.js'
 
 /** densable `zKu` */
 export const LOOP_FILE_SENTINEL = '<<loop.md>>'
@@ -122,11 +127,34 @@ function buildPushNotifGuidance(loopFileMode = false): string {
 Use PushNotification when the loop can't move further without the user, or when something landed that they'd want to act on now: ${reason}, or a major update arrived (CI went red, a review changes the plan). Progress you made yourself isn't a trigger — the transcript covers that. One ping per state, not per tick.`
 }
 
+function hasFable5Mitigations(canonical: string, raw?: string): boolean {
+  const cap =
+    modelHasCatalogCapability(canonical, 'fable_5_mitigations') ??
+    (raw !== undefined
+      ? modelHasCatalogCapability(raw, 'fable_5_mitigations')
+      : undefined)
+  if (cap !== undefined) return cap
+  if (canonical === 'claude-mythos-5') return true
+  return false
+}
+
 /** densable `UAs` — dynamic re-arm guidance */
 function buildDynamicRearmGuidance(): string {
+  const model = getMainLoopModel()
+  const preArmStatus = hasFable5Mitigations(
+    firstPartyNameToCanonical(model),
+    model,
+  )
+  const briefMode = isBriefEnabled()
+  const statusVerb = briefMode
+    ? `send a brief status update for this tick via ${BRIEF_TOOL_NAME}`
+    : 'write a brief status update for this tick'
+  const timingPrefix = preArmStatus
+    ? `Immediately before re-arming, ${statusVerb}.`
+    : `After re-arming, ${statusVerb}.`
   return `
 
-If a Monitor is armed (check TaskList), keep \`delaySeconds\` at 1200–1800s — the Monitor is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. To stop the loop, call ScheduleWakeup with \`stop: true\` and TaskStop the monitor (use TaskList to find its task ID if no longer in context).`
+If a Monitor is armed (check TaskList), keep \`delaySeconds\` at 1200–1800s — the Monitor is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. ${timingPrefix} ${buildLoopTickStatusGuidance({ preArmStatus, briefMode })} To stop the loop, call ScheduleWakeup with \`stop: true\` and TaskStop the monitor (use TaskList to find its task ID if no longer in context).`
 }
 
 /** densable `WKu` */
@@ -142,7 +170,7 @@ function autonomousTickDynamic(): string {
 
 Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick.
 
-You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive, call ScheduleWakeup again at the end of this turn with \`prompt\` set to the literal sentinel \`${AUTONOMOUS_LOOP_DYNAMIC_SENTINEL}\` — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance()}`
+You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive, call ScheduleWakeup again this turn with \`prompt\` set to the literal sentinel \`${AUTONOMOUS_LOOP_DYNAMIC_SENTINEL}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance()}`
 }
 
 /** densable `AU_` */
@@ -158,7 +186,7 @@ function loopFileTickDynamic(): string {
 
 Work the tasks from the loop.md contents established earlier in this conversation. If you cannot find them, treat this as a no-op tick.
 
-You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive, call ScheduleWakeup again at the end of this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance(true)}`
+You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive, call ScheduleWakeup again this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance(true)}`
 }
 
 /** densable `kU_` */
@@ -167,7 +195,7 @@ function loopFileAbsentTickDynamic(): string {
 
 loop.md is not currently present. Run the autonomous check using the loop instructions established earlier in this conversation.
 
-You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive — and to pick up loop.md if it is recreated — call ScheduleWakeup again at the end of this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance()}`
+You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive — and to pick up loop.md if it is recreated — call ScheduleWakeup again this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) — otherwise the loop ends after this tick.${buildDynamicRearmGuidance()}${buildPushNotifGuidance()}`
 }
 
 /** densable `xU_` */

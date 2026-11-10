@@ -2396,6 +2396,9 @@ export type SessionCronTask = {
    * Session-only; never written to disk.
    */
   kind?: 'loop'
+  scheduledFor?: number
+  reason?: string
+  keepalive?: boolean
   /**
    * When set, the task was created by an in-process teammate (not the team lead).
    * The scheduler routes fires to that teammate's pendingUserMessages queue

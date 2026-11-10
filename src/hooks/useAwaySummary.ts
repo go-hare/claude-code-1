@@ -1,18 +1,25 @@
 import { feature } from 'bun:bundle'
 import { useEffect, useRef } from 'react'
 import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
+import { countPendingTurnDurationWork } from '../components/messages/SystemTextMessage.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
-import { useAppState } from '../state/AppState.js'
+import { useAppState, useAppStateStore } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
+import { logForDebugging } from '../utils/debug.js'
 import { isEnvDefinedFalsy } from '../utils/envUtils.js'
-import { isAwaySummaryEnvEnabled } from '../utils/residualFinalEnvGates.js'
+import { hasPendingLoopWakeups } from '../utils/loopDynamic.js'
+import { getCommandQueue } from '../utils/messageQueueManager.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
+import { getPromptInputStoreValue } from '../utils/promptInputCursorStore.js'
+import { isAwaySummaryEnvEnabled } from '../utils/residualFinalEnvGates.js'
 
 /** densable hrt=180000 — generate recap while blurred (not on focus). */
 const BLUR_DELAY_MS = 180_000
 /** densable xgo=30000 — Lgo floor for GB delayMs. */
 const MIN_RECAP_DELAY_MS = 30_000
+/** densable Ago=3 — max consecutive failures per turn before skipping. */
+export const MAX_CONSECUTIVE_FAILURES = 3
 /** densable Dgo=3 — first N recaps append disable-in-/config trailer. */
 const RECAP_TRAILER_COUNT = 3
 const RECAP_TRAILER = ' (disable recaps in /config)'
@@ -96,16 +103,41 @@ export function shouldGenerateAwaySummary(opts: {
   featureOn: boolean
   messages: readonly Message[]
   env?: NodeJS.ProcessEnv
+  draftInput?: string
+  pendingAgents?: number
+  pendingWorkflows?: number
+  hasPendingLoopWakeup?: boolean
+  inFlight?: boolean
+  consecutiveFailures?: number
 }): boolean {
   if (!isAwaySummaryLiveEnabled(opts)) return false
+  if (opts.draftInput && opts.draftInput !== '') {
+    logForDebugging('[awaySummary] skipped: draft input present')
+    return false
+  }
+  if ((opts.pendingAgents ?? 0) > 0 || (opts.pendingWorkflows ?? 0) > 0) {
+    logForDebugging('[awaySummary] skipped: background work pending')
+    return false
+  }
+  if (opts.hasPendingLoopWakeup) {
+    logForDebugging('[awaySummary] skipped: loop wakeup pending')
+    return false
+  }
+  if (opts.inFlight) {
+    logForDebugging('[awaySummary] skipped: generation in flight')
+    return false
+  }
+  if ((opts.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES) {
+    logForDebugging('[awaySummary] skipped: failing repeatedly this turn')
+    return false
+  }
   if (hasSummarySinceLastUserTurn(opts.messages)) return false
   if (!shouldRecapByTurnCount(opts.messages)) return false
   return true
 }
 
 /**
- * densable Hbe: generate recap while blurred (~3 min, hrt). Do not abort on
- * focus — the recap must already be in the transcript when the user returns.
+ * densable Hbe: generate recap while blurred (~3 min, hrt).
  *
  * For terminals that don't support DECSET 1004 focus events (CMD, PowerShell),
  * falls back to idle-based detection: starts an idle timer after each turn
@@ -122,10 +154,12 @@ export function useAwaySummary(
   const isLoadingRef = useRef(isLoading)
   const pendingRef = useRef(false)
   const recapCountRef = useRef(0)
+  const consecutiveFailuresRef = useRef(0)
   const lastTurnEndRef = useRef<number | null>(null)
   const wasLoadingRef = useRef(isLoading)
   const generateRef = useRef<(() => Promise<void>) | null>(null)
   const armAwayTimerRef = useRef<(() => void) | null>(null)
+  const store = useAppStateStore()
   const awaySummaryEnabled = useAppState(s => s.awaySummaryEnabled)
   const awaySummaryEnabledRef = useRef(awaySummaryEnabled)
 
@@ -164,12 +198,22 @@ export function useAwaySummary(
 
     async function generate(): Promise<void> {
       pendingRef.current = false
+      const { pendingAgents, pendingWorkflows } = countPendingTurnDurationWork({
+        tasks: store.getState().tasks,
+        queuedCommands: getCommandQueue(),
+      })
       if (
         !shouldGenerateAwaySummary({
           awaySummaryEnabled: awaySummaryEnabledRef.current,
           gbEnabled,
           featureOn,
           messages: messagesRef.current,
+          draftInput: getPromptInputStoreValue(),
+          pendingAgents,
+          pendingWorkflows,
+          hasPendingLoopWakeup: hasPendingLoopWakeups(),
+          inFlight: abortRef.current !== null,
+          consecutiveFailures: consecutiveFailuresRef.current,
         })
       ) {
         return
@@ -177,11 +221,19 @@ export function useAwaySummary(
       abortInFlight()
       const controller = new AbortController()
       abortRef.current = controller
-      const text = await generateAwaySummary(
-        messagesRef.current,
-        controller.signal,
-      )
-      if (controller.signal.aborted || text === null) return
+      let text: string | null = null
+      try {
+        text = await generateAwaySummary(messagesRef.current, controller.signal)
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null
+        }
+      }
+      if (controller.signal.aborted) return
+      if (text === null) {
+        consecutiveFailuresRef.current++
+        return
+      }
       if (
         !isAwaySummaryLiveEnabled({
           awaySummaryEnabled: awaySummaryEnabledRef.current,
@@ -231,8 +283,9 @@ export function useAwaySummary(
         return
       }
       if (state === 'focused') {
-        // densable #M focused: clear wait timer; do NOT abort in-flight generate.
+        // densable 289 #M focused: clear wait timer and abort in-flight generate (239: do NOT abort in-flight generate).
         clearTimer()
+        abortInFlight()
         pendingRef.current = false
       }
     }
@@ -247,16 +300,22 @@ export function useAwaySummary(
       unsubscribe()
       clearTimer()
       abortInFlight()
+      consecutiveFailuresRef.current = 0
       generateRef.current = null
       armAwayTimerRef.current = null
     }
-  }, [gbEnabled, setMessages, awaySummaryEnabled, featureOn])
+  }, [gbEnabled, setMessages, awaySummaryEnabled, featureOn, store])
 
   // densable setInputs: turn-end (#o false) → #P if still away.
   // unknown terminals KEEP idle-after-turn (gold #P fire is blurred-only).
   useEffect(() => {
+    if (!wasLoadingRef.current && isLoading) {
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
     if (wasLoadingRef.current && !isLoading) {
       lastTurnEndRef.current = Date.now()
+      consecutiveFailuresRef.current = 0
     }
     wasLoadingRef.current = isLoading
 

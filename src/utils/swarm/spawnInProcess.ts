@@ -17,6 +17,7 @@ import sample from 'lodash-es/sample.js'
 import { getSessionId } from '../../bootstrap/state.js'
 import { getSpinnerVerbs } from '../../constants/spinnerVerbs.js'
 import { TURN_COMPLETION_VERBS } from '../../constants/turnCompletionVerbs.js'
+import { logEvent } from '../../services/analytics/index.js'
 import type { AppState } from '../../state/AppState.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type {
@@ -31,8 +32,11 @@ import { logForDebugging } from '../debug.js'
 import { emitTaskTerminatedSdk } from '../sdkEventQueue.js'
 import { evictTaskOutput } from '../task/diskOutput.js'
 import {
+  addKeepaliveReason,
   evictTerminalTask,
+  idleWindowKeepaliveReason,
   registerTask,
+  removeKeepaliveReason,
   STOPPED_DISPLAY_MS,
 } from '../task/framework.js'
 import { createTeammateContext } from '../teammateContext.js'
@@ -45,6 +49,28 @@ import type { PermissionMode } from '../../types/permissions.js'
 import { removeMemberByAgentId } from './teamHelpers.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
+
+type KillableTeammateTaskState = InProcessTeammateTaskState & {
+  paneTeardown?: () => Promise<boolean>
+}
+
+/**
+ * Hold/release `flag:idle-window` keepalive around teammate idle transition
+ * and wakeup (densable yG / YP / hx).
+ */
+export function holdTeammateIdleWindowKeepalive(
+  ownerAgentId: string | undefined,
+  setAppState: SetAppStateFn,
+): void {
+  addKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), setAppState)
+}
+
+export function releaseTeammateIdleWindowKeepalive(
+  ownerAgentId: string | undefined,
+  setAppState: SetAppStateFn,
+): void {
+  removeKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), setAppState)
+}
 
 /**
  * Minimal context required for spawning an in-process teammate.
@@ -213,10 +239,12 @@ export async function spawnInProcessTeammate(
 
     // Register task in AppState
     registerTask(taskState, setAppState)
+    releaseTeammateIdleWindowKeepalive(agentId, setAppState)
 
     logForDebugging(
       `[spawnInProcessTeammate] Registered ${agentId} in AppState`,
     )
+    logEvent('swarm_in_process_spawn', {})
 
     return {
       success: true,
@@ -265,7 +293,7 @@ export function killInProcessTeammate(
       return prev
     }
 
-    const teammateTask = task as InProcessTeammateTaskState
+    const teammateTask = task as KillableTeammateTaskState
 
     if (teammateTask.status !== 'running') {
       return prev
@@ -313,26 +341,30 @@ export function killInProcessTeammate(
       }
     }
 
+    const updatedTask: KillableTeammateTaskState = {
+      ...teammateTask,
+      status: 'killed' as const,
+      notified: true,
+      endTime: Date.now(),
+      onIdleCallbacks: [], // Clear callbacks to prevent stale references
+      messages: teammateTask.messages?.length
+        ? [teammateTask.messages[teammateTask.messages.length - 1]!]
+        : undefined,
+      pendingUserMessages: [],
+      inProgressToolUseIDs: undefined,
+      abortController: undefined,
+      unregisterCleanup: undefined,
+      currentWorkAbortController: undefined,
+      paneTeardown: undefined,
+      evictAfter: undefined,
+    }
+
     return {
       ...prev,
       teamContext: updatedTeamContext,
       tasks: {
         ...prev.tasks,
-        [taskId]: {
-          ...teammateTask,
-          status: 'killed' as const,
-          notified: true,
-          endTime: Date.now(),
-          onIdleCallbacks: [], // Clear callbacks to prevent stale references
-          messages: teammateTask.messages?.length
-            ? [teammateTask.messages[teammateTask.messages.length - 1]!]
-            : undefined,
-          pendingUserMessages: [],
-          inProgressToolUseIDs: undefined,
-          abortController: undefined,
-          unregisterCleanup: undefined,
-          currentWorkAbortController: undefined,
-        },
+        [taskId]: updatedTask,
       },
     }
   })
@@ -343,6 +375,7 @@ export function killInProcessTeammate(
   }
 
   if (killed) {
+    releaseTeammateIdleWindowKeepalive(agentId ?? taskId, setAppState)
     for (const run of pendingAutonomyRuns) {
       void markAutonomyRunFailed(
         run.runId,
@@ -363,6 +396,7 @@ export function killInProcessTeammate(
       evictTerminalTask.bind(null, taskId, setAppState),
       STOPPED_DISPLAY_MS,
     )
+    logEvent('swarm_in_process_kill', {})
   }
 
   // Release perfetto agent registry entry

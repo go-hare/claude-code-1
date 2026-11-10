@@ -15,6 +15,7 @@ import { getTeammateContext } from 'src/utils/teammateContext.js'
 import {
   buildCronCreateDescription,
   buildCronCreatePrompt,
+  buildCronDurableFieldDescription,
   CRON_CREATE_TOOL_NAME,
   DEFAULT_MAX_AGE_DAYS,
   isDurableCronEnabled,
@@ -36,7 +37,7 @@ const inputSchema = lazySchema(() =>
       `true (default) = fire on every cron match until deleted or auto-expired after ${DEFAULT_MAX_AGE_DAYS} days. false = fire once at the next match, then auto-delete. Use false for "remind me at X" one-shot requests with pinned minute/hour/dom/month.`,
     ),
     durable: semanticBoolean(z.boolean().optional()).describe(
-      'true = persist to .claude/scheduled_tasks.json and survive restarts. false (default) = in-memory only, dies when this Claude session ends. Use true only when the user asks the task to survive across sessions.',
+      buildCronDurableFieldDescription(isDurableCronEnabled()),
     ),
   }),
 )
@@ -58,6 +59,7 @@ export const CronCreateTool = buildTool({
   searchHint: 'schedule a recurring or one-shot prompt',
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @196753194
   enablesCodeExecution: true,
+  backgrounding: 'never',
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   get inputSchema(): InputSchema {
@@ -80,6 +82,15 @@ export const CronCreateTool = buildTool({
   },
   getPath() {
     return getCronFilePath()
+  },
+  async checkPermissions(input, context) {
+    if (context.getAppState().toolPermissionContext.mode === 'auto') {
+      return {
+        behavior: 'passthrough' as const,
+        message: 'Scheduling a cron prompt requires classifier review.',
+      }
+    }
+    return { behavior: 'allow' as const, updatedInput: input }
   },
   async validateInput(input): Promise<ValidationResult> {
     // ExecuteExtraTool passes raw params through without re-running this

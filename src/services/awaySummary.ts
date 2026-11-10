@@ -6,7 +6,6 @@ import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { logForDebugging } from '../utils/debug.js'
 import { createUserMessage, extractTextContent } from '../utils/messages.js'
 import { getLastCacheSafeParams, runForkedAgent } from '../utils/forkedAgent.js'
-import { getResolvedLanguage } from '../utils/language.js'
 import { truncateAtWordBoundary } from '../utils/stringUtils.js'
 
 /** densable f/Hbm=400 */
@@ -14,13 +13,6 @@ export const AWAY_SUMMARY_RECAP_MAX_CHARS = 400
 
 const PROMPT_EN =
   'The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.'
-
-const PROMPT_ZH =
-  '用户离开后回来了。用中文写 1-2 句、不超过 40 词，不要 markdown。先说总体目标和当前任务，再说下一步。不要写根因、实现细节或次要待办。'
-
-function recapPrompt(): string {
-  return getResolvedLanguage() === 'zh' ? PROMPT_ZH : PROMPT_EN
-}
 
 export async function generateAwaySummary(
   _messages: readonly unknown[],
@@ -33,10 +25,16 @@ export async function generateAwaySummary(
   }
   if (signal.aborted) return null
 
+  const abortController = new AbortController()
+  signal.addEventListener('abort', () => abortController.abort(), {
+    once: true,
+  })
+
   try {
     const result = await runForkedAgent({
-      promptMessages: [createUserMessage({ content: recapPrompt() })],
+      promptMessages: [createUserMessage({ content: PROMPT_EN })],
       cacheSafeParams,
+      overrides: { abortController },
       canUseTool: async () => ({
         behavior: 'deny',
         message: 'Away summary cannot use tools',

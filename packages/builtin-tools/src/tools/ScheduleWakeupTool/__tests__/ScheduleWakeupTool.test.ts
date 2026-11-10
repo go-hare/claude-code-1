@@ -83,9 +83,13 @@ describe('ScheduleWakeupTool', () => {
     if (ids.length) removeSessionCronTasks(ids)
   })
 
-  test('name is ScheduleWakeup and shouldDefer is true', () => {
+  test('name is ScheduleWakeup and shouldDefer is false', () => {
     expect(ScheduleWakeupTool.name).toBe('ScheduleWakeup')
-    expect(ScheduleWakeupTool.shouldDefer).toBe(true)
+    expect(ScheduleWakeupTool.shouldDefer).toBe(false)
+    expect(ScheduleWakeupTool.backgrounding).toBe('never')
+    expect(ScheduleWakeupTool.whenToUse).toBe(
+      'schedules when this session resumes work, 60 to 3600 seconds from now. Use it, not CronCreate, to pace a /loop that has no interval.',
+    )
     expect(ScheduleWakeupTool.userFacingName()).toBe('')
   })
 

@@ -182,7 +182,7 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
   },
 
   isEnabled() {
-    return process.env.USER_TYPE !== 'ant';
+    return false;
   },
 
   isReadOnly(_input) {

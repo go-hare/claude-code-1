@@ -124,19 +124,10 @@ import {
   type LocalAgentTaskState,
 } from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { isBackgroundTask, type TaskState } from '../tasks/types.js';
-
-function countPendingTurnDurationWork(tasks: Record<string, TaskState>): {
-  agents: number | undefined;
-  workflows: number | undefined;
-} {
-  const running = Object.values(tasks).filter(isBackgroundTask);
-  const agents = running.filter(t => t.type === 'local_agent' || t.type === 'remote_agent').length;
-  const workflows = running.filter(t => t.type === 'local_workflow').length;
-  return {
-    agents: agents > 0 ? agents : undefined,
-    workflows: workflows > 0 ? workflows : undefined,
-  };
-}
+import {
+  countPendingTurnDurationWork,
+  resolveTurnDurationWithBackgroundWait,
+} from '../components/messages/SystemTextMessage.js';
 import {
   registerLeaderToolUseConfirmQueue,
   unregisterLeaderToolUseConfirmQueue,
@@ -1935,6 +1926,7 @@ export function REPL({
   // Start time of the first turn that had swarm teammates running
   // Used to compute total elapsed time (including teammate execution) for the deferred message
   const swarmStartTimeRef = React.useRef<number | null>(null);
+  const backgroundWaitStartTimeRef = React.useRef<number | null>(null);
   const swarmBudgetInfoRef = React.useRef<{ tokens: number; limit: number; nudges: number } | undefined>(undefined);
 
   // Ref to track current focusedInputDialog for use in callbacks
@@ -3229,6 +3221,29 @@ export function REPL({
       isDialogOnScreen: () => focusedInputDialogRef.current != null || dialogStore.getState().open.length > 0,
       hasPendingLoopWakeup: hasPendingLoopWakeups,
       hasArmedQuotaAutoResume: isQuotaAutoResumeArmed,
+      backgroundAgents: {
+        subscribe: store.subscribe,
+        getSnapshot: () =>
+          Object.values(store.getState().tasks).some(
+            t =>
+              (t.type === 'local_agent' ||
+                t.type === 'remote_agent' ||
+                t.type === 'in_process_teammate' ||
+                t.type === 'local_workflow') &&
+              t.status !== 'completed' &&
+              t.status !== 'failed' &&
+              t.status !== 'killed' &&
+              t.status !== 'paused' &&
+              !(t.type === 'in_process_teammate' && (t.isIdle || t.identity?.agentId === undefined)) &&
+              !(
+                t.type === 'remote_agent' &&
+                (t.isLongRunning ||
+                  t.ultraplanPhase === 'needs_input' ||
+                  t.ultraplanPhase === 'plan_ready' ||
+                  (t.isUltraplan && (t as { restoredOnResume?: boolean }).restoredOnResume))
+              ),
+          ),
+      },
       getIdleNotifThresholdMs: () => getGlobalConfig().messageIdleNotifThresholdMs,
       sendIdleNotification: () => {
         void sendNotification(
@@ -3483,6 +3498,10 @@ export function REPL({
       const deferredBudget = swarmBudgetInfoRef.current;
       swarmStartTimeRef.current = null;
       swarmBudgetInfoRef.current = undefined;
+      const pendingWork = countPendingTurnDurationWork({
+        tasks: store.getState().tasks,
+        queuedCommands: getCommandQueue(),
+      });
       setMessages(prev => [
         ...prev,
         createTurnDurationMessage(
@@ -3494,8 +3513,8 @@ export function REPL({
           // would make checkResumeConsistency report false delta<0 for
           // every turn that ran a progress-emitting tool.
           count(prev, isLoggableMessage),
-          countPendingTurnDurationWork(store.getState().tasks).agents,
-          countPendingTurnDurationWork(store.getState().tasks).workflows,
+          pendingWork.pendingAgents > 0 ? pendingWork.pendingAgents : undefined,
+          pendingWork.pendingWorkflows > 0 ? pendingWork.pendingWorkflows : undefined,
         ),
       ]);
     }
@@ -6223,14 +6242,24 @@ export function REPL({
                 swarmBudgetInfoRef.current = budgetInfo;
               }
             } else {
+              const now = performance.now();
+              const resolvedDuration = resolveTurnDurationWithBackgroundWait({
+                tasks: store.getState().tasks,
+                queuedCommands: getCommandQueue(),
+                turnDurationMs,
+                turnStartTime: loadingStartTimeRef.current,
+                now,
+                backgroundWaitStartTime: backgroundWaitStartTimeRef.current,
+              });
+              backgroundWaitStartTimeRef.current = resolvedDuration.backgroundWaitStartTime;
               setMessages(prev => [
                 ...prev,
                 createTurnDurationMessage(
-                  turnDurationMs,
+                  resolvedDuration.durationMs,
                   budgetInfo,
                   count(prev, isLoggableMessage),
-                  countPendingTurnDurationWork(store.getState().tasks).agents,
-                  countPendingTurnDurationWork(store.getState().tasks).workflows,
+                  resolvedDuration.pendingBackgroundAgentCount,
+                  resolvedDuration.pendingWorkflowCount,
                 ),
               ]);
             }

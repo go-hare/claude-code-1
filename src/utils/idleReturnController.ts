@@ -26,6 +26,11 @@ export type IdleReturnClock = {
   setTimeout: (fn: () => void, ms: number) => () => void
 }
 
+export type IdleReturnBackgroundAgents = {
+  getSnapshot: () => boolean
+  subscribe: (fn: () => void) => () => void
+}
+
 export type IdleReturnHost = {
   turn: IdleReturnTurn
   getMessages: () => readonly Message[]
@@ -35,6 +40,7 @@ export type IdleReturnHost = {
   isDialogOnScreen: () => boolean
   hasPendingLoopWakeup: () => boolean
   hasArmedQuotaAutoResume: () => boolean
+  backgroundAgents?: IdleReturnBackgroundAgents
   getIdleNotifThresholdMs: () => number
   sendIdleNotification: () => void
   addNotification: (n: Notification) => void
@@ -42,13 +48,18 @@ export type IdleReturnHost = {
   hasSeededRemotePrompt: boolean
 }
 
-/** densable 2.1.246 F$ — idle OS notif + idle-return hint. */
+export type IdleReturnDeps = IdleReturnHost
+
+/** densable 2.1.289 Jj — idle OS notif + idle-return hint. */
 export class IdleReturnController {
   readonly #host: IdleReturnHost
   #snapshot: IdleReturnTurnSnapshot
   #overlayShowing = false
   #idleNotifCancel: (() => void) | null = null
+  #bgAgentsUnsub: (() => void) | null = null
+  #lastNotifiedCompletionTime = 0
   #hintCancel: (() => void) | null = null
+  #lastOtherTurnCompletionTime = 0
   #hintShown = false
   readonly #unsubscribe: () => void
   #disposed = false
@@ -67,6 +78,12 @@ export class IdleReturnController {
     this.#scheduleIdleNotif()
   }
 
+  onOtherTurnComplete(nowMs?: number): void {
+    if (this.#disposed) return
+    this.#lastOtherTurnCompletionTime = nowMs ?? this.#host.now()
+    this.#scheduleHint()
+  }
+
   onClearSubmitted(): void {
     if (!this.#hintShown) return
     const messages = this.#host.getMessages()
@@ -74,7 +91,7 @@ export class IdleReturnController {
       action:
         'hint_converted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       idleMinutes: Math.round(
-        (this.#host.now() - this.#snapshot.lastQueryCompletionTime) / 60_000,
+        (this.#host.now() - this.#lastCompletionTime()) / 60_000,
       ),
       messageCount: messages.length,
       contextTokens: this.#contextTokens(messages),
@@ -108,6 +125,8 @@ export class IdleReturnController {
   #clearIdleNotif(): void {
     this.#idleNotifCancel?.()
     this.#idleNotifCancel = null
+    this.#bgAgentsUnsub?.()
+    this.#bgAgentsUnsub = null
   }
 
   #scheduleIdleNotif(): void {
@@ -121,6 +140,14 @@ export class IdleReturnController {
         this.#idleNotifCancel = null
         if (this.#host.getLastInteractionTime() > lastQueryCompletionTime)
           return
+        if (this.#host.backgroundAgents?.getSnapshot()) {
+          this.#bgAgentsUnsub = this.#host.backgroundAgents.subscribe(() => {
+            if (!this.#host.backgroundAgents?.getSnapshot()) {
+              this.#scheduleIdleNotif()
+            }
+          })
+          return
+        }
         const elapsed = this.#host.now() - lastQueryCompletionTime
         if (
           !this.#snapshot.isLoading &&
@@ -128,8 +155,10 @@ export class IdleReturnController {
           !this.#host.isDialogOnScreen() &&
           !this.#host.hasPendingLoopWakeup() &&
           !this.#host.hasArmedQuotaAutoResume() &&
-          elapsed >= this.#host.getIdleNotifThresholdMs()
+          elapsed >= this.#host.getIdleNotifThresholdMs() &&
+          lastQueryCompletionTime !== this.#lastNotifiedCompletionTime
         ) {
+          this.#lastNotifiedCompletionTime = lastQueryCompletionTime
           this.#host.sendIdleNotification()
         }
       },
@@ -149,20 +178,20 @@ export class IdleReturnController {
 
   #scheduleHint(): void {
     this.#clearHint()
-    const { isLoading, lastQueryCompletionTime } = this.#snapshot
-    if (lastQueryCompletionTime === 0 || isLoading) return
+    const { isLoading } = this.#snapshot
+    const lastCompletionTime = this.#lastCompletionTime()
+    if (lastCompletionTime === 0 || isLoading) return
     const tokenThreshold = resolveIdleTokenThreshold()
     if (this.#contextTokens(this.#host.getMessages()) < tokenThreshold) return
     const remaining =
-      resolveIdleThresholdMs() - (this.#host.now() - lastQueryCompletionTime)
+      resolveIdleThresholdMs() - (this.#host.now() - lastCompletionTime)
     this.#hintCancel = this.#host.clock.setTimeout(
       () => {
         const messages = this.#host.getMessages()
         const messageCount = messages.length
         if (messageCount === 0) return
         const contextTokens = this.#contextTokens(messages)
-        const idleMinutes =
-          (this.#host.now() - lastQueryCompletionTime) / 60_000
+        const idleMinutes = (this.#host.now() - lastCompletionTime) / 60_000
         this.#host.addNotification({
           key: IDLE_RETURN_HINT_KEY,
           kind: 'contextual',
@@ -193,6 +222,13 @@ export class IdleReturnController {
 
   #contextTokens(messages: readonly Message[]): number {
     return idleReturnContextTokens(messages as Message[])
+  }
+
+  #lastCompletionTime(): number {
+    return Math.max(
+      this.#snapshot.lastQueryCompletionTime,
+      this.#lastOtherTurnCompletionTime,
+    )
   }
 }
 

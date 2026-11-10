@@ -144,13 +144,14 @@ function startStallWatchdog(
 Last output:
 ${content.trimEnd()}
 
-The command is likely blocked on an interactive prompt. Kill this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
+The command is likely blocked on an interactive prompt. Stop this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
             enqueuePendingNotification({
               value: message,
               mode: 'task-notification',
               priority: 'next',
               agentId,
             });
+            logEvent('task_local_shell_stall_detected', {});
           },
           () => {},
         );

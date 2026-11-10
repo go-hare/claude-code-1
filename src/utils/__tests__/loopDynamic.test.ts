@@ -147,6 +147,9 @@ describe('scheduleModelWakeup / stopDynamicLoop', () => {
     const loops = getSessionCronTasks().filter(t => t.kind === 'loop')
     expect(loops).toHaveLength(1)
     expect(loops[0]?.prompt).toBe('do work')
+    expect(loops[0]?.scheduledFor).toBe(r!.scheduledFor)
+    expect(loops[0]?.reason).toBe('reason')
+    expect(loops[0]?.keepalive).toBeUndefined()
     expect(getLoopEnded()).toBe(false)
   })
 
@@ -246,6 +249,7 @@ describe('settleLoopTickAfterIdle (aPt + XKu harness)', () => {
   })
 
   test('clears aPt when in-flight is set (YKu off)', () => {
+    setGate('tengu_kairos_loop_keepalive', false)
     setLoopTickInFlightPrompt('<<autonomous-loop-dynamic>>')
     const r = settleLoopTickAfterIdle()
     expect(r.hadInFlight).toBe(true)
