@@ -61,6 +61,7 @@ export type LogOption = {
   prNumber?: number // GitHub PR number linked to this session
   prUrl?: string // Full URL to the linked PR
   prRepository?: string // Repository in "owner/repo" format
+  artifactCount?: number // Published artifact count shown in /resume
   mode?: 'coordinator' | 'normal' // Session mode for coordinator/normal detection
   sessionKind?: string // Session kind: 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
   worktreeSession?: PersistedWorktreeSession | null // Worktree state at session end (null = exited, undefined = never entered)

@@ -8,18 +8,19 @@ import {
   Text,
   stringWidth,
   useApp,
+  useInput,
   usePreviewTheme,
   useTheme,
   useThemeSetting,
   type DOMElement,
 } from '@anthropic/ink';
-import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
+import { useOptionalKeybindingContext, useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
-import { getCachedCustomThemes, parseCustomThemeRef } from '../utils/customThemes.js';
+import { getCachedCustomThemes, parseCustomThemeRef, type CustomTheme } from '../utils/customThemes.js';
 import type { ThemeSetting } from '../utils/theme.js';
 import { CUSTOM_THEME_PREFIX } from '../utils/theme.js';
 import { ItemList } from './ItemList.js';
@@ -31,6 +32,7 @@ import {
   leftoverChromeQ,
 } from './FullscreenLayout.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { PermissionOverflowBox } from './permissions/PermissionOverflowBox.js';
 import { getColorModuleUnavailableReason, getSyntaxTheme } from './StructuredDiff/colorDiff.js';
 import { StructuredDiff } from './StructuredDiff.js';
 
@@ -48,7 +50,7 @@ export type ThemePickerProps = {
    * densable 2.1.289 onCustomTheme: when set, appends `New custom theme…`.
    * /theme passes a handler so the extra item is listed (create UI may no-op).
    */
-  onCustomTheme?: (theme?: unknown) => void;
+  onCustomTheme?: (theme?: CustomTheme) => void;
 };
 
 export function ThemePicker({
@@ -67,13 +69,16 @@ export function ThemePicker({
   const colorModuleUnavailableReason = getColorModuleUnavailableReason();
   const syntaxTheme = colorModuleUnavailableReason === null ? getSyntaxTheme(theme) : null;
   const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
+  React.useEffect(() => () => cancelPreview(), [cancelPreview]);
   const syntaxHighlightingDisabled = useAppState(s => s.settings.syntaxHighlightingDisabled) ?? false;
   const setAppState = useSetAppState();
+  const keybindingContext = useOptionalKeybindingContext();
 
   // Register ThemePicker context so its keybindings take precedence over Global
   useRegisterKeybindingContext('ThemePicker');
 
   const syntaxToggleShortcut = useShortcutDisplay('theme:toggleSyntaxHighlighting', 'ThemePicker', 'ctrl+t');
+  const editCustomShortcut = useShortcutDisplay('theme:editCustom', 'ThemePicker', 'ctrl+e');
   const cancelTheme = skipExitHandling
     ? () => {
         cancelPreview();
@@ -105,12 +110,10 @@ export function ThemePicker({
   const exitState = useExitOnCtrlCDWithKeybindings(skipExitHandling ? () => {} : undefined);
 
   const NEW_CUSTOM_THEME = '__new_custom_theme__';
-  const [focusedValue, setFocusedValue] = React.useState<string | undefined>(themeSetting);
-  // densable XR + C.find(slug): ctrl+e only when custom:<slug> is a saved theme.
-  const focusedSlug = typeof focusedValue === 'string' ? parseCustomThemeRef(focusedValue) : null;
-  const editingCustom = focusedSlug !== null && getCachedCustomThemes().some(theme => theme.slug === focusedSlug);
+  const customThemes = getCachedCustomThemes();
   const themeChoices: {
     label: string;
+    origin?: string;
     value: ThemeSetting | typeof NEW_CUSTOM_THEME;
   }[] = [
     { label: 'Auto (match terminal)', value: 'auto' },
@@ -132,14 +135,49 @@ export function ThemePicker({
       label: 'Light mode (ANSI colors only)',
       value: 'light-ansi',
     },
-    ...getCachedCustomThemes().map(t => ({
+    ...customThemes.map(t => ({
       label: t.name,
+      origin: t.source === 'user' ? 'custom' : `from ${t.source.plugin}`,
       value: `${CUSTOM_THEME_PREFIX}${t.slug}` as ThemeSetting,
     })),
     ...(onCustomTheme
       ? [{ label: 'New custom theme…', value: NEW_CUSTOM_THEME as ThemeSetting | typeof NEW_CUSTOM_THEME }]
       : []),
   ];
+  const savedIndex = themeChoices.findIndex(opt => opt.value === themeSetting);
+  const [focusedValue, setFocusedValue] = React.useState<string | undefined>(
+    themeChoices[Math.max(0, savedIndex)]?.value ?? themeSetting,
+  );
+  const [userMovedFocus, setUserMovedFocus] = React.useState(false);
+  const [onSavedTheme, setOnSavedTheme] = React.useState(savedIndex !== -1);
+  if (!onSavedTheme && !userMovedFocus && savedIndex !== -1) {
+    setOnSavedTheme(true);
+    setFocusedValue(themeSetting);
+  }
+  // densable XR + C.find(slug): ctrl+e only when custom:<slug> is a saved theme.
+  const focusedSlug = typeof focusedValue === 'string' ? parseCustomThemeRef(focusedValue) : null;
+  const focusedCustomTheme = focusedSlug !== null ? customThemes.find(theme => theme.slug === focusedSlug) : undefined;
+  const editingCustom = focusedCustomTheme !== undefined;
+  const editCustomTheme = () => {
+    if (focusedCustomTheme && onCustomTheme) {
+      savePreview();
+      onCustomTheme(focusedCustomTheme);
+    }
+  };
+  useKeybinding('theme:editCustom', editCustomTheme, { context: 'ThemePicker' });
+  useInput(
+    (input, key, event) => {
+      if (
+        key.ctrl &&
+        input === 'e' &&
+        keybindingContext?.getDisplayText('theme:editCustom', 'ThemePicker') === undefined
+      ) {
+        editCustomTheme();
+        event.stopImmediatePropagation();
+      }
+    },
+    { isActive: editingCustom && Boolean(onCustomTheme) },
+  );
   // densable `sst()` — blank icon is as wide as the widest status glyph.
   const blankIcon = ' '.repeat(Math.max(1, stringWidth(figures.tick), stringWidth(figures.cross)));
   const themeOptions = themeChoices.map(opt => ({
@@ -151,8 +189,10 @@ export function ThemePicker({
       ) : (
         <Text aria-hidden>{blankIcon}</Text>
       ),
-    facts: typeof opt.value === 'string' && opt.value.startsWith(CUSTOM_THEME_PREFIX) ? (['user'] as const) : undefined,
+    facts: opt.origin === undefined ? undefined : [opt.origin],
   }));
+  const listKey = onSavedTheme ? 'on-saved-theme' : 'on-first-theme';
+  const defaultFocusIndex = Math.max(0, savedIndex);
 
   // densable NCe `ZV` — list box vs KVe/root. Added to reserve, not a shrink.
   const measureRef = React.useRef<DOMElement | null>(null);
@@ -181,15 +221,14 @@ export function ThemePicker({
         </Box>
         {/* hideIndexes: nn.Item has no index column. Gold nn does not pass visibleCount. */}
         <ItemList
+          key={listKey}
           options={themeOptions}
-          defaultFocusIndex={Math.max(
-            0,
-            themeOptions.findIndex(option => option.value === themeSetting),
-          )}
+          defaultFocusIndex={defaultFocusIndex}
           onFocus={index => {
             const setting = themeOptions[index]?.value;
-            if (setting === undefined) return;
+            if (setting === undefined || setting === focusedValue) return;
             setFocusedValue(setting);
+            setUserMovedFocus(true);
             if (setting === NEW_CUSTOM_THEME) {
               cancelPreview();
               return;
@@ -210,7 +249,7 @@ export function ThemePicker({
         />
       </Box>
       <Box flexDirection="column" width="100%">
-        <Box flexDirection="column" paddingX={0}>
+        <PermissionOverflowBox paddingX={0}>
           <StructuredDiff
             patch={{
               oldStart: 1,
@@ -229,7 +268,7 @@ export function ThemePicker({
             firstLine={null}
             width={Math.max(0, columns - 6)}
           />
-        </Box>
+        </PermissionOverflowBox>
         <Text dimColor>
           {' '}
           {colorModuleUnavailableReason === 'env'
@@ -266,7 +305,9 @@ export function ThemePicker({
             ) : (
               <Byline>
                 <KeyboardShortcutHint shortcut="Enter" action="select" />
-                {editingCustom && onCustomTheme ? <KeyboardShortcutHint shortcut="ctrl+e" action="edit" /> : null}
+                {editingCustom && onCustomTheme ? (
+                  <KeyboardShortcutHint shortcut={editCustomShortcut} action="edit" />
+                ) : null}
                 <KeyboardShortcutHint shortcut="Esc" action="cancel" />
               </Byline>
             )}

@@ -1,125 +1,107 @@
-import figures from 'figures';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Box, stringWidth, Text, useModalOrTerminalSize, useTerminalSize } from '@anthropic/ink';
 import type { DiffFile } from '../../hooks/useDiffData.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text } from '@anthropic/ink';
 import { truncateStartToWidth } from '../../utils/format.js';
-import { plural } from '../../utils/stringUtils.js';
+import { ItemList } from '../ItemList.js';
+import { flattenDiffFilename } from './DiffDetailView.js';
 
-const MAX_VISIBLE_FILES = 5;
+const VISIBLE_FILE_COUNT = 7;
 
 type Props = {
   files: DiffFile[];
-  selectedIndex: number;
+  defaultFocusIndex?: number;
+  selectedIndex?: number;
+  onFocus?: (index: number) => void;
+  onSelect?: (index: number) => void;
 };
 
-export function DiffFileList({ files, selectedIndex }: Props): React.ReactNode {
-  const { columns } = useTerminalSize();
+function getFileStatsTextLength(file: DiffFile): number {
+  if (file.isUntracked) return 'untracked'.length;
+  if (file.isBinary) return 'Binary file'.length;
+  if (file.isLargeFile) return 'Large file modified'.length;
+  const parts: string[] = [];
+  if (file.linesAdded > 0) parts.push(`+${file.linesAdded}`);
+  if (file.linesRemoved > 0) parts.push(`-${file.linesRemoved}`);
+  let len = parts.join(' ').length;
+  if (file.isTruncated) len += ' (truncated)'.length;
+  return len;
+}
 
-  // Calculate scroll window - must be before early return for hooks rules
-  const { startIndex, endIndex } = useMemo(() => {
-    if (files.length === 0 || files.length <= MAX_VISIBLE_FILES) {
-      return { startIndex: 0, endIndex: files.length };
-    }
+export function DiffFileList({ files, defaultFocusIndex, selectedIndex, onFocus, onSelect }: Props): React.ReactNode {
+  const terminalSize = useTerminalSize();
+  const { columns } = useModalOrTerminalSize(terminalSize);
+  const initialFocus = defaultFocusIndex ?? selectedIndex ?? 0;
+  const [focusedIndex, setFocusedIndex] = useState(initialFocus);
 
-    // Keep selected item roughly in the middle
-    let start = Math.max(0, selectedIndex - Math.floor(MAX_VISIBLE_FILES / 2));
-    let end = start + MAX_VISIBLE_FILES;
+  const rowWidth = Math.max(28, columns - 6);
 
-    // Adjust if we're at the end
-    if (end > files.length) {
-      end = files.length;
-      start = Math.max(0, end - MAX_VISIBLE_FILES);
-    }
+  const options = useMemo(
+    () =>
+      files.map((file, index) => {
+        const isSelected = index === focusedIndex;
+        const cleanedPath = flattenDiffFilename(file.path);
+        const statsWidth = getFileStatsTextLength(file);
+        const maxPathWidth = Math.max(20, rowWidth - statsWidth - 2);
+        const displayPath = truncateStartToWidth(cleanedPath, maxPathWidth);
+        const gapWidth = Math.max(1, rowWidth - stringWidth(displayPath) - statsWidth);
 
-    return { startIndex: start, endIndex: end };
-  }, [files.length, selectedIndex]);
+        return {
+          value: file.path,
+          label: (
+            <>
+              {displayPath}
+              {' '.repeat(gapWidth)}
+              <FileStats file={file} isSelected={isSelected} />
+            </>
+          ),
+        };
+      }),
+    [files, focusedIndex, rowWidth],
+  );
 
   if (files.length === 0) {
     return <Text dimColor>No changed files</Text>;
   }
 
-  const visibleFiles = files.slice(startIndex, endIndex);
-  const hasMoreAbove = startIndex > 0;
-  const hasMoreBelow = endIndex < files.length;
-  const needsPagination = files.length > MAX_VISIBLE_FILES;
-
-  const statsWidth = 16;
-  const pointerWidth = 3;
-  const maxPathWidth = Math.max(20, columns - statsWidth - pointerWidth - 4);
-
   return (
-    <Box flexDirection="column">
-      {needsPagination && (
-        <Text dimColor>{hasMoreAbove ? ` ↑ ${startIndex} more ${plural(startIndex, 'file')}` : ' '}</Text>
-      )}
-      {visibleFiles.map((file, index) => (
-        <FileItem
-          key={file.path}
-          file={file}
-          isSelected={startIndex + index === selectedIndex}
-          maxPathWidth={maxPathWidth}
-        />
-      ))}
-      {needsPagination && (
-        <Text dimColor>
-          {hasMoreBelow ? ` ↓ ${files.length - endIndex} more ${plural(files.length - endIndex, 'file')}` : ' '}
-        </Text>
-      )}
-    </Box>
-  );
-}
-
-function FileItem({
-  file,
-  isSelected,
-  maxPathWidth,
-}: {
-  file: DiffFile;
-  isSelected: boolean;
-  maxPathWidth: number;
-}): React.ReactNode {
-  const displayPath = truncateStartToWidth(file.path, maxPathWidth);
-
-  const pointer = isSelected ? figures.pointer + ' ' : '  ';
-  const line = `${pointer}${displayPath}`;
-
-  return (
-    <Box flexDirection="row">
-      <Text bold={isSelected} color={isSelected ? 'background' : undefined} inverse={isSelected}>
-        {line}
-      </Text>
-      <Box flexGrow={1} />
-      <FileStats file={file} isSelected={isSelected} />
-    </Box>
+    <ItemList
+      options={options}
+      visibleOptionCount={VISIBLE_FILE_COUNT}
+      defaultFocusIndex={initialFocus}
+      onFocus={index => {
+        setFocusedIndex(index);
+        onFocus?.(index);
+      }}
+      onSelect={onSelect}
+      onUpFromFirst={() => {}}
+    />
   );
 }
 
 function FileStats({ file, isSelected }: { file: DiffFile; isSelected: boolean }): React.ReactNode {
   if (file.isUntracked) {
     return (
-      <Text dimColor={!isSelected} italic>
+      <Text color="text" dimColor={!isSelected} italic>
         untracked
       </Text>
     );
   }
   if (file.isBinary) {
     return (
-      <Text dimColor={!isSelected} italic>
+      <Text color="text" dimColor={!isSelected} italic>
         Binary file
       </Text>
     );
   }
   if (file.isLargeFile) {
     return (
-      <Text dimColor={!isSelected} italic>
+      <Text color="text" dimColor={!isSelected} italic>
         Large file modified
       </Text>
     );
   }
-  // Normal or truncated file - show line counts
   return (
-    <Text>
+    <Text color="text">
       {file.linesAdded > 0 && (
         <Text color="diffAddedWord" bold={isSelected}>
           +{file.linesAdded}
@@ -131,7 +113,12 @@ function FileStats({ file, isSelected }: { file: DiffFile; isSelected: boolean }
           -{file.linesRemoved}
         </Text>
       )}
-      {file.isTruncated && <Text dimColor={!isSelected}> (truncated)</Text>}
+      {file.isTruncated && (
+        <Text color="text" dimColor={!isSelected}>
+          {' '}
+          (truncated)
+        </Text>
+      )}
     </Text>
   );
 }

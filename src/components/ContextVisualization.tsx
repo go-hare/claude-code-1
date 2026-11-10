@@ -6,6 +6,7 @@ import { formatContextOverLimitWarning } from '../utils/contextOverLimit.js';
 import { generateContextSuggestions } from '../utils/contextSuggestions.js';
 import { getDisplayPath } from '../utils/file.js';
 import { formatTokens } from '../utils/format.js';
+import { getMarketingNameForModel } from '../utils/model/model.js';
 import { getSourceDisplayName, type SettingSource } from '../utils/settings/constants.js';
 import { plural } from '../utils/stringUtils.js';
 import { ContextSuggestions } from './ContextSuggestions.js';
@@ -64,16 +65,18 @@ function CollapseStatus(): React.ReactNode {
   return null;
 }
 
-// Order for displaying source groups: Project > User > Managed > Plugin > Built-in
-const SOURCE_DISPLAY_ORDER = ['Project', 'User', 'Managed', 'Plugin', 'Built-in'];
+// Order for displaying source groups: Project > User > Local > Managed > Plugin > MCP > Built-in
+const SOURCE_DISPLAY_ORDER = ['Project', 'User', 'Local', 'Managed', 'Plugin', 'MCP', 'Built-in'];
 
 /** Group items by source type for display, sorted by tokens descending within each group */
-function groupBySource<T extends { source: SettingSource | 'plugin' | 'built-in'; tokens: number }>(
-  items: T[],
-): Map<string, T[]> {
+function groupBySource<
+  T extends { source: SettingSource | 'plugin' | 'mcp' | 'built-in'; tokens: number; pluginName?: string },
+>(items: T[]): Map<string, T[]> {
   const groups = new Map<string, T[]>();
   for (const item of items) {
-    const key = getSourceDisplayName(item.source);
+    const key =
+      getSourceDisplayName(item.source as SettingSource | 'plugin' | 'built-in') +
+      (item.pluginName ? ` (${item.pluginName})` : '');
     const existing = groups.get(key) || [];
     existing.push(item);
     groups.set(key, existing);
@@ -92,15 +95,35 @@ function groupBySource<T extends { source: SettingSource | 'plugin' | 'built-in'
     if (group) {
       orderedGroups.set(source, group);
     }
+    const subkeys = [...groups.keys()].filter(k => k.startsWith(`${source} (`)).sort();
+    for (const k of subkeys) {
+      orderedGroups.set(k, groups.get(k)!);
+    }
+  }
+  for (const [key, group] of groups) {
+    if (!orderedGroups.has(key)) {
+      orderedGroups.set(key, group);
+    }
   }
   return orderedGroups;
 }
 
-interface Props {
-  data: ContextData;
+function CollapsedSummary({ count, noun, tokens }: { count: number; noun: string; tokens: number }): React.ReactNode {
+  return (
+    <Box>
+      <Text dimColor>
+        └ {count} {plural(count, noun)} · {formatTokens(tokens)} tokens
+      </Text>
+    </Box>
+  );
 }
 
-export function ContextVisualization({ data }: Props): React.ReactNode {
+interface Props {
+  data: ContextData;
+  collapseDetailSections?: boolean;
+}
+
+export function ContextVisualization({ data, collapseDetailSections = false }: Props): React.ReactNode {
   const {
     categories,
     totalTokens,
@@ -116,8 +139,6 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
     agents,
     skills,
     messageBreakdown,
-    cacheHitRate,
-    cacheThreshold,
     autocompactSource,
   } = data;
 
@@ -136,6 +157,9 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
     rawMaxTokens,
     autocompactSource,
   });
+  const hasCollapsibleDetails =
+    mcpTools.length > 0 || agents.length > 0 || memoryFiles.length > 0 || (skills?.tokens ?? 0) > 0;
+  const modelTitle = getMarketingNameForModel(model);
 
   return (
     <Box flexDirection="column" paddingLeft={1}>
@@ -177,16 +201,12 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
 
         {/* Legend to the right */}
         <Box flexDirection="column" gap={0} flexShrink={0}>
+          {modelTitle && <Text>{modelTitle}</Text>}
+          <Text dimColor>{model}</Text>
           <Text dimColor>
-            {model} · {formatTokens(totalTokens)}/{formatTokens(rawMaxTokens)} tokens ({percentage}%)
+            {formatTokens(totalTokens)}/{formatTokens(rawMaxTokens)} tokens ({percentage}%)
           </Text>
           <CollapseStatus />
-          {cacheHitRate !== undefined && cacheThreshold !== undefined && (
-            <Text color={cacheHitRate < cacheThreshold ? 'warning' : undefined}>
-              Cache hit rate: {cacheHitRate.toFixed(0)}%
-              {cacheHitRate < cacheThreshold ? ` (below ${cacheThreshold}% threshold)` : ''}
-            </Text>
-          )}
           <Text> </Text>
           <Text dimColor italic>
             Estimated usage by category
@@ -236,47 +256,70 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
       </Box>
 
       <Box flexDirection="column" marginLeft={-1}>
+        {autocompactSource && autocompactSource !== 'auto' && (
+          <Box marginTop={1}>
+            <Text bold>Auto-compact window: </Text>
+            <Text dimColor>
+              {autocompactSource === 'experiment' || autocompactSource === 'clientdata'
+                ? `auto (${formatTokens(rawMaxTokens)} tokens)`
+                : (autocompactSource as string) === 'unknown-model'
+                  ? `${formatTokens(rawMaxTokens)} tokens (default for an unrecognized model)`
+                  : `${formatTokens(rawMaxTokens)} tokens`}
+            </Text>
+          </Box>
+        )}
+
         {mcpTools.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
             <Box>
               <Text bold>MCP tools</Text>
               <Text dimColor> · /mcp{hasDeferredMcpTools ? ' (loaded on-demand)' : ''}</Text>
             </Box>
-            {/* Show loaded tools first */}
-            {mcpTools.some(t => t.isLoaded) && (
-              <Box flexDirection="column" marginTop={1}>
-                <Text dimColor>Loaded</Text>
-                {mcpTools
-                  .filter(t => t.isLoaded)
-                  .map((tool, i) => (
+            {collapseDetailSections ? (
+              <CollapsedSummary
+                count={mcpTools.length}
+                noun="tool"
+                tokens={mcpTools.filter(t => !hasDeferredMcpTools || t.isLoaded).reduce((sum, t) => sum + t.tokens, 0)}
+              />
+            ) : (
+              <>
+                {/* Show loaded tools first */}
+                {mcpTools.some(t => t.isLoaded) && (
+                  <Box flexDirection="column" marginTop={1}>
+                    <Text dimColor>Loaded</Text>
+                    {mcpTools
+                      .filter(t => t.isLoaded)
+                      .map((tool, i) => (
+                        <Box key={i}>
+                          <Text>└ {tool.name}: </Text>
+                          <Text dimColor>{formatTokens(tool.tokens)} tokens</Text>
+                        </Box>
+                      ))}
+                  </Box>
+                )}
+                {/* Show available (deferred) tools */}
+                {hasDeferredMcpTools && mcpTools.some(t => !t.isLoaded) && (
+                  <Box flexDirection="column" marginTop={1}>
+                    <Text dimColor>Available</Text>
+                    {mcpTools
+                      .filter(t => !t.isLoaded)
+                      .map((tool, i) => (
+                        <Box key={i}>
+                          <Text dimColor>└ {tool.name}</Text>
+                        </Box>
+                      ))}
+                  </Box>
+                )}
+                {/* Show all tools normally when not deferred */}
+                {!hasDeferredMcpTools &&
+                  mcpTools.map((tool, i) => (
                     <Box key={i}>
                       <Text>└ {tool.name}: </Text>
                       <Text dimColor>{formatTokens(tool.tokens)} tokens</Text>
                     </Box>
                   ))}
-              </Box>
+              </>
             )}
-            {/* Show available (deferred) tools */}
-            {hasDeferredMcpTools && mcpTools.some(t => !t.isLoaded) && (
-              <Box flexDirection="column" marginTop={1}>
-                <Text dimColor>Available</Text>
-                {mcpTools
-                  .filter(t => !t.isLoaded)
-                  .map((tool, i) => (
-                    <Box key={i}>
-                      <Text dimColor>└ {tool.name}</Text>
-                    </Box>
-                  ))}
-              </Box>
-            )}
-            {/* Show all tools normally when not deferred */}
-            {!hasDeferredMcpTools &&
-              mcpTools.map((tool, i) => (
-                <Box key={i}>
-                  <Text>└ {tool.name}: </Text>
-                  <Text dimColor>{formatTokens(tool.tokens)} tokens</Text>
-                </Box>
-              ))}
           </Box>
         )}
 
@@ -337,19 +380,27 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
           <Box flexDirection="column" marginTop={1}>
             <Box>
               <Text bold>Custom agents</Text>
-              <Text dimColor> · /agents</Text>
+              <Text dimColor> · .claude/agents/</Text>
             </Box>
-            {Array.from(groupBySource(agents).entries()).map(([sourceDisplay, sourceAgents]) => (
-              <Box key={sourceDisplay} flexDirection="column" marginTop={1}>
-                <Text dimColor>{sourceDisplay}</Text>
-                {sourceAgents.map((agent, i) => (
-                  <Box key={i}>
-                    <Text>└ {agent.agentType}: </Text>
-                    <Text dimColor>{formatTokens(agent.tokens)} tokens</Text>
-                  </Box>
-                ))}
-              </Box>
-            ))}
+            {collapseDetailSections ? (
+              <CollapsedSummary
+                count={agents.length}
+                noun="agent"
+                tokens={agents.reduce((sum, a) => sum + a.tokens, 0)}
+              />
+            ) : (
+              Array.from(groupBySource(agents).entries()).map(([sourceDisplay, sourceAgents]) => (
+                <Box key={sourceDisplay} flexDirection="column" marginTop={1}>
+                  <Text dimColor>{sourceDisplay}</Text>
+                  {sourceAgents.map((agent, i) => (
+                    <Box key={i}>
+                      <Text>└ {agent.agentType}: </Text>
+                      <Text dimColor>{formatTokens(agent.tokens)} tokens</Text>
+                    </Box>
+                  ))}
+                </Box>
+              ))
+            )}
           </Box>
         )}
 
@@ -359,12 +410,20 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
               <Text bold>Memory files</Text>
               <Text dimColor> · /memory</Text>
             </Box>
-            {memoryFiles.map((file, i) => (
-              <Box key={i}>
-                <Text>└ {getDisplayPath(file.path)}: </Text>
-                <Text dimColor>{formatTokens(file.tokens)} tokens</Text>
-              </Box>
-            ))}
+            {collapseDetailSections ? (
+              <CollapsedSummary
+                count={memoryFiles.length}
+                noun="file"
+                tokens={memoryFiles.reduce((sum, f) => sum + f.tokens, 0)}
+              />
+            ) : (
+              memoryFiles.map((file, i) => (
+                <Box key={i}>
+                  <Text>└ {getDisplayPath(file.path)}: </Text>
+                  <Text dimColor>{formatTokens(file.tokens)} tokens</Text>
+                </Box>
+              ))
+            )}
           </Box>
         )}
 
@@ -374,17 +433,21 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
               <Text bold>Skills</Text>
               <Text dimColor> · /skills</Text>
             </Box>
-            {Array.from(groupBySource(skills.skillFrontmatter).entries()).map(([sourceDisplay, sourceSkills]) => (
-              <Box key={sourceDisplay} flexDirection="column" marginTop={1}>
-                <Text dimColor>{sourceDisplay}</Text>
-                {sourceSkills.map((skill, i) => (
-                  <Box key={i}>
-                    <Text>└ {skill.name}: </Text>
-                    <Text dimColor>{formatTokens(skill.tokens)} tokens</Text>
-                  </Box>
-                ))}
-              </Box>
-            ))}
+            {collapseDetailSections ? (
+              <CollapsedSummary count={skills.skillFrontmatter.length} noun="skill" tokens={skills.tokens} />
+            ) : (
+              Array.from(groupBySource(skills.skillFrontmatter).entries()).map(([sourceDisplay, sourceSkills]) => (
+                <Box key={sourceDisplay} flexDirection="column" marginTop={1}>
+                  <Text dimColor>{sourceDisplay}</Text>
+                  {sourceSkills.map((skill, i) => (
+                    <Box key={i}>
+                      <Text>└ {skill.name}: </Text>
+                      <Text dimColor>{formatTokens(skill.tokens)} tokens</Text>
+                    </Box>
+                  ))}
+                </Box>
+              ))
+            )}
           </Box>
         )}
 
@@ -444,6 +507,12 @@ export function ContextVisualization({ data }: Props): React.ReactNode {
                 ))}
               </Box>
             )}
+          </Box>
+        )}
+
+        {collapseDetailSections && hasCollapsibleDetails && (
+          <Box marginTop={1}>
+            <Text dimColor>/context all to expand</Text>
           </Box>
         )}
       </Box>

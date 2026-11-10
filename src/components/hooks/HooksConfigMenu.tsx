@@ -1,14 +1,8 @@
 /**
  * HooksConfigMenu is a read-only browser for configured hooks.
  *
- * Users can drill into each hook event, see configured matchers and hooks
- * (of any type: command, prompt, agent, http), and view individual hook
- * details. To add or modify hooks, users should edit settings.json directly
- * or ask Claude — the menu directs them there.
- *
- * The menu is read-only because the old editing UI only supported
- * command-type hooks and duplicating the settings.json editing surface
- * in-menu for all four types would be a maintenance burden.
+ * Starts in a configured-hooks overview (`mode: 'list'`) grouped by event,
+ * with an "All events" entry drilling into the full event catalog.
  */
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
@@ -16,23 +10,36 @@ import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useSettingsChange } from '../../hooks/useSettingsChange.js';
-import { Box, Text } from '@anthropic/ink';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import {
+  Box,
+  Byline,
+  type ClickEvent,
+  Dialog,
+  KeyboardShortcutHint,
+  Link,
+  ListItem,
+  StatusIcon,
+  Text,
+  useModalOrTerminalSize,
+  useTerminalSize,
+  type WheelEvent,
+} from '@anthropic/ink';
+import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   getHookEventMetadata,
   getHooksForMatcher,
   getMatcherMetadata,
   getSortedMatchersForEvent,
   groupHooksByEventAndMatcher,
+  type HookEventMetadata,
 } from '../../utils/hooks/hooksConfigManager.js';
-import type { IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
+import { hookSourceInlineDisplayString, type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
 import { getSettings_DEPRECATED, getSettingsForSource } from '../../utils/settings/settings.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Dialog } from '@anthropic/ink';
 import { SelectEventMode } from './SelectEventMode.js';
 import { SelectHookMode } from './SelectHookMode.js';
 import { SelectMatcherMode } from './SelectMatcherMode.js';
-import { ViewHookMode } from './ViewHookMode.js';
+import { getContentFieldValue, ViewHookMode } from './ViewHookMode.js';
 
 type Props = {
   toolNames: string[];
@@ -40,31 +47,266 @@ type Props = {
 };
 
 type ModeState =
+  | { mode: 'list' }
   | { mode: 'select-event' }
   | { mode: 'select-matcher'; event: HookEvent }
   | { mode: 'select-hook'; event: HookEvent; matcher: string }
-  | { mode: 'view-hook'; event: HookEvent; hook: IndividualHookConfig };
+  | { mode: 'view-hook'; event: HookEvent; hook: IndividualHookConfig; from?: 'list' | 'select-hook' };
+
+type OverviewVisualRow =
+  | { kind: 'gap'; key: string }
+  | { kind: 'heading'; key: string; event: HookEvent; summary: string }
+  | { kind: 'hook'; key: string; selectableIndex: number; hook: IndividualHookConfig }
+  | { kind: 'all-events'; key: string; selectableIndex: number };
+
+function lowercaseLeadingChar(summary: string): string {
+  return summary.replace(/^\p{Lu}(?=\p{Ll}|\s)/u, ch => ch.toLowerCase());
+}
+
+function HooksOverviewMode({
+  hookEventMetadata,
+  hooksByEventAndMatcher,
+  restrictedByPolicy,
+  defaultFocusIndex,
+  onFocusRow,
+  onSelectHook,
+  onOpenEvents,
+  onCancel,
+}: {
+  hookEventMetadata: Record<HookEvent, HookEventMetadata>;
+  hooksByEventAndMatcher: Record<HookEvent, Record<string, IndividualHookConfig[]>>;
+  restrictedByPolicy: boolean;
+  defaultFocusIndex: number;
+  onFocusRow: (index: number) => void;
+  onSelectHook: (hook: IndividualHookConfig) => void;
+  onOpenEvents: () => void;
+  onCancel: () => void;
+}): React.ReactNode {
+  const eventGroups = useMemo(() => {
+    return Object.entries(hookEventMetadata).flatMap(([eventName, metadata]) => {
+      const event = eventName as HookEvent;
+      const byMatcher = hooksByEventAndMatcher[event] ?? {};
+      const hooks = getSortedMatchersForEvent(hooksByEventAndMatcher, event).flatMap(m => byMatcher[m] ?? []);
+      return hooks.length > 0 ? [{ event, metadata, hooks }] : [];
+    });
+  }, [hookEventMetadata, hooksByEventAndMatcher]);
+
+  const allHooks = useMemo(() => eventGroups.flatMap(g => g.hooks), [eventGroups]);
+  const totalSelectable = allHooks.length + 1;
+
+  const { visualRows, rowLineForSelectable } = useMemo(() => {
+    const rows: OverviewVisualRow[] = [];
+    const lineForSelectable: number[] = [];
+    let selectableIndex = 0;
+
+    eventGroups.forEach((group, groupIndex) => {
+      if (groupIndex > 0) {
+        rows.push({ kind: 'gap', key: `${group.event}-gap` });
+      }
+      rows.push({
+        kind: 'heading',
+        key: `${group.event}-heading`,
+        event: group.event,
+        summary: lowercaseLeadingChar(group.metadata.summary),
+      });
+      group.hooks.forEach((hook, hookIdx) => {
+        lineForSelectable.push(rows.length);
+        rows.push({
+          kind: 'hook',
+          key: `${group.event}-${hookIdx}`,
+          selectableIndex,
+          hook,
+        });
+        selectableIndex++;
+      });
+    });
+
+    if (allHooks.length > 0) {
+      rows.push({ kind: 'gap', key: 'events-gap' });
+    }
+    lineForSelectable.push(rows.length);
+    rows.push({
+      kind: 'all-events',
+      key: 'events',
+      selectableIndex,
+    });
+
+    return { visualRows: rows, rowLineForSelectable: lineForSelectable };
+  }, [eventGroups, allHooks.length]);
+
+  const { rows: availableRows } = useModalOrTerminalSize(useTerminalSize());
+  const windowHeight = Math.max(5, availableRows - (restrictedByPolicy ? 11 : 8));
+  const maxOrigin = Math.max(0, visualRows.length - windowHeight);
+
+  const [cursor, setCursor] = useState(() => Math.max(0, Math.min(totalSelectable - 1, defaultFocusIndex)));
+  const [origin, setOrigin] = useState(0);
+
+  const moveCursor = useCallback(
+    (next: number) => {
+      const clamped = Math.max(0, Math.min(totalSelectable - 1, next));
+      setCursor(clamped);
+      onFocusRow(clamped);
+      const targetLine = rowLineForSelectable[clamped] ?? 0;
+      setOrigin(prev => {
+        const cur = Math.min(prev, maxOrigin);
+        if (clamped === 0) return 0;
+        if (targetLine < cur) return Math.max(0, targetLine - 1);
+        if (targetLine >= cur + windowHeight) return Math.min(maxOrigin, targetLine - windowHeight + 1);
+        return cur;
+      });
+    },
+    [totalSelectable, onFocusRow, rowLineForSelectable, maxOrigin, windowHeight],
+  );
+
+  const activateIndex = useCallback(
+    (index: number) => {
+      const hook = allHooks[index];
+      if (hook) {
+        onSelectHook(hook);
+      } else {
+        onOpenEvents();
+      }
+    },
+    [allHooks, onSelectHook, onOpenEvents],
+  );
+
+  useKeybindings(
+    {
+      'select:next': () => moveCursor(cursor + 1),
+      'select:previous': () => moveCursor(cursor - 1),
+      'select:first': () => moveCursor(0),
+      'select:last': () => moveCursor(totalSelectable - 1),
+      'select:accept': () => activateIndex(cursor),
+    },
+    { context: 'Select' },
+  );
+
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      if (event.deltaY === 0 || maxOrigin === 0) return;
+      const delta = event.deltaY > 0 ? 1 : -1;
+      setOrigin(prev => Math.max(0, Math.min(maxOrigin, Math.min(prev, maxOrigin) + delta)));
+      event.stopImmediatePropagation();
+    },
+    [maxOrigin],
+  );
+
+  const clampedOrigin = Math.min(origin, maxOrigin);
+  const visibleRows =
+    visualRows.length <= windowHeight ? visualRows : visualRows.slice(clampedOrigin, clampedOrigin + windowHeight);
+
+  const subtitle =
+    allHooks.length === 0
+      ? restrictedByPolicy
+        ? 'managed hooks only'
+        : 'no hooks yet'
+      : `${allHooks.length} ${plural(allHooks.length, 'hook')} on ${eventGroups.length} ${plural(eventGroups.length, 'event')}`;
+
+  return (
+    <Dialog
+      title="Hooks"
+      subtitle={subtitle}
+      onCancel={onCancel}
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="enter" action="view" />
+          <KeyboardShortcutHint shortcut="esc" action="close" />
+        </Byline>
+      }
+    >
+      <Box flexDirection="column" gap={1}>
+        {restrictedByPolicy && (
+          <Box flexDirection="column">
+            <Text>
+              <StatusIcon status="info" withSpace />
+              Only hooks from managed settings run here.
+            </Text>
+            <Text dimColor>
+              Hooks in your own settings files (user, project and local) are blocked and aren&apos;t listed. Managed
+              hooks aren&apos;t shown here either.
+            </Text>
+          </Box>
+        )}
+
+        <Text dimColor>
+          This menu is read-only. To add or change a hook, edit settings.json or ask Claude.{' '}
+          <Link url="https://code.claude.com/docs/en/hooks">Learn more</Link>
+        </Text>
+
+        <Box flexDirection="column" onWheel={maxOrigin > 0 ? handleWheel : undefined}>
+          {visibleRows.map(row => {
+            switch (row.kind) {
+              case 'gap':
+                return <Text key={row.key}> </Text>;
+              case 'heading':
+                return (
+                  <Text key={row.key} wrap="truncate-end">
+                    <Text bold>{row.event}</Text>
+                    <Text dimColor>
+                      {'  '}
+                      {row.summary}
+                    </Text>
+                  </Text>
+                );
+              case 'hook': {
+                const { hook, selectableIndex } = row;
+                const meta = [
+                  hook.source === 'pluginHook' && hook.pluginName ? hook.pluginName : '',
+                  hook.matcher || '',
+                  hook.config.type,
+                ].filter(Boolean);
+                return (
+                  <ListItem
+                    key={row.key}
+                    isFocused={cursor === selectableIndex}
+                    icon={<Text dimColor>[{hookSourceInlineDisplayString(hook.source)}]</Text>}
+                    meta={meta}
+                    onClick={(event: ClickEvent) => {
+                      moveCursor(selectableIndex);
+                      activateIndex(selectableIndex);
+                      event.stopImmediatePropagation();
+                    }}
+                  >
+                    {getContentFieldValue(hook.config).replace(/[\r\n]+/g, ' ')}
+                  </ListItem>
+                );
+              }
+              case 'all-events':
+                return (
+                  <ListItem
+                    key={row.key}
+                    isFocused={cursor === row.selectableIndex}
+                    onClick={(event: ClickEvent) => {
+                      moveCursor(row.selectableIndex);
+                      onOpenEvents();
+                      event.stopImmediatePropagation();
+                    }}
+                  >
+                    All events
+                  </ListItem>
+                );
+            }
+          })}
+        </Box>
+      </Box>
+    </Dialog>
+  );
+}
 
 export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
-  const [modeState, setModeState] = useState<ModeState>({
-    mode: 'select-event',
-  });
-  // Cache whether hooks are disabled by policy settings.
-  // getSettingsForSource() is expensive (file read + JSON parse + validation),
-  // so we compute it once on mount and only re-compute when policy settings change.
-  // Short-circuit evaluation ensures we skip the expensive check when hooks aren't disabled.
+  const [modeState, setModeState] = useState<ModeState>({ mode: 'list' });
+  const [listFocusIndex, setListFocusIndex] = useState(0);
+
   const [disabledByPolicy, setDisabledByPolicy] = useState(() => {
     const settings = getSettings_DEPRECATED();
     const hooksDisabled = settings?.disableAllHooks === true;
     return hooksDisabled && getSettingsForSource('policySettings')?.disableAllHooks === true;
   });
 
-  // Check if hooks are restricted to managed-only by policy
   const [restrictedByPolicy, setRestrictedByPolicy] = useState(() => {
     return getSettingsForSource('policySettings')?.allowManagedHooksOnly === true;
   });
 
-  // Update cached values when policy settings change
   useSettingsChange(source => {
     if (source === 'policySettings') {
       const settings = getSettings_DEPRECATED();
@@ -74,7 +316,6 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
     }
   });
 
-  // Extract commonly used values from modeState for convenience
   const mode = modeState.mode;
   const selectedEvent = 'event' in modeState ? modeState.event : 'PreToolUse';
   const selectedMatcher = 'matcher' in modeState ? modeState.matcher : null;
@@ -98,18 +339,43 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
     [hooksByEventAndMatcher, selectedEvent, selectedMatcher],
   );
 
-  // Handler for exiting the dialog
   const handleExit = useCallback(() => {
     onExit('Hooks dialog dismissed', { display: 'system' });
   }, [onExit]);
 
-  // Escape handling for select-event mode - exit the menu
+  const hookEventMetadata = getHookEventMetadata(combinedToolNames);
+
+  const handleViewHookCancel = useCallback(() => {
+    if (modeState.mode !== 'view-hook') return;
+    const { event, hook, from } = modeState;
+    if (from === 'list') {
+      setModeState({ mode: 'list' });
+      return;
+    }
+    const supportsMatcher = hookEventMetadata[event].matcherMetadata !== undefined;
+    setModeState({
+      mode: 'select-hook',
+      event,
+      matcher: supportsMatcher ? hook.matcher || '' : '',
+    });
+  }, [modeState, hookEventMetadata]);
+
   useKeybinding('confirm:no', handleExit, {
     context: 'Confirmation',
-    isActive: mode === 'select-event',
+    isActive: mode === 'list',
   });
 
-  // Escape handling for select-matcher mode - go to select-event
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setModeState({ mode: 'list' });
+    },
+    {
+      context: 'Confirmation',
+      isActive: mode === 'select-event',
+    },
+  );
+
   useKeybinding(
     'confirm:no',
     () => {
@@ -121,12 +387,11 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
     },
   );
 
-  // Escape handling for select-hook mode - go to select-matcher or select-event
   useKeybinding(
     'confirm:no',
     () => {
       if ('event' in modeState) {
-        if (getMatcherMetadata(modeState.event, combinedToolNames) !== undefined) {
+        if (hookEventMetadata[modeState.event].matcherMetadata !== undefined) {
           setModeState({ mode: 'select-matcher', event: modeState.event });
         } else {
           setModeState({ mode: 'select-event' });
@@ -139,32 +404,14 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
     },
   );
 
-  // Escape handling for view-hook mode - go to select-hook
-  useKeybinding(
-    'confirm:no',
-    () => {
-      if (modeState.mode === 'view-hook') {
-        const { event, hook } = modeState;
-        setModeState({
-          mode: 'select-hook',
-          event,
-          matcher: hook.matcher || '',
-        });
-      }
-    },
-    {
-      context: 'Confirmation',
-      isActive: mode === 'view-hook',
-    },
-  );
+  useKeybinding('confirm:no', handleViewHookCancel, {
+    context: 'Confirmation',
+    isActive: mode === 'view-hook',
+  });
 
-  const hookEventMetadata = getHookEventMetadata(combinedToolNames);
-
-  // Check if hooks are disabled
   const settings = getSettings_DEPRECATED();
   const hooksDisabled = settings?.disableAllHooks === true;
 
-  // Count hooks per event for the event-selection view, and the total.
   const { hooksByEvent, totalHooksCount } = useMemo(() => {
     const byEvent: Partial<Record<HookEvent, number>> = {};
     let total = 0;
@@ -176,29 +423,30 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
     return { hooksByEvent: byEvent, totalHooksCount: total };
   }, [hooksByEventAndMatcher]);
 
-  // If hooks are disabled, show an informational screen.
-  // The menu is read-only, so we don't offer a re-enable button —
-  // users can edit settings.json or ask Claude instead.
   if (hooksDisabled) {
+    const statusPrefix = disabledByPolicy ? 'disabled by your organization' : 'disabled';
+    const disabledSubtitle =
+      totalHooksCount > 0
+        ? `${statusPrefix} · ${totalHooksCount} ${plural(totalHooksCount, 'hook')} not running`
+        : statusPrefix;
+    const hasManagedHooks = Boolean(getSettingsForSource('policySettings')?.hooks);
+
     return (
-      <Dialog title="Hook Configuration - Disabled" onCancel={handleExit} inputGuide={() => <Text>Esc to close</Text>}>
+      <Dialog
+        title="Hooks"
+        subtitle={disabledSubtitle}
+        onCancel={handleExit}
+        inputGuide={<KeyboardShortcutHint shortcut="esc" action="close" />}
+      >
         <Box flexDirection="column" gap={1}>
-          <Box flexDirection="column">
-            <Text>
-              All hooks are currently <Text bold>disabled</Text>
-              {disabledByPolicy && ' by a managed settings file'}. You have <Text bold>{totalHooksCount}</Text>{' '}
-              configured {plural(totalHooksCount, 'hook')} that {plural(totalHooksCount, 'is', 'are')} not running.
-            </Text>
-            <Box marginTop={1}>
-              <Text dimColor>When hooks are disabled:</Text>
-            </Box>
-            <Text dimColor>· No hook commands will execute</Text>
-            <Text dimColor>· StatusLine will not be displayed</Text>
-            <Text dimColor>· Tool operations will proceed without hook validation</Text>
-          </Box>
+          <Text>
+            While hooks are disabled no hook command runs, the status line isn&apos;t shown, and tools run without hook
+            checks.
+            {!disabledByPolicy && hasManagedHooks ? ' Hooks set by your organization still run.' : ''}
+          </Text>
           {!disabledByPolicy && (
             <Text dimColor>
-              To re-enable hooks, remove &quot;disableAllHooks&quot; from settings.json or ask Claude.
+              To turn hooks back on, remove &quot;disableAllHooks&quot; from settings.json or ask Claude.
             </Text>
           )}
         </Box>
@@ -207,6 +455,28 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
   }
 
   switch (modeState.mode) {
+    case 'list':
+      return (
+        <HooksOverviewMode
+          hookEventMetadata={hookEventMetadata}
+          hooksByEventAndMatcher={hooksByEventAndMatcher}
+          restrictedByPolicy={restrictedByPolicy}
+          defaultFocusIndex={listFocusIndex}
+          onFocusRow={setListFocusIndex}
+          onSelectHook={hook => {
+            setModeState({
+              mode: 'view-hook',
+              event: hook.event,
+              hook,
+              from: 'list',
+            });
+          }}
+          onOpenEvents={() => {
+            setModeState({ mode: 'select-event' });
+          }}
+          onCancel={handleExit}
+        />
+      );
     case 'select-event':
       return (
         <SelectEventMode
@@ -221,7 +491,9 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
               setModeState({ mode: 'select-hook', event, matcher: '' });
             }
           }}
-          onCancel={handleExit}
+          onCancel={() => {
+            setModeState({ mode: 'list' });
+          }}
         />
       );
     case 'select-matcher':
@@ -255,10 +527,10 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
               mode: 'view-hook',
               event: modeState.event,
               hook,
+              from: 'select-hook',
             });
           }}
           onCancel={() => {
-            // Go back to matcher selection or event selection
             if (getMatcherMetadata(modeState.event, combinedToolNames) !== undefined) {
               setModeState({
                 mode: 'select-matcher',
@@ -275,14 +547,7 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
         <ViewHookMode
           selectedHook={modeState.hook}
           eventSupportsMatcher={getMatcherMetadata(modeState.event, combinedToolNames) !== undefined}
-          onCancel={() => {
-            const { event, hook } = modeState;
-            setModeState({
-              mode: 'select-hook',
-              event,
-              matcher: hook.matcher || '',
-            });
-          }}
+          onCancel={handleViewHookCancel}
         />
       );
   }

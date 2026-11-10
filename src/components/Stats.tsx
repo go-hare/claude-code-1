@@ -11,11 +11,12 @@ import {
   Ansi,
   applyColor,
   Box,
+  KeyboardShortcutHint,
   Text,
   useInput,
+  useModalOrTerminalSize,
   stringWidth as getStringWidth,
   type Color,
-  Pane,
   Tab,
   Tabs,
   useTabHeaderFocus,
@@ -84,18 +85,28 @@ function createAllTimeStatsPromise(): Promise<StatsResult> {
 export function Stats({ onClose }: Props): React.ReactNode {
   // Always load all-time stats first (for heatmap)
   const allTimePromise = useMemo(() => createAllTimeStatsPromise(), []);
+  const { rows } = useModalOrTerminalSize(useTerminalSize());
+  const minHeight = Math.max(8, Math.min(rows - 4, 31));
+
+  const handleClose = useCallback(() => {
+    onClose('Stats dialog dismissed', { display: 'system' });
+  }, [onClose]);
+
+  useKeybinding('confirm:no', handleClose, { context: 'Settings' });
 
   return (
-    <Suspense
-      fallback={
-        <Box marginTop={1}>
-          <Spinner />
-          <Text> Loading your Claude Code stats…</Text>
-        </Box>
-      }
-    >
-      <StatsContent allTimePromise={allTimePromise} onClose={onClose} />
-    </Suspense>
+    <Box flexDirection="column" minHeight={minHeight}>
+      <Suspense
+        fallback={
+          <Box marginTop={1}>
+            <Spinner />
+            <Text> Loading your Claude Code stats…</Text>
+          </Box>
+        }
+      >
+        <StatsContent allTimePromise={allTimePromise} onClose={onClose} />
+      </Suspense>
+    </Box>
   );
 }
 
@@ -115,6 +126,7 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
   const [isLoadingFiltered, setIsLoadingFiltered] = useState(false);
   const [activeTab, setActiveTab] = useState<'Overview' | 'Models'>('Overview');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const { headerFocused, focusHeader } = useTabHeaderFocus();
 
   // Load filtered stats when date range changes (with caching)
   useEffect(() => {
@@ -159,30 +171,30 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
   // All-time stats for the heatmap (always use all-time)
   const allTimeStats = allTimeResult.type === 'success' ? allTimeResult.data : null;
 
-  const handleClose = useCallback(() => {
-    onClose('Stats dialog dismissed', { display: 'system' });
-  }, [onClose]);
-
-  useKeybinding('confirm:no', handleClose, { context: 'Confirmation' });
-
-  useInput((input, key) => {
-    // Handle ctrl+c and ctrl+d for closing
-    if (key.ctrl && (input === 'c' || input === 'd')) {
-      onClose('Stats dialog dismissed', { display: 'system' });
-    }
-    // Track tab changes
-    if (key.tab) {
-      setActiveTab(prev => (prev === 'Overview' ? 'Models' : 'Overview'));
-    }
-    // r to cycle date range
-    if (input === 'r' && !key.ctrl && !key.meta) {
-      setDateRange(getNextDateRange(dateRange));
-    }
-    // Ctrl+S to copy screenshot to clipboard
-    if (key.ctrl && input === 's' && displayStats) {
-      void handleScreenshot(displayStats, activeTab, setCopyStatus);
-    }
-  });
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input === 'c' || input === 'd')) {
+        onClose('Stats dialog dismissed', { display: 'system' });
+        return;
+      }
+      if (key.upArrow && activeTab === 'Overview') {
+        focusHeader();
+        return;
+      }
+      if (key.tab || key.leftArrow || key.rightArrow) {
+        setActiveTab(prev => (prev === 'Overview' ? 'Models' : 'Overview'));
+        return;
+      }
+      if (input === 'r' && !key.ctrl && !key.meta) {
+        setDateRange(getNextDateRange(dateRange));
+        return;
+      }
+      if (key.ctrl && input === 's' && displayStats) {
+        void handleScreenshot(displayStats, activeTab, setCopyStatus);
+      }
+    },
+    { isActive: !headerFocused },
+  );
 
   if (allTimeResult.type === 'error') {
     return (
@@ -209,10 +221,18 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
     );
   }
 
+  const footerHint = headerFocused ? '↓ stats' : '↑ tabs · r to cycle dates · ctrl+s to copy';
+
   return (
-    <Pane color="claude">
+    <Box flexDirection="column">
       <Box flexDirection="row" gap={1} marginBottom={1}>
-        <Tabs title="" color="claude" defaultTab="Overview">
+        <Tabs
+          initialHeaderFocused={false}
+          color="claude"
+          selectedTab={activeTab}
+          onTabChange={tab => setActiveTab(tab as 'Overview' | 'Models')}
+          disableNavigation={headerFocused}
+        >
           <Tab title="Overview">
             <OverviewTab
               stats={displayStats}
@@ -228,11 +248,11 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
       </Box>
       <Box paddingLeft={2}>
         <Text dimColor>
-          Esc to cancel · r to cycle dates · ctrl+s to copy
+          {footerHint}
           {copyStatus ? ` · ${copyStatus}` : ''}
         </Text>
       </Box>
-    </Pane>
+    </Box>
   );
 }
 
@@ -354,12 +374,6 @@ function OverviewTab({
           </Text>
         </Box>
       </Box>
-      {/* densable 2.1.221 D5a — Input · Output · Cache read · Cache write */}
-      <Box marginBottom={1}>
-        <Text color="subtle" wrap="truncate">
-          {formatTokenBreakdownLine(modelEntries.map(([, usage]) => usage))}
-        </Text>
-      </Box>
 
       {/* Section 2: Activity - Row 1: Sessions | Longest session */}
       <Box flexDirection="row" gap={4}>
@@ -415,6 +429,13 @@ function OverviewTab({
           </Text>
         </Box>
       </Box>
+
+      {/* Input · Output · Cache read · Cache write */}
+      {totalTokens > 0 && (
+        <Text color="subtle" wrap="truncate">
+          {formatTokenBreakdownLine(modelEntries.map(([, usage]) => usage))}
+        </Text>
+      )}
 
       {/* Speculation time saved (ant-only) */}
       {process.env.USER_TYPE === 'ant' && stats.totalSpeculationTimeSavedMs > 0 && (
@@ -533,9 +554,9 @@ function generateFunFactoid(stats: ClaudeCodeStats, totalTokens: number): string
     for (const book of matchingBooks) {
       const times = totalTokens / book.tokens;
       if (times >= 2) {
-        factoids.push(`You've used ~${Math.floor(times)}x more tokens than ${book.name}`);
+        factoids.push(`Your input and output are ~${Math.floor(times)}x the tokens in ${book.name}`);
       } else {
-        factoids.push(`You've used the same number of tokens as ${book.name}`);
+        factoids.push(`Your input and output are about as many tokens as ${book.name}`);
       }
     }
   }
@@ -660,8 +681,8 @@ function ModelsTab({
         <Box marginTop={1}>
           <Text color="subtle">
             {canScrollUp ? figures.arrowUp : ' '} {canScrollDown ? figures.arrowDown : ' '} {scrollOffset + 1}-
-            {Math.min(scrollOffset + VISIBLE_MODELS, modelEntries.length)} of {modelEntries.length} models (↑↓ to
-            scroll)
+            {Math.min(scrollOffset + VISIBLE_MODELS, modelEntries.length)} of {modelEntries.length} models{' '}
+            <KeyboardShortcutHint shortcut="↑/↓" action="scroll" parens />
           </Text>
         </Box>
       )}
@@ -722,11 +743,10 @@ function ModelEntry({ model, usage, totalTokens }: ModelEntryProps): React.React
       <Text>
         {figures.bullet} <Text bold>{renderModelName(model)}</Text> <Text color="subtle">({percentage}%)</Text>
       </Text>
-      <Text color="subtle">
-        {'  '}
-        {formatTokenBreakdownLine([usage])}
+      <Text color="subtle" wrap="truncate">
+        {'  '}In: {formatNumber(usage.inputTokens)} · Out: {formatNumber(usage.outputTokens)}
       </Text>
-      <Text color="subtle">
+      <Text color="subtle" wrap="truncate">
         {'  '}
         {formatModelCacheLine(usage)}
       </Text>
@@ -1065,7 +1085,7 @@ function renderModelsToAnsi(stats: ClaudeCodeStats): string[] {
     const modelTokens = usage.inputTokens + usage.outputTokens;
     const percentage = ((modelTokens / totalTokens) * 100).toFixed(1);
     lines.push(`${figures.bullet} ${chalk.bold(renderModelName(model))} ${chalk.gray(`(${percentage}%)`)}`);
-    lines.push(chalk.dim(`  ${formatTokenBreakdownLine([usage])}`));
+    lines.push(chalk.dim(`  In: ${formatNumber(usage.inputTokens)} · Out: ${formatNumber(usage.outputTokens)}`));
     lines.push(chalk.dim(`  ${formatModelCacheLine(usage)}`));
   }
 

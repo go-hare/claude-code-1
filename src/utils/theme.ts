@@ -1,8 +1,11 @@
 import chalk, { Chalk } from 'chalk'
+import { colorize } from '@anthropic/ink'
 import { env } from './env.js'
 
 export type Theme = {
   autoAccept: string
+  autoAcceptShimmer: string
+  skill: string
   bashBorder: string
   claude: string
   claudeShimmer: string // Lighter version of claude color for shimmer effect
@@ -191,6 +194,8 @@ export function isBuiltinThemeName(name: string): name is ThemeName {
  */
 const lightTheme: Theme = {
   autoAccept: 'rgb(135,0,255)', // Electric violet
+  autoAcceptShimmer: 'rgb(208,180,255)',
+  skill: 'rgb(135,0,255)',
   bashBorder: 'rgb(255,0,135)', // Vibrant pink
   claude: 'rgb(215,119,87)', // Claude orange
   claudeShimmer: 'rgb(245,149,117)', // Lighter claude orange for shimmer effect
@@ -200,7 +205,7 @@ const lightTheme: Theme = {
   permissionShimmer: 'rgb(137,155,255)', // Lighter blue for shimmer effect
   planMode: 'rgb(0,102,102)', // Muted teal
   ide: 'rgb(71,130,200)', // Muted blue
-  promptBorder: 'rgb(153,153,153)', // Medium gray
+  promptBorder: 'rgb(138,138,138)', // Medium gray
   promptBorderShimmer: 'rgb(183,183,183)', // Lighter gray for shimmer effect
   text: 'rgb(0,0,0)', // Black
   inverseText: 'rgb(255,255,255)', // White
@@ -223,12 +228,12 @@ const lightTheme: Theme = {
   diffRemovedWord: 'rgb(209,69,75)', // Medium red
   // Agent colors
   red_FOR_SUBAGENTS_ONLY: 'rgb(220,38,38)', // Red 600
-  blue_FOR_SUBAGENTS_ONLY: 'rgb(37,99,235)', // Blue 600
+  blue_FOR_SUBAGENTS_ONLY: 'rgb(106,155,204)',
   green_FOR_SUBAGENTS_ONLY: 'rgb(22,163,74)', // Green 600
   yellow_FOR_SUBAGENTS_ONLY: 'rgb(202,138,4)', // Yellow 600
-  purple_FOR_SUBAGENTS_ONLY: 'rgb(147,51,234)', // Purple 600
-  orange_FOR_SUBAGENTS_ONLY: 'rgb(234,88,12)', // Orange 600
-  pink_FOR_SUBAGENTS_ONLY: 'rgb(219,39,119)', // Pink 600
+  purple_FOR_SUBAGENTS_ONLY: 'rgb(130,125,189)',
+  orange_FOR_SUBAGENTS_ONLY: 'rgb(217,119,87)',
+  pink_FOR_SUBAGENTS_ONLY: 'rgb(196,102,134)',
   cyan_FOR_SUBAGENTS_ONLY: 'rgb(8,145,178)', // Cyan 600
   // Grove colors
   professionalBlue: 'rgb(106,155,204)',
@@ -275,6 +280,8 @@ const lightTheme: Theme = {
  */
 const lightAnsiTheme: Theme = {
   autoAccept: 'ansi:magenta',
+  autoAcceptShimmer: 'ansi:magentaBright',
+  skill: 'ansi:magenta',
   bashBorder: 'ansi:magenta',
   claude: 'ansi:redBright',
   claudeShimmer: 'ansi:yellowBright',
@@ -358,6 +365,8 @@ const lightAnsiTheme: Theme = {
  */
 const darkAnsiTheme: Theme = {
   autoAccept: 'ansi:magentaBright',
+  autoAcceptShimmer: 'ansi:magentaBright',
+  skill: 'ansi:magentaBright',
   bashBorder: 'ansi:magentaBright',
   claude: 'ansi:redBright',
   claudeShimmer: 'ansi:yellowBright',
@@ -443,6 +452,8 @@ const darkAnsiTheme: Theme = {
  */
 const lightDaltonizedTheme: Theme = {
   autoAccept: 'rgb(135,0,255)', // Electric violet
+  autoAcceptShimmer: 'rgb(208,180,255)',
+  skill: 'rgb(135,0,255)',
   bashBorder: 'rgb(0,102,204)', // Blue instead of pink
   claude: 'rgb(255,153,51)', // Orange adjusted for deuteranopia
   claudeShimmer: 'rgb(255,183,101)', // Lighter orange for shimmer effect
@@ -452,7 +463,7 @@ const lightDaltonizedTheme: Theme = {
   permissionShimmer: 'rgb(101,152,255)', // Lighter bright blue for shimmer
   planMode: 'rgb(51,102,102)', // Muted blue-gray (works for color-blind)
   ide: 'rgb(71,130,200)', // Muted blue
-  promptBorder: 'rgb(153,153,153)', // Medium gray
+  promptBorder: 'rgb(138,138,138)', // Medium gray
   promptBorderShimmer: 'rgb(183,183,183)', // Lighter gray for shimmer
   text: 'rgb(0,0,0)', // Black
   inverseText: 'rgb(255,255,255)', // White
@@ -526,6 +537,8 @@ const lightDaltonizedTheme: Theme = {
  */
 const darkTheme: Theme = {
   autoAccept: 'rgb(175,135,255)', // Electric violet
+  autoAcceptShimmer: 'rgb(208,180,255)',
+  skill: 'rgb(175,135,255)',
   bashBorder: 'rgb(253,93,177)', // Bright pink
   claude: 'rgb(215,119,87)', // Claude orange
   claudeShimmer: 'rgb(235,159,127)', // Lighter claude orange for shimmer effect
@@ -558,12 +571,12 @@ const darkTheme: Theme = {
   diffRemovedWord: 'rgb(179,89,107)', // Softer red (less intense than bright red)
   // Agent colors
   red_FOR_SUBAGENTS_ONLY: 'rgb(220,38,38)', // Red 600
-  blue_FOR_SUBAGENTS_ONLY: 'rgb(37,99,235)', // Blue 600
+  blue_FOR_SUBAGENTS_ONLY: 'rgb(106,155,204)',
   green_FOR_SUBAGENTS_ONLY: 'rgb(22,163,74)', // Green 600
   yellow_FOR_SUBAGENTS_ONLY: 'rgb(202,138,4)', // Yellow 600
-  purple_FOR_SUBAGENTS_ONLY: 'rgb(147,51,234)', // Purple 600
-  orange_FOR_SUBAGENTS_ONLY: 'rgb(234,88,12)', // Orange 600
-  pink_FOR_SUBAGENTS_ONLY: 'rgb(219,39,119)', // Pink 600
+  purple_FOR_SUBAGENTS_ONLY: 'rgb(130,125,189)',
+  orange_FOR_SUBAGENTS_ONLY: 'rgb(217,119,87)',
+  pink_FOR_SUBAGENTS_ONLY: 'rgb(196,102,134)',
   cyan_FOR_SUBAGENTS_ONLY: 'rgb(8,145,178)', // Cyan 600
   // Grove colors
   professionalBlue: 'rgb(106,155,204)',
@@ -609,6 +622,8 @@ const darkTheme: Theme = {
  */
 const darkDaltonizedTheme: Theme = {
   autoAccept: 'rgb(175,135,255)', // Electric violet
+  autoAcceptShimmer: 'rgb(208,180,255)',
+  skill: 'rgb(175,135,255)',
   bashBorder: 'rgb(51,153,255)', // Bright blue
   claude: 'rgb(255,153,51)', // Orange adjusted for deuteranopia
   claudeShimmer: 'rgb(255,183,101)', // Lighter orange for shimmer effect
@@ -733,6 +748,8 @@ export function themeColorToAnsi(themeColor: string): string {
     const colored = chalkForChart.rgb(r, g, b)('X')
     return colored.slice(0, colored.indexOf('X'))
   }
-  // Fallback to magenta if parsing fails
-  return '\x1b[35m'
+  if (chalk.level === 0) return ''
+  const colored = colorize('X', themeColor, 'foreground')
+  const markerIndex = colored.indexOf('X')
+  return markerIndex > 0 ? colored.slice(0, markerIndex) : '\x1b[35m'
 }

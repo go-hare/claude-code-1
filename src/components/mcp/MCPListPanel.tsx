@@ -1,17 +1,27 @@
-import figures from 'figures';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import {
+  Box,
+  Byline,
+  Dialog,
+  KeyboardShortcutHint,
+  Link,
+  StatusIcon,
+  Text,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  useTerminalSize,
+} from '@anthropic/ink';
 import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
 import { isOfficialClaudeAiConnector } from '../../services/mcp/officialClaudeAiConnector.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
-import { describeMcpConfigFilePath } from '../../services/mcp/utils.js';
+import { describeMcpConfigFilePath, filterToolsByServer } from '../../services/mcp/utils.js';
+import { useAppState } from '../../state/AppState.js';
 import { isDebugMode } from '../../utils/debug.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { ItemList } from '../ItemList.js';
 import { McpParsingWarnings } from './McpParsingWarnings.js';
 import type { AgentMcpServerInfo, ServerInfo } from './types.js';
 
@@ -25,14 +35,13 @@ type Props = {
 };
 
 type SelectableItem =
-  | { type: 'server'; server: ServerInfo }
-  | { type: 'agent-server'; agentServer: AgentMcpServerInfo };
+  | { type: 'heading'; value: string; label: React.ReactNode }
+  | { type: 'server'; value: string; server: ServerInfo }
+  | { type: 'agent-server'; value: string; agentServer: AgentMcpServerInfo };
 
-// Define scope order for display (constant, outside component)
-// 'dynamic' (built-in) is rendered separately at the end
 const SCOPE_ORDER: ConfigScope[] = ['project', 'local', 'user', 'enterprise'];
+const MIN_VISIBLE_ROWS = 4;
 
-// Get scope heading parts (label is bold, path is grey)
 function getScopeHeading(scope: ConfigScope): { label: string; path?: string } {
   switch (scope) {
     case 'project':
@@ -50,7 +59,15 @@ function getScopeHeading(scope: ConfigScope): { label: string; path?: string } {
   }
 }
 
-// Group servers by scope
+function renderScopeHeading(label: string, path?: string): React.ReactNode {
+  return (
+    <Text wrap="truncate-end">
+      <Text bold>{label}</Text>
+      {path ? <Text dimColor> ({path})</Text> : null}
+    </Text>
+  );
+}
+
 function groupServersByScope(serverList: ServerInfo[]): Map<ConfigScope, ServerInfo[]> {
   const groups = new Map<ConfigScope, ServerInfo[]>();
   for (const server of serverList) {
@@ -60,11 +77,78 @@ function groupServersByScope(serverList: ServerInfo[]): Map<ConfigScope, ServerI
     }
     groups.get(scope)!.push(server);
   }
-  // Sort servers within each group alphabetically
   for (const [, groupServers] of groups) {
     groupServers.sort((a, b) => a.name.localeCompare(b.name));
   }
   return groups;
+}
+
+function buildServerItemProps(
+  server: ServerInfo,
+  toolCount: number | undefined,
+): { icon: React.ReactNode; facts: string[] } {
+  const { client } = server;
+  let icon: React.ReactNode;
+  let facts: string[] = [];
+
+  if (client.type === 'disabled') {
+    icon = <StatusIcon status="off" />;
+  } else if (client.type === 'connected') {
+    const hasToolsCapability = Boolean(client.capabilities?.tools);
+    const extraClient = client as {
+      discoveryBearerRejected?: boolean;
+      toolsListError?: unknown;
+    };
+    let warningText: string | undefined;
+    if (extraClient.discoveryBearerRejected) {
+      warningText = 'session token rejected';
+    } else if (extraClient.toolsListError) {
+      warningText = 'tools fetch failed';
+    } else if (hasToolsCapability && toolCount === 0) {
+      warningText = 'no tools';
+    }
+
+    if (warningText) {
+      icon = <StatusIcon status="warning" />;
+      facts = [warningText, 'connected'];
+    } else {
+      icon = <StatusIcon status="success" aria-label="connected:" />;
+      if (hasToolsCapability && toolCount !== undefined) {
+        facts = [`${toolCount} ${plural(toolCount, 'tool')}`];
+      }
+    }
+  } else if (client.type === 'pending') {
+    icon = <StatusIcon status="loading" aria-label="connecting:" />;
+    const { reconnectAttempt, maxReconnectAttempts } = client;
+    if (reconnectAttempt && maxReconnectAttempts) {
+      facts = [`reconnecting (${reconnectAttempt}/${maxReconnectAttempts})…`];
+    }
+  } else if (client.type === 'needs-auth') {
+    icon = <StatusIcon status="warning" />;
+    facts = ['needs authentication'];
+  } else {
+    icon = <StatusIcon status="error" />;
+    const issue = client.type === 'failed' ? formatFailedMcpIssue(client) : '';
+    if (issue) {
+      facts = [issue];
+    }
+  }
+
+  const managed = isEnterpriseManagedClaudeAiConnector({
+    transport: server.transport,
+    scope: server.scope,
+    enterpriseManaged: server.transport === 'claudeai-proxy' ? server.config.enterpriseManaged : undefined,
+  });
+
+  if (managed) {
+    facts = [...facts, 'managed'];
+  }
+
+  return { icon, facts };
+}
+
+function buildAgentServerIcon(needsAuth: boolean): React.ReactNode {
+  return <StatusIcon status={needsAuth ? 'warning' : 'off'} />;
 }
 
 export function MCPListPanel({
@@ -74,55 +158,111 @@ export function MCPListPanel({
   onSelectAgentServer,
   onComplete,
 }: Props): React.ReactNode {
-  const [theme] = useTheme();
-  // densable 247 Et: An(0) 3-tuple — confirm:yes reads he[B()], not W[O].
-  const [selectedIndex, setSelectedIndexState] = useState(0);
-  const selectedIndexLive = useRef(0);
-  const setSelectedIndex = (action: React.SetStateAction<number>): void => {
-    const next = typeof action === 'function' ? action(selectedIndexLive.current) : action;
-    selectedIndexLive.current = next;
-    setSelectedIndexState(next);
-  };
+  const mcpTools = useAppState(s => s.mcp.tools);
+  const terminalSize = useTerminalSize();
+  const insideModal = useIsInsideModal();
+  const { rows: availableRows } = useModalOrTerminalSize(terminalSize);
 
-  // densable 2.1.248 `ebn(config)` — official claude.ai heading, not type-only.
-  const serversByScope = React.useMemo(() => {
+  // densable 247 Et: live ref so same-tick focus + accept reads latest index.
+  const selectedIndexLive = useRef(0);
+
+  const toolCountsByServer = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const server of servers) {
+      counts[server.name] = filterToolsByServer(mcpTools, server.name).length;
+    }
+    return counts;
+  }, [servers, mcpTools]);
+
+  const serversByScope = useMemo(() => {
     const regularServers = servers.filter(s => !isOfficialClaudeAiConnector(s.client.config));
     return groupServersByScope(regularServers);
   }, [servers]);
 
-  const claudeAiServers = React.useMemo(
+  const claudeAiServers = useMemo(
     () =>
       servers.filter(s => isOfficialClaudeAiConnector(s.client.config)).sort((a, b) => a.name.localeCompare(b.name)),
     [servers],
   );
 
-  // Built-in (dynamic) servers - rendered last
-  const dynamicServers = React.useMemo(
+  const dynamicServers = useMemo(
     () => (serversByScope.get('dynamic') ?? []).sort((a, b) => a.name.localeCompare(b.name)),
     [serversByScope],
   );
 
-  // Pre-compute dynamic heading for render
-  const dynamicHeading = getScopeHeading('dynamic');
-
-  // Build flat list of selectable items in display order
-  const selectableItems = React.useMemo(() => {
+  const selectableItems = useMemo(() => {
     const items: SelectableItem[] = [];
     for (const scope of SCOPE_ORDER) {
       const scopeServers = serversByScope.get(scope) ?? [];
+      if (scopeServers.length === 0) continue;
+      const heading = getScopeHeading(scope);
+      items.push({
+        type: 'heading',
+        value: `heading-${scope}`,
+        label: renderScopeHeading(heading.label, heading.path),
+      });
       for (const server of scopeServers) {
-        items.push({ type: 'server', server });
+        items.push({ type: 'server', value: `${scope}-${server.name}`, server });
       }
+      items.push({ type: 'heading', value: `spacer-${scope}`, label: <Text> </Text> });
     }
-    for (const server of claudeAiServers) {
-      items.push({ type: 'server', server });
+    if (claudeAiServers.length > 0) {
+      items.push({
+        type: 'heading',
+        value: 'heading-claudeai',
+        label: (
+          <Text wrap="truncate-end">
+            <Text bold>claude.ai</Text>
+          </Text>
+        ),
+      });
+      for (const server of claudeAiServers) {
+        items.push({ type: 'server', value: `claudeai-${server.name}`, server });
+      }
+      items.push({ type: 'heading', value: 'spacer-claudeai', label: <Text> </Text> });
     }
-    for (const agentServer of agentServers) {
-      items.push({ type: 'agent-server', agentServer });
+    if (agentServers.length > 0) {
+      items.push({
+        type: 'heading',
+        value: 'heading-agent-mcps',
+        label: renderScopeHeading('Agent MCPs'),
+      });
+      const agentNames = [...new Set(agentServers.flatMap(s => s.sourceAgents))];
+      for (const agentName of agentNames) {
+        items.push({ type: 'heading', value: `spacer-agent-${agentName}`, label: <Text> </Text> });
+        items.push({
+          type: 'heading',
+          value: `subheading-agent-${agentName}`,
+          label: (
+            <Text dimColor wrap="truncate-end">
+              @{agentName}
+            </Text>
+          ),
+        });
+        for (const agentServer of agentServers.filter(s => s.sourceAgents.includes(agentName))) {
+          items.push({
+            type: 'agent-server',
+            value: `agent-${agentName}-${agentServer.name}`,
+            agentServer,
+          });
+        }
+      }
+      items.push({ type: 'heading', value: 'spacer-agent-mcps', label: <Text> </Text> });
     }
-    // Dynamic (built-in) servers come last
-    for (const server of dynamicServers) {
-      items.push({ type: 'server', server });
+    if (dynamicServers.length > 0) {
+      const dynamicHeading = getScopeHeading('dynamic');
+      items.push({
+        type: 'heading',
+        value: 'heading-dynamic',
+        label: renderScopeHeading(dynamicHeading.label, dynamicHeading.path),
+      });
+      for (const server of dynamicServers) {
+        items.push({ type: 'server', value: `dynamic-${server.name}`, server });
+      }
+      items.push({ type: 'heading', value: 'spacer-dynamic', label: <Text> </Text> });
+    }
+    if (items.at(-1)?.value.startsWith('spacer-')) {
+      items.pop();
     }
     return items;
   }, [serversByScope, claudeAiServers, agentServers, dynamicServers]);
@@ -143,99 +283,47 @@ export function MCPListPanel({
     }
   }, [selectableItems, onSelectServer, onSelectAgentServer]);
 
-  // Use configurable keybindings for navigation and selection
-  useKeybindings(
-    {
-      'confirm:previous': () => setSelectedIndex(prev => (prev === 0 ? selectableItems.length - 1 : prev - 1)),
-      'confirm:next': () => setSelectedIndex(prev => (prev === selectableItems.length - 1 ? 0 : prev + 1)),
-      'confirm:yes': handleSelect,
-      'confirm:no': handleCancel,
-    },
-    { context: 'Confirmation' },
-  );
-
-  // Build index lookup for each server
-  const getServerIndex = (server: ServerInfo): number => {
-    return selectableItems.findIndex(item => item.type === 'server' && item.server === server);
-  };
-
-  const getAgentServerIndex = (agentServer: AgentMcpServerInfo): number => {
-    return selectableItems.findIndex(item => item.type === 'agent-server' && item.agentServer === agentServer);
-  };
-
   const debugMode = isDebugMode();
   const hasFailedClients = servers.some(s => s.client.type === 'failed');
+
+  const itemOptions = useMemo(() => {
+    return selectableItems.map(entry => {
+      if (entry.type === 'heading') {
+        return {
+          heading: true,
+          value: entry.value,
+          label: entry.label,
+        };
+      }
+      if (entry.type === 'server') {
+        const { icon, facts } = buildServerItemProps(entry.server, toolCountsByServer[entry.server.name]);
+        return {
+          value: entry.value,
+          label: entry.server.name,
+          icon,
+          facts,
+        };
+      }
+
+      const icon = buildAgentServerIcon(entry.agentServer.needsAuth);
+      const baseFact = entry.agentServer.needsAuth ? 'may need auth' : 'agent-only';
+      return {
+        value: entry.value,
+        label: entry.agentServer.name,
+        icon,
+        facts: [baseFact],
+      };
+    });
+  }, [selectableItems, toolCountsByServer]);
 
   if (servers.length === 0 && agentServers.length === 0) {
     return null;
   }
 
-  const renderServerItem = (server: ServerInfo): React.ReactNode => {
-    const index = getServerIndex(server);
-    const isSelected = selectedIndex === index;
-    let statusIcon = '';
-    let statusText = '';
-
-    if (server.client.type === 'disabled') {
-      statusIcon = color('inactive', theme)(figures.radioOff);
-      statusText = 'disabled';
-    } else if (server.client.type === 'connected') {
-      statusIcon = color('success', theme)(figures.tick);
-      statusText = 'connected';
-    } else if (server.client.type === 'pending') {
-      statusIcon = color('inactive', theme)(figures.radioOff);
-      const { reconnectAttempt, maxReconnectAttempts } = server.client;
-      if (reconnectAttempt && maxReconnectAttempts) {
-        statusText = `reconnecting (${reconnectAttempt}/${maxReconnectAttempts})…`;
-      } else {
-        statusText = 'connecting…';
-      }
-    } else if (server.client.type === 'needs-auth') {
-      statusIcon = color('warning', theme)(figures.triangleUpOutline);
-      statusText = 'needs authentication';
-    } else {
-      // densable 2.1.219: failed rows show HTTP status / error issue text.
-      statusIcon = color('error', theme)(figures.cross);
-      const issue = server.client.type === 'failed' ? formatFailedMcpIssue(server.client) : '';
-      statusText = issue ? `failed — ${issue}` : 'failed';
-    }
-
-    const managed = isEnterpriseManagedClaudeAiConnector({
-      transport: server.transport,
-      scope: server.scope,
-      enterpriseManaged: server.transport === 'claudeai-proxy' ? server.config.enterpriseManaged : undefined,
-    });
-
-    return (
-      <Box key={`${server.name}-${index}`}>
-        <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
-        <Text color={isSelected ? 'suggestion' : undefined}>{server.name}</Text>
-        {managed && <Text dimColor={!isSelected}> · managed</Text>}
-        <Text dimColor={!isSelected}> · {statusIcon} </Text>
-        <Text dimColor={!isSelected}>{statusText}</Text>
-      </Box>
-    );
-  };
-
-  const renderAgentServerItem = (agentServer: AgentMcpServerInfo): React.ReactNode => {
-    const index = getAgentServerIndex(agentServer);
-    const isSelected = selectedIndex === index;
-    const statusIcon = agentServer.needsAuth
-      ? color('warning', theme)(figures.triangleUpOutline)
-      : color('inactive', theme)(figures.radioOff);
-    const statusText = agentServer.needsAuth ? 'may need auth' : 'agent-only';
-
-    return (
-      <Box key={`agent-${agentServer.name}-${index}`}>
-        <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? `${figures.pointer} ` : '  '}</Text>
-        <Text color={isSelected ? 'suggestion' : undefined}>{agentServer.name}</Text>
-        <Text dimColor={!isSelected}> · {statusIcon} </Text>
-        <Text dimColor={!isSelected}>{statusText}</Text>
-      </Box>
-    );
-  };
-
   const totalServers = servers.length + agentServers.length;
+  const chromeRows = insideModal ? 8 : 12;
+  const visibleOptionCount = Math.max(MIN_VISIBLE_ROWS, availableRows - chromeRows - (hasFailedClients ? 1 : 0));
+  const overflows = itemOptions.length > visibleOptionCount;
 
   return (
     <Box flexDirection="column">
@@ -248,65 +336,20 @@ export function MCPListPanel({
         hideInputGuide
       >
         <Box flexDirection="column">
-          {/* Regular servers grouped by scope */}
-          {SCOPE_ORDER.map(scope => {
-            const scopeServers = serversByScope.get(scope);
-            if (!scopeServers || scopeServers.length === 0) return null;
-            const heading = getScopeHeading(scope);
-            return (
-              <Box key={scope} flexDirection="column" marginBottom={1}>
-                <Box paddingLeft={2}>
-                  <Text bold>{heading.label}</Text>
-                  {heading.path && <Text dimColor> ({heading.path})</Text>}
-                </Box>
-                {scopeServers.map(server => renderServerItem(server))}
-              </Box>
-            );
-          })}
+          <ItemList
+            options={itemOptions}
+            visibleOptionCount={visibleOptionCount}
+            onFocus={index => {
+              selectedIndexLive.current = index;
+            }}
+            onSelect={index => {
+              selectedIndexLive.current = index;
+              handleSelect();
+            }}
+            onCancel={handleCancel}
+          />
 
-          {/* Claude.ai servers section */}
-          {claudeAiServers.length > 0 && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Box paddingLeft={2}>
-                <Text bold>claude.ai</Text>
-              </Box>
-              {claudeAiServers.map(server => renderServerItem(server))}
-            </Box>
-          )}
-
-          {/* Agent servers section - grouped by source agent */}
-          {agentServers.length > 0 && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Box paddingLeft={2}>
-                <Text bold>Agent MCPs</Text>
-              </Box>
-              {/* Group servers by source agent */}
-              {[...new Set(agentServers.flatMap(s => s.sourceAgents))].map(agentName => (
-                <Box key={agentName} flexDirection="column" marginTop={1}>
-                  <Box paddingLeft={2}>
-                    <Text dimColor>@{agentName}</Text>
-                  </Box>
-                  {agentServers
-                    .filter(s => s.sourceAgents.includes(agentName))
-                    .map(agentServer => renderAgentServerItem(agentServer))}
-                </Box>
-              ))}
-            </Box>
-          )}
-
-          {/* Built-in (dynamic) servers section - always last */}
-          {dynamicServers.length > 0 && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Box paddingLeft={2}>
-                <Text bold>{dynamicHeading.label}</Text>
-                {dynamicHeading.path && <Text dimColor> ({dynamicHeading.path})</Text>}
-              </Box>
-              {dynamicServers.map(server => renderServerItem(server))}
-            </Box>
-          )}
-
-          {/* Footer info */}
-          <Box flexDirection="column">
+          <Box flexDirection="column" marginTop={overflows ? 0 : 1}>
             {hasFailedClients && (
               <Text dimColor>
                 {debugMode ? '※ Error logs shown inline with --debug' : '※ Run claude --debug to see error logs'}
@@ -319,11 +362,10 @@ export function MCPListPanel({
         </Box>
       </Dialog>
 
-      {/* Custom footer with navigation hint */}
       <Box paddingX={1}>
         <Text dimColor italic>
           <Byline>
-            <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
+            <KeyboardShortcutHint shortcut="↑/↓" action="navigate" />
             <KeyboardShortcutHint shortcut="Enter" action="confirm" />
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
           </Byline>

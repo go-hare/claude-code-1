@@ -7,7 +7,8 @@ const agents = {
     '(removed) Ask Claude to create/manage subagents, or edit .claude/agents/',
   isHidden: true,
   supportsNonInteractive: true,
+  thinClientDispatch: 'post-text',
   load: () => import('./agents.js'),
-} satisfies Command
+} satisfies Command & { thinClientDispatch?: 'post-text' }
 
 export default agents

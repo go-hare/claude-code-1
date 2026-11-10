@@ -1,16 +1,16 @@
 import { feature } from 'bun:bundle';
-import type { UUID } from 'crypto';
 import { dirname } from 'path';
 import React from 'react';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { getOriginalCwd, switchSession } from '../bootstrap/state.js';
+import { getOriginalCwd, getSessionId, switchSession } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
 import { LogSelector } from '../components/LogSelector.js';
 import { Spinner } from '../components/Spinner.js';
 import { restoreCostStateForSession } from '../cost-tracker.js';
-import { setClipboard } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
+import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
+import { AlternateScreen, Box, setClipboard, Text, useSelection, useTerminalTitle } from '@anthropic/ink';
+import { useSelectionClearKeybinding } from '../components/ScrollKeybindingHandler.js';
+import { isFullscreenEnvEnabled, mouseTrackingProp } from '../utils/fullscreen.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -23,13 +23,14 @@ import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool
 import { asSessionId } from '../types/ids.js';
 import type { LogOption } from '../types/logs.js';
 import type { Message } from '../types/message.js';
-import { agenticSessionSearch } from '../utils/agenticSessionSearch.js';
 import { renameRecordingForSession } from '../utils/asciicast.js';
 import { updateSessionName } from '../utils/concurrentSessions.js';
 import { loadConversationForResume } from '../utils/conversationRecovery.js';
 import { checkCrossProjectResume } from '../utils/crossProjectResume.js';
+import { isEnvTruthy } from '../utils/envUtils.js';
 import type { FileHistorySnapshot } from '../utils/fileHistory.js';
 import { toError } from '../utils/errors.js';
+import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { logError } from '../utils/log.js';
 import { createSystemMessage } from '../utils/messages.js';
 import {
@@ -50,6 +51,7 @@ import {
 } from '../utils/sessionStorage.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
 import type { ContentReplacementRecord } from '../utils/toolResultStorage.js';
+import { validateUuid } from '../utils/uuid.js';
 import { REPL } from './REPL.js';
 
 function parsePrIdentifier(value: string): number | null {
@@ -131,6 +133,8 @@ export function ResumeConversation({
   // Mirror of logs.length so loadMoreLogs can compute value indices outside
   // the setLogs updater (keeping it pure per React's contract).
   const logCountRef = React.useRef(0);
+  const hasListRef = React.useRef(false);
+  const currentSessionId = getSessionId();
 
   const filteredLogs = React.useMemo(() => {
     let result = logs.filter(l => !l.isSidechain);
@@ -149,17 +153,21 @@ export function ResumeConversation({
     return result;
   }, [logs, filterByPr]);
   const isResumeWithRenameEnabled = isCustomTitleEnabled();
+  const terminalTitleDisabled = React.useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE), []);
+  useTerminalTitle(resumeData || terminalTitleDisabled ? null : 'claude · resume');
 
   React.useEffect(() => {
     loadSameRepoMessageLogsProgressive(worktreePaths)
       .then(result => {
         sessionLogResultRef.current = result;
         logCountRef.current = result.logs.length;
+        hasListRef.current = true;
         setLogs(result.logs);
         setLoading(false);
       })
       .catch(error => {
         logError(error);
+        hasListRef.current = true;
         setLoading(false);
       });
   }, [worktreePaths]);
@@ -423,73 +431,80 @@ export function ResumeConversation({
     );
   }
 
-  if (loading) {
+  if (loading && !hasListRef.current && (logs.length === 0 || filteredLogs.length === 0)) {
     return (
-      <Box>
-        <Spinner />
-        <Text> Loading conversations…</Text>
-      </Box>
+      <PickerScreenWrapper>
+        <Box>
+          <Spinner />
+          <Text> Loading conversations…</Text>
+        </Box>
+      </PickerScreenWrapper>
     );
   }
 
   if (resumeFailed) {
-    // densable IQf
-    const sid = resumeFailed.sessionId;
-    return (
-      <Box flexDirection="column" gap={1}>
-        <Text>Failed to resume the conversation.</Text>
-        <Text dimColor>
-          {sid
-            ? `Run claude --resume ${sid} to retry, or claude to start a new session.`
-            : 'Run claude to start a new session.'}
-        </Text>
-      </Box>
-    );
+    return <ResumeFailedMessage sessionId={resumeFailed.sessionId} />;
   }
 
   if (resuming) {
     return (
-      <Box>
-        <Spinner />
-        <Text> Resuming conversation…</Text>
-      </Box>
+      <PickerScreenWrapper>
+        <Box>
+          <Spinner />
+          <Text> Resuming conversation…</Text>
+        </Box>
+      </PickerScreenWrapper>
     );
   }
 
-  if (filteredLogs.length === 0) {
-    return <NoConversationsMessage />;
-  }
-
   return (
-    <LogSelector
-      logs={filteredLogs}
-      maxHeight={rows}
-      onCancel={onCancel}
-      onSelect={onSelect}
-      onLogsChanged={isResumeWithRenameEnabled ? () => loadLogs(showAllProjects) : undefined}
-      onLoadMore={loadMoreLogs}
-      initialSearchQuery={initialSearchQuery}
-      showAllProjects={showAllProjects}
-      onToggleAllProjects={handleToggleAllProjects}
-      onAgenticSearch={agenticSessionSearch}
-    />
+    <PickerScreenWrapper>
+      <LogSelector
+        logs={filteredLogs}
+        currentSessionId={currentSessionId}
+        maxHeight={rows}
+        onCancel={onCancel}
+        onSelect={onSelect}
+        onLogsChanged={isResumeWithRenameEnabled ? () => loadLogs(showAllProjects) : undefined}
+        onLoadMore={loadMoreLogs}
+        initialSearchQuery={initialSearchQuery}
+        isLoading={loading}
+        showAllProjects={showAllProjects}
+        onToggleAllProjects={handleToggleAllProjects}
+      />
+    </PickerScreenWrapper>
   );
 }
 
-function NoConversationsMessage(): React.ReactNode {
-  useKeybinding(
-    'app:interrupt',
-    () => {
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(1);
-    },
-    { context: 'Global' },
-  );
+function PickerScreenWrapper({ children }: { children: React.ReactNode }): React.ReactNode {
+  const isFullscreen = isFullscreenEnvEnabled();
+  const selection = useSelection();
+  useSelectionBgColor(selection);
+  useCopyOnSelect(selection, isFullscreen);
+  useSelectionClearKeybinding(selection, isFullscreen);
+  if (!isFullscreen) {
+    return children;
+  }
+  return <AlternateScreen mouseTracking={mouseTrackingProp()}>{children}</AlternateScreen>;
+}
+
+function ResumeFailedMessage({ sessionId }: { sessionId?: string }): React.ReactNode {
+  // densable IQf / Je: delay exit so Ink flushes the error output first
+  React.useEffect(() => {
+    const timeout = setTimeout(() => {
+      void gracefulShutdown(1);
+    }, 100);
+    return () => clearTimeout(timeout);
+  }, []);
 
   return (
-    <Box flexDirection="column">
-      <Text>No conversations found to resume.</Text>
-      <Text dimColor>Press Ctrl+C to exit and start a new conversation.</Text>
+    <Box flexDirection="column" gap={1}>
+      <Text>Failed to resume the conversation.</Text>
+      <Text dimColor>
+        {validateUuid(sessionId)
+          ? `Run claude --resume ${sessionId} to retry, or claude to start a new session.`
+          : 'Run claude to start a new session.'}
+      </Text>
     </Box>
   );
 }

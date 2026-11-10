@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { CANCEL_MESSAGE } from '../effortPanelState.js'
+import { CANCEL_MESSAGE, getSliderGeometry } from '../effortPanelState.js'
 
 const panelSrc = readFileSync(
   join(import.meta.dir, '../EffortPanel.tsx'),
@@ -13,16 +13,26 @@ const stateSrc = readFileSync(
 )
 
 describe('densable 2.1.289 EffortPanel copy', () => {
-  test('scale is Faster left / Smarter right', () => {
+  test('scale is Faster left / Smarter right on Pane slider track', () => {
+    expect(panelSrc).toContain('<Pane>')
     expect(panelSrc).toContain('>Faster</Text>')
     expect(panelSrc).toContain('>Smarter</Text>')
-    expect(panelSrc).toContain("text: 'Faster'")
-    expect(panelSrc).toContain("text: 'Smarter'")
+    const geom = getSliderGeometry('claude-opus-4-7')
+    expect(geom.levels.map(l => l.value)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(geom.width).toBe(42)
   })
 
-  test('footer is Enter to confirm; Ultracode Tab to toggle', () => {
+  test('footer has Enter to confirm and separate Ultracode boolean toggle', () => {
     expect(panelSrc).toContain('Enter to confirm')
-    expect(panelSrc).toContain('Ultracode · Tab to toggle')
+    expect(panelSrc).toContain('shortcut="Enter" action="confirm"')
+    expect(panelSrc).toContain('Ultracode  on')
+    expect(panelSrc).toContain('action="toggle"')
     expect(panelSrc).not.toContain('Enter to save')
   })
 

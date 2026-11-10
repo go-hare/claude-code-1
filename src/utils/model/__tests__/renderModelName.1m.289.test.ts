@@ -43,7 +43,7 @@ describe('densable 2.1.289 model [1m] display + picker footer', () => {
   })
 
   test('picker footer is Enter default / s session-only; no 1M toggle row', () => {
-    expect(pickerSrc).toContain('action="set as default"')
+    expect(pickerSrc).toContain("'set as default'")
     expect(pickerSrc).toContain('action="use this session only"')
     expect(pickerSrc).not.toContain('Space to toggle 1M')
     expect(pickerSrc).not.toContain('1M context on')

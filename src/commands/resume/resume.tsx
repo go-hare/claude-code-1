@@ -10,7 +10,7 @@ import { Spinner } from '../../components/Spinner.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { setClipboard } from '@anthropic/ink';
-import { Box, Divider, Text } from '@anthropic/ink';
+import { Box, Pane, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import type { LogOption } from '../../types/logs.js';
@@ -19,14 +19,17 @@ import { checkCrossProjectResume } from '../../utils/crossProjectResume.js';
 import { getWorktreePaths } from '../../utils/getWorktreePaths.js';
 import { logError } from '../../utils/log.js';
 import {
+  enrichLogs,
   getLastSessionLog,
   getSessionIdFromLog,
   isCustomTitleEnabled,
   isLiteLog,
-  loadAllProjectsMessageLogs,
+  loadAllProjectsMessageLogsProgressive,
   loadFullLog,
   loadSameRepoMessageLogs,
+  loadSameRepoMessageLogsProgressive,
   searchSessionsByCustomTitle,
+  type SessionLogResult,
 } from '../../utils/sessionStorage.js';
 import { validateUuid } from '../../utils/uuid.js';
 
@@ -37,9 +40,9 @@ type ResumeResult =
 function resumeHelpMessage(result: ResumeResult): string {
   switch (result.resultType) {
     case 'sessionNotFound':
-      return `Session ${chalk.bold(result.arg)} was not found. Run ${chalk.bold('/resume')} without arguments to browse all sessions.`;
+      return `Session ${chalk.bold(result.arg)} was not found.`;
     case 'multipleMatches':
-      return `Found ${result.count} sessions matching ${chalk.bold(result.arg)}. Run ${chalk.bold('/resume')} to pick one from the list.`;
+      return `Found ${result.count} sessions matching ${chalk.bold(result.arg)}. Please use /resume to pick a specific session.`;
   }
 }
 
@@ -81,7 +84,12 @@ function ResumeCommand({
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
+  const currentSessionId = getSessionId();
   const cancelledRef = React.useRef(false);
+  const selectingRef = React.useRef(false);
+  const sessionLogResultRef = React.useRef<SessionLogResult | null>(null);
+  const loadingMoreRef = React.useRef(false);
+  const logCountRef = React.useRef(0);
   const hasListRef = React.useRef(false);
   // Inside FullscreenLayout's modal slot, use the modal's inner rows (already
   // minus transcript peek + divider) — floor(rows/2) collapses the list and
@@ -91,13 +99,16 @@ function ResumeCommand({
 
   const loadLogs = React.useCallback(
     async (allProjects: boolean, paths: string[]) => {
-      // First load (no list yet) takes the small status frame. A reload while
-      // the list is up keeps the list and only marks it refreshing.
-      if (!hasListRef.current) setLoading(true);
+      setLoading(true);
+      sessionLogResultRef.current = null;
       try {
-        const allLogs = allProjects ? await loadAllProjectsMessageLogs() : await loadSameRepoMessageLogs(paths);
+        const result = allProjects
+          ? await loadAllProjectsMessageLogsProgressive()
+          : await loadSameRepoMessageLogsProgressive(paths);
         if (cancelledRef.current) return;
-        const resumable = filterResumableSessions(allLogs, getSessionId());
+        sessionLogResultRef.current = result;
+        const resumable = filterResumableSessions(result.logs, getSessionId());
+        logCountRef.current = resumable.length;
         hasListRef.current = true;
         setLogs(resumable);
       } catch (_err) {
@@ -112,6 +123,36 @@ function ResumeCommand({
     },
     [onDone],
   );
+
+  const handleLoadMore = React.useCallback((count: number) => {
+    if (loadingMoreRef.current) return;
+    const currentResult = sessionLogResultRef.current;
+    if (!currentResult || currentResult.nextIndex >= currentResult.allStatLogs.length) return;
+    loadingMoreRef.current = true;
+    let retryMore = false;
+    void enrichLogs(currentResult.allStatLogs, currentResult.nextIndex, count)
+      .then(batch => {
+        if (sessionLogResultRef.current !== currentResult || cancelledRef.current) return;
+        currentResult.nextIndex = batch.nextIndex;
+        const resumable = filterResumableSessions(batch.logs, getSessionId());
+        if (resumable.length > 0) {
+          const offset = logCountRef.current;
+          resumable.forEach((log, idx) => {
+            log.value = offset + idx;
+          });
+          setLogs(prev => prev.concat(resumable));
+          logCountRef.current += resumable.length;
+        } else if (currentResult.nextIndex < currentResult.allStatLogs.length) {
+          retryMore = true;
+        }
+      })
+      .finally(() => {
+        loadingMoreRef.current = false;
+        if (retryMore) {
+          handleLoadMore(count);
+        }
+      });
+  }, []);
 
   React.useEffect(() => {
     async function init() {
@@ -131,23 +172,37 @@ function ResumeCommand({
   }, [showAllProjects, loadLogs, worktreePaths]);
 
   async function handleSelect(log: LogOption) {
+    if (selectingRef.current) return;
+    selectingRef.current = true;
     const sessionId = validateUuid(getSessionIdFromLog(log));
     if (!sessionId) {
       onDone('Failed to resume conversation');
       return;
     }
 
-    // Load full messages for lite logs
-    const fullLog = isLiteLog(log) ? await loadFullLog(log) : log;
-    if (cancelledRef.current) return;
+    let fullLog: LogOption;
+    let command: string | null;
+    try {
+      // Load full messages for lite logs
+      fullLog = isLiteLog(log) ? await loadFullLog(log) : log;
+      if (cancelledRef.current) return;
 
-    // densable MTs: null → resume here (same dir / worktree / deleted path)
-    const command = await checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
-    if (cancelledRef.current) return;
+      // densable MTs: null → resume here (same dir / worktree / deleted path)
+      command = await checkCrossProjectResume(fullLog, showAllProjects, worktreePaths);
+      if (cancelledRef.current) return;
+      if (command) {
+        const raw = await setClipboard(command);
+        if (cancelledRef.current) return;
+        if (raw) process.stdout.write(raw);
+      }
+    } catch (error) {
+      if (cancelledRef.current) return;
+      logError(error as Error);
+      onDone('Failed to resume conversation');
+      return;
+    }
+
     if (command) {
-      const raw = await setClipboard(command);
-      if (raw) process.stdout.write(raw);
-
       const message = [
         '',
         'This conversation is from a different directory.',
@@ -181,9 +236,9 @@ function ResumeCommand({
   // Gold ie(): while the first load is in flight (or a session is being
   // resumed) the picker is not mounted. The list appears once, at its
   // content height, instead of growing a row at a time.
-  if ((loading && logs.length === 0) || resuming) {
-    const statusBody = (
-      <>
+  if ((loading && !hasListRef.current && logs.length === 0) || resuming) {
+    return (
+      <Pane color="suggestion">
         <Text bold color="suggestion">
           Resume session
         </Text>
@@ -191,35 +246,19 @@ function ResumeCommand({
           <Spinner />
           <Text> {resuming ? 'Resuming conversation…' : 'Loading conversations…'}</Text>
         </Box>
-      </>
-    );
-    // Gold paints this content-sized while logs are empty. The list frame
-    // mounts only after logs arrive (empty logs return null), so do not
-    // reserve the list height here — that draws a blank box that then fills.
-    if (insideModal) {
-      return (
-        <Box flexDirection="column" paddingX={1} flexShrink={0}>
-          {statusBody}
-        </Box>
-      );
-    }
-    return (
-      <Box flexDirection="column" paddingTop={1}>
-        <Divider color="suggestion" />
-        <Box flexDirection="column" paddingX={2}>
-          {statusBody}
-        </Box>
-      </Box>
+      </Pane>
     );
   }
 
   return (
     <LogSelector
       logs={logs}
+      currentSessionId={currentSessionId}
       maxHeight={insideModal ? rows : Math.max(1, rows - 2)}
       onCancel={handleCancel}
       onSelect={handleSelect}
       onLogsChanged={() => loadLogs(showAllProjects, worktreePaths)}
+      onLoadMore={handleLoadMore}
       showAllProjects={showAllProjects}
       onToggleAllProjects={handleToggleAllProjects}
       onAgenticSearch={agenticSessionSearch}

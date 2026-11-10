@@ -99,7 +99,11 @@ export function Settings({ onClose, context, defaultTab }: Props): React.ReactNo
         // MCP list) flow to their natural height for the Modal's ScrollBox
         // to scroll. Config still gets contentHeight above — it
         // paginate internally so this only affects Status/Usage.
-        contentHeight={tabsHidden || insideModal ? undefined : contentHeight}
+        contentHeight={
+          tabsHidden || insideModal || (selectedTab === 'Config' && configOwnsEsc)
+            ? undefined
+            : Math.max(0, Math.min(contentHeight - 1, rows - 5))
+        }
       >
         {tabs}
       </Tabs>

@@ -1,13 +1,11 @@
 /**
  * ViewHookMode shows read-only details for a single configured hook.
- *
- * The /hooks menu is read-only; this view replaces the former delete-hook
- * confirmation screen and directs users to settings.json or Claude for edits.
  */
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { getDisplayPath } from '../../utils/file.js';
 import { hookSourceDescriptionDisplayString, type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
-import { Dialog } from '@anthropic/ink';
+import { getSettingsFilePathForSource } from '../../utils/settings/settings.js';
 
 type Props = {
   selectedHook: IndividualHookConfig;
@@ -16,53 +14,89 @@ type Props = {
 };
 
 export function ViewHookMode({ selectedHook, eventSupportsMatcher, onCancel }: Props): React.ReactNode {
+  const matcherLabel = selectedHook.matcher || 'matches everything';
+  const title = getHookTypeTitle(selectedHook.config);
+  const subtitle = eventSupportsMatcher ? `${selectedHook.event} · ${matcherLabel}` : selectedHook.event;
+
   return (
-    <Dialog title="Hook details" onCancel={onCancel} inputGuide={() => <Text>Esc to go back</Text>}>
+    <Dialog
+      title={title}
+      subtitle={subtitle}
+      onCancel={onCancel}
+      inputGuide={<KeyboardShortcutHint shortcut="esc" action="go back" />}
+    >
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
           <Text>
-            Event: <Text bold>{selectedHook.event}</Text>
-          </Text>
-          {eventSupportsMatcher && (
-            <Text>
-              Matcher: <Text bold>{selectedHook.matcher || '(all)'}</Text>
-            </Text>
-          )}
-          <Text>
-            Type: <Text bold>{selectedHook.config.type}</Text>
-          </Text>
-          <Text>
-            Source: <Text dimColor>{hookSourceDescriptionDisplayString(selectedHook.source)}</Text>
+            <Text bold>Source:</Text> <Text dimColor>{hookSourceDescriptionDisplayString(selectedHook.source)}</Text>
           </Text>
           {selectedHook.pluginName && (
             <Text>
-              Plugin: <Text dimColor>{selectedHook.pluginName}</Text>
+              <Text bold>Plugin:</Text> <Text dimColor>{selectedHook.pluginName}</Text>
+            </Text>
+          )}
+          {'statusMessage' in selectedHook.config && selectedHook.config.statusMessage && (
+            <Text>
+              <Text bold>Status message:</Text> <Text dimColor>{selectedHook.config.statusMessage}</Text>
             </Text>
           )}
         </Box>
         <Box flexDirection="column">
-          <Text dimColor>{getContentFieldLabel(selectedHook.config)}:</Text>
+          <Text dimColor>{getContentFieldLabel(selectedHook.config)}</Text>
           <Box borderStyle="round" borderDimColor paddingLeft={1} paddingRight={1}>
             <Text>{getContentFieldValue(selectedHook.config)}</Text>
           </Box>
         </Box>
-        {'statusMessage' in selectedHook.config && selectedHook.config.statusMessage && (
-          <Text>
-            Status message: <Text dimColor>{selectedHook.config.statusMessage}</Text>
-          </Text>
-        )}
-        <Text dimColor>To modify or remove this hook, edit settings.json directly or ask Claude to help.</Text>
+        <Text dimColor>{getHookSourceFooter(selectedHook)}</Text>
       </Box>
     </Dialog>
   );
 }
 
-/**
- * Get a human-readable label for the primary content field of a hook
- * based on its type.
- */
+function getHookTypeTitle(config: IndividualHookConfig['config']): string {
+  const rawType = (config as { type: string }).type;
+  switch (rawType) {
+    case 'command':
+      return 'Command hook';
+    case 'prompt':
+      return 'Prompt hook';
+    case 'agent':
+      return 'Agent hook';
+    case 'http':
+      return 'HTTP hook';
+    case 'mcp_tool':
+      return 'MCP tool hook';
+    case 'script':
+      return 'Script hook';
+    default:
+      return 'Command hook';
+  }
+}
+
+function getHookSourceFooter(hook: IndividualHookConfig): string {
+  switch (hook.source) {
+    case 'userSettings':
+    case 'projectSettings':
+    case 'localSettings': {
+      const filePath = getSettingsFilePathForSource(hook.source);
+      return `To change or remove this hook, edit ${filePath ? getDisplayPath(filePath) : 'settings.json'} or ask Claude.`;
+    }
+    case 'pluginHook':
+      return hook.pluginName
+        ? `This hook comes from the ${hook.pluginName} plugin and stops running when that plugin is disabled (/plugin).`
+        : 'This hook comes from a plugin and stops running when that plugin is disabled (/plugin).';
+    case 'builtinHook':
+      return "This hook is built in to Claude Code and can't be changed or removed.";
+    case 'sessionHook':
+      return "This hook was registered while Claude Code was running (by /goal, an agent or a skill), not by a settings file, and can't be changed here.";
+    case 'policySettings':
+      return "This hook is set by your organization's managed settings and can't be changed here.";
+  }
+}
+
 function getContentFieldLabel(config: IndividualHookConfig['config']): string {
-  switch (config.type) {
+  const raw = config as { type: string; file?: string };
+  switch (raw.type) {
     case 'command':
       return 'Command';
     case 'prompt':
@@ -71,14 +105,16 @@ function getContentFieldLabel(config: IndividualHookConfig['config']): string {
       return 'Prompt';
     case 'http':
       return 'URL';
+    case 'mcp_tool':
+      return 'MCP tool';
+    case 'script':
+      return raw.file !== undefined ? 'Script file' : 'Script';
+    default:
+      return 'Command';
   }
 }
 
-/**
- * Get the actual content value for a hook's primary field, bypassing
- * statusMessage so the detail view always shows the real command/prompt/URL.
- */
-function getContentFieldValue(config: IndividualHookConfig['config']): string {
+export function getContentFieldValue(config: IndividualHookConfig['config']): string {
   switch (config.type) {
     case 'command':
       return config.command;

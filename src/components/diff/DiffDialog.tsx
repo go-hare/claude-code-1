@@ -1,16 +1,25 @@
 import type { StructuredPatchHunk } from 'diff';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { type DiffData, useDiffData } from '../../hooks/useDiffData.js';
-import { useAppState } from '../../state/AppState.js';
 import { type TurnDiff, useTurnDiffs } from '../../hooks/useTurnDiffs.js';
-import { Box, Text } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  Dialog,
+  KeyboardShortcutHint,
+  LoadingState,
+  Tab,
+  Tabs,
+  Text,
+  useModalScrollRef,
+} from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
+import { useAppState } from '../../state/AppState.js';
 import type { Message } from '../../types/message.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Byline, Dialog } from '@anthropic/ink';
+import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { DiffDetailView } from './DiffDetailView.js';
 import { DiffFileList } from './DiffFileList.js';
 
@@ -51,7 +60,7 @@ function turnDiffToDiffData(turn: TurnDiff): DiffData {
     hunks,
     loading: false,
     source: { kind: 'working-tree' },
-    baseMode: 'uncommitted',
+    baseMode: 'auto',
   };
 }
 
@@ -61,8 +70,14 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
   const turnDiffs = useTurnDiffs(messages);
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [sourceIndex, setSourceIndex] = useState<number>(0);
+  const [selection, setSelection] = useState<{ source: number; index: number; mount: number }>({
+    source: 0,
+    index: 0,
+    mount: 0,
+  });
+
+  const selectedIndex = selection.source === sourceIndex ? selection.index : 0;
 
   const sources: DiffSource[] = useMemo(
     () => [{ type: 'current' }, ...turnDiffs.map((turn): DiffSource => ({ type: 'turn', turn }))],
@@ -88,42 +103,59 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
     }
   }, [sources.length, sourceIndex]);
 
-  // Reset file selection when source changes
-  const prevSourceIndex = useRef(sourceIndex);
-  useEffect(() => {
-    if (prevSourceIndex.current !== sourceIndex) {
-      setSelectedIndex(0);
-      prevSourceIndex.current = sourceIndex;
-    }
-  }, [sourceIndex]);
-
-  // Register as modal overlay so Chat keybindings and CancelRequestHandler
-  // are disabled while DiffDialog is showing
   useRegisterOverlay('diff-dialog');
+  const modalScrollRef = useModalScrollRef();
 
-  // Diff dialog navigation keybindings
-  // View-mode dependent: left/right arrows have different behavior based on mode
-  // (source tab switching vs back navigation), and up/down/enter are
-  // context-sensitive to viewMode
-  //
-  // Note: Escape handling (diff:dismiss) is NOT registered here because Dialog's
-  // built-in useKeybinding('confirm:no', handleCancel) already handles it.
-  // Having both would be dead code since Dialog's child effect registers first
-  // and calls stopImmediatePropagation(). The diff:dismiss binding in
-  // defaultBindings.ts is kept for useShortcutDisplay to show the "esc close" hint.
+  const scrollDetail = useCallback(
+    (
+      dir: 'up' | 'down' | 'pageUp' | 'pageDown' | 'fullPageUp' | 'fullPageDown' | 'top' | 'bottom',
+    ): false | undefined => {
+      const handle = modalScrollRef?.current;
+      if (viewMode !== 'detail' || !handle) {
+        return false;
+      }
+      const halfPage = Math.max(1, Math.floor(handle.getViewportHeight() / 2));
+      const fullPage = Math.max(1, handle.getViewportHeight());
+      switch (dir) {
+        case 'up':
+          handle.scrollBy(-1);
+          break;
+        case 'down':
+          handle.scrollBy(1);
+          break;
+        case 'pageUp':
+          handle.scrollBy(-halfPage);
+          break;
+        case 'pageDown':
+          handle.scrollBy(halfPage);
+          break;
+        case 'fullPageUp':
+          handle.scrollBy(-fullPage);
+          break;
+        case 'fullPageDown':
+          handle.scrollBy(fullPage);
+          break;
+        case 'top':
+          handle.scrollTo(0);
+          break;
+        case 'bottom':
+          handle.scrollToBottom();
+          break;
+      }
+    },
+    [modalScrollRef, viewMode],
+  );
+
   useKeybindings(
     {
-      // Left arrow: in detail mode goes back, in list mode switches source
       'diff:previousSource': () => {
-        if (viewMode === 'detail') {
-          setViewMode('list');
-        } else if (viewMode === 'list' && sources.length > 1) {
-          setSourceIndex(prev => Math.max(0, prev - 1));
+        if (viewMode === 'list' && sources.length > 1) {
+          setSourceIndex(prev => (prev - 1 + sources.length) % sources.length);
         }
       },
       'diff:nextSource': () => {
         if (viewMode === 'list' && sources.length > 1) {
-          setSourceIndex(prev => Math.min(sources.length - 1, prev + 1));
+          setSourceIndex(prev => (prev + 1) % sources.length);
         }
       },
       'diff:back': () => {
@@ -134,20 +166,24 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
       'diff:viewDetails': () => {
         if (viewMode === 'list' && selectedFile) {
           setViewMode('detail');
+          return;
         }
+        return false;
       },
-      'diff:previousFile': () => {
-        if (viewMode === 'list') {
-          setSelectedIndex(prev => Math.max(0, prev - 1));
-        }
-      },
-      'diff:nextFile': () => {
-        if (viewMode === 'list') {
-          setSelectedIndex(prev => Math.min(diffData.files.length - 1, prev + 1));
-        }
-      },
+      'diff:previousFile': () => scrollDetail('up'),
+      'diff:nextFile': () => scrollDetail('down'),
     },
     { context: 'DiffDialog' },
+  );
+
+  useKeybindings(
+    {
+      'scroll:pageUp': () => scrollDetail('pageUp'),
+      'scroll:pageDown': () => scrollDetail('pageDown'),
+      'scroll:top': () => scrollDetail('top'),
+      'scroll:bottom': () => scrollDetail('bottom'),
+    },
+    { context: 'Scroll', isActive: viewMode === 'detail' },
   );
 
   const subtitle = diffData.stats ? (
@@ -158,50 +194,35 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
     </Text>
   ) : null;
 
-  // Build header based on current source
-  const headerTitle = currentTurn ? `Turn ${currentTurn.turnIndex}` : 'Uncommitted changes';
+  const noCommits = !currentTurn && diffData.noCommits === true;
+  const isBranch = !currentTurn && diffData.source.kind === 'branch';
+  const headerTitle = currentTurn
+    ? `Turn ${currentTurn.turnIndex}`
+    : noCommits
+      ? 'Staged and new files'
+      : isBranch
+        ? 'Branch changes'
+        : 'Uncommitted changes';
   const headerSubtitle = currentTurn
     ? currentTurn.userPromptPreview
       ? `"${currentTurn.userPromptPreview}"`
       : ''
-    : '(git diff HEAD)';
+    : noCommits
+      ? '(no commits yet)'
+      : diffData.source.kind === 'branch'
+        ? `(vs ${diffData.source.baseBranch})`
+        : '(git diff HEAD)';
 
-  // Source selector pills
-  const sourceSelector =
-    sources.length > 1 ? (
-      <Box>
-        {sourceIndex > 0 && <Text dimColor>◀ </Text>}
-        {sources.map((source, i) => {
-          const isSelected = i === sourceIndex;
-          const label = source.type === 'current' ? 'Current' : `T${source.turn.turnIndex}`;
-          return (
-            <Text key={i} dimColor={!isSelected} bold={isSelected}>
-              {i > 0 ? ' · ' : ''}
-              {label}
-            </Text>
-          );
-        })}
-        {sourceIndex < sources.length - 1 && <Text dimColor> ▶</Text>}
-      </Box>
-    ) : null;
-
-  const dismissShortcut = useShortcutDisplay('diff:dismiss', 'DiffDialog', 'esc');
-  // Determine the appropriate message when no files are shown
   const emptyMessage = (() => {
-    if (diffData.loading) {
-      return 'Loading diff…';
-    }
     if (currentTurn) {
       return 'No file changes in this turn';
     }
-    // Check if we have stats but no files (too many files case)
     if (diffData.stats && diffData.stats.filesCount > 0 && diffData.files.length === 0) {
       return 'Too many files to display details';
     }
-    return 'Working tree is clean';
+    return 'No changes yet';
   })();
 
-  // Build title with header subtitle inline
   const title = (
     <Text>
       {headerTitle}
@@ -209,7 +230,6 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
     </Text>
   );
 
-  // Handle cancel/dismiss - in detail mode goes back, in list mode dismisses
   function handleCancel(): void {
     if (viewMode === 'detail') {
       setViewMode('list');
@@ -218,41 +238,27 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
     }
   }
 
-  return (
-    <Dialog
-      title={title}
-      onCancel={handleCancel}
-      color="background"
-      inputGuide={exitState =>
-        exitState.pending ? (
-          <Text>Press {exitState.keyName} again to exit</Text>
-        ) : viewMode === 'list' ? (
-          <Byline>
-            {sources.length > 1 && <Text>←/→ source</Text>}
-            <Text>↑/↓ select</Text>
-            <Text>Enter view</Text>
-            <Text>{dismissShortcut} close</Text>
-          </Byline>
-        ) : (
-          <Byline>
-            <Text>← back</Text>
-            <Text>{dismissShortcut} close</Text>
-          </Byline>
-        )
-      }
-    >
-      {sourceSelector}
+  const tabBody = (
+    <Box flexDirection="column" gap={1}>
       {subtitle}
       {diffData.files.length === 0 ? (
-        <Box marginTop={1}>
+        diffData.loading ? (
+          <LoadingState message="Loading diff…" dimColor />
+        ) : (
           <Text dimColor>{emptyMessage}</Text>
-        </Box>
+        )
       ) : viewMode === 'list' ? (
-        <Box flexDirection="column" marginTop={1}>
-          <DiffFileList files={diffData.files} selectedIndex={selectedIndex} />
+        <Box flexDirection="column">
+          <DiffFileList
+            key={`${sourceIndex}:${selection.mount}`}
+            files={diffData.files}
+            defaultFocusIndex={selectedIndex}
+            onFocus={index => setSelection(prev => ({ ...prev, source: sourceIndex, index }))}
+            onSelect={() => setViewMode('detail')}
+          />
         </Box>
       ) : (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column">
           <DiffDetailView
             filePath={selectedFile?.path || ''}
             hunks={selectedHunks}
@@ -263,6 +269,42 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
           />
         </Box>
       )}
+    </Box>
+  );
+
+  const inputGuide =
+    viewMode === 'list' ? (
+      <Byline>
+        {sources.length > 1 && <KeyboardShortcutHint shortcut="←/→" action="switch source" />}
+        <KeyboardShortcutHint shortcut="↑/↓" action="select" />
+        <KeyboardShortcutHint shortcut="enter" action="view" />
+        <ConfigurableShortcutHint action="diff:dismiss" context="DiffDialog" fallback="Esc" description="close" />
+      </Byline>
+    ) : (
+      <Byline>
+        <KeyboardShortcutHint shortcut="↑/↓" action="scroll" />
+        <ConfigurableShortcutHint action="diff:dismiss" context="DiffDialog" fallback="Esc" description="back" />
+      </Byline>
+    );
+
+  return (
+    <Dialog title={title} onCancel={handleCancel} color="background" inputGuide={inputGuide}>
+      <Tabs
+        hidden={sources.length <= 1}
+        selectedTab={String(sourceIndex)}
+        onTabChange={tabId => setSourceIndex(Number(tabId))}
+        disableNavigation={viewMode === 'detail'}
+      >
+        {sources.map((source, index) => (
+          <Tab
+            key={index}
+            id={String(index)}
+            title={source.type === 'current' ? 'Current' : `T${source.turn.turnIndex}`}
+          >
+            {tabBody}
+          </Tab>
+        ))}
+      </Tabs>
     </Dialog>
   );
 }

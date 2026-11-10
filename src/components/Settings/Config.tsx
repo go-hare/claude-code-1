@@ -3,6 +3,7 @@ import { feature } from 'bun:bundle';
 import {
   type DOMElement,
   type KeyboardEvent,
+  type WheelEvent,
   Box,
   Text,
   measureElement,
@@ -2031,7 +2032,7 @@ export function Config({
   onIsSearchModeChange,
   contentHeight,
 }: Props): React.ReactNode {
-  const { headerFocused, focusHeader } = useTabHeaderFocus();
+  const { headerFocused, focusHeader, blurHeader } = useTabHeaderFocus();
   const insideModal = useIsInsideModal();
   const [, setTheme] = useTheme();
   const themeSetting = useThemeSetting();
@@ -2653,30 +2654,30 @@ export function Config({
     setAppState,
   ]);
 
-  // Escape: revert all changes (if any) and close.
-  const handleEscape = useCallback(() => {
-    if (showSubmenu !== null) {
-      return;
-    }
-    if (isDirty.current) {
-      revertChanges();
-    }
-    onClose('Config dialog dismissed', { display: 'system' });
-  }, [showSubmenu, revertChanges, onClose]);
+  // densable 2.1.289 ps: Esc closes and keeps applied changes (no revert);
+  // both Enter and Space change/open the focused setting.
+  void revertChanges;
+  const [hoveredSettingId, setHoveredSettingId] = useState<string | null>(null);
 
   // Disable when submenu is open so the submenu's Dialog handles ESC, and in
   // search mode so the onKeyDown handler (which clears-then-exits search)
-  // wins — otherwise Escape in search would jump straight to revert+close.
-  useKeybinding('confirm:no', handleEscape, {
+  // wins — otherwise Escape in search would jump straight to close.
+  useKeybinding('confirm:no', handleSaveAndClose, {
     context: 'Settings',
     isActive: showSubmenu === null && !isSearchMode && !headerFocused,
   });
-  // Save-and-close fires on Enter only when not in search mode (Enter there
-  // exits search to the list — see the isSearchMode branch in handleKeyDown).
-  useKeybinding('settings:close', handleSaveAndClose, {
-    context: 'Settings',
-    isActive: showSubmenu === null && !isSearchMode && !headerFocused,
-  });
+  // Both Enter (settings:close in defaultBindings) and Space (select:accept)
+  // change/open the focused setting when not in search mode.
+  useKeybinding(
+    'settings:close',
+    () => {
+      toggleSetting();
+    },
+    {
+      context: 'Settings',
+      isActive: showSubmenu === null && !isSearchMode && !headerFocused,
+    },
+  );
 
   // Settings navigation and toggle actions via configurable keybindings.
   // Only active when not in search mode and no submenu is open.
@@ -2903,10 +2904,15 @@ export function Config({
         return;
       }
       if (e.defaultPrevented) return;
-      // List mode: left/right/tab cycle the selected option's value. These
-      // keys used to switch tabs; now they only do so when the tab row is
+      // List mode: left/right/tab/return/space cycle or open the selected option's value.
+      // These keys used to switch tabs; now they only do so when the tab row is
       // explicitly focused (see headerFocused in Settings.tsx).
       if (e.key === 'left' || e.key === 'right' || e.key === 'tab') {
+        e.preventDefault();
+        toggleSetting();
+        return;
+      }
+      if (!e.ctrl && !e.meta && (e.key === 'return' || e.key === ' ')) {
         e.preventDefault();
         toggleSetting();
         return;
@@ -3212,18 +3218,32 @@ export function Config({
         />
       ) : (
         <Box flexDirection="column" gap={1} marginY={insideModal ? undefined : 1}>
-          <SearchBox
-            query={searchQuery}
-            isFocused={isSearchMode && !headerFocused}
-            isTerminalFocused={isTerminalFocused}
-            cursorOffset={searchCursorOffset}
-            placeholder="Search settings…"
-          />
-          <Box flexDirection="column">
+          <Box
+            onClick={() => {
+              if (headerFocused) blurHeader();
+              setIsSearchMode(true);
+            }}
+          >
+            <SearchBox
+              query={searchQuery}
+              isFocused={isSearchMode && !headerFocused}
+              isTerminalFocused={isTerminalFocused}
+              cursorOffset={searchCursorOffset}
+              placeholder="Search settings…"
+            />
+          </Box>
+          <Box
+            flexDirection="column"
+            onWheel={(e: WheelEvent) => {
+              if (showSubmenu !== null || filteredSettingsItems.length === 0 || e.deltaY === 0) return;
+              e.stopImmediatePropagation();
+              if (headerFocused) blurHeader();
+              if (isSearchMode) setIsSearchMode(false);
+              moveSelection(e.deltaY > 0 ? 1 : -1);
+            }}
+          >
             {filteredSettingsItems.length === 0 ? (
-              <Text dimColor italic>
-                No settings match &quot;{searchQuery}&quot;
-              </Text>
+              <Text dimColor>No settings match &quot;{searchQuery}&quot;</Text>
             ) : (
               <>
                 {scrollOffset > 0 && (
@@ -3242,17 +3262,47 @@ export function Config({
                   }
                   const setting = entry.item;
                   const isSelected = entry.settingIndex === selectedIndex && !headerFocused && !isSearchMode;
+                  const isHovered = hoveredSettingId === setting.id;
                   return (
                     <React.Fragment key={setting.id}>
                       {/* densable sda row: fixed label width + flexGrow value with minWidth:0
                           so values wrap/truncate inside the panel instead of past the edge. */}
-                      <Box width="100%">
+                      <Box
+                        width="100%"
+                        onClick={e => {
+                          e.stopImmediatePropagation();
+                          if (headerFocused) blurHeader();
+                          if (isSearchMode) setIsSearchMode(false);
+                          const alreadySelected = isSelected;
+                          setShowThinkingWarning(false);
+                          setSelectedIndex(entry.settingIndex);
+                          adjustScrollOffset(entry.settingIndex);
+                          if (alreadySelected) {
+                            toggleSetting();
+                          }
+                        }}
+                      >
                         <Box width={labelWidth} flexShrink={0} marginRight={1}>
                           <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                             {isSelected ? figures.pointer : ' '} {setting.label}
                           </Text>
                         </Box>
-                        <Box flexGrow={1} minWidth={0}>
+                        <Box
+                          flexGrow={1}
+                          minWidth={0}
+                          backgroundColor={isHovered ? 'userMessageBackgroundHover' : undefined}
+                          onMouseEnter={() => setHoveredSettingId(setting.id)}
+                          onMouseLeave={() => setHoveredSettingId(prev => (prev === setting.id ? null : prev))}
+                          onClick={e => {
+                            e.stopImmediatePropagation();
+                            if (headerFocused) blurHeader();
+                            if (isSearchMode) setIsSearchMode(false);
+                            setShowThinkingWarning(false);
+                            setSelectedIndex(entry.settingIndex);
+                            adjustScrollOffset(entry.settingIndex);
+                            toggleSetting();
+                          }}
+                        >
                           {setting.type === 'boolean' ? (
                             <>
                               <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
@@ -3341,30 +3391,14 @@ export function Config({
             ) : (
               <Text dimColor wrap="truncate-end">
                 <Byline>
-                  <ConfigurableShortcutHint
-                    action="select:accept"
-                    context="Settings"
-                    fallback="Space"
-                    description="change"
-                  />
-                  <ConfigurableShortcutHint
-                    action="settings:close"
-                    context="Settings"
-                    fallback="Enter"
-                    description="save"
-                  />
+                  <KeyboardShortcutHint shortcut="enter/space" action="change" />
                   <ConfigurableShortcutHint
                     action="settings:search"
                     context="Settings"
                     fallback="/"
                     description="search"
                   />
-                  <ConfigurableShortcutHint
-                    action="confirm:no"
-                    context="Settings"
-                    fallback="Esc"
-                    description="cancel"
-                  />
+                  <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="close" />
                 </Byline>
               </Text>
             )}

@@ -62,6 +62,11 @@ export type TreeSelectProps<T> = {
   readonly isDisabled?: boolean;
 
   /**
+   * When true, hides the focus prompt indicator (`❯`) while `isDisabled` is true.
+   */
+  readonly hidePromptWhileDisabled?: boolean;
+
+  /**
    * When true, hides the numeric indexes next to each option.
    */
   readonly hideIndexes?: boolean;
@@ -117,6 +122,7 @@ export function TreeSelect<T>({
   visibleOptionCount,
   layout = 'expanded',
   isDisabled = false,
+  hidePromptWhileDisabled = false,
   hideIndexes = false,
   isNodeExpanded,
   onExpand,
@@ -333,6 +339,7 @@ export function TreeSelect<T>({
         visibleOptionCount={visibleOptionCount}
         layout={layout}
         isDisabled={isDisabled}
+        hidePromptWhileDisabled={hidePromptWhileDisabled}
         hideIndexes={hideIndexes}
         onUpFromFirstItem={onUpFromFirstItem}
       />

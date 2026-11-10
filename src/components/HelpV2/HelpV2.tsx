@@ -2,14 +2,10 @@ import * as React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useShortcutDisplay } from 'src/keybindings/useShortcutDisplay.js';
 import { getFeedbackCommandDisabledReason } from 'src/utils/feedbackDrafts/gates.js';
-import {
-  builtInCommandNames,
-  type Command,
-  type CommandResultDisplay,
-  INTERNAL_ONLY_COMMANDS,
-} from '../../commands.js';
+import { type Command, type CommandResultDisplay, INTERNAL_ONLY_COMMANDS } from '../../commands.js';
+import { useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Link, Text, Tab, Tabs, Pane } from '@anthropic/ink';
+import { Box, Link, Pane, Tab, Tabs, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { Commands } from './Commands.js';
 import { General } from './General.js';
@@ -22,18 +18,23 @@ type Props = {
 /** densable 2.1.289 Help `ee=44` — feedback footer when tall enough. */
 const HELP_FEEDBACK_FOOTER_MIN_ROWS = 44;
 
+function isDefaultHelpCommand(cmd: Command): boolean {
+  return cmd.type !== 'prompt' || cmd.source === 'builtin' || cmd.source === 'bundled';
+}
+
 export function HelpV2({ onClose, commands }: Props): React.ReactNode {
-  const { rows, columns } = useTerminalSize();
+  const terminalSize = useTerminalSize();
+  const { rows, columns } = useModalOrTerminalSize(terminalSize);
 
   const close = () => onClose('Help dialog dismissed', { display: 'system' });
   useKeybinding('help:dismiss', close, { context: 'Help' });
   const exitState = useExitOnCtrlCDWithKeybindings(close);
   const dismissShortcut = useShortcutDisplay('help:dismiss', 'Help', 'esc');
   // densable QA() — show /feedback line when the command is not disabled.
-  const showFeedbackFooter = rows >= HELP_FEEDBACK_FOOTER_MIN_ROWS && getFeedbackCommandDisabledReason() === null;
+  const showFeedbackFooter =
+    terminalSize.rows >= HELP_FEEDBACK_FOOTER_MIN_ROWS && getFeedbackCommandDisabledReason() === null;
 
-  const builtinNames = builtInCommandNames();
-  let builtinCommands = commands.filter(cmd => builtinNames.has(cmd.name) && !cmd.isHidden);
+  let builtinCommands = commands.filter(cmd => isDefaultHelpCommand(cmd) && !cmd.isHidden);
   let antOnlyCommands: Command[] = [];
 
   // We have to do this in an `if` to help treeshaking
@@ -43,7 +44,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
     antOnlyCommands = commands.filter(cmd => internalOnlyNames.has(cmd.name) && !cmd.isHidden);
   }
 
-  const customCommands = commands.filter(cmd => !builtinNames.has(cmd.name) && !cmd.isHidden);
+  const customCommands = commands.filter(cmd => !isDefaultHelpCommand(cmd) && !cmd.isHidden);
 
   const tabs = [
     <Tab key="general" id="general" title="General">

@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
+import { AccessibilityContext, Box, Text, useTabHeaderFocus } from '@anthropic/ink';
 import { type Command, formatDescriptionWithSource } from '../../commands.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { truncate } from '../../utils/truncate.js';
-import { Box, Text, useTabHeaderFocus } from '@anthropic/ink';
 import { ItemList } from '../ItemList.js';
 
 type Props = {
@@ -16,8 +17,10 @@ type Props = {
 
 export function Commands({ commands, maxHeight, columns, title, onCancel, emptyMessage }: Props): React.ReactNode {
   const { headerFocused, focusHeader } = useTabHeaderFocus();
+  const srContext = useContext(AccessibilityContext);
+  const screenReader = srContext || isScreenReaderModeEnabled();
   const maxWidth = Math.max(1, columns - 10);
-  const visibleCount = Math.max(1, Math.floor((maxHeight - 10) / 2));
+  const visibleOptionCount = 2 * Math.max(1, Math.floor((maxHeight - 10) / 2));
 
   const options = useMemo(() => {
     // Custom commands can appear more than once (e.g. same name at user and
@@ -30,11 +33,16 @@ export function Commands({ commands, maxHeight, columns, title, onCancel, emptyM
         return true;
       })
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map(cmd => ({
-        label: `/${cmd.name}`,
-        value: cmd.name,
-        description: truncate(formatDescriptionWithSource(cmd), maxWidth, true),
-      }));
+      .map(cmd => {
+        const fullDescription = formatDescriptionWithSource(cmd);
+        return {
+          label: `/${cmd.name}`,
+          value: cmd.name,
+          description: truncate(fullDescription, maxWidth, true),
+          fullDescription,
+          lines: 2,
+        };
+      });
   }, [commands, maxWidth]);
 
   return (
@@ -45,12 +53,23 @@ export function Commands({ commands, maxHeight, columns, title, onCancel, emptyM
         <>
           <Text>{title}</Text>
           <Box marginTop={1}>
-            <ItemList
-              options={options}
-              visibleOptionCount={visibleCount}
-              onCancel={headerFocused ? focusHeader : onCancel}
-              isDisabled={headerFocused}
-            />
+            {screenReader ? (
+              <Box flexDirection="column">
+                {options.map((item, idx) => (
+                  <Text key={item.value}>
+                    {idx + 1}. {item.label} — {item.fullDescription}
+                  </Text>
+                ))}
+              </Box>
+            ) : (
+              <ItemList
+                options={options}
+                visibleOptionCount={visibleOptionCount}
+                onUpFromFirst={focusHeader}
+                onCancel={headerFocused ? focusHeader : onCancel}
+                isDisabled={headerFocused}
+              />
+            )}
           </Box>
         </>
       )}

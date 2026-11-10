@@ -16,12 +16,18 @@ import React, {
 import {
   AccessibilityContext,
   Box,
+  getStatusIconMaxWidth,
   ListItem,
+  StatusIcon,
+  stringWidth,
+  Text,
   type ClickEvent,
   type DOMElement,
   type KeyboardEvent,
   type WheelEvent,
   useApp,
+  useHoverTracked,
+  useModalOrTerminalSize,
   useTerminalSize,
 } from '@anthropic/ink';
 import figures from 'figures';
@@ -34,17 +40,41 @@ import {
   leftoverChildRows,
   leftoverChromeQ,
   leftoverListVisibleCountIdle,
+  leftoverNnFit,
+  leftoverNnFromOptions,
+  leftoverNnLiveWidth,
   leftoverOverflowHint,
 } from './FullscreenLayout.js';
+
+function extractNodeText(node: ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number' || typeof node === 'boolean') return String(node);
+  if (!node) return '';
+  if (Array.isArray(node)) return node.map(extractNodeText).join('');
+  if (React.isValidElement<{ children?: ReactNode }>(node)) {
+    return extractNodeText(node.props.children);
+  }
+  return '';
+}
+
+function measureItemIconWidth(icon: ReactNode): number {
+  if (icon == null) return 0;
+  if (React.isValidElement(icon) && icon.type === StatusIcon) {
+    return getStatusIconMaxWidth();
+  }
+  return stringWidth(extractNodeText(icon));
+}
 
 type Item<T> = {
   label: ReactNode;
   value: T;
   description?: string;
-  /** densable `Oo` — row height. Missing is 1. Not "description means 2". */
+  /** densable `Un` → `nl.Item` — explicit lines, else 2 when description is present, else 1. */
   lines?: number;
   icon?: ReactNode;
   facts?: readonly string[];
+  /** Non-selectable section heading row (`nl.Heading`). */
+  heading?: boolean;
 };
 
 type Props<T> = {
@@ -75,10 +105,13 @@ export function ItemList<T>({
 }: Props<T>): React.ReactNode {
   const host = useContext(LeftoverModalHostContext);
   const screenReader = useContext(AccessibilityContext);
+  const hoverTracked = useHoverTracked();
   const kve = useContext(KVeReserveContext);
   const kveRef = useRef(kve);
   kveRef.current = kve;
-  const { rows: terminalRows } = useTerminalSize();
+  const terminalSize = useTerminalSize();
+  const { rows: terminalRows } = terminalSize;
+  const { columns: modalColumns } = useModalOrTerminalSize(terminalSize);
   const listRef = useRef<DOMElement | null>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
@@ -89,13 +122,27 @@ export function ItemList<T>({
     return leftoverChromeQ(listRef.current, reserveBox, current == null && kveRef.current == null) ?? 0;
   }, []);
   const measuredChromeQ = useSyncExternalStore(subscribeLayout, readChrome, () => 0);
+  const readListWidth = useCallback(() => listRef.current?.yogaNode?.getComputedWidth() ?? 0, []);
+  const measuredListWidth = useSyncExternalStore(subscribeLayout, readListWidth, () => 0);
+  const nnWidths = leftoverNnFromOptions(
+    leftoverNnLiveWidth(measuredListWidth, modalColumns),
+    options
+      .filter(option => !option.heading)
+      .map(option => ({
+        iconWidth: measureItemIconWidth(option.icon),
+        name: extractNodeText(option.label),
+        facts: (option.facts ?? []).filter(fact => fact !== ''),
+      })),
+  );
   const idleWindow = leftoverListVisibleCountIdle(
     kve?.rows ?? host?.rows ?? terminalRows,
     measuredChromeQ,
     kve?.reserve ?? host?.reserve,
   );
   const windowCount = visibleOptionCount ?? idleWindow;
-  const heightOf = (index: number): number => leftoverChildRows(options[index]?.lines);
+  const rowLines = (option: Item<T> | undefined): number =>
+    leftoverChildRows(option?.lines ?? (option?.description ? 2 : 1));
+  const heightOf = (index: number): number => rowLines(options[index]);
   const lineOf = (index: number): number => {
     let line = 0;
     for (let i = 0; i < index && i < options.length; i++) line += heightOf(i);
@@ -120,14 +167,30 @@ export function ItemList<T>({
     }
     return last;
   };
+  const isNavigable = (index: number): boolean => Boolean(options[index] && !options[index]?.heading);
+  const findNavigable = (fromIdx: number, dir: 1 | -1): number => {
+    for (let i = Math.max(0, Math.min(last, fromIdx)); i >= 0 && i <= last; i += dir) {
+      if (isNavigable(i)) return i;
+    }
+    return Math.max(0, Math.min(last, fromIdx));
+  };
+  const firstNavigable = findNavigable(0, 1);
+  const lastNavigable = findNavigable(last, -1);
   const counted = lineCount;
   const hint = leftoverOverflowHint(windowCount, undefined);
   const snapDown = (line: number): number => lineOf(indexAt(line));
-  const [cursor, setCursor] = useState(() => Math.min(defaultFocusIndex, last));
+  const [cursor, setCursor] = useState(() => {
+    const initial = Math.min(defaultFocusIndex, last);
+    return isNavigable(initial) ? initial : findNavigable(initial, 1);
+  });
   const cursorValue = options[cursor]?.value;
   useEffect(() => {
-    const found = options.findIndex(option => option.value === cursorValue);
+    const found = options.findIndex(option => !option.heading && option.value === cursorValue);
     if (found >= 0 && found !== cursor) setCursor(found);
+    else if (!isNavigable(cursor)) {
+      const fallback = findNavigable(cursor, 1);
+      if (fallback !== cursor) setCursor(fallback);
+    }
   }, [options, cursor, cursorValue]);
   const [from, setFrom] = useState(0);
   const fromRef = useRef(from);
@@ -155,22 +218,23 @@ export function ItemList<T>({
     const rows: typeof options = [];
     let used = 0;
     for (const option of options.slice(startIndex)) {
-      const height = leftoverChildRows(option.lines);
+      const height = rowLines(option);
       if (rows.length > 0 && used + height > visible) break;
       rows.push(option);
       used += height;
     }
     return rows;
   })();
-  const shownLines = shown.reduce((sum, option) => sum + leftoverChildRows(option.lines), 0);
+  const shownLines = shown.reduce((sum, option) => sum + rowLines(option), 0);
   const fits = windowCount >= counted;
   const spare = fits ? 0 : Math.max(0, visible - shownLines);
-  const move = (next: number): void => {
-    const clamped = Math.max(0, Math.min(last, next));
+  const move = (next: number, dir: 1 | -1 = 1): void => {
+    const rawClamped = Math.max(0, Math.min(last, next));
+    const clamped = isNavigable(rawClamped) ? rawClamped : findNavigable(rawClamped, dir);
     setCursor(clamped);
     setFrom(start => {
-      const cursorLine = lineOf(clamped);
-      const cursorEnd = cursorLine + heightOf(clamped);
+      const cursorLine = clamped === firstNavigable ? 0 : lineOf(clamped);
+      const cursorEnd = lineOf(clamped) + heightOf(clamped);
       let origin = start;
       for (let pass = 0; pass < 4; pass++) {
         const room = contentRoom(origin);
@@ -186,12 +250,22 @@ export function ItemList<T>({
     onFocus?.(clamped);
   };
   const step = (delta: number): void => {
-    if (cursor === (delta < 0 ? 0 : last)) {
+    const dir: 1 | -1 = delta < 0 ? -1 : 1;
+    if (cursor === (delta < 0 ? firstNavigable : lastNavigable)) {
       if (delta < 0) onUpFromFirst?.();
       else onDownFromLast?.();
       return;
     }
-    move(cursor + delta);
+    let next = cursor + delta;
+    while (next >= 0 && next <= last && !isNavigable(next)) {
+      next += dir;
+    }
+    if (next < 0 || next > last || !isNavigable(next)) {
+      if (delta < 0) onUpFromFirst?.();
+      else onDownFromLast?.();
+      return;
+    }
+    move(next, dir);
   };
   const page = (delta: number): void => {
     if (fits) return;
@@ -199,10 +273,11 @@ export function ItemList<T>({
       step(delta);
       return;
     }
+    const dir: 1 | -1 = delta > 0 ? 1 : -1;
     const span = Math.max(1, shownLines);
     const target = Math.max(0, Math.min(counted - 1, lineOf(cursor) + delta * span));
     const landed = indexAt(snapDown(target));
-    move(delta > 0 ? Math.max(landed, cursor + 1) : Math.min(landed, cursor - 1));
+    move(delta > 0 ? Math.max(landed, cursor + 1) : Math.min(landed, cursor - 1), dir);
   };
   const binding = useOptionalKeybindingContext();
   const keysOn = !isDisabled && options.length > 0 && binding !== null;
@@ -210,8 +285,8 @@ export function ItemList<T>({
   useKeybinding('select:previous', () => step(-1), { context: 'Select', isActive: keysOn });
   useKeybinding('select:pageDown', () => page(1), { context: 'Select', isActive: keysOn });
   useKeybinding('select:pageUp', () => page(-1), { context: 'Select', isActive: keysOn });
-  useKeybinding('select:first', () => move(0), { context: 'Select', isActive: keysOn });
-  useKeybinding('select:last', () => move(last), { context: 'Select', isActive: keysOn });
+  useKeybinding('select:first', () => move(firstNavigable, 1), { context: 'Select', isActive: keysOn });
+  useKeybinding('select:last', () => move(lastNavigable, -1), { context: 'Select', isActive: keysOn });
   useKeybinding('select:cancel', () => onCancel?.(), { context: 'Select', isActive: keysOn && onCancel !== undefined });
   useKeybinding('select:accept', () => onSelect?.(cursor), {
     context: 'Select',
@@ -226,7 +301,10 @@ export function ItemList<T>({
   const placeCursor = (origin: number): void => {
     const room = contentRoom(origin);
     setCursor(current => {
-      const next = Math.max(indexAt(origin), Math.min(indexAt(Math.max(origin, origin + room - 1)), current));
+      const lo = indexAt(origin);
+      const hi = indexAt(Math.max(origin, origin + room - 1));
+      const raw = Math.max(lo, Math.min(hi, current));
+      const next = isNavigable(raw) ? raw : findNavigable(raw, raw <= lo ? 1 : -1);
       if (next !== current) onFocus?.(next);
       return next;
     });
@@ -274,19 +352,39 @@ export function ItemList<T>({
       ) : null}
       {shown.map((option, offset) => {
         const index = startIndex + offset;
+        if (option.heading) {
+          return (
+            <Box
+              key={String(option.value)}
+              flexDirection="column"
+              height={rowLines(option)}
+              overflow="hidden"
+              paddingLeft={2}
+            >
+              {typeof option.label === 'string' ? <Text dimColor>{option.label}</Text> : option.label}
+            </Box>
+          );
+        }
+        const rawFacts = (option.facts ?? []).filter(fact => fact !== '');
+        const fittedFacts =
+          nnWidths && nnWidths.factsWidth > 0 && rawFacts.length > 0
+            ? leftoverNnFit(rawFacts, nnWidths.factsWidth)
+            : '';
+        const metaProp = nnWidths === null ? option.facts : fittedFacts !== '' ? [fittedFacts] : undefined;
+        const iconProp = option.icon ?? (nnWidths && nnWidths.iconWidth > 0 ? <Text /> : undefined);
         return (
-          <Box
-            key={String(option.value)}
-            flexDirection="column"
-            height={leftoverChildRows(option.lines)}
-            overflow="hidden"
-          >
+          <Box key={String(option.value)} flexDirection="column" height={rowLines(option)} overflow="hidden">
             <ListItem
-              isFocused={!isDisabled && index === cursor}
+              isFocused={index === cursor}
+              idle={isDisabled}
+              declareCursor={!isDisabled}
               isSelected={false}
               description={option.description}
-              icon={option.icon}
-              meta={option.facts}
+              icon={iconProp}
+              iconWidth={nnWidths?.iconWidth}
+              nameWidth={nnWidths?.nameWidth}
+              meta={metaProp}
+              metaWidth={nnWidths?.factsWidth}
               showScrollUp={glyph && offset === 0 && moreAbove > 0}
               showScrollDown={glyph && offset === shown.length - 1 && moreBelow > 0}
               onClick={(event: ClickEvent) => {
@@ -312,10 +410,14 @@ export function ItemList<T>({
     </>
   );
   const [barHover, setBarHover] = useState(false);
+  if (barHover && !hoverTracked) {
+    setBarHover(false);
+  }
   const list = (
     <Box
       ref={listRef}
       flexDirection="column"
+      flexGrow={1}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onWheel={isDisabled || fits ? undefined : onWheel}
@@ -324,10 +426,11 @@ export function ItemList<T>({
     </Box>
   );
   const overflows = counted > visible;
+  const showScrollbarTrack = hoverTracked && overflows;
   return (
     <Box flexDirection="row" gap={1} onMouseEnter={() => setBarHover(true)} onMouseLeave={() => setBarHover(false)}>
       {list}
-      {overflows ? (
+      {showScrollbarTrack ? (
         barHover ? (
           <LeftoverScrollbar
             offset={from}

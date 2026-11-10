@@ -106,7 +106,7 @@ export function ThinkingToggle({ currentValue, onSelect, onCancel, isMidConversa
         ) : (
           <Byline>
             <KeyboardShortcutHint shortcut="Enter" action="confirm" />
-            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="exit" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
           </Byline>
         )}
       </Text>

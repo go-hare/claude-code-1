@@ -22,15 +22,18 @@ import {
 /** densable Whf */
 const MAX_THEME_JSON_BYTES = 262144
 
+export type CustomThemeSource = 'user' | { plugin: string }
+
 export type CustomTheme = {
   slug: string
   name: string
   base: ThemeName
   overrides: Record<string, string>
-  source: 'user'
+  source: CustomThemeSource
 }
 
 let cachedUserThemes: CustomTheme[] = []
+let cachedPluginThemes: CustomTheme[] = []
 
 /** densable k2t */
 export function getThemesDir(): string {
@@ -52,7 +55,7 @@ export function customThemeSetting(slug: string): ThemeSetting {
 export function parseCustomThemeJson(
   slug: string,
   raw: string,
-  source: 'user' = 'user',
+  source: CustomThemeSource = 'user',
 ): CustomTheme | undefined {
   let parsed: unknown
   try {
@@ -85,6 +88,7 @@ export function parseCustomThemeJson(
 async function readThemeFile(
   path: string,
   slug: string,
+  source: CustomThemeSource = 'user',
 ): Promise<CustomTheme | undefined> {
   try {
     const st = await stat(path)
@@ -95,7 +99,7 @@ async function readThemeFile(
       return undefined
     }
     const raw = await readFile(path, 'utf8')
-    return parseCustomThemeJson(slug, raw, 'user')
+    return parseCustomThemeJson(slug, raw, source)
   } catch (e) {
     const err = toError(e)
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -133,14 +137,88 @@ export async function loadCustomThemes(): Promise<CustomTheme[]> {
   return cachedUserThemes
 }
 
-/** densable BTi */
-export function getCachedCustomThemes(): CustomTheme[] {
-  return cachedUserThemes
+/** densable nUn — read themes from a directory (or single .json file). */
+async function loadThemesFromPath(
+  targetPath: string,
+  source: CustomThemeSource,
+  slugPrefix = '',
+): Promise<CustomTheme[]> {
+  let names: string[]
+  try {
+    names = await readdir(targetPath)
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code === 'ENOTDIR') {
+      if (extname(targetPath) !== '.json') return []
+      const single = await readThemeFile(
+        targetPath,
+        slugPrefix + basename(targetPath, '.json'),
+        source,
+      )
+      return single ? [single] : []
+    }
+    if (code !== 'ENOENT') {
+      logForDebugging(`[theme] readdir ${targetPath} failed`, { level: 'warn' })
+    }
+    return []
+  }
+  const loaded: CustomTheme[] = []
+  for (const name of names) {
+    if (extname(name) !== '.json') continue
+    const slug = slugPrefix + basename(name, '.json')
+    const theme = await readThemeFile(join(targetPath, name), slug, source)
+    if (theme) loaded.push(theme)
+  }
+  return loaded
 }
 
-/** densable DKa */
+/** densable xRe / Mpt — load custom themes from enabled plugins. */
+export async function loadPluginCustomThemes(
+  plugins: ReadonlyArray<{
+    name: string
+    themesPath?: string
+    themesPaths?: readonly string[]
+  }>,
+): Promise<CustomTheme[]> {
+  const loaded: CustomTheme[] = []
+  for (const plugin of plugins) {
+    const source: CustomThemeSource = { plugin: plugin.name }
+    const prefix = `${plugin.name}:`
+    if (plugin.themesPath) {
+      loaded.push(
+        ...(await loadThemesFromPath(plugin.themesPath, source, prefix)),
+      )
+    }
+    for (const path of plugin.themesPaths ?? []) {
+      loaded.push(...(await loadThemesFromPath(path, source, prefix)))
+    }
+  }
+  loaded.sort((a, b) => a.name.localeCompare(b.name))
+  cachedPluginThemes = loaded
+  return cachedPluginThemes
+}
+
+export function setCachedPluginThemes(themes: readonly CustomTheme[]): void {
+  cachedPluginThemes = [...themes]
+}
+
+export function getCachedPluginThemes(): CustomTheme[] {
+  return cachedPluginThemes
+}
+
+/** densable BTi / ele().customThemes — user themes followed by plugin themes. */
+export function getCachedCustomThemes(): CustomTheme[] {
+  return cachedPluginThemes.length === 0
+    ? cachedUserThemes
+    : [...cachedUserThemes, ...cachedPluginThemes]
+}
+
+/** densable DKa / skr */
 export function findCustomTheme(slug: string): CustomTheme | undefined {
-  return cachedUserThemes.find(t => t.slug === slug)
+  return (
+    cachedUserThemes.find(t => t.slug === slug) ??
+    cachedPluginThemes.find(t => t.slug === slug)
+  )
 }
 
 /**

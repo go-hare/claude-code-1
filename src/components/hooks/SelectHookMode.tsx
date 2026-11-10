@@ -1,21 +1,16 @@
 /**
  * SelectHookMode shows all hooks configured for a given event+matcher pair.
- *
- * The /hooks menu is read-only: this view no longer offers "add new hook"
- * and selecting a hook shows its read-only details instead of a delete
- * confirmation.
  */
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import type { HookEventMetadata } from 'src/utils/hooks/hooksConfigManager.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import {
   getHookDisplayText,
   hookSourceHeaderDisplayString,
   type IndividualHookConfig,
 } from '../../utils/hooks/hooksSettings.js';
-import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { ItemList } from '../ItemList.js';
 
 type Props = {
   selectedEvent: HookEvent;
@@ -45,11 +40,11 @@ export function SelectHookMode({
         title={title}
         subtitle={hookEventMetadata.description}
         onCancel={onCancel}
-        inputGuide={() => <Text>Esc to go back</Text>}
+        inputGuide={<KeyboardShortcutHint shortcut="esc" action="go back" />}
       >
-        <Box flexDirection="column" gap={1}>
-          <Text dimColor>No hooks configured for this event.</Text>
-          <Text dimColor>To add hooks, edit settings.json directly or ask Claude.</Text>
+        <Box flexDirection="column">
+          <Text dimColor>No hooks configured for this event</Text>
+          <Text dimColor>To add hooks, edit settings.json directly or ask Claude</Text>
         </Box>
       </Dialog>
     );
@@ -57,26 +52,25 @@ export function SelectHookMode({
 
   return (
     <Dialog title={title} subtitle={hookEventMetadata.description} onCancel={onCancel}>
-      <Box flexDirection="column">
-        <Select
-          options={hooksForSelectedMatcher.map((hook, index) => ({
-            label: `[${hook.config.type}] ${getHookDisplayText(hook.config)}`,
-            value: index.toString(),
-            description:
-              hook.source === 'pluginHook' && hook.pluginName
-                ? `${hookSourceHeaderDisplayString(hook.source)} (${hook.pluginName})`
-                : hookSourceHeaderDisplayString(hook.source),
-          }))}
-          onChange={value => {
-            const index = parseInt(value, 10);
-            const hook = hooksForSelectedMatcher[index];
-            if (hook) {
-              onSelect(hook);
-            }
-          }}
-          onCancel={onCancel}
-        />
-      </Box>
+      <ItemList
+        options={hooksForSelectedMatcher.map((hook, index) => ({
+          label: getHookDisplayText(hook.config),
+          value: String(index),
+          facts: [hook.config.type],
+          description:
+            hook.source === 'pluginHook' && hook.pluginName
+              ? `${hookSourceHeaderDisplayString(hook.source)} (${hook.pluginName})`
+              : hookSourceHeaderDisplayString(hook.source),
+          lines: 2,
+        }))}
+        onSelect={index => {
+          const hook = hooksForSelectedMatcher[index];
+          if (hook) {
+            onSelect(hook);
+          }
+        }}
+        onCancel={onCancel}
+      />
     </Dialog>
   );
 }

@@ -7,6 +7,7 @@ import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
 import { analyzeContextUsage } from '../../utils/analyzeContext.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
+import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { renderToAnsiString } from '../../utils/staticRender.js';
 
 /**
@@ -27,7 +28,15 @@ function toApiView(messages: Message[]): Message[] {
   return view;
 }
 
-export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext): Promise<React.ReactNode> {
+export async function call(
+  onDone: LocalJSXCommandOnDone,
+  context: LocalJSXCommandContext,
+  args = '',
+): Promise<React.ReactNode> {
+  const isFullscreen =
+    context.presentation !== undefined ? context.presentation === 'fullscreen' : isFullscreenEnvEnabled();
+  const collapseDetailSections = isFullscreen && args.trim().toLowerCase() !== 'all';
+
   const {
     messages,
     getAppState,
@@ -59,7 +68,9 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
   );
 
   // Render to ANSI string to preserve colors and pass to onDone like local commands do
-  const output = await renderToAnsiString(<ContextVisualization data={data} />);
-  onDone(output);
+  const output = await renderToAnsiString(
+    <ContextVisualization data={data} collapseDetailSections={collapseDetailSections} />,
+  );
+  onDone(output, { display: 'system' });
   return null;
 }

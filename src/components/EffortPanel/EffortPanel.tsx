@@ -1,101 +1,168 @@
 import * as React from 'react';
-import { BaseText, Box, Text, useTerminalSize } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
+  AccessibilityContext,
+  Box,
+  Byline,
+  type Color,
+  type KeyboardEvent,
+  KeyboardShortcutHint,
+  Pane,
+  Text,
+  type Theme,
+  stringWidth,
+  useAnimationFrame,
+  useTerminalSize,
+} from '@anthropic/ink';
+import { executeEffort } from '../../commands/effort/effort.js';
+import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
+import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
+import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { useAppState, useSetAppState } from '../../state/AppState.js';
+import {
+  type EffortLevel,
   type EffortValue,
   getDisplayedEffortLevel,
   getEffortEnvOverride,
-  getUltracodeEffortForModel,
+  isUltracodeOfferable,
+  modelSupportsMaxEffort,
 } from '../../utils/effort.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
+import { getInitialSettings } from '../../utils/settings/settings.js';
+import { Select } from '../CustomSelect/index.js';
 import {
-  type PanelPosition,
   CANCEL_MESSAGE,
+  MAX_EFFORT_WARNING,
+  type SliderGeometry,
+  type SliderLevelSpec,
+  ULTRACODE_BLURB,
   computeConfirmOutcome,
-  getInitialCursor,
-  getPanelPositionsForModel,
-  moveLeft,
-  moveRight,
+  getEffortLevelDescription,
+  getSliderGeometry,
+  isEffortCostNoteEnabled,
 } from './effortPanelState.js';
-import { executeEffort } from '../../commands/effort/effort.js';
-import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
-import { useSetAppState } from '../../state/AppState.js';
-import { useRippleFrame } from './useRippleFrame.js';
-import {
-  TRANSPARENT,
-  RIPPLE_LAVENDER,
-  RIPPLE_TEXT_ON_BG,
-  type Overlay,
-  type Segment,
-  applyOverlaysToCells,
-  cellsToSegments,
-  computeRippleCells,
-  fadeCells,
-} from './rippleAnimation.js';
 
-/**
- * 每档最小宽度（足够装下 'ultracode' 9 字符 + 居中留白）。
- * 当终端窄时使用此值，保证最低可读性。
- */
-const MIN_SEGMENT = 12;
+const SIDE_BY_SIDE_MIN_COLS = 70;
+const TOGGLE_GAP = 6;
+const MIN_TOGGLE_WIDTH = 14;
+const DEFAULT_FALLBACK_INDEX = 2;
+const SHIMMER_HIGHLIGHT_HEX: Color = '#d0b4ff';
+const ULTRACODE_SR_TOGGLE_VALUE = 'ultracode-toggle';
 
-// densable help row (plain + ripple). densable 2.1.233 #15 — keep full hint
-// visible (do not truncate mid-sentence for narrow panels).
-const HELP_TEXT = '←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel';
-const ULTRACODE_TAB_HINT = 'Ultracode · Tab to toggle';
+const RAINBOW_THEME_KEYS: readonly (keyof Theme)[] = [
+  'rainbow_red',
+  'rainbow_orange',
+  'rainbow_yellow',
+  'rainbow_green',
+  'rainbow_blue',
+  'rainbow_indigo',
+  'rainbow_violet',
+];
 
-// 淡入淡出每帧步长：60ms 间隔下 5 帧达到目标 ≈ 300ms 动画时长。
-const FADE_STEP = 0.2;
-
-// 波纹震源 y 坐标（相对波纹区域坐标系，y=0 是档位名行）。
-const RIPPLE_SOURCE_Y = 0;
-
-/**
- * densable ultracode sublabel: "{wire} + workflows".
- * Wire follows catalog top tier (opus → xhigh, grok → high).
- */
-function ultracodeSublabel(model: string): string {
-  const wire = getUltracodeEffortForModel(model) ?? 'high';
-  return `${wire} + workflows`;
+function isMaxEffortReminderEnabled(): boolean {
+  if (process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER !== undefined) {
+    return isEnvTruthy(process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER);
+  }
+  return Boolean(getFeatureValue_CACHED_MAY_BE_STALE('tengu_proud_clover', false));
 }
 
-/**
- * 根据终端宽度计算每档实际宽度（SEGMENT）。
- *
- * 规则：
- * - 留出 paddingX={1} 的左右各 1 列 → 可用宽度 = columns - 2
- * - 若可用宽度 <= MIN_SEGMENT * positionCount，用 MIN_SEGMENT（保持当前窄布局）
- * - 否则铺满：floor(可用宽度 / positionCount)
- *
- * 即"窄则不变，宽则铺满"。最小宽度保证 'ultracode' 9 字符能正常显示。
- */
-function computeSegment(terminalColumns: number, positionCount: number): number {
-  const available = terminalColumns - 2; // paddingX={1} 两侧
-  const count = Math.max(1, positionCount);
-  const minNeeded = MIN_SEGMENT * count;
-  if (available <= minNeeded) return MIN_SEGMENT;
-  return Math.floor(available / count);
+function getInitialSliderIndex(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+  geometry: SliderGeometry,
+): number {
+  const envOverride = getEffortEnvOverride();
+  const effective = envOverride === null ? undefined : (envOverride ?? appStateEffort);
+  if (effective !== undefined && typeof effective === 'string') {
+    const found = geometry.levels.findIndex(lvl => lvl.value === effective);
+    if (found !== -1) return found;
+  }
+  const displayed = getDisplayedEffortLevel(model, effective);
+  const idx = geometry.levels.findIndex(lvl => lvl.value === displayed);
+  return idx === -1 ? Math.min(DEFAULT_FALLBACK_INDEX, geometry.levels.length - 1) : idx;
 }
 
-/**
- * 计算波纹震源 x 坐标（ultracode 段内 'ultracode' 标签的中心列）。
- *
- * 'ultracode' 是 9 字符，在 SEGMENT 列内居中：
- *   offset = floor((SEGMENT - 9) / 2)
- *   labelCenter = SEGMENT * (n-1) + offset + 4
- */
-function computeRippleSourceX(segment: number, positionCount: number): number {
-  const LABEL_LEN = 9; // 'ultracode'
-  const offset = Math.max(0, Math.floor((segment - LABEL_LEN) / 2));
-  const labelCenter = Math.floor(LABEL_LEN / 2); // 4
-  return segment * Math.max(0, positionCount - 1) + offset + labelCenter;
+function RainbowLabel({ text }: { text: string }): React.ReactNode {
+  const [reducedMotion] = React.useState(() => Boolean(getInitialSettings().prefersReducedMotion));
+  const [ref, timeMs] = useAnimationFrame(reducedMotion ? null : 100);
+  const tick = Math.floor(timeMs / 100);
+  const chars = [...text];
+  return (
+    <Box ref={ref}>
+      <Text bold>
+        {chars.map((ch, idx) => (
+          <Text key={idx} color={RAINBOW_THEME_KEYS[(idx + tick) % RAINBOW_THEME_KEYS.length]}>
+            {ch}
+          </Text>
+        ))}
+      </Text>
+    </Box>
+  );
 }
 
-/**
- * 计算某段 idx 内居中文字的起始列。
- * 动态 segment：textLen 字符在 segment 列内居中。
- */
-function segmentTextStartX(idx: number, textLen: number, segment: number): number {
-  return segment * idx + Math.max(0, Math.floor((segment - textLen) / 2));
+function ShimmerLabel({ text, color = 'autoAccept' }: { text: string; color?: keyof Theme }): React.ReactNode {
+  const [reducedMotion] = React.useState(() => Boolean(getInitialSettings().prefersReducedMotion));
+  const [ref, timeMs] = useAnimationFrame(reducedMotion ? null : 100);
+  const chars = [...text];
+  const period = chars.length + 4;
+  const sweepPos = reducedMotion ? -10 : Math.floor(timeMs / 100) % period;
+  return (
+    <Box ref={ref}>
+      <Text bold>
+        {chars.map((ch, idx) => {
+          const isCrest = idx === sweepPos;
+          const isShoulder = idx === sweepPos - 1 || idx === sweepPos + 1;
+          return (
+            <Text key={idx} color={isCrest ? SHIMMER_HIGHLIGHT_HEX : color} bold={isCrest || isShoulder}>
+              {ch}
+            </Text>
+          );
+        })}
+      </Text>
+    </Box>
+  );
+}
+
+function EffortLevelLabel({ level, selected }: { level: SliderLevelSpec; selected: boolean }): React.ReactNode {
+  if (!selected) {
+    return <Text dimColor>{level.label}</Text>;
+  }
+  if (level.color === 'rainbow-animated') {
+    return <RainbowLabel text={level.label} />;
+  }
+  if (level.color === 'autoAccept-shimmer') {
+    return <ShimmerLabel text={level.label} />;
+  }
+  return (
+    <Text bold color={level.color}>
+      {level.label}
+    </Text>
+  );
+}
+
+function UltracodeToggle({ on, chord, width }: { on: boolean; chord: string; width: number }): React.ReactNode {
+  return (
+    <Box flexDirection="column" width={width}>
+      <Box>
+        {on ? (
+          <ShimmerLabel text="Ultracode  on" color="effortUltra" />
+        ) : (
+          <>
+            <Text bold>Ultracode</Text>
+            <Text>{'  '}</Text>
+            <Text dimColor>off</Text>
+          </>
+        )}
+      </Box>
+      {chord ? (
+        <Text dimColor>
+          <KeyboardShortcutHint shortcut={chord} action="toggle" />
+        </Text>
+      ) : null}
+    </Box>
+  );
 }
 
 type Props = {
@@ -103,380 +170,351 @@ type Props = {
   onDone: (message: string) => void;
 };
 
-export function EffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
+export function EffortPanel(props: Props): React.ReactNode {
+  const srContext = React.useContext(AccessibilityContext);
+  if (srContext || isScreenReaderModeEnabled()) {
+    return <ScreenReaderEffortPanel {...props} />;
+  }
+  return <VisualEffortPanel {...props} />;
+}
+
+function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const setAppState = useSetAppState();
+  const ultracodeState = useAppState(s => s.ultracode);
   const model = useMainLoopModel();
   const { columns } = useTerminalSize();
 
-  // densable: only offer model-supported effort levels (+ ultracode slot).
-  const positions = React.useMemo(() => getPanelPositionsForModel(model), [model]);
-  const positionCount = positions.length;
-  const sublabel = React.useMemo(() => ultracodeSublabel(model), [model]);
+  const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
+  const initialIdx = React.useMemo(
+    () => getInitialSliderIndex(model, appStateEffort, geometry),
+    [model, appStateEffort, geometry],
+  );
+  const [cursorIdx, setCursorIdx] = React.useState(initialIdx);
+  const selectedIdx = Math.min(cursorIdx, geometry.levels.length - 1);
 
-  // 自适应宽度：根据终端列数计算每档宽度。
-  // 终端变化（resize）时 columns 改变 → 重新计算 → 重渲染。
-  const segment = React.useMemo(() => computeSegment(columns, positionCount), [columns, positionCount]);
-  const panelWidth = segment * positionCount;
-  const rippleSourceX = React.useMemo(() => computeRippleSourceX(segment, positionCount), [segment, positionCount]);
+  const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
+  const initialUltracode = ultracodeState === true && ultracodeOfferable;
+  const [ultracodeOn, setUltracodeOn] = React.useState(initialUltracode);
 
-  const envOverride = getEffortEnvOverride();
-  const displayed = getDisplayedEffortLevel(model, appStateEffort);
-  const initialCursor = getInitialCursor({
-    envOverride,
-    appStateEffort,
-    displayed,
-    positions,
-  });
+  const toggleChord = useShortcutDisplay('effortSlider:toggleUltracode', 'EffortSlider', 'tab');
+  const toggleHintWidth = stringWidth(`${toggleChord} to toggle`);
+  const toggleWidth = Math.max(MIN_TOGGLE_WIDTH, toggleHintWidth);
+  const isWide = columns >= SIDE_BY_SIDE_MIN_COLS + toggleWidth - MIN_TOGGLE_WIDTH;
 
-  const [cursor, setCursor] = React.useState<PanelPosition>(initialCursor);
-  const [done, setDone] = React.useState(false);
-
-  // If model changes mid-panel (rare), keep cursor on the filtered ladder.
-  React.useEffect(() => {
-    setCursor(c => (positions.includes(c) ? c : initialCursor));
-  }, [positions, initialCursor]);
-
-  const isOnUltracode = cursor === 'ultracode';
-  const [fade, setFade] = React.useState(0);
-  // 仍在波纹模式：cursor 在 ultracode，或退出动画未结束（fade > 0）
-  const showingRipple = isOnUltracode || fade > 0.001;
-  const [rippleRef, time] = useRippleFrame(showingRipple);
-
-  // 淡入淡出驱动：每 tick（time 推进）朝目标步进 FADE_STEP。
-  // 退出动画完成后 fade 归零，showingRipple 变 false，时钟停止订阅。
-  React.useEffect(() => {
-    if (!showingRipple) return;
-    const target = isOnUltracode ? 1 : 0;
-    setFade(prev => {
-      if (prev === target) return prev;
-      const next = target > prev ? prev + FADE_STEP : prev - FADE_STEP;
-      return target > prev ? Math.min(target, next) : Math.max(target, next);
-    });
-  }, [time, isOnUltracode, showingRipple]);
+  const doneRef = React.useRef(false);
 
   const handleConfirm = React.useCallback(
     (persistAsDefault = true) => {
-      if (done) return;
-      setDone(true);
-      // Pass model so ultracode / unsupported levels follow catalog ladder.
-      // densable EffortSlider s → persistAsDefault false (session-only like /model s).
-      const outcome = computeConfirmOutcome(cursor, arg =>
-        executeEffort(arg, model, undefined, persistAsDefault, appStateEffort),
-      );
-      if (outcome.kind === 'apply' && outcome.effortUpdate) {
+      if (doneRef.current) return;
+      doneRef.current = true;
+
+      const selectedLevel = geometry.levels[selectedIdx]!.value;
+      const levelChanged = selectedIdx !== initialIdx;
+      const ultracodeChanged = ultracodeOn !== initialUltracode;
+      const shouldApplyLevel = levelChanged || !ultracodeChanged;
+
+      const messages: string[] = [];
+      let nextEffort = appStateEffort;
+      let hasEffortUpdate = false;
+
+      if (shouldApplyLevel) {
+        const outcome = computeConfirmOutcome(selectedLevel, arg =>
+          executeEffort(arg, model, undefined, persistAsDefault, appStateEffort),
+        );
+        messages.push(outcome.message);
+        if (outcome.effortUpdate) {
+          nextEffort = outcome.effortUpdate.value;
+          hasEffortUpdate = true;
+        }
+      }
+
+      if (ultracodeChanged) {
+        const ultraOutcome = executeEffort(
+          ultracodeOn ? 'ultracode on' : 'ultracode off',
+          model,
+          undefined,
+          persistAsDefault,
+          nextEffort,
+        );
+        messages.push(
+          messages.length === 0 || !ultraOutcome.effortUpdate
+            ? ultraOutcome.message
+            : `Ultracode ${ultracodeOn ? 'on' : 'off'}`,
+        );
+        if (!shouldApplyLevel && ultraOutcome.effortUpdate) {
+          nextEffort = ultraOutcome.effortUpdate.value;
+          hasEffortUpdate = true;
+        }
+      }
+
+      if (hasEffortUpdate || ultracodeChanged) {
         setAppState(prev => ({
           ...prev,
-          effortValue: outcome.effortUpdate!.value,
-          // densable 2.1.289: omit ultracode when unset so normal effort
-          // confirm leaves the session flag alone.
-          ...(outcome.effortUpdate!.ultracode !== undefined ? { ultracode: outcome.effortUpdate!.ultracode } : {}),
+          ...(hasEffortUpdate ? { effortValue: nextEffort } : {}),
+          ...(ultracodeChanged ? { ultracode: ultracodeOn } : {}),
         }));
       }
-      onDone(outcome.message);
+
+      onDone(messages.join(' · '));
     },
-    [appStateEffort, cursor, done, model, onDone, setAppState],
+    [
+      appStateEffort,
+      geometry.levels,
+      initialIdx,
+      initialUltracode,
+      model,
+      onDone,
+      selectedIdx,
+      setAppState,
+      ultracodeOn,
+    ],
   );
 
   const handleCancel = React.useCallback(() => {
-    if (done) return;
-    setDone(true);
+    if (doneRef.current) return;
+    doneRef.current = true;
     onDone(CANCEL_MESSAGE);
-  }, [done, onDone]);
+  }, [onDone]);
 
-  const effortSliderHandlers = {
-    'effortSlider:decreaseEffort': () => setCursor(c => moveLeft(c, positions)),
-    'effortSlider:increaseEffort': () => setCursor(c => moveRight(c, positions)),
-    'effortSlider:thisSessionOnly': () => handleConfirm(false),
-    'effortSlider:toggleUltracode': () => {
-      if (positions.includes('ultracode')) setCursor('ultracode');
+  const exitState = useExitOnCtrlCDWithKeybindings(handleCancel);
+
+  const handleKeyDown = React.useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'return') {
+        e.preventDefault();
+        handleConfirm(true);
+      } else if (e.key === 'escape') {
+        e.preventDefault();
+        handleCancel();
+      }
     },
+    [handleConfirm, handleCancel],
+  );
+
+  const decrease = React.useCallback(() => {
+    setCursorIdx(i => Math.max(0, i - 1));
+  }, []);
+  const increase = React.useCallback(() => {
+    setCursorIdx(i => Math.min(geometry.levels.length - 1, i + 1));
+  }, [geometry.levels.length]);
+  const toggleUltracode = React.useCallback(() => {
+    if (!ultracodeOfferable) return false;
+    setUltracodeOn(prev => !prev);
+  }, [ultracodeOfferable]);
+  const confirmSessionOnly = React.useCallback(() => {
+    handleConfirm(false);
+  }, [handleConfirm]);
+
+  const sliderBindings = {
+    'effortSlider:decreaseEffort': decrease,
+    'effortSlider:increaseEffort': increase,
+    'effortSlider:toggleUltracode': toggleUltracode,
+    'effortSlider:thisSessionOnly': confirmSessionOnly,
   };
+
+  useKeybindings(sliderBindings, { context: 'EffortSlider' });
   useKeybindings(
     {
-      'effortPanel:decrease': () => setCursor(c => moveLeft(c, positions)),
-      'effortPanel:increase': () => setCursor(c => moveRight(c, positions)),
-      'effortPanel:home': () => setCursor(positions[0] ?? 'low'),
-      'effortPanel:end': () => setCursor(positions[positions.length - 1] ?? 'ultracode'),
+      'effortPanel:decrease': decrease,
+      'effortPanel:increase': increase,
+      'effortPanel:home': () => setCursorIdx(0),
+      'effortPanel:end': () => setCursorIdx(geometry.levels.length - 1),
       'effortPanel:confirm': () => handleConfirm(true),
-      'effortPanel:thisSessionOnly': () => handleConfirm(false),
+      'effortPanel:thisSessionOnly': confirmSessionOnly,
       'effortPanel:cancel': handleCancel,
-      ...effortSliderHandlers,
     },
     { context: 'EffortPanel' },
   );
-  // densable 2.1.289 CUt EffortSlider (gold Go left/right/tab/s)
-  useKeybindings(effortSliderHandlers, { context: 'EffortSlider' });
 
+  const leftChord = useShortcutDisplay('effortSlider:decreaseEffort', 'EffortSlider', 'left');
+  const rightChord = useShortcutDisplay('effortSlider:increaseEffort', 'EffortSlider', 'right');
+  const adjustShortcut = [leftChord, rightChord].filter(Boolean).join('/');
+  const sessionOnlyShortcut = useShortcutDisplay('effortSlider:thisSessionOnly', 'EffortSlider', 's');
+
+  const envOverride = getEffortEnvOverride();
   const envActive = envOverride !== null && envOverride !== undefined;
   const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
 
-  // 波纹行 cells 计算：返回该行所有 cell（含 overlay 文字）
-  // fade 控制背景颜色亮度（0 → 全 transparent，1 → 完整波纹）。
-  // Overlay 不强制 fg 色：保留底层波纹色，RippleRow 按 densable
-  // 「波上白字+紫底 / 波外淡紫字」渲染。
-  const renderRippleRow = React.useCallback(
-    (relY: number, overlays: Overlay[]): Segment[] => {
-      const cells = computeRippleCells({
-        y: relY + RIPPLE_SOURCE_Y,
-        width: panelWidth,
-        time,
-        sourceX: rippleSourceX,
-        sourceY: RIPPLE_SOURCE_Y,
-      });
-      const overlayed = applyOverlaysToCells(cells, overlays);
-      const faded = fadeCells(overlayed, fade);
-      return cellsToSegments(faded);
-    },
-    [time, fade, panelWidth, rippleSourceX],
-  );
+  const triangleCol = geometry.trianglePositions[selectedIdx]!;
+  const trackBefore = geometry.trackChars.slice(0, triangleCol);
+  const trackAfter = geometry.trackChars.slice(triangleCol + 1);
+  const headerGap = Math.max(1, geometry.width - 'Faster'.length - 'Smarter'.length);
+  const lastStart = geometry.labelStarts[geometry.labelStarts.length - 1]!;
+  const lastLabel = geometry.levels[geometry.levels.length - 1]!;
+  const trailingCount = Math.max(0, geometry.width - (lastStart + lastLabel.label.length));
+
+  const selectedLevel = geometry.levels[selectedIdx]!.value;
+  const levelDescription = isEffortCostNoteEnabled(model) ? getEffortLevelDescription(model, selectedLevel) : null;
+  const showMaxReminder = selectedLevel === 'max' && modelSupportsMaxEffort(model) && isMaxEffortReminderEnabled();
+
+  const toggleNode = <UltracodeToggle on={ultracodeOn} chord={toggleChord} width={toggleWidth} />;
 
   return (
-    <Box
-      ref={rippleRef}
-      flexDirection="column"
-      paddingX={1}
-      width={panelWidth + 2}
-      // densable 2.1.233 #15 residual — screen-reader list of effort levels
-      accessibility={{ role: 'list', label: 'Effort levels' }}
-    >
-      <Text bold color="suggestion">
-        Effort
-      </Text>
-      {envActive && <Text color="warning">{`⚠ CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides this session`}</Text>}
-      {showingRipple ? (
-        <RippleContent
-          renderRow={renderRippleRow}
-          cursor={cursor}
-          segment={segment}
-          panelWidth={panelWidth}
-          positions={positions}
-          sublabel={sublabel}
-        />
-      ) : (
-        <>
-          <PlainContent
-            cursor={cursor}
-            segment={segment}
-            panelWidth={panelWidth}
-            positions={positions}
-            sublabel={sublabel}
-          />
-          <Box marginTop={1} width={panelWidth} flexShrink={0} flexDirection="column">
-            {positions.includes('ultracode') && <Text color="subtle">{ULTRACODE_TAB_HINT}</Text>}
-            <Text color="subtle" wrap="wrap">
-              {HELP_TEXT}
-            </Text>
+    <Pane>
+      <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
+        <Text bold color="suggestion">
+          Effort
+        </Text>
+        {envActive && <Text color="warning">{`⚠ CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides this session`}</Text>}
+        <Box height={1} />
+        <Box flexDirection="column" alignItems="center" width="100%">
+          <Box flexDirection="row" alignItems="flex-start">
+            <Box flexDirection="column" width={geometry.width}>
+              <Box>
+                <Text>Faster</Text>
+                <Text>{' '.repeat(headerGap)}</Text>
+                <Text>Smarter</Text>
+              </Box>
+              <Box>
+                <Text dimColor>{trackBefore}</Text>
+                <Text bold>▲</Text>
+                <Text dimColor>{trackAfter}</Text>
+              </Box>
+              <Box>
+                {geometry.levels.map((lvl, idx) => (
+                  <React.Fragment key={lvl.value}>
+                    {idx > 0 && <Text>{' '.repeat(geometry.spacers[idx - 1]!)}</Text>}
+                    <EffortLevelLabel level={lvl} selected={selectedIdx === idx} />
+                  </React.Fragment>
+                ))}
+                {trailingCount > 0 ? <Text>{' '.repeat(trailingCount)}</Text> : null}
+              </Box>
+            </Box>
+            {ultracodeOfferable && isWide ? (
+              <Box marginLeft={TOGGLE_GAP} marginTop={1}>
+                {toggleNode}
+              </Box>
+            ) : null}
           </Box>
-        </>
-      )}
-    </Box>
-  );
-}
-
-// ---- 普通模式（无波纹）----
-
-function PlainContent({
-  cursor,
-  segment,
-  panelWidth,
-  positions,
-  sublabel,
-}: {
-  cursor: PanelPosition;
-  segment: number;
-  panelWidth: number;
-  positions: readonly PanelPosition[];
-  sublabel: string;
-}): React.ReactNode {
-  return (
-    <>
-      <Box marginTop={1} flexDirection="row" justifyContent="space-between">
-        <Text color="suggestion">Faster</Text>
-        <Text color="suggestion">Smarter</Text>
-      </Box>
-      <Text color="subtle">{'─'.repeat(panelWidth)}</Text>
-      <Box flexDirection="row">
-        {positions.map(p => (
-          <Box key={`cursor-${p}`} width={segment} justifyContent="center">
-            <Text bold color={cursor === p ? 'suggestion' : 'subtle'}>
-              {cursor === p ? '▲' : ' '}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-      <Box flexDirection="row">
-        {positions.map((p, i) => (
-          <Box
-            key={`label-${p}`}
-            width={segment}
-            justifyContent="center"
-            accessibility={{
-              role: 'listitem',
-              label: `${i + 1}. ${p}${cursor === p ? ', selected' : ''}`,
-            }}
-          >
-            <Text bold={cursor === p} color={cursor === p ? 'suggestion' : 'subtle'}>
-              {p}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-      <Box flexDirection="row">
-        <Box width={segment * Math.max(0, positions.length - 1)} />
-        <Box width={segment} justifyContent="center">
-          <Text color="subtle">{sublabel}</Text>
+          {ultracodeOfferable ? (
+            <Box height={1} width={geometry.width + (isWide ? TOGGLE_GAP + toggleWidth : 0)}>
+              {ultracodeOn ? (
+                <Text dimColor wrap="truncate-end">
+                  Ultracode: {ULTRACODE_BLURB}
+                </Text>
+              ) : null}
+            </Box>
+          ) : null}
+          {levelDescription !== null ? (
+            <Box minHeight={2}>
+              {showMaxReminder ? (
+                <Text color="warning">{levelDescription}</Text>
+              ) : (
+                <Text dimColor>{levelDescription}</Text>
+              )}
+            </Box>
+          ) : selectedLevel === 'max' ? (
+            <Box>
+              {showMaxReminder ? (
+                <Text color="warning">⚠ {MAX_EFFORT_WARNING}</Text>
+              ) : (
+                <Text dimColor>{MAX_EFFORT_WARNING}</Text>
+              )}
+            </Box>
+          ) : null}
+          {geometry.orgNote ? (
+            <Box>
+              <Text dimColor>{geometry.orgNote}</Text>
+            </Box>
+          ) : null}
+          {ultracodeOfferable && !isWide ? (
+            <>
+              <Box height={1} />
+              {toggleNode}
+            </>
+          ) : null}
         </Box>
+        <Box height={1} />
+        {/* Footer: Enter to confirm · s for this session only · Esc to cancel */}
+        <Text dimColor>
+          {exitState.pending ? (
+            `Press ${exitState.keyName} again to cancel`
+          ) : (
+            <Byline>
+              {adjustShortcut ? <KeyboardShortcutHint shortcut={adjustShortcut} action="adjust" /> : null}
+              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+              {sessionOnlyShortcut ? <Text>{sessionOnlyShortcut} for this session only</Text> : null}
+              <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+            </Byline>
+          )}
+        </Text>
       </Box>
-    </>
+    </Pane>
   );
 }
 
-// ---- 波纹模式（cursor === 'ultracode'）----
-//
-// densable Phr/DZs 紫阶波前：
-// - 空格段：backgroundColor = 波纹紫（transparent 跳过）
-// - 文字在波上：白字 + 紫底
-// - 文字在波外：淡紫字无底
-// Overlay 不写 color，保留底层波纹色供 RippleRow 判定。
-
-type RippleContentProps = {
-  renderRow: (relY: number, overlays: Overlay[]) => Segment[];
-  cursor: PanelPosition;
-  segment: number;
-  panelWidth: number;
-  positions: readonly PanelPosition[];
-  sublabel: string;
-};
-
-function RippleContent({
-  renderRow,
-  cursor,
-  segment,
-  panelWidth,
-  positions,
-  sublabel,
-}: RippleContentProps): React.ReactNode {
-  // 光标索引跟随 cursor（退出动画期间 cursor 已移到别处，
-  // 让 ▲ overlay 跟着移走，ultracode 段恢复普通背景色）。
-  const cursorIdx = Math.max(0, positions.indexOf(cursor));
-  // 副标签固定在 ultracode 段下方，不跟随光标移动。
-  const ultracodeIdx = Math.max(0, positions.length - 1);
-
-  // densable: overlays inherit ripple cell color (no forced blue/hue).
-  const fasterOverlay: Overlay = { text: 'Faster', x: 0 };
-  const smarterOverlay: Overlay = {
-    text: 'Smarter',
-    x: panelWidth - 'Smarter'.length,
-  };
-  const separatorOverlay: Overlay = {
-    text: '─'.repeat(panelWidth),
-    x: 0,
-  };
-  const cursorOverlay: Overlay = {
-    text: '▲',
-    x: segmentTextStartX(cursorIdx, 1, segment),
-  };
-  const labelOverlays: Overlay[] = positions.map((p, idx) => ({
-    text: p,
-    x: segmentTextStartX(idx, p.length, segment),
-  }));
-  const sublabelOverlay: Overlay = {
-    text: sublabel,
-    x: segmentTextStartX(ultracodeIdx, sublabel.length, segment),
-  };
-
-  // 各行 y 坐标（相对震源 RIPPLE_SOURCE_Y = 档位名行）
-  //   y=-4: 顶部纯波纹行（视觉一致，无 overlay）
-  //   y=-3: Faster/Smarter
-  //   y=-2: 分隔线
-  //   y=-1: ▲
-  //   y=0:  档位名（震源）
-  //   y=1:  副标签
-  //   y=2:  底部纯波纹行（视觉一致，无 overlay）
-  //
-  // 快捷键行：plain Text，不参与波纹渲染（无背景动画），紧贴底部波纹行。
-  return (
-    <>
-      <RippleRow segments={renderRow(-4, [])} />
-      <RippleRow segments={renderRow(-3, [fasterOverlay, smarterOverlay])} />
-      <RippleRow segments={renderRow(-2, [separatorOverlay])} />
-      <RippleRow segments={renderRow(-1, [cursorOverlay])} />
-      <RippleRow segments={renderRow(0, labelOverlays)} />
-      <RippleRow segments={renderRow(1, [sublabelOverlay])} />
-      <RippleRow segments={renderRow(2, [])} />
-      {positions.includes('ultracode') && <Text color={RIPPLE_LAVENDER as `#${string}`}>{ULTRACODE_TAB_HINT}</Text>}
-      <Text color={RIPPLE_LAVENDER as `#${string}`}>{HELP_TEXT}</Text>
-    </>
-  );
-}
-
-/**
- * 渲染一行波纹 segments（densable 白字紫底 / 波外淡紫）。
- *
- * 每个 segment 可能含空格 + 文字混合（如 "  Faster  "）：
- * - 空格部分用 backgroundColor 染色块（波纹紫）
- * - 文字在波上：白字 + 紫底
- * - 文字在波外（transparent）：淡紫字无底
- */
-function RippleRow({ segments }: { segments: Segment[] }): React.ReactNode {
-  const tokens: Array<{ text: string; kind: 'space' | 'text'; color: string }> = [];
-  for (const seg of segments) {
-    // 拆分 seg.text 为空格段和非空格段
-    let buf = '';
-    let bufIsSpace: boolean | null = null;
-    const flush = (): void => {
-      if (buf === '' || bufIsSpace === null) return;
-      tokens.push({
-        text: buf,
-        kind: bufIsSpace ? 'space' : 'text',
-        color: seg.color,
-      });
-      buf = '';
-      bufIsSpace = null;
-    };
-    for (const ch of seg.text) {
-      const isSpace = ch === ' ';
-      if (bufIsSpace === null) {
-        buf = ch;
-        bufIsSpace = isSpace;
-      } else if (isSpace === bufIsSpace) {
-        buf += ch;
-      } else {
-        flush();
-        buf = ch;
-        bufIsSpace = isSpace;
-      }
-    }
-    flush();
+function getScreenReaderLevelNote(model: string, level: EffortLevel): string {
+  if (isEffortCostNoteEnabled(model)) {
+    return getEffortLevelDescription(model, level);
   }
+  return level === 'max' ? MAX_EFFORT_WARNING : '';
+}
+
+function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
+  const setAppState = useSetAppState();
+  const ultracodeState = useAppState(s => s.ultracode);
+  const model = useMainLoopModel();
+  const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
+  const initialIdx = React.useMemo(
+    () => getInitialSliderIndex(model, appStateEffort, geometry),
+    [model, appStateEffort, geometry],
+  );
+  const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
+  const doneRef = React.useRef(false);
+
+  const options = React.useMemo(() => {
+    const items = geometry.levels.map(lvl => {
+      const note = getScreenReaderLevelNote(model, lvl.value);
+      return {
+        label: note === '' ? lvl.label : `${lvl.label} (${note})`,
+        value: lvl.value as string,
+      };
+    });
+    if (ultracodeOfferable) {
+      items.push({
+        label: `Ultracode: ${ultracodeState ? 'on' : 'off'} (select to turn it ${ultracodeState ? 'off' : 'on'}; ${ULTRACODE_BLURB})`,
+        value: ULTRACODE_SR_TOGGLE_VALUE,
+      });
+    }
+    return items;
+  }, [geometry.levels, model, ultracodeOfferable, ultracodeState]);
+
+  const defaultValue = geometry.levels[Math.min(initialIdx, geometry.levels.length - 1)]!.value;
+
+  const handleSelect = React.useCallback(
+    (selected: string) => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      const arg =
+        selected === ULTRACODE_SR_TOGGLE_VALUE ? (ultracodeState ? 'ultracode off' : 'ultracode on') : selected;
+      const result = executeEffort(arg, model, undefined, true, appStateEffort);
+      if (result.effortUpdate) {
+        setAppState(prev => ({
+          ...prev,
+          effortValue: result.effortUpdate!.value,
+          ...(result.effortUpdate!.ultracode !== undefined ? { ultracode: result.effortUpdate!.ultracode } : {}),
+        }));
+      }
+      onDone(result.message);
+    },
+    [appStateEffort, model, onDone, setAppState, ultracodeState],
+  );
+
+  const handleCancel = React.useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onDone(CANCEL_MESSAGE);
+  }, [onDone]);
 
   return (
-    <Box flexDirection="row">
-      {tokens.map((tok, i) => {
-        if (tok.kind === 'space') {
-          if (tok.color === TRANSPARENT) {
-            return <BaseText key={i}>{tok.text}</BaseText>;
-          }
-          return (
-            <BaseText key={i} backgroundColor={tok.color as `#${string}`}>
-              {tok.text}
-            </BaseText>
-          );
-        }
-        // densable text: on-wave white+purple bg; off-wave lavender.
-        if (tok.color === TRANSPARENT) {
-          return (
-            <Text key={i} color={RIPPLE_LAVENDER as `#${string}`} bold>
-              {tok.text}
-            </Text>
-          );
-        }
-        return (
-          <BaseText key={i} color={RIPPLE_TEXT_ON_BG as `#${string}`} backgroundColor={tok.color as `#${string}`} bold>
-            {tok.text}
-          </BaseText>
-        );
-      })}
-    </Box>
+    <Pane>
+      <Box flexDirection="column">
+        <Text bold color="suggestion">
+          Effort
+        </Text>
+        {geometry.orgNote ? <Text>{geometry.orgNote}</Text> : null}
+        <Select options={options} defaultValue={defaultValue} onChange={handleSelect} onCancel={handleCancel} />
+      </Box>
+    </Pane>
   );
 }

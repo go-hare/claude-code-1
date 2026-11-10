@@ -1,6 +1,8 @@
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
+import { getOriginalCwd } from '../../bootstrap/state.js';
+import { type Command, getCommands, type LocalJSXCommandContext } from '../../commands.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -13,15 +15,28 @@ import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithK
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
-import type { PluginError } from '../../types/plugin.js';
+import type { PluginError, PluginWarning } from '../../types/plugin.js';
+import { uniq } from '../../utils/array.js';
 import { errorMessage } from '../../utils/errors.js';
+import { getMainLoopModel } from '../../utils/model/model.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
+import { re } from '../../utils/plugins/escapeSafeText.js';
 import { loadMarketplacesWithGracefulDegradation } from '../../utils/plugins/marketplaceHelpers.js';
 import { loadKnownMarketplacesConfig, removeMarketplaceSource } from '../../utils/plugins/marketplaceManager.js';
 import { useSessionServices } from '../../context/sessionServices.js';
 import { getPluginEditableScopes } from '../../utils/plugins/pluginStartupCheck.js';
 import type { EditableSettingSource } from '../../utils/settings/constants.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
+import { plural } from '../../utils/stringUtils.js';
+import {
+  type DisusedPlugin,
+  type SkillDoctorRow,
+  type SkillDoctorScan,
+  SkillDoctorStageError,
+  scanSkillDoctor,
+  skillDoctorTranscriptScanAllowed,
+} from '../skill-doctor/scan.js';
+import { logError } from '../../utils/log.js';
 import { AddMarketplace } from './AddMarketplace.js';
 import { BrowseMarketplace } from './BrowseMarketplace.js';
 import { DiscoverPlugins } from './DiscoverPlugins.js';
@@ -33,7 +48,7 @@ import type { PluginSettingsProps, ViewState } from './types.js';
 import { PluginEval } from './PluginEval.js';
 import { ValidatePlugin } from './ValidatePlugin.js';
 
-type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors';
+type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors' | 'stats';
 
 /** densable `_l` — queued reload toast when the main query is still running. */
 export const PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE =
@@ -127,7 +142,12 @@ type ErrorRow = {
   guidance?: string | null;
   action: ErrorRowAction;
   scope?: string;
+  isAdvisory?: boolean;
 };
+
+function isAdvisoryPluginError(error: PluginError): boolean {
+  return error.type === 'mcp-server-suppressed-duplicate' || error.type === 'synced-plugin-shadowed';
+}
 
 /**
  * Determine which settings sources define an extraKnownMarketplace entry.
@@ -297,22 +317,26 @@ function buildErrorRows(
     const marketplace = 'marketplace' in error ? error.marketplace : undefined;
     // Try pluginId@marketplace format first, then just pluginName
     const scope = pluginName ? (pluginScopes.get(error.source) ?? pluginScopes.get(pluginName)) : undefined;
+    const advisory = isAdvisoryPluginError(error);
     rows.push({
       label: pluginName ? (marketplace ? `${pluginName} @ ${marketplace}` : pluginName) : error.source,
       message: formatErrorMessage(error),
       guidance: getErrorGuidance(error),
-      action: pluginName ? buildPluginAction(pluginName) : { kind: 'none' },
+      action: pluginName && !advisory ? buildPluginAction(pluginName) : { kind: 'none' },
       scope,
+      isAdvisory: advisory || undefined,
     });
   }
 
   // --- Other errors (non-marketplace, non-plugin-specific) ---
   for (const error of otherErrors) {
+    const advisory = isAdvisoryPluginError(error);
     rows.push({
       label: error.source,
       message: formatErrorMessage(error),
       guidance: getErrorGuidance(error),
       action: { kind: 'none' },
+      isAdvisory: advisory || undefined,
     });
   }
 
@@ -371,6 +395,7 @@ function ErrorsTabContent({
 }): React.ReactNode {
   const { storageV5, credentials } = useSessionServices();
   const errors = useAppState(s => s.plugins.errors);
+  const warnings = useAppState(s => (s.plugins as { warnings?: PluginWarning[] }).warnings);
   const installationStatus = useAppState(s => s.plugins.installationStatus);
   const setAppState = useSetAppState();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -432,7 +457,7 @@ function ErrorsTabContent({
   });
 
   const pluginScopes = getPluginEditableScopes();
-  const rows = buildErrorRows(
+  const baseRows = buildErrorRows(
     failedMarketplaces,
     extraMarketplaceErrors,
     pluginLoadingErrors,
@@ -441,6 +466,14 @@ function ErrorsTabContent({
     transientErrors,
     pluginScopes,
   );
+  const warningRows: ErrorRow[] = (warnings ?? []).map(w => ({
+    label: w.plugin ?? w.source ?? w.type,
+    message: w.warning ?? `Advisory warning: ${w.type}`,
+    action: { kind: 'none' },
+    scope: (w.plugin ? pluginScopes.get(w.plugin) : undefined) ?? (w.source ? pluginScopes.get(w.source) : undefined),
+    isAdvisory: true,
+  }));
+  const rows = [...baseRows, ...warningRows];
 
   // Handle escape to exit the plugin menu
   useKeybinding(
@@ -531,7 +564,7 @@ function ErrorsTabContent({
         </Box>
         <Box marginTop={1}>
           <Text dimColor italic>
-            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="go back" />
           </Text>
         </Box>
       </Box>
@@ -542,15 +575,17 @@ function ErrorsTabContent({
     <Box flexDirection="column">
       {rows.map((row, idx) => {
         const isSelected = idx === clampedIndex;
+        const tone = row.isAdvisory ? 'warning' : 'error';
+        const icon = isSelected ? figures.pointer : row.isAdvisory ? figures.warning : figures.cross;
         return (
           <Box key={idx} marginLeft={1} flexDirection="column" marginBottom={1}>
             <Text>
-              <Text color={isSelected ? 'suggestion' : 'error'}>{isSelected ? figures.pointer : figures.cross} </Text>
+              <Text color={isSelected ? 'suggestion' : tone}>{icon} </Text>
               <Text bold={isSelected}>{row.label}</Text>
               {row.scope && <Text dimColor> ({row.scope})</Text>}
             </Text>
             <Box marginLeft={3}>
-              <Text color="error">{row.message}</Text>
+              <Text color={tone}>{row.message}</Text>
             </Box>
             {row.guidance && (
               <Box marginLeft={3}>
@@ -581,11 +616,219 @@ function ErrorsTabContent({
                 description="resolve"
               />
             )}
-            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="go back" />
           </Byline>
         </Text>
       </Box>
     </Box>
+  );
+}
+
+type PluginStatsReportResult = { ok: true; report: SkillDoctorScan } | { ok: false; message: string };
+
+function padRight(value: string, width: number): string {
+  return value.padEnd(width);
+}
+
+function padLeft(value: string, width: number): string {
+  return value.padStart(width);
+}
+
+function SkillUsageTable({ rows }: { rows: SkillDoctorRow[] }): React.ReactNode {
+  if (rows.length === 0) {
+    return <Text dimColor>{'  '}(no skills loaded)</Text>;
+  }
+
+  const cells = rows.map(r => ({
+    context: r.listingTokens === null ? '—' : String(r.listingTokens),
+    week: r.weekTokens === null ? '—' : String(r.weekTokens),
+    lastUsed: r.daysSinceUse === null ? 'never' : r.daysSinceUse === 0 ? 'today' : `${r.daysSinceUse}d`,
+  }));
+
+  const widths = {
+    name: Math.max(5, ...rows.map(r => r.name.length)),
+    source: Math.max(6, ...rows.map(r => r.source.length)),
+    context: Math.max(7, ...cells.map(c => c.context.length)),
+    week: Math.max(9, ...cells.map(c => c.week.length)),
+    uses: Math.max(4, ...rows.map(r => String(r.usageCount).length)),
+  };
+
+  const headerLine = `  ${padRight('skill', widths.name)}  ${padRight('source', widths.source)}  ${padLeft('context', widths.context)}  ${padLeft('7d tokens', widths.week)}  ${padLeft('uses', widths.uses + 1)}  last used`;
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>{headerLine}</Text>
+      {rows.map((row, idx) => {
+        const cell = cells[idx]!;
+        return (
+          <Text key={`${idx}:${row.name}`} color={row.usageCount === 0 ? 'warning' : undefined}>
+            {`  ${padRight(row.name, widths.name)}  `}
+            <Text dimColor>{padRight(row.source, widths.source)}</Text>
+            {`  ${padLeft(cell.context, widths.context)}  ${padLeft(cell.week, widths.week)}  ${padLeft(String(row.usageCount), widths.uses)}×  ${cell.lastUsed}`}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
+function UnusedSkillsCallouts({
+  rows,
+  unusedOwned,
+  unusedSynced,
+  unusedFromPlugins,
+  unusedFromMcp,
+  unusedMcpServers,
+}: {
+  rows: SkillDoctorRow[];
+  unusedOwned: SkillDoctorRow[];
+  unusedSynced: SkillDoctorRow[];
+  unusedFromPlugins: SkillDoctorRow[];
+  unusedFromMcp: SkillDoctorRow[];
+  unusedMcpServers: string[];
+}): React.ReactNode {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const pluginSources = uniq(unusedFromPlugins.map(r => r.source));
+  const mcpFromSuffix = unusedMcpServers.length > 0 ? `, from ${unusedMcpServers.join(', ')}` : '';
+  const singleMcpServer = unusedMcpServers.length <= 1;
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      {unusedOwned.length > 0 && (
+        <Text color="warning" wrap="wrap">
+          {`${unusedOwned.length} ${plural(unusedOwned.length, 'skill')} loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or remove from .claude/skills.`}
+        </Text>
+      )}
+      {unusedSynced.length > 0 && (
+        <Text color="warning" wrap="wrap">
+          {`${unusedSynced.length} ${plural(unusedSynced.length, 'skill')} synced from claude.ai loaded but never invoked. Each one adds to the system prompt every turn. Disable in /skills, or turn ${unusedSynced.length === 1 ? 'it' : 'them'} off on claude.ai — a deleted synced copy is re-downloaded on the next sync.`}
+        </Text>
+      )}
+      {unusedFromPlugins.length > 0 && (
+        <Text color="warning" wrap="wrap">
+          {`${unusedFromPlugins.length} plugin ${plural(unusedFromPlugins.length, 'skill')} loaded but never invoked, from ${pluginSources.join(', ')}. Each one adds to the system prompt every turn. Plugin skills can't be turned off individually — disable ${pluginSources.length === 1 ? 'the plugin' : 'those plugins'} in the Installed tab.`}
+        </Text>
+      )}
+      {unusedFromMcp.length > 0 && (
+        <Text color="warning" wrap="wrap">
+          {`${unusedFromMcp.length} MCP ${plural(unusedFromMcp.length, 'skill')} loaded but never invoked${mcpFromSuffix}. Each one adds to the system prompt every turn. MCP skills live on the server, not on disk — turning ${singleMcpServer ? 'that server' : 'those servers'} off in /mcp also removes ${singleMcpServer ? 'its' : 'their'} tools.`}
+        </Text>
+      )}
+      {rows.every(r => r.usageCount > 0) && (
+        <Text color="success">All loaded skills have been used at least once.</Text>
+      )}
+    </Box>
+  );
+}
+
+function DisusedPluginsSection({ disusedPlugins }: { disusedPlugins: DisusedPlugin[] }): React.ReactNode {
+  if (disusedPlugins.length === 0) {
+    return null;
+  }
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>Plugins not used recently</Text>
+      <Box flexDirection="column" marginTop={1}>
+        {disusedPlugins.map(p => (
+          <Text key={p.pluginId}>
+            {'  '}
+            <Text color="warning">{re(p.name)}</Text>
+            <Text dimColor>{`  last used ${p.daysSinceLastUse} days ago`}</Text>
+          </Text>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>{'  '}Manage these in the Installed tab</Text>
+      </Box>
+    </Box>
+  );
+}
+
+function PluginStatsResolved({ reportPromise }: { reportPromise: Promise<PluginStatsReportResult> }): React.ReactNode {
+  const result = use(reportPromise);
+  if (!result.ok) {
+    return (
+      <Text dimColor wrap="wrap">
+        Couldn&apos;t compute skill usage. Run with --debug for details. ({result.message})
+      </Text>
+    );
+  }
+
+  const {
+    rows,
+    unusedOwned,
+    unusedFromPlugins,
+    unusedFromMcp,
+    unusedSynced,
+    unusedMcpServers,
+    disusedPlugins,
+    weekTokensNote,
+  } = result.report;
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>Skills loaded this session</Text>
+      <Box flexDirection="column" marginTop={1}>
+        <SkillUsageTable rows={rows} />
+      </Box>
+      {rows.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor wrap="wrap">
+            {'  '}context = this skill&apos;s one-line listing in the system prompt, included every turn
+          </Text>
+          <Text dimColor wrap="wrap">
+            {'  '}(dash = not in the current listing, costs nothing; full SKILL.md loads only when it runs)
+          </Text>
+          <Text dimColor wrap="wrap">
+            {'  '}
+            {weekTokensNote === null
+              ? '7d tokens = tokens attributed to the skill over the last 7 days of sessions on this machine'
+              : `7d tokens: ${weekTokensNote}`}
+          </Text>
+        </Box>
+      )}
+      <UnusedSkillsCallouts
+        rows={rows}
+        unusedOwned={unusedOwned}
+        unusedSynced={unusedSynced}
+        unusedFromPlugins={unusedFromPlugins}
+        unusedFromMcp={unusedFromMcp}
+        unusedMcpServers={unusedMcpServers}
+      />
+      <DisusedPluginsSection disusedPlugins={disusedPlugins} />
+    </Box>
+  );
+}
+
+function StatsTabContent({
+  getReport,
+  onExit,
+}: {
+  getReport: () => Promise<PluginStatsReportResult>;
+  onExit: () => void;
+}): React.ReactNode {
+  const [reportPromise] = useState(getReport);
+  const [scanGate] = useState(skillDoctorTranscriptScanAllowed);
+
+  useKeybinding('confirm:no', onExit, { context: 'Confirmation' });
+
+  const fallback = (
+    <Box flexDirection="column">
+      <Text bold>Skills loaded this session</Text>
+      <Box marginTop={1}>
+        <Text dimColor>{scanGate.allowed ? 'Scanning local sessions…' : 'Computing skill usage…'}</Text>
+      </Box>
+    </Box>
+  );
+
+  return (
+    <Suspense fallback={fallback}>
+      <PluginStatsResolved reportPromise={reportPromise} />
+    </Suspense>
   );
 }
 
@@ -684,10 +927,11 @@ function getInitialTab(viewState: ViewState): TabId {
 }
 
 export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: PluginSettingsProps): React.ReactNode {
-  const parsedCommand = parsePluginArgs(args);
+  const isStatsSubcommand = args?.trim().toLowerCase() === 'stats';
+  const parsedCommand = parsePluginArgs(isStatsSubcommand ? undefined : args);
   const initialViewState = getInitialViewState(parsedCommand);
   const [viewState, setViewState] = useState<ViewState>(initialViewState);
-  const [activeTab, setActiveTab] = useState<TabId>(getInitialTab(initialViewState));
+  const [activeTab, setActiveTab] = useState<TabId>(isStatsSubcommand ? 'stats' : getInitialTab(initialViewState));
   const [inputValue, setInputValue] = useState(
     viewState.type === 'add-marketplace' ? viewState.initialValue || '' : '',
   );
@@ -698,14 +942,65 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
   );
   const [childSearchActive, setChildSearchActive] = useState(false);
   const setAppState = useSetAppState();
+  const { storageV5 } = useSessionServices();
+  const mcpClients = useAppState(s => s.mcp.clients);
+  const mcpCommands = useAppState(s => s.mcp.commands);
+  const pluginCommands = useAppState(s => s.plugins.commands);
+  const mainLoopModel = useAppState(s => s.mainLoopModel);
 
-  // Error count for the Errors tab badge — counts loader errors + background
-  // marketplace install failures. Does NOT count marketplace-on-disk load
-  // failures (those require I/O and are discovered lazily when the tab opens).
-  // May slightly overcount vs. displayed rows when a marketplace has both a
-  // loader error and a failed install status (buildErrorRows deduplicates).
+  const statsReportRef = useRef<Promise<PluginStatsReportResult> | null>(null);
+  const getStatsReport = useCallback((): Promise<PluginStatsReportResult> => {
+    if (statsReportRef.current === null) {
+      statsReportRef.current = (async (): Promise<PluginStatsReportResult> => {
+        try {
+          const baseCommands = await getCommands(getOriginalCwd());
+          const seen = new Set<string>();
+          const mergedCommands: Command[] = [];
+          for (const cmd of [...baseCommands, ...pluginCommands, ...mcpCommands]) {
+            if (!seen.has(cmd.name)) {
+              seen.add(cmd.name);
+              mergedCommands.push(cmd);
+            }
+          }
+          const report = await scanSkillDoctor({
+            storageV5,
+            options: {
+              commands: mergedCommands,
+              mcpClients,
+              mainLoopModel: mainLoopModel ?? getMainLoopModel(),
+            },
+          } as unknown as LocalJSXCommandContext);
+          if (report.rows.length === 0) {
+            logEvent('cli_skill_doctor', {
+              outcome: 'no_user_skills' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+          } else if (report.weekTokensNote !== null) {
+            logEvent('cli_skill_doctor', {
+              outcome: 'scan_policy_denied' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            });
+          } else {
+            logEvent('cli_skill_doctor', {});
+          }
+          return { ok: true, report };
+        } catch (err) {
+          const cause = err instanceof SkillDoctorStageError ? err.cause : err;
+          logError(cause);
+          logEvent('cli_skill_doctor', {
+            outcome: (err instanceof SkillDoctorStageError
+              ? err.featureErrorCode
+              : 'render_failed') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          return { ok: false, message: errorMessage(cause) };
+        }
+      })();
+    }
+    return statsReportRef.current;
+  }, [storageV5, pluginCommands, mcpCommands, mcpClients, mainLoopModel]);
+
+  // Error count for the Errors tab badge — counts non-advisory loader errors +
+  // background marketplace install failures.
   const pluginErrorCount = useAppState(s => {
-    let count = s.plugins.errors.length;
+    let count = s.plugins.errors.filter(e => !isAdvisoryPluginError(e)).length;
     for (const m of s.plugins.installationStatus.marketplaces) {
       if (m.status === 'failed') count++;
     }
@@ -779,7 +1074,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         setViewState({ type: 'manage-marketplaces' });
         break;
       case 'errors':
-        // No viewState change needed — ErrorsTabContent renders inside <Tab id="errors">
+      case 'stats':
         break;
     }
   }, []);
@@ -849,6 +1144,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         <Text> </Text>
         <Text dimColor>Management:</Text>
         <Text> /plugin manage - Manage installed plugins</Text>
+        <Text> /plugin stats - Show skill usage and context costs</Text>
         <Text> /plugin enable &lt;plugin&gt; - Enable a plugin</Text>
         <Text> /plugin disable &lt;plugin&gt; - Disable a plugin</Text>
         <Text> /plugin uninstall &lt;plugin&gt; - Uninstall a plugin</Text>
@@ -978,6 +1274,9 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
             setActiveTab={setActiveTab}
             markPluginsChanged={markPluginsChanged}
           />
+        </Tab>
+        <Tab id="stats" title="Stats">
+          <StatsTabContent getReport={getStatsReport} onExit={() => setViewState({ type: 'menu' })} />
         </Tab>
       </Tabs>
     </Pane>

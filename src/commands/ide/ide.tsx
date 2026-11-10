@@ -3,15 +3,14 @@ import * as path from 'path';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
-import { Select } from '../../components/CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { ItemList } from '../../components/ItemList.js';
+import { Box, Dialog, StatusIcon, Text } from '@anthropic/ink';
 import {
   IdeAutoConnectDialog,
   IdeDisableAutoConnectDialog,
   shouldShowAutoConnectDialog,
   shouldShowDisableAutoConnectDialog,
 } from '../../components/IdeAutoConnectDialog.js';
-import { Box, Text } from '@anthropic/ink';
 import { clearServerCache } from '../../services/mcp/client.js';
 import type { ScopedMcpServerConfig } from '../../services/mcp/types.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
@@ -27,7 +26,17 @@ import {
   isSupportedTerminal,
   toIDEDisplayName,
 } from '../../utils/ide.js';
+import { plural } from '../../utils/stringUtils.js';
 import { getCurrentWorktreeSession } from '../../utils/worktree.js';
+
+function CollapsedListSummary({ count, unit = 'line' }: { count: number; unit?: string }): React.ReactNode {
+  if (count <= 0) return null;
+  return (
+    <Text dimColor>
+      … +{count} {plural(count, unit)}
+    </Text>
+  );
+}
 
 type IDEScreenProps = {
   availableIDEs: DetectedIDEInfo[];
@@ -107,20 +116,31 @@ function IDEScreen({
           <Text dimColor>
             {isSupportedJetBrainsTerminal()
               ? 'No available IDEs detected. Please install the plugin and restart your IDE:\n' +
-                'https://docs.claude.com/s/claude-code-jetbrains'
+                'https://code.claude.com/docs/en/jetbrains'
               : 'No available IDEs detected. Make sure your IDE has the Claude Code extension or plugin installed and is running.'}
           </Text>
         )}
 
         {availableIDEs.length !== 0 && (
-          <Select
-            defaultValue={selectedValue}
-            defaultFocusValue={selectedValue}
-            options={options}
-            onChange={value => {
-              setSelectedValue(value);
-              handleSelectIDE(value);
+          <ItemList
+            defaultFocusIndex={Math.max(
+              0,
+              options.findIndex(opt => opt.value === selectedValue),
+            )}
+            options={options.map(opt => ({
+              label: opt.label,
+              value: opt.value,
+              icon: opt.value === selectedValue ? <StatusIcon status="success" aria-label="current:" /> : undefined,
+              description: opt.description,
+              lines: opt.description ? 2 : 1,
+            }))}
+            onSelect={index => {
+              const selected = options[index];
+              if (!selected) return;
+              setSelectedValue(selected.value);
+              handleSelectIDE(selected.value);
             }}
+            onCancel={onClose}
           />
         )}
         {availableIDEs.length !== 0 &&
@@ -138,17 +158,16 @@ function IDEScreen({
         {unavailableIDEs.length > 0 && (
           <Box marginTop={1} flexDirection="column">
             <Text dimColor>
-              Found {unavailableIDEs.length} other running IDE(s). However, their workspace/project directories do not
-              match the current cwd.
+              Found {unavailableIDEs.length} other running IDE(s). However, their workspace or project directories
+              don&apos;t match the current directory.
             </Text>
-            <Box marginTop={1} flexDirection="column">
-              {unavailableIDEs.map((ide, index) => (
-                <Box key={index} paddingLeft={3}>
-                  <Text dimColor>
-                    • {ide.name}: {formatWorkspaceFolders(ide.workspaceFolders)}
-                  </Text>
-                </Box>
+            <Box marginTop={1} paddingLeft={3} flexDirection="column">
+              {unavailableIDEs.slice(0, 4).map((ide, index) => (
+                <Text key={index} dimColor>
+                  • {ide.name}: {formatWorkspaceFolders(ide.workspaceFolders)}
+                </Text>
               ))}
+              {unavailableIDEs.length > 4 && <CollapsedListSummary count={unavailableIDEs.length - 4} unit="IDE" />}
             </Box>
           </Box>
         )}
@@ -180,16 +199,6 @@ type IDEOpenSelectionProps = {
 };
 
 function IDEOpenSelection({ availableIDEs, onSelectIDE, onDone }: IDEOpenSelectionProps): React.ReactNode {
-  const [selectedValue, setSelectedValue] = useState(availableIDEs[0]?.port?.toString() ?? '');
-
-  const handleSelectIDE = useCallback(
-    (value: string) => {
-      const selectedIDE = availableIDEs.find(ide => ide.port === parseInt(value, 10));
-      onSelectIDE(selectedIDE);
-    },
-    [availableIDEs, onSelectIDE],
-  );
-
   const options = availableIDEs.map(ide => ({
     label: ide.name,
     value: ide.port.toString(),
@@ -201,14 +210,12 @@ function IDEOpenSelection({ availableIDEs, onSelectIDE, onDone }: IDEOpenSelecti
 
   return (
     <Dialog title="Select an IDE to open the project" onCancel={handleCancel} color="ide">
-      <Select
-        defaultValue={selectedValue}
-        defaultFocusValue={selectedValue}
+      <ItemList
         options={options}
-        onChange={value => {
-          setSelectedValue(value);
-          handleSelectIDE(value);
+        onSelect={index => {
+          onSelectIDE(availableIDEs[index]);
         }}
+        onCancel={handleCancel}
       />
     </Dialog>
   );
@@ -223,15 +230,6 @@ function RunningIDESelector({
   onSelectIDE: (ide: IdeType) => void;
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
 }): React.ReactNode {
-  const [selectedValue, setSelectedValue] = useState(runningIDEs[0] ?? '');
-
-  const handleSelectIDE = useCallback(
-    (value: string) => {
-      onSelectIDE(value as IdeType);
-    },
-    [onSelectIDE],
-  );
-
   const options = runningIDEs.map(ide => ({
     label: toIDEDisplayName(ide),
     value: ide,
@@ -243,13 +241,15 @@ function RunningIDESelector({
 
   return (
     <Dialog title="Select IDE to install extension" onCancel={handleCancel} color="ide">
-      <Select
-        defaultFocusValue={selectedValue}
+      <ItemList
         options={options}
-        onChange={value => {
-          setSelectedValue(value);
-          handleSelectIDE(value);
+        onSelect={index => {
+          const ide = runningIDEs[index];
+          if (ide) {
+            onSelectIDE(ide);
+          }
         }}
+        onCancel={handleCancel}
       />
     </Dialog>
   );

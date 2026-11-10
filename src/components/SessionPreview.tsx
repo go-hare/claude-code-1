@@ -7,6 +7,7 @@ import type { LogOption } from '../types/logs.js';
 import { formatRelativeTimeAgo } from '../utils/format.js';
 import { getSessionIdFromLog, isLiteLog, loadFullLog } from '../utils/sessionStorage.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
+import { LogoV2 } from './LogoV2/LogoV2.js';
 import { Messages } from './Messages.js';
 
 type Props = {
@@ -61,6 +62,7 @@ export function SessionPreview({ log, onExit, onSelect }: Props): React.ReactNod
 
   return (
     <Box flexDirection="column">
+      <LogoV2 />
       <Messages
         messages={displayLog.messages}
         tools={tools}

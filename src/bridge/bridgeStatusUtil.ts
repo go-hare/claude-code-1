@@ -116,11 +116,7 @@ export function computeShimmerSegments(
 
 /** Computed bridge status label and color from connection state. */
 export type BridgeStatusInfo = {
-  label:
-    | 'Remote Control failed'
-    | 'Remote Control reconnecting'
-    | 'Remote Control active'
-    | 'Remote Control connecting\u2026'
+  label: '/rc failed' | '/rc reconnecting' | '/rc active' | '/rc connecting…'
   color: 'error' | 'warning' | 'success'
 }
 
@@ -136,23 +132,25 @@ export function getBridgeStatus({
   sessionActive: boolean
   reconnecting: boolean
 }): BridgeStatusInfo {
-  if (error) return { label: 'Remote Control failed', color: 'error' }
-  if (reconnecting)
-    return { label: 'Remote Control reconnecting', color: 'warning' }
+  if (error) return { label: '/rc failed', color: 'error' }
+  if (reconnecting) return { label: '/rc reconnecting', color: 'warning' }
   if (sessionActive || connected)
-    return { label: 'Remote Control active', color: 'success' }
-  return { label: 'Remote Control connecting\u2026', color: 'warning' }
+    return { label: '/rc active', color: 'success' }
+  return { label: '/rc connecting…', color: 'warning' }
 }
 
 /** Footer text shown when bridge is idle (Ready state). */
 export function buildIdleFooterText(url: string): string {
-  return `Code everywhere with the Claude app or ${url}`
+  return `Code anywhere with the Claude mobile app or ${url}`
 }
 
 /** Footer text shown when a session is active (Connected state). */
 export function buildActiveFooterText(url: string): string {
-  return `Continue coding in the Claude app or ${url}`
+  return `Continue coding in the Claude mobile app or ${url}`
 }
+
+export const IDLE_PROJECT_HINT =
+  'Or ask Claude to work in this folder from your projects on claude.ai'
 
 /**
  * densable 2.1.224 #22 — persistent fail reconnect shortcut (was toast-only).

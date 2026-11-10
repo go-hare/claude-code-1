@@ -3,6 +3,7 @@ import type { Command } from '../../commands.js'
 const rename = {
   type: 'local-jsx',
   name: 'rename',
+  aliases: ['name'],
   description: 'Rename the current conversation',
   immediate: true,
   argumentHint: '[name]',

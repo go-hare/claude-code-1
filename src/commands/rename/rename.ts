@@ -11,7 +11,10 @@ import type {
 } from '../../types/command.js'
 import { listLiveSessionRecords } from '../../utils/concurrentSessions.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
+import {
+  getMessagesAfterCompactBoundary,
+  wrapInSystemReminder,
+} from '../../utils/messages.js'
 import {
   getTranscriptPath,
   saveAgentName,
@@ -29,7 +32,24 @@ import {
   sanitizeSessionTitle,
 } from '../../utils/sessionTitleSanitize.js'
 import { isTeammate } from '../../utils/teammate.js'
+import { escapeOutputStyleName } from '../../utils/xml.js'
 import { generateSessionName } from './generateSessionName.js'
+
+/**
+ * densable yos — meta message informing the model of a user-initiated /rename.
+ */
+export function buildRenameMetaMessage(
+  newName: string,
+  requestedName: string = newName,
+): string {
+  const escapedNew = escapeOutputStyleName(newName)
+  const escapedRequested = escapeOutputStyleName(requestedName)
+  return wrapInSystemReminder(
+    requestedName === newName
+      ? `The user named this session "${escapedNew}". This may indicate the session's focus or intent.`
+      : `The user asked to name this session "${escapedRequested}"; another live session on this machine already holds that name, so this session is "${escapedNew}". The requested name may indicate the session's focus or intent.`,
+  )
+}
 
 export async function call(
   onDone: LocalJSXCommandOnDone,
@@ -46,20 +66,22 @@ export async function call(
     return null
   }
 
+  const isGenerated = !args || args.trim() === ''
   let requestedName: string
-  if (!args || args.trim() === '') {
+  if (isGenerated) {
     const generated = await generateSessionName(
       getMessagesAfterCompactBoundary(context.messages),
       context.abortController.signal,
     )
-    if (!generated) {
+    const sanitized = generated ? sanitizeSessionTitle(generated) : ''
+    if (!sanitized) {
       onDone(
         'Could not generate a name: no conversation context yet. Usage: /rename <name>',
         { display: 'system' },
       )
       return null
     }
-    requestedName = generated
+    requestedName = sanitized
   } else {
     // densable 2.1.221: shared uge (ly/vhn) before persist — FXe funnel.
     requestedName = sanitizeSessionTitle(args)
@@ -170,6 +192,9 @@ export async function call(
 
   onDone(formatSessionRenamedMessage(newName, yieldedFrom, registryUpdated), {
     display: 'system',
+    metaMessages: !isGenerated
+      ? [buildRenameMetaMessage(newName, yieldedFrom ?? newName)]
+      : undefined,
   })
   return null
 }

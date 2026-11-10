@@ -16,11 +16,22 @@ import {
   formatRewindSkippedLinksMessage,
 } from 'src/utils/fileHistory.js';
 import { logError } from 'src/utils/log.js';
-import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text, Divider } from '@anthropic/ink';
-import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js';
+import {
+  Box,
+  Byline,
+  type ClickEvent,
+  Dialog,
+  KeyboardShortcutHint,
+  ListItem,
+  Text,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  type WheelEvent,
+} from '@anthropic/ink';
+import { useKeybindings } from '../keybindings/useKeybinding.js';
 import type { Message, PartialCompactDirection, UserMessage } from '../types/message.js';
 import { stripDisplayTags } from '../utils/displayTags.js';
+import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import {
   createUserMessage,
   extractTag,
@@ -28,7 +39,7 @@ import {
   isSyntheticMessage,
   isToolUseResultMessage,
 } from '../utils/messages.js';
-import { type OptionWithDescription, Select } from './CustomSelect/select.js';
+import { FePress, type OptionWithDescription, Select } from './CustomSelect/select.js';
 import { Spinner } from './Spinner.js';
 
 function isTextBlock(block: ContentBlockParam): block is TextBlockParam {
@@ -67,13 +78,14 @@ type Props = {
    * surface TYn copy without treating the restore as a hard failure.
    */
   onRestoreCode: (message: UserMessage) => Promise<{ skippedLinks?: number } | undefined>;
-  onSummarize: (message: UserMessage, feedback?: string, direction?: PartialCompactDirection) => Promise<void>;
+  onSummarize?: (message: UserMessage, feedback?: string, direction?: PartialCompactDirection) => Promise<void>;
   onClose: () => void;
   /** Skip pick-list, land on confirm. Caller ran skip-check first. Esc closes fully (no back-to-list). */
   preselectedMessage?: UserMessage;
+  onResumePreviousSession?: () => void;
+  parentSessionId?: string;
+  confirmDescription?: string;
 };
-
-const MAX_VISIBLE_MESSAGES = 7;
 
 export function MessageSelector({
   messages,
@@ -83,15 +95,38 @@ export function MessageSelector({
   onSummarize,
   onClose,
   preselectedMessage,
+  onResumePreviousSession,
+  parentSessionId,
+  confirmDescription,
 }: Props): React.ReactNode {
   const fileHistory = useAppState(s => s.fileHistory);
   const [error, setError] = useState<string | undefined>(undefined);
   const isFileHistoryEnabled = fileHistoryEnabled();
+  const terminalSize = useTerminalSize();
+  const insideModal = useIsInsideModal();
+  const { rows: modalOrTermRows } = useModalOrTerminalSize(terminalSize);
+  const availableRows = insideModal
+    ? modalOrTermRows
+    : isFullscreenEnvEnabled()
+      ? Math.floor(terminalSize.rows / 2)
+      : terminalSize.rows;
+  const itemRows = isFileHistoryEnabled ? 3 : 2;
+  const visibleMessages = Math.max(2, Math.floor((availableRows - 12) / itemRows));
 
-  // Add current prompt as a virtual message
+  // Add current prompt (and optional pre-clear session entry) as virtual messages
   const currentUUID = useMemo(randomUUID, []);
+  const preClearUUID = useMemo(randomUUID, []);
+  const hasPreviousSession = !!onResumePreviousSession;
   const messageOptions = useMemo(
     () => [
+      ...(hasPreviousSession
+        ? [
+            {
+              ...createUserMessage({ content: '' }),
+              uuid: preClearUUID,
+            } as UserMessage,
+          ]
+        : []),
       ...messages.filter(selectableUserMessagesFilter),
       {
         ...createUserMessage({
@@ -100,19 +135,18 @@ export function MessageSelector({
         uuid: currentUUID,
       } as UserMessage,
     ],
-    [messages, currentUUID],
+    [messages, currentUUID, preClearUUID, hasPreviousSession],
   );
   const [selectedIndex, setSelectedIndex] = useState(messageOptions.length - 1);
-
-  // Orient the selected message as the middle of the visible options
-  const firstVisibleIndex = Math.max(
-    0,
-    Math.min(selectedIndex - Math.floor(MAX_VISIBLE_MESSAGES / 2), messageOptions.length - MAX_VISIBLE_MESSAGES),
-  );
+  const maxWindowStart = Math.max(0, messageOptions.length - visibleMessages);
+  const [windowStart, setWindowStart] = useState(() => Math.max(0, messageOptions.length - visibleMessages));
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const firstVisibleIndex = Math.min(windowStart, maxWindowStart);
 
   const hasMessagesToSelect = messageOptions.length > 1;
 
   const [messageToRestore, setMessageToRestore] = useState<UserMessage | undefined>(preselectedMessage);
+  const [confirmOpenedAt, setConfirmOpenedAt] = useState(() => new Date());
   const [diffStatsForRestore, setDiffStatsForRestore] = useState<DiffStats | undefined>(undefined);
 
   useEffect(() => {
@@ -149,16 +183,17 @@ export function MessageSelector({
       placeholder: 'add context (optional)',
       initialValue: '',
       allowEmptySubmitToCancel: true,
+      screenReaderEmptySubmit: true,
       showLabelWithValue: true,
       labelValueSeparator: ': ',
     };
-    baseOptions.push({
-      value: 'summarize',
-      label: 'Summarize from here',
-      ...summarizeInputProps,
-      onChange: setSummarizeFromFeedback,
-    });
-    if (process.env.USER_TYPE === 'ant') {
+    if (onSummarize) {
+      baseOptions.push({
+        value: 'summarize',
+        label: 'Summarize from here',
+        ...summarizeInputProps,
+        onChange: setSummarizeFromFeedback,
+      });
       baseOptions.push({
         value: 'summarize_up_to',
         label: 'Summarize up to here',
@@ -192,6 +227,13 @@ export function MessageSelector({
   }
 
   async function handleSelect(message: UserMessage) {
+    if (message.uuid === preClearUUID) {
+      onPreRestore();
+      onClose();
+      onResumePreviousSession?.();
+      return;
+    }
+
     const index = messages.indexOf(message);
     const indexFromEnd = messages.length - 1 - index;
 
@@ -208,11 +250,17 @@ export function MessageSelector({
     }
 
     if (!isFileHistoryEnabled) {
-      await restoreConversationDirectly(message);
+      if (confirmDescription === undefined) {
+        await restoreConversationDirectly(message);
+        return;
+      }
+      setConfirmOpenedAt(new Date());
+      setMessageToRestore(message);
       return;
     }
 
     const diffStats = await fileHistoryGetDiffStats(fileHistory, message.uuid);
+    setConfirmOpenedAt(new Date());
     setMessageToRestore(message);
     setDiffStatsForRestore(diffStats);
   }
@@ -231,7 +279,7 @@ export function MessageSelector({
       return;
     }
 
-    if (isSummarizeOption(option)) {
+    if (isSummarizeOption(option) && onSummarize) {
       onPreRestore();
       setIsRestoring(true);
       setRestoringOption(option);
@@ -308,8 +356,6 @@ export function MessageSelector({
     }
   }
 
-  const exitState = useExitOnCtrlCDWithKeybindings();
-
   const handleEscape = useCallback(() => {
     if (messageToRestore && !preselectedMessage) {
       // Go back to message list instead of closing entirely
@@ -320,13 +366,27 @@ export function MessageSelector({
     onClose();
   }, [onClose, messageToRestore, preselectedMessage]);
 
-  const moveUp = useCallback(() => setSelectedIndex(prev => Math.max(0, prev - 1)), []);
-  const moveDown = useCallback(
-    () => setSelectedIndex(prev => Math.min(messageOptions.length - 1, prev + 1)),
-    [messageOptions.length],
+  const moveSelectionTo = useCallback(
+    (nextIndex: number) => {
+      const clamped = Math.max(0, Math.min(messageOptions.length - 1, nextIndex));
+      setSelectedIndex(clamped);
+      setWindowStart(prev => {
+        const start = Math.min(prev, maxWindowStart);
+        if (clamped < start) return clamped;
+        if (clamped >= start + visibleMessages) return Math.min(maxWindowStart, clamped - visibleMessages + 1);
+        return start;
+      });
+    },
+    [messageOptions.length, maxWindowStart, visibleMessages],
   );
-  const jumpToTop = useCallback(() => setSelectedIndex(0), []);
-  const jumpToBottom = useCallback(() => setSelectedIndex(messageOptions.length - 1), [messageOptions.length]);
+
+  const moveUp = useCallback(() => moveSelectionTo(selectedIndex - 1), [moveSelectionTo, selectedIndex]);
+  const moveDown = useCallback(() => moveSelectionTo(selectedIndex + 1), [moveSelectionTo, selectedIndex]);
+  const jumpToTop = useCallback(() => moveSelectionTo(0), [moveSelectionTo]);
+  const jumpToBottom = useCallback(
+    () => moveSelectionTo(messageOptions.length - 1),
+    [moveSelectionTo, messageOptions.length],
+  );
   const handleSelectCurrent = useCallback(() => {
     const selected = messageOptions[selectedIndex];
     if (selected) {
@@ -334,11 +394,20 @@ export function MessageSelector({
     }
   }, [messageOptions, selectedIndex, handleSelect]);
 
-  // Escape to close - uses Confirmation context where escape is bound
-  useKeybinding('confirm:no', handleEscape, {
-    context: 'Confirmation',
-    isActive: !messageToRestore,
-  });
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      if (isRestoring || event.deltaY === 0 || maxWindowStart === 0) return;
+      const delta = event.deltaY > 0 ? 1 : -1;
+      setWindowStart(prev => {
+        const base = Math.min(prev, maxWindowStart);
+        const next = Math.max(0, Math.min(maxWindowStart, base + delta));
+        setSelectedIndex(cur => Math.max(next, Math.min(next + visibleMessages - 1, cur)));
+        return next;
+      });
+      event.stopImmediatePropagation();
+    },
+    [isRestoring, maxWindowStart, visibleMessages],
+  );
 
   // Message selector navigation keybindings
   useKeybindings(
@@ -355,7 +424,7 @@ export function MessageSelector({
     },
   );
 
-  const [fileHistoryMetadata, setFileHistoryMetadata] = useState<Record<number, DiffStats>>({});
+  const [fileHistoryMetadata, setFileHistoryMetadata] = useState<Record<number, DiffStats | undefined>>({});
 
   useEffect(() => {
     async function loadFileHistoryMetadata() {
@@ -365,7 +434,7 @@ export function MessageSelector({
       // Load file snapshot metadata
       void Promise.all(
         messageOptions.map(async (userMessage, itemIndex) => {
-          if (userMessage.uuid !== currentUUID) {
+          if (userMessage.uuid !== currentUUID && userMessage.uuid !== preClearUUID) {
             const canRestore = fileHistoryCanRestore(fileHistory, userMessage.uuid);
 
             const nextUserMessage = messageOptions.at(itemIndex + 1);
@@ -393,165 +462,184 @@ export function MessageSelector({
       );
     }
     void loadFileHistoryMetadata();
-  }, [messageOptions, messages, currentUUID, fileHistory, isFileHistoryEnabled]);
+  }, [messageOptions, messages, currentUUID, preClearUUID, fileHistory, isFileHistoryEnabled]);
 
   const canRestoreCode =
     isFileHistoryEnabled && diffStatsForRestore?.filesChanged && diffStatsForRestore.filesChanged.length > 0;
   const showPickList = !error && !messageToRestore && !preselectedMessage && hasMessagesToSelect;
+  const visibleSlice = messageOptions.slice(firstVisibleIndex, firstVisibleIndex + visibleMessages);
+  const moreAbove = firstVisibleIndex;
+  const moreBelow = Math.max(0, messageOptions.length - (firstVisibleIndex + visibleSlice.length));
 
   return (
-    <Box flexDirection="column" width="100%">
-      <Divider color="suggestion" />
-      <Box flexDirection="column" marginX={1} gap={1}>
-        <Text bold color="suggestion">
-          Rewind
-        </Text>
-
-        {error && (
-          <>
-            <Text color="error">Error: {error}</Text>
-          </>
-        )}
-        {!hasMessagesToSelect && (
-          <>
-            <Text>Nothing to rewind to yet.</Text>
-          </>
-        )}
-        {!error && messageToRestore && hasMessagesToSelect && (
-          <>
-            <Text>
-              Confirm you want to restore {!diffStatsForRestore && 'the conversation '}to the point before you sent this
-              message:
+    <Dialog
+      title="Rewind"
+      color="suggestion"
+      onCancel={handleEscape}
+      isCancelActive={!messageToRestore || !hasMessagesToSelect}
+      hideInputGuide={!!messageToRestore && hasMessagesToSelect}
+      inputGuide={
+        <Byline>
+          {!error && hasMessagesToSelect && <KeyboardShortcutHint shortcut="enter" action="continue" />}
+          <KeyboardShortcutHint shortcut="esc" action="cancel" />
+        </Byline>
+      }
+    >
+      {error && <Text color="error">Error: {error}</Text>}
+      {!hasMessagesToSelect && <Text dimColor>Nothing to rewind to yet.</Text>}
+      {!error && messageToRestore && hasMessagesToSelect && (
+        <>
+          <Text>
+            Confirm you want to restore {!diffStatsForRestore && 'the conversation '}to the point before you sent this
+            message:
+          </Text>
+          <Box
+            flexDirection="column"
+            paddingLeft={1}
+            borderStyle="single"
+            borderRight={false}
+            borderTop={false}
+            borderBottom={false}
+            borderLeft={true}
+            borderLeftDimColor
+          >
+            <UserMessageOption userMessage={messageToRestore} color="text" isCurrent={false} />
+            <Text dimColor>
+              (
+              {formatRelativeTimeAgo(new Date(messageToRestore.timestamp as string | number | Date), {
+                now: confirmOpenedAt,
+              })}
+              )
             </Text>
-            <Box
-              flexDirection="column"
-              paddingLeft={1}
-              borderStyle="single"
-              borderRight={false}
-              borderTop={false}
-              borderBottom={false}
-              borderLeft={true}
-              borderLeftDimColor
-            >
-              <UserMessageOption userMessage={messageToRestore} color="text" isCurrent={false} />
-              <Text dimColor>
-                ({formatRelativeTimeAgo(new Date(messageToRestore.timestamp as string | number | Date))})
-              </Text>
-            </Box>
+          </Box>
+          {confirmDescription !== undefined && !isSummarizeOption(selectedRestoreOption) ? (
+            <Text dimColor>
+              {selectedRestoreOption === 'nevermind' ? 'The conversation will be unchanged.' : confirmDescription}
+            </Text>
+          ) : (
             <RestoreOptionDescription
               selectedRestoreOption={selectedRestoreOption}
               canRestoreCode={!!canRestoreCode}
               diffStatsForRestore={diffStatsForRestore}
             />
-            {isRestoring && isSummarizeOption(restoringOption) ? (
-              <Box flexDirection="row" gap={1}>
-                <Spinner />
-                <Text>Summarizing…</Text>
+          )}
+          {isRestoring && isSummarizeOption(restoringOption) ? (
+            <Box flexDirection="row" gap={1}>
+              <Spinner />
+              <Text>Summarizing…</Text>
+            </Box>
+          ) : (
+            <Select
+              isDisabled={isRestoring}
+              options={getRestoreOptions(!!canRestoreCode)}
+              defaultFocusValue={canRestoreCode ? 'both' : 'conversation'}
+              onFocus={value => setSelectedRestoreOption(value as RestoreOption)}
+              onChange={value => onSelectRestoreOption(value as RestoreOption)}
+              onCancel={() => (preselectedMessage ? onClose() : setMessageToRestore(undefined))}
+            />
+          )}
+          {canRestoreCode && (
+            <Box marginBottom={1}>
+              <Text dimColor>{figures.warning} Rewinding does not affect files edited manually or via bash.</Text>
+            </Box>
+          )}
+        </>
+      )}
+      {showPickList && (
+        <>
+          {isFileHistoryEnabled ? (
+            <Text>Restore the code and/or conversation to the point before…</Text>
+          ) : (
+            <Text>Restore and fork the conversation to the point before…</Text>
+          )}
+          <Box width="100%" flexDirection="column" onWheel={maxWindowStart > 0 ? handleWheel : undefined}>
+            {moreAbove > 0 && (
+              <Box paddingLeft={1}>
+                <FePress paddingX={1} repeat onPress={isRestoring ? undefined : jumpToTop}>
+                  {`${figures.arrowUp} ${moreAbove} more`}
+                </FePress>
               </Box>
-            ) : (
-              <Select
-                isDisabled={isRestoring}
-                options={getRestoreOptions(!!canRestoreCode)}
-                defaultFocusValue={canRestoreCode ? 'both' : 'conversation'}
-                onFocus={value => setSelectedRestoreOption(value as RestoreOption)}
-                onChange={value => onSelectRestoreOption(value as RestoreOption)}
-                onCancel={() => (preselectedMessage ? onClose() : setMessageToRestore(undefined))}
-              />
             )}
-            {canRestoreCode && (
-              <Box marginBottom={1}>
-                <Text dimColor>{figures.warning} Rewinding does not affect files edited manually or via bash.</Text>
-              </Box>
-            )}
-          </>
-        )}
-        {showPickList && (
-          <>
-            {isFileHistoryEnabled ? (
-              <Text>Restore the code and/or conversation to the point before…</Text>
-            ) : (
-              <Text>Restore and fork the conversation to the point before…</Text>
-            )}
-            <Box width="100%" flexDirection="column">
-              {messageOptions
-                .slice(firstVisibleIndex, firstVisibleIndex + MAX_VISIBLE_MESSAGES)
-                .map((msg, visibleOptionIndex) => {
-                  const optionIndex = firstVisibleIndex + visibleOptionIndex;
-                  const isSelected = optionIndex === selectedIndex;
-                  const isCurrent = msg.uuid === currentUUID;
+            {visibleSlice.map((msg, visibleOptionIndex) => {
+              const optionIndex = firstVisibleIndex + visibleOptionIndex;
+              const isSelected = optionIndex === selectedIndex;
+              const isCurrent = msg.uuid === currentUUID;
+              const isPreClear = msg.uuid === preClearUUID;
 
-                  const metadataLoaded = optionIndex in fileHistoryMetadata;
-                  const metadata = fileHistoryMetadata[optionIndex];
-                  const numFilesChanged = metadata?.filesChanged && metadata.filesChanged.length;
+              const metadataLoaded = isFileHistoryEnabled && optionIndex in fileHistoryMetadata;
+              const metadata = fileHistoryMetadata[optionIndex];
+              const numFilesChanged = metadata?.filesChanged && metadata.filesChanged.length;
 
-                  return (
-                    <Box
-                      key={msg.uuid}
-                      height={isFileHistoryEnabled ? 3 : 2}
-                      overflow="hidden"
-                      width="100%"
-                      flexDirection="row"
-                    >
-                      <Box width={2} minWidth={2}>
-                        {isSelected ? (
-                          <Text color="permission" bold>
-                            {figures.pointer}{' '}
-                          </Text>
+              return (
+                <Box key={msg.uuid} height={itemRows} overflow="hidden" width="100%" flexDirection="column">
+                  <ListItem
+                    isFocused={!isRestoring && isSelected}
+                    styled={false}
+                    hovered={!isRestoring && !isSelected && hoveredIndex === optionIndex}
+                    onMouseEnter={() => setHoveredIndex(optionIndex)}
+                    onMouseLeave={() => setHoveredIndex(prev => (prev === optionIndex ? null : prev))}
+                    onClick={(event: ClickEvent) => {
+                      if (isRestoring) return;
+                      moveSelectionTo(optionIndex);
+                      void handleSelect(msg);
+                      event.stopImmediatePropagation();
+                    }}
+                  >
+                    <Box flexDirection="column">
+                      <Box flexShrink={1} height={1} overflow="hidden">
+                        {isPreClear ? (
+                          <Box width="100%">
+                            <Text color={isSelected ? 'suggestion' : undefined}>
+                              /resume {parentSessionId} (previous session)
+                            </Text>
+                          </Box>
                         ) : (
-                          <Text>{'  '}</Text>
-                        )}
-                      </Box>
-                      <Box flexDirection="column">
-                        <Box flexShrink={1} height={1} overflow="hidden">
                           <UserMessageOption
                             userMessage={msg}
                             color={isSelected ? 'suggestion' : undefined}
                             isCurrent={isCurrent}
                             paddingRight={10}
                           />
-                        </Box>
-                        {isFileHistoryEnabled && metadataLoaded && (
-                          <Box height={1} flexDirection="row">
-                            {metadata ? (
-                              <>
-                                <Text dimColor={!isSelected} color="inactive">
-                                  {numFilesChanged ? (
-                                    <>
-                                      {numFilesChanged === 1 && metadata.filesChanged![0]
-                                        ? `${path.basename(metadata.filesChanged![0])} `
-                                        : `${numFilesChanged} files changed `}
-                                      <DiffStatsText diffStats={metadata} />
-                                    </>
-                                  ) : (
-                                    <>No code changes</>
-                                  )}
-                                </Text>
-                              </>
-                            ) : (
-                              <Text dimColor color="warning">
-                                {figures.warning} No code restore
-                              </Text>
-                            )}
-                          </Box>
                         )}
                       </Box>
+                      {metadataLoaded && (
+                        <Box height={1} flexDirection="row">
+                          {metadata ? (
+                            <Text dimColor={!isSelected} color="inactive">
+                              {numFilesChanged ? (
+                                <>
+                                  {numFilesChanged === 1 && metadata.filesChanged![0]
+                                    ? `${path.basename(metadata.filesChanged![0])} `
+                                    : `${numFilesChanged} files changed `}
+                                  <DiffStatsText diffStats={metadata} />
+                                </>
+                              ) : (
+                                <>No code changes</>
+                              )}
+                            </Text>
+                          ) : (
+                            <Text dimColor color="warning">
+                              {figures.warning} No code restore
+                            </Text>
+                          )}
+                        </Box>
+                      )}
                     </Box>
-                  );
-                })}
-            </Box>
-          </>
-        )}
-        {!messageToRestore && (
-          <Text dimColor italic>
-            {exitState.pending ? (
-              <>Press {exitState.keyName} again to exit</>
-            ) : (
-              <>{!error && hasMessagesToSelect && 'Enter to continue · '}Esc to exit</>
+                  </ListItem>
+                </Box>
+              );
+            })}
+            {moreBelow > 0 && (
+              <Box paddingLeft={1}>
+                <FePress paddingX={1} repeat onPress={isRestoring ? undefined : jumpToBottom}>
+                  {`${figures.arrowDown} ${moreBelow} more`}
+                </FePress>
+              </Box>
             )}
-          </Text>
-        )}
-      </Box>
-    </Box>
+          </Box>
+        </>
+      )}
+    </Dialog>
   );
 }
 
@@ -633,11 +721,16 @@ function DiffStatsText({ diffStats }: { diffStats: DiffStats | undefined }): Rea
   if (!diffStats || !diffStats.filesChanged) {
     return undefined;
   }
+  const { insertions, deletions } = diffStats;
+  if (insertions === 0 && deletions === 0) {
+    return null;
+  }
   return (
-    <>
-      <Text color="diffAddedWord">+{diffStats.insertions} </Text>
-      <Text color="diffRemovedWord">-{diffStats.deletions}</Text>
-    </>
+    <Text>
+      {insertions > 0 && <Text color="diffAddedWord">+{insertions}</Text>}
+      {insertions > 0 && deletions > 0 && ' '}
+      {deletions > 0 && <Text color="diffRemovedWord">-{deletions}</Text>}
+    </Text>
   );
 }
 
@@ -720,10 +813,11 @@ function UserMessageOption({
         );
       } else {
         // Slash commands: Add "/" prefix and include args
+        const commandText = `/${commandMessage}${args ? ` ${args}` : ''}`;
         return (
           <Box flexDirection="row" width="100%">
             <Text color={color} dimColor={dimColor}>
-              /{commandMessage} {args}
+              {commandText}
             </Text>
           </Box>
         );

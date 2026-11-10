@@ -1,20 +1,16 @@
 /**
  * SelectMatcherMode shows the configured matchers for a selected hook event.
- *
- * The /hooks menu is read-only: this view no longer offers "add new matcher"
- * and simply lets the user drill into each matcher to see its hooks.
  */
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import {
   type HookSource,
   hookSourceInlineDisplayString,
   type IndividualHookConfig,
 } from '../../utils/hooks/hooksSettings.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { ItemList } from '../ItemList.js';
 
 type MatcherWithSource = {
   matcher: string;
@@ -39,7 +35,6 @@ export function SelectMatcherMode({
   onSelect,
   onCancel,
 }: Props): React.ReactNode {
-  // Group matchers with their sources (already sorted by priority in parent)
   const matchersWithSources: MatcherWithSource[] = React.useMemo(() => {
     return matchersForSelectedEvent.map(matcher => {
       const hooks = hooksByEventAndMatcher[selectedEvent]?.[matcher] || [];
@@ -52,41 +47,41 @@ export function SelectMatcherMode({
     });
   }, [matchersForSelectedEvent, hooksByEventAndMatcher, selectedEvent]);
 
+  const title = `${selectedEvent} - Matchers`;
+
   if (matchersForSelectedEvent.length === 0) {
     return (
       <Dialog
-        title={`${selectedEvent} - Matchers`}
+        title={title}
         subtitle={eventDescription}
         onCancel={onCancel}
-        inputGuide={() => <Text>Esc to go back</Text>}
+        inputGuide={<KeyboardShortcutHint shortcut="esc" action="go back" />}
       >
-        <Box flexDirection="column" gap={1}>
-          <Text dimColor>No hooks configured for this event.</Text>
-          <Text dimColor>To add hooks, edit settings.json directly or ask Claude.</Text>
+        <Box flexDirection="column">
+          <Text dimColor>No hooks configured for this event</Text>
+          <Text dimColor>To add hooks, edit settings.json directly or ask Claude</Text>
         </Box>
       </Dialog>
     );
   }
 
   return (
-    <Dialog title={`${selectedEvent} - Matchers`} subtitle={eventDescription} onCancel={onCancel}>
-      <Box flexDirection="column">
-        <Select
-          options={matchersWithSources.map(item => {
-            const sourceText = item.sources.map(hookSourceInlineDisplayString).join(', ');
-            const matcherLabel = item.matcher || '(all)';
-            return {
-              label: `[${sourceText}] ${matcherLabel}`,
-              value: item.matcher,
-              description: `${item.hookCount} ${plural(item.hookCount, 'hook')}`,
-            };
-          })}
-          onChange={value => {
-            onSelect(value);
-          }}
-          onCancel={onCancel}
-        />
-      </Box>
+    <Dialog title={title} subtitle={eventDescription} onCancel={onCancel}>
+      <ItemList
+        options={matchersWithSources.map(item => ({
+          icon: <Text dimColor>[{item.sources.map(hookSourceInlineDisplayString).join(', ')}]</Text>,
+          label: item.matcher || '(all)',
+          value: item.matcher,
+          facts: [`${item.hookCount} ${plural(item.hookCount, 'hook')}`],
+        }))}
+        onSelect={index => {
+          const item = matchersWithSources[index];
+          if (item) {
+            onSelect(item.matcher);
+          }
+        }}
+        onCancel={onCancel}
+      />
     </Dialog>
   );
 }

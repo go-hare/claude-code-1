@@ -13,7 +13,9 @@ import {
   Ansi,
   Box,
   ClockContext,
+  StatusIcon,
   Text,
+  type TextProps,
   stringWidth,
   useApp,
   useDeclaredCursor,
@@ -126,6 +128,7 @@ import {
 import { count } from '../../utils/array.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
+import { truncateToWidth } from '../../utils/truncate.js';
 import { SelectInputOption } from './select-input-option.js';
 import { SelectOption, SelectZiOption } from './select-option.js';
 import { useSelectInput } from './use-select-input.js';
@@ -790,6 +793,7 @@ function LeftoverCountHint({
 type BaseOption<T> = {
   description?: string;
   dimDescription?: boolean;
+  descriptionColor?: TextProps['color'] | (string & {});
   label: ReactNode;
   value: T;
   disabled?: boolean;
@@ -933,6 +937,16 @@ export type SelectProps<T> = {
   readonly options: OptionWithDescription<T>[];
 
   /**
+   * Optional full option set used to stabilize two-column label width across filtering.
+   */
+  readonly columnSizingOptions?: OptionWithDescription<T>[];
+
+  /**
+   * Extra horizontal chrome columns subtracted from SelectInputOption width.
+   */
+  readonly inputChromeWidth?: number;
+
+  /**
    * Default value.
    */
   readonly defaultValue?: T;
@@ -1045,6 +1059,8 @@ export function Select<T>({
   pointerWhileDisabled = false,
   highlightText,
   options,
+  columnSizingOptions,
+  inputChromeWidth = 0,
   defaultValue,
   selectedValue,
   onCancel,
@@ -1135,7 +1151,7 @@ export function Select<T>({
   );
   const { subscribeLayout } = useApp();
   const terminalSize = useTerminalSize();
-  const { rows: sizeRows } = useModalOrTerminalSize(terminalSize);
+  const { rows: sizeRows, columns: sizeColumns } = useModalOrTerminalSize(terminalSize);
   const leftoverList = leftoverHostRef.current;
   const leftoverModalBox = leftoverModal?.box.current ?? null;
   // leftover Lo window/clip/GXt stay off (`leftoverLoOn` above).
@@ -1573,6 +1589,8 @@ export function Select<T>({
               shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
               maxIndexWidth={maxIndexWidth}
               index={i}
+              hideIndex={hideIndexes}
+              extraChromeWidth={inputChromeWidth}
               inputValue={inputValue}
               onInputChange={value => {
                 setInputValues(prev => {
@@ -1748,6 +1766,8 @@ export function Select<T>({
                 shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
                 maxIndexWidth={maxIndexWidth}
                 index={i}
+                hideIndex={hideIndexes}
+                extraChromeWidth={inputChromeWidth}
                 inputValue={inputValue}
                 onInputChange={value => {
                   setInputValues(prev => {
@@ -1852,63 +1872,69 @@ export function Select<T>({
     });
   }
 
-  const maxIndexWidth = hideIndexes ? 0 : state.options.length.toString().length;
+  const sizingOptions = columnSizingOptions ?? options;
+  const maxIndexWidth = hideIndexes ? 0 : sizingOptions.length.toString().length;
 
   // Check if any visible options have descriptions (for two-column layout)
   // Also check that there are NO input options, since they're not supported in two-column layout
   // Skip two-column layout when inlineDescriptions is enabled
-  const hasInputOptions = state.visibleOptions.some(opt => opt.type === 'input');
-  const hasDescriptions = !inlineDescriptions && !hasInputOptions && state.visibleOptions.some(opt => opt.description);
-
-  // Pre-compute option data for two-column layout
-  const optionData = state.visibleOptions.map((option, index) => {
-    const isFirstVisibleOption = option.index === state.visibleFromIndex;
-    const isLastVisibleOption = option.index === state.visibleToIndex - 1;
-    const areMoreOptionsBelow = state.visibleToIndex < options.length;
-    const areMoreOptionsAbove = state.visibleFromIndex > 0;
-    const i = state.visibleFromIndex + index + 1;
-    const isFocused = !isDisabled && state.focusedValue === option.value;
-    const isSelected = state.value === option.value;
-    const isOptionDisabled = option.disabled === true;
-
-    let label: ReactNode = option.label;
-    if (typeof option.label === 'string' && highlightText && option.label.includes(highlightText)) {
-      const labelText = option.label;
-      const idx = labelText.indexOf(highlightText);
-      label = (
-        <>
-          {labelText.slice(0, idx)}
-          <Text {...styles.highlightedText()}>{highlightText}</Text>
-          {labelText.slice(idx + highlightText.length)}
-        </>
-      );
-    }
-
-    return {
-      option,
-      index: i,
-      label,
-      isFocused,
-      isSelected,
-      isOptionDisabled,
-      shouldShowDownArrow: leftoverArrow(areMoreOptionsBelow, isLastVisibleOption),
-      shouldShowUpArrow: leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption),
-    };
-  });
+  const hasInputOptions = sizingOptions.some(opt => opt.type === 'input');
+  const hasDescriptions = !inlineDescriptions && !hasInputOptions && sizingOptions.some(opt => opt.description);
 
   // densable `$e` Ye two-col → `Zi` @202785693 + inline Ze tick in label column.
   // Do not wrap with SelectOption/ListItem isSelected (that paints a second tick).
   if (hasDescriptions) {
-    // Gold labelWidth: 2 + indexPad + label + (selected ? 2 : 0)
-    const maxLabelWidth = Math.max(
-      ...optionData.map(data => {
-        if (data.option.type === 'input') return 0;
-        const labelText = getTextContent(data.option.label);
-        const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
-        const checkmarkWidth = data.isSelected ? 2 : 0;
+    // Gold labelWidth: 2 + indexPad + label + (selected ? 2 : 0), capped at floor(columns * 0.6)
+    const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
+    const rawMaxLabelWidth = Math.max(
+      ...sizingOptions.map(opt => {
+        if (opt.type === 'input') return 0;
+        const labelText = getTextContent(opt.label);
+        const checkmarkWidth = state.value === opt.value ? 2 : 0;
         return 2 + indexWidth + stringWidth(labelText) + checkmarkWidth;
       }),
     );
+    const maxLabelWidth = Math.min(rawMaxLabelWidth, Math.floor(sizeColumns * 0.6));
+    const optionData = state.visibleOptions.map((option, index) => {
+      const isFirstVisibleOption = option.index === state.visibleFromIndex;
+      const isLastVisibleOption = option.index === state.visibleToIndex - 1;
+      const areMoreOptionsBelow = state.visibleToIndex < options.length;
+      const areMoreOptionsAbove = state.visibleFromIndex > 0;
+      const i = state.visibleFromIndex + index + 1;
+      const isFocused = !isDisabled && state.focusedValue === option.value;
+      const isSelected = state.value === option.value;
+      const isOptionDisabled = option.disabled === true;
+      const checkmarkWidth = isSelected ? 2 : 0;
+      let labelText = getTextContent(option.label);
+      let label: ReactNode = option.label;
+      const availableLabelWidth = maxLabelWidth - 2 - indexWidth - checkmarkWidth;
+      if (stringWidth(labelText) > availableLabelWidth) {
+        labelText = truncateToWidth(labelText, Math.max(0, availableLabelWidth));
+        label = labelText;
+      }
+      if (typeof label === 'string' && highlightText && label.includes(highlightText)) {
+        const labelStr = label;
+        const idx = labelStr.indexOf(highlightText);
+        label = (
+          <>
+            {labelStr.slice(0, idx)}
+            <Text {...styles.highlightedText()}>{highlightText}</Text>
+            {labelStr.slice(idx + highlightText.length)}
+          </>
+        );
+      }
+      return {
+        option,
+        index: i,
+        label,
+        labelWidth: 2 + indexWidth + stringWidth(labelText) + checkmarkWidth,
+        isFocused,
+        isSelected,
+        isOptionDisabled,
+        shouldShowDownArrow: leftoverArrow(areMoreOptionsBelow, isLastVisibleOption),
+        shouldShowUpArrow: leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption),
+      };
+    });
 
     return leftoverListFrame({
       hostRef: leftoverHostRef,
@@ -1950,11 +1976,8 @@ export function Select<T>({
           // Input options not supported in two-column layout
           return null;
         }
-        const labelText = getTextContent(data.option.label);
-        const indexWidth = hideIndexes ? 0 : maxIndexWidth + 2;
-        const checkmarkWidth = data.isSelected ? 2 : 0;
-        const currentLabelWidth = 2 + indexWidth + stringWidth(labelText) + checkmarkWidth;
-        const padding = maxLabelWidth - currentLabelWidth;
+        const padding = maxLabelWidth - data.labelWidth;
+        const descriptionColor = data.option.descriptionColor as TextProps['color'];
 
         return leftoverClip(
           data.option,
@@ -1986,7 +2009,7 @@ export function Select<T>({
               {data.isSelected && (
                 <Text>
                   {' '}
-                  <Text color="success">{figures.tick}</Text>
+                  <StatusIcon status="success" />
                 </Text>
               )}
               {padding > 0 && <Text>{' '.repeat(padding)}</Text>}
@@ -1994,15 +2017,17 @@ export function Select<T>({
             <Box flexGrow={1} marginLeft={2}>
               <Text
                 wrap="wrap"
-                dimColor={data.isOptionDisabled || data.option.dimDescription !== false}
+                dimColor={
+                  descriptionColor === undefined && (data.isOptionDisabled || data.option.dimDescription !== false)
+                }
                 color={
                   data.isOptionDisabled
-                    ? undefined
+                    ? descriptionColor
                     : data.isSelected
                       ? 'success'
                       : data.isFocused
                         ? 'suggestion'
-                        : undefined
+                        : descriptionColor
                 }
               >
                 <Ansi>{data.option.description || ' '}</Ansi>
@@ -2075,6 +2100,8 @@ export function Select<T>({
             shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
             maxIndexWidth={maxIndexWidth}
             index={i}
+            hideIndex={hideIndexes}
+            extraChromeWidth={inputChromeWidth}
             inputValue={inputValue}
             onInputChange={value => {
               setInputValues(prev => {
@@ -2139,38 +2166,45 @@ export function Select<T>({
 
       return leftoverClip(
         option,
-        <>
-          <SelectOption
-            key={String(option.value)}
-            isFocused={isFocused}
-            isSelected={isSelected}
-            shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
-            shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
-            onClick={optionOnClick(option)}
-            hoverStyle={hoverStyle}
-            description={leftoverNn && !inlineDescriptions ? option.description : undefined}
-            icon={option.icon}
-            meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
-            iconWidth={leftoverNn?.iconWidth}
-            nameWidth={leftoverNn?.nameWidth}
-            factsWidth={leftoverNn?.factsWidth}
-          >
-            <Box flexDirection="row" flexShrink={0}>
-              {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
+        <SelectOption
+          key={String(option.value)}
+          isFocused={isFocused}
+          isSelected={isSelected}
+          shouldShowDownArrow={leftoverArrow(areMoreOptionsBelow, isLastVisibleOption)}
+          shouldShowUpArrow={leftoverArrow(areMoreOptionsAbove, isFirstVisibleOption)}
+          onClick={optionOnClick(option)}
+          hoverStyle={hoverStyle}
+          description={leftoverNn && !inlineDescriptions ? option.description : undefined}
+          icon={option.icon}
+          meta={leftoverNn ? leftoverNnFacts(option.meta) : undefined}
+          iconWidth={leftoverNn?.iconWidth}
+          nameWidth={leftoverNn?.nameWidth}
+          factsWidth={leftoverNn?.factsWidth}
+        >
+          <Box flexDirection="row" flexShrink={0}>
+            {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
+            <Text
+              dimColor={isOptionDisabled}
+              color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
+            >
+              {label}
+              {inlineDescriptions && option.description && (
+                <Text dimColor={isOptionDisabled || option.dimDescription !== false}> {option.description}</Text>
+              )}
+            </Text>
+          </Box>
+          {!leftoverNn && !inlineDescriptions && option.description ? (
+            <Box flexShrink={99} marginLeft={2}>
               <Text
-                dimColor={isOptionDisabled}
+                wrap="wrap-trim"
+                dimColor={isOptionDisabled || option.dimDescription !== false}
                 color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
               >
-                {label}
+                <Ansi>{option.description}</Ansi>
               </Text>
             </Box>
-          </SelectOption>
-          {!inlineDescriptions && option.description ? (
-            <Box flexShrink={99} marginLeft={2}>
-              <Text wrap="wrap-trim">{option.description}</Text>
-            </Box>
           ) : null}
-        </>,
+        </SelectOption>,
       );
     }),
   });

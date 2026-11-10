@@ -6,7 +6,7 @@ import * as React from 'react';
 import { use, useEffect, useState } from 'react';
 import { getOriginalCwd } from '../../bootstrap/state.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text, ListItem } from '@anthropic/ink';
+import { Box, type ClickEvent, ListItem, stringWidth, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { getAutoMemPath, isAutoMemoryEnabled } from '../../memdir/paths.js';
 import { logEvent } from '../../services/analytics/index.js';
@@ -21,7 +21,7 @@ import { getDisplayPath } from '../../utils/file.js';
 import { formatRelativeTimeAgo } from '../../utils/format.js';
 import { projectIsInGitRepo } from '../../utils/memory/versions.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
-import { Select } from '../CustomSelect/index.js';
+import { ItemList } from '../ItemList.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemPaths = feature('TEAMMEM')
@@ -86,10 +86,9 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
 
   const depths = new Map<string, number>();
 
-  // Create options for the select component
+  // Create options for the list component
   const memoryOptions = allMemoryFiles.map(file => {
     const displayPath = getDisplayPath(file.path);
-    const existsLabel = file.exists ? '' : ' (new)';
 
     // Calculate depth based on parent
     const depth = file.parent ? (depths.get(file.parent) ?? 0) + 1 : 0;
@@ -103,8 +102,8 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
     } else if (file.type === 'Project' && !file.isNested && file.path === projectMemoryPath) {
       label = `Project instructions`;
     } else if (depth > 0) {
-      // For child nodes (imported files), show indented with L
-      label = `${indent}L ${displayPath}${existsLabel}`;
+      // For child nodes (imported files), show indented with · without (new)
+      label = `${indent}· ${displayPath}`;
     } else {
       // For other memory files, just show the path
       label = `${displayPath}`;
@@ -255,14 +254,56 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
     { context: 'Select', isActive: toggleFocused },
   );
 
+  const INLINE_FACT_MAX_COLS = 30;
+  const itemListOptions = memoryOptions.map(opt => {
+    if (!opt.description) {
+      return {
+        label: opt.label,
+        value: opt.value,
+      };
+    }
+    if (stringWidth(opt.description) <= INLINE_FACT_MAX_COLS) {
+      return {
+        label: opt.label,
+        value: opt.value,
+        facts: [opt.description],
+      };
+    }
+    return {
+      label: opt.label,
+      value: opt.value,
+      description: opt.description,
+      lines: 2,
+    };
+  });
+  const defaultFocusIndex = Math.max(
+    0,
+    memoryOptions.findIndex(opt => opt.value === initialPath),
+  );
+
   return (
     <Box flexDirection="column" width="100%">
       <Box flexDirection="column" marginBottom={1}>
-        <ListItem isFocused={focusedToggle === 0}>
+        <ListItem
+          isFocused={focusedToggle === 0}
+          onClick={(event: ClickEvent) => {
+            setFocusedToggle(0);
+            handleToggleAutoMemory();
+            event.stopImmediatePropagation();
+          }}
+        >
           <Text>Auto-memory: {autoMemoryOn ? 'on' : 'off'}</Text>
         </ListItem>
         {showDreamRow && (
-          <ListItem isFocused={focusedToggle === 1} styled={false}>
+          <ListItem
+            isFocused={focusedToggle === 1}
+            styled={false}
+            onClick={(event: ClickEvent) => {
+              setFocusedToggle(1);
+              handleToggleAutoDream();
+              event.stopImmediatePropagation();
+            }}
+          >
             <Text color={focusedToggle === 1 ? 'suggestion' : undefined}>
               Auto-dream: {autoDreamOn ? 'on' : 'off'}
               {dreamStatus && <Text dimColor> · {dreamStatus}</Text>}
@@ -272,25 +313,26 @@ export function MemoryFileSelector({ onSelect, onCancel }: Props): React.ReactNo
         )}
       </Box>
 
-      <Select
-        defaultFocusValue={initialPath}
-        options={memoryOptions}
+      <ItemList
+        defaultFocusIndex={defaultFocusIndex}
+        options={itemListOptions}
         isDisabled={toggleFocused}
-        onChange={value => {
+        onSelect={index => {
+          const selected = memoryOptions[index];
+          if (!selected) return;
+          const value = selected.value;
           if (value.startsWith(OPEN_FOLDER_PREFIX)) {
             const folderPath = value.slice(OPEN_FOLDER_PREFIX.length);
-            // Ensure folder exists before opening (idempotent; swallow
-            // permission errors to match previous behavior)
             void mkdir(folderPath, { recursive: true })
               .catch(() => {})
               .then(() => openPath(folderPath));
             return;
           }
-          lastSelectedPath = value; // Remember the selection
+          lastSelectedPath = value;
           onSelect(value);
         }}
         onCancel={onCancel}
-        onUpFromFirstItem={() => setFocusedToggle(lastToggleIndex)}
+        onUpFromFirst={() => setFocusedToggle(lastToggleIndex)}
       />
     </Box>
   );

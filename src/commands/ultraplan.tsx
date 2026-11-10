@@ -38,7 +38,7 @@ import { isUltraplanProductEnabled } from '../utils/ultraplanKeyword.js';
 export const CCR_TERMS_URL = 'https://code.claude.com/docs/en/claude-code-on-the-web';
 
 export function getUltraplanTimeoutMs(): number {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_ultraplan_timeout_seconds', 1800) * 1000;
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_ultraplan_timeout_seconds', 5400) * 1000;
 }
 
 /**
@@ -125,9 +125,9 @@ function startDetachedPoll(
         setAppState(prev => (prev.ultraplanSessionUrl === url ? { ...prev, ultraplanSessionUrl: undefined } : prev));
         enqueuePendingNotification({
           value: [
-            `Ultraplan approved — executing in Claude Code on the web. Follow along at: ${url}`,
+            `Ultraplan approved — executing in the cloud session. Follow along at: ${url}`,
             '',
-            'Results will land as a pull request when the remote session finishes. There is nothing to do here.',
+            'Results will land as a pull request when the cloud session finishes. There is nothing to do here.',
           ].join('\n'),
           mode: 'task-notification',
         });
@@ -191,11 +191,11 @@ function startDetachedPoll(
 // multi-second teleportToRemote round-trip.
 function buildLaunchMessage(disconnectedBridge?: boolean): string {
   const prefix = disconnectedBridge ? `${REMOTE_CONTROL_DISCONNECTED_MSG} ` : '';
-  return `${DIAMOND_OPEN} ultraplan\n${prefix}Starting Claude Code on the web…`;
+  return `${DIAMOND_OPEN} ultraplan\n${prefix}Starting a cloud session…`;
 }
 
 function buildSessionReadyMessage(url: string): string {
-  return `${DIAMOND_OPEN} ultraplan · Monitor progress in Claude Code on the web ${url}\nYou can continue working — when the ${DIAMOND_OPEN} fills, press ↓ to view results`;
+  return `${DIAMOND_OPEN} ultraplan · Monitor the cloud session at ${url}\nYou can continue working — when the ${DIAMOND_OPEN} fills, press ↓ to view results`;
 }
 
 function buildAlreadyActiveMessage(url: string | undefined): string {

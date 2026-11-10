@@ -6,6 +6,7 @@ import { getTimestampedHistory, type TimestampedHistoryEntry } from '../history.
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Box, FuzzyPicker, Text, stringWidth, wrapAnsi } from '@anthropic/ink';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
+import { isVimModeEnabled } from './PromptInput/utils.js';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
@@ -135,8 +136,13 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
   const rowWidth = Math.max(20, listWidth - AGE_WIDTH - 1);
   const previewWidth = previewOnRight ? Math.max(20, columns - listWidth - 12) : Math.max(20, columns - 10);
 
-  const truncatedSuffix = scan?.status === 'truncated' ? ` · newest ${scan.items.length.toLocaleString()} only` : '';
-  const title = `Search prompts · ${scope}${truncatedSuffix}`;
+  // densable 289 doe: Search prompts · ${scope} + newest ${scan.items.length.toLocaleString()} only
+  const title = (
+    <Text>
+      Search prompts <Text color="suggestion">· {scope}</Text>
+      {scan?.status === 'truncated' && <Text dimColor> · newest {scan.items.length.toLocaleString()} only</Text>}
+    </Text>
+  );
 
   return (
     <FuzzyPicker
@@ -154,14 +160,17 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
         void item.entry.resolve().then(onSelect);
       }}
       onCancel={onCancel}
-      extraHints={
+      resetKey={scope}
+      extraHints={[
         <ConfigurableShortcutHint
+          key="scope"
           action="historySearch:cycleScope"
           context="HistorySearch"
           fallback="ctrl+s"
           description="scope"
-        />
-      }
+        />,
+        isVimModeEnabled() && <Text key="vim">Esc i / for slash commands</Text>,
+      ]}
       emptyMessage={q => emptyHistoryMessage(scan, q)}
       selectAction="use"
       direction="up"

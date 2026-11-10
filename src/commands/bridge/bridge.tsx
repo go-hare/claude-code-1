@@ -6,11 +6,10 @@ import { getBridgeAccessToken } from '../../bridge/bridgeConfig.js';
 import { checkBridgeMinVersion, getBridgeDisabledReason, isEnvLessBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { checkEnvLessBridgeMinVersion } from '../../bridge/envLessBridgeConfig.js';
 import { BRIDGE_LOGIN_INSTRUCTION, REMOTE_CONTROL_DISCONNECTED_MSG } from '../../bridge/types.js';
-import { Dialog, ListItem } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { ItemList } from '../../components/ItemList.js';
 import { shouldShowRemoteCallout } from '../../components/RemoteCallout.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { Box, Text } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -25,18 +24,6 @@ type Props = {
   name?: string;
 };
 
-/**
- * /remote-control command — manages the bidirectional bridge connection.
- *
- * When enabled, sets replBridgeEnabled in AppState, which triggers
- * useReplBridge in REPL.tsx to initialize the bridge connection.
- * The bridge registers an environment, creates a session with the current
- * conversation, polls for work, and connects an ingress WebSocket for
- * bidirectional messaging between the CLI and claude.ai.
- *
- * Running /remote-control when already connected shows a dialog with the session
- * URL and options to disconnect or continue.
- */
 function BridgeToggle({ onDone, name }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const replBridgeConnected = useAppState(s => s.replBridgeConnected);
@@ -45,9 +32,6 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
   const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
 
   useEffect(() => {
-    // If already connected or enabled in full bidirectional mode, show
-    // disconnect confirmation. Outbound-only (CCR mirror) doesn't count —
-    // /remote-control upgrades it to full RC instead.
     if ((replBridgeConnected || replBridgeEnabled) && !replBridgeOutboundOnly) {
       setShowDisconnectDialog(true);
       return;
@@ -55,8 +39,6 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
 
     let cancelled = false;
     void (async () => {
-      // Pre-flight checks before enabling (awaits GrowthBook init if disk
-      // cache is stale — so Max users don't get a false "not enabled" error)
       const error = await checkBridgePrerequisites();
       if (cancelled) return;
       if (error) {
@@ -67,9 +49,6 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
         return;
       }
 
-      // Show first-time remote dialog if not yet seen.
-      // Store the name now so it's in AppState when the callout handler later
-      // enables the bridge (the handler only sets replBridgeEnabled, not the name).
       if (shouldShowRemoteCallout()) {
         setAppState(prev => {
           if (prev.showRemoteCallout) return prev;
@@ -83,8 +62,6 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
         return;
       }
 
-      // Enable the bridge — useReplBridge in REPL.tsx handles the rest:
-      // registers environment, creates session with conversation, connects WebSocket
       logEvent('tengu_bridge_command', {
         action: 'connect' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
@@ -98,7 +75,7 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
           replBridgeInitialName: name,
         };
       });
-      onDone('Remote Control connecting\u2026', {
+      onDone('Remote Control connecting…', {
         display: 'system',
       });
     })();
@@ -115,23 +92,17 @@ function BridgeToggle({ onDone, name }: Props): React.ReactNode {
   return null;
 }
 
-/**
- * Dialog shown when /remote-control is used while the bridge is already connected.
- * Shows the session URL and lets the user disconnect or continue.
- */
 function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
   useRegisterOverlay('bridge-disconnect-dialog');
   const setAppState = useSetAppState();
   const sessionUrl = useAppState(s => s.replBridgeSessionUrl);
   const connectUrl = useAppState(s => s.replBridgeConnectUrl);
   const sessionActive = useAppState(s => s.replBridgeSessionActive);
-  const [focusIndex, setFocusIndex] = useState(2);
   const [showQR, setShowQR] = useState(false);
   const [qrText, setQrText] = useState('');
 
   const displayUrl = sessionActive ? sessionUrl : connectUrl;
 
-  // Generate QR code when URL changes or QR is toggled on
   useEffect(() => {
     if (!showQR || !displayUrl) {
       setQrText('');
@@ -170,33 +141,25 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
     onDone(undefined, { display: 'skip' });
   }
 
-  const ITEM_COUNT = 3;
-
-  useKeybindings(
-    {
-      'select:next': () => setFocusIndex(i => (i + 1) % ITEM_COUNT),
-      'select:previous': () => setFocusIndex(i => (i - 1 + ITEM_COUNT) % ITEM_COUNT),
-      'select:accept': () => {
-        if (focusIndex === 0) {
-          handleDisconnect();
-        } else if (focusIndex === 1) {
-          handleShowQR();
-        } else {
-          handleContinue();
-        }
-      },
-    },
-    { context: 'Select' },
-  );
-
   const qrLines = qrText ? qrText.split('\n').filter(l => l.length > 0) : [];
+
+  const actions = [
+    { key: 'disconnect', label: 'Disconnect this session', facts: [] as string[], run: handleDisconnect },
+    {
+      key: 'qr',
+      label: showQR ? 'Hide QR code' : 'Show QR code',
+      facts: showQR ? [] : ['Scan with your phone to open this session'],
+      run: handleShowQR,
+    },
+    { key: 'continue', label: 'Continue', facts: [] as string[], run: handleContinue },
+  ];
 
   return (
     <Dialog title="Remote Control" onCancel={handleContinue} hideInputGuide>
       <Box flexDirection="column" gap={1}>
         <Text>
-          This session is available via Remote Control
-          {displayUrl ? ` at ${displayUrl}` : ''}.
+          This session is available in the Claude mobile app
+          {displayUrl ? ` and at ${displayUrl}` : ' and claude.ai/code'}.
         </Text>
         {showQR && qrLines.length > 0 && (
           <Box flexDirection="column">
@@ -205,29 +168,30 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
             ))}
           </Box>
         )}
-        <Box flexDirection="column">
-          <ListItem isFocused={focusIndex === 0}>
-            <Text>Disconnect this session</Text>
-          </ListItem>
-          <ListItem isFocused={focusIndex === 1}>
-            <Text>{showQR ? 'Hide QR code' : 'Show QR code'}</Text>
-          </ListItem>
-          <ListItem isFocused={focusIndex === 2}>
-            <Text>Continue</Text>
-          </ListItem>
-        </Box>
-        <Text dimColor>Enter to select · Esc to continue</Text>
+        <ItemList
+          visibleOptionCount={actions.length}
+          defaultFocusIndex={actions.length - 1}
+          options={actions.map(item => ({
+            label: item.label,
+            value: item.key,
+            facts: item.facts,
+          }))}
+          onSelect={index => {
+            actions[index]?.run();
+          }}
+          onCancel={handleContinue}
+        />
+        <Text dimColor>
+          <Byline>
+            <KeyboardShortcutHint shortcut="enter" action="select" />
+            <KeyboardShortcutHint shortcut="esc" action="continue" />
+          </Byline>
+        </Text>
       </Box>
     </Dialog>
   );
 }
 
-/**
- * Check bridge prerequisites. Returns an error message if a precondition
- * fails, or null if all checks pass. Awaits GrowthBook init if the disk
- * cache is stale, so a user who just became entitled (e.g. upgraded to Max,
- * or the flag just launched) gets an accurate result on the first try.
- */
 async function checkBridgePrerequisites(): Promise<string | null> {
   const { waitForPolicyLimitsToLoad, isRemotePolicyAllowed } = await import('../../services/policyLimits/index.js');
   await waitForPolicyLimitsToLoad();
@@ -239,10 +203,6 @@ async function checkBridgePrerequisites(): Promise<string | null> {
     return disabledReason;
   }
 
-  // Mirror the v1/v2 branching logic in initReplBridge: env-less (v2) is used
-  // only when the flag is on AND the session is not perpetual.  In assistant
-  // mode (KAIROS) useReplBridge sets perpetual=true, which forces
-  // initReplBridge onto the v1 path — so the prerequisite check must match.
   let useV2 = isEnvLessBridgeEnabled();
   if (feature('KAIROS') && useV2) {
     const { isAssistantMode } = await import('../../assistant/index.js');

@@ -1,13 +1,22 @@
 import React, { type ReactNode, useEffect, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- UP arrow exit not in Attachments bindings
-import { Box, Text, useInput, type ClickEvent } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  KeyboardShortcutHint,
+  stringWidth,
+  Text,
+  useInput,
+  useTerminalSize,
+  type ClickEvent,
+} from '@anthropic/ink';
+import { useModalOrTerminalSize } from '../../context/modalContext.js';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { PastedContent } from '../../utils/config.js';
 import { getImageFromClipboard } from '../../utils/imagePaste.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { ClickableImageRef } from '../ClickableImageRef.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Byline } from '@anthropic/ink';
 import TextInput from '../TextInput.js';
 import type { OptionWithDescription } from './select.js';
 import { SelectOption } from './select-option.js';
@@ -20,6 +29,8 @@ type Props<T> = {
   shouldShowUpArrow: boolean;
   maxIndexWidth: number;
   index: number;
+  hideIndex?: boolean;
+  extraChromeWidth?: number;
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: (value: string) => void;
@@ -94,6 +105,8 @@ export function SelectInputOption<T>({
   shouldShowUpArrow,
   maxIndexWidth,
   index,
+  hideIndex = false,
+  extraChromeWidth = 0,
   inputValue,
   onInputChange,
   onSubmit,
@@ -226,6 +239,13 @@ export function SelectInputOption<T>({
   }, [isFocused, imagesSelected, onImagesSelectedChange]);
 
   const descriptionPaddingLeft = layout === 'expanded' ? maxIndexWidth + 3 : maxIndexWidth + 4;
+  const terminalSize = useTerminalSize();
+  const { columns: termColumns } = useModalOrTerminalSize(terminalSize);
+  const labelWidth =
+    showLabel && typeof option.label === 'string'
+      ? stringWidth(option.label) + stringWidth(option.labelValueSeparator ?? ', ')
+      : 0;
+  const columns = Math.max(1, termColumns - (4 + maxIndexWidth) - labelWidth - extraChromeWidth);
 
   return (
     <Box flexDirection="column" flexShrink={0}>
@@ -239,7 +259,11 @@ export function SelectInputOption<T>({
         hoverStyle={hoverStyle}
       >
         <Box flexDirection="row" flexShrink={layout === 'compact' ? 0 : undefined}>
-          <Text dimColor>{`${index}.`.padEnd(maxIndexWidth + 2)}</Text>
+          {!hideIndex && (
+            <Box flexShrink={0}>
+              <Text dimColor>{`${index}.`.padEnd(maxIndexWidth + 2)}</Text>
+            </Box>
+          )}
           {children}
           {showLabel ? (
             <>
@@ -251,8 +275,8 @@ export function SelectInputOption<T>({
                     value={inputValue}
                     onChange={value => {
                       isUserEditing.current = true;
+                      if ((option.onChange(value) as unknown) === false) return;
                       onInputChange(value);
-                      option.onChange(value);
                     }}
                     onSubmit={onSubmit}
                     onExit={onExit}
@@ -262,15 +286,15 @@ export function SelectInputOption<T>({
                     multiline={true}
                     cursorOffset={cursorOffset}
                     onChangeCursorOffset={setCursorOffset}
-                    columns={80}
+                    columns={columns}
                     onImagePaste={onImagePaste}
                     onPaste={(pastedText: string) => {
                       isUserEditing.current = true;
                       const before = inputValue.slice(0, cursorOffset);
                       const after = inputValue.slice(cursorOffset);
                       const newValue = before + pastedText + after;
+                      if ((option.onChange(newValue) as unknown) === false) return;
                       onInputChange(newValue);
-                      option.onChange(newValue);
                       setCursorOffset(before.length + pastedText.length);
                     }}
                   />
@@ -289,8 +313,8 @@ export function SelectInputOption<T>({
               value={inputValue}
               onChange={value => {
                 isUserEditing.current = true;
+                if ((option.onChange(value) as unknown) === false) return;
                 onInputChange(value);
-                option.onChange(value);
               }}
               onSubmit={onSubmit}
               onExit={onExit}
@@ -300,15 +324,15 @@ export function SelectInputOption<T>({
               multiline={true}
               cursorOffset={cursorOffset}
               onChangeCursorOffset={setCursorOffset}
-              columns={80}
+              columns={columns}
               onImagePaste={onImagePaste}
               onPaste={(pastedText: string) => {
                 isUserEditing.current = true;
                 const before = inputValue.slice(0, cursorOffset);
                 const after = inputValue.slice(cursorOffset);
                 const newValue = before + pastedText + after;
+                if ((option.onChange(newValue) as unknown) === false) return;
                 onInputChange(newValue);
-                option.onChange(newValue);
                 setCursorOffset(before.length + pastedText.length);
               }}
             />
@@ -370,7 +394,7 @@ export function SelectInputOption<T>({
                   />
                 </Byline>
               ) : isFocused ? (
-                '(↓ to select)'
+                <KeyboardShortcutHint shortcut="down" action="select" parens />
               ) : null}
             </Text>
           </Box>

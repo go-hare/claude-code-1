@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { getAllOutputStyles, OUTPUT_STYLE_CONFIG, type OutputStyleConfig } from '../constants/outputStyles.js';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Text, Dialog, StatusIcon } from '@anthropic/ink';
 import type { OutputStyle } from '../utils/config.js';
 import { getCwd } from '../utils/cwd.js';
 import type { OptionWithDescription } from './CustomSelect/select.js';
-import { Select } from './CustomSelect/select.js';
+import { ItemList } from './ItemList.js';
 
 const DEFAULT_OUTPUT_STYLE_LABEL = 'Default';
 const DEFAULT_OUTPUT_STYLE_DESCRIPTION = 'Claude completes coding tasks efficiently and provides concise responses';
@@ -72,11 +72,23 @@ export function OutputStylePicker({
         {isLoading ? (
           <Text dimColor>Loading output styles…</Text>
         ) : (
-          <Select
-            options={styleOptions}
-            onChange={handleStyleSelect}
+          <ItemList
+            options={styleOptions.map(opt => ({
+              label: opt.label,
+              value: opt.value,
+              description: opt.description,
+              icon: opt.value === initialStyle ? <StatusIcon status="success" aria-label="current:" /> : undefined,
+            }))}
+            defaultFocusIndex={Math.max(
+              0,
+              styleOptions.findIndex(opt => opt.value === initialStyle),
+            )}
             visibleOptionCount={10}
-            defaultValue={initialStyle}
+            onSelect={index => {
+              const chosen = styleOptions[index];
+              if (chosen) handleStyleSelect(chosen.value);
+            }}
+            onCancel={onCancel}
           />
         )}
       </Box>

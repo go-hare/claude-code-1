@@ -1,16 +1,21 @@
+import React from 'react';
 import { Settings } from '../../components/Settings/Settings.js';
-import type { LocalJSXCommandCall } from '../../types/command.js';
+import type { ToolUseContext } from '../../Tool.js';
+import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 
 /**
- * /usage — unified command replacing /cost and /stats (v2.1.118 upstream alignment).
+ * /usage — unified command replacing /cost and /stats (v2.1.289 upstream alignment).
  *
  * Routing:
- *   - claude.ai subscriber → Settings panel → Usage tab (plan limits + overages)
- *   - API / non-subscriber  → Stats panel (session cost, token counts, activity)
- *
- * Both /cost and /stats are registered as aliases of this command so that
- * existing muscle-memory still works.
+ *   - /stats → Settings panel → Stats tab
+ *   - /usage or /cost → Settings panel → Usage tab
  */
-export const call: LocalJSXCommandCall = async (onDone, context) => {
-  return <Settings onClose={onDone} context={context} defaultTab="Usage" />;
-};
+export async function call(
+  onDone: LocalJSXCommandOnDone,
+  context: ToolUseContext & LocalJSXCommandContext,
+  _args: string,
+  invokedName?: string,
+): Promise<React.ReactNode> {
+  const defaultTab = invokedName === 'stats' ? 'Stats' : 'Usage';
+  return <Settings onClose={onDone} context={context} defaultTab={defaultTab} />;
+}

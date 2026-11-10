@@ -58,13 +58,18 @@ import {
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { PermissionPreviewGutter } from '../permissions/PermissionPreviewGutter.js';
 import TextInput from '../TextInput.js';
 
 type Props = {
   event: ElicitationRequestEvent;
-  onResponse: (action: ElicitResult['action'], content?: ElicitResult['content']) => void;
+  onResponse: (action: ElicitResult['action'], content?: ElicitResult['content']) => unknown;
   /** Called when the phase 2 waiting state is dismissed (URL elicitations only). */
   onWaitingDismiss?: (action: 'dismiss' | 'retry' | 'cancel') => void;
+  /** densable Ype `userConfirmsCompletion` — 3-button URL mode ("Open in browser" / "I'm done, continue" / "Decline"). */
+  userConfirmsCompletion?: boolean;
+  /** densable Host wouldTakeAnswer guard. */
+  wouldTakeAnswer?: () => boolean;
 };
 
 const isTextField = (s: PrimitiveSchemaDefinition) => ['string', 'number', 'integer'].includes(s.type);
@@ -137,9 +142,23 @@ function formatDateDisplay(isoValue: string, schema: PrimitiveSchemaDefinition):
   }
 }
 
-export function ElicitationDialog({ event, onResponse, onWaitingDismiss }: Props): React.ReactNode {
+export function ElicitationDialog({
+  event,
+  onResponse,
+  onWaitingDismiss,
+  userConfirmsCompletion,
+  wouldTakeAnswer,
+}: Props): React.ReactNode {
   if (event.params.mode === 'url') {
-    return <ElicitationURLDialog event={event} onResponse={onResponse} onWaitingDismiss={onWaitingDismiss} />;
+    return (
+      <ElicitationURLDialog
+        event={event}
+        onResponse={onResponse}
+        onWaitingDismiss={onWaitingDismiss}
+        userConfirmsCompletion={userConfirmsCompletion}
+        wouldTakeAnswer={wouldTakeAnswer}
+      />
+    );
   }
 
   return <ElicitationFormDialog event={event} onResponse={onResponse} />;
@@ -1112,9 +1131,15 @@ function ElicitationFormDialog({
               {accordionContent}
               {schema.description && (
                 <Box marginLeft={6}>
-                  <Text dimColor>
-                    {clampElicitationText(schema.description, elicitationDescriptionWidth(columns), clampFieldRows)}
-                  </Text>
+                  {clampFieldRows ? (
+                    <Text dimColor>
+                      {clampElicitationText(schema.description, elicitationDescriptionWidth(columns), clampFieldRows)}
+                    </Text>
+                  ) : (
+                    <PermissionPreviewGutter multiline={schema.description.includes('\n')}>
+                      <Text dimColor>{schema.description}</Text>
+                    </PermissionPreviewGutter>
+                  )}
                 </Box>
               )}
               <Box marginLeft={6} height={1}>
@@ -1205,10 +1230,14 @@ function ElicitationURLDialog({
   event,
   onResponse,
   onWaitingDismiss,
+  userConfirmsCompletion = false,
+  wouldTakeAnswer,
 }: {
   event: ElicitationRequestEvent;
   onResponse: Props['onResponse'];
   onWaitingDismiss: Props['onWaitingDismiss'];
+  userConfirmsCompletion?: boolean;
+  wouldTakeAnswer?: () => boolean;
 }): React.ReactNode {
   const { serverName, signal, waitingState } = event;
   const urlParams = event.params as ElicitRequestURLParams;
@@ -1266,14 +1295,21 @@ function ElicitationURLDialog({
   const overflows = urlOverflowsScreen(href, columns, rows);
   const warning = urlPromptWarning(exact, oneClick, overflows);
   const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | 'open' | 'action' | 'cancel'>(
-    oneClick && !overflows ? 'accept' : 'decline',
+    event.startWaiting === true
+      ? 'open'
+      : oneClick && !overflows
+        ? userConfirmsCompletion
+          ? 'open'
+          : 'accept'
+        : 'decline',
   );
+  const [openedInBrowser, setOpenedInBrowser] = useState(false);
 
   useEffect(() => {
     if (!oneClick || overflows) {
-      setFocusedButton(prev => knockAcceptIfUnsafe(prev));
+      setFocusedButton(prev => (prev === 'open' && userConfirmsCompletion ? 'decline' : knockAcceptIfUnsafe(prev)));
     }
-  }, [oneClick, overflows]);
+  }, [oneClick, overflows, userConfirmsCompletion]);
 
   // Auto-dismiss when the server sends a completion notification (sets completed flag)
   useEffect(() => {
@@ -1282,45 +1318,70 @@ function ElicitationURLDialog({
     }
   }, [phase, event.completed, onWaitingDismiss, showCancel]);
 
+  const handleOpenInBrowser = useCallback(() => {
+    if (!oneClick) return;
+    if (wouldTakeAnswer && !wouldTakeAnswer()) return;
+    void openBrowser(href);
+    setOpenedInBrowser(true);
+    setFocusedButton('accept');
+  }, [href, oneClick, wouldTakeAnswer]);
+
   const handleAccept = useCallback(() => {
     if (!oneClick) {
       return;
     }
+    if (onResponse('accept') === false) {
+      return;
+    }
+    if (userConfirmsCompletion) {
+      return;
+    }
     void openBrowser(href);
-    onResponse('accept');
     setPhase('waiting');
     phaseRef.current = 'waiting';
     setFocusedButton('open');
-  }, [href, onResponse, oneClick]);
+  }, [href, onResponse, oneClick, userConfirmsCompletion]);
 
-  const urlDisplay =
-    oneClick || exact ? (
-      domainParsed ? (
-        <Text>
-          {urlBeforeDomain}
-          <Text bold>{domain}</Text>
-          {urlAfterDomain}
-        </Text>
+  const urlDisplay = (
+    <PermissionPreviewGutter multiline={(oneClick || exact ? href : url).includes('\n')}>
+      {oneClick || exact ? (
+        domainParsed ? (
+          <Text>
+            {urlBeforeDomain}
+            <Text bold>{domain}</Text>
+            {urlAfterDomain}
+          </Text>
+        ) : (
+          <Text>{href}</Text>
+        )
       ) : (
-        <Text>{href}</Text>
-      )
-    ) : (
-      <Text>{URL_WITHHELD_MARKER}</Text>
-    );
+        <Text>{URL_WITHHELD_MARKER}</Text>
+      )}
+    </PermissionPreviewGutter>
+  );
 
   // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for button navigation
   useInput((_input, key) => {
     if (phase === 'prompt') {
       if (key.leftArrow || key.rightArrow) {
-        if (oneClick) {
+        if (oneClick && userConfirmsCompletion) {
+          const promptButtons = ['open', 'accept', 'decline'] as const;
+          const delta = key.rightArrow ? 1 : -1;
+          setFocusedButton(prev => {
+            const idx = promptButtons.indexOf(prev as (typeof promptButtons)[number]);
+            return promptButtons[(idx + delta + promptButtons.length) % promptButtons.length]!;
+          });
+        } else if (oneClick) {
           setFocusedButton(prev => (prev === 'accept' || prev === 'decline' ? toggleAcceptDecline(prev) : prev));
         }
         return;
       }
       if (key.return) {
-        if (focusedButton === 'accept') {
+        if (focusedButton === 'open' && userConfirmsCompletion) {
+          handleOpenInBrowser();
+        } else if (focusedButton === 'accept') {
           handleAccept();
-        } else {
+        } else if (focusedButton === 'decline') {
           onResponse('decline');
         }
       }
@@ -1448,6 +1509,18 @@ function ElicitationURLDialog({
           </Box>
         )}
         <Box>
+          {oneClick && userConfirmsCompletion && (
+            <>
+              <Text color="success">{focusedButton === 'open' ? figures.pointer : ' '}</Text>
+              <Text
+                bold={focusedButton === 'open'}
+                color={focusedButton === 'open' ? 'success' : undefined}
+                dimColor={focusedButton !== 'open'}
+              >
+                {openedInBrowser ? ' Open again  ' : ' Open in browser  '}
+              </Text>
+            </>
+          )}
           {oneClick && (
             <>
               <Text color="success">{focusedButton === 'accept' ? figures.pointer : ' '}</Text>
@@ -1456,7 +1529,7 @@ function ElicitationURLDialog({
                 color={focusedButton === 'accept' ? 'success' : undefined}
                 dimColor={focusedButton !== 'accept'}
               >
-                {' Accept  '}
+                {userConfirmsCompletion ? " I'm done, continue  " : ' Accept  '}
               </Text>
             </>
           )}
