@@ -108,14 +108,40 @@ export function powerShellPayloadSuggestions(
   return suggestions as PermissionUpdate[]
 }
 
-/** densable lUA — S3(suggestions, J0s, Ubn(PowerShell), Z0s). */
+function filterDirectoryGrantSuggestions(
+  suggestions: unknown,
+): unknown[] | null {
+  if (!Array.isArray(suggestions)) return null
+  try {
+    return suggestions.filter(
+      item =>
+        typeof item === 'object' &&
+        item !== null &&
+        'type' in item &&
+        (item as { type?: unknown }).type === 'addDirectories',
+    )
+  } catch {
+    return null
+  }
+}
+
+/** densable lUA / g8e — S3(suggestions, J0s, Ubn(PowerShell), Z0s); brr when !classifierApprovable. */
 export function buildPowerShellSuggestionsRow(
   payload: PowerShellPermissionPayload,
 ): PowerShellSuggestionsRow | null {
-  if (!shouldShowPowerShellSuggestions(payload)) return null
-  const suggestions = (
+  if (
+    isPowerShellCommandWithheld(payload) ||
+    payload.isAskCappedByOrg === true ||
+    payload.requestSource?.type === 'remote-agent'
+  ) {
+    return null
+  }
+  const rawSuggestions = (
     payload.permissionResult as { suggestions?: unknown } | null
   )?.suggestions
+  const suggestions = isClassifierNotApprovable(payload.permissionResult)
+    ? filterDirectoryGrantSuggestions(rawSuggestions)
+    : rawSuggestions
   return mintConsentRow(suggestions, {
     displayedTypes: SHELL_DISPLAYED_TYPES,
     labelPredicate: rule => isShellConsentLabelRule(rule, POWERSHELL_TOOL_NAME),

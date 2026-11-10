@@ -1,4 +1,5 @@
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js';
+import { isClassifierNotApprovable } from '../../../dialog/classifierVeto.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
 import {
@@ -63,24 +64,26 @@ export function powershellToolUseOptions({
   // non-editable suggestions label. The editable input can't represent
   // directory permissions or Read-tool rules, so fall back to the label when
   // those are present.
+  const classifierVetoed = isClassifierNotApprovable(permissionResult);
+  const effectiveSuggestions = classifierVetoed ? suggestions.filter(s => s.type === 'addDirectories') : suggestions;
   if (
     shouldShowPersistentAllowOption({
-      baseAllowed: shouldShowAlwaysAllowOptions() && suggestions.length > 0,
+      baseAllowed: shouldShowAlwaysAllowOptions() && effectiveSuggestions.length > 0,
       permissionResult,
       tool,
       input,
       isAskCappedByOrg,
     })
   ) {
-    const hasNonPowerShellSuggestions = suggestions.some(
+    const hasNonPowerShellSuggestions = effectiveSuggestions.some(
       s =>
         s.type === 'addDirectories' ||
         (s.type === 'addRules' && s.rules?.some(r => r.toolName !== POWERSHELL_TOOL_NAME)),
     );
-    if (editablePrefix !== undefined && onEditablePrefixChange && !hasNonPowerShellSuggestions) {
+    if (!classifierVetoed && editablePrefix !== undefined && onEditablePrefixChange && !hasNonPowerShellSuggestions) {
       options.push({
         type: 'input',
-        label: 'Yes, and don\u2019t ask again for',
+        label: 'Yes, and don’t ask again for',
         value: 'yes-prefix-edited',
         placeholder: 'command prefix (e.g., Get-Process *)',
         initialValue: editablePrefix,
@@ -91,7 +94,7 @@ export function powershellToolUseOptions({
         resetCursorOnUpdate: true,
       });
     } else {
-      const label = generateShellSuggestionsLabel(suggestions, POWERSHELL_TOOL_NAME);
+      const label = generateShellSuggestionsLabel(effectiveSuggestions, POWERSHELL_TOOL_NAME);
       if (label) {
         options.push({
           label,

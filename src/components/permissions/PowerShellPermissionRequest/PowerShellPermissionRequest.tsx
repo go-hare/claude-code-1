@@ -1,22 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
-import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../../services/analytics/index.js';
 import { sanitizeToolNameForAnalytics } from '../../../services/analytics/metadata.js';
+import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js';
 import { getDestructiveCommandWarning } from '@claude-code/builtin-tools/tools/PowerShellTool/destructiveCommandWarning.js';
 import { PowerShellTool } from '@claude-code/builtin-tools/tools/PowerShellTool/PowerShellTool.js';
 import { isAllowlistedCommand } from '@claude-code/builtin-tools/tools/PowerShellTool/readOnlyValidation.js';
+import {
+  resolvePermissionRequestSource,
+  type PermissionRequestSourceContext,
+} from '../../../dialog/permissionRequestSource.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
 import { getCompoundCommandPrefixesStatic } from '../../../utils/powershell/staticPrefix.js';
+import { SandboxManager } from '../../../utils/sandbox/sandbox-adapter.js';
 import { Select } from '../../CustomSelect/select.js';
 import { type UnaryEvent, usePermissionRequestLogging } from '../hooks.js';
-import { PermissionDecisionDebugInfo } from '../PermissionDecisionDebugInfo.js';
 import { PermissionDialog } from '../PermissionDialog.js';
-import { PermissionExplainerContent, usePermissionExplainerUI } from '../PermissionExplanation.js';
 import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
@@ -31,12 +34,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
   const { command, description } = PowerShellTool.inputSchema.parse(toolUseConfirm.input);
 
   const [theme] = useTheme();
-  const explainerState = usePermissionExplainerUI({
-    toolName: toolUseConfirm.tool.name,
-    toolInput: toolUseConfirm.input,
-    toolDescription: toolUseConfirm.description,
-    messages: toolUseContext.messages,
-  });
   const {
     yesInputMode,
     noInputMode,
@@ -54,13 +51,29 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
     toolUseConfirm,
     onDone,
     onReject,
-    explainerVisible: explainerState.visible,
+    explainerVisible: false,
   });
-  const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
-    ? getDestructiveCommandWarning(command)
-    : null;
-
-  const [showPermissionDebug, setShowPermissionDebug] = useState(false);
+  const requestSource = useMemo(
+    () => resolvePermissionRequestSource(toolUseContext as unknown as PermissionRequestSourceContext),
+    [toolUseContext],
+  );
+  const { destructiveWarning, sandboxingEnabled, isSandboxed } = useMemo(() => {
+    const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
+      ? getDestructiveCommandWarning(command)
+      : null;
+    const sandboxingEnabled = SandboxManager.isSandboxingEnabled();
+    const dangerouslyDisableSandbox =
+      (toolUseConfirm.input as { dangerouslyDisableSandbox?: unknown } | undefined)?.dangerouslyDisableSandbox === true;
+    const isSandboxed =
+      sandboxingEnabled &&
+      requestSource?.type !== 'remote-agent' &&
+      shouldUseSandbox({
+        command,
+        dangerouslyDisableSandbox,
+        shellType: 'powershell',
+      });
+    return { destructiveWarning, sandboxingEnabled, isSandboxed };
+  }, [command, toolUseConfirm.input, requestSource]);
 
   // Editable prefix — compute static prefix locally (no LLM call).
   // Initialize synchronously to the raw command for single-line commands so
@@ -85,7 +98,7 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
       .then(prefixes => {
         if (cancelled || hasUserEditedPrefix.current) return;
         if (prefixes.length > 0) {
-          setEditablePrefix(`${prefixes[0]}:*`);
+          setEditablePrefix(`${prefixes[0]} *`);
         }
       })
       .catch(() => {});
@@ -123,14 +136,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
     [toolUseConfirm, yesInputMode, noInputMode, editablePrefix, onEditablePrefixChange],
   );
 
-  // Toggle permission debug info with keybinding
-  const handleToggleDebug = useCallback(() => {
-    setShowPermissionDebug(prev => !prev);
-  }, []);
-  useKeybinding('permission:toggleDebug', handleToggleDebug, {
-    context: 'Confirmation',
-  });
-
   function onSelect(value: string) {
     // Map options to numeric values for analytics (strings not allowed in logEvent)
     const optionIndex: Record<string, number> = {
@@ -141,7 +146,6 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
     };
     logEvent('tengu_permission_request_option_selected', {
       option_index: optionIndex[value],
-      explainer_visible: explainerState.visible,
     });
 
     const toolNameForAnalytics = sanitizeToolNameForAnalytics(
@@ -211,68 +215,65 @@ export function PowerShellPermissionRequest(props: PermissionRequestProps): Reac
     }
   }
 
+  const networkAllowHosts = (toolUseConfirm as { networkAllowHosts?: readonly string[] }).networkAllowHosts;
+
   return (
-    <PermissionDialog workerBadge={workerBadge} title="PowerShell command" innerPaddingX={0}>
+    <PermissionDialog
+      workerBadge={workerBadge}
+      requestSource={requestSource}
+      title={sandboxingEnabled && !isSandboxed ? 'PowerShell command (unsandboxed)' : 'PowerShell command'}
+      innerPaddingX={0}
+    >
       {toolUseConfirm.description ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor>{toolUseConfirm.description}</Text>
+          <PermissionPreviewGutter multiline={toolUseConfirm.description.includes('\n')}>
+            <Text dimColor>{toolUseConfirm.description}</Text>
+          </PermissionPreviewGutter>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
         <PermissionPreviewGutter multiline={command.includes('\n')}>
-          <Text dimColor={explainerState.visible}>
-            {PowerShellTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}
-          </Text>
+          <Text>{PowerShellTool.renderToolUseMessage({ command, description }, { theme, verbose: true })}</Text>
         </PermissionPreviewGutter>
       </PermissionOverflowBox>
-      <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
-      {showPermissionDebug ? (
-        <>
-          <PermissionDecisionDebugInfo permissionResult={toolUseConfirm.permissionResult} toolName="PowerShell" />
-          {toolUseContext.options.debug && (
-            <Box justifyContent="flex-end" marginTop={1}>
-              <Text dimColor>Ctrl-D to hide debug info</Text>
-            </Box>
-          )}
-        </>
-      ) : (
-        <>
-          <Box flexDirection="column" paddingX={1}>
-            <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="command" />
-            {destructiveWarning && (
-              <Box marginBottom={1}>
-                <Text color="warning">{destructiveWarning}</Text>
-              </Box>
-            )}
-            <Text>Do you want to proceed?</Text>
-            <Select
-              options={options}
-              inlineDescriptions
-              onChange={onSelect}
-              onCancel={() => handleReject()}
-              onFocus={handleFocus}
-              onInputModeToggle={handleInputModeToggle}
-            />
-          </Box>
-          <Box justifyContent="space-between" marginTop={1} paddingX={1}>
-            <Text dimColor>
-              <Byline>
-                <KeyboardShortcutHint shortcut="escape" action="cancel" />
-                {(focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode) ? (
-                  <KeyboardShortcutHint shortcut="tab" action="amend" />
-                ) : null}
-                {explainerState.enabled ? (
-                  <KeyboardShortcutHint
-                    shortcut={explainerState.chord}
-                    action={explainerState.visible ? 'hide' : 'explain'}
-                  />
-                ) : null}
-              </Byline>
+      <Box flexDirection="column" paddingX={1}>
+        {networkAllowHosts !== undefined && networkAllowHosts.length > 0 ? (
+          <Box marginBottom={1}>
+            <Text>
+              Also lets this command reach, beyond the sandbox allowlist:{' '}
+              <Text bold>{networkAllowHosts.slice(0, 8).join(', ')}</Text>
+              {networkAllowHosts.length > 8
+                ? ` (+${networkAllowHosts.length - 8} more, ${networkAllowHosts.length} in all)`
+                : ''}
             </Text>
-            {toolUseContext.options.debug && <Text dimColor>Ctrl+d to show debug info</Text>}
           </Box>
-        </>
-      )}
+        ) : null}
+        <PermissionRuleExplanation permissionResult={toolUseConfirm.permissionResult} toolType="command" />
+        {destructiveWarning && (
+          <Box marginBottom={1}>
+            <Text color="warning">{destructiveWarning}</Text>
+          </Box>
+        )}
+        <Text>Do you want to proceed?</Text>
+        <Select
+          options={options}
+          inlineDescriptions
+          onChange={onSelect}
+          onCancel={() => handleReject()}
+          onFocus={handleFocus}
+          onInputModeToggle={handleInputModeToggle}
+        />
+      </Box>
+      <Box justifyContent="space-between" marginTop={1} paddingX={1}>
+        <Text dimColor>
+          <Byline>
+            <KeyboardShortcutHint shortcut="escape" action="cancel" />
+            {(focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode) ? (
+              <KeyboardShortcutHint shortcut="tab" action="amend" />
+            ) : null}
+          </Byline>
+        </Text>
+      </Box>
     </PermissionDialog>
   );
 }

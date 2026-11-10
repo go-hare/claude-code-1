@@ -107,14 +107,40 @@ export function bashPayloadSuggestions(
   return suggestions as PermissionUpdate[]
 }
 
-/** densable jNA — S3(suggestions, J0s, Ubn(Bash, unu), Z0s). */
+function filterDirectoryGrantSuggestions(
+  suggestions: unknown,
+): unknown[] | null {
+  if (!Array.isArray(suggestions)) return null
+  try {
+    return suggestions.filter(
+      item =>
+        typeof item === 'object' &&
+        item !== null &&
+        'type' in item &&
+        (item as { type?: unknown }).type === 'addDirectories',
+    )
+  } catch {
+    return null
+  }
+}
+
+/** densable jNA / v6e — S3(suggestions, J0s, Ubn(Bash, unu), Z0s); brr when !classifierApprovable. */
 export function buildBashSuggestionsRow(
   payload: BashPermissionPayload,
 ): BashSuggestionsRow | null {
-  if (!shouldShowBashSuggestions(payload)) return null
-  const suggestions = (
+  if (
+    isBashCommandWithheld(payload) ||
+    payload.isAskCappedByOrg === true ||
+    payload.requestSource?.type === 'remote-agent'
+  ) {
+    return null
+  }
+  const rawSuggestions = (
     payload.permissionResult as { suggestions?: unknown } | null
   )?.suggestions
+  const suggestions = isClassifierNotApprovable(payload.permissionResult)
+    ? filterDirectoryGrantSuggestions(rawSuggestions)
+    : rawSuggestions
   return mintConsentRow(suggestions, {
     displayedTypes: SHELL_DISPLAYED_TYPES,
     labelPredicate: rule =>

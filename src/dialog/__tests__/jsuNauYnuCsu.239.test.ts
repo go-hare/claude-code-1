@@ -576,7 +576,7 @@ describe('source-lock Ynu / csu / nau / Iiu notify', () => {
       join(root, 'src/dialog/dialogs/PermissionFileDialog.tsx'),
       'utf8',
     )
-    expect(src).toContain("answer({ behavior: 'deny' })")
+    expect(src).toContain("answer({ behavior: 'cancelled' })")
     expect(src).toContain('mintFileStandingRow')
     expect(src).toContain('filePermissionQuestionNode')
     expect(src).toContain('useAppState(s => s.toolPermissionContext)')

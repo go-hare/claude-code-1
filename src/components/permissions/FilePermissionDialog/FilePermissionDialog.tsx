@@ -1,15 +1,19 @@
 import { relative } from 'path';
 import React, { useMemo } from 'react';
+import { getOriginalCwd } from '../../../bootstrap/state.js';
 import { useDiffInIDE } from '../../../hooks/useDiffInIDE.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import type { ToolUseContext } from '../../../Tool.js';
 import { getLanguageName } from '../../../utils/cliHighlight.js';
 import { getCwd } from '../../../utils/cwd.js';
 import { getFsImplementation, safeResolvePath } from '../../../utils/fsOperations.js';
 import { expandPath } from '../../../utils/path.js';
+import { resolveSandboxFilesystemDisabled, SandboxManager } from '../../../utils/sandbox/sandbox-adapter.js';
+import { getSettingsForSource } from '../../../utils/settings/settings.js';
 import type { CompletionType } from '../../../utils/unaryLogging.js';
 import { Select } from '../../CustomSelect/index.js';
 import { ShowInIDEPrompt } from '../../ShowInIDEPrompt.js';
+import { toTildePath } from '../dontAskAgainLabel.js';
 import { usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import type { ToolUseConfirm } from '../PermissionRequest.js';
@@ -17,7 +21,11 @@ import type { WorkerBadgeProps } from '../WorkerBadge.js';
 import type { IDEDiffSupport } from './ideDiffConfig.js';
 import type { FileOperationType, PermissionOption } from './permissionOptions.js';
 import { type ToolInput, useFilePermissionDialog } from './useFilePermissionDialog.js';
-import { OUTSIDE_READS_DIALOG_QUESTION, OUTSIDE_READS_DIALOG_TITLE } from '../../../utils/permissions/outsideReads.js';
+import {
+  outsideReadsExplainer,
+  OUTSIDE_READS_DIALOG_QUESTION,
+  OUTSIDE_READS_DIALOG_TITLE,
+} from '../../../utils/permissions/outsideReads.js';
 
 export type FilePermissionDialogProps<T extends ToolInput = ToolInput> = {
   // Required props from PermissionRequestProps
@@ -214,11 +222,17 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     <Box paddingX={1} marginBottom={1}>
       <Text color="warning">
         {isSymlinkOutsideCwd
-          ? `This will modify ${symlinkTarget} (outside working directory) via a symlink`
-          : `Symlink target: ${symlinkTarget}`}
+          ? `This will modify ${toTildePath(symlinkTarget)} (outside working directory) via a symlink`
+          : `Symlink target: ${toTildePath(symlinkTarget)}`}
       </Text>
     </Box>
   ) : null;
+
+  const sandboxFenced =
+    SandboxManager.isSandboxingEnabled() &&
+    !resolveSandboxFilesystemDisabled() &&
+    getSettingsForSource('policySettings')?.sandbox?.filesystem?.allowManagedReadPathsOnly !== true &&
+    !/[*?[\]]/.test(getOriginalCwd());
 
   return (
     <>
@@ -230,6 +244,11 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
       >
         {symlinkWarning}
         {content}
+        {offersBlockOutsideReads && (
+          <Box paddingX={1} marginBottom={1}>
+            <Text dimColor>{outsideReadsExplainer(sandboxFenced)}</Text>
+          </Box>
+        )}
         <Box flexDirection="column" paddingX={1}>
           {offersBlockOutsideReads ? (
             <Text>{OUTSIDE_READS_DIALOG_QUESTION}</Text>
@@ -267,9 +286,12 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
       </PermissionDialog>
       <Box paddingX={1} marginTop={1}>
         <Text dimColor>
-          Esc to reject
-          {((focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode)) &&
-            ' · Tab to add feedback'}
+          <Byline>
+            <KeyboardShortcutHint shortcut="escape" action="cancel" />
+            {(focusedOption === 'yes' && !yesInputMode) || (focusedOption === 'no' && !noInputMode) ? (
+              <KeyboardShortcutHint shortcut="tab" action="amend" />
+            ) : null}
+          </Byline>
         </Text>
       </Box>
     </>

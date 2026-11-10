@@ -1,27 +1,25 @@
 /**
- * densable Cmy — permission_bash DialogHost renderer.
+ * densable Cmy / v6e — permission_bash DialogHost renderer.
  *
- * Gold 2.1.239: jsu `vM(Byr,Cmy)`. Title `"Bash command"` (± unsandboxed).
- * Esc/onCancel → `{behavior:"deny"}`. jNA S3 + Z0s label. $Oo prefix is
+ * Gold 2.1.289 v6e (replaces 2.1.239 Cmy usePermissionExplainerUI / explainerState.chord /
+ * classifierState / isDisabled={classifierApproved} / Auto-approved / Attempting to auto-approve):
+ * Title `"Bash command"` (± unsandboxed). Esc/onCancel → `{behavior:"deny"}`.
+ * jNA S3 + Z0s label (brr directory grant when !classifierApprovable). $Oo prefix is
  * Xxs(YAe seed, edited). Qgy async seed `YAe(\`${p} *\`)`. IOo +
  * Mut tab-amend footer. Gold `$e` Select (not o5). destructive GB.
  * m0n workflow auto-mode. Host answer; no dequeue.
  */
 import { getDestructiveCommandWarning } from '@claude-code/builtin-tools/tools/BashTool/destructiveCommandWarning.js';
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js';
-import figures from 'figures';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
 import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
-import {
-  PermissionExplainerContent,
-  usePermissionExplainerUI,
-} from '../../components/permissions/PermissionExplanation.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { logEvent } from '../../services/analytics/index.js';
 import { getCompoundCommandPrefixesStatic } from '../../utils/bash/prefix.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
@@ -52,8 +50,36 @@ import {
   WORKFLOW_PERMISSION_PROMPT_TRIGGER,
 } from '../permissionAutoMode.js';
 
+const MAX_DISPLAYED_NETWORK_HOSTS = 8;
+const MAX_NETWORK_HOSTS_CHARS = 160;
+
+function renderNetworkAllowHosts(hosts: readonly string[] | undefined): React.ReactNode {
+  if (hosts === undefined || hosts.length === 0) return null;
+  const first = hosts[0]!;
+  const firstTrimmed =
+    first.length > MAX_NETWORK_HOSTS_CHARS ? `…${first.slice(first.length - (MAX_NETWORK_HOSTS_CHARS - 1))}` : first;
+  const shown = [firstTrimmed];
+  let used = Math.min(shown[0]!.length + 2, MAX_NETWORK_HOSTS_CHARS / 2);
+  for (const host of hosts.slice(1)) {
+    if (shown.length >= MAX_DISPLAYED_NETWORK_HOSTS) break;
+    if (used + host.length > MAX_NETWORK_HOSTS_CHARS) continue;
+    shown.push(host);
+    used += host.length + 2;
+  }
+  const remaining = hosts.length - shown.length;
+  const more = remaining > 0 ? ` (+${remaining} more, ${hosts.length} in all)` : '';
+  return (
+    <Box marginBottom={1}>
+      <Text>
+        Also lets this command reach, beyond the sandbox allowlist: <Text bold>{shown.join(', ')}</Text>
+        {more}
+      </Text>
+    </Box>
+  );
+}
+
 export function PermissionBashDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
-  const p = payload as BashPermissionPayload;
+  const p = payload as BashPermissionPayload & { networkAllowHosts?: readonly string[] };
   const row = shouldShowBashPersistentAllow(p) ? buildBashSuggestionsRow(p) : null;
   const { offered, canOfferAutoMode, enableAutoMode } = useWorkflowAutoModeOffer(p.requestSource);
   const withheld = isBashCommandWithheld(p);
@@ -73,15 +99,10 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
     typeof (p.input as { command?: unknown } | undefined)?.command === 'string'
       ? (p.input as { command: string }).command
       : p.command;
-  const explainerState = usePermissionExplainerUI({
-    toolName: p.toolName,
-    toolInput: p.input,
-    toolDescription: p.description,
-    messages: [],
-  });
-  const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
-    ? getDestructiveCommandWarning(command)
-    : null;
+  const destructiveWarning =
+    !withheld && getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
+      ? getDestructiveCommandWarning(command)
+      : null;
   const {
     acceptFeedback,
     rejectFeedback,
@@ -131,17 +152,6 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
     };
   }, [command, isCompound]);
 
-  const classifierState = p.classifierState;
-  const classifierApproved = classifierState === 'approved';
-  const classifierChecking = classifierState === 'checking';
-  const classifierSubtitle = classifierApproved ? (
-    <Text>
-      <Text color="success">{figures.tick} Auto-approved</Text>
-    </Text>
-  ) : classifierChecking ? (
-    <Text dimColor>Attempting to auto-approve{'\u2026'}</Text>
-  ) : undefined;
-
   const options: OptionWithDescription<BashPermissionChoice>[] = [];
   if (yesInputMode) {
     options.push({
@@ -158,7 +168,7 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
   if (row !== null) {
     const suggestions = row.applies;
     const canEditPrefix =
-      editablePrefix !== undefined && !bashSuggestionsHaveNonBash(suggestions) && suggestions.length > 0;
+      !vetoed && editablePrefix !== undefined && !bashSuggestionsHaveNonBash(suggestions) && suggestions.length > 0;
     if (canEditPrefix) {
       options.push({
         type: 'input',
@@ -198,43 +208,38 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
   return (
     <PermissionDialog
       title={bashCommandTitle(p)}
-      subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : classifierSubtitle}
+      subtitle={showEnableAutoModeOption ? <Text bold>{BASH_AUTO_MODE_TIP}</Text> : undefined}
       requestSource={p.requestSource}
       innerPaddingX={0}
     >
       {description !== '' ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor>{description}</Text>
+          <PermissionPreviewGutter multiline={description.includes('\n')}>
+            <Text dimColor>{description}</Text>
+          </PermissionPreviewGutter>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
         <PermissionPreviewGutter multiline={preview.kind === 'full' && preview.needsGutter}>
-          {explainerState.visible ? (
-            <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
-          ) : preview.kind === 'withheld' ? (
-            <Text dimColor>{preview.marker}</Text>
-          ) : (
-            <Text>{preview.text}</Text>
-          )}
+          {preview.kind === 'withheld' ? <Text dimColor>{preview.marker}</Text> : <Text>{preview.text}</Text>}
         </PermissionPreviewGutter>
       </PermissionOverflowBox>
-      <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       <Box flexDirection="column" paddingX={1}>
+        {renderNetworkAllowHosts(p.networkAllowHosts)}
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="command" />
         {destructiveWarning ? (
           <Box marginBottom={1}>
-            <Text color="warning" dimColor={classifierApproved}>
-              {destructiveWarning}
-            </Text>
+            <Text color="warning">{destructiveWarning}</Text>
           </Box>
         ) : null}
-        <Text dimColor={classifierApproved}>Do you want to proceed?</Text>
+        <Text>Do you want to proceed?</Text>
         <Select
           options={options}
           inlineDescriptions
-          isDisabled={classifierApproved}
           onChange={choice => {
-            if (classifierApproved) return;
+            logEvent('tengu_permission_request_option_selected', {
+              option_index: options.findIndex(o => o.value === choice) + 1,
+            });
             if (choice === 'yes-enable-auto-mode') {
               enableAutoMode(offered ? WORKFLOW_PERMISSION_PROMPT_TRIGGER : BASH_PERMISSION_PROMPT_UPSELL_TRIGGER);
             }
@@ -268,7 +273,6 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
             );
           }}
           onCancel={() => {
-            if (classifierApproved) return;
             logEscape();
             answer({ behavior: 'deny' });
           }}
@@ -281,12 +285,6 @@ export function PermissionBashDialog({ payload, answer }: DialogRendererProps): 
           <Byline>
             <KeyboardShortcutHint shortcut="escape" action="cancel" />
             {showAmendHint ? <KeyboardShortcutHint shortcut="tab" action="amend" /> : null}
-            {explainerState.enabled ? (
-              <KeyboardShortcutHint
-                shortcut={explainerState.chord}
-                action={explainerState.visible ? 'hide' : 'explain'}
-              />
-            ) : null}
           </Byline>
         </Text>
       </Box>

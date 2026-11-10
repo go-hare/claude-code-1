@@ -27,6 +27,7 @@ import {
   permissionRuleSourceDisplayString,
 } from '../../../utils/permissions/permissions.js';
 import type { UnreachableRule } from '../../../utils/permissions/shadowedRuleDetection.js';
+import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { jsonStringify } from '../../../utils/slowOperations.js';
 import { Pane, Tab, Tabs, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
 import { SearchBox } from '../../SearchBox.js';
@@ -181,10 +182,18 @@ function RulesTabContent(props: RulesTabContentProps): React.ReactNode {
       </Box>
       <Select
         options={options}
-        onChange={onSelect}
+        onChange={value => {
+          if (headerFocused) {
+            blurHeader();
+            onHeaderFocusChange?.(false);
+          }
+          onSelect(value);
+        }}
         onCancel={onCancel}
         visibleOptionCount={Math.min(10, options.length)}
         isDisabled={isSearchMode || headerFocused}
+        hidePromptWhileDisabled={true}
+        pointerWhileDisabled={!isSearchMode}
         defaultFocusValue={lastFocusedRuleKey}
         onUpFromFirstItem={focusHeader}
       />
@@ -239,10 +248,12 @@ type Props = {
 export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props): React.ReactNode {
   const hasDenials = getAutoModeDenials().length > 0;
   const defaultTab: TabType = initialTab ?? (hasDenials ? 'recent' : 'allow');
+  const [selectedTab, setSelectedTab] = useState<TabType>(defaultTab);
   const [changes, setChanges] = useState<string[]>([]);
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const setAppState = useSetAppState();
   const isTerminalFocused = useTerminalFocus();
+  const isScreenReader = isScreenReaderModeEnabled();
 
   // Ref not state: RecentDenialsTab updates don't need to trigger parent
   // re-render (only read on exit), and re-renders trip the modal ScrollBox
@@ -650,9 +661,11 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     <Box flexDirection="column" onKeyDown={handleKeyDown}>
       <Pane color="permission">
         <Tabs
-          title="Permissions:"
+          title="Permissions"
           color="permission"
           defaultTab={defaultTab}
+          selectedTab={selectedTab}
+          onTabChange={tabId => setSelectedTab(tabId as TabType)}
           hidden={isHidden}
           initialHeaderFocused={!hasDenials}
           navFromContent={!isSearchMode}
@@ -691,18 +704,18 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
             </Tab>,
           ]}
         </Tabs>
-        <Box marginTop={1} paddingLeft={1}>
+        <Box marginTop={1}>
           <Text dimColor>
             {exitState.pending ? (
-              <>Press {exitState.keyName} again to exit</>
+              <>Press {exitState.keyName} again to cancel</>
             ) : headerFocused ? (
-              <>←/→ tab switch · ↓ return · Esc cancel</>
+              <>←/→ to switch · ↓ to select · Esc to cancel</>
             ) : isSearchMode ? (
-              <>Type to filter · Enter/↓ select · ↑ tabs · Esc clear</>
-            ) : hasDenials && defaultTab === 'recent' ? (
-              <>Enter approve · r retry · ↑↓ navigate · ←/→ switch · Esc cancel</>
+              <>Type to filter · Enter/↓ to select · ↑ to tabs · Esc to clear</>
+            ) : hasDenials && selectedTab === 'recent' ? (
+              <>Enter to approve · r to retry · {isScreenReader ? '' : '↑/↓ to navigate · '}Esc to cancel</>
             ) : (
-              <>↑↓ navigate · Enter select · Type to search · ←/→ switch · Esc cancel</>
+              <>{isScreenReader ? '' : '↑/↓ to navigate · Enter to select · '}←/→ to switch · Esc to cancel</>
             )}
           </Text>
         </Box>

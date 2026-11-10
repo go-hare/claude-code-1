@@ -1,8 +1,9 @@
 /**
- * densable tyy — permission_powershell DialogHost renderer.
+ * densable tyy / g8e — permission_powershell DialogHost renderer.
  *
- * Gold 2.1.239: jsu `vM($no,tyy)`. Title `"PowerShell command"` (± unsandboxed).
- * Esc/onCancel → `{behavior:"deny"}`. lUA S3 + Z0s. EMs prefix is
+ * Gold 2.1.289 g8e (replaces 2.1.239 tyy usePermissionExplainerUI / explainerState.chord):
+ * Title `"PowerShell command"` (± unsandboxed). Esc/onCancel → `{behavior:"deny"}`.
+ * lUA S3 + Z0s (brr directory grant when !classifierApprovable). EMs prefix is
  * Xxs(YAe seed, edited). Qgy async `YAe(\`${p} *\`)`. IOo + Mut
  * tab-amend footer. Gold `$e` Select (not o5). destructive GB.
  * Host answer; no dequeue.
@@ -14,13 +15,10 @@ import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
 import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
-import {
-  PermissionExplainerContent,
-  usePermissionExplainerUI,
-} from '../../components/permissions/PermissionExplanation.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { logEvent } from '../../services/analytics/index.js';
 import { getCompoundCommandPrefixesStatic } from '../../utils/powershell/staticPrefix.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
@@ -28,6 +26,8 @@ import { sanitizeEditablePrefix } from '../consentRow.js';
 import { usePermissionSelectFeedback } from '../permissionSelectFeedback.js';
 import {
   buildPowerShellSuggestionsRow,
+  isPowerShellAlwaysAllowVetoed,
+  isPowerShellCommandWithheld,
   POWERSHELL_PREFIX_PLACEHOLDER,
   type PowerShellPermissionChoice,
   type PowerShellPermissionPayload,
@@ -39,24 +39,49 @@ import {
   shouldShowPowerShellPersistentAllow,
 } from '../permissionPowerShell.js';
 
+const MAX_DISPLAYED_NETWORK_HOSTS = 8;
+const MAX_NETWORK_HOSTS_CHARS = 160;
+
+function renderNetworkAllowHosts(hosts: readonly string[] | undefined): React.ReactNode {
+  if (hosts === undefined || hosts.length === 0) return null;
+  const first = hosts[0]!;
+  const firstTrimmed =
+    first.length > MAX_NETWORK_HOSTS_CHARS ? `…${first.slice(first.length - (MAX_NETWORK_HOSTS_CHARS - 1))}` : first;
+  const shown = [firstTrimmed];
+  let used = Math.min(shown[0]!.length + 2, MAX_NETWORK_HOSTS_CHARS / 2);
+  for (const host of hosts.slice(1)) {
+    if (shown.length >= MAX_DISPLAYED_NETWORK_HOSTS) break;
+    if (used + host.length > MAX_NETWORK_HOSTS_CHARS) continue;
+    shown.push(host);
+    used += host.length + 2;
+  }
+  const remaining = hosts.length - shown.length;
+  const more = remaining > 0 ? ` (+${remaining} more, ${hosts.length} in all)` : '';
+  return (
+    <Box marginBottom={1}>
+      <Text>
+        Also lets this command reach, beyond the sandbox allowlist: <Text bold>{shown.join(', ')}</Text>
+        {more}
+      </Text>
+    </Box>
+  );
+}
+
 export function PermissionPowerShellDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
-  const p = payload as PowerShellPermissionPayload;
+  const p = payload as PowerShellPermissionPayload & { networkAllowHosts?: readonly string[] };
   const row = shouldShowPowerShellPersistentAllow(p) ? buildPowerShellSuggestionsRow(p) : null;
+  const withheld = isPowerShellCommandWithheld(p);
+  const vetoed = isPowerShellAlwaysAllowVetoed(p);
   const preview = powerShellCommandPreview(p);
   const description = typeof p.description === 'string' ? p.description : '';
   const command =
     typeof (p.input as { command?: unknown } | undefined)?.command === 'string'
       ? (p.input as { command: string }).command
       : p.command;
-  const explainerState = usePermissionExplainerUI({
-    toolName: p.toolName,
-    toolInput: p.input,
-    toolDescription: p.description,
-    messages: [],
-  });
-  const destructiveWarning = getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
-    ? getDestructiveCommandWarning(command)
-    : null;
+  const destructiveWarning =
+    !withheld && getFeatureValue_CACHED_MAY_BE_STALE('tengu_destructive_command_warning', false)
+      ? getDestructiveCommandWarning(command)
+      : null;
   const {
     acceptFeedback,
     rejectFeedback,
@@ -118,7 +143,7 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
   }
   if (row !== null) {
     const suggestions = row.applies;
-    const canEditPrefix = editablePrefix !== undefined && !powerShellSuggestionsHaveNonShell(suggestions);
+    const canEditPrefix = !vetoed && editablePrefix !== undefined && !powerShellSuggestionsHaveNonShell(suggestions);
     if (canEditPrefix) {
       options.push({
         type: 'input',
@@ -156,22 +181,18 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
     <PermissionDialog title={powerShellCommandTitle(p)} requestSource={p.requestSource} innerPaddingX={0}>
       {description !== '' ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text dimColor>{description}</Text>
+          <PermissionPreviewGutter multiline={description.includes('\n')}>
+            <Text dimColor>{description}</Text>
+          </PermissionPreviewGutter>
         </Box>
       ) : null}
       <PermissionOverflowBox paddingX={1}>
         <PermissionPreviewGutter multiline={preview.kind === 'full' && preview.needsGutter}>
-          {explainerState.visible ? (
-            <Text dimColor>{preview.kind === 'withheld' ? preview.marker : preview.text}</Text>
-          ) : preview.kind === 'withheld' ? (
-            <Text dimColor>{preview.marker}</Text>
-          ) : (
-            <Text>{preview.text}</Text>
-          )}
+          {preview.kind === 'withheld' ? <Text dimColor>{preview.marker}</Text> : <Text>{preview.text}</Text>}
         </PermissionPreviewGutter>
       </PermissionOverflowBox>
-      <PermissionExplainerContent visible={explainerState.visible} promise={explainerState.promise} />
       <Box flexDirection="column" paddingX={1}>
+        {renderNetworkAllowHosts(p.networkAllowHosts)}
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="command" />
         {destructiveWarning ? (
           <Box marginBottom={1}>
@@ -183,6 +204,9 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
           options={options}
           inlineDescriptions
           onChange={choice => {
+            logEvent('tengu_permission_request_option_selected', {
+              option_index: options.findIndex(o => o.value === choice) + 1,
+            });
             if (choice === 'yes') {
               const feedback = acceptFeedback.trim();
               logSubmitted('accept', feedback);
@@ -225,12 +249,6 @@ export function PermissionPowerShellDialog({ payload, answer }: DialogRendererPr
           <Byline>
             <KeyboardShortcutHint shortcut="escape" action="cancel" />
             {showAmendHint ? <KeyboardShortcutHint shortcut="tab" action="amend" /> : null}
-            {explainerState.enabled ? (
-              <KeyboardShortcutHint
-                shortcut={explainerState.chord}
-                action={explainerState.visible ? 'hide' : 'explain'}
-              />
-            ) : null}
           </Byline>
         </Text>
       </Box>

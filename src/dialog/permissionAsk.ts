@@ -25,6 +25,29 @@ import type { PermissionPromptResult } from './specs/permissionKinds.js'
 /** densable hpy */
 export const OFY_PREVIEW_CAP = 2000
 
+/** densable Kfe */
+export const WITHHELD_PREVIEW_TEXT =
+  '(preview cannot be shown in full — compare the option labels and descriptions instead)'
+
+const PREVIEW_WITHHOLD_UNICODE_RE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/u
+
+function hasWithholdControlChars(value: string): boolean {
+  if (PREVIEW_WITHHOLD_UNICODE_RE.test(value)) return true
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (
+      (code >= 0 && code <= 8) ||
+      code === 11 ||
+      code === 12 ||
+      (code >= 14 && code <= 31) ||
+      (code >= 127 && code <= 159)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 /** densable Ofy preview */
 export type AskPreview =
   | { kind: 'full'; markdown: string }
@@ -76,10 +99,7 @@ export type AskUserQuestionAnnotation = {
 
 /** densable UVe — visible after FFFD/ws collapse. oge/WSt invent-ban. */
 function isOfyDisplayable(value: string): boolean {
-  const collapsed = value
-    .replace(/\uFFFD/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const collapsed = value.replace(/�/g, '').replace(/\s+/g, ' ').trim()
   return collapsed !== '' && stringWidth(collapsed) > 0
 }
 
@@ -97,6 +117,7 @@ export function mapOfyPreview(raw: unknown): AskPreview | undefined {
   if (typeof raw !== 'string') return undefined
   if (raw.length > OFY_PREVIEW_CAP) return { kind: 'withheld' }
   if (!isOfyDisplayable(raw)) return undefined
+  if (hasWithholdControlChars(raw)) return { kind: 'withheld' }
   return { kind: 'full', markdown: raw }
 }
 
@@ -289,32 +310,58 @@ export function formatAskUserQuestionAnswer(
   return label
 }
 
+function isPreviewQuestionForNotes(q: {
+  multiSelect?: boolean
+  options?: { preview?: unknown }[]
+}): boolean {
+  if (q.multiSelect) return false
+  if (!Array.isArray(q.options)) return true
+  return q.options.some(opt => opt.preview !== undefined)
+}
+
 function formatAskUserQuestionTranscript(
-  questions: { question: string }[],
+  questions: {
+    question: string
+    multiSelect?: boolean
+    options?: { preview?: unknown }[]
+  }[],
   answers: Record<string, string>,
+  questionStates?: Record<string, { textInputValue?: string }>,
 ): string {
   return questions
     .map(q => {
       const answer = answers[q.question]
-      if (answer) {
-        return `- "${q.question}"\n  Answer: ${answer}`
+      const notes = isPreviewQuestionForNotes(q)
+        ? questionStates?.[q.question]?.textInputValue?.trim()
+        : undefined
+      const lines = [
+        `- "${q.question}"`,
+        answer ? `  Answer: ${answer}` : '  (No answer provided)',
+      ]
+      if (notes) {
+        lines.push(`  User notes: ${notes}`)
       }
-      return `- "${q.question}"\n  (No answer provided)`
+      return lines.join('\n')
     })
     .join('\n')
 }
 
 /** DualInk analog Chat about this deny feedback. */
 export function formatAskUserQuestionChatAboutFeedback(
-  questions: { question: string }[],
+  questions: {
+    question: string
+    multiSelect?: boolean
+    options?: { preview?: unknown }[]
+  }[],
   answers: Record<string, string>,
+  questionStates?: Record<string, { textInputValue?: string }>,
 ): string {
   return `The user wants to clarify these questions.
     This means they may have additional information, context or questions for you.
     Take their response into account and then reformulate the questions if appropriate.
     Start by asking them what they would like to clarify.
 
-    Questions asked:\n${formatAskUserQuestionTranscript(questions, answers)}`
+    Questions asked:\n${formatAskUserQuestionTranscript(questions, answers, questionStates)}`
 }
 
 /** DualInk analog Skip interview deny feedback. */

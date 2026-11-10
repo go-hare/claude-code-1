@@ -4,15 +4,17 @@
  * Gold 2.1.239: jsu `vM(S4t,Mhy)`. yhy + E$A standing mint. Y$A
  * minted applies. X$A bold fileName. J$A notebook verbose/120 +
  * `_ou` remoteOldContent/skipLocalRead. Th symlink. Esc/onCancel →
- * `{behavior:"cancelled"}` (gold permission_file default; W() abort, not
- * ask-again). showingDiffInIDE doo KEEP. confirm:cycleMode
+ * `{behavior:"cancelled"}` (jsuIiuJiuWou lock). showingDiffInIDE doo KEEP. confirm:cycleMode
  * PermissionPrompt. Mut footer hint outside Cm. Host answer; no dequeue.
  */
 import { relative } from 'path';
 import React, { isValidElement, useCallback, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { getOriginalCwd } from '../../bootstrap/state.js';
 import { FileEditToolDiff } from '../../components/FileEditToolDiff.js';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
+import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
 import { toTildePath } from '../../components/permissions/dontAskAgainLabel.js';
 import { FileWriteToolDiff } from '../../components/permissions/FileWritePermissionRequest/FileWriteToolDiff.js';
@@ -22,6 +24,8 @@ import { useAppState } from '../../state/AppState.js';
 import type { NotebookCellType } from '../../types/notebook.js';
 import { getCwd } from '../../utils/cwd.js';
 import { isSupportedVSCodeTerminal } from '../../utils/ide.js';
+import { resolveSandboxFilesystemDisabled, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { getSettingsForSource } from '../../utils/settings/settings.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import type { FilePermissionContent } from '../filePermissionPreview.js';
 import {
@@ -35,12 +39,22 @@ import {
   resolveFilePermissionAnswer,
 } from '../permissionFile.js';
 import {
+  outsideReadsExplainer,
   OUTSIDE_READS_DIALOG_QUESTION,
   OUTSIDE_READS_OPTION_ALLOW,
   OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
   OUTSIDE_READS_OPTION_ASK_AGAIN,
   OUTSIDE_READS_OPTION_BLOCK,
 } from '../../utils/permissions/outsideReads.js';
+
+function isOutsideReadSandboxFenced(): boolean {
+  return (
+    SandboxManager.isSandboxingEnabled() &&
+    !resolveSandboxFilesystemDisabled() &&
+    getSettingsForSource('policySettings')?.sandbox?.filesystem?.allowManagedReadPathsOnly !== true &&
+    !/[*?[\]]/.test(getOriginalCwd())
+  );
+}
 
 function notebookCellType(raw: string | undefined): NotebookCellType | undefined {
   if (raw === 'code' || raw === 'markdown' || raw === 'raw') {
@@ -109,12 +123,15 @@ function contentPreview(
       const name = typeof payload.userFacingName === 'string' ? payload.userFacingName : '';
       const rendered = payload.renderedToolUseMessage;
       const inner = typeof rendered === 'string' || isValidElement(rendered) ? rendered : '';
+      const multiline = typeof inner === 'string' && `${name}(${inner})`.includes('\n');
       return (
-        <Box flexDirection="column" paddingX={2} paddingY={1}>
-          <Text>
-            {name}({inner})
-          </Text>
-        </Box>
+        <PermissionOverflowBox>
+          <PermissionPreviewGutter multiline={multiline}>
+            <Text>
+              {name}({inner})
+            </Text>
+          </PermissionPreviewGutter>
+        </PermissionOverflowBox>
       );
     }
   }
@@ -199,6 +216,11 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
               </Box>
             )
           : contentPreview(p.content, p.contentWithheld, p)}
+        {offersBlockOutsideReads && (
+          <Box paddingX={1} marginBottom={1}>
+            <Text dimColor>{outsideReadsExplainer(isOutsideReadSandboxFenced())}</Text>
+          </Box>
+        )}
         <Box flexDirection="column" paddingX={1}>
           <PermissionPrompt
             hostChrome

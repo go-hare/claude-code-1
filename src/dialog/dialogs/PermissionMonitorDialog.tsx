@@ -8,6 +8,8 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
+import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
 import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
@@ -27,9 +29,9 @@ function previewNode(preview: UrlPreview): React.ReactNode {
     return <Text dimColor>{preview.marker}</Text>;
   }
   return (
-    <Box flexDirection={preview.needsGutter ? 'column' : 'row'}>
+    <PermissionPreviewGutter multiline={preview.needsGutter}>
       <Text>{preview.text}</Text>
-    </Box>
+    </PermissionPreviewGutter>
   );
 }
 
@@ -42,7 +44,9 @@ function monitorBody(p: MonitorPermissionPayload): React.ReactNode {
           Poll <Text bold>{`${p.mcp.server}/${p.mcp.tool}`}</Text> every {seconds}s
         </Text>
         {p.mcp.argsDisplay !== undefined ? (
-          <Text dimColor>{`args: ${monitorPreviewText(p.mcp.argsDisplay)}`}</Text>
+          <PermissionPreviewGutter multiline={p.mcp.argsDisplay.kind === 'full' && p.mcp.argsDisplay.needsGutter}>
+            <Text dimColor>{`args: ${monitorPreviewText(p.mcp.argsDisplay)}`}</Text>
+          </PermissionPreviewGutter>
         ) : null}
       </>
     );
@@ -52,11 +56,11 @@ function monitorBody(p: MonitorPermissionPayload): React.ReactNode {
     const protocols = Array.isArray(p.ws.protocols) ? p.ws.protocols.filter(item => typeof item === 'string') : [];
     return (
       <>
-        <Box flexDirection={p.ws.url.kind === 'full' && p.ws.url.needsGutter ? 'column' : 'row'}>
+        <PermissionPreviewGutter multiline={p.ws.url.kind === 'full' && p.ws.url.needsGutter}>
           <Text>
             Open WebSocket <Text bold>{urlText}</Text>
           </Text>
-        </Box>
+        </PermissionPreviewGutter>
         {protocols.length > 0 ? (
           <Text>
             subprotocols: <Text bold>{protocols.join(', ')}</Text>
@@ -93,12 +97,14 @@ export function PermissionMonitorDialog({ payload, answer }: DialogRendererProps
   });
 
   return (
-    <PermissionDialog title="Monitor" requestSource={p.requestSource}>
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
-        {monitorBody(p)}
-        {monitorDescription !== '' ? <Text dimColor>{monitorDescription}</Text> : null}
+    <PermissionDialog title="Monitor" innerPaddingX={0} requestSource={p.requestSource}>
+      <Box flexDirection="column" paddingX={1}>
+        <PermissionPreviewGutter multiline={monitorDescription.includes('\n')}>
+          <Text dimColor>{monitorDescription}</Text>
+        </PermissionPreviewGutter>
       </Box>
-      <Box flexDirection="column">
+      <PermissionOverflowBox>{monitorBody(p)}</PermissionOverflowBox>
+      <Box flexDirection="column" paddingX={1}>
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType={toolType} />
         <PermissionPrompt
           options={options}

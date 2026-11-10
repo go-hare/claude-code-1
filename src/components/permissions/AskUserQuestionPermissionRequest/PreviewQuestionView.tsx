@@ -1,15 +1,15 @@
 import figures from 'figures';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Byline, Divider, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../../keybindings/useKeybinding.js';
-import { useAppState } from '../../../state/AppState.js';
 import type { Question } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
+import { type AskPreview, mapOfyPreview } from '../../../dialog/permissionAsk.js';
 import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
-import { Divider } from '@anthropic/ink';
 import TextInput from '../../TextInput.js';
+import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PreviewBox } from './PreviewBox.js';
 import { QuestionNavigationBar } from './QuestionNavigationBar.js';
@@ -18,6 +18,7 @@ import type { QuestionState } from './use-multiple-choice-state.js';
 type Props = {
   question: Question;
   questions: Question[];
+  optionPreviews?: (AskPreview | undefined)[];
   currentQuestionIndex: number;
   answers: Record<string, string>;
   questionStates: Record<string, QuestionState>;
@@ -31,7 +32,6 @@ type Props = {
   onTabPrev?: () => void;
   onTabNext?: () => void;
   onRespondToClaude: () => void;
-  onFinishPlanInterview: () => void;
 };
 
 /**
@@ -41,6 +41,7 @@ type Props = {
 export function PreviewQuestionView({
   question,
   questions,
+  optionPreviews,
   currentQuestionIndex,
   answers,
   questionStates,
@@ -54,11 +55,8 @@ export function PreviewQuestionView({
   onTabPrev,
   onTabNext,
   onRespondToClaude,
-  onFinishPlanInterview,
 }: Props): React.ReactNode {
-  const isInPlanMode = useAppState(s => s.toolPermissionContext.mode) === 'plan';
   const [isFooterFocused, setIsFooterFocused] = useState(false);
-  const [footerIndex, setFooterIndex] = useState(0);
   const [isInNotesInput, setIsInNotesInput] = useState(false);
   const [cursorOffset, setCursorOffset] = useState(0);
 
@@ -73,6 +71,7 @@ export function PreviewQuestionView({
 
   // Track which option is focused (for preview display)
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [hasNavigated, setHasNavigated] = useState(false);
 
   // Reset focusedIndex when navigating to a different question
   const prevQuestionText = useRef(questionText);
@@ -81,6 +80,7 @@ export function PreviewQuestionView({
     const selected = questionState?.selectedValue as string | undefined;
     const idx = selected ? allOptions.findIndex(opt => opt.label === selected) : -1;
     setFocusedIndex(idx >= 0 ? idx : 0);
+    setHasNavigated(false);
   }
 
   const focusedOption = allOptions[focusedIndex];
@@ -115,6 +115,9 @@ export function PreviewQuestionView({
 
       if (newIndex >= 0 && newIndex < allOptions.length) {
         setFocusedIndex(newIndex);
+        if (newIndex !== focusedIndex) {
+          setHasNavigated(true);
+        }
       }
     },
     [focusedIndex, allOptions.length, isInNotesInput],
@@ -151,10 +154,23 @@ export function PreviewQuestionView({
   const handleNotesExit = useCallback(() => {
     setIsInNotesInput(false);
     onTextInputFocus(false);
-    if (selectedValue) {
+    if (notesValue.trim() && hasNavigated) {
+      handleSelectOption(focusedIndex);
+    } else if (selectedValue) {
       onAnswer(questionText, selectedValue);
+    } else if (notesValue.trim()) {
+      onAnswer(questionText, '(notes only)');
     }
-  }, [selectedValue, questionText, onAnswer, onTextInputFocus]);
+  }, [
+    notesValue,
+    hasNavigated,
+    handleSelectOption,
+    focusedIndex,
+    selectedValue,
+    questionText,
+    onAnswer,
+    onTextInputFocus,
+  ]);
 
   const handleDownFromPreview = useCallback(() => {
     setIsFooterFocused(true);
@@ -171,29 +187,13 @@ export function PreviewQuestionView({
       if (isFooterFocused) {
         if (e.key === 'up' || (e.ctrl && e.key === 'p')) {
           e.preventDefault();
-          if (footerIndex === 0) {
-            handleUpFromFooter();
-          } else {
-            setFooterIndex(0);
-          }
-          return;
-        }
-
-        if (e.key === 'down' || (e.ctrl && e.key === 'n')) {
-          e.preventDefault();
-          if (isInPlanMode && footerIndex === 0) {
-            setFooterIndex(1);
-          }
+          handleUpFromFooter();
           return;
         }
 
         if (e.key === 'return') {
           e.preventDefault();
-          if (footerIndex === 0) {
-            onRespondToClaude();
-          } else {
-            onFinishPlanInterview();
-          }
+          onRespondToClaude();
           return;
         }
 
@@ -248,8 +248,6 @@ export function PreviewQuestionView({
     },
     [
       isFooterFocused,
-      footerIndex,
-      isInPlanMode,
       isInNotesInput,
       focusedIndex,
       allOptions.length,
@@ -259,19 +257,23 @@ export function PreviewQuestionView({
       handleSelectOption,
       handleNotesExit,
       onRespondToClaude,
-      onFinishPlanInterview,
       onCancel,
       onTextInputFocus,
     ],
   );
 
-  const previewContent = focusedOption?.preview || null;
+  const resolvedPreview = optionPreviews ? optionPreviews[focusedIndex] : mapOfyPreview(focusedOption?.preview);
+  const previewContent =
+    resolvedPreview === undefined
+      ? null
+      : resolvedPreview.kind === 'full'
+        ? resolvedPreview.markdown
+        : '(preview cannot be shown in full — compare the option labels and descriptions instead)';
 
   // The right panel's available width is terminal minus the left panel and gap.
   const LEFT_PANEL_WIDTH = 30;
-  const GAP = 4;
-  const { columns } = useTerminalSize();
-  const previewMaxWidth = columns - LEFT_PANEL_WIDTH - GAP;
+  const { columns, rows } = useTerminalSize();
+  const previewMaxWidth = columns - LEFT_PANEL_WIDTH - 4;
 
   // Lines used within the content area that aren't preview content:
   // 1: marginTop on side-by-side box
@@ -285,9 +287,11 @@ export function PreviewQuestionView({
 
   // Cap preview lines from the parent height budget. densable MT4/XT4 do not
   // pin minHeight on this column — only truncate preview content.
-  const previewMaxLines = useMemo(() => {
-    return minContentHeight ? Math.max(1, minContentHeight - PREVIEW_OVERHEAD) : undefined;
-  }, [minContentHeight]);
+  const maxPreviewLines = useMemo(() => {
+    return minContentHeight ? Math.max(1, minContentHeight - PREVIEW_OVERHEAD) : Math.max(1, rows - 26);
+  }, [minContentHeight, rows]);
+
+  const needsGutter = question.question.includes('\n') || stringWidth(question.question) > 80;
 
   return (
     <Box flexDirection="column" marginTop={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
@@ -299,7 +303,9 @@ export function PreviewQuestionView({
           answers={answers}
           hideSubmitTab={hideSubmitTab}
         />
-        <PermissionRequestTitle title={question.question} color={'text'} />
+        <PermissionPreviewGutter multiline={needsGutter}>
+          <PermissionRequestTitle title={question.question} color={'text'} />
+        </PermissionPreviewGutter>
 
         <Box flexDirection="column">
           {/* Side-by-side layout: options on left, preview on right */}
@@ -328,7 +334,7 @@ export function PreviewQuestionView({
             <Box flexDirection="column" flexGrow={1}>
               <PreviewBox
                 content={previewContent || 'No preview available'}
-                maxLines={previewMaxLines}
+                maxLines={maxPreviewLines}
                 minWidth={minContentWidth}
                 maxWidth={previewMaxWidth}
               />
@@ -348,6 +354,7 @@ export function PreviewQuestionView({
                     columns={60}
                     cursorOffset={cursorOffset}
                     onChangeCursorOffset={setCursorOffset}
+                    disableEscapeDoublePress={true}
                   />
                 ) : (
                   <Text dimColor italic>
@@ -362,31 +369,22 @@ export function PreviewQuestionView({
           <Box flexDirection="column" marginTop={1}>
             <Divider color="inactive" />
             <Box flexDirection="row" gap={1}>
-              {isFooterFocused && footerIndex === 0 ? (
-                <Text color="suggestion">{figures.pointer}</Text>
-              ) : (
-                <Text> </Text>
-              )}
-              <Text color={isFooterFocused && footerIndex === 0 ? 'suggestion' : undefined}>Chat about this</Text>
+              {isFooterFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
+              <Text color={isFooterFocused ? 'suggestion' : undefined}>Chat about this</Text>
             </Box>
-            {isInPlanMode && (
-              <Box flexDirection="row" gap={1}>
-                {isFooterFocused && footerIndex === 1 ? (
-                  <Text color="suggestion">{figures.pointer}</Text>
-                ) : (
-                  <Text> </Text>
-                )}
-                <Text color={isFooterFocused && footerIndex === 1 ? 'suggestion' : undefined}>
-                  Skip interview and plan immediately
-                </Text>
-              </Box>
-            )}
           </Box>
           <Box marginTop={1}>
             <Text color="inactive" dimColor>
-              Enter to select · {figures.arrowUp}/{figures.arrowDown} to navigate · n to add notes
-              {questions.length > 1 && <> · Tab to switch questions</>}
-              {isInNotesInput && editorName && <> · ctrl+g to edit in {editorName}</>} · Esc to cancel
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="select" />
+                <KeyboardShortcutHint shortcut={`${figures.arrowUp}/${figures.arrowDown}`} action="navigate" />
+                <KeyboardShortcutHint shortcut="n" action="add notes" />
+                {questions.length > 1 && <KeyboardShortcutHint shortcut="Tab" action="switch questions" />}
+                {isInNotesInput && editorName && (
+                  <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                )}
+                <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+              </Byline>
             </Text>
           </Box>
         </Box>

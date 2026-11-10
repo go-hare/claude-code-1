@@ -39,7 +39,10 @@ import { OUTSIDE_READS_DIALOG_TITLE } from '../utils/permissions/outsideReads.js
 import type { PermissionPromptResult } from './specs/permissionKinds.js'
 
 export const CLAUDE_FOLDER_STANDING_LABEL =
-  'Yes, and allow Claude to edit its own settings for this session'
+  "Yes, and allow Claude to edit files in this project's .claude folder for this session"
+
+export const GLOBAL_CLAUDE_FOLDER_STANDING_LABEL =
+  'Yes, and allow Claude to edit files in its ~/.claude folder for this session'
 
 export type FilePermissionPayload = {
   requestId: string
@@ -153,12 +156,55 @@ export type FileStandingMint = {
   value: 'yes-session' | 'yes-claude-folder'
 }
 
-/** densable E$A */
-export function mintFileStandingRow(
+/** densable V4e `Oo` — directoryGrantOnly when safetyCheck !classifierApprovable and not hard-vetoed. */
+export function isFileDirectoryGrantOnly(
+  payload: FilePermissionPayload,
+): boolean {
+  const result = payload.permissionResult as {
+    behavior?: string
+    decisionReason?: { type?: string; classifierApprovable?: boolean }
+  } | null
+  const reason = result?.behavior === 'ask' ? result.decisionReason : undefined
+  const isSafetyCheckBlocked =
+    reason?.type === 'safetyCheck' && reason.classifierApprovable === false
+  const isHardVetoed =
+    payload.isAskCappedByOrg === true ||
+    payload.requestSource?.type === 'remote-agent' ||
+    payload.contentWithheld === true
+  return isSafetyCheckBlocked && !isHardVetoed
+}
+
+/** densable cro — directory-grant-only standing row when safetyCheck !classifierApprovable. */
+export function mintFileDirectoryGrantRow(
   filePath: string,
   operationType: 'read' | 'write',
   toolPermissionContext: ToolPermissionContext | undefined,
 ): FileStandingMint | null {
+  if (!toolPermissionContext || filePath === '') return null
+  const addDirs = generateSuggestions(
+    filePath,
+    operationType,
+    toolPermissionContext,
+  ).find(item => item.type === 'addDirectories')
+  if (addDirs?.type !== 'addDirectories') return null
+  const row = mintAddDirectoriesRow(addDirs.directories)
+  return row === null ? null : { row, value: 'yes-session' }
+}
+
+/** densable E$A / dro */
+export function mintFileStandingRow(
+  filePath: string,
+  operationType: 'read' | 'write',
+  toolPermissionContext: ToolPermissionContext | undefined,
+  options?: { directoryGrantOnly?: boolean },
+): FileStandingMint | null {
+  if (options?.directoryGrantOnly) {
+    return mintFileDirectoryGrantRow(
+      filePath,
+      operationType,
+      toolPermissionContext,
+    )
+  }
   const inClaude = isInClaudeFolder(filePath)
   const inGlobal = isInGlobalClaudeFolder(filePath)
   if ((inClaude || inGlobal) && operationType !== 'read') {
@@ -187,7 +233,9 @@ export function mintFileStandingRow(
           ) {
             return null
           }
-          return CLAUDE_FOLDER_STANDING_LABEL
+          return inGlobal
+            ? GLOBAL_CLAUDE_FOLDER_STANDING_LABEL
+            : CLAUDE_FOLDER_STANDING_LABEL
         },
       },
     )

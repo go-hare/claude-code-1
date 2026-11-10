@@ -2,7 +2,7 @@ import type { Base64ImageSource, ContentBlockParam, ImageBlockParam } from '@ant
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../../../hooks/useSettings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
+import { Ratchet, stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
 import { useKeybindings } from '../../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -244,10 +244,13 @@ function AskUserQuestionPermissionRequestBody({
     const questionsWithAnswers = questions
       .map((q: Question) => {
         const answer = answers[q.question];
-        if (answer) {
-          return `- "${q.question}"\n  Answer: ${answer}`;
+        const hasPreview = !q.multiSelect && q.options.some(opt => opt.preview !== undefined);
+        const notes = hasPreview ? questionStates[q.question]?.textInputValue?.trim() : undefined;
+        const lines = [`- "${q.question}"`, answer ? `  Answer: ${answer}` : '  (No answer provided)'];
+        if (notes) {
+          lines.push(`  User notes: ${notes}`);
         }
-        return `- "${q.question}"\n  (No answer provided)`;
+        return lines.join('\n');
       })
       .join('\n');
 
@@ -271,38 +274,7 @@ function AskUserQuestionPermissionRequestBody({
 
     onDone();
     toolUseConfirm.onReject(feedback, imageBlocks && imageBlocks.length > 0 ? imageBlocks : undefined);
-  }, [questions, answers, onDone, toolUseConfirm, metadataSource, isInPlanMode, allImageAttachments]);
-
-  const handleFinishPlanInterview = useCallback(async () => {
-    const questionsWithAnswers = questions
-      .map((q: Question) => {
-        const answer = answers[q.question];
-        if (answer) {
-          return `- "${q.question}"\n  Answer: ${answer}`;
-        }
-        return `- "${q.question}"\n  (No answer provided)`;
-      })
-      .join('\n');
-
-    const feedback = `The user has indicated they have provided enough answers for the plan interview.
-Stop asking clarifying questions and proceed to finish the plan with the information you have.
-
-Questions asked and answers provided:\n${questionsWithAnswers}`;
-
-    if (metadataSource) {
-      logEvent('tengu_ask_user_question_finish_plan_interview', {
-        source: metadataSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        questionCount: questions.length,
-        isInPlanMode,
-        interviewPhaseEnabled: isInPlanMode && isPlanModeInterviewPhaseEnabled(),
-      });
-    }
-
-    const imageBlocks = await convertImagesToBlocks(allImageAttachments);
-
-    onDone();
-    toolUseConfirm.onReject(feedback, imageBlocks && imageBlocks.length > 0 ? imageBlocks : undefined);
-  }, [questions, answers, onDone, toolUseConfirm, metadataSource, isInPlanMode, allImageAttachments]);
+  }, [questions, answers, questionStates, onDone, toolUseConfirm, metadataSource, isInPlanMode, allImageAttachments]);
 
   const submitAnswers = useCallback(
     async (answersToSubmit: Record<string, string>, options?: { afkTimeoutMs?: number }) => {
@@ -458,56 +430,51 @@ Questions asked and answers provided:\n${questionsWithAnswers}`;
     { context: 'Tabs', isActive: !(isInTextInput && !isInSubmitView) },
   );
 
-  let engineNode: React.ReactNode = null;
-  if (currentQuestion) {
-    engineNode = (
-      <>
-        <QuestionView
-          question={currentQuestion}
-          questions={questions}
-          displayQuestion={engineDisplay[currentQuestionIndex]?.displayQuestion}
-          displayBody={engineDisplay[currentQuestionIndex]?.displayBody}
-          currentQuestionIndex={currentQuestionIndex}
-          answers={answers}
-          questionStates={questionStates}
-          hideSubmitTab={hideSubmitTab}
-          minContentHeight={globalContentHeight}
-          minContentWidth={globalContentWidth}
-          planFilePath={planFilePath}
-          onUpdateQuestionState={updateQuestionState}
-          onAnswer={handleQuestionAnswer}
-          onTextInputFocus={setTextInputMode}
-          onCancel={handleCancel}
-          onSubmit={nextQuestion}
-          onTabPrev={handleTabPrev}
-          onTabNext={handleTabNext}
-          onRespondToClaude={handleRespondToClaude}
-          onFinishPlanInterview={handleFinishPlanInterview}
-          onImagePaste={(base64, mediaType, filename, dims, path) =>
-            onImagePaste(currentQuestion.question, base64, mediaType, filename, dims, path)
-          }
-          pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
-          onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
-        />
-        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
-      </>
-    );
-  } else if (isInSubmitView) {
-    engineNode = (
-      <>
-        <SubmitQuestionsView
-          questions={questions}
-          currentQuestionIndex={currentQuestionIndex}
-          answers={answers}
-          allQuestionsAnswered={allQuestionsAnswered}
-          permissionResult={toolUseConfirm.permissionResult}
-          minContentHeight={globalContentHeight}
-          onFinalResponse={handleFinalResponse}
-        />
-        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
-      </>
-    );
-  }
+  const viewNode = currentQuestion ? (
+    <QuestionView
+      question={currentQuestion}
+      questions={questions}
+      displayQuestion={engineDisplay[currentQuestionIndex]?.displayQuestion}
+      displayBody={engineDisplay[currentQuestionIndex]?.displayBody}
+      currentQuestionIndex={currentQuestionIndex}
+      answers={answers}
+      questionStates={questionStates}
+      hideSubmitTab={hideSubmitTab}
+      minContentHeight={globalContentHeight}
+      minContentWidth={globalContentWidth}
+      planFilePath={planFilePath}
+      onUpdateQuestionState={updateQuestionState}
+      onAnswer={handleQuestionAnswer}
+      onTextInputFocus={setTextInputMode}
+      onCancel={handleCancel}
+      onSubmit={nextQuestion}
+      onTabPrev={handleTabPrev}
+      onTabNext={handleTabNext}
+      onRespondToClaude={handleRespondToClaude}
+      onImagePaste={(base64, mediaType, filename, dims, path) =>
+        onImagePaste(currentQuestion.question, base64, mediaType, filename, dims, path)
+      }
+      pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
+      onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
+    />
+  ) : isInSubmitView ? (
+    <SubmitQuestionsView
+      questions={questions}
+      currentQuestionIndex={currentQuestionIndex}
+      answers={answers}
+      allQuestionsAnswered={allQuestionsAnswered}
+      permissionResult={toolUseConfirm.permissionResult}
+      minContentHeight={globalContentHeight}
+      onFinalResponse={handleFinalResponse}
+    />
+  ) : null;
+
+  const engineNode: React.ReactNode = viewNode ? (
+    <Ratchet>
+      {viewNode}
+      <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
+    </Ratchet>
+  ) : null;
 
   return (
     <PluginAskUserQuestionSite

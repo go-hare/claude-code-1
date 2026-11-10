@@ -88,6 +88,7 @@ export function PermissionExitPlanModeDialog({ payload, answer }: DialogRenderer
       onReject={() => {}}
       verbose={host?.verbose ?? false}
       workerBadge={undefined}
+      requestSource={p.requestSource}
       setStickyFooter={host?.setStickyFooter}
     />
   );

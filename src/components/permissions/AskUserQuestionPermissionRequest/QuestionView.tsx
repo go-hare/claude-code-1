@@ -1,21 +1,20 @@
 import figures from 'figures';
-import React, { useCallback, useState } from 'react';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import React, { useCallback, useRef, useState } from 'react';
+import { type KeyboardEvent, Box, Byline, Divider, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
 import { useAppState } from '../../../state/AppState.js';
 import type {
   Question,
   QuestionOption,
 } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
-import type { EngineConfirmDisplayBody } from '../../../dialog/permissionAsk.js';
+import type { AskPreview, EngineConfirmDisplayBody } from '../../../dialog/permissionAsk.js';
 import type { PastedContent } from '../../../utils/config.js';
 import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
-import { Divider } from '@anthropic/ink';
 import { FilePathLink } from '../../FilePathLink.js';
-
+import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PreviewQuestionView } from './PreviewQuestionView.js';
 import { QuestionNavigationBar } from './QuestionNavigationBar.js';
@@ -28,6 +27,7 @@ type Props = {
   displayQuestion?: string;
   /** densable DY displayBody — engine confirm body after the blank line. */
   displayBody?: EngineConfirmDisplayBody[];
+  optionPreviews?: (AskPreview | undefined)[];
   currentQuestionIndex: number;
   answers: Record<string, string>;
   questionStates: Record<string, QuestionState>;
@@ -44,7 +44,6 @@ type Props = {
   onTabPrev?: () => void;
   onTabNext?: () => void;
   onRespondToClaude: () => void;
-  onFinishPlanInterview: () => void;
   onImagePaste?: (
     base64Image: string,
     mediaType?: string,
@@ -60,6 +59,7 @@ export function QuestionView({
   questions,
   displayQuestion,
   displayBody,
+  optionPreviews,
   currentQuestionIndex,
   answers,
   questionStates,
@@ -75,15 +75,14 @@ export function QuestionView({
   onTabPrev,
   onTabNext,
   onRespondToClaude,
-  onFinishPlanInterview,
   onImagePaste,
   pastedContents,
   onRemoveImage,
 }: Props): React.ReactNode {
   const isInPlanMode = useAppState(s => s.toolPermissionContext.mode) === 'plan';
   const [isFooterFocused, setIsFooterFocused] = useState(false);
-  const [footerIndex, setFooterIndex] = useState(0);
   const [isOtherFocused, setIsOtherFocused] = useState(false);
+  const latestOtherInputRef = useRef<{ question: string; value: string } | null>(null);
 
   const editor = getExternalEditor();
   const editorName = editor ? toIDEDisplayName(editor) : null;
@@ -105,36 +104,29 @@ export function QuestionView({
     setIsFooterFocused(false);
   }, []);
 
-  // Handle keyboard input when footer is focused
+  const chatAboutOptionNumber = question.options.length + 2;
+
+  // Handle keyboard input when footer is focused (or number shortcut from option list)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!isFooterFocused) return;
+      const normalizedKey = e.key.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+      if (!isFooterFocused) {
+        if (!isOtherFocused && !e.ctrl && !e.meta && normalizedKey === String(chatAboutOptionNumber)) {
+          e.preventDefault();
+          onRespondToClaude();
+        }
+        return;
+      }
 
       if (e.key === 'up' || (e.ctrl && e.key === 'p')) {
         e.preventDefault();
-        if (footerIndex === 0) {
-          handleUpFromFooter();
-        } else {
-          setFooterIndex(0);
-        }
+        handleUpFromFooter();
         return;
       }
 
-      if (e.key === 'down' || (e.ctrl && e.key === 'n')) {
+      if (e.key === 'return' || normalizedKey === String(chatAboutOptionNumber)) {
         e.preventDefault();
-        if (isInPlanMode && footerIndex === 0) {
-          setFooterIndex(1);
-        }
-        return;
-      }
-
-      if (e.key === 'return') {
-        e.preventDefault();
-        if (footerIndex === 0) {
-          onRespondToClaude();
-        } else {
-          onFinishPlanInterview();
-        }
+        onRespondToClaude();
         return;
       }
 
@@ -143,15 +135,7 @@ export function QuestionView({
         onCancel();
       }
     },
-    [
-      isFooterFocused,
-      footerIndex,
-      isInPlanMode,
-      handleUpFromFooter,
-      onRespondToClaude,
-      onFinishPlanInterview,
-      onCancel,
-    ],
+    [chatAboutOptionNumber, isFooterFocused, isOtherFocused, handleUpFromFooter, onRespondToClaude, onCancel],
   );
 
   const textOptions: OptionWithDescription<string>[] = question.options.map((opt: QuestionOption) => ({
@@ -185,6 +169,7 @@ export function QuestionView({
     placeholder: question.multiSelect ? 'Type something' : 'Type something.',
     initialValue: questionState?.textInputValue ?? '',
     onChange: (value: string) => {
+      latestOtherInputRef.current = { question: questionText, value };
       onUpdateQuestionState(questionText, { textInputValue: value }, question.multiSelect ?? false);
     },
   };
@@ -193,7 +178,9 @@ export function QuestionView({
 
   // Check if any option has a preview and it's not multi-select
   // Previews only supported for single-select questions
-  const hasAnyPreview = !question.multiSelect && question.options.some(opt => opt.preview);
+  const hasAnyPreview =
+    !question.multiSelect &&
+    (question.options.some(opt => opt.preview !== undefined) || (optionPreviews?.some(p => p !== undefined) ?? false));
 
   // Delegate to PreviewQuestionView for carousel-style preview mode
   if (hasAnyPreview) {
@@ -201,6 +188,7 @@ export function QuestionView({
       <PreviewQuestionView
         question={question}
         questions={questions}
+        optionPreviews={optionPreviews}
         currentQuestionIndex={currentQuestionIndex}
         answers={answers}
         questionStates={questionStates}
@@ -214,10 +202,11 @@ export function QuestionView({
         onTabPrev={onTabPrev}
         onTabNext={onTabNext}
         onRespondToClaude={onRespondToClaude}
-        onFinishPlanInterview={onFinishPlanInterview}
       />
     );
   }
+
+  const needsGutter = question.question.includes('\n') || stringWidth(question.question) > 80;
 
   return (
     <Box flexDirection="column" marginTop={0} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
@@ -229,9 +218,7 @@ export function QuestionView({
           </Text>
         </Box>
       )}
-      <Box marginTop={-1}>
-        <Divider color="inactive" />
-      </Box>
+      <Divider color="inactive" />
       <Box flexDirection="column" paddingTop={0}>
         <QuestionNavigationBar
           questions={questions}
@@ -239,18 +226,20 @@ export function QuestionView({
           answers={answers}
           hideSubmitTab={hideSubmitTab}
         />
-        <PermissionRequestTitle title={displayQuestion ?? question.question} color={'text'} />
-        {displayBody && displayBody.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            {displayBody.map((part, i) =>
-              part.kind === 'fileLink' ? (
-                <FilePathLink key={`${part.path}-${i}`} filePath={part.path} />
-              ) : (
-                <Text key={`body-${i}`}>{part.text}</Text>
-              ),
-            )}
-          </Box>
-        )}
+        <PermissionPreviewGutter multiline={needsGutter}>
+          <PermissionRequestTitle title={displayQuestion ?? question.question} color={'text'} />
+          {displayBody && displayBody.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              {displayBody.map((part, i) =>
+                part.kind === 'fileLink' ? (
+                  <FilePathLink key={`${part.path}-${i}`} filePath={part.path} />
+                ) : (
+                  <Text key={`body-${i}`}>{part.text}</Text>
+                ),
+              )}
+            </Box>
+          )}
+        </PermissionPreviewGutter>
 
         {/* densable XT4: no minHeight on the options+footer column. Local
             minContentHeight forced tall Ask under tot.bottom overflowY:hidden
@@ -266,7 +255,9 @@ export function QuestionView({
                 onChange={(values: string[]) => {
                   onUpdateQuestionState(questionText, { selectedValue: values }, true);
                   const textInput = values.includes('__other__')
-                    ? questionStates[questionText]?.textInputValue
+                    ? latestOtherInputRef.current?.question === questionText
+                      ? latestOtherInputRef.current.value
+                      : questionStates[questionText]?.textInputValue
                     : undefined;
                   const finalValues = values.filter(v => v !== '__other__').concat(textInput ? [textInput] : []);
                   onAnswer(questionText, finalValues, undefined, false);
@@ -308,39 +299,24 @@ export function QuestionView({
           <Box flexDirection="column">
             <Divider color="inactive" />
             <Box flexDirection="row" gap={1}>
-              {isFooterFocused && footerIndex === 0 ? (
-                <Text color="suggestion">{figures.pointer}</Text>
-              ) : (
-                <Text> </Text>
-              )}
-              <Text color={isFooterFocused && footerIndex === 0 ? 'suggestion' : undefined}>
-                {options.length + 1}. Chat about this
-              </Text>
+              {isFooterFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
+              <Text color={isFooterFocused ? 'suggestion' : undefined}>{options.length + 1}. Chat about this</Text>
             </Box>
-            {isInPlanMode && (
-              <Box flexDirection="row" gap={1}>
-                {isFooterFocused && footerIndex === 1 ? (
-                  <Text color="suggestion">{figures.pointer}</Text>
-                ) : (
-                  <Text> </Text>
-                )}
-                <Text color={isFooterFocused && footerIndex === 1 ? 'suggestion' : undefined}>
-                  {options.length + 2}. Skip interview and plan immediately
-                </Text>
-              </Box>
-            )}
           </Box>
           <Box marginTop={1}>
             <Text color="inactive" dimColor>
-              Enter to select ·{' '}
-              {questions.length === 1 ? (
-                <>
-                  {figures.arrowUp}/{figures.arrowDown} to navigate
-                </>
-              ) : (
-                'Tab/Arrow keys to navigate'
-              )}
-              {isOtherFocused && editorName && <> · ctrl+g to edit in {editorName}</>} · Esc to cancel
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="select" />
+                {questions.length === 1 ? (
+                  <KeyboardShortcutHint shortcut={`${figures.arrowUp}/${figures.arrowDown}`} action="navigate" />
+                ) : (
+                  <Text>Tab/Arrow keys to navigate</Text>
+                )}
+                {isOtherFocused && editorName && (
+                  <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                )}
+                <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+              </Byline>
             </Text>
           </Box>
         </Box>

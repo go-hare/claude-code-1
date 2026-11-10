@@ -11,6 +11,8 @@ import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { Select } from '../../components/CustomSelect/index.js';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
+import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import type { DialogRendererProps } from '../DialogHost.js';
@@ -47,6 +49,7 @@ export function PermissionWebFetchDialog({ payload, answer }: DialogRendererProp
   const withheld = urlPreview.kind === 'withheld';
   const row = shouldShowWebFetchDomainAllow(p) && !withheld ? buildWebFetchDomainAllowRow(p) : null;
   const promptText = typeof prompt === 'string' ? prompt : '';
+  const description = typeof p.description === 'string' ? p.description : '';
 
   const options: Array<{
     label: React.ReactNode;
@@ -75,26 +78,30 @@ export function PermissionWebFetchDialog({ payload, answer }: DialogRendererProp
     urlPreview.kind === 'withheld' ? (
       <Text dimColor>{urlPreview.marker}</Text>
     ) : (
-      <Box flexDirection={urlPreview.needsGutter ? 'column' : 'row'}>
+      <PermissionPreviewGutter multiline={urlPreview.needsGutter}>
         <Text>{`url: ${urlPreview.text}`}</Text>
-      </Box>
+      </PermissionPreviewGutter>
     );
 
   const promptNode =
     promptText !== '' ? (
-      <Box flexDirection={promptText.includes('\n') ? 'column' : 'row'}>
+      <PermissionPreviewGutter multiline={promptText.includes('\n')}>
         <Text>{`prompt: ${promptText}`}</Text>
-      </Box>
+      </PermissionPreviewGutter>
     ) : null;
 
   return (
-    <PermissionDialog title="Fetch" requestSource={p.requestSource}>
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
+    <PermissionDialog title="Fetch" innerPaddingX={0} requestSource={p.requestSource}>
+      <Box flexDirection="column" paddingX={1}>
+        <PermissionPreviewGutter multiline={description.includes('\n')}>
+          <Text dimColor>{description}</Text>
+        </PermissionPreviewGutter>
+      </Box>
+      <PermissionOverflowBox>
         {urlNode}
         {promptNode}
-        <Text dimColor>{typeof p.description === 'string' ? p.description : ''}</Text>
-      </Box>
-      <Box flexDirection="column">
+      </PermissionOverflowBox>
+      <Box flexDirection="column" paddingX={1}>
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="tool" />
         <Text>Do you want to allow Claude to fetch this content?</Text>
         <Select

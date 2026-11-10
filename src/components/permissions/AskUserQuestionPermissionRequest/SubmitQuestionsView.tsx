@@ -1,10 +1,10 @@
 import figures from 'figures';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Divider, StatusIcon, stringWidth, Text } from '@anthropic/ink';
 import type { Question } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js';
-import { Select } from '../../CustomSelect/index.js';
-import { Divider } from '@anthropic/ink';
+import { ConfirmSelect } from '../../ConfirmSelect.js';
+import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
 import { QuestionNavigationBar } from './QuestionNavigationBar.js';
@@ -38,7 +38,10 @@ export function SubmitQuestionsView({
         <Box flexDirection="column" marginTop={1}>
           {!allQuestionsAnswered && (
             <Box marginBottom={1}>
-              <Text color="warning">{figures.warning} You have not answered all questions</Text>
+              <Text color="warning">
+                <StatusIcon status="warning" withSpace />
+                You have not answered all questions
+              </Text>
             </Box>
           )}
           {Object.keys(answers).length > 0 && (
@@ -47,12 +50,16 @@ export function SubmitQuestionsView({
                 .filter((q: Question) => q?.question && answers[q.question])
                 .map((q: Question) => {
                   const answer = answers[q?.question];
+                  const questionText = q?.question || 'Question';
+                  const needsGutter = questionText.includes('\n') || stringWidth(questionText) > 80;
 
                   return (
                     <Box key={q?.question || 'answer'} flexDirection="column" marginLeft={1}>
-                      <Text>
-                        {figures.bullet} {q?.question || 'Question'}
-                      </Text>
+                      <PermissionPreviewGutter multiline={needsGutter}>
+                        <Text>
+                          {figures.bullet} {questionText}
+                        </Text>
+                      </PermissionPreviewGutter>
                       <Box marginLeft={2}>
                         <Text color="success">
                           {figures.arrowRight} {answer}
@@ -67,16 +74,10 @@ export function SubmitQuestionsView({
           <PermissionRuleExplanation permissionResult={permissionResult} toolType="tool" />
           <Text color="inactive">Ready to submit your answers?</Text>
           <Box marginTop={1}>
-            <Select
-              options={[
-                {
-                  type: 'text' as const,
-                  label: 'Submit answers',
-                  value: 'submit',
-                },
-                { type: 'text' as const, label: 'Cancel', value: 'cancel' },
-              ]}
-              onChange={value => onFinalResponse(value as 'submit' | 'cancel')}
+            <ConfirmSelect
+              confirmLabel="Submit answers"
+              cancelLabel="Cancel"
+              onConfirm={() => onFinalResponse('submit')}
               onCancel={() => onFinalResponse('cancel')}
             />
           </Box>

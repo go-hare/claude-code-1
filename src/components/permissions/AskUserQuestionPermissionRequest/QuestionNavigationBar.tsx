@@ -38,7 +38,7 @@ export function QuestionNavigationBar({
       // Terminal too narrow, fallback to minimal display
       return questions.map((q: Question, index: number) => {
         const header = q?.header || `Q${index + 1}`;
-        return index === currentQuestionIndex ? header.slice(0, 3) : '';
+        return index === currentQuestionIndex ? truncateToWidth(header, 3) : '';
       });
     }
 

@@ -1,6 +1,7 @@
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
+import { isClassifierNotApprovable } from '../../../dialog/classifierVeto.js';
+import { WORKFLOW_AUTO_MODE_DESCRIPTION } from '../../../dialog/permissionAutoMode.js';
 import { extractOutputRedirections } from '../../../utils/bash/commands.js';
-import { isClassifierPermissionsEnabled } from '../../../utils/permissions/bashClassifier.js';
 import type { PermissionDecisionReason } from '../../../utils/permissions/PermissionResult.js';
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
@@ -9,26 +10,10 @@ import {
   type ShowPersistentAllowTool,
   shouldShowPersistentAllowOption,
 } from '../../../utils/permissions/showAlwaysAllow.js';
-import { WORKFLOW_AUTO_MODE_DESCRIPTION } from '../../../dialog/permissionAutoMode.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { generateShellSuggestionsLabel } from '../shellPermissionHelpers.js';
 
-export type BashToolUseOption =
-  | 'yes'
-  | 'yes-apply-suggestions'
-  | 'yes-prefix-edited'
-  | 'yes-classifier-reviewed'
-  | 'yes-enable-auto-mode'
-  | 'no';
-
-/**
- * Check if a description already exists in the allow list.
- * Compares lowercase and trailing-whitespace-trimmed versions.
- */
-function descriptionAlreadyExists(description: string, existingDescriptions: string[]): boolean {
-  const normalized = description.toLowerCase().trimEnd();
-  return existingDescriptions.some(existing => existing.toLowerCase().trimEnd() === normalized);
-}
+export type BashToolUseOption = 'yes' | 'yes-apply-suggestions' | 'yes-prefix-edited' | 'yes-enable-auto-mode' | 'no';
 
 /**
  * Strip output redirections so filenames don't show as commands in the label.
@@ -44,10 +29,6 @@ export function bashToolUseOptions({
   decisionReason,
   onRejectFeedbackChange,
   onAcceptFeedbackChange,
-  onClassifierDescriptionChange,
-  classifierDescription,
-  initialClassifierDescriptionEmpty = false,
-  existingAllowDescriptions = [],
   yesInputMode = false,
   noInputMode = false,
   editablePrefix,
@@ -63,11 +44,6 @@ export function bashToolUseOptions({
   decisionReason?: PermissionDecisionReason;
   onRejectFeedbackChange: (value: string) => void;
   onAcceptFeedbackChange: (value: string) => void;
-  onClassifierDescriptionChange?: (value: string) => void;
-  classifierDescription?: string;
-  /** Whether the initial classifier description was empty. When true, hides the option. */
-  initialClassifierDescriptionEmpty?: boolean;
-  existingAllowDescriptions?: string[];
   yesInputMode?: boolean;
   noInputMode?: boolean;
   /** Editable prefix rule content (e.g., "npm run *"). When set, replaces Haiku-based suggestions. */
@@ -112,17 +88,27 @@ export function bashToolUseOptions({
       isAskCappedByOrg,
     })
   ) {
+    const classifierVetoed = isClassifierNotApprovable(
+      permissionResult ?? (decisionReason ? { behavior: 'ask', decisionReason } : undefined),
+    );
+    const effectiveSuggestions = classifierVetoed ? suggestions.filter(s => s.type === 'addDirectories') : suggestions;
     // Show an editable input for the prefix rule instead of the
     // Haiku-generated suggestion label — but only when the suggestions
     // don't contain non-Bash items (addDirectories, Read rules) that
     // the editable prefix can't represent.
-    const hasNonBashSuggestions = suggestions.some(
+    const hasNonBashSuggestions = effectiveSuggestions.some(
       s => s.type === 'addDirectories' || (s.type === 'addRules' && s.rules?.some(r => r.toolName !== BASH_TOOL_NAME)),
     );
-    if (editablePrefix !== undefined && onEditablePrefixChange && !hasNonBashSuggestions && suggestions.length > 0) {
+    if (
+      !classifierVetoed &&
+      editablePrefix !== undefined &&
+      onEditablePrefixChange &&
+      !hasNonBashSuggestions &&
+      effectiveSuggestions.length > 0
+    ) {
       options.push({
         type: 'input',
-        label: 'Yes, and don\u2019t ask again for',
+        label: 'Yes, and don’t ask again for',
         value: 'yes-prefix-edited',
         placeholder: 'command prefix (e.g., npm run *)',
         initialValue: editablePrefix,
@@ -132,8 +118,8 @@ export function bashToolUseOptions({
         labelValueSeparator: ': ',
         resetCursorOnUpdate: true,
       });
-    } else if (suggestions.length > 0) {
-      const label = generateShellSuggestionsLabel(suggestions, BASH_TOOL_NAME, stripBashRedirections);
+    } else if (effectiveSuggestions.length > 0) {
+      const label = generateShellSuggestionsLabel(effectiveSuggestions, BASH_TOOL_NAME, stripBashRedirections);
 
       if (label) {
         options.push({
@@ -141,36 +127,6 @@ export function bashToolUseOptions({
           value: 'yes-apply-suggestions',
         });
       }
-    }
-
-    // Add classifier-reviewed option if enabled, the initial description was
-    // non-empty, the description doesn't already exist in the allow list,
-    // and the decision reason is NOT a server-side classifier block
-    // (prompt-based rules don't help when the server-side classifier triggers first).
-    // Skip when the editable prefix option is already shown — they serve the
-    // same role and having two identical-looking "don't ask again" inputs is confusing.
-    const editablePrefixShown = options.some(o => o.value === 'yes-prefix-edited');
-    if (
-      process.env.USER_TYPE === 'ant' &&
-      !editablePrefixShown &&
-      isClassifierPermissionsEnabled() &&
-      onClassifierDescriptionChange &&
-      !initialClassifierDescriptionEmpty &&
-      !descriptionAlreadyExists(classifierDescription ?? '', existingAllowDescriptions) &&
-      decisionReason?.type !== 'classifier'
-    ) {
-      options.push({
-        type: 'input',
-        label: 'Yes, and don\u2019t ask again for',
-        value: 'yes-classifier-reviewed',
-        placeholder: 'describe what to allow...',
-        initialValue: classifierDescription ?? '',
-        onChange: onClassifierDescriptionChange,
-        allowEmptySubmitToCancel: true,
-        showLabelWithValue: true,
-        labelValueSeparator: ': ',
-        resetCursorOnUpdate: true,
-      });
     }
   }
 

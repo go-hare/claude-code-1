@@ -224,8 +224,8 @@ function McpUrlElicitationRenderer({ payload, answer }: DialogRendererProps): Re
   );
 }
 
-/** densable W7 — elicitation/create Host. Waiting is wne, not this dialog. */
-function leftoverMcpElicitationRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
+/** densable W7 / zso — elicitation/create Host. Waiting is wne, not this dialog. */
+function leftoverMcpElicitationRenderer({ payload, answer, wouldTakeAnswer }: DialogRendererProps): React.ReactNode {
   const signal = useMemo(() => new AbortController().signal, []);
   const built = leftoverMcpElicitationEvent(payload, signal, undefined, false);
   if (!built) {
@@ -236,10 +236,9 @@ function leftoverMcpElicitationRenderer({ payload, answer }: DialogRendererProps
   return (
     <ElicitationDialog
       event={built.event}
-      onResponse={(action, content) => {
-        if (action === 'accept' && built.params.mode === 'url' && built.userConfirmsCompletion) return;
-        answer({ action, content });
-      }}
+      userConfirmsCompletion={built.userConfirmsCompletion}
+      wouldTakeAnswer={wouldTakeAnswer}
+      onResponse={(action, content) => (content === undefined ? answer({ action }) : answer({ action, content }))}
       onWaitingDismiss={action => {
         if (built.userConfirmsCompletion) {
           if (action === 'cancel') answer({ action: 'cancel' });
@@ -252,7 +251,7 @@ function leftoverMcpElicitationRenderer({ payload, answer }: DialogRendererProps
   );
 }
 
-/** densable wne — URL waiting after W7 accept. */
+/** densable wne / Yso — URL waiting after W7 accept. */
 function leftoverMcpElicitationWaitingRenderer({ payload, answer }: DialogRendererProps): React.ReactNode {
   const signal = useMemo(() => new AbortController().signal, []);
   const built = leftoverMcpElicitationEvent(payload, signal, { actionLabel: 'Skip confirmation' }, true);
@@ -264,9 +263,7 @@ function leftoverMcpElicitationWaitingRenderer({ payload, answer }: DialogRender
   return (
     <ElicitationDialog
       event={built.event}
-      onResponse={(action, content) => {
-        answer({ action, content });
-      }}
+      onResponse={() => false}
       onWaitingDismiss={action => {
         answer(action);
       }}

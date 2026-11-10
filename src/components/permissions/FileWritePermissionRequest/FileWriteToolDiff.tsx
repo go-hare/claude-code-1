@@ -1,11 +1,12 @@
 import * as React from 'react';
 import { useMemo } from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { Box, NoSelect, Text } from '@anthropic/ink';
+import { NoSelect, Text } from '@anthropic/ink';
 import { intersperse } from '../../../utils/array.js';
 import { getPatchForDisplay } from '../../../utils/diff.js';
 import { HighlightedCode } from '../../HighlightedCode.js';
 import { StructuredDiff } from '../../StructuredDiff.js';
+import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 
 type Props = {
   file_path: string;
@@ -37,38 +38,29 @@ export function FileWriteToolDiff({ file_path, content, fileExists, oldContent }
   const paddingX = 1;
 
   return (
-    <Box flexDirection="column">
-      <Box
-        borderColor="subtle"
-        borderStyle="dashed"
-        flexDirection="column"
-        borderLeft={false}
-        borderRight={false}
-        paddingX={paddingX}
-      >
-        {hunks ? (
-          intersperse(
-            hunks.map(_ => (
-              <StructuredDiff
-                key={_.newStart}
-                patch={_}
-                dim={false}
-                filePath={file_path}
-                firstLine={firstLine}
-                fileContent={oldContent}
-                width={columns - 2 * paddingX}
-              />
-            )),
-            i => (
-              <NoSelect fromLeftEdge key={`ellipsis-${i}`}>
-                <Text dimColor>...</Text>
-              </NoSelect>
-            ),
-          )
-        ) : (
-          <HighlightedCode code={content || '(No content)'} filePath={file_path} />
-        )}
-      </Box>
-    </Box>
+    <PermissionOverflowBox paddingX={paddingX}>
+      {hunks ? (
+        intersperse(
+          hunks.map(_ => (
+            <StructuredDiff
+              key={_.newStart}
+              patch={_}
+              dim={false}
+              filePath={file_path}
+              firstLine={firstLine}
+              fileContent={oldContent}
+              width={columns - 2 * paddingX}
+            />
+          )),
+          i => (
+            <NoSelect fromLeftEdge key={`ellipsis-${i}`}>
+              <Text dimColor>...</Text>
+            </NoSelect>
+          ),
+        )
+      ) : (
+        <HighlightedCode code={content || '(No content)'} filePath={file_path} />
+      )}
+    </PermissionOverflowBox>
   );
 }

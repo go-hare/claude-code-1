@@ -4,12 +4,13 @@
  * layout default "inline"; variant filter matches densable LyN/MyN.
  * answer debounce densable c_y=150 after swap (swappedAt / suppress lift).
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, useTerminalNotification } from '@anthropic/ink';
+import React, { createContext, useEffect, useRef, useState } from 'react';
+import { Box, Text, useTerminalNotification } from '@anthropic/ink';
 import { useNotifyAfterTimeout } from '../hooks/useNotifyAfterTimeout.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { useDialogStore, useTopDialog } from './DialogStoreContext.js';
 import { AX_BELL_CLAIM_KEY, claimIfChanged, noteAxBellNow } from './dialogHostBell.js';
+import { HOST_PARKED_TYPING_QUESTION, HOST_PARKED_TYPING_SUGGESTION, type HostParkMode } from './hostPark.js';
 import { PermissionAskUserQuestionDialog } from './dialogs/PermissionAskUserQuestionDialog.js';
 import { PermissionBashDialog } from './dialogs/PermissionBashDialog.js';
 import { PermissionBrowserDialog } from './dialogs/PermissionBrowserDialog.js';
@@ -22,20 +23,23 @@ import { PermissionPromptDialog } from './dialogs/PermissionPromptDialog.js';
 import { PermissionSkillDialog } from './dialogs/PermissionSkillDialog.js';
 import { PermissionWebFetchDialog } from './dialogs/PermissionWebFetchDialog.js';
 import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
-import type { DialogSuppressReason } from './legacyDialogFocus.js';
 import {
   AUTO_MODE_FLAGGED_ALLOW_KIND,
   AUTO_MODE_SERVER_FALLBACK_KIND,
   AUTO_MODE_SETUP_REVIEW_KIND,
   CHROME_INSTALL_SETUP_KIND,
   CHROME_INSTALL_UPSELL_KIND,
+  COMPUTER_USE_APPROVAL_KIND,
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
+  IT2_SETUP_KIND,
+  isSoftNmsDialogKind,
   MCP_ELICITATION_KIND,
   MCP_ELICITATION_WAITING_KIND,
   MCP_URL_ELICITATION_KIND,
   PEER_INBOUND_APPROVAL_KIND,
   REFUSAL_FALLBACK_PROMPT_KIND,
+  SANDBOX_NETWORK_ACCESS_KIND,
 } from './specs/jsuKinds.js';
 import {
   isPermissionDialogKind,
@@ -54,6 +58,9 @@ import {
 } from './specs/permissionKinds.js';
 import { resolveHostWaitingFor } from './permissionWaiting.js';
 
+/** densable OVe — active dialog entry id inside DialogHost. */
+export const CurrentDialogIdContext = createContext<string | null>(null);
+
 /** densable c_y */
 export const DIALOG_ANSWER_SWAP_DEBOUNCE_MS = 150;
 
@@ -61,7 +68,8 @@ export type DialogHostVariant = 'inline' | 'modal' | 'bottom';
 
 export type DialogRendererProps = {
   payload: unknown;
-  answer: (result: unknown) => void;
+  answer: (result: unknown) => unknown;
+  wouldTakeAnswer?: () => boolean;
 };
 
 type DialogRenderer = (props: DialogRendererProps) => React.ReactNode;
@@ -82,15 +90,45 @@ const DIALOG_LAYOUTS: Record<string, DialogHostVariant> = {
 /** @internal test — densable mLo map */
 export const DIALOG_LAYOUTS_FOR_TEST = DIALOG_LAYOUTS;
 
-/** densable But */
+/** densable But / uy */
 const CLAUDE_NEEDS_PERMISSION = 'Claude needs your permission';
+/** densable c8e */
+const CLAUDE_NEEDS_INPUT = 'Claude Code needs your input';
+
+export type DialogNotificationType =
+  | 'permission_prompt'
+  | 'agent_needs_input'
+  | 'elicitation_dialog'
+  | 'elicitation_url_dialog';
+
+export type DialogNotificationSpec = {
+  text: string;
+  type?: DialogNotificationType;
+};
+
+type DialogNotificationEntry = DialogNotificationSpec | ((payload: unknown) => DialogNotificationSpec | undefined);
+
+/** densable dso — W7 URL mode check for notification type. */
+function isMcpElicitationUrlMode(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  if (!('serverName' in payload) || !('params' in payload)) return false;
+  const params = (payload as { params?: unknown }).params;
+  return typeof params === 'object' && params !== null && (params as { mode?: unknown }).mode === 'url';
+}
+
+/** densable cso — wne notifies only when waitingState is omitted. */
+function isMcpWaitingWithoutCustomState(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  if (!('serverName' in payload) || !('params' in payload)) return false;
+  return (payload as { waitingState?: unknown }).waitingState === undefined;
+}
 
 /**
- * densable Usu — OS notify title per kind. Missing key → no nau child.
+ * densable Usu — 2.1.239 OS notify title per kind (locked for .239/.246 tests).
  * Not in Usu (gold): GSn / Wxt / Gxt / CHr / FRr / DIi / qSn / _Bi / Gbt.
  * HMs review-artifact is feature-gated in gold; local has no that kind — do not invent.
  */
-const DIALOG_NOTIFICATIONS: Record<string, string> = {
+const USU_NOTIFICATIONS: Record<string, string> = {
   [PERMISSION_PROMPT_KIND]: CLAUDE_NEEDS_PERMISSION,
   [PERMISSION_WEBFETCH_KIND]: CLAUDE_NEEDS_PERMISSION,
   [PERMISSION_SKILL_KIND]: CLAUDE_NEEDS_PERMISSION,
@@ -114,7 +152,86 @@ const DIALOG_NOTIFICATIONS: Record<string, string> = {
 };
 
 /** @internal test — densable Usu map */
-export const DIALOG_NOTIFICATIONS_FOR_TEST = DIALOG_NOTIFICATIONS;
+export const DIALOG_NOTIFICATIONS_FOR_TEST = USU_NOTIFICATIONS;
+
+/**
+ * densable 2.1.289 `ig` notification table — adds the 7 kinds + per-kind `type`.
+ */
+const DIALOG_NOTIFICATIONS: Record<string, DialogNotificationEntry> = {
+  [IT2_SETUP_KIND]: {
+    text: 'Teammate setup needs your input',
+    type: 'agent_needs_input',
+  },
+  [COMPUTER_USE_APPROVAL_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [AUTO_MODE_SERVER_FALLBACK_KIND]: {
+    text: 'Auto mode has a classifier billing notice to acknowledge',
+    type: 'agent_needs_input',
+  },
+  [SANDBOX_NETWORK_ACCESS_KIND]: {
+    text: 'A sandboxed command needs network access',
+  },
+  [MCP_ELICITATION_KIND]: payload => ({
+    text: CLAUDE_NEEDS_INPUT,
+    type: isMcpElicitationUrlMode(payload) ? 'elicitation_url_dialog' : 'elicitation_dialog',
+  }),
+  [MCP_ELICITATION_WAITING_KIND]: payload =>
+    isMcpWaitingWithoutCustomState(payload) ? { text: CLAUDE_NEEDS_INPUT, type: 'elicitation_url_dialog' } : undefined,
+  [MCP_URL_ELICITATION_KIND]: {
+    text: 'An MCP server needs your input',
+    type: 'elicitation_url_dialog',
+  },
+  [PERMISSION_PROMPT_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_WEBFETCH_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_SKILL_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_POWERSHELL_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_FILE_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_ASK_USER_QUESTION_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_ENTER_PLAN_MODE_KIND]: { text: 'Claude Code wants to enter plan mode' },
+  [PERMISSION_EXIT_PLAN_MODE_V2_KIND]: {
+    text: 'Claude Code needs your approval for the plan',
+  },
+  [PERMISSION_MONITOR_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_BASH_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_BROWSER_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [PERMISSION_WORKFLOW_KIND]: { text: CLAUDE_NEEDS_PERMISSION },
+  [REFUSAL_FALLBACK_PROMPT_KIND]: { text: 'Session paused' },
+  [FABLE_OVERAGE_CONSENT_PROMPT_KIND]: { text: 'Session paused' },
+  [PEER_INBOUND_APPROVAL_KIND]: {
+    text: 'A message from another session needs your approval',
+  },
+  [CHROME_INSTALL_UPSELL_KIND]: { text: 'Claude wants to use your browser' },
+  [CHROME_INSTALL_SETUP_KIND]: { text: 'Setting up Claude in Chrome' },
+  [AUTO_MODE_SETUP_REVIEW_KIND]: {
+    text: 'Auto-mode setup proposal is ready for review',
+  },
+  [AUTO_MODE_FLAGGED_ALLOW_KIND]: {
+    text: 'Auto-mode setup flagged some permission rules for review',
+  },
+  [GOAL_PROPOSAL_KIND]: { text: 'Claude proposed a session goal' },
+};
+
+/** densable oP — resolve notification spec for a dialog kind and payload. */
+export function resolveDialogNotification(
+  kind: string | undefined,
+  payload?: unknown,
+): DialogNotificationSpec | undefined {
+  if (!kind) return undefined;
+  const entry = DIALOG_NOTIFICATIONS[kind];
+  return typeof entry === 'function' ? entry(payload) : entry;
+}
+
+/** densable aM — suggestion-tier engine dialogs use the "suggestion" draft cue. */
+function isSuggestionDialogKind(kind: string): boolean {
+  return (
+    isSoftNmsDialogKind(kind) ||
+    kind === GOAL_PROPOSAL_KIND ||
+    kind === 'lsp_recommendation' ||
+    kind === 'plugin_hint' ||
+    kind === 'left_arrow_confirm' ||
+    kind === 'remote_callout' ||
+    kind === 'fullscreen_upsell'
+  );
+}
 
 /** densable Bsu — mLo lookup, default inline. */
 export function getDialogHostLayout(kind: string | undefined): DialogHostVariant {
@@ -132,7 +249,7 @@ export type ModalChromeVisibility = 'none' | 'suppressed' | 'visible';
 /** densable RPs — !KUe() ? none : zIr()!=null ? suppressed : visible */
 export function getModalChromeVisibility(opts: {
   hasOpenDialogs: boolean;
-  suppressReason: DialogSuppressReason;
+  suppressReason: HostParkMode;
 }): ModalChromeVisibility {
   if (!opts.hasOpenDialogs) return 'none';
   if (opts.suppressReason != null) return 'suppressed';
@@ -158,12 +275,20 @@ export function isFullscreenModalChromeActive(opts: {
   return kaVisible || opts.toolJsxCentered === true;
 }
 /**
- * densable nau — WRr(message, "permission_prompt") + claimIfChanged("ax-bell")
+ * densable nau / VH — default is useNotifyAfterTimeout(message, 'permission_prompt') + claimIfChanged("ax-bell")
  * then aAr (screen-reader + lastBellAt 500ms + notifyBell). Returns null.
  * Process-singleton bag (no Ink WeakMap host API).
  */
-function DialogHostNotification({ dialogId, message }: { dialogId: string; message: string }): null {
-  useNotifyAfterTimeout(message, 'permission_prompt');
+function DialogHostNotification({
+  dialogId,
+  message,
+  notificationType = 'permission_prompt',
+}: {
+  dialogId: string;
+  message: string;
+  notificationType?: DialogNotificationType;
+}): null {
+  useNotifyAfterTimeout(message, notificationType);
   const terminal = useTerminalNotification();
   const screenReader = isScreenReaderModeEnabled();
   useEffect(() => {
@@ -201,14 +326,14 @@ export const DIALOG_COMPONENTS_FOR_TEST = DIALOG_COMPONENTS;
 type Props = {
   variant?: DialogHostVariant;
   /**
-   * densable zIr suppress — when set, dQc returns null (dialog stays in store).
-   * Tip: pass 'typing' when isPromptInputActive.
+   * densable zIr / Rf suppress — when set, Host withholds the dialog renderer.
+   * When `'draft'` suppresses an engine dialog matching `variant`, paints the draft cue.
    */
-  suppressReason?: 'typing' | 'legacy-dialog' | null;
+  suppressReason?: HostParkMode;
 };
 
 /**
- * densable NMs / dQc host.
+ * densable yv / NMs / dQc host.
  */
 export function DialogHost({ variant = 'inline', suppressReason = null }: Props): React.ReactNode {
   const store = useDialogStore();
@@ -268,8 +393,39 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
     };
   }, [suppressReason, top?.kind, top?.id, top?.payload]);
 
-  // densable dQc
-  if (suppressReason != null || !top) return null;
+  // densable Xye / yv draft suppression cue
+  if (suppressReason != null) {
+    if (suppressReason === 'draft') {
+      const openList = store.getState().open;
+      const hiddenEngine =
+        top && top.userInvoked !== true
+          ? top
+          : (openList.findLast(d => d.userInvoked !== true && !isSuggestionDialogKind(d.kind)) ??
+            openList.findLast(d => d.userInvoked !== true) ??
+            null);
+      if (hiddenEngine && (DIALOG_LAYOUTS[hiddenEngine.kind] ?? 'inline') === variant) {
+        const hiddenNotification = resolveDialogNotification(hiddenEngine.kind, hiddenEngine.payload);
+        const cueText = isSuggestionDialogKind(hiddenEngine.kind)
+          ? HOST_PARKED_TYPING_SUGGESTION
+          : HOST_PARKED_TYPING_QUESTION;
+        return (
+          <CurrentDialogIdContext.Provider value={hiddenEngine.id} key={hiddenEngine.id}>
+            {hiddenNotification !== undefined ? (
+              <DialogHostNotification
+                dialogId={hiddenEngine.id}
+                message={hiddenNotification.text}
+                notificationType={hiddenNotification.type}
+              />
+            ) : null}
+            <Text dimColor>{cueText}</Text>
+          </CurrentDialogIdContext.Provider>
+        );
+      }
+    }
+    return null;
+  }
+
+  if (!top) return null;
 
   const layout = DIALOG_LAYOUTS[top.kind] ?? 'inline';
   if (layout !== variant) return null;
@@ -281,24 +437,34 @@ export function DialogHost({ variant = 'inline', suppressReason = null }: Props)
   }
 
   // Live payload from store (updates may change settings)
-  const entry = store.getState().open.find(d => d.id === top.id) ?? top;
-  const payload = entry.payload;
+  const current = store.getState().open.find(d => d.id === top.id) ?? top;
+  const payload = current.payload;
 
-  const answer = (result: unknown) => {
-    const live = store.getState().open.find(d => d.id === top.id);
-    if (!live) return;
-    const swappedAt = Math.max(live.swappedAt ?? 0, suppressLiftedAt);
-    if (Date.now() - swappedAt < DIALOG_ANSWER_SWAP_DEBOUNCE_MS) return;
-    store.answer(top.id, result);
+  const wouldTakeAnswer = (): boolean => {
+    const entry = store.getState().open.find(d => d.id === top.id);
+    if (!entry) return false;
+    if (!(entry.payload === current.payload)) return false;
+    const swappedAt = Math.max(entry.swappedAt ?? 0, entry.userInvoked ? 0 : suppressLiftedAt);
+    return Date.now() - swappedAt >= DIALOG_ANSWER_SWAP_DEBOUNCE_MS;
   };
 
-  const title = DIALOG_NOTIFICATIONS[top.kind];
+  const answer = (result: unknown): boolean => {
+    if (!wouldTakeAnswer()) return false;
+    store.answer(top.id, result);
+    return true;
+  };
+
+  const notification = resolveDialogNotification(top.kind, payload);
 
   return (
-    <Box flexDirection="column" key={top.id}>
-      {title !== undefined ? <DialogHostNotification dialogId={top.id} message={title} /> : null}
-      <Renderer payload={payload} answer={answer} />
-    </Box>
+    <CurrentDialogIdContext.Provider value={top.id} key={top.id}>
+      <Box flexDirection="column">
+        {notification !== undefined ? (
+          <DialogHostNotification dialogId={top.id} message={notification.text} notificationType={notification.type} />
+        ) : null}
+        <Renderer payload={payload} answer={answer} wouldTakeAnswer={wouldTakeAnswer} />
+      </Box>
+    </CurrentDialogIdContext.Provider>
   );
 }
 

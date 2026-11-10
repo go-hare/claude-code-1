@@ -77,6 +77,8 @@ export function getFilePermissionOptions({
   noInputMode = false,
   contentWithheld = false,
   suppressPersistentAllow = false,
+  standingRowVetoed = false,
+  directoryGrantOnly = false,
   offersBlockOutsideReads = false,
 }: {
   filePath: string;
@@ -93,6 +95,10 @@ export function getFilePermissionOptions({
    * or tool.suppressesAlwaysAllowRule(input) is set.
    */
   suppressPersistentAllow?: boolean;
+  /** densable R4e standingRowVetoed — omit non-directory standing rows when true. */
+  standingRowVetoed?: boolean;
+  /** densable R4e / cro directoryGrantOnly — allow directory grant when safetyCheck !classifierApprovable. */
+  directoryGrantOnly?: boolean;
   /** official yBt — Yes / Block / ask_again instead of session allow. */
   offersBlockOutsideReads?: boolean;
 }): PermissionOptionWithLabel[] {
@@ -143,8 +149,11 @@ export function getFilePermissionOptions({
     });
   }
 
-  // densable B7S / #12: withheld preview OR suppressAlwaysAllowRule → one-time only.
-  if (!contentWithheld && !suppressPersistentAllow) {
+  // densable B7S / #12 / R4e: withheld preview OR suppressAlwaysAllowRule → one-time only;
+  // when standingRowVetoed && directoryGrantOnly (cro), only offer outside-dir grant.
+  const vetoed = contentWithheld || suppressPersistentAllow || standingRowVetoed;
+  const allowDirectoryGrantOnly = !contentWithheld && !suppressPersistentAllow && directoryGrantOnly;
+  if (!vetoed || allowDirectoryGrantOnly) {
     const inAllowedPath = pathInAllowedWorkingPath(filePath, toolPermissionContext);
 
     // Check if this is a .claude/ folder path (project or global)
@@ -155,16 +164,18 @@ export function getFilePermissionOptions({
     // Note: Session-level options are always shown since they only affect in-memory state,
     // not persisted settings. The allowManagedPermissionRulesOnly setting only restricts
     // persisted permission rules.
-    if ((inClaudeFolder || inGlobalClaudeFolder) && operationType !== 'read') {
+    if (!vetoed && (inClaudeFolder || inGlobalClaudeFolder) && operationType !== 'read') {
       options.push({
-        label: 'Yes, allow edits to .claude/ config for this session',
+        label: inGlobalClaudeFolder
+          ? 'Yes, and allow Claude to edit files in its ~/.claude folder for this session'
+          : "Yes, and allow Claude to edit files in this project's .claude folder for this session",
         value: 'yes-claude-folder',
         option: {
           type: 'accept-session',
           scope: inGlobalClaudeFolder ? 'global-claude-folder' : 'claude-folder',
         },
       });
-    } else {
+    } else if (!vetoed || (!inAllowedPath && !inClaudeFolder && !inGlobalClaudeFolder)) {
       // Option 2: Allow all changes/reads during session
       let sessionLabel: ReactNode;
 

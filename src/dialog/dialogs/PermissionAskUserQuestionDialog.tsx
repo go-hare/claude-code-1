@@ -11,13 +11,12 @@
  * Omit gold image convert. Host answer is store.answer; do not dequeue.
  */
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
-import { stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
-import { QuestionView } from '../../components/permissions/AskUserQuestionPermissionRequest/QuestionView.js';
+import { Ratchet, stringWidth, useTheme, useTerminalFocus } from '@anthropic/ink';
+import { QuestionView as RawQuestionView } from '../../components/permissions/AskUserQuestionPermissionRequest/QuestionView.js';
 import { SubmitQuestionsView } from '../../components/permissions/AskUserQuestionPermissionRequest/SubmitQuestionsView.js';
 import { AfkCountdown } from '../../components/permissions/AskUserQuestionPermissionRequest/AfkCountdown.js';
 import { useMultipleChoiceState } from '../../components/permissions/AskUserQuestionPermissionRequest/use-multiple-choice-state.js';
 import { useSettings } from '../../hooks/useSettings.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import { type CliHighlight, getCliHighlightPromise } from '../../utils/cliHighlight.js';
@@ -37,7 +36,6 @@ import {
   convertImagesToBlocks,
   formatAskUserQuestionAnswer,
   formatAskUserQuestionChatAboutFeedback,
-  formatAskUserQuestionSkipInterviewFeedback,
   applyEngineConfirmDisplay,
   normalizeAskQuestions,
   resolveAskUserQuestionDeny,
@@ -45,9 +43,11 @@ import {
   toDualInkQuestions,
 } from '../permissionAsk.js';
 
-const MIN_CONTENT_HEIGHT = 12;
 const MIN_CONTENT_WIDTH = 40;
-const CONTENT_CHROME_OVERHEAD = 15;
+
+const QuestionView: React.ComponentType<
+  React.ComponentProps<typeof RawQuestionView> & { wouldTakeAnswer?: () => boolean }
+> = RawQuestionView;
 
 function coercePermissionDecision(raw: unknown): PermissionDecision {
   if (typeof raw === 'object' && raw !== null && 'behavior' in raw) {
@@ -85,6 +85,7 @@ function PermissionAskUserQuestionWithHighlight(
 function PermissionAskUserQuestionDialogBody({
   payload,
   answer,
+  wouldTakeAnswer,
   highlight,
   choiceState,
 }: DialogRendererProps & {
@@ -97,48 +98,25 @@ function PermissionAskUserQuestionDialogBody({
     [p.questions, p.isEngineConfirm],
   );
   const questions = useMemo(() => toDualInkQuestions(hostQuestions), [hostQuestions]);
-  const { rows: terminalRows } = useTerminalSize();
   const [theme] = useTheme();
   const afkTimeoutMs = useMemo(() => askUserQuestionTimeoutToMs(), []);
   const isTerminalFocused = useTerminalFocus();
   const setAppState = useSetAppState();
 
-  const { globalContentHeight, globalContentWidth } = useMemo(() => {
-    let maxHeight = 0;
-    let maxWidth = 0;
-    const FOOTER_HELP_LINES = 7;
-    const maxAllowedHeight = Math.max(MIN_CONTENT_HEIGHT, terminalRows - CONTENT_CHROME_OVERHEAD);
-    const PREVIEW_OVERHEAD = 11;
+  const globalContentWidth = useMemo(() => {
+    let maxWidth = MIN_CONTENT_WIDTH;
     for (const q of questions) {
-      const hasPreview = q.options.some(opt => opt.preview);
-      if (hasPreview) {
-        const maxPreviewContentLines = Math.max(1, maxAllowedHeight - PREVIEW_OVERHEAD);
-        let maxPreviewBoxHeight = 0;
-        for (const opt of q.options) {
-          if (opt.preview) {
-            const rendered = applyMarkdown(opt.preview, theme, highlight);
-            const previewLines = rendered.split('\n');
-            const isTruncated = previewLines.length > maxPreviewContentLines;
-            const displayedLines = isTruncated ? maxPreviewContentLines : previewLines.length;
-            maxPreviewBoxHeight = Math.max(maxPreviewBoxHeight, displayedLines + (isTruncated ? 1 : 0) + 2);
-            for (const line of previewLines) {
-              maxWidth = Math.max(maxWidth, stringWidth(line));
-            }
+      for (const opt of q.options) {
+        if (opt.preview) {
+          const rendered = applyMarkdown(opt.preview, theme, highlight);
+          for (const line of rendered.split('\n')) {
+            maxWidth = Math.max(maxWidth, stringWidth(line));
           }
         }
-        const rightPanelHeight = maxPreviewBoxHeight + 2;
-        const leftPanelHeight = q.options.length + 2;
-        const sideByHeight = Math.max(leftPanelHeight, rightPanelHeight);
-        maxHeight = Math.max(maxHeight, sideByHeight + FOOTER_HELP_LINES);
-      } else {
-        maxHeight = Math.max(maxHeight, q.options.length + 3 + FOOTER_HELP_LINES);
       }
     }
-    return {
-      globalContentHeight: Math.min(Math.max(maxHeight, MIN_CONTENT_HEIGHT), maxAllowedHeight),
-      globalContentWidth: Math.max(maxWidth, MIN_CONTENT_WIDTH),
-    };
-  }, [questions, terminalRows, theme, highlight]);
+    return maxWidth;
+  }, [questions, theme, highlight]);
 
   const [pastedContentsByQuestion, setPastedContentsByQuestion] = useState<
     Record<string, Record<number, PastedContent>>
@@ -252,12 +230,8 @@ function PermissionAskUserQuestionDialogBody({
   );
 
   const handleRespondToClaude = useCallback(() => {
-    denyWithFeedback(formatAskUserQuestionChatAboutFeedback(questions, answers));
-  }, [answers, denyWithFeedback, questions]);
-
-  const handleFinishPlanInterview = useCallback(() => {
-    denyWithFeedback(formatAskUserQuestionSkipInterviewFeedback(questions, answers));
-  }, [answers, denyWithFeedback, questions]);
+    denyWithFeedback(formatAskUserQuestionChatAboutFeedback(hostQuestions, answers, questionStates));
+  }, [answers, denyWithFeedback, hostQuestions, questionStates]);
 
   const handleQuestionAnswer = useCallback(
     (questionText: string, label: string | string[], textInput?: string, shouldAdvance: boolean = true) => {
@@ -316,57 +290,51 @@ function PermissionAskUserQuestionDialogBody({
 
   const afkEnabled = isTerminalFocused && afkTimeoutMs !== null;
 
-  if (currentQuestion) {
-    return (
-      <>
-        <QuestionView
-          question={currentQuestion}
-          questions={questions}
-          displayQuestion={hostQuestions[currentQuestionIndex]?.displayQuestion}
-          displayBody={hostQuestions[currentQuestionIndex]?.displayBody}
-          currentQuestionIndex={currentQuestionIndex}
-          answers={answers}
-          questionStates={questionStates}
-          hideSubmitTab={hideSubmitTab}
-          minContentHeight={globalContentHeight}
-          minContentWidth={globalContentWidth}
-          planFilePath={planFilePath}
-          onUpdateQuestionState={updateQuestionState}
-          onAnswer={handleQuestionAnswer}
-          onTextInputFocus={setTextInputMode}
-          onCancel={deny}
-          onSubmit={nextQuestion}
-          onTabPrev={handleTabPrev}
-          onTabNext={handleTabNext}
-          onRespondToClaude={handleRespondToClaude}
-          onFinishPlanInterview={handleFinishPlanInterview}
-          onImagePaste={(base64, mediaType, filename, dims, path) =>
-            onImagePaste(currentQuestion.question, base64, mediaType, filename, dims, path)
-          }
-          pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
-          onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
-        />
-        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
-      </>
-    );
-  }
+  const viewNode = currentQuestion ? (
+    <QuestionView
+      wouldTakeAnswer={wouldTakeAnswer}
+      question={currentQuestion}
+      questions={questions}
+      displayQuestion={hostQuestions[currentQuestionIndex]?.displayQuestion}
+      displayBody={hostQuestions[currentQuestionIndex]?.displayBody}
+      optionPreviews={hostQuestions[currentQuestionIndex]?.options.map(opt => opt.preview)}
+      currentQuestionIndex={currentQuestionIndex}
+      answers={answers}
+      questionStates={questionStates}
+      hideSubmitTab={hideSubmitTab}
+      minContentWidth={globalContentWidth}
+      planFilePath={planFilePath}
+      onUpdateQuestionState={updateQuestionState}
+      onAnswer={handleQuestionAnswer}
+      onTextInputFocus={setTextInputMode}
+      onCancel={deny}
+      onSubmit={nextQuestion}
+      onTabPrev={handleTabPrev}
+      onTabNext={handleTabNext}
+      onRespondToClaude={handleRespondToClaude}
+      onImagePaste={(base64, mediaType, filename, dims, path) =>
+        onImagePaste(currentQuestion.question, base64, mediaType, filename, dims, path)
+      }
+      pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
+      onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
+    />
+  ) : isInSubmitView ? (
+    <SubmitQuestionsView
+      questions={questions}
+      currentQuestionIndex={currentQuestionIndex}
+      answers={answers}
+      allQuestionsAnswered={allQuestionsAnswered}
+      permissionResult={coercePermissionDecision(p.permissionResult)}
+      onFinalResponse={handleFinalResponse}
+    />
+  ) : null;
 
-  if (isInSubmitView) {
-    return (
-      <>
-        <SubmitQuestionsView
-          questions={questions}
-          currentQuestionIndex={currentQuestionIndex}
-          answers={answers}
-          allQuestionsAnswered={allQuestionsAnswered}
-          permissionResult={coercePermissionDecision(p.permissionResult)}
-          minContentHeight={globalContentHeight}
-          onFinalResponse={handleFinalResponse}
-        />
-        <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
-      </>
-    );
-  }
+  if (!viewNode) return null;
 
-  return null;
+  return (
+    <Ratchet>
+      {viewNode}
+      <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
+    </Ratchet>
+  );
 }

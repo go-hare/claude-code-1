@@ -10,6 +10,8 @@ import React from 'react';
 import { getOriginalCwd } from '../../bootstrap/state.js';
 import { Box, Text } from '@anthropic/ink';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
+import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
+import { PermissionPreviewGutter } from '../../components/permissions/PermissionPreviewGutter.js';
 import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
 import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
@@ -56,15 +58,19 @@ export function PermissionSkillDialog({ payload, answer }: DialogRendererProps):
   });
 
   return (
-    <PermissionDialog title={title} requestSource={p.requestSource}>
-      <Text>Claude may use instructions, code, or files from this Skill.</Text>
+    <PermissionDialog title={title} innerPaddingX={0} requestSource={p.requestSource}>
+      <Box paddingX={1}>
+        <Text>Claude may use instructions, code, or files from this Skill.</Text>
+      </Box>
       {skillDescription !== '' ? (
-        <Box flexDirection="column" paddingX={2} paddingY={1}>
-          <Text dimColor>{skillDescription}</Text>
-        </Box>
+        <PermissionOverflowBox>
+          <PermissionPreviewGutter multiline={skillDescription.includes('\n')}>
+            <Text dimColor>{skillDescription}</Text>
+          </PermissionPreviewGutter>
+        </PermissionOverflowBox>
       ) : null}
 
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={1}>
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="tool" />
         <PermissionPrompt
           options={options}

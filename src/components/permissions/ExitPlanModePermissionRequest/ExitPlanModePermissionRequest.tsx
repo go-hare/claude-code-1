@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle';
 import type { UUID } from 'crypto';
-import figures from 'figures';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
 import {
@@ -26,6 +25,7 @@ import {
   type DOMElement,
   ScrollBox,
   type ScrollBoxHandle,
+  StatusIcon,
   Text,
   useModalClaimScrollBox,
   useModalOrTerminalSize,
@@ -94,6 +94,11 @@ import {
   offerExitPlanResumeAuto,
   resolveExitPlanKeepContextAnswer,
 } from '../../../dialog/permissionExitPlan.js';
+import {
+  type PermissionRequestSource,
+  type PermissionRequestSourceContext,
+  resolvePermissionRequestSource,
+} from '../../../dialog/permissionRequestSource.js';
 
 type ResponseValue =
   | 'yes-bypass-permissions'
@@ -184,7 +189,14 @@ export function ExitPlanModePermissionRequest({
   onReject,
   workerBadge,
   setStickyFooter,
-}: PermissionRequestProps): React.ReactNode {
+  requestSource,
+}: PermissionRequestProps & { requestSource?: PermissionRequestSource }): React.ReactNode {
+  const resolvedRequestSource = useMemo(
+    () =>
+      requestSource ??
+      resolvePermissionRequestSource(toolUseConfirm.toolUseContext as unknown as PermissionRequestSourceContext),
+    [requestSource, toolUseConfirm.toolUseContext],
+  );
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const setAppState = useSetAppState();
   const { addNotification } = useNotifications();
@@ -350,8 +362,11 @@ export function ExitPlanModePermissionRequest({
     // Shift+Tab approves the minted first keep-context slot (Lcy elevated).
     if (e.shift && e.key === 'tab') {
       e.preventDefault();
+      const elevatedClear = (['yes-bypass-permissions', 'yes-auto-clear-context', 'yes-accept-edits'] as const).find(
+        val => options.some(opt => opt.value === val),
+      );
       const elevatedKeep = keepContext.options[0]?.value ?? 'yes-default-keep-context';
-      void handleResponse(showClearContext ? 'yes-accept-edits' : elevatedKeep);
+      void handleResponse(showClearContext ? (elevatedClear ?? 'yes-accept-edits') : elevatedKeep);
       return;
     }
   };
@@ -755,7 +770,12 @@ export function ExitPlanModePermissionRequest({
     }
 
     return (
-      <PermissionDialog color="planMode" title="Exit plan mode?" workerBadge={workerBadge}>
+      <PermissionDialog
+        color="planMode"
+        title="Exit plan mode?"
+        workerBadge={workerBadge}
+        requestSource={resolvedRequestSource}
+      >
         <Box flexDirection="column" paddingX={1} marginTop={1}>
           <Text>Claude wants to exit plan mode</Text>
           <Box marginTop={1}>
@@ -791,7 +811,13 @@ export function ExitPlanModePermissionRequest({
         height={claimed ? planScrollHeight : undefined}
         stickyScroll={false}
       >
-        <PermissionDialog color="planMode" title="Ready to code?" innerPaddingX={0} workerBadge={workerBadge}>
+        <PermissionDialog
+          color="planMode"
+          title="Ready to code?"
+          innerPaddingX={0}
+          workerBadge={workerBadge}
+          requestSource={resolvedRequestSource}
+        >
           <Box flexDirection="column" marginTop={1}>
             <Box paddingX={1} flexDirection="column">
               <Text>Here is Claude&apos;s plan:</Text>
@@ -838,17 +864,22 @@ export function ExitPlanModePermissionRequest({
           />
         </Box>
         {editorName && (
-          <Box flexDirection="row" gap={1} marginTop={1}>
-            <Text dimColor>
-              <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
-              {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
+          <Box marginTop={1}>
+            <Text>
+              <Text dimColor>
+                <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
+              </Text>
+              {showSaveMessage && (
+                <>
+                  <Text dimColor>{' · '}</Text>
+                  <Text color="success">
+                    <StatusIcon status="success" withSpace />
+                    Plan saved!
+                  </Text>
+                </>
+              )}
             </Text>
-            {showSaveMessage && (
-              <>
-                <Text dimColor>{' · '}</Text>
-                <Text color="success">{figures.tick}Plan saved!</Text>
-              </>
-            )}
           </Box>
         )}
       </Box>
@@ -878,15 +909,15 @@ export function buildPlanApprovalOptions({
   const usedLabel = usedPercent !== null ? ` (${usedPercent}% used)` : '';
 
   if (showClearContext) {
-    if (feature('TRANSCRIPT_CLASSIFIER') && isAutoModeAvailable) {
-      options.push({
-        label: `Yes, clear context${usedLabel} and use auto mode`,
-        value: 'yes-auto-clear-context',
-      });
-    } else if (isBypassPermissionsModeAvailable) {
+    if (isBypassPermissionsModeAvailable) {
       options.push({
         label: `Yes, clear context${usedLabel} and bypass permissions`,
         value: 'yes-bypass-permissions',
+      });
+    } else if (feature('TRANSCRIPT_CLASSIFIER') && isAutoModeAvailable) {
+      options.push({
+        label: `Yes, clear context${usedLabel} and use auto mode`,
+        value: 'yes-auto-clear-context',
       });
     } else {
       options.push({
@@ -908,6 +939,13 @@ export function buildPlanApprovalOptions({
     options.push({ label: row.label, value: row.value });
   }
 
+  if (showUltraplan) {
+    options.push({
+      label: 'No, refine with Ultraplan in a cloud session',
+      value: 'ultraplan',
+    });
+  }
+
   options.push({
     type: 'input',
     label: 'No, keep planning',
@@ -916,13 +954,6 @@ export function buildPlanApprovalOptions({
     description: 'shift+tab to approve with this feedback',
     onChange: onFeedbackChange,
   });
-
-  if (showUltraplan) {
-    options.push({
-      label: 'No, refine with Ultraplan on Claude Code on the web',
-      value: 'ultraplan',
-    });
-  }
 
   return options;
 }

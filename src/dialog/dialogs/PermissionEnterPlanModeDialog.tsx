@@ -6,7 +6,7 @@
  * Keep Select (do not invent sc). Gold Ynu sc has no cancelFirst —
  * that token is GoalProposal xou. Host answer is store.answer.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { handlePlanModeTransition } from '../../bootstrap/state.js';
 import { Box, Text } from '@anthropic/ink';
 import {
@@ -14,7 +14,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 import { useAppState } from '../../state/AppState.js';
-import { ConfirmSelect } from '../../components/ConfirmSelect.js';
+import { CONFIRM_SELECT_ARM_MS, ConfirmSelect, confirmSelectRefused } from '../../components/ConfirmSelect.js';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import {
@@ -26,12 +26,20 @@ import {
   resolveEnterPlanModeAnswer,
 } from '../permissionEnterPlanMode.js';
 
-export function PermissionEnterPlanModeDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
+export function PermissionEnterPlanModeDialog({
+  payload,
+  answer,
+  wouldTakeAnswer,
+}: DialogRendererProps): React.ReactNode {
   const p = payload as EnterPlanModePermissionPayload;
   const currentMode = useAppState(s => s.toolPermissionContext.mode);
   const row = mintEnterPlanModeRow();
+  const [openedAt] = useState(() => Date.now());
+  const refuseInput = () =>
+    (wouldTakeAnswer ? !wouldTakeAnswer() : false) || confirmSelectRefused(openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
 
   function handleChoice(choice: EnterPlanModeChoice): void {
+    if (wouldTakeAnswer && !wouldTakeAnswer()) return;
     if (choice === 'yes' && row !== null) {
       logEvent('tengu_plan_enter', {
         entryMethod: 'tool' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -61,6 +69,8 @@ export function PermissionEnterPlanModeDialog({ payload, answer }: DialogRendere
         <Box marginTop={1}>
           <ConfirmSelect
             hideIndexes
+            openedAt={openedAt}
+            refuseInput={refuseInput}
             confirmLabel={ENTER_PLAN_MODE_CONFIRM_LABEL}
             cancelLabel={ENTER_PLAN_MODE_CANCEL_LABEL}
             onConfirm={() => handleChoice('yes')}

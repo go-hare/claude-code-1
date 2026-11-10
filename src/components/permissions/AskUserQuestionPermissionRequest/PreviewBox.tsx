@@ -1,10 +1,9 @@
 import React, { Suspense, use, useMemo } from 'react';
 import { useSettings } from '../../../hooks/useSettings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { Ansi, Box, Text, stringWidth, useTheme } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth, useTheme, wrapAnsi } from '@anthropic/ink';
 import { type CliHighlight, getCliHighlightPromise } from '../../../utils/cliHighlight.js';
 import { applyMarkdown } from '../../../utils/markdown.js';
-import sliceAnsi from '../../../utils/sliceAnsi.js';
 
 type PreviewBoxProps = {
   /** The preview content to display. Markdown is rendered with syntax highlighting
@@ -70,9 +69,14 @@ function PreviewBoxBody({
 
   // Render markdown with syntax highlighting for code blocks. applyMarkdown
   // returns an ANSI-styled string (bold, colors, etc.) that we split into
-  // lines. stringWidth and sliceAnsi below correctly handle ANSI codes.
+  // lines and wrap to fit the available inner width before truncating.
   const rendered = useMemo(() => applyMarkdown(content, theme, highlight), [content, theme, highlight]);
-  const contentLines = rendered.split('\n');
+  const innerWidth = Math.max(1, effectiveMaxWidth - 4);
+  const contentLines = rendered
+    .split('\n')
+    .flatMap(line =>
+      stringWidth(line) > innerWidth ? wrapAnsi(line, innerWidth, { hard: true, trim: false }).split('\n') : line,
+    );
   const isTruncated = contentLines.length > effectiveMaxLines;
 
   // Truncate to effectiveMaxLines
@@ -86,9 +90,9 @@ function PreviewBoxBody({
 
   // Calculate content width (max visual line width, handling unicode/emoji/CJK)
   const contentWidth = Math.max(minWidth, ...lines.map(line => stringWidth(line)));
-  // Add 2 for border padding, cap at the container width to prevent line wrapping
-  const boxWidth = Math.min(contentWidth + 4, effectiveMaxWidth);
-  const innerWidth = boxWidth - 4; // Account for borders and padding
+  // Add 4 for borders and padding, cap at the container width to prevent line wrapping
+  const boxWidth = Math.max(4, Math.min(contentWidth + 4, effectiveMaxWidth));
+  const boxInnerWidth = boxWidth - 4; // Account for borders and padding
 
   // Render top border
   const topBorder = `${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(boxWidth - 2)}${BOX_CHARS.topRight}`;
@@ -112,11 +116,8 @@ function PreviewBoxBody({
       <Text dimColor>{topBorder}</Text>
 
       {lines.map((line, index) => {
-        // Pad or truncate line to fit inner width (using visual width for unicode/emoji/CJK).
-        // sliceAnsi handles ANSI escape codes correctly; stringWidth strips them before measuring.
-        const lineWidth = stringWidth(line);
-        const displayLine = lineWidth > innerWidth ? sliceAnsi(line, 0, innerWidth) : line;
-        const padding = ' '.repeat(Math.max(0, innerWidth - stringWidth(displayLine)));
+        const displayLine = boxInnerWidth < 1 ? '' : line;
+        const padding = ' '.repeat(Math.max(0, boxInnerWidth - stringWidth(displayLine)));
 
         return (
           <Box key={index} flexDirection="row">
