@@ -1,4 +1,16 @@
+import { shouldUseSimpleSystemPrompt } from 'src/utils/simpleSystemPrompt.js'
 import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
+
+export const LEAN_PROMPT =
+  'Create and update a task list for the current session. The list is rendered to the user as your working plan.\n\n- Each todo has `content`, `status` ("pending" | "in_progress" | "completed"), and `activeForm` (present-tense label shown while in progress).\n- Send the full list each call; it replaces the previous one.\n- Keep one item `in_progress` at a time and mark it `completed` when done.'
+
+export function getTodoWritePrompt(
+  model?: string,
+  leanPrompt?: boolean,
+): string {
+  const isLean = leanPrompt ?? shouldUseSimpleSystemPrompt({ model })
+  return isLean ? LEAN_PROMPT : PROMPT
+}
 
 export const PROMPT = `Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
 It also helps the user understand the progress of the task and overall progress of their requests.

@@ -2,7 +2,7 @@ import { FILE_READ_TOOL_NAME } from '../FileReadTool/constants.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from './constants.js'
 
 export const DESCRIPTION =
-  'Replaces, inserts, or deletes a single cell in a Jupyter notebook.'
+  'Edit a cell in a Jupyter notebook — replace, insert, or delete.'
 export const PROMPT = `Replaces, inserts, or deletes a single cell in a Jupyter notebook (.ipynb file).
 
 Usage:

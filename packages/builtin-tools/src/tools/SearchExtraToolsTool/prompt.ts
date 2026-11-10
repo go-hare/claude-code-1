@@ -95,33 +95,47 @@ function isRemoteTriggerEntrypoint(): boolean {
 }
 
 /**
- * densable `tCo` / T3_+v3_|E3_+w3_ — ToolSearch prompt.
+ * densable `d` / `c` / `m` / `p` / `rXn` — ToolSearch prompt (2.1.289).
  * Model fetches schemas via this tool, then calls deferred tools **directly**
  * (API expands tool_reference). No ExecuteExtraTool indirection.
  */
 const PROMPT_HEAD = `Fetches full schema definitions for deferred tools so they can be called.
-`
 
-// Matches isDeferredToolsDeltaEnabled in searchExtraTools.ts (not imported —
-// searchExtraTools.ts imports from this file). When enabled: tools announced
-// via system-reminder attachments. When disabled: prepended
-// <available-deferred-tools> block (pre-gate behavior).
-function getToolLocationHint(): string {
-  const deltaEnabled =
-    process.env.USER_TYPE === 'ant' ||
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_glacier_2xr', false)
-  return deltaEnabled
-    ? 'Deferred tools appear by name in <system-reminder> messages.'
-    : 'Deferred tools appear by name in <available-deferred-tools> messages.'
-}
+Deferred tools appear by name in <system-reminder> messages.`
 
-// densable E3_ (InputValidationError branch) — always use the stronger form.
-const PROMPT_TAIL = ` Until fetched, only the name is known — there is no parameter schema, so calling the tool fails with InputValidationError. When any instruction, system reminder, or other tool's description names a deferred tool, fetch it with query "select:<name>" before calling it. This tool takes a query, matches it against the deferred tool list, and returns the matched tools' complete JSONSchema definitions inside a <functions> block. Once a tool's schema appears in that result, it is callable exactly like any tool defined at the top of the prompt.
+const PROMPT_MID_DEFAULT =
+  ' Until fetched, only the name is known — there is no parameter schema, so the tool cannot be invoked.'
+
+const PROMPT_MID_FETCH_RULE = ` Until fetched, only the name is known — there is no parameter schema, so calling the tool fails with InputValidationError. When any instruction, system reminder, or other tool's description names a deferred tool, fetch it with query "select:<name>" before calling it.`
+
+const PROMPT_TAIL = ` This tool takes a query, matches it against the deferred tool list, and returns the matched tools' complete JSONSchema definitions inside a <functions> block. Once a tool's schema appears in that result, it is callable exactly like any tool defined at the top of the prompt.
+
 Result format: each matched tool appears as one <function>{"description": "...", "name": "...", "parameters": {...}}</function> line inside the <functions> block — the same encoding as the tool list at the top of this prompt.
+
 Query forms:
 - "select:Read,Edit,Grep" — fetch these exact tools by name
 - "notebook jupyter" — keyword search, up to max_results best matches
 - "+slack send" — require "slack" in the name, rank by remaining terms`
+
+/**
+ * densable `cXo` — `juniper_shoal.gorse_hollow === true`.
+ */
+function isToolSearchFetchRuleEnabled(): boolean {
+  try {
+    const shoal = getFeatureValue_CACHED_MAY_BE_STALE<Record<
+      string,
+      unknown
+    > | null>('tengu_juniper_shoal', null)
+    return (
+      typeof shoal === 'object' &&
+      shoal !== null &&
+      !Array.isArray(shoal) &&
+      shoal.gorse_hollow === true
+    )
+  } catch {
+    return false
+  }
+}
 
 /**
  * densable `TX` — opt-in defer policy (not CORE_TOOLS whitelist).
@@ -191,14 +205,21 @@ export function isDeferredTool(tool: Tool): boolean {
 }
 
 /**
- * Format one deferred-tool line for the <available-deferred-tools> user
- * message. Search hints (tool.searchHint) are not rendered — the
- * hints A/B (exp_xenhnnmn0smrx4, stopped Mar 21) showed no benefit.
+ * densable `d6r` — format one deferred-tool line.
  */
 export function formatDeferredToolLine(tool: Tool): string {
-  return tool.name
+  const whenToUse = (tool as { whenToUse?: string }).whenToUse
+  return whenToUse !== undefined && isDeferredTool(tool)
+    ? `${tool.name}: ${whenToUse}`
+    : tool.name
 }
 
 export function getPrompt(): string {
-  return PROMPT_HEAD + getToolLocationHint() + PROMPT_TAIL
+  return (
+    PROMPT_HEAD +
+    (isToolSearchFetchRuleEnabled()
+      ? PROMPT_MID_FETCH_RULE
+      : PROMPT_MID_DEFAULT) +
+    PROMPT_TAIL
+  )
 }

@@ -102,7 +102,22 @@ PowerShell Syntax Notes:
    - Environment variables: read with \`$env:NAME\`, set with \`$env:NAME = "value"\` (NOT \`Set-Variable\` or bash \`export\`)
    - Call native exe with spaces in path via call operator: \`& "C:\\Program Files\\App\\app.exe" arg1 arg2\`
 
-Interactive and blocking commands (will hang — this tool runs with -NonInteractive):
+Unix commands that DO NOT exist in PowerShell — use the equivalent instead:
+   - head / tail → \`Get-Content file -TotalCount N\` / \`-Tail N\`; piped: \`| Select-Object -First N\` / \`-Last N\`
+   - which → \`(Get-Command name).Source\`
+   - touch → \`if (-not (Test-Path path)) { New-Item -ItemType File path }\` (NEVER use \`New-Item -Force\` on a file — it truncates existing content)
+   - wc -l → \`(Get-Content file | Measure-Object -Line).Lines\`
+   - mkdir -p → \`New-Item -ItemType Directory -Force path\` (\`-p\` is not a PowerShell flag)
+   - rm -rf → \`Remove-Item -Recurse -Force path\`
+   - ln -s → \`New-Item -ItemType SymbolicLink -Path link -Target target\`
+   - chmod / chown → not applicable on Windows; use \`icacls\` only if ACL changes are required
+   - 2>/dev/null → \`2>$null\` (but stderr is captured for you — usually unnecessary)
+   - VAR=x cmd → \`$env:VAR = 'x'; cmd\` (PowerShell has no inline env-var prefix)
+   - Bash control flow (\`if [ -f x ]\`, \`for x in *\`, backtick \`\`cmd\`\` substitution) is a parser error — use \`if (Test-Path x)\`, \`foreach ($x in ...)\`, \`$(cmd)\`
+
+Exit-code note: \`-ErrorAction SilentlyContinue\` suppresses error OUTPUT but the cmdlet failure still causes this tool to report exit 1. To make a cmdlet failure truly non-fatal, promote it to terminating and swallow it: \`try { Cmdlet ... -ErrorAction Stop } catch {}\` (without \`-ErrorAction Stop\`, non-terminating errors skip the \`catch\` and still exit 1).
+
+Interactive and blocking commands (this tool runs with -NonInteractive and stdin attached to the null device — console prompts read EOF or error immediately; GUI prompts can still block until timeout):
    - NEVER use \`Read-Host\`, \`Get-Credential\`, \`Out-GridView\`, \`$Host.UI.PromptForChoice\`, or \`pause\`
    - Destructive cmdlets (\`Remove-Item\`, \`Stop-Process\`, \`Clear-Content\`, etc.) may prompt for confirmation. Add \`-Confirm:$false\` when you intend the action to proceed. Use \`-Force\` for read-only/hidden items.
    - Never use \`git rebase -i\`, \`git add -i\`, or other commands that open an interactive editor
@@ -120,7 +135,7 @@ Second line with $literal dollar signs.
 
 Usage notes:
   - The command argument is required.
-  - You can specify an optional timeout in milliseconds (up to ${getMaxTimeoutMs()}ms / ${getMaxTimeoutMs() / 60000} minutes). If not specified, commands will timeout after ${getDefaultTimeoutMs()}ms (${getDefaultTimeoutMs() / 60000} minutes).
+  - You can specify an optional timeout in milliseconds (up to ${getMaxTimeoutMs()}ms / ${getMaxTimeoutMs() / 60000} minutes for a foreground command). If not specified, commands will timeout after ${getDefaultTimeoutMs()}ms (${getDefaultTimeoutMs() / 60000} minutes).
   - It is very helpful if you write a clear, concise description of what this command does.
   - If the output exceeds ${getMaxOutputLength()} characters, output will be truncated before being returned to you.
 ${backgroundNote ? backgroundNote + '\n' : ''}\

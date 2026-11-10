@@ -36,6 +36,4 @@ The canonical multi-stage pattern — pipeline by default, each dimension verifi
   )
   const confirmed = results.flat().filter(Boolean).filter(f => f.verdict?.isReal)
   return { confirmed }
-  // Dimension 'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.
-
-Before writing a script, load the \`workflow-authoring\` skill — the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.`
+  // Dimension 'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.`

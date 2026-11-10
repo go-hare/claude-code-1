@@ -11,6 +11,7 @@ import {
   runFunctionHookChain,
 } from 'src/utils/plugins/functionHooksModules.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
+import { shouldUseSimpleSystemPrompt } from 'src/utils/simpleSystemPrompt.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import {
   getDefaultBashTimeoutMs,
@@ -26,7 +27,7 @@ import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
 import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
 import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
-import { TodoWriteTool } from '../TodoWriteTool/TodoWriteTool.js'
+import { TODO_WRITE_TOOL_NAME } from '../TodoWriteTool/constants.js'
 import { BASH_TOOL_NAME } from './toolName.js'
 
 export function getDefaultTimeoutMs(): number {
@@ -201,7 +202,7 @@ ${commitStep1}
 
 Important notes:
 - NEVER run additional commands to read or explore code, besides git bash commands
-- NEVER use the ${TodoWriteTool.name} or ${AGENT_TOOL_NAME} tools
+- NEVER use the ${TODO_WRITE_TOOL_NAME} or ${AGENT_TOOL_NAME} tools
 - DO NOT push to the remote repository unless the user explicitly asks you to do so
 - IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.
 - IMPORTANT: Do not use --no-edit with git rebase commands, as the --no-edit flag is not a valid option for git rebase.
@@ -239,7 +240,7 @@ EOF
 </example>
 
 Important:
-- DO NOT use the ${TodoWriteTool.name} or ${AGENT_TOOL_NAME} tools
+- DO NOT use the ${TODO_WRITE_TOOL_NAME} or ${AGENT_TOOL_NAME} tools
 - Return the PR URL when you're done, so the user can see it
 
 # Other common operations
@@ -358,7 +359,80 @@ function getSimpleSandboxSection(): string {
   ].join('\n')
 }
 
-export async function getSimplePrompt(): Promise<string> {
+async function getLeanGitInstructions(): Promise<string> {
+  if (!shouldIncludeGitInstructions()) return ''
+  const baseAttribution = attributionMod.getAttributionTexts()
+  let commitAttribution = baseAttribution.commit
+  let prAttribution = baseAttribution.pr
+  if (
+    !(process.env.USER_TYPE === 'ant' && isUndercover()) &&
+    hasMatchingFunctionHook('attribution.text')
+  ) {
+    ;[commitAttribution, prAttribution] = await Promise.all([
+      resolveHookAttributionText('commit', commitAttribution),
+      resolveHookAttributionText('pr', prAttribution),
+    ])
+  }
+  const attributionLines = [
+    commitAttribution
+      ? `- End git commit messages with:\n${commitAttribution}`
+      : null,
+    prAttribution ? `- End PR bodies with:\n${prAttribution}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const sandboxSection = getSimpleSandboxSection()
+  return `# Git
+- Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
+- Use the \`gh\` CLI for GitHub operations (PRs, issues, API).
+- Commit or push only when the user asks. If on the default branch, branch first.${attributionLines ? `\n${attributionLines}` : ''}${sandboxSection ? `\n\n${sandboxSection.trimStart()}` : ''}`
+}
+
+async function getLeanBashPrompt(): Promise<string> {
+  const hasBg = getBackgroundUsageNote() !== null
+  const gitSection = await getLeanGitInstructions()
+  const embedded = hasEmbeddedSearchTools()
+  const avoidCommands = embedded
+    ? '`cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
+    : '`find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo`'
+  const toolLines = [
+    `- IMPORTANT: Avoid using this tool to run ${avoidCommands} commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.`,
+  ]
+  const workingDirLine =
+    "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile."
+  const bgLines: string[] = []
+  if (hasBg) {
+    let bgLine =
+      '- `run_in_background` runs the command detached: it keeps running across turns and re-invokes you when it exits. No `&` needed.'
+    if (feature('MONITOR_TOOL')) {
+      bgLine +=
+        ' Foreground `sleep` is blocked; use Monitor with an until-loop to wait on a condition.'
+    }
+    bgLines.push(bgLine)
+  }
+  // densable 2.1.289 kJn — fixed Bash tool description bullet (SEA gold).
+  const outputDisplayLine =
+    'Command output is displayed to you, not reliably to the user.'
+  return [
+    'Executes a bash command and returns its output.',
+    '',
+    workingDirLine,
+    ...toolLines,
+    `- ${outputDisplayLine}`,
+    `- \`timeout\` is in milliseconds: default ${getDefaultTimeoutMs()}, max ${getMaxTimeoutMs()} for a foreground command.`,
+    ...bgLines,
+    ...(gitSection ? ['', gitSection] : []),
+  ].join('\n')
+}
+
+export async function getSimplePrompt(
+  model?: string,
+  leanPrompt?: boolean,
+): Promise<string> {
+  if (leanPrompt ?? (model ? shouldUseSimpleSystemPrompt({ model }) : false)) {
+    return getLeanBashPrompt()
+  }
+
   // Ant-native builds alias find/grep to embedded bfs/ugrep in Claude's shell,
   // so we don't steer away from them (and Glob/Grep tools are removed).
   const embedded = hasEmbeddedSearchTools()
@@ -385,19 +459,12 @@ export async function getSimplePrompt(): Promise<string> {
   // read-only git analysis; keep true parallel for unrelated independent work.
   const preferCombinedGitOnWindows = process.platform === 'win32'
 
-  const multipleCommandsSubitems = preferCombinedGitOnWindows
-    ? [
-        `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message — except for read-only git analysis (status/diff/log/show): combine those into one ${BASH_TOOL_NAME} call (e.g. \`git status --short && git diff && git log --oneline -n 5\`) to avoid multiple console flashes on Windows.`,
-        `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
-        "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
-        'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
-      ]
-    : [
-        `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message. Example: if you need to run "git status" and "git diff", send a single message with two ${BASH_TOOL_NAME} tool calls in parallel.`,
-        `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
-        "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
-        'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
-      ]
+  const multipleCommandsSubitems = [
+    `If the commands are independent and can run in parallel, make multiple ${BASH_TOOL_NAME} tool calls in a single message — except for read-only git analysis (status/diff/log/show): combine those into one ${BASH_TOOL_NAME} call (e.g. \`git status --short && git diff && git log --oneline -n 5\`) to avoid multiple console flashes on Windows.`,
+    `If the commands depend on each other and must run sequentially, use a single ${BASH_TOOL_NAME} call with '&&' to chain them together.`,
+    "Use ';' only when you need to run commands sequentially but don't care if earlier commands fail.",
+    'DO NOT use newlines to separate commands (newlines are ok in quoted strings).',
+  ]
 
   const gitSubitems = [
     ...(preferCombinedGitOnWindows
@@ -410,21 +477,34 @@ export async function getSimplePrompt(): Promise<string> {
     'Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.',
   ]
 
+  const backgroundEnabled = !isBackgroundTasksDisabled()
   const sleepSubitems = [
     'Do not sleep between commands that can run immediately — just run them.',
     ...(feature('MONITOR_TOOL')
       ? [
-          'Use the Monitor tool to stream events from a background process (each stdout line is a notification). For one-shot "wait until done," use Bash with run_in_background instead.',
+          backgroundEnabled
+            ? 'Use the Monitor tool to stream events from a background process (each stdout line is a notification). For one-shot "wait until done," use Bash with run_in_background instead.'
+            : 'Use the Monitor tool to stream events from a background process (each stdout line is a notification).',
         ]
       : []),
-    'For long-running commands, use `run_in_background` — you will be notified when it completes. Do not poll.',
-    'Do not retry failing commands in a sleep loop — diagnose the root cause.',
-    ...(feature('MONITOR_TOOL')
+    ...(backgroundEnabled
       ? [
-          '`sleep N` as the first command with N ≥ 2 is blocked. If you need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.',
+          'If your command is long running and you would like to be notified when it finishes — use `run_in_background`. No sleep needed.',
+        ]
+      : []),
+    'Do not retry failing commands in a sleep loop — diagnose the root cause.',
+    ...(backgroundEnabled
+      ? [
+          'If waiting for a background task you started with `run_in_background`, you will be notified when it completes — do not poll.',
+        ]
+      : []),
+    ...(feature('MONITOR_TOOL') && backgroundEnabled
+      ? [
+          'Long leading `sleep` commands are blocked. To poll until a condition is met, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.',
         ]
       : [
-          'If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.',
+          'If you must poll an external process, use a check command (e.g. `gh run view`) rather than sleeping first.',
+          'If you must sleep, keep the duration short to avoid blocking the user.',
         ]),
   ]
   const backgroundNote = getBackgroundUsageNote()
@@ -432,19 +512,19 @@ export async function getSimplePrompt(): Promise<string> {
   const instructionItems: Array<string | string[]> = [
     'If your command will create new directories or files, first use this tool to run `ls` to verify the parent directory exists and is the correct location.',
     'Always quote file paths that contain spaces with double quotes in your command (e.g., cd "path with spaces/file.txt")',
-    'Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.',
-    // densable 2.1.224 #26 — fixed Bash tool description bullet (SEA gold).
-    'Command output is displayed to you, not reliably to the user.',
-    `You may specify an optional timeout in milliseconds (up to ${getMaxTimeoutMs()}ms / ${getMaxTimeoutMs() / 60000} minutes). By default, your command will timeout after ${getDefaultTimeoutMs()}ms (${getDefaultTimeoutMs() / 60000} minutes).`,
+    'Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it. In particular, never prepend `cd <current-directory>` to a `git` command — `git` already operates on the current working tree, and the compound triggers a permission prompt.',
+    `You may specify an optional timeout in milliseconds (up to ${getMaxTimeoutMs()}ms / ${getMaxTimeoutMs() / 60000} minutes for a foreground command). By default, your command will timeout after ${getDefaultTimeoutMs()}ms (${getDefaultTimeoutMs() / 60000} minutes).`,
     ...(backgroundNote !== null ? [backgroundNote] : []),
-    'When issuing multiple commands:',
-    multipleCommandsSubitems,
+    ...(preferCombinedGitOnWindows
+      ? ['When issuing multiple commands:', multipleCommandsSubitems]
+      : []),
     'For git commands:',
     gitSubitems,
     'Avoid unnecessary `sleep` commands:',
     sleepSubitems,
     ...(embedded
       ? [
+          'When running `find`, search from `.` (or a specific path), not `/` — scanning the full filesystem can exhaust system resources on large trees.',
           // bfs (which backs `find`) uses Oniguruma for -regex, which picks the
           // FIRST matching alternative (leftmost-first), unlike GNU find's
           // POSIX leftmost-longest. This silently drops matches when a shorter

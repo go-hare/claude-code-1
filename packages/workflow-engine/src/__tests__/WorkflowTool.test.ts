@@ -246,8 +246,8 @@ test('prompt defers script-API / concurrency dump to workflow-authoring skill', 
   const { ports } = mockPorts('/tmp', new Map())
   const tool = createWorkflowTool(ports)
   const p = await tool.prompt()
-  // densable 2.1.248 #40: remaining tool text + skill pointer; concurrency lives on pXt
-  expect(p).toContain('load the `workflow-authoring` skill')
+  // densable 2.1.289: remaining tool text; authoring reference lives on skill
+  expect(p).toContain('see **Ultracode** in the workflow authoring reference')
   expect(p).not.toMatch(/host-derived default|availableParallelism/i)
   expect(p).not.toMatch(/AskUserQuestion/i)
 })
@@ -534,7 +534,9 @@ test('prompt is densable 248 slim tool description (authoring lives on skill)', 
   expect(prompt).toContain(
     'ONLY call this tool when the user has explicitly opted',
   )
-  expect(prompt).toContain('load the `workflow-authoring` skill')
+  expect(prompt).toContain(
+    'see **Ultracode** in the workflow authoring reference',
+  )
   expect(prompt).not.toContain('Script body hooks')
   expect(prompt).not.toContain('See /ultracode for the full playbook')
 })

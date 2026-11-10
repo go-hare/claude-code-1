@@ -6,10 +6,11 @@
  * Local discovery: UDS + local registry bridge + account bridge walk + cloud walk.
  */
 import { z } from 'zod/v4'
-import type { ToolResultBlockParam } from 'src/Tool.js'
+import { toolMatchesName, type ToolResultBlockParam } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { listAgentsIncompleteNotes } from 'src/utils/sessionListIncompleteCopy.js'
+import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import {
   LIST_AGENTS_TOOL_NAME,
   LIST_PEERS_LEGACY_TOOL_NAME,
@@ -248,11 +249,24 @@ export const ListAgentsTool = buildTool({
     return 'list agents'
   },
 
-  async description() {
-    return getListAgentsPrompt()
+  async description(
+    _input?: ListAgentsInput,
+    context?: { tools?: readonly { name: string; aliases?: string[] }[] },
+  ) {
+    const tools = context?.tools
+    const canSendMessages = tools
+      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
+      : true
+    return getListAgentsPrompt({ canSendMessages })
   },
-  async prompt() {
-    return getListAgentsPrompt()
+  async prompt(context?: {
+    tools?: readonly { name: string; aliases?: string[] }[]
+  }) {
+    const tools = context?.tools
+    const canSendMessages = tools
+      ? tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME))
+      : true
+    return getListAgentsPrompt({ canSendMessages })
   },
 
   isConcurrencySafe() {

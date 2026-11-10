@@ -199,10 +199,19 @@ export const WebFetchTool = buildTool({
       suggestions: buildSuggestions(ruleContent),
     }
   },
-  async prompt({ model, tools }) {
+  async prompt(options) {
+    const model = options?.model
+    const tools = options?.tools
+    const leanPrompt = (options as { leanPrompt?: boolean } | undefined)
+      ?.leanPrompt
+    const enabled = await isWebFetchArtifactExceptionEnabled(tools)
+    const hasArtifactTool =
+      enabled &&
+      (tools?.some(tool => tool.name === OFFICIAL_ARTIFACT_TOOL_NAME) ?? false)
     return getWebFetchPrompt(
       model,
-      await isWebFetchArtifactExceptionEnabled(tools),
+      hasArtifactTool ? 'artifact-tool' : enabled ? 'webfetch' : 'none',
+      leanPrompt,
     )
   },
   async validateInput(input) {

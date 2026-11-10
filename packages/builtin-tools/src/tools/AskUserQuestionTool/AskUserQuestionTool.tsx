@@ -3,13 +3,17 @@ import * as React from 'react';
 import { getAllowedChannels, getQuestionPreviewFormat } from 'src/bootstrap/state.js';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { BLACK_CIRCLE } from 'src/constants/figures.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import { getModeColor } from 'src/utils/permissions/PermissionMode.js';
+import { shouldUseSimpleSystemPrompt } from 'src/utils/simpleSystemPrompt.js';
 import { z } from 'zod/v4';
 import { Box, Text } from '@anthropic/ink';
 import type { Tool } from 'src/Tool.js';
 import { buildTool, type ToolDef } from 'src/Tool.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import {
+  ASK_USER_QUESTION_EXTENDED_PROMPT,
+  ASK_USER_QUESTION_LEAN_GUIDANCE,
   ASK_USER_QUESTION_TOOL_CHIP_WIDTH,
   ASK_USER_QUESTION_TOOL_NAME,
   ASK_USER_QUESTION_TOOL_PROMPT,
@@ -370,14 +374,40 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   async description() {
     return DESCRIPTION;
   },
-  async prompt() {
+  async prompt(options) {
+    const model = options?.model;
+    const leanPrompt = (options as { leanPrompt?: boolean } | undefined)?.leanPrompt;
+    const extendedQuestions =
+      (options as { extendedQuestionsEnabled?: boolean } | undefined)?.extendedQuestionsEnabled === true;
+    let leanGuidance = '';
+    if (leanPrompt ?? shouldUseSimpleSystemPrompt({ model })) {
+      let plover = '';
+      try {
+        const raw = getFeatureValue_CACHED_MAY_BE_STALE('tengu_cinder_plover', '');
+        plover = typeof raw === 'string' ? raw.trim() : '';
+      } catch {
+        // growthbook optional
+      }
+      leanGuidance = plover ? `\n${plover}\n` : ASK_USER_QUESTION_LEAN_GUIDANCE;
+    }
+    let wren = '';
+    try {
+      const raw = getFeatureValue_CACHED_MAY_BE_STALE('tengu_cinder_wren', '');
+      wren = typeof raw === 'string' ? raw.trim() : '';
+    } catch {
+      // growthbook optional
+    }
+    const wrenSection = wren ? `\n${wren}\n` : '';
+    const extendedSection = extendedQuestions ? ASK_USER_QUESTION_EXTENDED_PROMPT : '';
     const format = getQuestionPreviewFormat();
     if (format === undefined) {
       // SDK consumer that hasn't opted into a preview format — omit preview
       // guidance (they may not render the field at all).
-      return ASK_USER_QUESTION_TOOL_PROMPT;
+      return ASK_USER_QUESTION_TOOL_PROMPT + leanGuidance + wrenSection + extendedSection;
     }
-    return ASK_USER_QUESTION_TOOL_PROMPT + PREVIEW_FEATURE_PROMPT[format];
+    return (
+      ASK_USER_QUESTION_TOOL_PROMPT + leanGuidance + wrenSection + extendedSection + PREVIEW_FEATURE_PROMPT[format]
+    );
   },
   get inputSchema(): InputSchema {
     return inputSchema();

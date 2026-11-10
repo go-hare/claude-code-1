@@ -1,38 +1,69 @@
-import { isPlanModeInterviewPhaseEnabled } from 'src/utils/planModeV2.js'
+import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../AskUserQuestionTool/prompt.js'
+import { EXIT_PLAN_MODE_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/constants.js'
+import { GLOB_TOOL_NAME, readSubagentSteer } from '../GlobTool/prompt.js'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
 
-const WHAT_HAPPENS_SECTION = `## What Happens in Plan Mode
+function getAgentSteerSuffix(): string {
+  return readSubagentSteer() === 'default'
+    ? ' (use the Agent tool instead)'
+    : ''
+}
+
+function getWhatHappensSection(): string {
+  const searchTools =
+    hasEmbeddedSearchTools() && process.platform !== 'win32'
+      ? `\`find\`/${GLOB_TOOL_NAME}, \`grep\`/${GREP_TOOL_NAME}, and ${FILE_READ_TOOL_NAME}`
+      : `${GLOB_TOOL_NAME}, ${GREP_TOOL_NAME}, and ${FILE_READ_TOOL_NAME}`
+  return `## What Happens in Plan Mode
 
 In plan mode, you'll:
-1. Thoroughly explore the codebase using Glob, Grep, and Read tools
+1. Thoroughly explore the codebase using ${searchTools}
 2. Understand existing patterns and architecture
 3. Design an implementation approach
 4. Present your plan to the user for approval
 5. Use ${ASK_USER_QUESTION_TOOL_NAME} if you need to clarify approaches
-6. Exit plan mode with ExitPlanMode when ready to implement
+6. Exit plan mode with ${EXIT_PLAN_MODE_TOOL_NAME} when ready to implement
 
 `
+}
 
-function getEnterPlanModeToolPromptExternal(): string {
-  // When interview phase is enabled, omit the "What Happens" section —
-  // detailed workflow instructions arrive via the plan_mode attachment (messages.ts).
-  const whatHappens = isPlanModeInterviewPhaseEnabled()
-    ? ''
-    : WHAT_HAPPENS_SECTION
-
+export function getEnterPlanModeToolPrompt(): string {
+  const agentSuffix = getAgentSteerSuffix()
   return `Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment. This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.
 
 ## When to Use This Tool
 
 **Prefer using EnterPlanMode** for implementation tasks unless they're simple. Use it when ANY of these conditions apply:
 
-1. **New Feature Implementation** — Adding meaningful new functionality where the implementation path isn't obvious
-2. **Multiple Valid Approaches** — The task can be solved in several different ways
-3. **Code Modifications** — Changes that affect existing behavior or structure, where the user should approve the approach
-4. **Architectural Decisions** — The task requires choosing between patterns or technologies
-5. **Multi-File Changes** — The task will likely touch more than 2-3 files
-6. **Unclear Requirements** — You need to explore before understanding the full scope
-7. **User Preferences Matter** — If you would use ${ASK_USER_QUESTION_TOOL_NAME} to clarify the approach, use EnterPlanMode instead
+1. **New Feature Implementation**: Adding meaningful new functionality
+   - Example: "Add a logout button" - where should it go? What should happen on click?
+   - Example: "Add form validation" - what rules? What error messages?
+
+2. **Multiple Valid Approaches**: The task can be solved in several different ways
+   - Example: "Add caching to the API" - could use Redis, in-memory, file-based, etc.
+   - Example: "Improve performance" - many optimization strategies possible
+
+3. **Code Modifications**: Changes that affect existing behavior or structure
+   - Example: "Update the login flow" - what exactly should change?
+   - Example: "Refactor this component" - what's the target architecture?
+
+4. **Architectural Decisions**: The task requires choosing between patterns or technologies
+   - Example: "Add real-time updates" - WebSockets vs SSE vs polling
+   - Example: "Implement state management" - Redux vs Context vs custom solution
+
+5. **Multi-File Changes**: The task will likely touch more than 2-3 files
+   - Example: "Refactor the authentication system"
+   - Example: "Add a new API endpoint with tests"
+
+6. **Unclear Requirements**: You need to explore before understanding the full scope
+   - Example: "Make the app faster" - need to profile and identify bottlenecks
+   - Example: "Fix the bug in checkout" - need to investigate root cause
+
+7. **User Preferences Matter**: The implementation could reasonably go multiple ways
+   - If you would use ${ASK_USER_QUESTION_TOOL_NAME} to clarify the approach, use EnterPlanMode instead
+   - Plan mode lets you explore first, then present options with context
 
 ## When NOT to Use This Tool
 
@@ -40,53 +71,40 @@ Only skip EnterPlanMode for simple tasks:
 - Single-line or few-line fixes (typos, obvious bugs, small tweaks)
 - Adding a single function with clear requirements
 - Tasks where the user has given very specific, detailed instructions
-- Pure research/exploration tasks (use the Agent tool with explore agent instead)
+- Pure research/exploration tasks${agentSuffix}
 
-${whatHappens}## Important Notes
+${getWhatHappensSection()}## Examples
+
+### GOOD - Use EnterPlanMode:
+User: "Add user authentication to the app"
+- Requires architectural decisions (session vs JWT, where to store tokens, middleware structure)
+
+User: "Optimize the database queries"
+- Multiple approaches possible, need to profile first, significant impact
+
+User: "Implement dark mode"
+- Architectural decision on theme system, affects many components
+
+User: "Add a delete button to the user profile"
+- Seems simple but involves: where to place it, confirmation dialog, API call, error handling, state updates
+
+User: "Update the error handling in the API"
+- Affects multiple files, user should approve the approach
+
+### BAD - Don't use EnterPlanMode:
+User: "Fix the typo in the README"
+- Straightforward, no planning needed
+
+User: "Add a console.log to debug this function"
+- Simple, obvious implementation
+
+User: "What files handle routing?"
+- Research task, not implementation planning
+
+## Important Notes
 
 - This tool REQUIRES user approval - they must consent to entering plan mode
 - If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work
 - Users appreciate being consulted before significant changes are made to their codebase
 `
-}
-
-function getEnterPlanModeToolPromptAnt(): string {
-  // When interview phase is enabled, omit the "What Happens" section —
-  // detailed workflow instructions arrive via the plan_mode attachment (messages.ts).
-  const whatHappens = isPlanModeInterviewPhaseEnabled()
-    ? ''
-    : WHAT_HAPPENS_SECTION
-
-  return `Use this tool when a task has genuine ambiguity about the right approach and getting user input before coding would prevent significant rework. This tool transitions you into plan mode where you can explore the codebase and design an implementation approach for user approval.
-
-## When to Use This Tool
-
-Plan mode is valuable when the implementation approach is genuinely unclear. Use it when:
-
-1. **Significant Architectural Ambiguity** — Multiple reasonable approaches exist and the choice meaningfully affects the codebase
-2. **Unclear Requirements** — You need to explore and clarify before you can make progress
-3. **High-Impact Restructuring** — The task will significantly restructure existing code and getting buy-in first reduces risk
-
-## When NOT to Use This Tool
-
-Skip plan mode when you can reasonably infer the right approach:
-- The task is straightforward even if it touches multiple files
-- The user's request is specific enough that the implementation path is clear
-- You're adding a feature with an obvious implementation pattern
-- Bug fixes where the fix is clear once you understand the bug
-- Research/exploration tasks (use the Agent tool instead)
-- The user says something like "can we work on X" or "let's do X" — just get started
-
-When in doubt, prefer starting work and using ${ASK_USER_QUESTION_TOOL_NAME} for specific questions over entering a full planning phase.
-
-${whatHappens}## Important Notes
-
-- This tool REQUIRES user approval - they must consent to entering plan mode
-`
-}
-
-export function getEnterPlanModeToolPrompt(): string {
-  return process.env.USER_TYPE === 'ant'
-    ? getEnterPlanModeToolPromptAnt()
-    : getEnterPlanModeToolPromptExternal()
 }

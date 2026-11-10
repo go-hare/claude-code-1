@@ -7,16 +7,12 @@ import {
 } from 'src/commands.js'
 import { COMMAND_NAME_TAG } from 'src/constants/xml.js'
 import { stringWidth } from '@anthropic/ink'
-import {
-  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-  logEvent,
-} from 'src/services/analytics/index.js'
-import { count } from 'src/utils/array.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { toError } from 'src/utils/errors.js'
-import { truncate } from 'src/utils/format.js'
 import { logError } from 'src/utils/log.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
+import { resolveSkillOverrideMode } from 'src/utils/residualFinalEnvGates.js'
+import { getInitialSettings } from 'src/utils/settings/settings.js'
 import {
   getSkillDescReframeBody,
   isSkillDescReframeEnabled,
@@ -34,25 +30,47 @@ export const DEFAULT_CHAR_BUDGET = 8_000 // Fallback: 1% of 200k × 4
 // v2.1.117: raised from 250 → 1536 to allow richer skill descriptions.
 export const MAX_LISTING_DESC_CHARS = 1536
 
-export function getCharBudget(contextWindowTokens?: number): number {
-  if (Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)) {
-    return Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)
-  }
-  if (contextWindowTokens) {
-    return Math.floor(
-      contextWindowTokens * CHARS_PER_TOKEN * SKILL_BUDGET_CONTEXT_PERCENT,
+function getSkillListingMaxDescChars(): number {
+  try {
+    return (
+      (getInitialSettings() as { skillListingMaxDescChars?: number })
+        .skillListingMaxDescChars ?? MAX_LISTING_DESC_CHARS
     )
+  } catch {
+    return MAX_LISTING_DESC_CHARS
   }
-  return DEFAULT_CHAR_BUDGET
+}
+
+function getSkillListingBudgetFraction(): number {
+  try {
+    return (
+      (getInitialSettings() as { skillListingBudgetFraction?: number })
+        .skillListingBudgetFraction ?? SKILL_BUDGET_CONTEXT_PERCENT
+    )
+  } catch {
+    return SKILL_BUDGET_CONTEXT_PERCENT
+  }
+}
+
+export function getCharBudget(
+  contextWindowTokens?: number,
+  charsPerToken: number = CHARS_PER_TOKEN,
+): number {
+  const envBudget = Number(process.env.SLASH_COMMAND_TOOL_CHAR_BUDGET)
+  if (envBudget > 0) {
+    return envBudget
+  }
+  const fraction = getSkillListingBudgetFraction()
+  const raw = (contextWindowTokens ?? 200_000) * charsPerToken * fraction
+  return Math.max(1, Math.floor(raw))
 }
 
 function getCommandDescription(cmd: Command): string {
   const desc = cmd.whenToUse
     ? `${cmd.description} - ${cmd.whenToUse}`
     : cmd.description
-  return desc.length > MAX_LISTING_DESC_CHARS
-    ? desc.slice(0, MAX_LISTING_DESC_CHARS - 1) + '\u2026'
-    : desc
+  const maxChars = getSkillListingMaxDescChars()
+  return desc.length > maxChars ? desc.slice(0, maxChars - 1) + '…' : desc
 }
 
 function formatCommandDescription(cmd: Command): string {
@@ -71,21 +89,52 @@ function formatCommandDescription(cmd: Command): string {
   return `- ${cmd.name}: ${getCommandDescription(cmd)}`
 }
 
-const MIN_DESC_LENGTH = 20
+function isCommandNameOnly(cmd: Command): boolean {
+  try {
+    const settings = getInitialSettings()
+    return (
+      resolveSkillOverrideMode(cmd, {
+        skillOverrides: settings.skillOverrides,
+        settingsDisableBundledSkills: settings.disableBundledSkills,
+      }) === 'name-only'
+    )
+  } catch {
+    return false
+  }
+}
 
+/**
+ * Official `Len(commands, rankFn, contextWindowTokens, charsPerToken)`.
+ * Also supports `(commands, contextWindowTokens)` for callers that omit `rankFn`.
+ */
 export function formatCommandsWithinBudget(
   commands: Command[],
+  contextWindowTokensOrRankFn?: number | ((cmd: Command) => number),
   contextWindowTokens?: number,
+  charsPerToken: number = CHARS_PER_TOKEN,
 ): string {
   if (commands.length === 0) return ''
 
-  const budget = getCharBudget(contextWindowTokens)
+  const rankFn: (cmd: Command) => number =
+    typeof contextWindowTokensOrRankFn === 'function'
+      ? contextWindowTokensOrRankFn
+      : () => 0
+  const resolvedContextTokens =
+    typeof contextWindowTokensOrRankFn === 'number'
+      ? contextWindowTokensOrRankFn
+      : contextWindowTokens
 
-  // Try full descriptions first
-  const fullEntries = commands.map(cmd => ({
-    cmd,
-    full: formatCommandDescription(cmd),
-  }))
+  const budget = getCharBudget(resolvedContextTokens, charsPerToken)
+
+  const nameOnlyIndices = new Set<number>()
+  const fullEntries = commands.map((cmd, i) => {
+    if (isCommandNameOnly(cmd)) {
+      nameOnlyIndices.add(i)
+      return { cmd, full: `- ${cmd.name}` }
+    }
+    return { cmd, full: formatCommandDescription(cmd) }
+  })
+
   // join('\n') produces N-1 newlines for N entries
   const fullTotal =
     fullEntries.reduce((sum, e) => sum + stringWidth(e.full), 0) +
@@ -95,94 +144,58 @@ export function formatCommandsWithinBudget(
     return fullEntries.map(e => e.full).join('\n')
   }
 
-  // Partition into bundled (never truncated) and rest
-  const bundledIndices = new Set<number>()
-  const restCommands: Command[] = []
+  logForDebugging(
+    `Skill listing over budget: ${commands.length} skills, ${fullTotal} chars > ${budget} budget — descriptions will be truncated. Run /skills to disable some, or raise skillListingBudgetFraction in settings.`,
+    { level: 'warn' },
+  )
+
+  const fixedIndices = new Set(nameOnlyIndices)
   for (let i = 0; i < commands.length; i++) {
     const cmd = commands[i]!
     if (cmd.type === 'prompt' && cmd.source === 'bundled') {
-      bundledIndices.add(i)
-    } else {
-      restCommands.push(cmd)
+      fixedIndices.add(i)
     }
   }
 
-  // Compute space used by bundled skills (full descriptions, always preserved)
-  const bundledChars = fullEntries.reduce(
-    (sum, e, i) =>
-      bundledIndices.has(i) ? sum + stringWidth(e.full) + 1 : sum,
-    0,
-  )
-  const remainingBudget = budget - bundledChars
-
-  // Calculate max description length for non-bundled commands
-  if (restCommands.length === 0) {
+  const candidateIndices = commands
+    .map((_, i) => i)
+    .filter(i => !fixedIndices.has(i))
+  if (candidateIndices.length === 0) {
     return fullEntries.map(e => e.full).join('\n')
   }
 
-  const restNameOverhead =
-    restCommands.reduce((sum, cmd) => sum + stringWidth(cmd.name) + 4, 0) +
-    (restCommands.length - 1)
-  const availableForDescs = remainingBudget - restNameOverhead
-  const maxDescLen = Math.floor(availableForDescs / restCommands.length)
+  const nameOnlyWidth = (i: number): number =>
+    stringWidth(commands[i]!.name) + 2
+  const fullWidth = (i: number): number => stringWidth(fullEntries[i]!.full)
+  const baseUsed =
+    commands.reduce(
+      (sum, _, i) =>
+        sum + (fixedIndices.has(i) ? fullWidth(i) : nameOnlyWidth(i)),
+      0,
+    ) +
+    (commands.length - 1)
+  let remaining = budget - baseUsed
+  const keptFullIndices = new Set<number>()
 
-  if (maxDescLen < MIN_DESC_LENGTH) {
-    // Extreme case: non-bundled go names-only, bundled keep descriptions
-    if (process.env.USER_TYPE === 'ant') {
-      logEvent('tengu_skill_descriptions_truncated', {
-        skill_count: commands.length,
-        budget,
-        full_total: fullTotal,
-        truncation_mode:
-          'names_only' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        max_desc_length: maxDescLen,
-        bundled_count: bundledIndices.size,
-        bundled_chars: bundledChars,
-      })
+  candidateIndices.sort((a, b) => rankFn(commands[b]!) - rankFn(commands[a]!))
+  for (const i of candidateIndices) {
+    const extra = fullWidth(i) - nameOnlyWidth(i)
+    if (extra <= remaining) {
+      keptFullIndices.add(i)
+      remaining -= extra
     }
-    return commands
-      .map((cmd, i) =>
-        bundledIndices.has(i) ? fullEntries[i]!.full : `- ${cmd.name}`,
-      )
-      .join('\n')
   }
 
-  // Truncate non-bundled descriptions to fit within budget
-  const truncatedCount = count(
-    restCommands,
-    cmd => stringWidth(getCommandDescription(cmd)) > maxDescLen,
-  )
-  if (process.env.USER_TYPE === 'ant') {
-    logEvent('tengu_skill_descriptions_truncated', {
-      skill_count: commands.length,
-      budget,
-      full_total: fullTotal,
-      truncation_mode:
-        'description_trimmed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      max_desc_length: maxDescLen,
-      truncated_count: truncatedCount,
-      // Count of bundled skills included in this prompt (excludes skills with disableModelInvocation)
-      bundled_count: bundledIndices.size,
-      bundled_chars: bundledChars,
-    })
-  }
   return commands
-    .map((cmd, i) => {
-      // Bundled skills always get full descriptions
-      if (bundledIndices.has(i)) return fullEntries[i]!.full
-      const description = getCommandDescription(cmd)
-      return `- ${cmd.name}: ${truncate(description, maxDescLen)}`
-    })
+    .map((cmd, i) =>
+      fixedIndices.has(i) || keptFullIndices.has(i)
+        ? fullEntries[i]!.full
+        : `- ${cmd.name}`,
+    )
     .join('\n')
 }
 
-export const getPrompt = memoize(async (_cwd: string): Promise<string> => {
-  // Official skill_desc_reframe arm: denser Skill tool description emphasizing
-  // exact names, directory-scoped variants, and no inventing skill names.
-  if (isSkillDescReframeEnabled()) {
-    return getSkillDescReframeBody(COMMAND_NAME_TAG)
-  }
-  const prompt = `Invoke a skill.
+export const BASE_SKILL_PROMPT = `Invoke a skill.
 
 A skill is a packaged set of instructions the user or project has set up for a particular kind of task (deploy steps, a review checklist, a repo-specific workflow). Available skills appear in a system-reminder listing with one-line descriptions. When the task at hand is one a listed skill covers, call this tool first — the skill's instructions load into the turn for you to follow in place of your default approach; some skills instead run in a subagent and return the finished result. A skill that runs in the background returns only the agent's name — its result arrives later as a task notification, so don't wait on it or invoke it again in the meantime. Users may also ask for one by name (\`/<name>\`, or "slash command"); that's a request to invoke it.
 
@@ -191,12 +204,20 @@ A skill is a packaged set of instructions the user or project has set up for a p
 
 Only names from the listing (or that the user typed explicitly) are valid. Built-in CLI commands (\`/help\`, \`/clear\`, …) aren't skills. If a \`<${COMMAND_NAME_TAG}>\` block is already present this turn, the skill is loaded — follow it directly rather than calling again.
 `
-  if (isCoordinatorMode()) {
-    return `${prompt}
+
+export const COORDINATOR_SKILL_APPENDIX = `
 In a coordinator session, the coordinator's own use of this tool is read-only: it loads the skill's instructions to inform replies, triage, and coordination but does not run the skill — no fork, no permission grants, no hooks, no preamble shell commands. Execution happens in workers: hand the skill to one worker, or when its recipe is orchestration, spawn workers per that recipe and synthesize their results. Worker skill invocations execute normally. A \`<${COMMAND_NAME_TAG}>\` block that arrived with only a delegation summary (no skill content) does not mean the skill is loaded — calling this tool to load it is still appropriate then.
 `
+
+export const getPrompt = memoize(async (_cwd?: string): Promise<string> => {
+  // Official skill_desc_reframe arm: denser Skill tool description emphasizing
+  // exact names, directory-scoped variants, and no inventing skill names.
+  if (isSkillDescReframeEnabled()) {
+    return getSkillDescReframeBody(COMMAND_NAME_TAG)
   }
-  return prompt
+  return isCoordinatorMode()
+    ? BASE_SKILL_PROMPT + COORDINATOR_SKILL_APPENDIX
+    : BASE_SKILL_PROMPT
 })
 
 export async function getSkillToolInfo(cwd: string): Promise<{
