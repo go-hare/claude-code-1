@@ -83,10 +83,13 @@ const NULL_RENDERING_ATTACHMENT_TYPES: ReadonlySet<Attachment['type']> =
 export function isNullRenderingAttachment(
   msg: Message | NormalizedMessage,
 ): boolean {
-  return (
-    msg.type === 'attachment' &&
-    NULL_RENDERING_ATTACHMENT_TYPES.has(
-      msg.attachment!.type as Attachment['type'],
+  if (msg.type !== 'attachment') return false
+  const att = msg.attachment!
+  if (att.type === 'hook_cancelled') {
+    const cancelled = att as { hookEvent?: string; timedOut?: boolean }
+    return !(
+      cancelled.hookEvent === 'UserPromptSubmit' && cancelled.timedOut === true
     )
-  )
+  }
+  return NULL_RENDERING_ATTACHMENT_TYPES.has(att.type as Attachment['type'])
 }

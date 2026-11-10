@@ -9,7 +9,6 @@ import { StaticRenderContext } from '../../utils/staticRender.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { findToolByName, type Tool, type ToolProgressData, type Tools } from '../../Tool.js';
 import type { ProgressMessage } from '../../types/message.js';
-import { useIsClassifierChecking } from '../../utils/classifierApprovalsHook.js';
 import { logError } from '../../utils/log.js';
 import type { buildMessageLookups } from '../../utils/messages.js';
 import { FilePathWidthContext, toolUsePathWidth } from '../FilePathLink.js';
@@ -55,17 +54,6 @@ export function AssistantToolUseMessage({
   const bg = useSelectedMessageBg();
   const isStaticRender = useContext(StaticRenderContext);
   const pendingWorkerRequest = useAppStateMaybeOutsideOfProvider(state => state.pendingWorkerRequest);
-  const isClassifierCheckingRaw = useIsClassifierChecking(param.id);
-  const permissionMode = useAppStateMaybeOutsideOfProvider(state => state.toolPermissionContext.mode);
-  // strippedDangerousRules is set by stripDangerousPermissionsForAutoMode
-  // (even to {}) whenever auto is active, and cleared by restoreDangerousPermissions
-  // on deactivation — a reliable proxy for isAutoModeActive() during plan.
-  // prePlanMode would be stale after transitionPlanAutoMode deactivates mid-plan.
-  const hasStrippedRules = useAppStateMaybeOutsideOfProvider(
-    state => !!state.toolPermissionContext.strippedDangerousRules,
-  );
-  const isAutoClassifier = permissionMode === 'auto' || (permissionMode === 'plan' && hasStrippedRules);
-  const isClassifierChecking = process.env.USER_TYPE === 'ant' && isClassifierCheckingRaw && permissionMode !== 'auto';
 
   // Memoize on param identity (stable — from the persisted message object).
   // Zod safeParse allocates per call, and some tools' userFacingName()
@@ -98,6 +86,18 @@ export function AssistantToolUseMessage({
   const isResolved = lookups.resolvedToolUseIDs.has(param.id);
   const isQueued = !inProgressToolUseIDs.has(param.id) && !isResolved;
   const isWaitingForPermission = pendingWorkerRequest?.toolUseId === param.id;
+  const resultMsg = lookups.toolResultByToolUseID.get(param.id);
+  const rawToolUseResult = resultMsg?.type === 'user' ? resultMsg.toolUseResult : undefined;
+  const renderToolUseTag = tool.renderToolUseTag as
+    | ((
+        input: unknown,
+        context?: {
+          toolUseId: string;
+          toolUseResult: unknown;
+          progressMessages: ProgressMessage[] | undefined;
+        },
+      ) => React.ReactNode)
+    | undefined;
 
   if (isTransparentWrapper) {
     if (isQueued || isResolved) return null;
@@ -140,7 +140,9 @@ export function AssistantToolUseMessage({
           {shouldShowDot &&
             (isQueued ? (
               <Box minWidth={2}>
-                <Text dimColor={isQueued}>{BLACK_CIRCLE}</Text>
+                <Text aria-label="tool:" dimColor={isQueued}>
+                  {BLACK_CIRCLE}
+                </Text>
               </Box>
             ) : (
               // WARNING: The code here and in ToolUseLoader is particularly
@@ -176,18 +178,17 @@ export function AssistantToolUseMessage({
             </FilePathWidthContext.Provider>
           )}
           {/* Render tool-specific tags (timeout, model, resume ID, etc.) */}
-          {input.success && tool.renderToolUseTag && tool.renderToolUseTag(input.data)}
+          {input.success &&
+            renderToolUseTag?.(input.data, {
+              toolUseId: param.id,
+              toolUseResult: rawToolUseResult,
+              progressMessages: lookups.progressMessagesByToolUseID.get(param.id),
+            })}
         </Box>
         {!isResolved &&
           !isQueued &&
           !defaultCollapsed &&
-          (isClassifierChecking ? (
-            <MessageResponse height={1}>
-              <Text dimColor>
-                {isAutoClassifier ? 'Auto classifier checking\u2026' : 'Bash classifier checking\u2026'}
-              </Text>
-            </MessageResponse>
-          ) : isWaitingForPermission ? (
+          (isWaitingForPermission ? (
             <MessageResponse height={1}>
               <Text dimColor>Waiting for permission…</Text>
             </MessageResponse>

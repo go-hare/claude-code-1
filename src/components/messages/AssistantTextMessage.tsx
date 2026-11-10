@@ -4,7 +4,7 @@ import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
 import { shouldShowAutoCompactOffHint } from 'src/services/compact/autoCompact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
-import { Box, NoSelect, Text, useTerminalSize } from '@anthropic/ink';
+import { Box, Link, NoSelect, Text, useTerminalSize } from '@anthropic/ink';
 import {
   API_ERROR_MESSAGE_PREFIX,
   API_TIMEOUT_ERROR_MESSAGE,
@@ -22,9 +22,9 @@ import {
 import { logForDebugging } from '../../utils/debug.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { isEmptyMessageText, NO_RESPONSE_REQUESTED } from '../../utils/messages.js';
+import { isEmptyMessageText, NO_RESPONSE_REQUESTED, stripPromptXMLTags } from '../../utils/messages.js';
 import { getUpgradeMessage } from '../../utils/model/contextWindowUpgradeCheck.js';
-import { getDefaultSonnetModel, renderModelName } from '../../utils/model/model.js';
+import { getDefaultSonnetModel, getMainLoopModel, renderModelName } from '../../utils/model/model.js';
 import {
   getLastUiRenderPlugin,
   hasMatchingFunctionHook,
@@ -41,6 +41,8 @@ import { extractDrawnPlugin, PluginRenderedTree } from '../PluginRasterPanes.js'
 import { RateLimitMessage } from './RateLimitMessage.js';
 
 const MAX_API_ERROR_CHARS = 1000;
+const OVERLOAD_ERROR_MESSAGE = 'Overloaded';
+const FABLE_OFF_SWITCH_MESSAGE = 'Fable is experiencing high load, please use /model to switch to Sonnet';
 let assistantMessageRenderSeq = 0;
 
 function getUiRenderVersion(): number {
@@ -116,6 +118,8 @@ type Props = {
   onOpenRateLimitOptions?: () => void;
   /** densable 2.1.243 #23 `Rle` — client-generated errors render as error lines. */
   isApiError?: boolean;
+  /** densable 2.1.289 `tu` `R` — e.g. `'verification_required'` for clickable link. */
+  apiErrorKind?: string;
   /** densable 2.1.289 `or` `xI("AssistantMessage")` requestId. */
   messageId?: string;
 };
@@ -127,14 +131,96 @@ export function formatClientApiErrorLine(text: string): string {
   return text === API_ERROR_MESSAGE_PREFIX ? `${API_ERROR_MESSAGE_PREFIX}: Please wait a moment and try again.` : text;
 }
 
+const ERROR_URL_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable Awt URL matcher excludes control chars
+  /https?:\/\/[^\s"'<>\\…\x00-\x1f]+/g;
+
+const CLOSING_PAIR: Record<string, string> = {
+  ')': '(',
+  ']': '[',
+  '}': '{',
+};
+
+function trimUrlTrailingPunctuation(raw: string): string {
+  let url = raw;
+  while (url.length > 0) {
+    const last = url.at(-1)!;
+    if ('.,;:!?'.includes(last)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    const open = CLOSING_PAIR[last];
+    if (!open) break;
+    let opens = 0;
+    let closes = 0;
+    for (const ch of url) {
+      if (ch === open) opens++;
+      else if (ch === last) closes++;
+    }
+    if (closes > opens) {
+      url = url.slice(0, -1);
+    } else {
+      break;
+    }
+  }
+  return url;
+}
+
+/** densable 2.1.289 `m0e` — allowlisted verification hosts. */
+function getVerificationLinkHref(raw: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '' || parsed.port !== '') {
+    return undefined;
+  }
+  const host = parsed.hostname;
+  return host === 'portal.anthropic.com' || host === 'claude.ai' || host === 'platform.claude.com'
+    ? parsed.href
+    : undefined;
+}
+
+function LinkifiedWarningText({
+  text,
+  linkHref,
+}: {
+  text: string;
+  linkHref?: (url: string) => string | undefined;
+}): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(ERROR_URL_RE)) {
+    const idx = match.index ?? 0;
+    const cleaned = trimUrlTrailingPunctuation(match[0]);
+    const href = linkHref === undefined ? cleaned : linkHref(cleaned);
+    if (href === undefined) continue;
+    if (idx > cursor) {
+      parts.push(text.slice(cursor, idx));
+    }
+    parts.push(
+      <Link key={idx} url={href}>
+        {href}
+      </Link>,
+    );
+    cursor = idx + cleaned.length;
+  }
+  parts.push(text.slice(cursor));
+  return <Text color="warning">{parts}</Text>;
+}
+
 function ClientGeneratedErrorLine({
   text,
   verbose,
   addMargin,
+  linkHref,
 }: {
   text: string;
   verbose: boolean;
   addMargin: boolean;
+  linkHref?: (url: string) => string | undefined;
 }): React.ReactNode {
   const nested = useIsMessageResponse();
   const { columns } = useTerminalSize();
@@ -146,13 +232,13 @@ function ClientGeneratedErrorLine({
   if (nested) {
     return (
       <Box flexDirection="column">
-        <Text color="warning">{shown}</Text>
+        <LinkifiedWarningText text={shown} linkHref={linkHref} />
         {truncated && <CtrlOToExpand />}
       </Box>
     );
   }
 
-  // densable 2.1.243 `Kx`: non-nested text column is `columns - 10`.
+  // densable 2.1.243 `Kx` / 2.1.289 `ru`: non-nested text column is `columns - 10`.
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
       <Box minWidth={2}>
@@ -161,7 +247,7 @@ function ClientGeneratedErrorLine({
         </Text>
       </Box>
       <Box flexDirection="column" width={columns - 10}>
-        <Text color="warning">{shown}</Text>
+        <LinkifiedWarningText text={shown} linkHref={linkHref} />
         {truncated && <CtrlOToExpand />}
       </Box>
     </Box>
@@ -225,10 +311,11 @@ function PromptTooLongMessage(): React.ReactNode {
 export function AssistantTextMessage(props: Props): React.ReactNode {
   const renderVer = useSyncExternalStore(subscribeRenderInvalidation, getUiRenderVersion, getUiRenderVersion);
   const { text } = props.param;
+  const strippedText = stripPromptXMLTags(text);
   const hasHook = hasMatchingFunctionHook('ui.render', {
     component: 'AssistantMessage',
     surface: 'terminal',
-    props: { text, isFirstOfReply: props.shouldShowDot },
+    props: { text: strippedText, isFirstOfReply: props.shouldShowDot },
   });
   if (!hasHook) {
     return <AssistantTextMessageBody {...props} />;
@@ -254,6 +341,7 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
   }
   const requestId = props.messageId ?? fallbackIdRef.current;
   const { text } = props.param;
+  const strippedText = stripPromptXMLTags(text);
   const [settled, setSettled] = useState<SettledAssistantRender | undefined>(undefined);
   const evalKey = `${requestId}\0${viewportColumns}\0${rows}\0${String(isFullscreen)}\0${props.shouldShowDot ? '1' : '0'}\0${props.renderVersion}\0${text}`;
 
@@ -264,7 +352,7 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
       component: 'AssistantMessage',
       requestId,
       viewport: { columns: viewportColumns, rows, isFullscreen },
-      props: { text, isFirstOfReply: props.shouldShowDot },
+      props: { text: strippedText, isFirstOfReply: props.shouldShowDot },
     };
     void runFunctionHookChain('ui.render', eventPayload, async ev => {
       const nextProps = isPlainRecord(ev) && isPlainRecord(ev.props) ? ev.props : eventPayload.props;
@@ -272,14 +360,14 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
     }).then(
       answer => {
         if (cancelled) return;
-        const resolved = resolveAssistantHookAnswer(answer, text, props.shouldShowDot);
+        const resolved = resolveAssistantHookAnswer(answer, strippedText, props.shouldShowDot);
         const owner =
           extractDrawnPlugin(resolved.pluginTree, 'AssistantMessage', requestId) ??
           extractDrawnPlugin(answer, 'AssistantMessage', requestId) ??
           (getLastUiRenderPlugin() || undefined);
         setSettled({
           sourceText: text,
-          text: resolved.text,
+          text: resolved.text === strippedText ? text : resolved.text,
           shouldShowDot: resolved.shouldShowDot,
           pluginTree: resolved.pluginTree,
           pluginName: owner,
@@ -302,7 +390,7 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
     return () => {
       cancelled = true;
     };
-  }, [evalKey, requestId, viewportColumns, rows, isFullscreen, text, props.shouldShowDot]);
+  }, [evalKey, requestId, viewportColumns, rows, isFullscreen, text, strippedText, props.shouldShowDot]);
 
   const current = settled?.sourceText === text ? settled : undefined;
   const effectiveText = current ? current.text : text;
@@ -335,6 +423,7 @@ function AssistantTextMessageBody({
   verbose,
   onOpenRateLimitOptions,
   isApiError = false,
+  apiErrorKind,
 }: Props): React.ReactNode {
   const isSelected = useContext(MessageActionsSelectedContext);
   if (isEmptyMessageText(text)) {
@@ -413,6 +502,20 @@ function AssistantTextMessageBody({
         </MessageResponse>
       );
 
+    case OVERLOAD_ERROR_MESSAGE:
+    case FABLE_OFF_SWITCH_MESSAGE:
+      return (
+        <MessageResponse>
+          <Box flexDirection="column" gap={1}>
+            <Text color="error">We are experiencing high demand for {renderModelName(getMainLoopModel())}.</Text>
+            <Text>
+              To continue immediately, use /model to switch to {renderModelName(getDefaultSonnetModel())} and continue
+              coding.
+            </Text>
+          </Box>
+        </MessageResponse>
+      );
+
     // TODO: Move this to a user turn
     case ERROR_MESSAGE_USER_ABORT:
       return (
@@ -422,20 +525,31 @@ function AssistantTextMessageBody({
       );
 
     default:
+      // densable 2.1.289 `tu`: `Prompt is too long · ...` prefix
+      if (text.startsWith(`${PROMPT_TOO_LONG_ERROR_MESSAGE} · `)) {
+        const upgradeHint = getUpgradeMessage('warning');
+        return (
+          <MessageResponse>
+            <Text color="error">
+              {text}
+              {' · /clear to start fresh'}
+              {upgradeHint ? ` · ${upgradeHint}` : ''}
+            </Text>
+          </MessageResponse>
+        );
+      }
       // densable 2.1.243 Gx `Ox` = `J$a` — red error text, not Markdown / Kx.
       if (isInvalidExternalCredentialSuffix(text)) {
         return (
           <MessageResponse>
-            <Box flexDirection="column">
-              <Text color="error">{text}</Text>
-            </Box>
+            <Text color="error">{text}</Text>
           </MessageResponse>
         );
       }
-      // densable 2.1.243 Gx: `Rle || Lx(text) || wx(text)` → Kx.
-      // Import map: Lx=NR (`startsWithApiErrorPrefix`), wx=`he`.
+      // densable 2.1.243 Gx / 2.1.289 tu: `Rle || Lx(text) || wx(text)` → ru.
       if (shouldRenderClientGeneratedErrorLine(isApiError, text)) {
-        return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} />;
+        const linkHref = apiErrorKind === 'verification_required' ? getVerificationLinkHref : undefined;
+        return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} linkHref={linkHref} />;
       }
       // gold @202887955: one row, width 100%, children [dot, column].
       // Streaming (gold yi @203236672) is a nested inner row — do not flatten

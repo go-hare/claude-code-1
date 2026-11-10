@@ -17,6 +17,7 @@ import type { Theme } from 'src/utils/theme.js';
 import { UserImageMessage } from './UserImageMessage.js';
 
 import { jsonParse } from '../../utils/slowOperations.js';
+import { uniq } from '../../utils/array.js';
 import { plural } from '../../utils/stringUtils.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
@@ -195,26 +196,26 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
     case 'pdf_reference':
       return (
         <Line>
-          Referenced PDF <Text bold>{attachment.displayPath}</Text> ({attachment.pageCount} pages)
+          Referenced PDF <Text bold>{attachment.displayPath}</Text> (
+          {attachment.pageCount === null
+            ? 'page count unknown'
+            : `${attachment.pageCount} ${plural(attachment.pageCount, 'page')}`}
+          )
         </Line>
       );
     case 'selected_lines_in_ide':
       return (
         <Line>
-          ⧉ Selected <Text bold>{attachment.lineEnd - attachment.lineStart + 1}</Text> lines from{' '}
+          <Text aria-hidden>{'⧉ '}</Text>
+          Selected <Text bold>{attachment.lineEnd - attachment.lineStart + 1}</Text> lines from{' '}
           <Text bold>{attachment.displayPath}</Text> in {attachment.ideName}
         </Line>
       );
     case 'selected_lines_in_diff':
       return (
         <Line>
-          ⧉ Selected <Text bold>{attachment.lineCount}</Text> {attachment.lineCount === 1 ? 'line' : 'lines'} from diff
-          {attachment.filePath ? (
-            <>
-              {' '}
-              <Text bold>{attachment.filePath}</Text>
-            </>
-          ) : null}
+          <Text aria-hidden>{'⧉ '}</Text>
+          Selected <Text bold>{attachment.lineCount}</Text> {plural(attachment.lineCount, 'line')} from diff view
         </Line>
       );
     case 'nested_memory':
@@ -285,10 +286,11 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       );
     }
     case 'agent_listing_delta': {
-      if (attachment.isInitial || attachment.addedTypes.length === 0) {
+      const added = uniq(attachment.addedTypes);
+      if (attachment.isInitial || added.length === 0) {
         return null;
       }
-      const count = attachment.addedTypes.length;
+      const count = added.length;
       return (
         <Line>
           <Text bold>{count}</Text> agent {plural(count, 'type')} available
@@ -296,7 +298,9 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       );
     }
     case 'queued_command': {
-      const text = typeof attachment.prompt === 'string' ? attachment.prompt : getContentText(attachment.prompt) || '';
+      const text = (
+        typeof attachment.prompt === 'string' ? attachment.prompt : getContentText(attachment.prompt) || ''
+      ).trim();
       const hasImages = attachment.imagePasteIds && attachment.imagePasteIds.length > 0;
       const origin = attachment.origin;
       return (
@@ -322,7 +326,7 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       return <Line>Skills restored ({skillNames})</Line>;
     }
     case 'diagnostics':
-      return <DiagnosticsDisplay attachment={attachment} verbose={verbose} />;
+      return <DiagnosticsDisplay attachment={attachment} verbose={verbose} isTranscriptMode={isTranscriptMode} />;
     case 'mcp_resource':
       return (
         <Line>
@@ -367,8 +371,36 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       if (attachment.hookEvent === 'Stop' || attachment.hookEvent === 'SubagentStop') {
         return null;
       }
+      const reason = firstHookErrorLine(attachment.stderr, attachment.stdout);
       // Full hook output is logged to debug log via hookEvents.ts
-      return <Line color="error">{attachment.hookName} hook error</Line>;
+      return (
+        <>
+          <Line color="error">{attachment.hookName} hook error</Line>
+          {reason ? <Line color="error">{reason}</Line> : null}
+        </>
+      );
+    }
+    case 'hook_cancelled': {
+      const cancelled = attachment as typeof attachment & {
+        timedOut?: boolean;
+        timeoutMs?: number;
+      };
+      if (cancelled.hookEvent !== 'UserPromptSubmit' || !cancelled.timedOut) {
+        return null;
+      }
+      const timeoutStr = cancelled.timeoutMs
+        ? cancelled.timeoutMs < 1000
+          ? `${cancelled.timeoutMs}ms`
+          : `${Math.round(cancelled.timeoutMs / 1000)}s`
+        : undefined;
+      const commandSuffix = cancelled.command ? ` [${cancelled.command}]` : '';
+      const afterSuffix = timeoutStr !== undefined ? ` after ${timeoutStr}` : '';
+      return (
+        <Line color="error" dimColor={false}>
+          {cancelled.hookName} hook{commandSuffix} timed out{afterSuffix}
+          {' — output discarded. Raise the hook\'s "timeout" to allow more time.'}
+        </Line>
+      );
     }
     case 'hook_error_during_execution':
       // Stop hooks are rendered as a summary in SystemStopHookSummaryMessage
@@ -391,7 +423,11 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
         </Line>
       );
     case 'hook_deferred_tool':
-      return null;
+      return (
+        <Line color="warning">
+          {attachment.hookName} deferred {attachment.toolName} · resume with -p --resume to continue
+        </Line>
+      );
     case 'hook_system_message':
       return (
         <Line>
@@ -411,7 +447,9 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
     case 'teammate_shutdown_batch':
       return (
         <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
-          <Text dimColor>{BLACK_CIRCLE} </Text>
+          <Text aria-hidden dimColor>
+            {BLACK_CIRCLE}{' '}
+          </Text>
           <Text dimColor>
             {attachment.count} {plural(attachment.count, 'teammate')} shut down gracefully
           </Text>
@@ -533,7 +571,9 @@ function GenericTaskStatus({ attachment }: { attachment: TaskStatusAttachment })
           : attachment.status;
   return (
     <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
-      <Text dimColor>{BLACK_CIRCLE} </Text>
+      <Text aria-hidden dimColor>
+        {BLACK_CIRCLE}{' '}
+      </Text>
       <Text dimColor>
         Task &quot;<Text bold>{attachment.description}</Text>&quot; {statusText}
       </Text>
@@ -553,7 +593,9 @@ function TeammateTaskStatus({ attachment }: { attachment: TaskStatusAttachment }
   const statusText = attachment.status === 'completed' ? 'shut down gracefully' : attachment.status;
   return (
     <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
-      <Text dimColor>{BLACK_CIRCLE} </Text>
+      <Text aria-hidden dimColor>
+        {BLACK_CIRCLE}{' '}
+      </Text>
       <Text dimColor>
         Teammate{' '}
         <Text color={agentColor} bold dimColor={false}>
@@ -563,6 +605,22 @@ function TeammateTaskStatus({ attachment }: { attachment: TaskStatusAttachment }
       </Text>
     </Box>
   );
+}
+
+function firstHookErrorLine(stderr?: string, stdout?: string): string {
+  const raw = stderr?.trim() ? stderr : stdout?.trim() ? stdout : '';
+  if (!raw) return '';
+  const beforeSchema = raw.split('\n\nExpected schema:')[0]!.trim();
+  let start = 0;
+  let nl = beforeSchema.indexOf('\n');
+  while (nl !== -1) {
+    const line = beforeSchema.slice(start, nl).trim();
+    if (line) return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+    start = nl + 1;
+    nl = beforeSchema.indexOf('\n', start);
+  }
+  const last = beforeSchema.slice(start).trim();
+  return last.length > 200 ? `${last.slice(0, 200)}…` : last;
 }
 // We allow setting dimColor to false here to help work around the dim-bold bug.
 // https://github.com/chalk/chalk/issues/290

@@ -39,7 +39,7 @@ export function PlanApprovalRequestDisplay({ request }: PlanApprovalRequestProps
           paddingX={1}
           marginBottom={1}
         >
-          <Markdown>{request.planContent}</Markdown>
+          <Markdown stripPromptTags={false}>{request.planContent}</Markdown>
         </Box>
         <Text dimColor>Plan file: {request.planFilePath}</Text>
       </Box>
@@ -62,9 +62,21 @@ export function PlanApprovalResponseDisplay({ response, senderName }: PlanApprov
         <Box borderStyle="round" borderColor="success" flexDirection="column" paddingX={1} paddingY={1}>
           <Box>
             <Text color="success" bold>
-              ✓ Plan Approved by {senderName}
+              <Text aria-hidden>✓ </Text>Plan Approved by {senderName}
             </Text>
           </Box>
+          {response.feedback && (
+            <Box
+              marginTop={1}
+              borderStyle="dashed"
+              borderColor="subtle"
+              borderLeft={false}
+              borderRight={false}
+              paddingX={1}
+            >
+              <Text>Feedback: {response.feedback}</Text>
+            </Box>
+          )}
           <Box marginTop={1}>
             <Text>You can now proceed with implementation. Your plan mode restrictions have been lifted.</Text>
           </Box>
@@ -78,7 +90,7 @@ export function PlanApprovalResponseDisplay({ response, senderName }: PlanApprov
       <Box borderStyle="round" borderColor="error" flexDirection="column" paddingX={1} paddingY={1}>
         <Box>
           <Text color="error" bold>
-            ✗ Plan Rejected by {senderName}
+            <Text aria-hidden>✗ </Text>Plan Rejected by {senderName}
           </Text>
         </Box>
         {response.feedback && (

@@ -5,29 +5,29 @@ import { Ansi, Box, Text } from '@anthropic/ink';
 import { extractTag } from '../../utils/messages.js';
 import { unescapeXmlEntities } from '../../utils/xml.js';
 import { Markdown } from '../Markdown.js';
-import { MessageResponse } from '../MessageResponse.js';
 
 type Props = {
   content: string;
+  capProseWidth?: boolean;
+  commandRun?: { command?: string };
 };
 
-export function UserLocalCommandOutputMessage({ content }: Props): React.ReactNode {
+export function UserLocalCommandOutputMessage({ content, capProseWidth, commandRun }: Props): React.ReactNode {
   // densable oX — unescape &amp;|&lt;|&gt; before UI (write path may escapeXml/EHe)
   const stdoutRaw = extractTag(content, 'local-command-stdout');
   const stderrRaw = extractTag(content, 'local-command-stderr');
   const stdout = stdoutRaw === null ? null : unescapeXmlEntities(stdoutRaw);
   const stderr = stderrRaw === null ? null : unescapeXmlEntities(stderrRaw);
-  if (!stdout && !stderr) {
-    return (
-      <MessageResponse>
-        <Text dimColor>{NO_CONTENT_MESSAGE}</Text>
-      </MessageResponse>
-    );
-  }
+  const resolvedCapProseWidth =
+    capProseWidth ?? (commandRun !== undefined ? commandRun.command === 'recap' : undefined);
 
   const lines: React.ReactNode[] = [];
-  if (stdout?.trim()) {
-    lines.push(<IndentedContent key="stdout">{stdout.trim()}</IndentedContent>);
+  if (stdout?.trim() && stdout.trim() !== NO_CONTENT_MESSAGE) {
+    lines.push(
+      <IndentedContent key="stdout" capProseWidth={resolvedCapProseWidth}>
+        {stdout.trim()}
+      </IndentedContent>,
+    );
   }
   if (stderr?.trim()) {
     // densable $pn(isError:!0) — failed /compact (and other local cmds) render as error
@@ -37,6 +37,9 @@ export function UserLocalCommandOutputMessage({ content }: Props): React.ReactNo
       </IndentedContent>,
     );
   }
+  if (lines.length === 0) {
+    return null;
+  }
   return lines;
 }
 
@@ -44,13 +47,22 @@ function hasAnsiEscapes(text: string): boolean {
   return text.includes('\x1b[');
 }
 
-function IndentedContent({ children, isError = false }: { children: string; isError?: boolean }): React.ReactNode {
+function IndentedContent({
+  children,
+  isError = false,
+  capProseWidth,
+}: {
+  children: string;
+  isError?: boolean;
+  capProseWidth?: boolean;
+}): React.ReactNode {
   if (children.startsWith(`${DIAMOND_OPEN} `) || children.startsWith(`${DIAMOND_FILLED} `)) {
     return <CloudLaunchContent>{children}</CloudLaunchContent>;
   }
-  // densable oa always stripPromptTags:!1. Pre-rendered /context grids are ANSI
-  // (renderToAnsiString) — marked.lexer would eat CSI and the replay would
-  // collapse to the command breadcrumb. Paint via <Ansi> when CSI is present.
+  // densable oa always stripPromptTags:!1 (<Markdown>{children}</Markdown>).
+  // Pre-rendered /context grids are ANSI (renderToAnsiString) — marked.lexer
+  // would eat CSI and the replay would collapse to the command breadcrumb.
+  // Paint via <Ansi> when CSI is present.
   const body = isError ? (
     <Text color="error" wrap="wrap">
       {children}
@@ -58,11 +70,15 @@ function IndentedContent({ children, isError = false }: { children: string; isEr
   ) : hasAnsiEscapes(children) ? (
     <Ansi wrap="wrap">{children}</Ansi>
   ) : (
-    <Markdown stripPromptTags={false}>{children}</Markdown>
+    <Markdown stripPromptTags={false} capProseWidth={capProseWidth}>
+      {children}
+    </Markdown>
   );
   return (
     <Box flexDirection="row">
-      <Text dimColor>{'  ⎿  '}</Text>
+      <Text aria-hidden dimColor>
+        {'  ⎿  '}
+      </Text>
       <Box flexDirection="column" flexGrow={1}>
         {body}
       </Box>
@@ -81,13 +97,17 @@ function CloudLaunchContent({ children }: { children: string }): React.ReactNode
   return (
     <Box flexDirection="column">
       <Text>
-        <Text color="background">{diamond} </Text>
+        <Text aria-hidden color="background">
+          {diamond}{' '}
+        </Text>
         <Text bold>{label}</Text>
         {suffix && <Text dimColor>{suffix}</Text>}
       </Text>
       {rest && (
         <Box flexDirection="row">
-          <Text dimColor>{'  ⎿  '}</Text>
+          <Text aria-hidden dimColor>
+            {'  ⎿  '}
+          </Text>
           <Text dimColor>{rest}</Text>
         </Box>
       )}

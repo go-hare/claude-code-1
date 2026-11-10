@@ -40,7 +40,7 @@ export function HookProgressMessage({ hookEvent, lookups, toolUseID, isTranscrip
     return null;
   }
 
-  if (resolvedHookCount === inProgressHookCount) {
+  if (resolvedHookCount >= inProgressHookCount) {
     return null;
   }
 

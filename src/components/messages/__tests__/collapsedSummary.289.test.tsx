@@ -85,4 +85,15 @@ describe('densable 2.1.289 Jc collapsed summary', () => {
     );
     expect(out).toContain('Recalled 2 local memories');
   });
+
+  test('hook-only group renders PreToolUse hook count in main line without duplicate sub-line', async () => {
+    const out = await paint(
+      group({
+        hookCount: 2,
+        hookTotalMs: 1500,
+      }),
+    );
+    expect(out).toContain('Ran 2 PreToolUse hooks');
+    expect(out).not.toContain('⎿');
+  });
 });

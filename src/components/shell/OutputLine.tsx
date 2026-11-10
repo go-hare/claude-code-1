@@ -43,12 +43,25 @@ export function tryJsonFormatContent(content: string): string {
   return allLines.map(tryFormatJson).join('\n');
 }
 
-// Match http(s) URLs inside JSON string values. Conservative: no quotes,
-// no whitespace, no trailing comma/brace that'd be JSON structure.
-const URL_IN_JSON = /https?:\/\/[^\s"'<>\\]+/g;
+// Match http(s) URLs inside output text, excluding quotes, whitespace, and control chars.
+const URL_IN_JSON =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable GHn URL matcher excludes control chars
+  /https?:\/\/[^\s"'<>\\\x00-\x1f]+/g;
+const MAX_LINKIFY_LENGTH = 100_000;
+const OSC8_PREFIX = '\x1b]8;;';
 
 export function linkifyUrlsInText(content: string): string {
-  return content.replace(URL_IN_JSON, url => createHyperlink(url));
+  if (content.length > MAX_LINKIFY_LENGTH) {
+    return content;
+  }
+  const linkifyLine = (line: string) => line.replace(URL_IN_JSON, url => createHyperlink(url));
+  if (!content.includes(OSC8_PREFIX)) {
+    return linkifyLine(content);
+  }
+  return content
+    .split('\n')
+    .map(line => (line.includes(OSC8_PREFIX) ? line : linkifyLine(line)))
+    .join('\n');
 }
 
 export function OutputLine({
@@ -56,7 +69,7 @@ export function OutputLine({
   verbose,
   isError,
   isWarning,
-  linkifyUrls,
+  linkifyUrls = true,
 }: {
   content: string;
   verbose: boolean;

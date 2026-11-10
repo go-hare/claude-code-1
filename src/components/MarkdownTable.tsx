@@ -303,7 +303,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   // tall-wrap tables. Gold HAS this; CJK unspaced cells trip Ao=4 easily.
   function renderVerticalFormat(): string {
     const lines: string[] = [];
-    const headers = token.header.map(h => getPlainText(h.tokens));
+    const headers = token.header.map(h => getPlainText(h.tokens).trim());
     // densable 2.1.229 #8: terminalWidth 0/1 → Math.min(width-1,40) is negative and
     // '─'.repeat throws RangeError (also on --continue/--resume at startup).
     const separatorWidth = Math.max(0, Math.min(terminalWidth - 1, 40));
@@ -328,7 +328,7 @@ export const MarkdownTable = React.memo(function MarkdownTable({
         const firstLine = firstPassLines[0] || '';
 
         let wrappedValue: string[];
-        if (firstPassLines.length <= 1 || subsequentLineWidth <= firstLineWidth) {
+        if (firstPassLines.length <= 1) {
           wrappedValue = firstPassLines;
         } else {
           // Re-join remaining text and re-wrap to the wider continuation width

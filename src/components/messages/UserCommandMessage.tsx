@@ -33,7 +33,9 @@ export function UserCommandMessage({ addMargin, param: { text } }: Props): React
         paddingRight={1}
       >
         <Text>
-          <Text color="subtle">{figures.pointer} </Text>
+          <Text aria-label="you:" color="inactive">
+            {figures.pointer}
+          </Text>{' '}
           <Text color="text">Skill({commandMessage})</Text>
         </Text>
       </Box>
@@ -45,7 +47,9 @@ export function UserCommandMessage({ addMargin, param: { text } }: Props): React
   return (
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor="userMessageBackground" paddingRight={1}>
       <Text>
-        <Text color="subtle">{figures.pointer} </Text>
+        <Text aria-label="you:" color="inactive">
+          {figures.pointer}
+        </Text>{' '}
         <Text color="text">{content}</Text>
       </Text>
     </Box>

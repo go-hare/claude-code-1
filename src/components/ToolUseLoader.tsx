@@ -3,6 +3,8 @@ import { BLACK_CIRCLE } from '../constants/figures.js';
 
 import { Box, Text } from '@anthropic/ink';
 import { useBlink } from '../hooks/useBlink.js';
+import { useAppStateMaybeOutsideOfProvider } from '../state/AppState.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 
 type Props = {
   isError: boolean;
@@ -11,9 +13,12 @@ type Props = {
 };
 
 export function ToolUseLoader({ isError, isUnresolved, shouldAnimate }: Props): React.ReactNode {
-  const [ref, isBlinking] = useBlink(shouldAnimate);
+  const isScreenReader = isScreenReaderModeEnabled();
+  const reducedMotion = useAppStateMaybeOutsideOfProvider(s => s.settings.prefersReducedMotion) ?? false;
+  const [ref, isBlinking] = useBlink(shouldAnimate && !isScreenReader && !reducedMotion);
+  const staticActiveInReducedMotion = isUnresolved && shouldAnimate && reducedMotion && !isScreenReader;
 
-  const color = isUnresolved ? undefined : isError ? 'error' : 'success';
+  const color = staticActiveInReducedMotion ? 'text' : isUnresolved ? undefined : isError ? 'error' : 'success';
 
   // WARNING: The code here and in AssistantToolUseMessage is particularly
   // sensitive to what *should* just be trivial refactorings. A `<dim>x</dim>`
@@ -25,7 +30,11 @@ export function ToolUseLoader({ isError, isUnresolved, shouldAnimate }: Props): 
   // https://github.com/chalk/chalk/issues/290
   return (
     <Box ref={ref} minWidth={2}>
-      <Text color={color} dimColor={isUnresolved}>
+      <Text
+        aria-label={isError ? 'tool error:' : 'tool:'}
+        color={color}
+        dimColor={isUnresolved && !staticActiveInReducedMotion}
+      >
         {!shouldAnimate || isBlinking || isError || !isUnresolved ? BLACK_CIRCLE : ' '}
       </Text>
     </Box>

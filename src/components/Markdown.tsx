@@ -1,13 +1,18 @@
+import chalk from 'chalk';
 import { Marked, marked, type Token, type Tokens } from 'marked';
 import React, { useMemo, useRef, type ReactNode } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, Text, useTheme, type Theme } from '@anthropic/ink';
 import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
+import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
-import { configureMarked, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
+import { logError } from '../utils/log.js';
+import { configureMarked, endsWithBlankLine, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { countCharInString } from '../utils/stringUtils.js';
+import type { ThemeName } from '../utils/theme.js';
 import { MarkdownList } from './MarkdownList.js';
 import { MarkdownTable } from './MarkdownTable.js';
 
@@ -15,6 +20,10 @@ type Props = {
   children: string;
   /** When true, render all text content as dim */
   dimColor?: boolean;
+  /** When true, render all text content as italic */
+  italic?: boolean;
+  /** When true, strip ANSI foreground colors so parent Text color wins */
+  monochrome?: boolean;
   /**
    * densable w0l `color` — wrap flushed ANSI in Ink Text with theme color
    * (user-prompt markdown inherits `text` / brief colors).
@@ -68,13 +77,56 @@ type Props = {
 // retaining full content strings (turn50→turn99 RSS regression, #24180).
 const tokenCache = new LRUCache<string, Token[]>({ max: 500 });
 
-// densable 2.1.246 Tr: CRLF blank lines, `N)` / `+` lists, setext `=`.
+// densable 2.1.289 an: CRLF blank lines, `N)` / `+` lists, setext `=`.
 const MD_SYNTAX_RE =
   /[#*`|[>\-_~]|\n[\r\n]|\r\r|\r\n[\r\n]|(?:^|[\r\n]) {0,3}(?:\d+[.)]|\+) |(?:^|[\r\n]) {0,3}=+ *(?:[\r\n]|$)|https?:\/\/|www\./;
+const NBSP_ENTITY = '&nbsp;';
 
-/** densable 2.1.246 xr=500 — probe only the first 500 chars. */
+/** densable 2.1.246 #9 — first-500 probe helper. */
 export function hasMarkdownSyntax(s: string): boolean {
-  return MD_SYNTAX_RE.test(s.length > 500 ? s.slice(0, 500) : s);
+  return MD_SYNTAX_RE.test(s.slice(0, 500));
+}
+
+function hasFullMarkdownSyntax(s: string, promptMode = false): boolean {
+  return MD_SYNTAX_RE.test(s) || (!promptMode && s.includes(NBSP_ENTITY));
+}
+
+const SGR_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional CSI SGR sequence match
+  /\x1b\[([0-9;]*)m/g;
+
+function stripForegroundSgr(input: string): string {
+  return input.replace(SGR_RE, (full, params: string) => {
+    if (params === '') return full;
+    const codes = params.split(';').map(Number);
+    const kept: number[] = [];
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i]!;
+      if (code === 38) {
+        const mode = codes[i + 1];
+        if (mode === 5) {
+          i += 2;
+        } else if (mode === 2) {
+          i += 4;
+        }
+        continue;
+      }
+      if ((code >= 30 && code <= 37) || code === 39 || (code >= 90 && code <= 97)) {
+        continue;
+      }
+      kept.push(code);
+    }
+    return kept.length > 0 ? `\x1b[${kept.join(';')}m` : '';
+  });
+}
+
+function applyAnsiTextOverrides(text: string, italic?: boolean, monochrome?: boolean): string {
+  if (!text) return text;
+  let out = monochrome ? stripForegroundSgr(text) : text;
+  if (italic) {
+    out = `\x1b[3m${out.replace(SGR_RE, match => `${match}\x1b[3m`)}\x1b[23m`;
+  }
+  return out;
 }
 
 /**
@@ -122,34 +174,161 @@ const promptModeMarked = new Marked({
   },
 });
 
+function plainParagraphTokens(content: string): Token[] {
+  return [
+    {
+      type: 'paragraph',
+      raw: content,
+      text: content,
+      tokens: [{ type: 'text', raw: content, text: content }],
+    } as Token,
+  ];
+}
+
+function safeLex(lexer: Marked | typeof marked, content: string): Token[] {
+  try {
+    return lexer.lexer(content);
+  } catch (err) {
+    if (err instanceof RangeError) {
+      logForDebugging(`marked.lexer overflow on ${content.length} chars`, { level: 'error' });
+    } else {
+      logError(err as Error);
+    }
+    return plainParagraphTokens(content);
+  }
+}
+
 function lexMarkdown(content: string, useCache: boolean, promptMode = false): Token[] {
-  // Fast path: plain text with no markdown syntax → single paragraph token.
-  if (!hasMarkdownSyntax(content)) {
-    return [
-      {
-        type: 'paragraph',
-        raw: content,
-        text: content,
-        tokens: [{ type: 'text', raw: content, text: content }],
-      } as Token,
-    ];
+  // densable mn: cache lookup first (LRU refresh), then fast path, then safe lex.
+  const key = useCache ? `${promptMode ? '_' : ''}${content.length}:${hashContent(content)}` : '';
+  if (useCache) {
+    const hit = tokenCache.get(key);
+    if (hit) return hit;
+  }
+  if (!hasFullMarkdownSyntax(content, promptMode)) {
+    return plainParagraphTokens(content);
   }
   const lexer = promptMode ? promptModeMarked : marked;
-  if (!useCache) {
-    return lexer.lexer(content);
+  const tokens = safeLex(lexer, content);
+  if (useCache) {
+    tokenCache.set(key, tokens);
   }
-  // densable _8m: cache key prefixes "_" for promptMode so lexers don't collide.
-  const key = `${promptMode ? '_' : ''}${content.length}:${hashContent(content)}`;
-  const hit = tokenCache.get(key);
-  if (hit) return hit;
-  const tokens = lexer.lexer(content);
-  tokenCache.set(key, tokens);
   return tokens;
+}
+
+const QUOTE_GUTTER_WIDTH = 2;
+
+function tokenContainsFullWidthBlock(root: Token): boolean {
+  const stack: Token[] = [root];
+  for (let tok = stack.pop(); tok !== undefined; tok = stack.pop()) {
+    if (tok.type === 'code' || tok.type === 'table') return true;
+    const children: Token[] =
+      tok.type === 'list'
+        ? ((tok as Tokens.List).items as unknown as Token[])
+        : tok.type === 'blockquote' || tok.type === 'list_item'
+          ? ((tok as { tokens?: Token[] }).tokens ?? [])
+          : [];
+    for (const child of children) {
+      stack.push(child);
+    }
+  }
+  return false;
+}
+
+function MarkdownBlockquote({
+  token,
+  theme,
+  highlight,
+  dimColor,
+  isScreenReader,
+  maxWidth,
+}: {
+  token: Tokens.Blockquote;
+  theme: ThemeName;
+  highlight: CliHighlight | null;
+  dimColor?: boolean;
+  isScreenReader: boolean;
+  maxWidth?: number;
+}): React.ReactNode {
+  const parts = token.tokens.map(child => ({
+    code: child.type === 'code',
+    fullWidth: maxWidth !== undefined && tokenContainsFullWidthBlock(child),
+    text: formatToken(child, theme, 0, null, null, highlight),
+  }));
+
+  if (maxWidth === undefined || isScreenReader || !parts.some(p => p.fullWidth)) {
+    const body = chalk.italic(
+      parts
+        .map(p => p.text)
+        .join('')
+        .replace(/^\n+/, '')
+        .trimEnd(),
+    );
+    return (
+      <Box
+        borderStyle="quote"
+        borderTop={false}
+        borderBottom={false}
+        borderRight={false}
+        borderDimColor
+        paddingLeft={1}
+        maxWidth={maxWidth}
+      >
+        <Ansi dimColor={dimColor}>{body}</Ansi>
+      </Box>
+    );
+  }
+
+  const merged: Array<{ code: boolean; fullWidth: boolean; text: string }> = [];
+  for (const part of parts) {
+    const prev = merged.at(-1);
+    if (prev && !prev.fullWidth && !part.fullWidth) {
+      prev.text += part.text;
+    } else {
+      merged.push({ ...part });
+    }
+  }
+
+  const rows: React.ReactNode[] = [];
+  let pendingNewlines = 0;
+  for (const part of merged) {
+    const leadingTrimmed = part.code ? part.text : part.text.replace(/^\n+/, '');
+    const trimmed = part.code ? leadingTrimmed.replace(/\n$/, '') : leadingTrimmed.trimEnd();
+    if (!trimmed) {
+      pendingNewlines += countCharInString(part.text, '\n');
+      continue;
+    }
+    pendingNewlines += part.text.length - leadingTrimmed.length;
+    rows.push(
+      <Box
+        key={rows.length}
+        marginTop={rows.length > 0 ? Math.max(0, pendingNewlines - 1) : 0}
+        maxWidth={part.fullWidth ? undefined : maxWidth - QUOTE_GUTTER_WIDTH}
+      >
+        <Ansi dimColor={dimColor}>{chalk.italic(trimmed)}</Ansi>
+      </Box>,
+    );
+    pendingNewlines = countCharInString(leadingTrimmed.slice(trimmed.length), '\n');
+  }
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="quote"
+      borderTop={false}
+      borderBottom={false}
+      borderRight={false}
+      borderDimColor
+      paddingLeft={1}
+    >
+      {rows}
+    </Box>
+  );
 }
 
 /**
  * Renders markdown content using a hybrid approach:
- * - Tables are rendered as React components with proper flexbox layout
+ * - Tables and blockquotes are rendered as React components with proper flexbox layout
  * - Other content is rendered as ANSI strings via formatToken
  */
 export function Markdown(props: Props): React.ReactNode {
@@ -162,10 +341,14 @@ export function Markdown(props: Props): React.ReactNode {
   return <MarkdownBody {...props} highlight={highlight} />;
 }
 
+type BlockKind = 'none' | 'prose' | 'list' | 'code' | 'block';
+
 function MarkdownBody({
   children,
   color,
   dimColor,
+  italic,
+  monochrome,
   promptMode = false,
   stripPromptTags,
   skipTokenCache,
@@ -180,12 +363,15 @@ function MarkdownBody({
   // densable w0l: stripPromptTags defaults true, but promptMode skips stripping.
   const shouldStrip = (stripPromptTags ?? true) && !promptMode;
   const maxProseWidth = capProseWidth ? settings.maxProseWidth : undefined;
+  const isScreenReader = isScreenReaderModeEnabled();
 
   const elements = useMemo(() => {
     const source = shouldStrip ? stripPromptXMLTags(children) : children;
     const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
+    let prevKind: BlockKind = 'none';
+    let hadBlankGap = false;
     let leftoverHintConsumed = false;
     const leftoverHint = hint ? `· ${hint}` : undefined;
 
@@ -195,75 +381,108 @@ function MarkdownBody({
       return <Text color="subtle"> {leftoverHint}</Text>;
     }
 
-    // densable Sh: only the final non-table flush gets tailWrap
-    function pushAnsiBlock(
-      text: string,
-      wrap?: Props['tailWrap'],
-      kind: 'prose' | 'code' = 'prose',
-      withHint = false,
-    ): void {
-      const ansi = (
-        <Ansi key={elements.length} dimColor={dimColor} wrap={wrap}>
-          {text}
+    // densable Or `J(node, marginTop, kind)` — 1-row block rhythm + maxWidth on prose only.
+    function pushBlock(node: React.ReactNode, marginTop: number, kind: Exclude<BlockKind, 'none'>): void {
+      elements.push(
+        <Box key={elements.length} marginTop={marginTop} maxWidth={kind === 'prose' ? maxProseWidth : undefined}>
+          {node}
+        </Box>,
+      );
+      prevKind = kind;
+      hadBlankGap = false;
+    }
+
+    function renderAnsiLeaf(text: string, wrap?: Props['tailWrap']): React.ReactNode {
+      return (
+        <Ansi dimColor={dimColor} wrap={wrap}>
+          {applyAnsiTextOverrides(text, italic, monochrome)}
         </Ansi>
       );
+    }
+
+    // densable Or `O(wrap, withHint)`
+    function flushNonTableContent(wrap?: Props['tailWrap'], withHint = false): void {
+      if (!nonTableContent) return;
+      const startsWithNewline = nonTableContent.startsWith('\n');
+      const blankEnd = endsWithBlankLine(nonTableContent);
+      const trimmed = nonTableContent.replace(/^\n+/, '').trimEnd();
+      nonTableContent = '';
+      if (!trimmed) {
+        hadBlankGap = true;
+        return;
+      }
+      const marginTop =
+        prevKind === 'none' ? 0 : (prevKind === 'list' || prevKind === 'code') && !startsWithNewline ? 0 : 1;
+      const ansi = renderAnsiLeaf(trimmed, wrap);
       const hintNode = withHint ? leftoverHintNode() : null;
       const inner =
         color || hintNode ? (
-          <Text key={elements.length} color={color} wrap={wrap}>
+          <Text color={color} wrap={wrap}>
             {ansi}
             {hintNode}
           </Text>
         ) : (
           ansi
         );
-      // densable Lr: maxWidth only on prose; tables/code keep full width.
-      elements.push(
-        kind === 'prose' && maxProseWidth !== undefined ? (
-          <Box key={elements.length} maxWidth={maxProseWidth}>
-            {inner}
-          </Box>
-        ) : (
-          inner
-        ),
-      );
+      pushBlock(inner, marginTop, 'prose');
+      hadBlankGap = blankEnd;
     }
 
-    function flushNonTableContent(wrap?: Props['tailWrap'], withHint = false): void {
-      if (nonTableContent) {
-        const trimmed = nonTableContent.replace(/^\n+/, '').trimEnd();
-        nonTableContent = '';
-        if (!trimmed) return;
-        pushAnsiBlock(trimmed, wrap, 'prose', withHint);
-      }
+    // densable Or `N(node, kind)`
+    function pushStructuredBlock(node: React.ReactNode, kind: 'block' | 'list' | 'code'): void {
+      flushNonTableContent();
+      const marginTop = prevKind === 'none' ? 0 : kind === 'block' || prevKind === 'block' || hadBlankGap ? 1 : 0;
+      pushBlock(node, marginTop, kind);
     }
 
-    // densable ZIl: when GIl and not screen-reader, top-level lists use Ink
-    // WIl/n6T hanging layout; otherwise ANSI i3 string path.
-    const useInkLists = !isScreenReaderModeEnabled() && shouldUseInkListLayout(tokens);
+    // densable Or: `U = !F && !u && Pr(M)` — disable Ink list layout in screen-reader or promptMode.
+    const useInkLists = !isScreenReader && !promptMode && shouldUseInkListLayout(tokens);
     const lastNonSpaceIndex = tokens.findLastIndex(t => t.type !== 'space');
 
     for (const [index, token] of tokens.entries()) {
       if (token.type === 'table') {
-        flushNonTableContent();
-        elements.push(<MarkdownTable key={elements.length} token={token as Tokens.Table} highlight={highlight} />);
+        pushStructuredBlock(<MarkdownTable token={token as Tokens.Table} highlight={highlight} />, 'block');
       } else if (token.type === 'list' && useInkLists) {
-        flushNonTableContent();
-        elements.push(
+        pushStructuredBlock(
           <MarkdownList
-            key={elements.length}
             token={token as Tokens.List}
             highlight={highlight}
             dimColor={dimColor}
+            italic={italic}
             tailWrap={index === lastNonSpaceIndex ? tailWrap : undefined}
             maxProseWidth={maxProseWidth}
           />,
+          'list',
+        );
+      } else if (token.type === 'blockquote') {
+        pushStructuredBlock(
+          <MarkdownBlockquote
+            token={token as Tokens.Blockquote}
+            theme={theme}
+            highlight={highlight}
+            dimColor={dimColor}
+            isScreenReader={isScreenReader}
+            maxWidth={maxProseWidth}
+          />,
+          'block',
         );
       } else if (maxProseWidth !== undefined && token.type === 'code') {
-        flushNonTableContent();
         const rendered = formatToken(token, theme, 0, null, null, highlight, promptMode);
         const isLast = index === lastNonSpaceIndex;
-        pushAnsiBlock(rendered.replace(/\n$/, ''), isLast ? tailWrap : undefined, 'code', isLast);
+        const wrap = isLast ? tailWrap : undefined;
+        const hintNode = isLast ? leftoverHintNode() : null;
+        const ansi = renderAnsiLeaf(rendered.replace(/\n$/, ''), wrap);
+        pushStructuredBlock(
+          color || hintNode ? (
+            <Text color={color} wrap={wrap}>
+              {ansi}
+              {hintNode}
+            </Text>
+          ) : (
+            ansi
+          ),
+          'code',
+        );
       } else {
         nonTableContent += formatToken(token, theme, 0, null, null, highlight, promptMode);
       }
@@ -276,19 +495,18 @@ function MarkdownBody({
       flushNonTableContent(tailWrap, true);
     }
     if (leftoverHint && !leftoverHintConsumed) {
-      elements.push(
-        <Text key={elements.length} color="subtle">
-          {leftoverHint}
-        </Text>,
-      );
+      pushBlock(<Text color="subtle">{leftoverHint}</Text>, 0, 'prose');
     }
     return elements;
   }, [
     children,
     color,
     dimColor,
+    italic,
+    monochrome,
     highlight,
     theme,
+    isScreenReader,
     skipTokenCache,
     tailWrap,
     promptMode,

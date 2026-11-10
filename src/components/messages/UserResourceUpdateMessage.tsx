@@ -72,7 +72,10 @@ export function UserResourceUpdateMessage({ addMargin, param: { text } }: Props)
       {updates.map((update, i) => (
         <Box key={i}>
           <Text>
-            <Text color="success">{REFRESH_ARROW}</Text> <Text dimColor>{update.server}:</Text>{' '}
+            <Text aria-label="update:" color="success">
+              {REFRESH_ARROW}
+            </Text>{' '}
+            <Text dimColor>{update.server}:</Text>{' '}
             <Text color="suggestion">{update.kind === 'resource' ? formatUri(update.target) : update.target}</Text>
             {update.reason && <Text dimColor> · {update.reason}</Text>}
           </Text>

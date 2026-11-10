@@ -5,18 +5,22 @@ import { Box, NoSelect, Text, Ratchet } from '@anthropic/ink';
 type Props = {
   children: React.ReactNode;
   height?: number;
+  screenReaderLabel?: string;
 };
 
-export function MessageResponse({ children, height }: Props): React.ReactNode {
+export function MessageResponse({ children, height, screenReaderLabel }: Props): React.ReactNode {
   const isMessageResponse = useContext(MessageResponseContext);
   if (isMessageResponse) {
     return children;
   }
+  const hideFromScreenReader = screenReaderLabel === undefined;
   const content = (
     <MessageResponseProvider>
       <Box flexDirection="row" height={height} overflowY="hidden">
         <NoSelect fromLeftEdge flexShrink={0}>
-          <Text dimColor>{'  '}⎿ &nbsp;</Text>
+          <Text aria-hidden={hideFromScreenReader} aria-label={screenReaderLabel} dimColor>
+            {'  '}⎿ &nbsp;
+          </Text>
         </NoSelect>
         <Box flexShrink={1} flexGrow={1}>
           {children}

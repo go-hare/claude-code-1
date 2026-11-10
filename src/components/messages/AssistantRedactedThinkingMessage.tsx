@@ -9,7 +9,8 @@ export function AssistantRedactedThinkingMessage({ addMargin = false }: Props): 
   return (
     <Box marginTop={addMargin ? 1 : 0}>
       <Text dimColor italic>
-        ✻ Thinking…
+        <Text aria-hidden>{'✻ '}</Text>
+        Thinking…
       </Text>
     </Box>
   );

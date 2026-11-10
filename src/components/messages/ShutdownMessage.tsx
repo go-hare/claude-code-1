@@ -10,12 +10,13 @@ import {
 
 type ShutdownRequestProps = {
   request: ShutdownRequestMessage;
+  replyInstructions?: string;
 };
 
 /**
  * Renders a shutdown request with a warning-colored border.
  */
-export function ShutdownRequestDisplay({ request }: ShutdownRequestProps): React.ReactNode {
+export function ShutdownRequestDisplay({ request, replyInstructions }: ShutdownRequestProps): React.ReactNode {
   return (
     <Box flexDirection="column" marginY={1}>
       <Box borderStyle="round" borderColor="warning" flexDirection="column" paddingX={1} paddingY={1}>
@@ -30,6 +31,7 @@ export function ShutdownRequestDisplay({ request }: ShutdownRequestProps): React
           </Box>
         )}
       </Box>
+      {replyInstructions && <Text dimColor>{replyInstructions}</Text>}
     </Box>
   );
 }
@@ -71,9 +73,12 @@ export function ShutdownRejectedDisplay({ response }: ShutdownRejectedProps): Re
  * Returns the rendered component if it's a shutdown message, null otherwise.
  */
 export function tryRenderShutdownMessage(content: string): React.ReactNode | null {
-  const request = isShutdownRequest(content);
+  const splitIdx = content.indexOf('\n\n');
+  const jsonPart = splitIdx === -1 ? content : content.slice(0, splitIdx);
+  const request = isShutdownRequest(jsonPart);
   if (request) {
-    return <ShutdownRequestDisplay request={request} />;
+    const replyInstructions = splitIdx === -1 ? undefined : content.slice(splitIdx + 2);
+    return <ShutdownRequestDisplay request={request} replyInstructions={replyInstructions} />;
   }
 
   // Shutdown approved is handled inline by the caller — skip it here
@@ -95,7 +100,9 @@ export function tryRenderShutdownMessage(content: string): React.ReactNode | nul
  * Returns null if the content is not a shutdown message.
  */
 export function getShutdownMessageSummary(content: string): string | null {
-  const request = isShutdownRequest(content);
+  const splitIdx = content.indexOf('\n\n');
+  const jsonPart = splitIdx === -1 ? content : content.slice(0, splitIdx);
+  const request = isShutdownRequest(jsonPart);
   if (request) {
     return `[Shutdown Request from ${request.from}]${request.reason ? ` ${request.reason}` : ''}`;
   }

@@ -27,19 +27,28 @@ import type {
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { collapseBackgroundBashNotifications } from '../utils/collapseBackgroundBashNotifications.js';
 import { collapseHookSummaries } from '../utils/collapseHookSummaries.js';
-import { collapseReadSearchGroups, LeftoverCollapseCache } from '../utils/collapseReadSearch.js';
+import {
+  collapseReadSearchGroups,
+  getSearchExtraToolsOrReadInfo,
+  getToolUseIdsFromCollapsedGroup,
+  LeftoverCollapseCache,
+  leftoverTut,
+  leftoverXut,
+} from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
 import { filterFoldedLoopNoopMessages } from '../utils/loopNoopFold.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { type BriefToolStats, collapseFocusTranscript, type FocusTranscriptMessage } from '../utils/focusTranscript.js';
-import { isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
+import { isFullscreenEnvEnabled, isFullscreenFeatureGateEnabled } from '../utils/fullscreen.js';
 import { applyGrouping } from '../utils/groupToolUses.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { useAppState, useAppStateStore } from '../state/AppState.js';
 import {
   buildMessageLookups,
   computeMessageStructureKey,
+  EMPTY_LOOKUPS,
+  extractTag,
   type MessageLookups,
   updateMessageLookupsIncremental,
   createAssistantMessage,
@@ -57,11 +66,13 @@ import {
   shouldShowUserMessage,
 } from '../utils/messages.js';
 import { plural } from '../utils/stringUtils.js';
+import { isOutputLineTruncated } from '../utils/terminal.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
+import { unescapeXmlEntities } from '../utils/xml.js';
 import { Divider } from '@anthropic/ink';
 import type { UnseenDivider } from './FullscreenLayout.js';
 import { LogoV2 } from './LogoV2/LogoV2.js';
-import { hasContentAfterIndex, MessageRow } from './MessageRow.js';
+import { MessageRow } from './MessageRow.js';
 import {
   InVirtualListContext,
   type MessageActionsNav,
@@ -138,7 +149,10 @@ export function filterForBriefTool<
       content: Array<{
         type: string;
         name?: string;
+        id?: string;
         tool_use_id?: string;
+        thinking?: string;
+        signature?: string;
       }>;
     };
     attachment?: {
@@ -148,12 +162,39 @@ export function filterForBriefTool<
       commandMode?: string;
     };
   },
->(messages: T[], briefToolNames: string[]): T[] {
+>(messages: T[], briefToolNames: string[], dropTextToolNames: string[] = briefToolNames): T[] {
   const nameSet = new Set(briefToolNames);
+  const dropTextNameSet = new Set(dropTextToolNames);
+  const turnsWithBrief = new Set<number>();
+  const turnAt: number[] = [];
+  let turn = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    const block = msg.message?.content[0];
+    if (msg.type === 'user' && block?.type !== 'tool_result' && (!msg.isMeta || isMetaVisibleOrigin(msg.origin))) {
+      turn++;
+    } else if (
+      msg.type === 'attachment' &&
+      msg.attachment?.type === 'queued_command' &&
+      msg.attachment.commandMode === 'prompt' &&
+      (isMetaVisibleOrigin(msg.attachment.origin) ||
+        (!msg.attachment.isMeta && isHumanLikeOrigin(msg.attachment.origin)))
+    ) {
+      turn++;
+    } else if (
+      msg.type === 'assistant' &&
+      block?.type === 'tool_use' &&
+      block.name &&
+      dropTextNameSet.has(block.name)
+    ) {
+      turnsWithBrief.add(turn);
+    }
+    turnAt[i] = turn;
+  }
   // tool_use always precedes its tool_result in the array, so we can collect
   // IDs and match against them in a single pass.
   const briefToolUseIDs = new Set<string>();
-  return messages.filter(msg => {
+  return messages.filter((msg, idx) => {
     // System messages (attach confirmation, remote errors, compact boundaries)
     // must stay visible — dropping them leaves the viewer with no feedback.
     // Exception: api_metrics is per-turn debug noise (TTFT, config writes,
@@ -167,9 +208,15 @@ export function filterForBriefTool<
       // Keep Brief tool_use blocks (renders with standard tool call chrome,
       // and must be in the list so buildMessageLookups can resolve tool results)
       if (block?.type === 'tool_use' && block.name && nameSet.has(block.name)) {
-        if ('id' in block) {
-          briefToolUseIDs.add((block as { id: string }).id);
+        if ('id' in block && typeof block.id === 'string') {
+          briefToolUseIDs.add(block.id);
         }
+        return true;
+      }
+      if (
+        (block?.type === 'text' || (block !== undefined && leftoverTut(block))) &&
+        !turnsWithBrief.has(turnAt[idx]!)
+      ) {
         return true;
       }
       return false;
@@ -237,10 +284,28 @@ export function dropTextInBriefTurns<
     type: string;
     isMeta?: boolean;
     origin?: { kind?: string; senderTaskId?: string };
-    message?: { content: Array<{ type: string; name?: string }> };
+    message?: {
+      content: Array<{
+        type: string;
+        name?: string;
+        id?: string;
+        tool_use_id?: string;
+        is_error?: boolean;
+        thinking?: string;
+        signature?: string;
+      }>;
+    };
   },
 >(messages: T[], briefToolNames: string[]): T[] {
   const nameSet = new Set(briefToolNames);
+  const erroredToolUseIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.type !== 'user') continue;
+    const block = msg.message?.content[0];
+    if (block?.type === 'tool_result' && block.tool_use_id && block.is_error) {
+      erroredToolUseIds.add(block.tool_use_id);
+    }
+  }
   // First pass: find which turns (bounded by non-meta user messages, densable
   // Ace-visible meta still counts as a turn boundary) contain a Brief tool_use.
   // Tag each assistant text block with its turn index.
@@ -255,10 +320,12 @@ export function dropTextInBriefTurns<
       continue;
     }
     if (msg.type === 'assistant') {
-      if (block?.type === 'text') {
+      if (block?.type === 'text' || (block !== undefined && leftoverTut(block))) {
         textIndexToTurn[i] = turn;
       } else if (block?.type === 'tool_use' && block.name && nameSet.has(block.name)) {
-        turnsWithBrief.add(turn);
+        if (!block.id || !erroredToolUseIds.has(block.id)) {
+          turnsWithBrief.add(turn);
+        }
       }
     }
   }
@@ -422,6 +489,11 @@ const MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE = 30;
 const MAX_MESSAGES_WITHOUT_VIRTUALIZATION = 200;
 const MESSAGE_CAP_STEP = 50;
 
+/** densable Vb — cap non-virtualized slice to Math.min(200, rows) in fullscreen. */
+function getNonVirtualizedMessageCap(rows: number, isFullscreen: boolean): number {
+  return isFullscreen ? Math.min(MAX_MESSAGES_WITHOUT_VIRTUALIZATION, rows) : MAX_MESSAGES_WITHOUT_VIRTUALIZATION;
+}
+
 export type SliceAnchor = { uuid: string; idx: number } | null;
 
 /** Exported for testing. Mutates anchorRef when the window needs to advance. */
@@ -448,6 +520,460 @@ export function computeSliceStart(
     anchorRef.current = null;
   }
   return start;
+}
+
+type TranscriptMessage = Exclude<NormalizedMessage, ProgressMessageType>;
+
+/**
+ * densable `class Ea` / `VI` (@207902546) — stateful splitter that compares
+ * elements by reference (`===`) against its previous `transcript` and `progress`
+ * arrays and returns the exact same `transcript` array reference when only
+ * `progress` messages change.
+ */
+class TranscriptProgressSplitter {
+  transcript: TranscriptMessage[] = [];
+  progress: ProgressMessageType[] = [];
+
+  split(messages: NormalizedMessage[]): {
+    transcript: TranscriptMessage[];
+    progress: ProgressMessageType[];
+  } {
+    const prevTranscript = this.transcript;
+    const prevProgress = this.progress;
+    let tIdx = 0;
+    let pIdx = 0;
+    let nextTranscript: TranscriptMessage[] | null = null;
+    let nextProgress: ProgressMessageType[] | null = null;
+    for (const msg of messages) {
+      if (msg.type === 'progress') {
+        const pMsg = msg as ProgressMessageType;
+        if (nextProgress !== null) {
+          nextProgress.push(pMsg);
+        } else if (prevProgress[pIdx] === pMsg) {
+          pIdx++;
+        } else {
+          nextProgress = prevProgress.slice(0, pIdx);
+          nextProgress.push(pMsg);
+        }
+      } else if (nextTranscript !== null) {
+        nextTranscript.push(msg);
+      } else if (prevTranscript[tIdx] === msg) {
+        tIdx++;
+      } else {
+        nextTranscript = prevTranscript.slice(0, tIdx);
+        nextTranscript.push(msg);
+      }
+    }
+    nextTranscript ??= tIdx === prevTranscript.length ? prevTranscript : prevTranscript.slice(0, tIdx);
+    nextProgress ??= pIdx === prevProgress.length ? prevProgress : prevProgress.slice(0, pIdx);
+    this.transcript = nextTranscript;
+    this.progress = nextProgress;
+    return { transcript: nextTranscript, progress: nextProgress };
+  }
+}
+
+type HookEventKey = MessageLookups['inProgressHookCounts'] extends Map<string, Map<infer K, number>> ? K : never;
+
+/**
+ * densable `Ad` (@207899971) — build `progressMessagesByToolUseID` and
+ * `inProgressHookCounts` from `progress` messages, skipping `tool_heartbeat`.
+ */
+function buildProgressLookups(
+  progress: ProgressMessageType[],
+): Pick<MessageLookups, 'progressMessagesByToolUseID' | 'inProgressHookCounts'> {
+  const progressMessagesByToolUseID = new Map<string, ProgressMessageType[]>();
+  const inProgressHookCounts = new Map<string, Map<HookEventKey, number>>();
+  for (const msg of progress) {
+    const data = msg.data as { type?: string; hookEvent?: HookEventKey };
+    if (data.type === 'tool_heartbeat') continue;
+    const parentToolUseID = msg.parentToolUseID as string;
+    const existing = progressMessagesByToolUseID.get(parentToolUseID);
+    if (existing) {
+      existing.push(msg);
+    } else {
+      progressMessagesByToolUseID.set(parentToolUseID, [msg]);
+    }
+    if (data.type === 'hook_progress' && data.hookEvent) {
+      const hookEvent = data.hookEvent;
+      let byHookEvent = inProgressHookCounts.get(parentToolUseID);
+      if (!byHookEvent) {
+        byHookEvent = new Map();
+        inProgressHookCounts.set(parentToolUseID, byHookEvent);
+      }
+      byHookEvent.set(hookEvent, (byHookEvent.get(hookEvent) ?? 0) + 1);
+    }
+  }
+  return { progressMessagesByToolUseID, inProgressHookCounts };
+}
+
+type ProjectedMessageLookups = MessageLookups & {
+  firstTextBlockUuidByMessageID?: Map<string, string>;
+};
+
+const EMPTY_FIRST_TEXT_MAP = new Map<string, string>();
+
+function arraysReferenceEqual<T>(a: readonly T[] | undefined, b: readonly T[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** densable `Oy` (@207904000) */
+function mapsShallowEqual<K, V>(a: ReadonlyMap<K, V> | undefined, b: ReadonlyMap<K, V> | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    if (b.get(k) !== v) return false;
+  }
+  return true;
+}
+
+/** densable `Mr` (@207904100) */
+function projectMapSubset<K, V>(source: Map<K, V>, keys: Iterable<K>, emptyFallback: Map<K, V>): Map<K, V> {
+  let projected: Map<K, V> | undefined;
+  for (const k of keys) {
+    const v = source.get(k);
+    if (v !== undefined) {
+      projected ??= new Map();
+      projected.set(k, v);
+    }
+  }
+  return projected ?? emptyFallback;
+}
+
+/** densable `Fy` (@207904200) */
+function projectSetSubset<T>(source: Set<T>, keys: Iterable<T>, emptyFallback: Set<T>): Set<T> {
+  let projected: Set<T> | undefined;
+  for (const k of keys) {
+    if (source.has(k)) {
+      projected ??= new Set();
+      projected.add(k);
+    }
+  }
+  return projected ?? emptyFallback;
+}
+
+/** densable `S_` (@207903350) */
+function collectRowToolUseIDs(row: RenderableMessage): string[] {
+  switch (row.type) {
+    case 'assistant': {
+      const ids: string[] = [];
+      const content = row.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content as Array<{
+          type: string;
+          id?: string;
+          tool_use_id?: string;
+        }>) {
+          if (
+            (block.type === 'tool_use' || block.type === 'server_tool_use' || block.type === 'mcp_tool_use') &&
+            typeof block.id === 'string'
+          ) {
+            ids.push(block.id);
+          } else if ('tool_use_id' in block && typeof block.tool_use_id === 'string') {
+            ids.push(block.tool_use_id);
+          }
+        }
+      }
+      return ids;
+    }
+    case 'user': {
+      const ids: string[] = [];
+      if (row.sourceToolUseID) ids.push(row.sourceToolUseID);
+      const content = row.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content as Array<{
+          type: string;
+          tool_use_id?: string;
+        }>) {
+          if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+            ids.push(block.tool_use_id);
+          }
+        }
+      }
+      return ids;
+    }
+    case 'attachment':
+    case 'system': {
+      const id = getToolUseID(row);
+      return id === null ? [] : [id];
+    }
+    case 'grouped_tool_use':
+      return row.messages
+        .map(m => {
+          const content = m.message.content;
+          const first = Array.isArray(content) ? (content[0] as { id?: string } | undefined) : undefined;
+          return first?.id ?? '';
+        })
+        .filter(Boolean);
+    case 'collapsed_read_search':
+      return getToolUseIdsFromCollapsedGroup(row);
+    default:
+      return [];
+  }
+}
+
+/** densable `w_` (@207903680) */
+function areRowLookupsEqual(
+  prev: ProjectedMessageLookups,
+  next: ProjectedMessageLookups,
+  rowToolUseIDs: Set<string>,
+  rowAndSiblingToolUseIDs: Set<string>,
+): boolean {
+  for (const id of rowAndSiblingToolUseIDs) {
+    if (prev.resolvedToolUseIDs.has(id) !== next.resolvedToolUseIDs.has(id)) {
+      return false;
+    }
+  }
+  for (const id of rowToolUseIDs) {
+    const prevSiblings = prev.siblingToolUseIDs.get(id);
+    const nextSiblings = next.siblingToolUseIDs.get(id);
+    if (
+      prev.erroredToolUseIDs.has(id) !== next.erroredToolUseIDs.has(id) ||
+      prev.toolResultByToolUseID.get(id) !== next.toolResultByToolUseID.get(id) ||
+      prev.toolUseByToolUseID.get(id) !== next.toolUseByToolUseID.get(id) ||
+      (prevSiblings === undefined || nextSiblings === undefined
+        ? prevSiblings !== nextSiblings
+        : prevSiblings.size !== nextSiblings.size || !every(prevSiblings, nextSiblings)) ||
+      !arraysReferenceEqual(prev.progressMessagesByToolUseID.get(id), next.progressMessagesByToolUseID.get(id)) ||
+      !mapsShallowEqual(prev.inProgressHookCounts.get(id), next.inProgressHookCounts.get(id)) ||
+      !mapsShallowEqual(prev.resolvedHookCounts.get(id), next.resolvedHookCounts.get(id))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** densable `b_` (@207903000) */
+function projectRowLookups(
+  row: RenderableMessage,
+  lookups: ProjectedMessageLookups,
+  prev: ProjectedMessageLookups | undefined,
+): ProjectedMessageLookups {
+  const rowToolUseIDs = new Set(collectRowToolUseIDs(row));
+  const assistantMsgId = row.type === 'assistant' ? (row.message.id ?? null) : null;
+  const firstTextUuid =
+    assistantMsgId === null ? undefined : lookups.firstTextBlockUuidByMessageID?.get(assistantMsgId);
+  if (rowToolUseIDs.size === 0 && firstTextUuid === undefined) {
+    return EMPTY_LOOKUPS;
+  }
+  const rowAndSiblingToolUseIDs = new Set(rowToolUseIDs);
+  for (const id of rowToolUseIDs) {
+    for (const siblingId of lookups.siblingToolUseIDs.get(id) ?? []) {
+      rowAndSiblingToolUseIDs.add(siblingId);
+    }
+  }
+  if (
+    prev &&
+    (assistantMsgId === null || prev.firstTextBlockUuidByMessageID?.get(assistantMsgId) === firstTextUuid) &&
+    areRowLookupsEqual(prev, lookups, rowToolUseIDs, rowAndSiblingToolUseIDs)
+  ) {
+    return prev;
+  }
+  return {
+    siblingToolUseIDs: projectMapSubset(lookups.siblingToolUseIDs, rowToolUseIDs, EMPTY_LOOKUPS.siblingToolUseIDs),
+    progressMessagesByToolUseID: projectMapSubset(
+      lookups.progressMessagesByToolUseID,
+      rowToolUseIDs,
+      EMPTY_LOOKUPS.progressMessagesByToolUseID,
+    ),
+    inProgressHookCounts: projectMapSubset(
+      lookups.inProgressHookCounts,
+      rowToolUseIDs,
+      EMPTY_LOOKUPS.inProgressHookCounts,
+    ),
+    resolvedHookCounts: projectMapSubset(lookups.resolvedHookCounts, rowToolUseIDs, EMPTY_LOOKUPS.resolvedHookCounts),
+    toolResultByToolUseID: projectMapSubset(
+      lookups.toolResultByToolUseID,
+      rowToolUseIDs,
+      EMPTY_LOOKUPS.toolResultByToolUseID,
+    ),
+    toolUseByToolUseID: projectMapSubset(lookups.toolUseByToolUseID, rowToolUseIDs, EMPTY_LOOKUPS.toolUseByToolUseID),
+    firstTextBlockUuidByMessageID:
+      assistantMsgId === null || firstTextUuid === undefined
+        ? EMPTY_FIRST_TEXT_MAP
+        : new Map([[assistantMsgId, firstTextUuid]]),
+    normalizedMessageCount: lookups.normalizedMessageCount,
+    resolvedToolUseIDs: projectSetSubset(
+      lookups.resolvedToolUseIDs,
+      rowAndSiblingToolUseIDs,
+      EMPTY_LOOKUPS.resolvedToolUseIDs,
+    ),
+    erroredToolUseIDs: projectSetSubset(lookups.erroredToolUseIDs, rowToolUseIDs, EMPTY_LOOKUPS.erroredToolUseIDs),
+  };
+}
+
+/**
+ * densable `class Ia` / `GI` (@207902892) — per-row lookup projector.
+ */
+class RowLookupsProjector {
+  private source: WeakRef<ProjectedMessageLookups> | null = null;
+  private generation = 0;
+  private byRow = new WeakMap<RenderableMessage, { generation: number; projection: ProjectedMessageLookups }>();
+
+  forRow(row: RenderableMessage, lookups: ProjectedMessageLookups): ProjectedMessageLookups {
+    if (this.source?.deref() !== lookups) {
+      this.source = new WeakRef(lookups);
+      this.generation++;
+    }
+    const entry = this.byRow.get(row);
+    if (entry && entry.generation === this.generation) {
+      return entry.projection;
+    }
+    const projected = projectRowLookups(row, lookups, entry?.projection);
+    if (projected === EMPTY_LOOKUPS) {
+      if (entry) {
+        this.byRow.delete(row);
+      }
+    } else if (entry) {
+      entry.generation = this.generation;
+      entry.projection = projected;
+    } else {
+      this.byRow.set(row, {
+        generation: this.generation,
+        projection: projected,
+      });
+    }
+    return projected;
+  }
+}
+
+/** densable `_Mr` (@191149164) — attachment that flushes a collapsed read/search group. */
+function isGroupFlushingAttachment(msg: RenderableMessage): boolean {
+  if (msg.type !== 'attachment') return false;
+  const att = msg.attachment;
+  if (att.type === 'queued_command') {
+    const origin =
+      att.origin !== null && typeof att.origin === 'object'
+        ? (att.origin as { kind?: string; senderTaskId?: string })
+        : undefined;
+    if (att.commandMode === 'task-notification') return true;
+    if (
+      (origin?.kind === 'peer' && origin.senderTaskId !== undefined) ||
+      origin?.kind === 'observer' ||
+      origin?.kind === 'coordinator'
+    ) {
+      return true;
+    }
+    if (att.commandMode !== 'prompt') return false;
+    if (att.isMeta !== true && isHumanLikeOrigin(origin)) return true;
+    const kind = origin?.kind;
+    return kind === 'channel' || kind === 'peer' || kind === 'slack-ping';
+  }
+  if (att.type === 'teammate_mailbox') {
+    return Array.isArray(att.messages) && att.messages.length > 0;
+  }
+  return false;
+}
+
+/**
+ * densable `Hd` (@207907549) — scan backwards from `messages.length - 1` to find
+ * the last index with non-collapsible content. Computed once per render instead
+ * of scanning forward per row.
+ */
+function findLastContentIndex(messages: RenderableMessage[], tools: Tools, streamingToolUseIDs: Set<string>): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.type === 'assistant') {
+      const content = Array.isArray(msg.message.content)
+        ? (msg.message.content[0] as { type: string; name?: string; input?: unknown; id?: string } | undefined)
+        : undefined;
+      if (content?.type === 'thinking' || content?.type === 'redacted_thinking') {
+        if (leftoverXut(msg)) return i;
+        continue;
+      }
+      if (content?.type === 'tool_use') {
+        if (getSearchExtraToolsOrReadInfo(content.name!, content.input, tools).isCollapsible) {
+          continue;
+        }
+        if (streamingToolUseIDs.has(content.id!)) {
+          continue;
+        }
+      }
+      return i;
+    }
+    if (msg?.type === 'attachment' && isGroupFlushingAttachment(msg)) {
+      return i;
+    }
+    if (msg?.type === 'system' || msg?.type === 'attachment') {
+      continue;
+    }
+    if (msg?.type === 'user') {
+      const content = Array.isArray(msg.message.content)
+        ? (msg.message.content[0] as { type: string } | undefined)
+        : undefined;
+      if (content?.type === 'tool_result') {
+        continue;
+      }
+    }
+    if (msg?.type === 'grouped_tool_use') {
+      const firstContent = Array.isArray(msg.messages[0]?.message.content)
+        ? (msg.messages[0]?.message.content[0] as { input?: unknown } | undefined)
+        : undefined;
+      if (getSearchExtraToolsOrReadInfo(msg.toolName, firstContent?.input, tools).isCollapsible) {
+        continue;
+      }
+    }
+    return i;
+  }
+  return -1;
+}
+
+/** densable `Pp` / `Lmr` (@207632799) — cached bash output block parser. */
+function parseBashOutputBlock(
+  cache: WeakMap<object, { stdout: string; stderr: string }>,
+  block: { text?: string },
+): { stdout: string; stderr: string } {
+  const cached = cache.get(block);
+  if (cached) return cached;
+  const content = block.text ?? '';
+  const rawStdout = extractTag(content, 'bash-stdout') ?? '';
+  const parsed = {
+    stdout: extractTag(rawStdout, 'persisted-output') ?? unescapeXmlEntities(rawStdout),
+    stderr: unescapeXmlEntities(extractTag(content, 'bash-stderr') ?? ''),
+  };
+  cache.set(block, parsed);
+  return parsed;
+}
+
+/** Check whether a tool_result error has >3 lines. */
+function isToolResultErrorTruncated(content: unknown): boolean {
+  if (typeof content === 'string') {
+    let lines = 1;
+    for (let i = 0; i < content.length; i++) {
+      if (content.charCodeAt(i) === 10 && ++lines > 3) return true;
+    }
+    return false;
+  }
+  if (!Array.isArray(content)) return false;
+  let lines = 0;
+  for (const item of content) {
+    lines += 1;
+    if (lines > 3) return true;
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      'type' in item &&
+      (item as { type: unknown }).type === 'text' &&
+      'text' in item &&
+      typeof (item as { text: unknown }).text === 'string'
+    ) {
+      const text = (item as { text: string }).text;
+      let idx = 0;
+      while (lines <= 3) {
+        idx = text.indexOf('\n', idx);
+        if (idx === -1) break;
+        idx++;
+        lines++;
+      }
+      if (lines > 3) return true;
+    }
+  }
+  return false;
 }
 
 const MessagesImpl = ({
@@ -484,7 +1010,9 @@ const MessagesImpl = ({
   cursorNavRef,
   renderRange,
 }: Props): React.ReactNode => {
-  const { columns } = useTerminalSize();
+  const { columns, rows } = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const isTranscriptMode = screen === 'transcript';
   const toggleShowAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'Ctrl+E');
   const briefTranscript = useAppState(s => s.briefTranscript);
   // densable W = showMessageTimestamps && tengu_silk_hinge
@@ -498,11 +1026,21 @@ const MessagesImpl = ({
 
   const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
 
+  const [transcriptProgressSplitter] = useState(() => new TranscriptProgressSplitter());
+  const [rowLookupsProjector] = useState(() => new RowLookupsProjector());
+  const [streamingToolUseFilter] = useState(() => new StreamingToolUseFilter());
+
+  const { transcript, progress: progressMessages } = useMemo(
+    () => transcriptProgressSplitter.split(normalizedMessages),
+    [transcriptProgressSplitter, normalizedMessages],
+  );
+
   // Last thinking block per human turn + latest bash output.
+  // densable Ew: all thinking blocks render when isTranscriptMode || verbose.
   const { lastThinkingBlockId, latestBashOutputUUID } = useMemo(() => {
     let bashUUID: string | null = null;
-    for (let i = normalizedMessages.length - 1; i >= 0; i--) {
-      const msg = normalizedMessages[i];
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const msg = transcript[i];
       if (msg?.type !== 'user') continue;
       const content = msg.message!.content as Array<{ type: string; text?: string }>;
       for (const block of content) {
@@ -516,18 +1054,18 @@ const MessagesImpl = ({
       }
       if (bashUUID) break;
     }
-    if (!hidePastThinking) {
+    if (!hidePastThinking || isTranscriptMode || verbose) {
       return { lastThinkingBlockId: null, latestBashOutputUUID: bashUUID };
     }
     return {
-      lastThinkingBlockId: collectLastThinkingIdsPerTurn(normalizedMessages),
+      lastThinkingBlockId: collectLastThinkingIdsPerTurn(transcript),
       latestBashOutputUUID: bashUUID,
     };
-  }, [normalizedMessages, hidePastThinking]);
+  }, [transcript, hidePastThinking, isTranscriptMode, verbose]);
 
-  // streamingToolUses updates on every input_json_delta while normalizedMessages
+  // streamingToolUses updates on every input_json_delta while transcript
   // stays stable — precompute the Set so the filter is O(k) not O(n×k) per chunk.
-  const normalizedToolUseIDs = useMemo(() => getToolUseIDs(normalizedMessages), [normalizedMessages]);
+  const normalizedToolUseIDs = useMemo(() => getToolUseIDs(transcript), [transcript]);
 
   // densable 246 $M/jM/_e: proxy `tool_use` without `id` must still render —
   // mint a stable id via WeakMap keyed on contentBlock (wrapper is recreated
@@ -539,8 +1077,8 @@ const MessagesImpl = ({
   }, []);
 
   const streamingToolUsesWithoutInProgress = useMemo(
-    () => filterStreamingToolUsesWithoutInProgress(streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs),
-    [streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs],
+    () => streamingToolUseFilter.next(streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs),
+    [streamingToolUseFilter, streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs],
   );
 
   const syntheticStreamingToolUseMessages = useMemo(
@@ -559,7 +1097,6 @@ const MessagesImpl = ({
     [streamingToolUsesWithoutInProgress, resolveStreamingToolUseId],
   );
 
-  const isTranscriptMode = screen === 'transcript';
   // Hoisted to mount-time — this component re-renders on every scroll.
   const disableVirtualScroll = useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL), []);
   // Virtual scroll replaces the transcript cap: everything is scrollable and
@@ -574,6 +1111,15 @@ const MessagesImpl = ({
   // under StrictMode double-render). See MAX_MESSAGES_WITHOUT_VIRTUALIZATION
   // comment above for why this replaced count-based slicing.
   const sliceAnchorRef = useRef<SliceAnchor>(null);
+  const prevSliceSyncRef = useRef({ conversationId, verbose });
+  if (prevSliceSyncRef.current.conversationId !== conversationId) {
+    prevSliceSyncRef.current.conversationId = conversationId;
+    sliceAnchorRef.current = null;
+  }
+  if (prevSliceSyncRef.current.verbose !== verbose) {
+    prevSliceSyncRef.current.verbose = verbose;
+    sliceAnchorRef.current = null;
+  }
 
   // Cache for buildMessageLookups: avoids rebuilding 8 Maps/Sets when only
   // message content changed during streaming (text/thinking deltas). The key
@@ -594,38 +1140,17 @@ const MessagesImpl = ({
     lastAssistantMsgId: string | undefined;
   } | null>(null);
 
-  // Expensive message transforms — filter, reorder, group, collapse, lookups.
-  // All O(n) over 27k messages. Split from the renderRange slice so scrolling
-  // (which only changes renderRange) doesn't re-run these. Previously this
-  // useMemo included renderRange → every scroll rebuilt 6 Maps over 27k
-  // messages + 4 filter/map passes = ~50ms alloc per scroll → GC pressure →
-  // 100-173ms stop-the-world pauses on the 1GB heap.
-  const { collapsed, lookups, hasTruncatedMessages, hiddenMessageCount } = useMemo(() => {
-    // In fullscreen mode the alt buffer has no native scrollback, so the
-    // compact-boundary filter just hides history the ScrollBox could
-    // otherwise scroll to. Main-screen mode keeps the filter — pre-compact
-    // rows live above the viewport in native scrollback there, and
-    // re-rendering them triggers full resets.
-    // includeSnipped: UI rendering keeps snipped messages for scrollback
-    // (this PR's core goal — full history in UI, filter only for the model).
-    // Also avoids a UUID mismatch: normalizeMessages derives new UUIDs, so
-    // projectSnippedView's check against original removedUuids would fail.
-    // Keep the full pre-compact history visible in every view (not just
-    // verbose/transcript). The model context is filtered separately in
-    // query.ts via getMessagesAfterCompactBoundary, so retaining the messages
-    // here only affects display: after /compact the user still sees the prior
-    // conversation (with the compact_boundary marker inline as the signal),
-    // while tokens are still freed from the API request.
-    const compactAwareMessages = normalizedMessages;
+  // Expensive message transforms — filter, reorder, group, collapse, transcriptLookups.
+  // Depends on `transcript` (NOT `normalizedMessages` / `progress`), so 1s bash/hook
+  // progress ticks completely skip reorderMessagesInUI, applyGrouping,
+  // collapseReadSearchGroups, collapseTeammateShutdowns, collapseHookSummaries,
+  // collapseBackgroundBashNotifications, filterFoldedLoopNoopMessages, and buildMessageLookups.
+  const { collapsed, transcriptLookups, hasTruncatedMessages, hiddenMessageCount } = useMemo(() => {
+    const compactAwareMessages = transcript;
 
     const messagesToShowNotTruncated = reorderMessagesInUI(
       compactAwareMessages.filter(
-        (msg): msg is Exclude<NormalizedMessage, ProgressMessageType> =>
-          // CC-724: drop attachment messages that AttachmentMessage renders as
-          // null (hook_success, hook_additional_context, hook_cancelled, etc.)
-          // BEFORE counting/slicing so they don't inflate the "N messages"
-          // count in ctrl-o or consume slots in the 200-message render cap.
-          msg.type !== 'progress' && !isNullRenderingAttachment(msg) && shouldShowUserMessage(msg, isTranscriptMode),
+        msg => !isNullRenderingAttachment(msg) && shouldShowUserMessage(msg, isTranscriptMode),
       ) as Parameters<typeof reorderMessagesInUI>[0],
       syntheticStreamingToolUseMessages,
     );
@@ -641,7 +1166,11 @@ const MessagesImpl = ({
     const briefFiltered =
       briefToolNames.length > 0 && !isTranscriptMode
         ? isBriefOnly
-          ? filterForBriefTool(messagesToShowNotTruncated as Parameters<typeof filterForBriefTool>[0], briefToolNames)
+          ? filterForBriefTool(
+              messagesToShowNotTruncated as Parameters<typeof filterForBriefTool>[0],
+              briefToolNames,
+              dropTextToolNames,
+            )
           : dropTextToolNames.length > 0
             ? dropTextInBriefTurns(
                 messagesToShowNotTruncated as Parameters<typeof dropTextInBriefTurns>[0],
@@ -689,17 +1218,17 @@ const MessagesImpl = ({
           }) as typeof collapsedBase)
         : collapsedBase;
 
-    const lookupsKey = computeMessageStructureKey(normalizedMessages, messagesToShow as MessageType[]);
+    const lookupsKey = computeMessageStructureKey(transcript, messagesToShow as MessageType[]);
     const currentLastAssistantMsgId = (() => {
       const lastMsg = (messagesToShow as MessageType[]).at(-1);
       return lastMsg?.type === 'assistant' ? (lastMsg as AssistantMessage).message?.id : undefined;
     })();
-    let lookups: MessageLookups;
+    let transcriptLookups: MessageLookups;
     if (lookupsCacheRef.current && lookupsCacheRef.current.key === lookupsKey) {
-      lookups = lookupsCacheRef.current.lookups;
+      transcriptLookups = lookupsCacheRef.current.lookups;
     } else if (
       lookupsCacheRef.current &&
-      normalizedMessages.length >= lookupsCacheRef.current.normalizedCount &&
+      transcript.length >= lookupsCacheRef.current.normalizedCount &&
       (messagesToShow as MessageType[]).length >= lookupsCacheRef.current.messageCount &&
       // If lastAssistantMsgId changed, previous "in-progress" assistant may
       // now be orphaned — force a full rebuild to pick up the new status.
@@ -710,34 +1239,34 @@ const MessagesImpl = ({
         lookupsCacheRef.current.lookups,
         lookupsCacheRef.current.normalizedCount,
         lookupsCacheRef.current.messageCount,
-        normalizedMessages,
+        transcript,
         messagesToShow as MessageType[],
       );
       if (updated) {
-        lookups = updated;
+        transcriptLookups = updated;
         lookupsCacheRef.current = {
           key: lookupsKey,
-          lookups,
-          normalizedCount: normalizedMessages.length,
+          lookups: transcriptLookups,
+          normalizedCount: transcript.length,
           messageCount: (messagesToShow as MessageType[]).length,
           lastAssistantMsgId: currentLastAssistantMsgId,
         };
       } else {
-        lookups = buildMessageLookups(normalizedMessages, messagesToShow as MessageType[]);
+        transcriptLookups = buildMessageLookups(transcript, messagesToShow as MessageType[]);
         lookupsCacheRef.current = {
           key: lookupsKey,
-          lookups,
-          normalizedCount: normalizedMessages.length,
+          lookups: transcriptLookups,
+          normalizedCount: transcript.length,
           messageCount: (messagesToShow as MessageType[]).length,
           lastAssistantMsgId: currentLastAssistantMsgId,
         };
       }
     } else {
-      lookups = buildMessageLookups(normalizedMessages, messagesToShow as MessageType[]);
+      transcriptLookups = buildMessageLookups(transcript, messagesToShow as MessageType[]);
       lookupsCacheRef.current = {
         key: lookupsKey,
-        lookups,
-        normalizedCount: normalizedMessages.length,
+        lookups: transcriptLookups,
+        normalizedCount: transcript.length,
         messageCount: (messagesToShow as MessageType[]).length,
         lastAssistantMsgId: currentLastAssistantMsgId,
       };
@@ -747,13 +1276,13 @@ const MessagesImpl = ({
 
     return {
       collapsed,
-      lookups,
+      transcriptLookups,
       hasTruncatedMessages,
       hiddenMessageCount,
     };
   }, [
     verbose,
-    normalizedMessages,
+    transcript,
     isTranscriptMode,
     syntheticStreamingToolUseMessages,
     shouldTruncate,
@@ -762,7 +1291,13 @@ const MessagesImpl = ({
     focusTranscriptActive,
     isLoading,
     appStore,
+    virtualScrollRuntimeGate,
+    collapseCache,
   ]);
+
+  const progressLookups = useMemo(() => buildProgressLookups(progressMessages), [progressMessages]);
+
+  const lookups = useMemo(() => ({ ...transcriptLookups, ...progressLookups }), [transcriptLookups, progressLookups]);
 
   // Cheap slice — only runs when scroll range or slice config changes.
   const renderableMessages = useMemo(() => {
@@ -774,17 +1309,23 @@ const MessagesImpl = ({
     // renderRange is first: the chunked export path slices the
     // post-grouping array so each chunk gets correct tool-call grouping.
     const capApplies = !virtualScrollRuntimeGate && !disableRenderCap;
-    const sliceStart = capApplies ? computeSliceStart(collapsed, sliceAnchorRef) : 0;
+    const nonVirtualizedCap = getNonVirtualizedMessageCap(rows, isFullscreen);
+    const sliceStart = capApplies ? computeSliceStart(collapsed, sliceAnchorRef, nonVirtualizedCap) : 0;
     return renderRange
       ? collapsed.slice(renderRange[0], renderRange[1])
       : sliceStart > 0
         ? collapsed.slice(sliceStart)
         : collapsed;
-  }, [collapsed, renderRange, virtualScrollRuntimeGate, disableRenderCap]);
+  }, [collapsed, renderRange, virtualScrollRuntimeGate, disableRenderCap, rows, isFullscreen, conversationId, verbose]);
 
   const streamingToolUseIDs = useMemo(
     () => new Set(streamingToolUses.map(stu => resolveStreamingToolUseId(stu).id)),
     [streamingToolUses, resolveStreamingToolUseId],
+  );
+
+  const lastContentIndex = useMemo(
+    () => findLastContentIndex(renderableMessages, tools, streamingToolUseIDs),
+    [renderableMessages, tools, streamingToolUseIDs],
   );
 
   // Divider insertion point and selected index: combined into a single pass
@@ -812,6 +1353,14 @@ const MessagesImpl = ({
   // heightCache + clear scrollHeightHwm (stale expand heights leave blank
   // spacer after collapse when not sticky).
   const [layoutEpoch, setLayoutEpoch] = useState(0);
+  const prevExpandConversationIdRef = useRef(conversationId);
+  if (prevExpandConversationIdRef.current !== conversationId) {
+    prevExpandConversationIdRef.current = conversationId;
+    if (expandedKeys.size > 0) {
+      setExpandedKeys(new Set());
+      setLayoutEpoch(n => n + 1);
+    }
+  }
   const onItemClick = useCallback((msg: RenderableMessage) => {
     const k = expandKey(msg);
     setExpandedKeys(prev => {
@@ -835,15 +1384,22 @@ const MessagesImpl = ({
   // every new message.
   const lookupsRef = useRef(lookups);
   lookupsRef.current = lookups;
+  const bashOutputCacheRef = useRef(new WeakMap<object, { stdout: string; stderr: string }>());
   const isItemClickable = useCallback(
     (msg: RenderableMessage): boolean => {
       if (msg.type === 'collapsed_read_search') return true;
-      // densable tx: queued_command + uM (or envelope) is clickable in
-      // default REPL. Session verbose/transcript already paints Fg — skip.
-      if (!(verbose || isTranscriptMode) && isPeerInboundExpandClickable(msg)) {
-        return true;
+      if (msg.type === 'attachment') {
+        if (verbose || isTranscriptMode) return false;
+        if (msg.attachment?.type === 'queued_command') {
+          return isPeerInboundExpandClickable(msg);
+        }
+        if (msg.attachment?.type === 'teammate_mailbox') {
+          return Array.isArray(msg.attachment.messages) && msg.attachment.messages.length > 0;
+        }
+        return msg.attachment?.type === 'goal_status' && Boolean((msg.attachment as { reason?: string }).reason);
       }
       if (msg.type === 'assistant') {
+        if (verbose || isTranscriptMode) return false;
         const content = msg.message!.content;
         const b = (Array.isArray(content) ? content[0] : undefined) as unknown as AdvisorBlock | undefined;
         return (
@@ -854,17 +1410,42 @@ const MessagesImpl = ({
       const b = (
         msg.message!.content as Array<{
           type: string;
+          text?: string;
           tool_use_id?: string;
           is_error?: boolean;
+          content?: unknown;
           [key: string]: unknown;
         }>
       )[0];
-      if (b?.type !== 'tool_result' || b.is_error || !msg.toolUseResult) return false;
+      if (
+        b?.type === 'text' &&
+        typeof b.text === 'string' &&
+        (b.text.startsWith('<bash-stdout') || b.text.startsWith('<bash-stderr'))
+      ) {
+        if (verbose || isTranscriptMode || msg.uuid === latestBashOutputUUID) {
+          return false;
+        }
+        const parsed = parseBashOutputBlock(bashOutputCacheRef.current, b);
+        const bashTool = findToolByName(tools, 'Bash');
+        if (bashTool?.isResultTruncated) {
+          return bashTool.isResultTruncated({ ...parsed, interrupted: false } as never, { columns });
+        }
+        return isOutputLineTruncated(parsed.stdout, columns) || isOutputLineTruncated(parsed.stderr, columns);
+      }
+      if (b?.type === 'text') {
+        if (verbose || isTranscriptMode) return false;
+        return isPeerInboundExpandClickable(msg);
+      }
+      if (b?.type !== 'tool_result') return false;
+      if (b.is_error) {
+        return isToolResultErrorTruncated(b.content);
+      }
+      if (!msg.toolUseResult) return false;
       const name = lookupsRef.current.toolUseByToolUseID.get(b.tool_use_id ?? '')?.name;
       const tool = name ? findToolByName(tools, name) : undefined;
       return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
-    [columns, tools, verbose, isTranscriptMode],
+    [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID],
   );
 
   const canAnimate =
@@ -891,66 +1472,86 @@ const MessagesImpl = ({
 
   const messageKey = useCallback((msg: RenderableMessage) => `${msg.uuid}-${conversationId}`, [conversationId]);
 
-  const renderMessageRow = (msg: RenderableMessage, index: number) => {
-    const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
-    const isUserContinuation = msg.type === 'user' && prevType === 'user';
-    // Official 2.1.150: collapsed && (!!streamingText || hasContentAfter).
-    // hasStreamingText is that string (null until a completed line), not the
-    // preview element — the element stays mounted for the whole isLoading window.
-    const hasContentAfter =
-      msg.type === 'collapsed_read_search' &&
-      (!!hasStreamingText || hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs));
+  const renderMessageRow = useCallback(
+    (msg: RenderableMessage, index: number) => {
+      const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
+      const isUserContinuation = msg.type === 'user' && prevType === 'user';
+      // Official 2.1.289: collapsed && (!!streamingText || index < lastContentIndex).
+      const hasContentAfter = msg.type === 'collapsed_read_search' && (!!hasStreamingText || index < lastContentIndex);
 
-    // Official densable 2.1.210: no message-distance diff collapse prop.
-    // Condensed style is only for subagent/grouped tool views; scratchpad
-    // files use FileEditToolUpdatedMessage.collapsed (isScratchpadFile).
-    // Fork PR #376 distance collapse removed (bare "Added N lines" walls).
-    const k = messageKey(msg);
-    const row = (
-      <MessageRow
-        key={k}
-        message={msg}
-        isUserContinuation={isUserContinuation}
-        hasContentAfter={hasContentAfter}
-        tools={tools}
-        commands={commands}
-        verbose={verbose || isItemExpanded(msg) || (cursor?.expanded === true && index === selectedIdx)}
-        inProgressToolUseIDs={inProgressToolUseIDs}
-        streamingToolUseIDs={streamingToolUseIDs}
-        screen={screen}
-        canAnimate={canAnimate}
-        onOpenRateLimitOptions={onOpenRateLimitOptions}
-        lastThinkingBlockId={lastThinkingBlockId}
-        latestBashOutputUUID={latestBashOutputUUID}
-        columns={columns}
-        isLoading={isLoading}
-        lookups={lookups}
-        showMessageTimestamps={showMessageTimestamps}
-      />
-    );
+      const k = messageKey(msg);
+      const row = (
+        <MessageRow
+          key={k}
+          message={msg}
+          isUserContinuation={isUserContinuation}
+          hasContentAfter={hasContentAfter}
+          tools={tools}
+          commands={commands}
+          verbose={verbose || isItemExpanded(msg) || (cursor?.expanded === true && index === selectedIdx)}
+          inProgressToolUseIDs={inProgressToolUseIDs}
+          streamingToolUseIDs={streamingToolUseIDs}
+          screen={screen}
+          canAnimate={canAnimate}
+          onOpenRateLimitOptions={onOpenRateLimitOptions}
+          lastThinkingBlockId={lastThinkingBlockId}
+          latestBashOutputUUID={latestBashOutputUUID}
+          columns={columns}
+          isLoading={isLoading}
+          lookups={rowLookupsProjector.forRow(msg, lookups)}
+          showMessageTimestamps={showMessageTimestamps}
+        />
+      );
 
-    // Per-row Provider — only 2 rows re-render on selection change.
-    // Wrapped BEFORE divider branch so both return paths get it.
-    const wrapped = (
-      <MessageActionsSelectedContext.Provider key={k} value={index === selectedIdx}>
-        {row}
-      </MessageActionsSelectedContext.Provider>
-    );
+      // Per-row Provider — only 2 rows re-render on selection change.
+      // Wrapped BEFORE divider branch so both return paths get it.
+      const wrapped = (
+        <MessageActionsSelectedContext.Provider key={k} value={index === selectedIdx}>
+          {row}
+        </MessageActionsSelectedContext.Provider>
+      );
 
-    if (unseenDivider && index === dividerBeforeIndex) {
-      return [
-        <Box key="unseen-divider" marginTop={1}>
-          <Divider
-            title={`${unseenDivider.count} new ${plural(unseenDivider.count, 'message')}`}
-            width={columns}
-            color="inactive"
-          />
-        </Box>,
-        wrapped,
-      ];
-    }
-    return wrapped;
-  };
+      if (unseenDivider && index === dividerBeforeIndex) {
+        return [
+          <Box key="unseen-divider" marginTop={1}>
+            <Divider
+              title={`${unseenDivider.count} new ${plural(unseenDivider.count, 'message')}`}
+              width={columns}
+              color="inactive"
+            />
+          </Box>,
+          wrapped,
+        ];
+      }
+      return wrapped;
+    },
+    [
+      renderableMessages,
+      hasStreamingText,
+      lastContentIndex,
+      messageKey,
+      tools,
+      commands,
+      verbose,
+      isItemExpanded,
+      cursor?.expanded,
+      selectedIdx,
+      inProgressToolUseIDs,
+      streamingToolUseIDs,
+      screen,
+      canAnimate,
+      onOpenRateLimitOptions,
+      lastThinkingBlockId,
+      latestBashOutputUUID,
+      columns,
+      isLoading,
+      rowLookupsProjector,
+      lookups,
+      showMessageTimestamps,
+      unseenDivider,
+      dividerBeforeIndex,
+    ],
+  );
 
   // Search indexing: for tool_result messages, look up the Tool and use
   // its extractSearchText — tool-owned, precise, matches what
@@ -1090,14 +1691,39 @@ export function resolveMintedStreamingToolUseId(
   return { id: minted, minted: true };
 }
 
+const EMPTY_STREAMING_TOOL_USES: StreamingToolUse[] = [];
+
 /**
- * densable 246 `jM` — streaming tool uses not yet in progress / normalized.
+ * densable `class Fm` (@207966081) — preserves previous array reference when
+ * `filterStreamingToolUsesWithoutInProgress` produces an identical element list.
+ */
+class StreamingToolUseFilter {
+  previous: StreamingToolUse[] = EMPTY_STREAMING_TOOL_USES;
+
+  next(
+    streamingToolUses: StreamingToolUse[],
+    inProgressToolUseIDs: Set<string>,
+    normalizedToolUseIDs: Set<string>,
+  ): StreamingToolUse[] {
+    this.previous = filterStreamingToolUsesWithoutInProgress(
+      streamingToolUses,
+      inProgressToolUseIDs,
+      normalizedToolUseIDs,
+      this.previous,
+    );
+    return this.previous;
+  }
+}
+
+/**
+ * densable 246 `jM` / 289 `mI` — streaming tool uses not yet in progress / normalized.
  * Missing `id` is kept (caller mints for render); present ids dedupe.
  */
 export function filterStreamingToolUsesWithoutInProgress(
   streamingToolUses: StreamingToolUse[],
   inProgressToolUseIDs: Set<string>,
   normalizedToolUseIDs: Set<string>,
+  previous: StreamingToolUse[] = EMPTY_STREAMING_TOOL_USES,
 ): StreamingToolUse[] {
   const seen = new Set<string>();
   const out: StreamingToolUse[] = [];
@@ -1110,6 +1736,10 @@ export function filterStreamingToolUsesWithoutInProgress(
       seen.add(id);
     }
     out.push(stu);
+  }
+  if (out.length === 0) return EMPTY_STREAMING_TOOL_USES;
+  if (out.length === previous.length && out.every((item, idx) => item === previous[idx])) {
+    return previous;
   }
   return out;
 }

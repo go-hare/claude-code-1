@@ -7,9 +7,8 @@ export function UserBashOutputMessage({ content, verbose }: { content: string; v
   const rawStdout = extractTag(content, 'bash-stdout') ?? '';
   // Unwrap <persisted-output> if present — keep the inner content (file path +
   // preview) for the user; the wrapper tag itself is model-facing signaling.
-  const stdoutInner = extractTag(rawStdout, 'persisted-output') ?? rawStdout;
-  // densable oX — display unescape &amp;|&lt;|&gt; (Ua/escapeXml write path)
-  const stdout = unescapeXmlEntities(stdoutInner);
+  // densable Pp — display unescape &amp;|&lt;|&gt; only on raw <bash-stdout>
+  const stdout = extractTag(rawStdout, 'persisted-output') ?? unescapeXmlEntities(rawStdout);
   const stderr = unescapeXmlEntities(extractTag(content, 'bash-stderr') ?? '');
   return <BashToolResultMessage content={{ stdout, stderr }} verbose={!!verbose} />;
 }

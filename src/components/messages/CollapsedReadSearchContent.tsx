@@ -1,12 +1,14 @@
 import { feature } from 'bun:bundle';
+import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { basename } from 'path';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useInterval } from 'usehooks-ts';
+import { TASK_NOTIFICATION_TAG } from '../../constants/xml.js';
 import { useMinDisplayTime } from '../../hooks/useMinDisplayTime.js';
 import { Ansi, Box, Text, useTheme, useTerminalSize } from '@anthropic/ink';
-import { findToolByName, type Tools } from '../../Tool.js';
+import { filterToolProgressMessages, findToolByName, type Tools } from '../../Tool.js';
 import { getReplPrimitiveTools } from '@claude-code/builtin-tools/tools/REPLTool/primitiveTools.js';
-import type { CollapsedReadSearchGroup, NormalizedAssistantMessage } from '../../types/message.js';
+import type { CollapsedReadSearchGroup, NormalizedAssistantMessage, ProgressMessage } from '../../types/message.js';
 import { uniq } from '../../utils/array.js';
 import {
   getToolUseIdsFromCollapsedGroup,
@@ -23,16 +25,26 @@ import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { leftoverIhrThinkingStartedAt, useLeftoverIhrStore } from '../../state/leftoverIhrStore.js';
 import { getSessionId } from '../../bootstrap/state.js';
-import { interruptedCall, type buildMessageLookups } from '../../utils/messages.js';
+import {
+  CANCEL_MESSAGE,
+  INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  interruptedCall,
+  REJECT_MESSAGE,
+  REJECT_MESSAGE_WITH_REASON_PREFIX,
+  type buildMessageLookups,
+} from '../../utils/messages.js';
 import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
 import type { ThemeName } from '../../utils/theme.js';
-import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
+import { Markdown } from '../Markdown.js';
 import { AssistantThinkingMessage } from './AssistantThinkingMessage.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { PrBadge } from '../PrBadge.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
+import { UserAgentNotificationMessage } from './UserAgentNotificationMessage.js';
+import { UserToolCanceledMessage } from './UserToolResultMessage/UserToolCanceledMessage.js';
+import { UserToolErrorMessage } from './UserToolResultMessage/UserToolErrorMessage.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemCollapsed = feature('TEAMMEM')
@@ -90,7 +102,80 @@ type Props = {
   lookups: ReturnType<typeof buildMessageLookups>;
   /** True if this is the currently active collapsed group (last one, still loading) */
   isActiveGroup?: boolean;
+  addMargin?: boolean;
 };
+
+/** densable `ta` — errored/rejected/canceled tool result in verbose collapsed group */
+function VerboseErroredToolResult({
+  toolUseID,
+  input,
+  resultMsg,
+  tool,
+  tools,
+  progressMessagesForMessage,
+}: {
+  toolUseID: string;
+  input: unknown;
+  resultMsg: ReturnType<typeof buildMessageLookups>['toolResultByToolUseID'] extends Map<string, infer V>
+    ? V | undefined
+    : never;
+  tool: NonNullable<ReturnType<typeof findToolByName>>;
+  tools: Tools;
+  progressMessagesForMessage: ProgressMessage[];
+}): React.ReactNode {
+  const { columns } = useTerminalSize();
+  const [theme] = useTheme();
+  if (resultMsg?.type !== 'user' || !Array.isArray(resultMsg.message?.content)) {
+    return null;
+  }
+  const block = (resultMsg.message.content as ToolResultBlockParam[]).find(
+    b => b.type === 'tool_result' && b.tool_use_id === toolUseID,
+  );
+  if (block?.type !== 'tool_result') {
+    return null;
+  }
+  if (typeof block.content === 'string' && block.content.startsWith(CANCEL_MESSAGE)) {
+    return <UserToolCanceledMessage />;
+  }
+  const isRejected =
+    (typeof block.content === 'string' &&
+      (block.content.startsWith(REJECT_MESSAGE) ||
+        (block.content.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) &&
+          tool.renderToolUseRejectedMessage !== undefined))) ||
+    block.content === INTERRUPT_MESSAGE_FOR_TOOL_USE;
+  if (isRejected) {
+    if (!tool.renderToolUseRejectedMessage) {
+      return <UserToolCanceledMessage />;
+    }
+    const parsedInput = tool.inputSchema.safeParse(input);
+    if (!parsedInput.success) {
+      return <UserToolCanceledMessage />;
+    }
+    return (
+      tool.renderToolUseRejectedMessage(parsedInput.data, {
+        columns,
+        messages: [],
+        tools,
+        verbose: true,
+        progressMessagesForMessage: filterToolProgressMessages(progressMessagesForMessage),
+        theme,
+        isTranscriptMode: true,
+      }) ?? <UserToolCanceledMessage />
+    );
+  }
+  return (
+    <UserToolErrorMessage
+      param={block}
+      tool={tool}
+      tools={tools}
+      input={input}
+      output={resultMsg.toolUseResult}
+      verbose={true}
+      progressMessagesForMessage={progressMessagesForMessage}
+      isTranscriptMode={true}
+    />
+  );
+}
 
 /** Render a single tool use in verbose mode */
 function VerboseToolUse({
@@ -128,6 +213,17 @@ function VerboseToolUse({
   const input = parsedInput.success ? parsedInput.data : undefined;
   const userFacingName = tool.userFacingName(input);
   const toolUseMessage = input ? tool.renderToolUseMessage(input, { theme, verbose: true }) : null;
+  const progressMessages = lookups.progressMessagesByToolUseID.get(content.id) ?? [];
+  const renderToolUseTag = tool.renderToolUseTag as
+    | ((
+        input: unknown,
+        context?: {
+          toolUseId: string;
+          toolUseResult: unknown;
+          progressMessages: unknown;
+        },
+      ) => React.ReactNode)
+    | undefined;
 
   return (
     <Box key={content.id} flexDirection="column" marginTop={1} backgroundColor={bg}>
@@ -137,16 +233,33 @@ function VerboseToolUse({
           <Text bold>{userFacingName}</Text>
           {toolUseMessage && <Text>({toolUseMessage})</Text>}
         </Text>
-        {input && tool.renderToolUseTag?.(input)}
+        {input &&
+          renderToolUseTag?.(input, {
+            toolUseId: content.id,
+            toolUseResult: rawToolResult,
+            progressMessages: lookups.progressMessagesByToolUseID.get(content.id),
+          })}
       </Box>
       {isResolved && !isError && toolResult !== undefined && (
         <Box>
-          {tool.renderToolResultMessage?.(toolResult, [], {
+          {tool.renderToolResultMessage?.(toolResult, filterToolProgressMessages(progressMessages), {
             verbose: true,
             tools,
             theme,
+            isTranscriptMode: true,
+            input: content.input,
           })}
         </Box>
+      )}
+      {isResolved && isError && (
+        <VerboseErroredToolResult
+          toolUseID={content.id}
+          input={content.input}
+          resultMsg={resultMsg}
+          tool={tool}
+          tools={tools}
+          progressMessagesForMessage={progressMessages}
+        />
       )}
     </Box>
   );
@@ -178,6 +291,23 @@ function LeftoverThoughtClock({
   return <Text bold>{formatDuration(leftoverZcMs(baseMs, lastThinkingAtMs, now, startedAt))}</Text>;
 }
 
+/** densable `og` — 2s live elapsed timer (` · Xs`) on active collapsed groups. */
+function CollapsedToolElapsed({
+  anchorMs,
+  shouldAnimate,
+}: {
+  anchorMs: number;
+  shouldAnimate: boolean;
+}): React.ReactNode {
+  const [, setTick] = useState(0);
+  useInterval(() => setTick(t => t + 1), shouldAnimate ? 1000 : null);
+  const elapsed = Date.now() - anchorMs;
+  if (elapsed < 2000) {
+    return null;
+  }
+  return <Text dimColor> · {formatDuration(elapsed)}</Text>;
+}
+
 export function CollapsedReadSearchContent({
   message,
   inProgressToolUseIDs,
@@ -186,6 +316,7 @@ export function CollapsedReadSearchContent({
   tools,
   lookups,
   isActiveGroup,
+  addMargin = true,
 }: Props): React.ReactNode {
   const bg = useSelectedMessageBg();
   const { columns } = useTerminalSize();
@@ -242,7 +373,6 @@ export function CollapsedReadSearchContent({
   const accountMemoryKeyCount = message.accountMemoryReadKeys?.length ?? 0;
   const accountMemorySearchCount = message.accountMemorySearchCount ?? 0;
   const hasAccountMemory = accountMemoryKeyCount > 0 || accountMemorySearchCount > 0;
-  const pendingText = message.pendingText;
 
   const hasNonMemoryOps =
     searchCount > 0 ||
@@ -257,7 +387,8 @@ export function CollapsedReadSearchContent({
     otherToolCount > 0 ||
     frameCount > 0 ||
     scratchpadWriteCount > 0 ||
-    workshopWriteCount > 0;
+    workshopWriteCount > 0 ||
+    (message.hookTotalMs ?? 0) > 0;
 
   const thoughtForMs = message.thoughtForMs ?? 0;
   // densable Io: `Mo>0||l.latestThinkingSummary!==void 0`. Empty Ss still
@@ -308,11 +439,25 @@ export function CollapsedReadSearchContent({
   // In verbose mode, render each tool use with its 1-line result summary
   if (verbose) {
     const toolUses: NormalizedAssistantMessage[] = [];
+    const taskNotificationRows: React.ReactNode[] = [];
     for (const msg of groupMessages) {
       if (msg.type === 'assistant') {
         toolUses.push(msg);
       } else if (msg.type === 'grouped_tool_use') {
         toolUses.push(...msg.messages);
+      } else if (msg.type === 'user') {
+        const first = (msg.message.content as Array<{ type?: string; text?: string }> | undefined)?.[0];
+        if (
+          first?.type === 'text' &&
+          typeof first.text === 'string' &&
+          first.text.includes(`<${TASK_NOTIFICATION_TAG}`)
+        ) {
+          taskNotificationRows.push(
+            <Box key={msg.uuid} marginTop={1}>
+              <UserAgentNotificationMessage addMargin={false} param={{ type: 'text', text: first.text }} />
+            </Box>,
+          );
+        }
       }
     }
 
@@ -385,6 +530,7 @@ export function CollapsedReadSearchContent({
     // densable always returns the verbose column (may be empty Ss list).
     return (
       <Box flexDirection="column">
+        {taskNotificationRows}
         {verboseRows}
         {hookBlock}
         {memoryRows}
@@ -428,6 +574,24 @@ export function CollapsedReadSearchContent({
     }
   }
 
+  let activeToolAnchorMs = 0;
+  if (isActiveGroup && isFullscreenEnvEnabled()) {
+    for (let i = groupMessages.length - 1; i >= 0 && !activeToolAnchorMs; i--) {
+      const item = groupMessages[i];
+      const assistants = item?.type === 'grouped_tool_use' ? item.messages : item?.type === 'assistant' ? [item] : [];
+      for (const assistant of assistants) {
+        const blocks = assistant.message.content as Array<{ type: string; id?: string }>;
+        if (blocks.some(b => b.type === 'tool_use' && b.id !== undefined && inProgressToolUseIDs.has(b.id))) {
+          const ts = typeof assistant.timestamp === 'string' ? Date.parse(assistant.timestamp) : Number.NaN;
+          if (Number.isFinite(ts)) {
+            activeToolAnchorMs = ts;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // Build non-memory parts first (edit, search, read, repl, mcp, agent, other, bash)
   // densable order: edit → git → frame → search → read → list → repl → mcp → agent → other → bash
   const nonMemParts: React.ReactNode[] = [];
@@ -465,15 +629,8 @@ export function CollapsedReadSearchContent({
       'edit',
       verb,
       <Text>
-        <Text bold>{editFileCount}</Text> {editFileCount === 1 ? 'file' : 'files'}
-        {(linesAdded > 0 || linesRemoved > 0) && (
-          <Text>
-            {' '}
-            <Text color="success">+{linesAdded}</Text>
-            <Text dimColor>/</Text>
-            <Text color="error">-{linesRemoved}</Text>
-          </Text>
-        )}
+        <Text bold>{editFileCount}</Text> {editFileCount === 1 ? 'file' : 'files'}{' '}
+        <LeftoverLineDiff added={linesAdded} removed={linesRemoved} />
       </Text>,
     );
   }
@@ -526,19 +683,33 @@ export function CollapsedReadSearchContent({
     }
   }
   if (isFullscreenEnvEnabled() && message.prs?.length) {
-    const verbs = {
+    const verbs: Record<string, string> = {
       created: 'created',
       edited: 'edited',
       merged: 'merged',
       commented: 'commented on',
       closed: 'closed',
+      reopened: 'reopened',
       ready: 'marked ready',
+      draft: 'marked draft',
+      'auto-merge-enabled': 'enabled auto-merge on',
+      'auto-merge-disabled': 'disabled auto-merge on',
     };
     for (const pr of message.prs) {
+      const verb = verbs[pr.action];
+      if (!verb) continue;
+      const isGitLabMr = pr.url !== undefined && /\/-\/merge_requests\/\d+/.test(pr.url);
       pushPart(
         `pr-${pr.action}-${pr.number}`,
-        verbs[pr.action],
-        pr.url ? <PrBadge number={pr.number} url={pr.url} bold /> : <Text bold>PR #{pr.number}</Text>,
+        verb,
+        pr.url ? (
+          <PrBadge number={pr.number} url={pr.url} bold kind={isGitLabMr ? 'mr' : undefined} />
+        ) : (
+          <Text bold>
+            {isGitLabMr ? 'MR !' : 'PR #'}
+            {pr.number}
+          </Text>
+        ),
       );
     }
   }
@@ -713,8 +884,21 @@ export function CollapsedReadSearchContent({
     );
   }
 
+  const hookInMainLine =
+    nonMemParts.length === 0 && memParts.length === 0 && !hasTeamMemoryOps && (message.hookTotalMs ?? 0) > 0;
+  if (hookInMainLine) {
+    pushPart(
+      'hooks',
+      'ran',
+      <Text>
+        <Text bold>{message.hookCount}</Text> PreToolUse {message.hookCount === 1 ? 'hook' : 'hooks'} (
+        {formatSecondsShort(message.hookTotalMs ?? 0)})
+      </Text>,
+    );
+  }
+
   return (
-    <Box flexDirection="column" marginTop={1} backgroundColor={bg}>
+    <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Box flexDirection="row">
         {isActiveGroup ? <ToolUseLoader shouldAnimate isUnresolved isError={anyError} /> : <Box minWidth={2} />}
         <Text dimColor={!isActiveGroup}>
@@ -724,9 +908,12 @@ export function CollapsedReadSearchContent({
             ? teamMemCollapsed!.TeamMemCountParts({
                 message,
                 isActiveGroup,
-                hasPrecedingParts: hasPrecedingNonMem || memParts.length > 0,
+                hasPrecedingParts: nonMemParts.length > 0 || memParts.length > 0,
               })
             : null}
+          {activeToolAnchorMs > 0 && message.isLiveBriefTurn !== true && (
+            <CollapsedToolElapsed key="tool-elapsed" anchorMs={activeToolAnchorMs} shouldAnimate={shouldAnimate} />
+          )}
           {isActiveGroup && <Text key="ellipsis">…</Text>} <CtrlOToExpand />
         </Text>
       </Box>
@@ -737,13 +924,15 @@ export function CollapsedReadSearchContent({
         // indent under ⎿. MAX_HINT_CHARS in commandAsHint caps total at ~5 lines.
         <Box flexDirection="row">
           <Box width={5} flexShrink={0}>
-            <Text dimColor>{'  ⎿  '}</Text>
+            <Text aria-hidden dimColor>
+              {'  ⎿  '}
+            </Text>
           </Box>
           <Box flexDirection="column" flexGrow={1}>
             {leftoverEm ? (
-              <Text dimColor italic>
+              <Markdown dimColor italic>
                 {leftoverHx(effectiveHint, columns - LEFTOVER_HX_GUTTER, LEFTOVER_HX_MAX_LINES)}
-              </Text>
+              </Markdown>
             ) : (
               effectiveHint.split('\n').map((line, i, arr) => (
                 <Text key={`hint-${i}`} dimColor>
@@ -755,22 +944,11 @@ export function CollapsedReadSearchContent({
           </Box>
         </Box>
       )}
-      {message.hookTotalMs !== undefined && message.hookTotalMs > 0 && (
+      {!hookInMainLine && message.hookTotalMs !== undefined && message.hookTotalMs > 0 && (
         <Text dimColor>
-          {'  ⎿  '}Ran {message.hookCount} PreToolUse {message.hookCount === 1 ? 'hook' : 'hooks'} (
-          {formatSecondsShort(message.hookTotalMs)})
+          <Text aria-hidden>{'  ⎿  '}</Text>Ran {message.hookCount} PreToolUse{' '}
+          {message.hookCount === 1 ? 'hook' : 'hooks'} ({formatSecondsShort(message.hookTotalMs)})
         </Text>
-      )}
-      {/* Official 2.1.150: active && pendingText (truthy), bullet is a4 */}
-      {isActiveGroup && pendingText && (
-        <Box flexDirection="row" marginTop={1}>
-          <Box width={2} flexShrink={0}>
-            <Text dimColor>{BLACK_CIRCLE}</Text>
-          </Box>
-          <Box flexDirection="column" flexGrow={1}>
-            <Text dimColor>{pendingText}</Text>
-          </Box>
-        </Box>
       )}
     </Box>
   );

@@ -23,11 +23,12 @@ import type {
   SystemThinkingMessage,
   SystemMemorySavedMessage,
 } from '../../types/message.js';
-import { SystemAPIErrorMessage } from './SystemAPIErrorMessage.js';
 import { formatDuration, formatNumber, formatSecondsShort } from '../../utils/format.js';
 import { formatTurnDoneAt } from '../../utils/timeFormat.js';
 import { getGlobalConfig } from '../../utils/config.js';
-import ThemedText from '../design-system/ThemedText.js';
+import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
+import { getPillLabel } from '../../tasks/pillLabel.js';
+import { isBackgroundTask } from '../../tasks/types.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 
@@ -40,6 +41,7 @@ type Props = {
 
 export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMode }: Props): React.ReactNode {
   const bg = useSelectedMessageBg();
+  const maxProseWidth = useAppStateMaybeOutsideOfProvider(s => s.settings.maxProseWidth);
   // Turn duration messages are always shown in grey
   if (message.subtype === 'turn_duration') {
     return <TurnDurationMessage message={message} addMargin={addMargin} />;
@@ -58,14 +60,16 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
             {REFERENCE_MARK}
           </Text>
         </Box>
-        <Text dimColor>
-          <Text dimColor bold>
-            recap:{' '}
+        <Box maxWidth={maxProseWidth}>
+          <Text>
+            <Text dimColor bold>
+              recap:{' '}
+            </Text>
+            <Text dimColor italic>
+              {String(message.content ?? '')}
+            </Text>
           </Text>
-          <Text dimColor italic>
-            {String(message.content ?? '')}
-          </Text>
-        </Text>
+        </Box>
       </Box>
     );
   }
@@ -75,7 +79,9 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
     return (
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
         <Box minWidth={2}>
-          <Text color="error">{BLACK_CIRCLE}</Text>
+          <Text aria-hidden color="error">
+            {BLACK_CIRCLE}
+          </Text>
         </Box>
         <Text dimColor>All background agents stopped</Text>
       </Box>
@@ -90,6 +96,52 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
     return null;
   }
 
+  const subtype = message.subtype as string;
+  if (subtype === 'model_refusal_no_fallback') {
+    return null;
+  }
+
+  if (subtype === 'model_refusal_fallback') {
+    const scope = (message as { scope?: string }).scope;
+    return (
+      <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+        <Box flexDirection="row" width="100%">
+          <Box minWidth={2}>
+            <Text aria-label="warning:" color="warning">
+              {BLACK_CIRCLE}
+            </Text>
+          </Box>
+          <Text color="warning" bold wrap="wrap">
+            {String(message.content ?? '')}
+          </Text>
+        </Box>
+        {scope !== 'local' && (
+          <Text dimColor>
+            <Text aria-hidden>{'  ⎿  '}</Text>
+            Tip: You can configure model switch behavior in /config
+          </Text>
+        )}
+      </Box>
+    );
+  }
+
+  if (subtype === 'model_fallback') {
+    const trigger = (message as { trigger?: string }).trigger;
+    const isBold = trigger === 'model_not_found' || trigger === 'permission_denied';
+    return (
+      <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+        <Box minWidth={2}>
+          <Text aria-label="warning:" color="warning">
+            {BLACK_CIRCLE}
+          </Text>
+        </Box>
+        <Text color="warning" bold={isBold} wrap="wrap">
+          {String(message.content ?? '')}
+        </Text>
+      </Box>
+    );
+  }
+
   if (message.subtype === 'bridge_status') {
     return <BridgeStatusMessage message={message} addMargin={addMargin} />;
   }
@@ -98,18 +150,32 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
     return (
       <Box marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
         <Text dimColor>
-          {TEARDROP_ASTERISK} {String(message.content ?? '')}
+          <Text aria-hidden>{TEARDROP_ASTERISK} </Text>
+          {String(message.content ?? '')}
         </Text>
       </Box>
     );
   }
 
   if (message.subtype === 'permission_retry') {
+    const commands = (message.commands ?? []) as string[];
+    const content = String(message.content ?? '');
+    if (commands.length === 0 && !content) {
+      return null;
+    }
     return (
       <Box marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Text dimColor>{TEARDROP_ASTERISK} </Text>
-        <Text>Allowed </Text>
-        <Text bold>{(message.commands as string[]).join(', ')}</Text>
+        <Text aria-hidden dimColor>
+          {TEARDROP_ASTERISK}{' '}
+        </Text>
+        {commands.length > 0 ? (
+          <>
+            <Text>Allowed </Text>
+            <Text bold>{commands.join(', ')}</Text>
+          </>
+        ) : (
+          <Text>{content}</Text>
+        )}
       </Box>
     );
   }
@@ -122,7 +188,7 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
   }
 
   if (message.subtype === 'api_error') {
-    return <SystemAPIErrorMessage message={message} verbose={verbose} />;
+    return null;
   }
 
   if (message.subtype === 'stop_hook_summary') {
@@ -142,14 +208,15 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
   if (typeof content !== 'string') {
     return null;
   }
+  const level = message.level as string;
   return (
     <Box flexDirection="row" width="100%">
       <SystemTextMessageInner
         content={content}
         addMargin={addMargin}
-        dot={message.level !== 'info'}
-        color={message.level === 'warning' ? 'warning' : undefined}
-        dimColor={message.level === 'info'}
+        dot={level !== 'info'}
+        color={level === 'warning' ? 'warning' : level === 'notice' ? 'inactive' : undefined}
+        dimColor={level === 'info'}
       />
     </Box>
   );
@@ -169,6 +236,7 @@ function StopHookSummaryMessage({
   const bg = useSelectedMessageBg();
   const { hookCount, hookInfos } = message;
   const hookErrors = (message.hookErrors ?? []) as string[];
+  const hookAdditionalContext = (message as { hookAdditionalContext?: string[] }).hookAdditionalContext ?? [];
   const preventedContinuation = message.preventedContinuation as boolean | undefined;
   const stopReason = message.stopReason as string | undefined;
   const { columns } = useTerminalSize();
@@ -180,7 +248,7 @@ function StopHookSummaryMessage({
   // Only show summary if there are errors or continuation was prevented
   // For ants: also show when hooks took > 500ms
   // Non-stop hooks (e.g. PreToolUse) are pre-filtered by the caller
-  if (hookErrors.length === 0 && !preventedContinuation && !message.hookLabel) {
+  if (hookErrors.length === 0 && hookAdditionalContext.length === 0 && !preventedContinuation && !message.hookLabel) {
     if (!isAnt || totalDurationMs < HOOK_TIMING_DISPLAY_THRESHOLD_MS) {
       return null;
     }
@@ -192,7 +260,7 @@ function StopHookSummaryMessage({
     return (
       <Box flexDirection="column" width="100%">
         <Text dimColor>
-          {'  ⎿  '}Ran {hookCount} {message.hookLabel} {hookCount === 1 ? 'hook' : 'hooks'}
+          <Text aria-hidden>{'  ⎿  '}</Text>Ran {hookCount} {message.hookLabel} {hookCount === 1 ? 'hook' : 'hooks'}
           {totalStr}
         </Text>
         {isTranscriptMode &&
@@ -201,7 +269,7 @@ function StopHookSummaryMessage({
               isAnt && info.durationMs !== undefined ? ` (${formatSecondsShort(info.durationMs)})` : '';
             return (
               <Text key={`cmd-${idx}`} dimColor>
-                {'     ⎿ '}
+                <Text aria-hidden>{'     ⎿ '}</Text>
                 {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
                 {durationStr}
               </Text>
@@ -214,7 +282,7 @@ function StopHookSummaryMessage({
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
       <Box minWidth={2}>
-        <Text>{BLACK_CIRCLE}</Text>
+        <Text aria-hidden>{BLACK_CIRCLE}</Text>
       </Box>
       <Box flexDirection="column" width={columns - 10}>
         <Text>
@@ -234,7 +302,7 @@ function StopHookSummaryMessage({
               isAnt && info.durationMs !== undefined ? ` (${formatSecondsShort(info.durationMs)})` : '';
             return (
               <Text key={`cmd-${idx}`} dimColor>
-                ⎿ &nbsp;
+                <Text aria-hidden>⎿ &nbsp;</Text>
                 {info.command === 'prompt' ? `prompt: ${info.promptText || ''}` : info.command}
                 {durationStr}
               </Text>
@@ -242,15 +310,28 @@ function StopHookSummaryMessage({
           })}
         {preventedContinuation && stopReason && (
           <Text>
-            <Text dimColor>⎿ &nbsp;</Text>
+            <Text aria-hidden dimColor>
+              ⎿ &nbsp;
+            </Text>
             {stopReason}
           </Text>
         )}
         {hookErrors.length > 0 &&
           hookErrors.map((err, idx) => (
             <Text key={idx}>
-              <Text dimColor>⎿ &nbsp;</Text>
+              <Text aria-hidden dimColor>
+                ⎿ &nbsp;
+              </Text>
               {message.hookLabel ?? 'Stop'} hook error: {err}
+            </Text>
+          ))}
+        {hookAdditionalContext.length > 0 &&
+          hookAdditionalContext.map((ctx, idx) => (
+            <Text key={`ctx-${idx}`}>
+              <Text aria-hidden dimColor>
+                ⎿ &nbsp;
+              </Text>
+              Stop hook feedback: {ctx}
             </Text>
           ))}
       </Box>
@@ -278,7 +359,7 @@ function SystemTextMessageInner({
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
       {dot && (
         <Box minWidth={2}>
-          <Text color={color} dimColor={dimColor}>
+          <Text aria-hidden color={color} dimColor={dimColor}>
             {BLACK_CIRCLE}
           </Text>
         </Box>
@@ -349,55 +430,64 @@ function TurnDurationMessage({
         } hidden (/focus to show)`
       : '';
 
+  const pillLabel =
+    useAppStateMaybeOutsideOfProvider(s => {
+      const running = Object.values(s.tasks).filter(isBackgroundTask);
+      return running.length > 0 ? getPillLabel(running) : null;
+    }) ?? null;
+
   const hasCrunched = Boolean(showTurnDuration || hasBudget || briefHiddenSuffix);
-  if (!hasCrunched && !waitingForBg) {
+  if (!hasCrunched) {
     return null;
   }
 
+  const suppressRunningPill = Boolean(showTurnDuration && waitingForBg);
   return (
-    <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-      {hasCrunched && (
-        <Box flexDirection="row" width="100%">
-          <Box minWidth={2}>
-            <Text dimColor>{TEARDROP_ASTERISK}</Text>
-          </Box>
-          <Text dimColor>
-            {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
-            {budgetSuffix}
-            {briefHiddenSuffix}
+    <Box flexDirection="column" width="100%">
+      <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+        <Box minWidth={2}>
+          <Text aria-hidden dimColor>
+            {TEARDROP_ASTERISK}
           </Text>
         </Box>
-      )}
-      {waitingForBg && (
-        <Box flexDirection="row" width="100%" marginTop={hasCrunched ? 1 : 0}>
-          <Box minWidth={2}>
-            <Text dimColor>{TEARDROP_ASTERISK}</Text>
-          </Box>
-          <Text dimColor>
-            Waiting for
-            {pendingAgents > 0 && (
-              <>
-                {' '}
-                <Text bold dimColor>
-                  {pendingAgents}
-                </Text>
-                {` background ${pendingAgents === 1 ? 'agent' : 'agents'}`}
-              </>
-            )}
-            {pendingAgents > 0 && pendingWorkflows > 0 && ' and'}
-            {pendingWorkflows > 0 && (
-              <>
-                {' '}
-                <Text bold dimColor>
-                  {pendingWorkflows}
-                </Text>
-                {` ${pendingWorkflows === 1 ? 'dynamic workflow' : 'dynamic workflows'}`}
-              </>
-            )}{' '}
-            to finish
-          </Text>
-        </Box>
-      )}
+        <Text>
+          {showTurnDuration &&
+            (waitingForBg ? (
+              <Text dimColor>
+                Waiting for
+                {pendingAgents > 0 && (
+                  <>
+                    {' '}
+                    <Text bold dimColor>
+                      {pendingAgents}
+                    </Text>
+                    {` background ${pendingAgents === 1 ? 'agent' : 'agents'}`}
+                  </>
+                )}
+                {pendingAgents > 0 && pendingWorkflows > 0 && ' and'}
+                {pendingWorkflows > 0 && (
+                  <>
+                    {' '}
+                    <Text bold dimColor>
+                      {pendingWorkflows}
+                    </Text>
+                    {` ${pendingWorkflows === 1 ? 'dynamic workflow' : 'dynamic workflows'}`}
+                  </>
+                )}{' '}
+                to finish
+              </Text>
+            ) : (
+              <Text dimColor>
+                {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
+              </Text>
+            ))}
+          {budgetSuffix && <Text dimColor>{budgetSuffix}</Text>}
+          {briefHiddenSuffix && <Text dimColor>{briefHiddenSuffix}</Text>}
+          {!suppressRunningPill && pillLabel && (
+            <Text dimColor>{[' · ', pillLabel, ' still', ' running'].join('')}</Text>
+          )}
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -476,16 +566,33 @@ function BridgeStatusMessage({
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
   const url = message.url as string;
+  const isActive =
+    useAppStateMaybeOutsideOfProvider(
+      s => s.replBridgeConnected && !s.replBridgeOutboundOnly && s.replBridgeSessionUrl === url,
+    ) ?? false;
+  if (!isActive) {
+    return null;
+  }
   const upgradeNudge = message.upgradeNudge as string | undefined;
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width={999}>
       <Box minWidth={2} />
       <Box flexDirection="column">
         <Text>
-          <ThemedText color="suggestion">/remote-control</ThemedText> is active. Code in CLI or at
+          /remote-control is active
+          <Text dimColor>
+            {' · Continue here, on your phone, or at '}
+            <Link url={url}>{url}</Link>
+          </Text>
         </Text>
-        <Link url={url}>{url}</Link>
-        {upgradeNudge && <Text dimColor>⎿ {upgradeNudge}</Text>}
+        {upgradeNudge && (
+          <Box flexDirection="row">
+            <Text aria-hidden dimColor>
+              {'⎿  '}
+            </Text>
+            <Text dimColor>{upgradeNudge}</Text>
+          </Box>
+        )}
       </Box>
     </Box>
   );

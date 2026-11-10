@@ -7,23 +7,30 @@ import { MessageResponse } from '../MessageResponse.js';
 type Props = {
   imageId?: number;
   addMargin?: boolean;
+  startsUserTurn?: boolean;
 };
 
 /**
  * Renders an image attachment in user messages.
- * densable r1t: path from AppState.storedImagePaths so storeImages stamp re-renders.
- * Shows as a clickable link if the image is stored and terminal supports hyperlinks.
- * Uses MessageResponse styling to appear connected to the message above,
- * unless addMargin is true (image starts a new user turn without text).
+ * densable Us: path from AppState.storedImagePaths and optional description from
+ * AppState.imageDescriptions. Shows as a clickable link if the image is stored
+ * and terminal supports hyperlinks. Uses MessageResponse styling unless this
+ * image starts a new user turn (startsUserTurn ?? addMargin).
  */
-export function UserImageMessage({ imageId, addMargin }: Props): React.ReactNode {
+export function UserImageMessage({ imageId, addMargin, startsUserTurn }: Props): React.ReactNode {
   const label = imageId ? `[Image #${imageId}]` : '[Image]';
   const imagePath =
     useAppStateMaybeOutsideOfProvider(s =>
       imageId !== undefined ? (s.storedImagePaths.get(imageId) ?? null) : null,
     ) ?? null;
+  const imageDescription =
+    useAppStateMaybeOutsideOfProvider(s => {
+      if (imageId === undefined) return null;
+      const descriptions = (s as { imageDescriptions?: ReadonlyMap<number, string> }).imageDescriptions;
+      return descriptions?.get(imageId) ?? null;
+    }) ?? null;
 
-  const content =
+  const labelNode =
     imagePath && supportsHyperlinks() ? (
       <Link url={pathToFileURL(imagePath).href}>
         <Text>{label}</Text>
@@ -32,10 +39,17 @@ export function UserImageMessage({ imageId, addMargin }: Props): React.ReactNode
       <Text>{label}</Text>
     );
 
+  const content = (
+    <Text>
+      {labelNode}
+      {imageDescription ? <Text dimColor> {imageDescription}</Text> : null}
+    </Text>
+  );
+
   // When this image starts a new user turn (no text before it),
-  // show with margin instead of the connected line style
-  if (addMargin) {
-    return <Box marginTop={1}>{content}</Box>;
+  // show without the connected ⎿ gutter even when a metadata header suppressed addMargin.
+  if (startsUserTurn ?? addMargin) {
+    return <Box marginTop={addMargin ? 1 : 0}>{content}</Box>;
   }
 
   return <MessageResponse>{content}</MessageResponse>;

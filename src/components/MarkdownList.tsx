@@ -194,7 +194,7 @@ function MarkdownListItem({
             ) : null}
           </Box>
           <Box flexDirection="column" flexShrink={1000} minWidth={shared.minContentWidth}>
-            <Ansi dimColor={shared.dimColor} wrap={wrap}>
+            <Ansi dimColor={shared.dimColor} italic={shared.italic} wrap={wrap}>
               {text}
             </Ansi>
           </Box>
@@ -207,7 +207,7 @@ function MarkdownListItem({
       const body = segment.code ? segment.text.replace(/\n$/, '') : segment.text.replace(/^\n+/, '').trimEnd();
       const node = (
         <Box key={index} marginTop={marginPending ? 1 : 0}>
-          <Ansi dimColor={shared.dimColor} wrap={wrap}>
+          <Ansi dimColor={shared.dimColor} italic={shared.italic} wrap={wrap}>
             {body}
           </Ansi>
         </Box>

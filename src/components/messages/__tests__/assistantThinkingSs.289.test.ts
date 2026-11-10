@@ -201,7 +201,7 @@ describe('gold thinking Ss paint', () => {
     const bootstrap = await Bun.file(
       join(ROOT, 'src/services/api/bootstrap.ts'),
     ).text()
-    expect(bootstrap).toContain('leftoverQrrInstallReadGate')
+    expect(bootstrap).toContain('leftoverQrrInstallClientData')
     expect(runner).toContain('setTurnEffort(null, null)')
     expect(runner).toContain('if (isRunAgentSpinnerMode(message)) {')
     expect(runner).toContain('leftoverTeammatePhn?.setMode(message.mode)')

@@ -10,7 +10,7 @@ import type {
 import * as React from 'react';
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box } from '@anthropic/ink';
+import { Box, Divider } from '@anthropic/ink';
 import { useAppState } from '../state/AppState.js';
 import type { Tools } from '../Tool.js';
 import { type ConnectorTextBlock, isConnectorTextBlock } from '../types/connectorText.js';
@@ -79,6 +79,8 @@ export type Props = {
   onOpenRateLimitOptions?: () => void;
   isActiveCollapsedGroup?: boolean;
   isUserContinuation?: boolean;
+  isSplitUserContinuation?: boolean;
+  hasMetadataHeader?: boolean;
   /** Last thinking block(s) (uuid:index) visible in transcript; Set = one per turn. */
   lastThinkingBlockId?: string | ReadonlySet<string> | null;
   /** UUID of the latest user bash output message (for auto-expanding) */
@@ -103,6 +105,8 @@ function MessageImpl({
   onOpenRateLimitOptions,
   isActiveCollapsedGroup,
   isUserContinuation = false,
+  isSplitUserContinuation = false,
+  hasMetadataHeader = false,
   lastThinkingBlockId,
   latestBashOutputUUID,
 }: Props): React.ReactNode {
@@ -173,6 +177,7 @@ function MessageImpl({
               messageId={message.uuid}
               isFirstTextBlock={index === firstTextBlockIndex}
               isApiError={message.isApiErrorMessage === true}
+              apiErrorKind={(message as { error?: string }).error}
             />
           ))}
         </Box>
@@ -219,6 +224,8 @@ function MessageImpl({
               verbose={verbose}
               imageIndex={imageIndices[index]!}
               isUserContinuation={isUserContinuation}
+              isSplitUserContinuation={isSplitUserContinuation}
+              hasMetadataHeader={hasMetadataHeader}
               lookups={lookups}
               isTranscriptMode={isTranscriptMode}
             />
@@ -261,6 +268,13 @@ function MessageImpl({
           return null;
         }
       }
+      if (message.subtype === 'read_divider') {
+        return (
+          <Box marginTop={1} width="100%">
+            <Divider title={String(message.content ?? '')} color="inactive" />
+          </Box>
+        );
+      }
       if (message.subtype === 'local_command') {
         return (
           <UserTextMessage
@@ -287,6 +301,7 @@ function MessageImpl({
           lookups={lookups}
           inProgressToolUseIDs={inProgressToolUseIDs}
           shouldAnimate={shouldAnimate}
+          addMargin={addMargin}
         />
       );
     case 'collapsed_read_search': // OffscreenFreeze: the verb flips "Reading…"→"Read" when tools complete.
@@ -310,6 +325,7 @@ function MessageImpl({
             tools={tools}
             lookups={lookups}
             isActiveGroup={isActiveCollapsedGroup}
+            addMargin={addMargin}
           />
         </OffscreenFreeze>
       );
@@ -326,6 +342,8 @@ function UserMessage({
   verbose,
   imageIndex,
   isUserContinuation,
+  isSplitUserContinuation,
+  hasMetadataHeader,
   lookups,
   isTranscriptMode,
 }: {
@@ -338,6 +356,8 @@ function UserMessage({
   verbose: boolean;
   imageIndex?: number;
   isUserContinuation: boolean;
+  isSplitUserContinuation: boolean;
+  hasMetadataHeader: boolean;
   lookups: ReturnType<typeof buildMessageLookups>;
   isTranscriptMode: boolean;
 }): React.ReactNode {
@@ -374,7 +394,13 @@ function UserMessage({
     case 'image':
       // If previous message is user (text or image), this is a continuation - use connector
       // Otherwise this image starts a new user turn - use margin
-      return <UserImageMessage imageId={imageIndex} addMargin={addMargin && !isUserContinuation} />;
+      return (
+        <UserImageMessage
+          imageId={imageIndex}
+          addMargin={addMargin && !isUserContinuation}
+          startsUserTurn={hasMetadataHeader ? !isSplitUserContinuation : undefined}
+        />
+      );
     case 'tool_result':
       return (
         <UserToolResultMessage
@@ -415,6 +441,7 @@ function AssistantMessageBlock({
   messageId,
   isFirstTextBlock,
   isApiError,
+  apiErrorKind,
 }: {
   param:
     | BetaContentBlock
@@ -453,6 +480,8 @@ function AssistantMessageBlock({
   isFirstTextBlock?: boolean;
   /** densable 2.1.243 #23 — pass through to AssistantTextMessage `Rle`. */
   isApiError?: boolean;
+  /** densable 2.1.289 `ff` `z` — pass through to AssistantTextMessage `apiErrorKind`. */
+  apiErrorKind?: string;
 }): React.ReactNode {
   // densable SFa = Uy(phH => text && bFa ? phH.displayedMessageContent[bFa] : void 0)
   // Guard: restored/partial AppState may omit displayedMessageContent.
@@ -470,6 +499,7 @@ function AssistantMessageBlock({
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
+          apiErrorKind={apiErrorKind}
           messageId={messageId}
         />
       );
@@ -494,10 +524,10 @@ function AssistantMessageBlock({
         />
       );
     case 'text': {
-      // densable: if (SFa !== void 0 && !lie) use transformed; empty SFa hides
+      // densable: if (me !== void 0 && !R) { if (!ie) return null; ... }
       let textParam = param as TextBlockParam;
-      if (displayedOverride !== undefined && !verbose && isFirstTextBlock) {
-        if (displayedOverride === '') return null;
+      if (displayedOverride !== undefined && !verbose) {
+        if (!isFirstTextBlock || displayedOverride === '') return null;
         textParam = { type: 'text', text: displayedOverride };
       }
       return (
@@ -509,6 +539,7 @@ function AssistantMessageBlock({
           width={width}
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
+          apiErrorKind={apiErrorKind}
           messageId={messageId}
         />
       );
@@ -597,10 +628,28 @@ export function areMessagePropsEqual(prev: Props, next: Props): boolean {
   const nextIsLatest = next.latestBashOutputUUID === next.message.uuid;
   if (prevIsLatest !== nextIsLatest) return false;
   if (prev.isTranscriptMode !== next.isTranscriptMode) return false;
+  if (
+    prev.isUserContinuation !== next.isUserContinuation ||
+    prev.isSplitUserContinuation !== next.isSplitUserContinuation ||
+    prev.hasMetadataHeader !== next.hasMetadataHeader ||
+    prev.shouldShowDot !== next.shouldShowDot
+  ) {
+    return false;
+  }
   // containerWidth is an absolute number in the no-metadata path (wrapper
   // Box is skipped). Static messages must re-render on terminal resize.
   if (prev.containerWidth !== next.containerWidth) return false;
-  if (prev.isStatic && next.isStatic) return true;
+  if (prev.isStatic && next.isStatic) {
+    const prevBriefHiddenCount =
+      prev.message.type === 'system' && prev.message.subtype === 'turn_duration'
+        ? (prev.message as { briefHiddenCount?: number }).briefHiddenCount
+        : undefined;
+    const nextBriefHiddenCount =
+      next.message.type === 'system' && next.message.subtype === 'turn_duration'
+        ? (next.message as { briefHiddenCount?: number }).briefHiddenCount
+        : undefined;
+    return prevBriefHiddenCount === nextBriefHiddenCount;
+  }
   return false;
 }
 

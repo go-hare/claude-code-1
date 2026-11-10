@@ -42,6 +42,8 @@ type Props = {
   timestamp?: string;
   /** densable `xI("UserMessage")` requestId (`URe` messageId). */
   requestId?: string;
+  /** densable `BX` `messageId` alias. */
+  messageId?: string;
   /** densable Wr origin — plugin / channel / peer (subagent). */
   origin?: {
     kind: string;
@@ -57,6 +59,9 @@ type Props = {
   task?: unknown;
   /** densable `URe` `from` — omit when unset. */
   from?: unknown;
+  commandRun?: { command?: string; args?: string };
+  followsSpeakerLabel?: boolean;
+  followsInboundLabel?: boolean;
 };
 
 export function UserTextMessage({
@@ -67,14 +72,22 @@ export function UserTextMessage({
   isTranscriptMode,
   timestamp,
   requestId,
+  messageId,
   origin,
   isExpanded,
   task,
   from,
+  commandRun,
+  followsSpeakerLabel,
+  followsInboundLabel,
 }: Props): React.ReactNode {
-  if (param.text.trim() === NO_CONTENT_MESSAGE) {
+  const resolvedMessageId = requestId ?? messageId;
+
+  if (typeof param.text !== 'string' || !param.text || param.text.trim() === NO_CONTENT_MESSAGE) {
     return null;
   }
+
+  const followsAnyLabel = Boolean(followsSpeakerLabel || followsInboundLabel);
 
   // densable Fg/zX — uM(origin) OR fme envelope (first-frame origin may lag).
   if (shouldPaintAgentInboundRow(origin, param.text)) {
@@ -87,7 +100,8 @@ export function UserTextMessage({
         fromName={peerOrObserverDisplayName(origin)}
         fallbackLabel="agent"
         origin={origin}
-        messageId={requestId}
+        followsSpeakerLabel={followsAnyLabel}
+        messageId={resolvedMessageId}
       />
     );
   }
@@ -95,6 +109,75 @@ export function UserTextMessage({
   // Plan to implement message (cleared context flow)
   if (planContent) {
     return <UserPlanMessage addMargin={addMargin} planContent={planContent} />;
+  }
+
+  // Teammate messages - only check when swarms enabled
+  if (isAgentSwarmsEnabled() && param.text.includes(`<${TEAMMATE_MESSAGE_TAG}`)) {
+    return <UserTeammateMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} />;
+  }
+
+  // Inbound channel message (MCP server push).
+  if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
+    if (param.text.includes('<channel source="')) {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { UserChannelMessage } = require('./UserChannelMessage.js') as typeof import('./UserChannelMessage.js');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      return <UserChannelMessage addMargin={addMargin} param={param} />;
+    }
+  }
+
+  // Cross-session UDS message (from another Claude session's SendMessage).
+  // CROSS_SESSION_MESSAGE_TAG is inlined so the import doesn't ship in
+  // external builds where feature('UDS_INBOX') is false.
+  if (feature('UDS_INBOX')) {
+    if (param.text.includes('<cross-session-message')) {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { UserCrossSessionMessage } =
+        require('./UserCrossSessionMessage.js') as typeof import('./UserCrossSessionMessage.js');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      return (
+        <UserCrossSessionMessage
+          addMargin={addMargin}
+          param={param}
+          verbose={verbose}
+          isTranscriptMode={isTranscriptMode}
+          messageId={resolvedMessageId}
+          origin={origin}
+          followsSpeakerLabel={followsAnyLabel}
+        />
+      );
+    }
+  }
+
+  const renderUserPrompt = (inbound: boolean | undefined): React.ReactNode => {
+    const prompt = (
+      <UserPromptMessage
+        addMargin={addMargin}
+        param={param}
+        isTranscriptMode={isTranscriptMode}
+        timestamp={timestamp}
+        origin={origin}
+        followsSpeakerLabel={followsSpeakerLabel}
+        followsInboundLabel={inbound}
+      />
+    );
+    if (resolvedMessageId === undefined) return prompt;
+    return (
+      <PluginUserMessageSite
+        requestId={resolvedMessageId}
+        text={param.text}
+        origin={origin}
+        isExpanded={isExpanded}
+        task={task}
+        from={from}
+      >
+        {prompt}
+      </PluginUserMessageSite>
+    );
+  };
+
+  if (followsInboundLabel) {
+    return renderUserPrompt(true);
   }
 
   if (extractTag(param.text, TICK_TAG)) {
@@ -113,7 +196,7 @@ export function UserTextMessage({
 
   // Show command output
   if (param.text.startsWith('<local-command-stdout') || param.text.startsWith('<local-command-stderr')) {
-    return <UserLocalCommandOutputMessage content={param.text} />;
+    return <UserLocalCommandOutputMessage content={param.text} commandRun={commandRun} />;
   }
 
   // Handle interruption messages specially
@@ -166,11 +249,6 @@ export function UserTextMessage({
     return <UserMemoryInputMessage addMargin={addMargin} text={param.text} />;
   }
 
-  // Teammate messages - only check when swarms enabled
-  if (isAgentSwarmsEnabled() && param.text.includes(`<${TEAMMATE_MESSAGE_TAG}`)) {
-    return <UserTeammateMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} />;
-  }
-
   // Task notifications (agent completions, bash completions, etc.)
   if (param.text.includes(`<${TASK_NOTIFICATION_TAG}`)) {
     return <UserAgentNotificationMessage addMargin={addMargin} param={param} />;
@@ -199,44 +277,6 @@ export function UserTextMessage({
     );
   }
 
-  // Cross-session UDS message (from another Claude session's SendMessage).
-  // CROSS_SESSION_MESSAGE_TAG is inlined so the import doesn't ship in
-  // external builds where feature('UDS_INBOX') is false.
-  if (feature('UDS_INBOX')) {
-    if (param.text.includes('<cross-session-message')) {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const { UserCrossSessionMessage } =
-        require('./UserCrossSessionMessage.js') as typeof import('./UserCrossSessionMessage.js');
-      /* eslint-enable @typescript-eslint/no-require-imports */
-      return <UserCrossSessionMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} />;
-    }
-  }
-
-  // Inbound channel message (MCP server push).
-  if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
-    if (param.text.includes('<channel source="')) {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const { UserChannelMessage } = require('./UserChannelMessage.js') as typeof import('./UserChannelMessage.js');
-      /* eslint-enable @typescript-eslint/no-require-imports */
-      return <UserChannelMessage addMargin={addMargin} param={param} />;
-    }
-  }
-
   // User prompts>
-  const prompt = (
-    <UserPromptMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} timestamp={timestamp} />
-  );
-  if (requestId === undefined) return prompt;
-  return (
-    <PluginUserMessageSite
-      requestId={requestId}
-      text={param.text}
-      origin={origin}
-      isExpanded={isExpanded}
-      task={task}
-      from={from}
-    >
-      {prompt}
-    </PluginUserMessageSite>
-  );
+  return renderUserPrompt(followsInboundLabel);
 }

@@ -7,6 +7,7 @@ import {
   CANCEL_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   REJECT_MESSAGE,
+  REJECT_MESSAGE_WITH_REASON_PREFIX,
 } from '../../../utils/messages.js';
 import { UserToolCanceledMessage } from './UserToolCanceledMessage.js';
 import { UserToolErrorMessage } from './UserToolErrorMessage.js';
@@ -47,7 +48,10 @@ export function UserToolResultMessage({
   }
 
   if (
-    (typeof param.content === 'string' && param.content.startsWith(REJECT_MESSAGE)) ||
+    (typeof param.content === 'string' &&
+      (param.content.startsWith(REJECT_MESSAGE) ||
+        (param.content.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) &&
+          toolUse.tool?.renderToolUseRejectedMessage !== undefined))) ||
     param.content === INTERRUPT_MESSAGE_FOR_TOOL_USE
   ) {
     return (
@@ -71,6 +75,8 @@ export function UserToolResultMessage({
         tool={toolUse.tool}
         tools={tools}
         param={param}
+        input={toolUse.toolUse.input}
+        output={message.toolUseResult}
         verbose={verbose}
         isTranscriptMode={isTranscriptMode}
       />

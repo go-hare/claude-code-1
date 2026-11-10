@@ -16,8 +16,8 @@ type Props = {
 /** Renders a list of diff hunks with ellipsis separators between them. */
 export function StructuredDiffList({ hunks, dim, width, filePath, firstLine, fileContent }: Props): React.ReactNode {
   return intersperse(
-    hunks.map(hunk => (
-      <Box flexDirection="column" key={hunk.newStart}>
+    hunks.map((hunk, idx) => (
+      <Box flexDirection="column" key={`hunk-${idx}`}>
         <StructuredDiff
           patch={hunk}
           dim={dim}

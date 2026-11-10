@@ -18,6 +18,24 @@ type Props = {
   advisorModel?: string;
 };
 
+function isAdvisorRefusal(block: AdvisorBlock): boolean {
+  if (!('content' in block)) return false;
+  const content = block.content as { type?: string; stop_reason?: unknown } | null | undefined;
+  if (!content || (content.type !== 'advisor_result' && content.type !== 'advisor_redacted_result')) {
+    return false;
+  }
+  return content.stop_reason === 'refusal';
+}
+
+function getAdvisorRefusalText(block: AdvisorBlock): string | undefined {
+  if (!isAdvisorRefusal(block) || !('content' in block)) return undefined;
+  const content = block.content as { type?: string; text?: unknown };
+  if (content?.type !== 'advisor_result' || typeof content.text !== 'string' || !content.text) {
+    return undefined;
+  }
+  return content.text;
+}
+
 export function AdvisorMessage({
   block,
   addMargin,
@@ -44,22 +62,54 @@ export function AdvisorMessage({
   }
 
   let body: React.ReactNode;
-  switch (block.content.type) {
-    case 'advisor_tool_result_error':
-      body = <Text color="error">Advisor unavailable ({block.content.error_code})</Text>;
-      break;
-    case 'advisor_result':
-      body = verbose ? (
-        <Text dimColor>{block.content.text}</Text>
+  if (isAdvisorRefusal(block)) {
+    const refusalText = getAdvisorRefusalText(block);
+    const headline = (
+      <Text>
+        <Text color="warning">Advisor declined to advise on this request</Text>
+        {refusalText !== undefined && !verbose ? (
+          <>
+            {' '}
+            <CtrlOToExpand />
+          </>
+        ) : null}
+      </Text>
+    );
+    body =
+      verbose && refusalText !== undefined ? (
+        <Box flexDirection="column">
+          {headline}
+          <Text dimColor>{refusalText}</Text>
+        </Box>
       ) : (
-        <Text dimColor>
-          {figures.tick} Advisor has reviewed the conversation and will apply the feedback <CtrlOToExpand />
-        </Text>
+        headline
       );
-      break;
-    case 'advisor_redacted_result':
-      body = <Text dimColor>{figures.tick} Advisor has reviewed the conversation and will apply the feedback</Text>;
-      break;
+  } else {
+    switch (block.content?.type) {
+      case 'advisor_tool_result_error':
+        body = <Text color="error">Advisor unavailable ({block.content.error_code})</Text>;
+        break;
+      case 'advisor_result':
+        body = verbose ? (
+          <Text dimColor>{block.content.text}</Text>
+        ) : (
+          <Text dimColor>
+            <Text aria-hidden>{figures.tick} </Text>
+            Advisor has reviewed the conversation and will apply the feedback <CtrlOToExpand />
+          </Text>
+        );
+        break;
+      case 'advisor_redacted_result':
+        body = (
+          <Text dimColor>
+            <Text aria-hidden>{figures.tick} </Text>
+            Advisor has reviewed the conversation and will apply the feedback
+          </Text>
+        );
+        break;
+      default:
+        return null;
+    }
   }
 
   return (

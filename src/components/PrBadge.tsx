@@ -8,12 +8,13 @@ type Props = {
   url: string;
   reviewState?: PrReviewState;
   bold?: boolean;
+  kind?: 'mr' | 'pr' | 'cr';
 };
 
-export function PrBadge({ number, url, reviewState, bold }: Props): React.ReactNode {
+export function PrBadge({ number, url, reviewState, bold, kind: kindProp }: Props): React.ReactNode {
   const statusColor = getPrStatusColor(reviewState);
   // densable 2.1.233 #1 — GitLab MR display uses !N; GitHub/Bitbucket keep #N
-  const sigil = codeChangeNumberPrefix(codeChangeProviderFromUrl(url));
+  const sigil = kindProp === 'mr' ? '!' : codeChangeNumberPrefix(codeChangeProviderFromUrl(url));
   const numLabel = `${sigil}${number}`;
   const kind = sigil === '!' ? 'MR' : 'PR';
   const label = (

@@ -57,6 +57,9 @@ export function UserToolSuccessMessage({
   if (!message.toolUseResult || !tool) {
     return null;
   }
+  if (tool.isTransparentWrapper?.()) {
+    return null;
+  }
 
   // Resumed transcripts deserialize toolUseResult via raw JSON.parse with no
   // validation (parseJSONL). A partial/corrupt/old-format result crashes
@@ -94,9 +97,16 @@ export function UserToolSuccessMessage({
   }
 
   // Ink requires text strings to be inside <Text>. Tools that return plain
-  // multi-line strings crash without the wrap.
+  // multi-line strings or primitive numbers crash without the wrap.
   // React elements from UI.tsx files pass through unchanged.
-  const wrappedMessage = typeof renderedMessage === 'string' ? <Text>{renderedMessage}</Text> : renderedMessage;
+  const wrappedMessage =
+    typeof renderedMessage === 'string' ||
+    typeof renderedMessage === 'number' ||
+    typeof renderedMessage === 'bigint' ? (
+      <Text>{renderedMessage}</Text>
+    ) : (
+      renderedMessage
+    );
 
   // Tools that return '' from userFacingName opt out of tool chrome and
   // render like plain assistant text. Skip the tool-result width constraint

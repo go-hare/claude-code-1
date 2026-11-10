@@ -1,13 +1,40 @@
 import type { StructuredPatchHunk } from 'diff';
 import * as React from 'react';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useSettings } from '../hooks/useSettings.js';
-import { Box, NoSelect, RawAnsi, useTheme } from '@anthropic/ink';
+import { Box, NoSelect, RawAnsi, Text, useTheme } from '@anthropic/ink';
+import { intersperse } from '../utils/array.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import sliceAnsi from '../utils/sliceAnsi.js';
 import { getTheme, type ThemeName } from '../utils/theme.js';
 import { expectColorDiff } from './StructuredDiff/colorDiff.js';
 import { StructuredDiffFallback } from './StructuredDiff/Fallback.js';
+
+function expandTabsInLine(line: string, tabWidth = 4): string {
+  if (!line.includes('\t')) return line;
+  let out = '';
+  let col = 0;
+  for (const ch of line) {
+    if (ch === '\t') {
+      const spaces = tabWidth - (col % tabWidth);
+      out += ' '.repeat(spaces);
+      col += spaces;
+    } else {
+      out += ch;
+      col += 1;
+    }
+  }
+  return out;
+}
+
+function expandPatchTabs(patch: StructuredPatchHunk): StructuredPatchHunk {
+  if (!patch.lines.some(line => line.includes('\t'))) return patch;
+  return {
+    ...patch,
+    lines: patch.lines.map(line => line.slice(0, 1) + expandTabsInLine(line.slice(1))),
+  };
+}
 
 type Props = {
   patch: StructuredPatchHunk;
@@ -117,6 +144,8 @@ export const StructuredDiff = memo(function StructuredDiff({
   const [theme] = useTheme();
   const settings = useSettings();
   const syntaxHighlightingDisabled = settings.syntaxHighlightingDisabled ?? false;
+  const isScreenReader = isScreenReaderModeEnabled();
+  const effectivePatch = useMemo(() => (isScreenReader ? expandPatchTabs(patch) : patch), [isScreenReader, patch]);
 
   // Ensure width is at least 1 to prevent crashes in the Rust NAPI module
   // which expects u32 (can't handle negative numbers)
@@ -129,14 +158,14 @@ export const StructuredDiff = memo(function StructuredDiff({
   const splitGutter = isFullscreenEnvEnabled();
 
   const cached =
-    skipHighlighting || syntaxHighlightingDisabled
+    skipHighlighting || syntaxHighlightingDisabled || isScreenReader
       ? null
       : renderColorDiff(patch, firstLine, filePath, fileContent ?? null, theme, safeWidth, dim, splitGutter);
 
   if (!cached) {
     return (
       <Box>
-        <StructuredDiffFallback patch={patch} dim={dim} width={width} />
+        <StructuredDiffFallback patch={effectivePatch} dim={dim} width={isScreenReader ? width - 1 : width} />
       </Box>
     );
   }
@@ -166,3 +195,39 @@ export const StructuredDiff = memo(function StructuredDiff({
     </Box>
   );
 });
+
+export function StructuredDiffList({
+  hunks,
+  dim,
+  width,
+  filePath,
+  firstLine,
+  fileContent,
+}: {
+  hunks: StructuredPatchHunk[];
+  dim: boolean;
+  width: number;
+  filePath: string;
+  firstLine: string | null;
+  fileContent?: string;
+}): React.ReactNode {
+  return intersperse(
+    hunks.map((patch, idx) => (
+      <Box key={`hunk-${idx}`} flexDirection="column">
+        <StructuredDiff
+          patch={patch}
+          dim={dim}
+          width={width}
+          filePath={filePath}
+          firstLine={firstLine}
+          fileContent={fileContent}
+        />
+      </Box>
+    )),
+    idx => (
+      <NoSelect key={`ellipsis-${idx}`} fromLeftEdge>
+        <Text dimColor>...</Text>
+      </NoSelect>
+    ),
+  );
+}

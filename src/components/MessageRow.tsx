@@ -43,6 +43,7 @@ export type Props = {
   message: RenderableMessage;
   /** Whether the previous message in renderableMessages is also a user message. */
   isUserContinuation: boolean;
+  isSplitUserContinuation?: boolean;
   /**
    * Whether there is non-skippable content after this message in renderableMessages.
    * Only needs to be accurate for `collapsed_read_search` messages — used to decide
@@ -57,7 +58,7 @@ export type Props = {
   screen: Screen;
   canAnimate: boolean;
   onOpenRateLimitOptions?: () => void;
-  lastThinkingBlockId: string | ReadonlySet<string> | null;
+  lastThinkingBlockId?: string | ReadonlySet<string> | null;
   latestBashOutputUUID: string | null;
   columns: number;
   isLoading: boolean;
@@ -128,6 +129,7 @@ export function hasContentAfterIndex(
 function MessageRowImpl({
   message: msg,
   isUserContinuation,
+  isSplitUserContinuation,
   hasContentAfter,
   tools,
   commands,
@@ -187,7 +189,7 @@ function MessageRowImpl({
 
   // densable cko(...) || sko(...) — setting stamps live REPL; model only in transcript.
   const hasMetadata =
-    shouldShowMessageTimestamp(displayMsg, isTranscriptMode, showMessageTimestamps) ||
+    shouldShowMessageTimestamp(displayMsg, isTranscriptMode, showMessageTimestamps, isSplitUserContinuation) ||
     (isTranscriptMode &&
       displayMsg.type === 'assistant' &&
       !!displayMsg.message?.model &&
@@ -212,7 +214,9 @@ function MessageRowImpl({
       onOpenRateLimitOptions={onOpenRateLimitOptions}
       isActiveCollapsedGroup={isActiveCollapsedGroup}
       isUserContinuation={isUserContinuation}
-      lastThinkingBlockId={lastThinkingBlockId}
+      isSplitUserContinuation={isSplitUserContinuation}
+      hasMetadataHeader={hasMetadata}
+      lastThinkingBlockId={lastThinkingBlockId ?? null}
       latestBashOutputUUID={latestBashOutputUUID}
     />
   );
@@ -234,6 +238,7 @@ function MessageRowImpl({
             message={displayMsg}
             isTranscriptMode={isTranscriptMode}
             showMessageTimestamps={showMessageTimestamps}
+            isSplitUserContinuation={isSplitUserContinuation}
           />
           <MessageModel message={displayMsg} isTranscriptMode={isTranscriptMode} />
         </Box>
@@ -311,6 +316,13 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
   // densable l10 — silk_hinge stamp chrome
   if (prev.showMessageTimestamps !== next.showMessageTimestamps) return false;
 
+  if (
+    prev.isUserContinuation !== next.isUserContinuation ||
+    prev.isSplitUserContinuation !== next.isSplitUserContinuation
+  ) {
+    return false;
+  }
+
   // collapsed_read_search is never static in prompt mode (matches shouldRenderStatically)
   if (prev.message.type === 'collapsed_read_search' && next.screen !== 'transcript') {
     return false;
@@ -324,10 +336,11 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
   const nextIsLatestBash = next.latestBashOutputUUID === next.message.uuid;
   if (prevIsLatestBash !== nextIsLatestBash) return false;
 
-  // lastThinkingBlockId affects thinking block visibility — but only for
-  // messages that HAVE thinking content. Checking unconditionally busts the
-  // memo for every scrollback message whenever hidePastThinking last-id changes (CC-941).
+  // lastThinkingBlockId affects thinking block visibility only when neither
+  // verbose nor transcript mode is active (both render all thinking blocks).
   if (
+    !next.verbose &&
+    next.screen !== 'transcript' &&
     prev.lastThinkingBlockId !== next.lastThinkingBlockId &&
     hasThinkingContent(next.message as Parameters<typeof hasThinkingContent>[0])
   ) {

@@ -31,18 +31,7 @@ export function AgentInboundMessage({
   body,
 }: Props): React.ReactNode {
   if (followsSpeakerLabel) {
-    if (expanded || uncapped) {
-      return (
-        <Box flexDirection="column" marginTop={addMargin ? 1 : 0} width="100%">
-          <Text wrap="wrap">{body}</Text>
-        </Box>
-      );
-    }
-    return (
-      <Box flexDirection="column" marginTop={addMargin ? 1 : 0} width="100%">
-        <AgentInboundOverflow body={body} />
-      </Box>
-    );
+    return expanded || uncapped ? <Text wrap="wrap">{body}</Text> : <AgentInboundOverflow body={body} />;
   }
   if (!expanded) {
     return <CollapsedPeerMessage displayName={fromName || name} addMargin={addMargin} fallbackLabel="agent" />;

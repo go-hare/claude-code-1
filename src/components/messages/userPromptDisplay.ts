@@ -15,6 +15,7 @@ export const USER_PROMPT_MARKDOWN_MAX_CHARS = 4_000
 export type TruncatedUserPromptText = {
   head: string
   hiddenLines: number
+  hiddenChars?: number
   tail: string
 }
 
@@ -41,7 +42,8 @@ export function truncateUserPromptForDisplay(
   const hiddenLines =
     countCharInString(text, '\n', USER_PROMPT_TRUNCATE_HEAD_CHARS) -
     countCharInString(tail, '\n')
-  return { head, hiddenLines, tail }
+  const hiddenChars = text.length - head.length - tail.length
+  return { head, hiddenLines, hiddenChars, tail }
 }
 
 /**
@@ -62,6 +64,16 @@ export function shouldRenderUserPromptMarkdown(
   return true
 }
 
-export function formatHiddenLinesTitle(hiddenLines: number): string {
-  return `(${hiddenLines} ${hiddenLines === 1 ? 'line' : 'lines'} hidden)`
+export function formatHiddenLinesTitle(
+  hiddenLines: number,
+  hiddenChars?: number,
+): string {
+  const linesLabel = `${hiddenLines} ${hiddenLines === 1 ? 'line' : 'lines'}`
+  if (hiddenChars === undefined) {
+    return `(${linesLabel} hidden)`
+  }
+  const kb = Math.max(1, Math.round(hiddenChars / 1000))
+  return hiddenLines === 0
+    ? `(~${kb} KB hidden)`
+    : `(${linesLabel}, ~${kb} KB hidden)`
 }

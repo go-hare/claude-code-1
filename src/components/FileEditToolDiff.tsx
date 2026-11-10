@@ -8,6 +8,7 @@ import { findActualString } from '@claude-code/builtin-tools/tools/FileEditTool/
 import { adjustHunkLineNumbers, CONTEXT_LINES, getPatchForDisplay } from '../utils/diff.js';
 import { logError } from '../utils/log.js';
 import { CHUNK_SIZE, openForScan, readCapped, scanForContext } from '../utils/readEditContext.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { firstLineOf } from '../utils/stringUtils.js';
 import { StructuredDiffList } from './StructuredDiffList.js';
 
@@ -60,7 +61,14 @@ function DiffBody({ promise, file_path }: { promise: Promise<DiffData>; file_pat
 function DiffFrame({ children, placeholder }: { children?: React.ReactNode; placeholder?: boolean }): React.ReactNode {
   return (
     <Box flexDirection="column">
-      <Box borderColor="subtle" borderStyle="dashed" flexDirection="column" borderLeft={false} borderRight={false}>
+      <Box
+        borderColor="subtle"
+        borderStyle={isScreenReaderModeEnabled() ? undefined : 'dashed'}
+        flexDirection="column"
+        borderLeft={false}
+        borderRight={false}
+        overflow="hidden"
+      >
         {placeholder ? <Text dimColor>…</Text> : children}
       </Box>
     </Box>

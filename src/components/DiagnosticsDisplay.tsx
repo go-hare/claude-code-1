@@ -12,9 +12,14 @@ type DiagnosticsAttachment = Extract<Attachment, { type: 'diagnostics' }>;
 type DiagnosticsDisplayProps = {
   attachment: DiagnosticsAttachment;
   verbose: boolean;
+  isTranscriptMode?: boolean;
 };
 
-export function DiagnosticsDisplay({ attachment, verbose }: DiagnosticsDisplayProps): React.ReactNode {
+export function DiagnosticsDisplay({
+  attachment,
+  verbose,
+  isTranscriptMode,
+}: DiagnosticsDisplayProps): React.ReactNode {
   // Only show if there are diagnostics to report
   if (attachment.files.length === 0) return null;
 
@@ -23,7 +28,7 @@ export function DiagnosticsDisplay({ attachment, verbose }: DiagnosticsDisplayPr
 
   const fileCount = attachment.files.length;
 
-  if (verbose) {
+  if (verbose || isTranscriptMode) {
     // Show all diagnostics in verbose mode (ctrl+o)
     return (
       <Box flexDirection="column">

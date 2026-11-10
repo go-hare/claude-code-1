@@ -49,7 +49,7 @@ export function CollapsedPeerMessage({
         {name}
         {suffix}
         {preview ? <Text italic>{`: ${preview}`}</Text> : null}{' '}
-        <KeyboardShortcutHint shortcut={expandShortcut} action="expand" parens />
+        <KeyboardShortcutHint shortcut={expandShortcut} action="expand" parens format={{ keyCase: 'lower' }} />
       </Text>
     </Box>
   );

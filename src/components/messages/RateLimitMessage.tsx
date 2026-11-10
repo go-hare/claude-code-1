@@ -14,6 +14,9 @@ type UpsellParams = {
   shouldAutoOpenRateLimitOptionsMenu: boolean;
   isTeamOrEnterprise: boolean;
   hasBillingAccess: boolean;
+  serverHidesUpgrade?: boolean;
+  serverHidesOverage?: boolean;
+  spendLimitNudgePath?: boolean;
 };
 
 export function getUpsellMessage({
@@ -23,35 +26,51 @@ export function getUpsellMessage({
   shouldAutoOpenRateLimitOptionsMenu,
   isTeamOrEnterprise,
   hasBillingAccess,
+  serverHidesUpgrade,
+  serverHidesOverage,
+  spendLimitNudgePath,
 }: UpsellParams): string | null {
   if (!shouldShowUpsell) return null;
 
+  if (shouldAutoOpenRateLimitOptionsMenu) {
+    return 'Opening your options…';
+  }
+
+  if (spendLimitNudgePath) {
+    return '/usage-credits to adjust your monthly spend limit.';
+  }
+
+  const canUseOverage = isExtraUsageCommandEnabled && !serverHidesOverage;
+
   if (isMax20x) {
-    if (isExtraUsageCommandEnabled) {
-      return '/extra-usage to finish what you\u2019re working on.';
+    if (canUseOverage) {
+      return '/usage-credits to finish what you’re working on.';
     }
     return '/login to switch to an API usage-billed account.';
   }
 
-  if (shouldAutoOpenRateLimitOptionsMenu) {
-    return 'Opening your options\u2026';
+  if (isTeamOrEnterprise) {
+    if (!canUseOverage) {
+      return 'Your admin can enable extra usage at claude.ai/admin-settings/usage.';
+    }
+    if (hasBillingAccess) {
+      return '/usage-credits to finish what you’re working on.';
+    }
+    return '/usage-credits to request more usage from your admin.';
   }
 
-  if (!isTeamOrEnterprise && !isExtraUsageCommandEnabled) {
+  if (serverHidesUpgrade) {
+    if (canUseOverage) {
+      return '/usage-credits to finish what you’re working on.';
+    }
+    return null;
+  }
+
+  if (!canUseOverage) {
     return '/upgrade to increase your usage limit.';
   }
 
-  if (isTeamOrEnterprise) {
-    if (!isExtraUsageCommandEnabled) return null;
-
-    if (hasBillingAccess) {
-      return '/extra-usage to finish what you\u2019re working on.';
-    }
-
-    return '/extra-usage to request more usage from your admin.';
-  }
-
-  return '/upgrade or /extra-usage to finish what you\u2019re working on.';
+  return '/upgrade or /usage-credits to finish what you’re working on.';
 }
 
 type RateLimitMessageProps = {
@@ -63,7 +82,7 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
   const subscriptionType = getSubscriptionType();
   const rateLimitTier = getRateLimitTier();
   const isTeamOrEnterprise = subscriptionType === 'team' || subscriptionType === 'enterprise';
-  const isMax20x = rateLimitTier === 'default_claude_max_20x';
+  const isMax20x = subscriptionType === 'max' && rateLimitTier === 'default_claude_max_20x';
   // Always show upsell when using /mock-limits command, otherwise show for subscribers
   const shouldShowUpsell = shouldProcessMockLimits() || isClaudeAISubscriber();
 
@@ -74,12 +93,24 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
   // Check actual rate limit status - only auto-open if user is currently rate limited
   // AND we've verified this with the API (resetsAt is only set after API response).
   // This prevents false alerts when resuming sessions with old rate limit messages.
-  const claudeAiLimits = useClaudeAiLimits();
+  const status: {
+    status: string;
+    resetsAt?: number;
+    isUsingOverage?: boolean;
+    rateLimitType?: string;
+    errorCode?: string;
+  } = useClaudeAiLimits();
   const isCurrentlyRateLimited =
-    claudeAiLimits.status === 'rejected' && claudeAiLimits.resetsAt !== undefined && !claudeAiLimits.isUsingOverage;
+    status.status === 'rejected' && status.resetsAt !== undefined && !status.isUsingOverage;
+  const isUpsellSuppressed =
+    status?.rateLimitType === 'seven_day_overage_included' || status?.errorCode === 'credits_required';
 
   const shouldAutoOpenRateLimitOptionsMenu =
-    canSeeRateLimitOptionsUpsell && !hasOpenedInteractiveMenu && isCurrentlyRateLimited && onOpenRateLimitOptions;
+    canSeeRateLimitOptionsUpsell &&
+    !hasOpenedInteractiveMenu &&
+    isCurrentlyRateLimited &&
+    !isUpsellSuppressed &&
+    onOpenRateLimitOptions;
 
   useEffect(() => {
     if (shouldAutoOpenRateLimitOptionsMenu) {
@@ -89,6 +120,7 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
   }, [shouldAutoOpenRateLimitOptionsMenu, onOpenRateLimitOptions]);
 
   const upsell = useMemo(() => {
+    if (isUpsellSuppressed) return null;
     const message = getUpsellMessage({
       shouldShowUpsell,
       isMax20x,
@@ -99,7 +131,7 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
     });
     if (!message) return null;
     return <Text dimColor>{message}</Text>;
-  }, [shouldShowUpsell, isMax20x, isTeamOrEnterprise, shouldAutoOpenRateLimitOptionsMenu]);
+  }, [isUpsellSuppressed, shouldShowUpsell, isMax20x, isTeamOrEnterprise, shouldAutoOpenRateLimitOptionsMenu]);
 
   return (
     <MessageResponse>

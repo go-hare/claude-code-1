@@ -6,10 +6,15 @@
  * Never `export function Wr|Fg|zX`.
  */
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
+import figures from 'figures';
 import * as React from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
+import { toInkColor } from '../../utils/ink.js';
 import { extractTag, isPeerHandbackOrFlaggedOrigin } from '../../utils/messages.js';
 import {
+  agentMessageOverflow,
   parseAgentMessageFromAttr,
   parseCrossSessionOpenAttrs,
   resolveCrossSessionSenderLabel,
@@ -17,6 +22,7 @@ import {
   stripAgentMessageEnvelope,
   stripHandbackReportFrame,
 } from '../../utils/crossSessionMessage.js';
+import { Markdown } from '../Markdown.js';
 import { PluginUserMessageSite } from '../PluginRasterPanes.js';
 import { AgentInboundMessage } from './AgentInboundMessage.js';
 import { CollapsedPeerMessage } from './CollapsedPeerMessage.js';
@@ -31,8 +37,10 @@ type Props = {
   fromName?: string;
   /** densable zX fallbackLabel — gold agent vs UDS peer. */
   fallbackLabel?: string;
+  /** densable Urs hostInjected — strips host-injected peer suffix. */
+  hostInjected?: boolean;
   /** densable Wr origin — irr handback/flagged. */
-  origin?: { kind?: string; handback?: unknown; flagged?: unknown };
+  origin?: { kind?: string; handback?: unknown; flagged?: unknown; plugin?: string };
   /** densable Wr followsSpeakerLabel — speaker_label row, not analog agent inbound. */
   followsSpeakerLabel?: boolean;
   /** densable Wr messageId — TDe / PluginUserMessageSite. */
@@ -63,13 +71,21 @@ export function UserCrossSessionMessage({
         fromName: attrs.fromName ?? fromName,
       });
   const displayName = from || fallbackLabel;
+  const senderPlugin =
+    origin?.kind === 'peer' && typeof origin.plugin === 'string' ? sanitizeCrossSessionDisplayName(origin.plugin) : '';
+  const appVerbose = useAppStateMaybeOutsideOfProvider(s => s.verbose) === true;
   // densable jg: strip <agent-message> so expanded body is the payload.
   const stripped = extracted ?? (isAgentFallback ? stripAgentMessageEnvelope(text) : text);
   // densable Jx: peel y7n frame when peer handback (Ko(KO) analog-skip).
-  const body = origin?.kind === 'peer' && origin.handback === true ? stripHandbackReportFrame(stripped) : stripped;
+  const body =
+    origin?.kind === 'peer' && origin.handback === true && !appVerbose ? stripHandbackReportFrame(stripped) : stripped;
   const isEnvelope = extracted !== null;
   const qmExpanded = isTranscriptMode || verbose;
   const uncapped = isPeerHandbackOrFlaggedOrigin(origin);
+  const { columns } = useTerminalSize();
+  const siteExpanded = isAgentFallback
+    ? qmExpanded || (followsSpeakerLabel && (uncapped || agentMessageOverflow(body, Math.max(1, columns)) === null))
+    : qmExpanded || followsSpeakerLabel;
 
   const painted = isAgentFallback ? (
     <AgentInboundMessage
@@ -81,10 +97,19 @@ export function UserCrossSessionMessage({
       followsSpeakerLabel={followsSpeakerLabel}
       body={body}
     />
+  ) : followsSpeakerLabel ? (
+    <Text wrap="wrap">{body}</Text>
   ) : qmExpanded ? (
-    <Box flexDirection="row" marginTop={addMargin ? 1 : 0}>
-      <Text dimColor>[{displayName}] </Text>
-      <Text>{body}</Text>
+    <Box flexDirection="column" marginTop={addMargin ? 1 : 0} width="100%">
+      <Text color={toInkColor(undefined)}>
+        {'@ '}
+        {displayName}
+        {senderPlugin ? <Text dimColor>{` <${senderPlugin} plugin>`}</Text> : null}
+        <Text aria-hidden>{figures.pointer}</Text>
+      </Text>
+      <Box paddingLeft={2}>
+        <Markdown stripPromptTags={false}>{body}</Markdown>
+      </Box>
     </Box>
   ) : (
     <CollapsedPeerMessage
@@ -101,7 +126,7 @@ export function UserCrossSessionMessage({
       requestId={messageId}
       text={body}
       origin={origin?.kind !== undefined ? { ...origin, kind: origin.kind } : undefined}
-      isExpanded={qmExpanded}
+      isExpanded={siteExpanded}
       from={{ name: displayName }}
     >
       {painted}
