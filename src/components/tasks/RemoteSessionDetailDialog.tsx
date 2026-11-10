@@ -261,7 +261,7 @@ function reviewCountsLine(session: DeepImmutable<RemoteAgentTaskState>): string 
   return formatReviewStageCounts(p.stage, p.bugsFound, verified, refuted);
 }
 
-type MenuAction = 'open' | 'stop' | 'back' | 'dismiss';
+type MenuAction = 'stop' | 'back' | 'dismiss';
 
 function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 'toolUseContext'>): React.ReactNode {
   const completed = session.status === 'completed';
@@ -277,7 +277,6 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
   const handleClose = () => onDone('Cloud session details dismissed', { display: 'system' });
   const goBackOrClose = onBack ?? handleClose;
 
-  const sessionUrl = getRemoteTaskSessionUrl(session.sessionId);
   const statusLabel = completed ? 'ready' : running ? 'running' : session.status;
 
   if (confirmingStop) {
@@ -320,22 +319,14 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
   }
 
   const options: { label: string; value: MenuAction }[] = completed
-    ? [
-        { label: 'Open in Claude Code on the web', value: 'open' },
-        { label: 'Dismiss', value: 'dismiss' },
-      ]
+    ? [{ label: 'Dismiss', value: 'dismiss' }]
     : [
-        { label: 'Open in Claude Code on the web', value: 'open' },
         ...(onKill && running ? [{ label: 'Stop ultrareview', value: 'stop' as const }] : []),
         { label: 'Back', value: 'back' },
       ];
 
   const handleSelect = (action: MenuAction) => {
     switch (action) {
-      case 'open':
-        void openBrowser(sessionUrl);
-        onDone();
-        break;
       case 'stop':
         setConfirmingStop(true);
         break;
@@ -384,9 +375,7 @@ function ReviewSessionDetail({ session, onDone, onBack, onKill }: Omit<Props, 't
 
         <Box flexDirection="column">
           <Text>{reviewCountsLine(session)}</Text>
-          <Link url={sessionUrl}>
-            <Text dimColor>{sessionUrl}</Text>
-          </Link>
+          {completed && <Text dimColor>The full review is in this session.</Text>}
         </Box>
 
         <Select options={options} defaultFocusValue={completed ? 'dismiss' : 'back'} onChange={handleSelect} />

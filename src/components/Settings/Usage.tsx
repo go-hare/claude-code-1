@@ -40,6 +40,7 @@ type LimitBarProps = {
   /** densable iXl alwaysShowDateInReset — force date in reset subtext. */
   alwaysShowDateInReset?: boolean;
   extraSubtext?: string;
+  subtextOverride?: string;
 };
 
 function LimitBar({
@@ -49,6 +50,7 @@ function LimitBar({
   showTimeInReset = true,
   alwaysShowDateInReset = false,
   extraSubtext,
+  subtextOverride,
 }: LimitBarProps): React.ReactNode {
   const { utilization, resets_at } = limit;
   if (utilization === null) {
@@ -69,6 +71,9 @@ function LimitBar({
     } else {
       subtext = extraSubtext;
     }
+  }
+  if (subtextOverride !== undefined) {
+    subtext = subtextOverride;
   }
 
   const maxBarWidth = 50;
@@ -245,6 +250,19 @@ export function Usage(): React.ReactNode {
               alwaysShowDateInReset={alwaysShowDateInReset}
             />
           ),
+      )}
+
+      {utilization.cinder_cove && (
+        <LimitBar
+          title="Claude Code and Cowork credit"
+          limit={utilization.cinder_cove}
+          maxWidth={maxWidth}
+          subtextOverride={
+            utilization.cinder_cove.resets_at
+              ? `One-time credit · Expires ${new Date(utilization.cinder_cove.resets_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`
+              : 'One-time credit'
+          }
+        />
       )}
 
       <SpendLimitSection maxWidth={maxWidth} />

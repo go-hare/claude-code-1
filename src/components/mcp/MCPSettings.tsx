@@ -11,7 +11,7 @@ import { extractAgentMcpServers, filterToolsByServer } from '../../services/mcp/
 import { useAppState } from '../../state/AppState.js';
 import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js';
 import { MCPAgentServerMenu } from './MCPAgentServerMenu.js';
-import { MCPListPanel } from './MCPListPanel.js';
+import { MCPListPanel, type SuppressedClaudeAiConnector } from './MCPListPanel.js';
 import { MCPRemoteServerMenu } from './MCPRemoteServerMenu.js';
 import { MCPStdioServerMenu } from './MCPStdioServerMenu.js';
 import { MCPToolDetailView } from './MCPToolDetailView.js';
@@ -30,6 +30,9 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
     type: 'list',
   });
   const [servers, setServers] = React.useState<ServerInfo[]>([]);
+  const [showUnusedConnectors, setShowUnusedConnectors] = React.useState(false);
+  const suppressedClaudeAiConnectors = (mcp as { suppressedClaudeAiConnectors?: SuppressedClaudeAiConnector[] })
+    .suppressedClaudeAiConnectors;
 
   // Extract agent-specific MCP servers from agent definitions
   const agentMcpServers = useMemo(
@@ -123,18 +126,25 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
     }
 
     // Only show "no servers" message if no regular servers AND no agent servers
-    if (servers.length === 0 && agentMcpServers.length === 0) {
+    if (servers.length === 0 && agentMcpServers.length === 0 && (suppressedClaudeAiConnectors?.length ?? 0) === 0) {
       onComplete(
-        'No MCP servers configured. Please run /doctor if this is unexpected. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.',
+        'No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.',
       );
     }
-  }, [servers.length, filteredClients.length, agentMcpServers.length, onComplete]);
+  }, [
+    servers.length,
+    filteredClients.length,
+    agentMcpServers.length,
+    suppressedClaudeAiConnectors?.length,
+    onComplete,
+  ]);
 
   switch (viewState.type) {
     case 'list':
       return (
         <MCPListPanel
           servers={servers}
+          suppressedClaudeAiConnectors={suppressedClaudeAiConnectors}
           agentServers={agentMcpServers}
           onSelectServer={server => setViewState({ type: 'server-menu', server })}
           onSelectAgentServer={(agentServer: AgentMcpServerInfo) =>
@@ -142,6 +152,8 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
           }
           onComplete={onComplete}
           defaultTab={viewState.defaultTab}
+          showUnusedConnectors={showUnusedConnectors}
+          onToggleUnusedConnectors={() => setShowUnusedConnectors(prev => !prev)}
         />
       );
 

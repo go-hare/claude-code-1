@@ -49,6 +49,7 @@ import {
 import { FeedbackDraftFooter } from '../FeedbackDraftFooter.js';
 import { useSessionDraftCount } from '../../utils/feedbackDrafts/useSessionDraftCount.js';
 import { plural } from '../../utils/stringUtils.js';
+import { isBgSession } from '../../utils/concurrentSessions.js';
 import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink';
 
 // Dead code elimination: conditional import for proactive mode
@@ -214,6 +215,7 @@ type Props = {
   tmuxSelected: boolean;
   teammateFooterIndex?: number;
   isPasting?: boolean;
+  showExpandPasteHint?: boolean;
   isSearching: boolean;
   historyQuery: string;
   setHistoryQuery: (query: string) => void;
@@ -269,6 +271,7 @@ export function PromptInputFooterLeftSide({
   tmuxSelected,
   teammateFooterIndex,
   isPasting,
+  showExpandPasteHint,
   isSearching,
   historyQuery,
   setHistoryQuery,
@@ -284,9 +287,10 @@ export function PromptInputFooterLeftSide({
   );
 
   if (exitMessage.show) {
+    const exitAction = isBgSession() ? 'detach (session keeps running)' : 'exit';
     return (
       <Text dimColor key="exit-message">
-        Press {exitMessage.key} again to exit
+        Press {exitMessage.key} again to {exitAction}
       </Text>
     );
   }
@@ -294,6 +298,13 @@ export function PromptInputFooterLeftSide({
     return (
       <Text dimColor key="pasting-message">
         Pasting…
+      </Text>
+    );
+  }
+  if (showExpandPasteHint && !isSearching) {
+    return (
+      <Text dimColor key="expand-paste-hint">
+        paste again to expand
       </Text>
     );
   }

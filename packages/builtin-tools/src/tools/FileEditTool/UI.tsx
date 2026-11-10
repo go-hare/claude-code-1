@@ -81,14 +81,24 @@ export function renderToolUseMessage(
   return <FilePathLink filePath={file_path}>{verbose ? file_path : getDisplayPath(file_path)}</FilePathLink>;
 }
 
+const STAGED_SETTINGS_REVIEW_TEXT = 'Staged for your review · not applied until you accept it in /settings-review';
+
 export function renderToolResultMessage(
-  { filePath, structuredPatch, originalFile }: FileEditOutput,
+  output: FileEditOutput,
   _progressMessagesForMessage: ProgressMessage[],
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
+  const { filePath, structuredPatch, originalFile } = output;
   // Official densable sp_: empty path → null (no empty-filePath card).
   if (!filePath) {
     return null;
+  }
+  if ((output as { staged?: boolean }).staged) {
+    return (
+      <MessageResponse>
+        <Text dimColor>{STAGED_SETTINGS_REVIEW_TEXT}</Text>
+      </MessageResponse>
+    );
   }
   // For plan files, show /plan hint above the diff
   const isPlanFile = filePath.startsWith(getPlansDirectory());

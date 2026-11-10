@@ -60,5 +60,8 @@ describe('TrustDialog marketplaceHelperSources densable 2.1.238', () => {
     expect(src).toContain('hasMarketplaceHeadersHelper')
     expect(src).toContain('hasRepoHeadersHelpers')
     expect(src).toContain('formatEnglishSourceList(repoHelperSources)')
+    expect(src).toContain('offerBackstop')
+    expect(src).toContain('No, continue without these permissions')
+    expect(src).toContain('gated_grants_backstop_declined')
   })
 })

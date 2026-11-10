@@ -96,4 +96,52 @@ describe('densable 2.1.289 Jc collapsed summary', () => {
     expect(out).toContain('Ran 2 PreToolUse hooks');
     expect(out).not.toContain('⎿');
   });
+
+  test('active group populates display hint from mcp_progress messages', async () => {
+    const msg = group({
+      mcpCallCount: 1,
+      messages: [
+        {
+          type: 'assistant',
+          uuid: '00000000-0000-4000-8000-0000000000ac',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu-mcp-1', name: 'mcp__srv__run', input: {} }],
+          },
+        } as unknown as CollapsedReadSearchGroup['messages'][number],
+      ],
+    });
+    const mcpLookups = {
+      erroredToolUseIDs: new Set<string>(),
+      toolResultByToolUseID: new Map(),
+      progressMessagesByToolUseID: new Map([
+        [
+          'tu-mcp-1',
+          [
+            {
+              type: 'progress',
+              data: {
+                type: 'mcp_progress',
+                progress: 3,
+                total: 4,
+                progressMessage: 'Indexing files',
+              },
+            },
+          ],
+        ],
+      ]),
+    } as unknown as React.ComponentProps<typeof CollapsedReadSearchContent>['lookups'];
+    const out = await renderToString(
+      <CollapsedReadSearchContent
+        message={msg}
+        inProgressToolUseIDs={new Set(['tu-mcp-1'])}
+        shouldAnimate={false}
+        verbose={false}
+        tools={[]}
+        lookups={mcpLookups}
+        isActiveGroup={true}
+      />,
+    );
+    expect(out).toContain('Indexing files (75%)');
+  });
 });

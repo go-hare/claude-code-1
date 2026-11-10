@@ -1,6 +1,9 @@
 import { homedir } from 'os';
 import React from 'react';
-import { logEvent } from 'src/services/analytics/index.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js';
 import { setSessionTrustAccepted } from '../../bootstrap/state.js';
 import type { Command } from '../../commands.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
@@ -10,6 +13,7 @@ import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
+import { probeProjectGrantsGated } from '../../utils/permissions/projectGrantsGate.js';
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
 import { getSettingsForSource } from '../../utils/settings/settings.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
@@ -107,6 +111,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   const repoHelperSources = getRepoHeadersHelperSources(marketplaceHelperSources);
   const hasMarketplaceHeadersHelper = marketplaceHelperSources.length > 0;
   const hasRepoHeadersHelpers = repoHelperSources.length > 0;
+  const offerBackstop = probeProjectGrantsGated() || hasRepoHeadersHelpers;
   const allowDisclosure = getProjectAllowDisclosure();
   const hasProjectAllowRules = allowDisclosure.sources.length > 0;
   const addDirsDisclosure = getProjectAddDirsDisclosure();
@@ -182,6 +187,18 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
     }
     exitingRef.current = true;
     if (value === 'exit') {
+      if (hasTrustDialogAccepted) {
+        logEvent('tengu_feature_sad', {
+          feature_name: 'onboarding_trust_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code: 'gated_grants_backstop_declined' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        onDone();
+        return;
+      }
+      logEvent('tengu_feature_sad', {
+        feature_name: 'onboarding_trust_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code: 'onboarding_trust_denied' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
       gracefulShutdownSync(1);
       return;
     }
@@ -244,6 +261,10 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   useKeybinding(
     'confirm:no',
     () => {
+      if (hasTrustDialogAccepted) {
+        onChange('exit');
+        return;
+      }
       if (isInputRefused()) return;
       if (exitingRef.current) return;
       exitingRef.current = true;
@@ -253,7 +274,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   );
 
   // densable: already trusted and no backstop → queueMicrotask(onDone), not setTimeout.
-  if (hasTrustDialogAccepted) {
+  if (hasTrustDialogAccepted && !offerBackstop) {
     queueMicrotask(onDone);
     return null;
   }
@@ -324,7 +345,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
           cancelFirst
           focus="cancel"
           confirmLabel={ACCESSING_CONFIRM_LABEL}
-          cancelLabel={ACCESSING_CANCEL_LABEL}
+          cancelLabel={hasTrustDialogAccepted ? 'No, continue without these permissions' : ACCESSING_CANCEL_LABEL}
           onConfirm={() => onChange('enable_all')}
           onCancel={() => onChange('exit')}
         />

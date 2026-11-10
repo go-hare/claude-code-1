@@ -78,7 +78,7 @@ function OverridesSelect({ onComplete, currentMode }: Props & { currentMode: Ove
   return (
     <Box flexDirection="column" paddingY={1}>
       <Box marginBottom={1}>
-        <Text bold>Configure Overrides:</Text>
+        <Text bold>Configure overrides</Text>
       </Box>
       <Select
         options={options}

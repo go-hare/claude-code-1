@@ -89,8 +89,12 @@ import { getThemeSetting } from '../../utils/themeSetting.js';
 import { getIsRemoteMode, getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js';
 import { TIME_FORMAT_PRESETS } from 'src/utils/timeFormat.js';
-import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
+import { getClaudeConfigHomeDir, isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js';
 import { buildConfigDisplayEntries, displayIndexForSetting, sortConfigCatalog } from 'src/utils/configCatalog.js';
+import { parseCustomThemeRef } from '../../utils/customThemes.js';
+import { getDisplayPath } from '../../utils/file.js';
+import { isSafeModeEnabled, safeModeDisableHint } from '../../utils/safeMode.js';
+import TextInput from '../TextInput.js';
 import { useNotifications } from '../../context/notifications.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
@@ -216,6 +220,13 @@ function asConfigSettingChange(value: unknown): ConfigSettingChange | undefined 
   return value as ConfigSettingChange;
 }
 
+export type SettingProvidedMeta = {
+  plugin: string;
+  pluginId: string;
+  description: string;
+  kind: 'boolean' | 'choice' | 'number' | 'text';
+};
+
 export type Setting =
   | (SettingBase & {
       value: boolean;
@@ -227,6 +238,7 @@ export type Setting =
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      provided?: SettingProvidedMeta;
       // densable grantBlocker — DualInk-off list shows qAr copy instead of onChange(true).
       grantBlocker?: RemoteHomeSettingsGrantBlocker;
     })
@@ -243,6 +255,7 @@ export type Setting =
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      provided?: SettingProvidedMeta;
     })
   | (SettingBase & {
       // For enums that are set by a custom component, we don't need to pass options,
@@ -256,6 +269,7 @@ export type Setting =
       consentGated?: boolean;
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
+      provided?: SettingProvidedMeta;
     });
 
 /** densable IRn `je` — plugin /config rows cannot be written over Remote Control. */
@@ -393,6 +407,12 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
           ...base,
           value: current === true || current === 'true',
           type: 'boolean',
+          provided: {
+            plugin: safeName,
+            pluginId,
+            description,
+            kind: 'boolean',
+          },
           onChange(value: boolean) {
             void persist(value);
           },
@@ -407,16 +427,43 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
           options,
           type: 'enum',
           pickToCommit: true,
+          provided: {
+            plugin: safeName,
+            pluginId,
+            description,
+            kind: 'choice',
+          },
           onChange(value: string) {
             void persist(value);
           },
         });
         continue;
       }
+      const isNumber = field.type === 'number';
       rows.push({
         ...base,
         value: current === undefined ? '' : String(current),
         type: 'managedEnum',
+        coerce: (raw: string) => {
+          if (!isNumber) return raw;
+          const trimmed = raw.trim();
+          const parsed = Number(trimmed);
+          return trimmed !== '' &&
+            Number.isFinite(parsed) &&
+            (field.min === undefined || parsed >= field.min) &&
+            (field.max === undefined || parsed <= field.max)
+            ? String(parsed)
+            : undefined;
+        },
+        optionsHint: isNumber
+          ? `It takes a number${field.min !== undefined || field.max !== undefined ? ` between ${field.min ?? '-∞'} and ${field.max ?? '∞'}` : ''}.`
+          : undefined,
+        provided: {
+          plugin: safeName,
+          pluginId,
+          description,
+          kind: isNumber ? 'number' : 'text',
+        },
         onChange(value: string) {
           if (field.type === 'number') {
             const trimmed = value.trim();
@@ -439,15 +486,132 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
   return rows;
 }
 
+/** densable o0t — normalize single-line display value for plugin text/number settings. */
+function formatSettingDisplayValue(setting: Setting): string {
+  const s = String(setting.value);
+  return setting.provided !== undefined && setting.type !== 'boolean' ? s.replace(/[\t\n\r]/g, ' ').trim() : s;
+}
+
+export type RemoteHomeSettingsDialogResult = 'forward' | 'keep_local' | 'not_now' | 'not_saved' | 'not_stored';
+
+export async function enableRemoteHomeSettingsFromConfigPanel(
+  choice: 'forward' | 'keep_local' | 'not_now' = 'forward',
+  storageV5?: unknown,
+): Promise<RemoteHomeSettingsDialogResult> {
+  if (choice === 'not_now') {
+    return 'not_now';
+  }
+  try {
+    const result = await persistRemoteHomeSettingsMode(choice, storageV5);
+    switch (result) {
+      case 'refused':
+        return 'not_saved';
+      case 'not_stored':
+        return 'not_stored';
+      case 'unconfirmed':
+      case 'written':
+        return choice;
+    }
+  } catch (err) {
+    logError(err);
+    return 'not_saved';
+  }
+}
+
+function RemoteHomeSettingsConfirmation({
+  configHome,
+  storageV5,
+  onDone,
+}: {
+  configHome: string;
+  storageV5?: unknown;
+  onDone: (result: RemoteHomeSettingsDialogResult) => void;
+}): React.ReactNode {
+  const [submitting, setSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    logEvent('tengu_home_settings_mode_prompt_shown', {
+      origin: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+  }, []);
+
+  const handleChoice = useCallback(
+    (choice: 'forward' | 'keep_local' | 'not_now') => {
+      if (submitting) return;
+      setSubmitting(true);
+      logEvent('tengu_home_settings_mode_prompt', {
+        choice: choice as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        origin: 'config_panel' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      void enableRemoteHomeSettingsFromConfigPanel(choice, storageV5).then(result => {
+        onDone(result);
+      });
+    },
+    [submitting, storageV5, onDone],
+  );
+
+  return (
+    <Dialog
+      title="Use this machine's settings in cloud sessions?"
+      onCancel={() => handleChoice('not_now')}
+      inputGuide={exitState =>
+        exitState.pending ? (
+          <Text>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Byline>
+            <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+            <ConfigurableShortcutHint
+              action="confirm:no"
+              context="Confirmation"
+              fallback="Esc"
+              description="skip for now"
+            />
+          </Byline>
+        )
+      }
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text bold>{getDisplayPath(configHome)}</Text>
+        <Text>
+          Send the CLAUDE.md, rules, output styles, and preferences in this folder, plus your portable permission rules,
+          into each claude --cloud session. It skips credential files and files your Read rules or sandbox settings deny
+          (your preferences and permission rules are still sent), never sends hooks, environment variables, MCP servers,
+          or plugins, and copies no file from outside this folder, even through a link or an @import. Deny and ask rules
+          can go with their paths; file rules need a ~/ or relative path. What is sent is encrypted at rest, and each
+          launch shows whether it was sent.
+        </Text>
+        <Text dimColor>
+          Without this, cloud sessions keep their own default settings, as they do today. Yes and No are saved for this
+          machine; /config changes it later, from a session started without --cloud.
+        </Text>
+      </Box>
+      <Select
+        options={[
+          { label: 'Yes, send my settings', value: 'forward' },
+          { label: 'No, keep them on this machine', value: 'keep_local' },
+          { label: 'Not now', value: 'not_now' },
+        ]}
+        defaultFocusValue="not_now"
+        isDisabled={submitting}
+        onChange={value => handleChoice(value as 'forward' | 'keep_local' | 'not_now')}
+        onCancel={() => handleChoice('not_now')}
+      />
+    </Dialog>
+  );
+}
+
 type SubMenu =
   | 'Theme'
   | 'Model'
+  | 'RemoteHomeSettings'
   | 'ExternalIncludes'
   | 'OutputStyle'
   | 'ChannelDowngrade'
   | 'Language'
+  | 'AgentsView'
   | 'EnableAutoUpdates'
-  | 'EnumPicker';
+  | 'EnumPicker'
+  | 'TextEdit';
 
 /** densable hKe bag — snapshot the panel (or /config key=value ce()) feeds the catalog. */
 export type ConfigHkeBag = {
@@ -2140,6 +2304,10 @@ export function Config({
   const [showSubmenu, setShowSubmenu] = useState<SubMenu | null>(null);
   // densable Ye/Fe — setting id for EnumPicker (pickToCommit enums).
   const [enumPickerId, setEnumPickerId] = useState<string | null>(null);
+  // densable Ti/Di/es/xi — setting id and draft text for TextEdit (plugin string/number).
+  const [textEditId, setTextEditId] = useState<string | null>(null);
+  const [textEditValue, setTextEditValue] = useState('');
+  const [textEditCursor, setTextEditCursor] = useState(0);
   // densable Pe / w0t — tengu_maple_sundial (default false).
   const mapleSundial = getFeatureValue_CACHED_MAY_BE_STALE('tengu_maple_sundial', false);
   const { addNotification } = useNotifications();
@@ -2348,7 +2516,11 @@ export function Config({
     return settingsItems.filter(setting => {
       if (setting.id.toLowerCase().includes(lowerQuery)) return true;
       const searchableText = 'searchText' in setting ? setting.searchText : setting.label;
-      return searchableText.toLowerCase().includes(lowerQuery);
+      if (searchableText.toLowerCase().includes(lowerQuery)) return true;
+      if (setting.type === 'enum') {
+        return setting.options.some(opt => opt.toLowerCase().includes(lowerQuery));
+      }
+      return false;
     });
   }, [settingsItems, searchQuery]);
 
@@ -2369,6 +2541,66 @@ export function Config({
     setShowSubmenu(null);
     setTabsHidden(false);
   }, [setTabsHidden]);
+
+  // densable bt/ao — TextEdit looks up Ti on the unfiltered settings list.
+  const textEditSetting = React.useMemo(() => {
+    const found = settingsItems.find(item => item.id === textEditId);
+    return found && found.type === 'managedEnum' ? found : undefined;
+  }, [settingsItems, textEditId]);
+
+  const closeTextEdit = useCallback(() => {
+    setTextEditId(null);
+    setShowSubmenu(null);
+    setTabsHidden(false);
+  }, [setTabsHidden]);
+
+  useLayoutEffect(() => {
+    if (showSubmenu === 'TextEdit' && textEditSetting === undefined) {
+      closeTextEdit();
+    } else if (showSubmenu === 'EnumPicker' && enumPickerSetting === undefined) {
+      closeEnumPicker();
+    }
+  }, [showSubmenu, textEditSetting, enumPickerSetting, closeTextEdit, closeEnumPicker]);
+
+  // densable Pi/Fl — AgentsView submenu items and toggle handler.
+  const agentsViewItems = React.useMemo(
+    () => [
+      ...(isLeftArrowFleetEnabled() && !getIsRemoteMode()
+        ? [
+            {
+              id: 'leftArrowOpensAgents' as const,
+              label: `${figures.arrowLeft} opens agents`,
+              value: globalConfig.leftArrowOpensAgents ?? true,
+            },
+          ]
+        : []),
+      ...(isLeftArrowFleetEnabled()
+        ? [
+            {
+              id: 'defaultToAgentsView' as const,
+              label: 'Start in agent view',
+              value: globalConfig.defaultToAgentsView ?? false,
+            },
+          ]
+        : []),
+    ],
+    [globalConfig.leftArrowOpensAgents, globalConfig.defaultToAgentsView],
+  );
+
+  const handleAgentsViewChange = useCallback((id: 'leftArrowOpensAgents' | 'defaultToAgentsView', value: boolean) => {
+    isDirty.current = true;
+    if (id === 'leftArrowOpensAgents') {
+      W(current => ({ ...current, leftArrowOpensAgents: value }));
+      setGlobalConfig(prev => ({ ...prev, leftArrowOpensAgents: value }));
+    } else {
+      W(current => ({ ...current, defaultToAgentsView: value }));
+      setGlobalConfig(prev => ({ ...prev, defaultToAgentsView: value }));
+    }
+    logEvent('tengu_config_changed', {
+      setting: id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      value,
+    });
+  }, []);
 
   // Adjust selected index when filtered list shrinks, and keep the selected
   // item visible when maxVisible changes (e.g., terminal resize).
@@ -2539,7 +2771,13 @@ export function Config({
       formattedChanges.push(remoteLabel);
     }
     if (settingsData?.autoUpdatesChannel !== initialSettingsData.current?.autoUpdatesChannel) {
-      formattedChanges.push(`Set auto-update channel to ${chalk.bold(settingsData?.autoUpdatesChannel ?? 'latest')}`);
+      formattedChanges.push(
+        `Set auto-update channel to ${chalk.bold(
+          (settingsData?.autoUpdatesChannel as string | undefined) === 'rc'
+            ? 'slow'
+            : (settingsData?.autoUpdatesChannel ?? 'latest'),
+        )}`,
+      );
     }
     if (formattedChanges.length > 0) {
       onClose(formattedChanges.join('\n'));
@@ -2688,13 +2926,16 @@ export function Config({
     }
 
     if (setting.type === 'boolean') {
-      // densable: off→on with grantBlocker shows qAr copy; do not call onChange(true).
+      // densable: off→on with grantBlocker shows qAr copy; otherwise open RemoteHomeSettings confirmation.
       if (setting.id === 'remoteHomeSettings' && setting.value === false) {
         const blocker = setting.grantBlocker;
         if (blocker !== undefined) {
           setRemoteHomeSettingsNotice(REMOTE_HOME_SETTINGS_GRANT_BLOCKERS[blocker]);
-          return;
+        } else {
+          setShowSubmenu('RemoteHomeSettings');
+          setTabsHidden(true);
         }
+        return;
       }
       isDirty.current = true;
       const next = !setting.value;
@@ -2731,6 +2972,22 @@ export function Config({
     if (isMapleJrExternalIncludes(setting)) {
       recordExternalIncludesDecision(false, 'config_toggle', context);
       setExternalIncludesApproved(false);
+      return;
+    }
+
+    if (setting.id === 'agentsView') {
+      setShowSubmenu('AgentsView');
+      setTabsHidden(true);
+      return;
+    }
+
+    if (setting.provided !== undefined && setting.type === 'managedEnum') {
+      const displayValue = formatSettingDisplayValue(setting);
+      setTextEditId(setting.id);
+      setTextEditValue(displayValue);
+      setTextEditCursor(displayValue.length);
+      setShowSubmenu('TextEdit');
+      setTabsHidden(true);
       return;
     }
 
@@ -2783,12 +3040,12 @@ export function Config({
         // Switching to latest - just do it and clear minimumVersion
         isDirty.current = true;
         F({
-          autoUpdatesChannel: 'latest',
+          autoUpdatesChannel: undefined,
           minimumVersion: undefined,
         });
         setSettingsData(prev => ({
           ...prev,
-          autoUpdatesChannel: 'latest',
+          autoUpdatesChannel: undefined,
           minimumVersion: undefined,
         }));
         logEvent('tengu_autoupdate_channel_changed', {
@@ -2953,6 +3210,11 @@ export function Config({
               setShowSubmenu(null);
               setTabsHidden(false);
             }}
+            helpText={
+              isSafeModeEnabled()
+                ? `Custom themes are disabled in safe mode — ${safeModeDisableHint()} to load them${parseCustomThemeRef(themeSetting) ? `. Your saved theme "${parseCustomThemeRef(themeSetting)}" is a custom theme; selecting a preset here replaces it` : ''}`
+                : ''
+            }
             hideEscToCancel
             skipExitHandling={true} // Skip exit handling as Config already handles it
           />
@@ -3002,6 +3264,35 @@ export function Config({
             </Byline>
           </Text>
         </>
+      ) : showSubmenu === 'RemoteHomeSettings' ? (
+        <RemoteHomeSettingsConfirmation
+          configHome={getClaudeConfigHomeDir()}
+          storageV5={storageV5}
+          onDone={result => {
+            setRemoteHomeSettingsNotice(
+              result === 'not_saved'
+                ? REMOTE_HOME_SETTINGS_GRANT_BLOCKERS.flag_off
+                : result === 'not_stored'
+                  ? remoteHomeSettingsNotStoredMessage()
+                  : null,
+            );
+            if (result === 'forward') {
+              logEvent('tengu_config_changed', {
+                setting: 'remoteHomeSettings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                value: true,
+              });
+            }
+            if (result === 'forward' || result === 'keep_local') {
+              isDirty.current = true;
+              setGlobalConfig(prev => ({
+                ...prev,
+                remoteHomeSettingsMode: getGlobalConfig().remoteHomeSettingsMode,
+              }));
+            }
+            setShowSubmenu(null);
+            setTabsHidden(false);
+          }}
+        />
       ) : showSubmenu === 'ExternalIncludes' ? (
         <>
           <ClaudeMdExternalIncludesDialog
@@ -3094,9 +3385,52 @@ export function Config({
             </Byline>
           </Text>
         </>
+      ) : showSubmenu === 'AgentsView' ? (
+        <Dialog
+          title="Agents view"
+          onCancel={() => {
+            setShowSubmenu(null);
+            setTabsHidden(false);
+          }}
+          hideBorder
+          hideInputGuide
+        >
+          <Select
+            options={agentsViewItems.map(item => ({
+              label: `${item.label}: ${item.value}`,
+              value: item.id,
+            }))}
+            onChange={(id: string) => {
+              const target = agentsViewItems.find(item => item.id === id);
+              if (target) {
+                handleAgentsViewChange(target.id, !target.value);
+              }
+            }}
+            onCancel={() => {
+              setShowSubmenu(null);
+              setTabsHidden(false);
+            }}
+          />
+          <Text dimColor>
+            <Byline>
+              <KeyboardShortcutHint shortcut="Enter/Space" action="toggle" />
+              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="close" />
+            </Byline>
+          </Text>
+        </Dialog>
       ) : showSubmenu === 'EnumPicker' && enumPickerSetting ? (
         <>
-          <Dialog title={enumPickerSetting.label} onCancel={closeEnumPicker} hideBorder hideInputGuide>
+          <Dialog
+            title={enumPickerSetting.label}
+            subtitle={
+              enumPickerSetting.provided === undefined
+                ? undefined
+                : `${enumPickerSetting.provided.description} · ${enumPickerSetting.provided.plugin}`
+            }
+            onCancel={closeEnumPicker}
+            hideBorder
+            hideInputGuide
+          >
             <Select
               options={enumPickerSetting.options.map(option => ({
                 label: option,
@@ -3119,6 +3453,57 @@ export function Config({
             </Byline>
           </Text>
         </>
+      ) : showSubmenu === 'TextEdit' && textEditSetting ? (
+        <Dialog
+          title={textEditSetting.label}
+          subtitle={
+            textEditSetting.provided === undefined
+              ? undefined
+              : `${textEditSetting.provided.description} · ${textEditSetting.provided.plugin}`
+          }
+          onCancel={closeTextEdit}
+          hideBorder
+          hideInputGuide
+        >
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="row" gap={1}>
+              <Text color="suggestion">{figures.pointer}</Text>
+              <Text>{textEditSetting.label}</Text>
+              <TextInput
+                value={textEditValue}
+                onChange={setTextEditValue}
+                onSubmit={() => {
+                  const validationError =
+                    textEditSetting.coerce && textEditSetting.coerce(textEditValue) === undefined
+                      ? (textEditSetting.optionsHint ?? 'Not a value it takes')
+                      : null;
+                  if (validationError !== null) return;
+                  const next = textEditSetting.coerce?.(textEditValue) ?? textEditValue;
+                  closeTextEdit();
+                  if (next !== formatSettingDisplayValue(textEditSetting)) {
+                    isDirty.current = true;
+                    textEditSetting.onChange(next);
+                  }
+                }}
+                onExit={closeTextEdit}
+                focus
+                showCursor
+                columns={60}
+                cursorOffset={textEditCursor}
+                onChangeCursorOffset={setTextEditCursor}
+              />
+            </Box>
+            {textEditSetting.coerce && textEditSetting.coerce(textEditValue) === undefined ? (
+              <Text color="error">{textEditSetting.optionsHint ?? 'Not a value it takes'}</Text>
+            ) : null}
+            <Text dimColor>
+              <Byline>
+                <KeyboardShortcutHint shortcut="Enter" action="continue" />
+                <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+              </Byline>
+            </Text>
+          </Box>
+        </Dialog>
       ) : showSubmenu === 'EnableAutoUpdates' ? (
         <Dialog
           title="Enable Auto-Updates"

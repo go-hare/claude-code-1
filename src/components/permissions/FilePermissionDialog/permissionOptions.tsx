@@ -80,6 +80,8 @@ export function getFilePermissionOptions({
   standingRowVetoed = false,
   directoryGrantOnly = false,
   offersBlockOutsideReads = false,
+  onAllowOnceFeedbackChange,
+  allowOnceInputMode = false,
 }: {
   filePath: string;
   toolPermissionContext: ToolPermissionContext;
@@ -101,32 +103,70 @@ export function getFilePermissionOptions({
   directoryGrantOnly?: boolean;
   /** official yBt — Yes / Block / ask_again instead of session allow. */
   offersBlockOutsideReads?: boolean;
+  onAllowOnceFeedbackChange?: (value: string) => void;
+  allowOnceInputMode?: boolean;
 }): PermissionOptionWithLabel[] {
   const options: PermissionOptionWithLabel[] = [];
   // densable: session-row shows confirm:cycleMode (Confirmation), not chat:cycleMode
   const modeCycleShortcut = getShortcutDisplay('confirm:cycleMode', 'Confirmation', 'shift+tab');
 
   if (offersBlockOutsideReads) {
-    options.push({
-      label: OUTSIDE_READS_OPTION_ALLOW,
-      value: 'yes',
-      option: { type: 'accept-once' },
-    });
+    if (yesInputMode && onAcceptFeedbackChange) {
+      options.push({
+        type: 'input',
+        label: OUTSIDE_READS_OPTION_ALLOW,
+        value: 'yes',
+        placeholder: 'and tell Claude what to do next',
+        onChange: onAcceptFeedbackChange,
+        allowEmptySubmitToCancel: true,
+        option: { type: 'accept-once' },
+      });
+    } else {
+      options.push({
+        label: OUTSIDE_READS_OPTION_ALLOW,
+        value: 'yes',
+        option: { type: 'accept-once' },
+      });
+    }
     options.push({
       label: OUTSIDE_READS_OPTION_BLOCK,
       value: 'block-outside-reads',
       option: { type: 'block-outside-reads' },
     });
-    options.push({
-      label: OUTSIDE_READS_OPTION_ASK_AGAIN,
-      value: 'ask-again-outside-reads',
-      option: { type: 'ask-again-outside-reads' },
-    });
-    options.push({
-      label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
-      value: 'allow-outside-read-once',
-      option: { type: 'allow-outside-read-once' },
-    });
+    if (noInputMode && onRejectFeedbackChange) {
+      options.push({
+        type: 'input',
+        label: OUTSIDE_READS_OPTION_ASK_AGAIN,
+        value: 'ask-again-outside-reads',
+        placeholder: 'and tell Claude what to do differently',
+        onChange: onRejectFeedbackChange,
+        allowEmptySubmitToCancel: true,
+        option: { type: 'ask-again-outside-reads' },
+      });
+    } else {
+      options.push({
+        label: OUTSIDE_READS_OPTION_ASK_AGAIN,
+        value: 'ask-again-outside-reads',
+        option: { type: 'ask-again-outside-reads' },
+      });
+    }
+    if (allowOnceInputMode && onAllowOnceFeedbackChange) {
+      options.push({
+        type: 'input',
+        label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
+        value: 'allow-outside-read-once',
+        placeholder: 'and tell Claude what to do next',
+        onChange: onAllowOnceFeedbackChange,
+        allowEmptySubmitToCancel: true,
+        option: { type: 'allow-outside-read-once' },
+      });
+    } else {
+      options.push({
+        label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
+        value: 'allow-outside-read-once',
+        option: { type: 'allow-outside-read-once' },
+      });
+    }
     return options;
   }
 

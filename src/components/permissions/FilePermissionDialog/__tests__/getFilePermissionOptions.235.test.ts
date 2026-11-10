@@ -56,4 +56,25 @@ describe('getFilePermissionOptions contentWithheld (2.1.235)', () => {
       'Yes, but ask again next time',
     ])
   })
+
+  test('offersBlockOutsideReads supports Tab input mode expansion (2.1.289)', () => {
+    const options = getFilePermissionOptions({
+      filePath: '/etc/hosts',
+      toolPermissionContext: getEmptyToolPermissionContext(),
+      operationType: 'read',
+      offersBlockOutsideReads: true,
+      yesInputMode: true,
+      noInputMode: true,
+      allowOnceInputMode: true,
+      onAcceptFeedbackChange: () => {},
+      onRejectFeedbackChange: () => {},
+      onAllowOnceFeedbackChange: () => {},
+    })
+    expect(options.map(o => o.type)).toEqual([
+      'input',
+      undefined,
+      'input',
+      'input',
+    ])
+  })
 })

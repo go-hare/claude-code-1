@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import figures from 'figures';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import {
   Box,
@@ -18,6 +19,7 @@ import { isOfficialClaudeAiConnector } from '../../services/mcp/officialClaudeAi
 import type { ConfigScope } from '../../services/mcp/types.js';
 import { describeMcpConfigFilePath, filterToolsByServer } from '../../services/mcp/utils.js';
 import { useAppState } from '../../state/AppState.js';
+import { getGlobalConfig } from '../../utils/config.js';
 import { isDebugMode } from '../../utils/debug.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
@@ -25,19 +27,29 @@ import { ItemList } from '../ItemList.js';
 import { McpParsingWarnings } from './McpParsingWarnings.js';
 import type { AgentMcpServerInfo, ServerInfo } from './types.js';
 
+export type SuppressedClaudeAiConnector = {
+  name: string;
+  duplicateOf: string;
+  duplicateOfScope?: ConfigScope | string;
+};
+
 type Props = {
   servers: ServerInfo[];
+  suppressedClaudeAiConnectors?: SuppressedClaudeAiConnector[];
   agentServers?: AgentMcpServerInfo[];
   onSelectServer: (server: ServerInfo) => void;
   onSelectAgentServer?: (agentServer: AgentMcpServerInfo) => void;
   onComplete: (result?: string, options?: { display?: CommandResultDisplay }) => void;
   defaultTab?: string;
+  showUnusedConnectors?: boolean;
+  onToggleUnusedConnectors?: () => void;
 };
 
 type SelectableItem =
   | { type: 'heading'; value: string; label: React.ReactNode }
   | { type: 'server'; value: string; server: ServerInfo }
-  | { type: 'agent-server'; value: string; agentServer: AgentMcpServerInfo };
+  | { type: 'agent-server'; value: string; agentServer: AgentMcpServerInfo }
+  | { type: 'unused-connectors-fold'; value: string; count: number; shown: boolean };
 
 const SCOPE_ORDER: ConfigScope[] = ['project', 'local', 'user', 'enterprise'];
 const MIN_VISIBLE_ROWS = 4;
@@ -151,17 +163,52 @@ function buildAgentServerIcon(needsAuth: boolean): React.ReactNode {
   return <StatusIcon status={needsAuth ? 'warning' : 'off'} />;
 }
 
+function renderSuppressedConnectorHint(s: SuppressedClaudeAiConnector): React.ReactNode {
+  if (s.duplicateOf.startsWith('plugin:')) {
+    return <Text dimColor>To use this connector instead, disable the plugin server in /plugins</Text>;
+  }
+  switch (s.duplicateOfScope) {
+    case 'local':
+    case 'user':
+    case 'project':
+      return (
+        <Text dimColor>
+          To use this connector instead, run <Text bold>{`claude mcp remove ${s.duplicateOf}`}</Text>
+        </Text>
+      );
+    case 'dynamic':
+      return <Text dimColor>To use this connector instead, drop it from your --mcp-config flag</Text>;
+    case 'enterprise':
+    case 'managed':
+      return <Text dimColor>An admin-managed server takes precedence here</Text>;
+    default:
+      return <Text dimColor>To use this connector instead, remove the duplicate server from your configuration</Text>;
+  }
+}
+
 export function MCPListPanel({
   servers,
+  suppressedClaudeAiConnectors = [],
   agentServers = [],
   onSelectServer,
   onSelectAgentServer,
   onComplete,
+  showUnusedConnectors,
+  onToggleUnusedConnectors,
 }: Props): React.ReactNode {
   const mcpTools = useAppState(s => s.mcp.tools);
   const terminalSize = useTerminalSize();
   const insideModal = useIsInsideModal();
   const { rows: availableRows } = useModalOrTerminalSize(terminalSize);
+  const [internalShowUnused, setInternalShowUnused] = useState(false);
+  const effectiveShowUnused = showUnusedConnectors ?? internalShowUnused;
+  const handleToggleUnusedConnectors = useCallback(() => {
+    if (onToggleUnusedConnectors) {
+      onToggleUnusedConnectors();
+    } else {
+      setInternalShowUnused(prev => !prev);
+    }
+  }, [onToggleUnusedConnectors]);
 
   // densable 247 Et: live ref so same-tick focus + accept reads latest index.
   const selectedIndexLive = useRef(0);
@@ -179,11 +226,22 @@ export function MCPListPanel({
     return groupServersByScope(regularServers);
   }, [servers]);
 
-  const claudeAiServers = useMemo(
-    () =>
-      servers.filter(s => isOfficialClaudeAiConnector(s.client.config)).sort((a, b) => a.name.localeCompare(b.name)),
-    [servers],
-  );
+  const { claudeAiServers, unusedClaudeAiServers } = useMemo(() => {
+    const everConnected = new Set(getGlobalConfig().claudeAiMcpEverConnected ?? []);
+    const active: ServerInfo[] = [];
+    const unused: ServerInfo[] = [];
+    for (const server of servers) {
+      if (!isOfficialClaudeAiConnector(server.client.config)) continue;
+      if ((server.client.type === 'needs-auth' || server.client.type === 'failed') && !everConnected.has(server.name)) {
+        unused.push(server);
+      } else {
+        active.push(server);
+      }
+    }
+    active.sort((a, b) => a.name.localeCompare(b.name));
+    unused.sort((a, b) => a.name.localeCompare(b.name));
+    return { claudeAiServers: active, unusedClaudeAiServers: unused };
+  }, [servers]);
 
   const dynamicServers = useMemo(
     () => (serversByScope.get('dynamic') ?? []).sort((a, b) => a.name.localeCompare(b.name)),
@@ -206,7 +264,7 @@ export function MCPListPanel({
       }
       items.push({ type: 'heading', value: `spacer-${scope}`, label: <Text> </Text> });
     }
-    if (claudeAiServers.length > 0) {
+    if (claudeAiServers.length > 0 || unusedClaudeAiServers.length > 0 || suppressedClaudeAiConnectors.length > 0) {
       items.push({
         type: 'heading',
         value: 'heading-claudeai',
@@ -218,6 +276,44 @@ export function MCPListPanel({
       });
       for (const server of claudeAiServers) {
         items.push({ type: 'server', value: `claudeai-${server.name}`, server });
+      }
+      if (unusedClaudeAiServers.length > 0) {
+        items.push({
+          type: 'unused-connectors-fold',
+          value: 'claudeai-unused-fold',
+          count: unusedClaudeAiServers.length,
+          shown: effectiveShowUnused,
+        });
+        if (effectiveShowUnused) {
+          for (const server of unusedClaudeAiServers) {
+            items.push({ type: 'server', value: `claudeai-${server.name}`, server });
+          }
+        }
+      }
+      for (const suppressed of suppressedClaudeAiConnectors) {
+        items.push({
+          type: 'heading',
+          value: `suppressed-${suppressed.name}`,
+          label: (
+            <Text wrap="truncate-end">
+              {suppressed.name}
+              <Text dimColor>
+                {' · '}
+                {figures.radioOff}
+                {` hidden — same URL as your server '${suppressed.duplicateOf}'`}
+              </Text>
+            </Text>
+          ),
+        });
+        items.push({
+          type: 'heading',
+          value: `suppressed-hint-${suppressed.name}`,
+          label: (
+            <Box paddingLeft={2}>
+              <Text wrap="truncate-end">{renderSuppressedConnectorHint(suppressed)}</Text>
+            </Box>
+          ),
+        });
       }
       items.push({ type: 'heading', value: 'spacer-claudeai', label: <Text> </Text> });
     }
@@ -265,7 +361,15 @@ export function MCPListPanel({
       items.pop();
     }
     return items;
-  }, [serversByScope, claudeAiServers, agentServers, dynamicServers]);
+  }, [
+    serversByScope,
+    claudeAiServers,
+    unusedClaudeAiServers,
+    effectiveShowUnused,
+    suppressedClaudeAiConnectors,
+    agentServers,
+    dynamicServers,
+  ]);
 
   const handleCancel = useCallback((): void => {
     onComplete('MCP dialog dismissed', {
@@ -280,11 +384,17 @@ export function MCPListPanel({
       onSelectServer(item.server);
     } else if (item.type === 'agent-server' && onSelectAgentServer) {
       onSelectAgentServer(item.agentServer);
+    } else if (item.type === 'unused-connectors-fold') {
+      handleToggleUnusedConnectors();
     }
-  }, [selectableItems, onSelectServer, onSelectAgentServer]);
+  }, [selectableItems, onSelectServer, onSelectAgentServer, handleToggleUnusedConnectors]);
 
   const debugMode = isDebugMode();
-  const hasFailedClients = servers.some(s => s.client.type === 'failed');
+  const hiddenUnusedSet = useMemo(
+    () => (effectiveShowUnused ? undefined : new Set(unusedClaudeAiServers.map(s => s.name))),
+    [effectiveShowUnused, unusedClaudeAiServers],
+  );
+  const hasFailedClients = servers.some(s => s.client.type === 'failed' && !hiddenUnusedSet?.has(s.name));
 
   const itemOptions = useMemo(() => {
     return selectableItems.map(entry => {
@@ -293,6 +403,14 @@ export function MCPListPanel({
           heading: true,
           value: entry.value,
           label: entry.label,
+        };
+      }
+      if (entry.type === 'unused-connectors-fold') {
+        return {
+          value: entry.value,
+          label: 'Show unused connectors',
+          icon: <Text>{entry.shown ? figures.arrowDown : figures.arrowRight}</Text>,
+          facts: [`${entry.count} ${entry.shown ? 'shown' : 'hidden'}`],
         };
       }
       if (entry.type === 'server') {
@@ -316,7 +434,7 @@ export function MCPListPanel({
     });
   }, [selectableItems, toolCountsByServer]);
 
-  if (servers.length === 0 && agentServers.length === 0) {
+  if (servers.length === 0 && agentServers.length === 0 && suppressedClaudeAiConnectors.length === 0) {
     return null;
   }
 

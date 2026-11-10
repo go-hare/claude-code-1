@@ -1,7 +1,13 @@
 import figures from 'figures';
 import * as React from 'react';
 import { Suspense, use, useEffect, useState } from 'react';
-import { getAttacherCaps, getIsInteractive, getSessionId } from '../../bootstrap/state.js';
+import {
+  getAttacherCaps,
+  getIsInteractive,
+  getIsRemoteMode,
+  getSessionId,
+  isTeleportedSessionId,
+} from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
@@ -88,10 +94,14 @@ function buildSecondarySection({
   return [
     { label: 'Model', value: modelLabel },
     ...(githubWeb ? [githubWeb] : []),
-    ...buildIDEProperties(mcp.clients, context.options.ideInstallationStatus, theme),
-    ...buildMcpProperties(mcp.clients, theme),
-    ...buildSandboxProperties(),
-    ...buildProcessWrapperProperties(),
+    ...(getIsRemoteMode()
+      ? []
+      : [
+          ...buildIDEProperties(mcp.clients, context.options.ideInstallationStatus, theme),
+          ...buildMcpProperties(mcp.clients, theme),
+          ...buildSandboxProperties(),
+          ...buildProcessWrapperProperties(),
+        ]),
     ...buildSettingSourcesProperties(),
     ...buildAutoModeServerProperties(permissionMode),
   ];
@@ -164,10 +174,18 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
   // footer sits mid-modal with 2-3 trailing blank rows below. Outside a
   // Modal (non-fullscreen), leave layout alone — no ScrollBox to fill.
   const grow = useIsInsideModal() ? 1 : undefined;
+  const isRemote = getIsRemoteMode();
+  const isCloud = Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim()) || isTeleportedSessionId(getSessionId());
 
   return (
     <Box flexDirection="column" flexGrow={grow}>
       <Box flexDirection="column" gap={1} flexGrow={grow}>
+        {isRemote && (
+          <Text dimColor>
+            Model and cwd are the {isCloud ? 'cloud' : 'remote'} session&apos;s; the other rows describe this terminal.
+            /mcp asks the session too.
+          </Text>
+        )}
         {sections.map(
           (properties, i) =>
             properties.length > 0 && (

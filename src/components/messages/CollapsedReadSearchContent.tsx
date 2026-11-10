@@ -421,6 +421,18 @@ export function CollapsedReadSearchContent({
           (safe.pattern ? `"${safe.pattern}"` : undefined) ??
           safe.command ??
           (latest.toolName as string | undefined);
+      } else if (latest?.type === 'mcp_progress') {
+        const progress = typeof latest.progress === 'number' ? latest.progress : undefined;
+        const total = typeof latest.total === 'number' ? latest.total : undefined;
+        const progressMessage = typeof latest.progressMessage === 'string' ? latest.progressMessage.trim() : '';
+        if (progress !== undefined && total !== undefined && total > 0) {
+          const pct = Math.round(Math.min(1, Math.max(0, progress / total)) * 100);
+          incomingHint = progressMessage ? `${progressMessage} (${pct}%)` : `${pct}%`;
+        } else if (progressMessage) {
+          incomingHint = progressMessage;
+        } else if (progress !== undefined) {
+          incomingHint = `Processing… ${progress}`;
+        }
       }
     }
   }

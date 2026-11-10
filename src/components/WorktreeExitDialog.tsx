@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { getSessionId } from '../bootstrap/state.js';
 import type { CommandResultDisplay } from 'src/commands.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -22,17 +23,28 @@ function recordWorktreeExit(): void {
   /* eslint-enable @typescript-eslint/no-require-imports */
 }
 
+function readCurrentSessionTitle(): string | undefined {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  return (require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js')).getCurrentSessionTitle(
+    getSessionId(),
+  );
+  /* eslint-enable @typescript-eslint/no-require-imports */
+}
+
 type Props = {
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
   onCancel?: () => void;
 };
 
 export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode {
-  const [status, setStatus] = useState<'loading' | 'asking' | 'keeping' | 'removing' | 'done'>('loading');
+  const [status, setStatus] = useState<'loading' | 'asking' | 'keeping' | 'removing-clean' | 'removing' | 'done'>(
+    'loading',
+  );
   const [changes, setChanges] = useState<string[]>([]);
-  const [commitCount, setCommitCount] = useState<number>(0);
+  const [commitCount, setCommitCount] = useState<number | null>(0);
   const [resultMessage, setResultMessage] = useState<string | undefined>();
   const worktreeSession = getCurrentWorktreeSession();
+  const sessionTitle = useMemo(() => readCurrentSessionTitle(), []);
 
   useEffect(() => {
     async function loadChanges() {
@@ -45,18 +57,21 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
 
       // Check for commits to eject
       if (worktreeSession) {
-        // Get commits in worktree that are not in original branch
-        const { stdout: commitsStr } = await execFileNoThrow('git', [
-          'rev-list',
-          '--count',
-          `${worktreeSession.originalHeadCommit}..HEAD`,
-        ]);
-        const count = parseInt(commitsStr.trim(), 10) || 0;
+        let count: number | null = worktreeSession.hookBased ? 0 : null;
+        if (worktreeSession.originalHeadCommit) {
+          // Get commits in worktree that are not in original branch
+          const { stdout: commitsStr, code } = await execFileNoThrow('git', [
+            'rev-list',
+            '--count',
+            `${worktreeSession.originalHeadCommit}..HEAD`,
+          ]);
+          count = code === 0 ? parseInt(commitsStr.trim(), 10) || 0 : null;
+        }
         setCommitCount(count);
 
-        // If no changes and no commits, clean up silently
-        if (changeLines.length === 0 && count === 0) {
-          setStatus('removing');
+        // If no changes and no commits (and session was not named), clean up silently
+        if (changeLines.length === 0 && count === 0 && !sessionTitle) {
+          setStatus('removing-clean');
           void cleanupWorktree()
             .then(removed => {
               process.chdir(worktreeSession.originalCwd);
@@ -91,7 +106,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
     }
     void loadChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worktreeSession]);
+  }, [worktreeSession, sessionTitle]);
 
   useEffect(() => {
     if (status === 'done') {
@@ -116,7 +131,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
     if (value === 'keep' || value === 'keep-with-tmux') {
       setStatus('keeping');
       logEvent('tengu_worktree_kept', {
-        commits: commitCount,
+        commits: commitCount ?? -1,
         changed_files: changes.length,
       });
       await keepWorktree();
@@ -137,7 +152,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
     } else if (value === 'keep-kill-tmux') {
       setStatus('keeping');
       logEvent('tengu_worktree_kept', {
-        commits: commitCount,
+        commits: commitCount ?? -1,
         changed_files: changes.length,
       });
       if (worktreeSession.tmuxSessionName) {
@@ -170,7 +185,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
         }
         logEvent('tengu_worktree_removed', {
           source: 'exit_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          commits: commitCount,
+          commits: commitCount ?? -1,
           changed_files: changes.length,
         });
       } catch (error) {
@@ -182,7 +197,11 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
         return;
       }
       const tmuxNote = hasTmux ? ' Tmux session terminated.' : '';
-      if (commitCount > 0 && changes.length > 0) {
+      if (commitCount === null) {
+        setResultMessage(
+          `Worktree and branch ${worktreeSession.worktreeBranch} removed.${changes.length > 0 ? ' Uncommitted changes were discarded.' : ''}${tmuxNote}`,
+        );
+      } else if (commitCount > 0 && changes.length > 0) {
         setResultMessage(
           `Worktree removed. ${commitCount} ${commitCount === 1 ? 'commit' : 'commits'} and uncommitted changes were discarded.${tmuxNote}`,
         );
@@ -208,26 +227,32 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
     );
   }
 
-  if (status === 'removing') {
+  if (status === 'removing-clean' || status === 'removing') {
+    const label = status === 'removing-clean' ? 'Cleaning up worktree (no pending changes)…' : 'Removing worktree…';
     return (
       <Box flexDirection="row" marginY={1}>
         <Spinner />
-        <Text>Removing worktree…</Text>
+        <Text>{label}</Text>
       </Box>
     );
   }
 
   const branchName = worktreeSession.worktreeBranch;
   const hasUncommitted = changes.length > 0;
-  const hasCommits = commitCount > 0;
+  const uncommittedSummary = `${changes.length} uncommitted ${changes.length === 1 ? 'file' : 'files'}`;
+  const hasCommits = commitCount === null || commitCount > 0;
 
   let subtitle = '';
-  if (hasUncommitted && hasCommits) {
-    subtitle = `You have ${changes.length} uncommitted ${changes.length === 1 ? 'file' : 'files'} and ${commitCount} ${commitCount === 1 ? 'commit' : 'commits'} on ${branchName}. All will be lost if you remove.`;
+  if (commitCount === null) {
+    subtitle = `${hasUncommitted ? `You have ${uncommittedSummary}, and the ` : 'The '}branch ${branchName} may hold unpushed commits (commit baseline unavailable). The branch will be deleted if you remove.`;
+  } else if (hasUncommitted && hasCommits) {
+    subtitle = `You have ${uncommittedSummary} and ${commitCount} ${commitCount === 1 ? 'commit' : 'commits'} on ${branchName}. All will be lost if you remove.`;
   } else if (hasUncommitted) {
-    subtitle = `You have ${changes.length} uncommitted ${changes.length === 1 ? 'file' : 'files'}. These will be lost if you remove the worktree.`;
+    subtitle = `You have ${uncommittedSummary}. These will be lost if you remove the worktree.`;
   } else if (hasCommits) {
     subtitle = `You have ${commitCount} ${commitCount === 1 ? 'commit' : 'commits'} on ${branchName}. The branch will be deleted if you remove the worktree.`;
+  } else if (sessionTitle) {
+    subtitle = `This session was named "${sessionTitle}". Keep the worktree to resume it later, or remove it to clean up.`;
   } else {
     subtitle = 'You are working in a worktree. Keep it to continue working there, or remove it to clean up.';
   }

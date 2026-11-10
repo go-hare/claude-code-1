@@ -34,12 +34,17 @@ import {
   type HookEventMetadata,
 } from '../../utils/hooks/hooksConfigManager.js';
 import { hookSourceInlineDisplayString, type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
+import { isSafeModeEnabled, safeModeDisableHint } from '../../utils/safeMode.js';
 import { getSettings_DEPRECATED, getSettingsForSource } from '../../utils/settings/settings.js';
-import { plural } from '../../utils/stringUtils.js';
+import { capitalize, plural } from '../../utils/stringUtils.js';
 import { SelectEventMode } from './SelectEventMode.js';
 import { SelectHookMode } from './SelectHookMode.js';
 import { SelectMatcherMode } from './SelectMatcherMode.js';
 import { getContentFieldValue, ViewHookMode } from './ViewHookMode.js';
+
+export function areSettingsHooksSuspendedBySafeMode(): boolean {
+  return isSafeModeEnabled();
+}
 
 type Props = {
   toolNames: string[];
@@ -67,6 +72,7 @@ function HooksOverviewMode({
   hookEventMetadata,
   hooksByEventAndMatcher,
   restrictedByPolicy,
+  suspendedBySafeMode,
   defaultFocusIndex,
   onFocusRow,
   onSelectHook,
@@ -76,6 +82,7 @@ function HooksOverviewMode({
   hookEventMetadata: Record<HookEvent, HookEventMetadata>;
   hooksByEventAndMatcher: Record<HookEvent, Record<string, IndividualHookConfig[]>>;
   restrictedByPolicy: boolean;
+  suspendedBySafeMode?: { exitHint: string; managedHooksStillApply: boolean };
   defaultFocusIndex: number;
   onFocusRow: (index: number) => void;
   onSelectHook: (hook: IndividualHookConfig) => void;
@@ -135,7 +142,7 @@ function HooksOverviewMode({
   }, [eventGroups, allHooks.length]);
 
   const { rows: availableRows } = useModalOrTerminalSize(useTerminalSize());
-  const windowHeight = Math.max(5, availableRows - (restrictedByPolicy ? 11 : 8));
+  const windowHeight = Math.max(5, availableRows - (restrictedByPolicy ? 11 : 8) - (suspendedBySafeMode ? 4 : 0));
   const maxOrigin = Math.max(0, visualRows.length - windowHeight);
 
   const [cursor, setCursor] = useState(() => Math.max(0, Math.min(totalSelectable - 1, defaultFocusIndex)));
@@ -215,6 +222,21 @@ function HooksOverviewMode({
       }
     >
       <Box flexDirection="column" gap={1}>
+        {suspendedBySafeMode && (
+          <Box flexDirection="column">
+            <Text>
+              <StatusIcon status="warning" withSpace />
+              Safe mode: hooks from settings files won&apos;t run this session.
+            </Text>
+            <Text dimColor>
+              Session hooks created by /goal, agents and skills still run
+              {suspendedBySafeMode.managedHooksStillApply ? ', and managed policy hooks still apply' : ''}. Settings
+              edits save but don&apos;t load until safe mode is off. {capitalize(suspendedBySafeMode.exitHint)} to leave
+              safe mode.
+            </Text>
+          </Box>
+        )}
+
         {restrictedByPolicy && (
           <Box flexDirection="column">
             <Text>
@@ -455,12 +477,19 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
   }
 
   switch (modeState.mode) {
-    case 'list':
+    case 'list': {
+      const suspendedBySafeMode = areSettingsHooksSuspendedBySafeMode()
+        ? {
+            exitHint: safeModeDisableHint(),
+            managedHooksStillApply: Boolean(getSettingsForSource('policySettings')?.hooks),
+          }
+        : undefined;
       return (
         <HooksOverviewMode
           hookEventMetadata={hookEventMetadata}
           hooksByEventAndMatcher={hooksByEventAndMatcher}
           restrictedByPolicy={restrictedByPolicy}
+          suspendedBySafeMode={suspendedBySafeMode}
           defaultFocusIndex={listFocusIndex}
           onFocusRow={setListFocusIndex}
           onSelectHook={hook => {
@@ -477,6 +506,7 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           onCancel={handleExit}
         />
       );
+    }
     case 'select-event':
       return (
         <SelectEventMode

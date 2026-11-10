@@ -12,6 +12,28 @@ const statusUtilSrc = readFileSync(
   join(import.meta.dir, '../../../utils/status.tsx'),
   'utf8',
 )
+const usageSrc = readFileSync(join(import.meta.dir, '../Usage.tsx'), 'utf8')
+const statsSrc = readFileSync(join(import.meta.dir, '../../Stats.tsx'), 'utf8')
+const mcpSettingsSrc = readFileSync(
+  join(import.meta.dir, '../../mcp/MCPSettings.tsx'),
+  'utf8',
+)
+const mcpListPanelSrc = readFileSync(
+  join(import.meta.dir, '../../mcp/MCPListPanel.tsx'),
+  'utf8',
+)
+const mcpStdioMenuSrc = readFileSync(
+  join(import.meta.dir, '../../mcp/MCPStdioServerMenu.tsx'),
+  'utf8',
+)
+const mcpToolListSrc = readFileSync(
+  join(import.meta.dir, '../../mcp/MCPToolListView.tsx'),
+  'utf8',
+)
+const mcpToolDetailSrc = readFileSync(
+  join(import.meta.dir, '../../mcp/MCPToolDetailView.tsx'),
+  'utf8',
+)
 
 describe('densable 2.1.289 Settings pane', () => {
   test('tabs are Status / Config / Usage / Stats with Settings title', () => {
@@ -59,5 +81,83 @@ describe('densable 2.1.289 Status rows', () => {
     expect(statusUtilSrc).toContain("label: 'Organization policy'")
     expect(statusUtilSrc).toContain("'Enabled'")
     expect(statusUtilSrc).toContain("'Disabled'")
+  })
+
+  test('remote/cloud viewer banner is rendered at top of Status', () => {
+    expect(statusSrc).toContain(
+      "Model and cwd are the {isCloud ? 'cloud' : 'remote'} session&apos;s; the other rows describe this terminal.",
+    )
+    expect(statusSrc).toContain('/mcp asks the session too.')
+  })
+})
+
+describe('densable 2.1.289 Config submenus, search, safe-mode, and rc channel', () => {
+  test('enum options are matched by search filter', () => {
+    expect(configSrc).toContain("if (setting.type === 'enum')")
+    expect(configSrc).toContain(
+      'setting.options.some(opt => opt.toLowerCase().includes(lowerQuery))',
+    )
+  })
+
+  test('AgentsView, RemoteHomeSettings, and TextEdit submenus are wired', () => {
+    expect(configSrc).toContain("setShowSubmenu('AgentsView')")
+    expect(configSrc).toContain("showSubmenu === 'AgentsView'")
+    expect(configSrc).toContain('title="Agents view"')
+    expect(configSrc).toContain("setShowSubmenu('RemoteHomeSettings')")
+    expect(configSrc).toContain("showSubmenu === 'RemoteHomeSettings'")
+    expect(configSrc).toContain('enableRemoteHomeSettingsFromConfigPanel')
+    expect(configSrc).toContain(
+      'title="Use this machine\'s settings in cloud sessions?"',
+    )
+    expect(configSrc).toContain(
+      "setting.provided !== undefined && setting.type === 'managedEnum'",
+    )
+    expect(configSrc).toContain("setShowSubmenu('TextEdit')")
+    expect(configSrc).toContain("showSubmenu === 'TextEdit' && textEditSetting")
+    expect(configSrc).toContain(
+      "textEditSetting.optionsHint ?? 'Not a value it takes'",
+    )
+  })
+
+  test('ThemePicker receives safe-mode helpText and autoUpdatesChannel handles rc/latest', () => {
+    expect(configSrc).toContain('Custom themes are disabled in safe mode')
+    expect(configSrc).toContain("? 'slow'")
+    expect(configSrc).toContain('autoUpdatesChannel: undefined')
+  })
+})
+
+describe('densable 2.1.289 Usage, Stats, and MCP panels', () => {
+  test('Usage renders cinder_cove credit bar with subtextOverride', () => {
+    expect(usageSrc).toContain('utilization.cinder_cove')
+    expect(usageSrc).toContain('title="Claude Code and Cowork credit"')
+    expect(usageSrc).toContain('One-time credit · Expires ')
+    expect(usageSrc).toContain("'One-time credit'")
+  })
+
+  test('Stats allows upArrow to focusHeader in any active tab', () => {
+    expect(statsSrc).toContain('if (key.upArrow) {')
+    expect(statsSrc).not.toContain(
+      "if (key.upArrow && activeTab === 'Overview')",
+    )
+  })
+
+  test('MCPSettings empty state and MCPListPanel unused/suppressed connectors', () => {
+    expect(mcpSettingsSrc).toContain(
+      'No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.',
+    )
+    expect(mcpListPanelSrc).toContain("label: 'Show unused connectors'")
+    expect(mcpListPanelSrc).toContain('hidden — same URL as your server')
+  })
+
+  test('MCPStdioServerMenu, MCPToolListView, and MCPToolDetailView 2.1.289 parity', () => {
+    expect(mcpStdioMenuSrc).toContain('<Dialog')
+    expect(mcpStdioMenuSrc).toContain('Protocol: ')
+    expect(mcpStdioMenuSrc).toContain('Issue: ')
+    expect(mcpToolListSrc).toContain('disabled by your organization')
+    expect(mcpToolListSrc).toContain("'ask-only'")
+    expect(mcpToolListSrc).toContain('is disabled by your organization')
+    expect(mcpToolDetailSrc).toContain(
+      'The model receives only about the first {limit} characters.',
+    )
   })
 })

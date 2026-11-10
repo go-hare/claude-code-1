@@ -15,6 +15,7 @@ import {
   Text,
   useModalScrollRef,
 } from '@anthropic/ink';
+import { useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useAppState } from '../../state/AppState.js';
 import type { Message } from '../../types/message.js';
@@ -91,7 +92,8 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
     return currentTurn ? turnDiffToDiffData(currentTurn) : gitDiffData;
   }, [currentTurn, gitDiffData]);
 
-  const selectedFile = diffData.files[selectedIndex];
+  const selectedFile: ((typeof diffData.files)[number] & { isRestricted?: boolean }) | undefined =
+    diffData.files[selectedIndex];
   const selectedHunks = useMemo(() => {
     return selectedFile ? diffData.hunks.get(selectedFile.path) || [] : [];
   }, [selectedFile, diffData.hunks]);
@@ -148,6 +150,7 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
 
   useKeybindings(
     {
+      'diff:dismiss': handleCancel,
       'diff:previousSource': () => {
         if (viewMode === 'list' && sources.length > 1) {
           setSourceIndex(prev => (prev - 1 + sources.length) % sources.length);
@@ -172,8 +175,38 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
       },
       'diff:previousFile': () => scrollDetail('up'),
       'diff:nextFile': () => scrollDetail('down'),
+      'scroll:pageUp': () => scrollDetail('pageUp'),
+      'scroll:pageDown': () => scrollDetail('pageDown'),
+      'scroll:fullPageUp': () => scrollDetail('fullPageUp'),
+      'scroll:fullPageDown': () => scrollDetail('fullPageDown'),
+      'scroll:top': () => scrollDetail('top'),
+      'scroll:bottom': () => scrollDetail('bottom'),
     },
     { context: 'DiffDialog' },
+  );
+
+  useRegisterKeybindingContext('DiffDialog');
+
+  const moveFileSelection = useCallback(
+    (delta: number) => {
+      setSelection(prev => {
+        const cur = prev.source === sourceIndex ? prev.index : 0;
+        const next = Math.max(0, Math.min(diffData.files.length - 1, cur + delta));
+        if (next === cur) {
+          return prev;
+        }
+        return { source: sourceIndex, index: next, mount: prev.mount + 1 };
+      });
+    },
+    [diffData.files.length, sourceIndex],
+  );
+
+  useKeybindings(
+    {
+      'diff:previousFile': () => moveFileSelection(-1),
+      'diff:nextFile': () => moveFileSelection(1),
+    },
+    { context: 'Select', isActive: viewMode === 'list' },
   );
 
   useKeybindings(
@@ -266,6 +299,7 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
             isBinary={selectedFile?.isBinary}
             isTruncated={selectedFile?.isTruncated}
             isUntracked={selectedFile?.isUntracked}
+            isRestricted={selectedFile?.isRestricted}
           />
         </Box>
       )}

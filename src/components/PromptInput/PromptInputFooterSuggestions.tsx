@@ -64,7 +64,7 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   item,
   maxColumnWidth,
   isSelected,
-  allowWrap = false,
+  allowWrap = true,
 }: {
   item: SuggestionItem;
   maxColumnWidth?: number;
@@ -158,9 +158,9 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   const tagText = item.tag ? `[${item.tag}] ` : '';
   const tagWidth = stringWidth(tagText);
   const { kindLaneText, kindLabel, sourceText } = menuKindLane(item);
-  // densable passes color "skill", which is not a theme key, so it renders in the default color.
-  const laneColor: keyof Theme | undefined = kindLabel === 'agent' ? 'background' : undefined;
-  const laneDim = kindLabel !== 'skill' && kindLabel !== 'agent';
+  const laneColor: keyof Theme | undefined =
+    kindLabel === 'skill' ? 'skill' : kindLabel === 'agent' ? 'background' : undefined;
+  const laneDim = !laneColor;
   const laneWidth = stringWidth(kindLaneText) + stringWidth(sourceText);
   const descriptionWidth = Math.max(0, columns - displayTextWidth - tagWidth - laneWidth - 4);
   // Skill descriptions can contain newlines (e.g. /claude-api's "TRIGGER

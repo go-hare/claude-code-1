@@ -16,6 +16,7 @@ import type { TaskState } from '../../../tasks/types.js'
 import { IDLE_WINDOW_KEEPALIVE_REASON } from '../../../utils/task/framework.js'
 import {
   canOpenBackgroundTaskDetail,
+  getActionsForItem,
   isBackgroundTasksDialogRow,
   isCompletedAgentListItem,
   isCompletedUnparkedLocalAgent,
@@ -199,5 +200,35 @@ describe('densable 2.1.239 xCs sK / copy', () => {
       "count(agentTasks, t => t.status === 'running') > 1",
     )
     expect(dialog).not.toContain("agentTasks.some(t => t.status === 'running')")
+  })
+
+  test('289 screenReader mode: actions secondary menu and ReviewSessionDetail nLe alignment', () => {
+    expect(dialog).toContain("mode: 'actions'")
+    expect(dialog).toContain('Actions for')
+    expect(
+      getActionsForItem({
+        id: 'b1',
+        type: 'local_bash',
+        label: 'sleep 10',
+        status: 'running',
+        task: { id: 'b1', type: 'local_bash', status: 'running' } as never,
+      }),
+    ).toEqual(['view', 'stop'])
+    expect(
+      getActionsForItem({
+        id: 'w1',
+        type: 'monitor_ws',
+        label: 'watch',
+        status: 'running',
+        task: { id: 'w1', type: 'monitor_ws', status: 'running' } as never,
+      }),
+    ).toEqual(['stop'])
+
+    const remoteDetail = readFileSync(
+      join(import.meta.dir, '../RemoteSessionDetailDialog.tsx'),
+      'utf8',
+    )
+    expect(remoteDetail).toContain('The full review is in this session.')
+    expect(remoteDetail).not.toContain('Open in Claude Code on the web')
   })
 })

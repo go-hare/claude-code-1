@@ -306,11 +306,20 @@ export function renderToolUseErrorMessage(
   return <FallbackToolUseErrorMessage result={result} verbose={verbose} />;
 }
 
+const STAGED_SETTINGS_REVIEW_TEXT = 'Staged for your review · not applied until you accept it in /settings-review';
+
 export function renderToolResultMessage(
   output: Output,
   progressMessagesForMessage: ProgressMessage<ToolProgressData>[],
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
+  if ((output as { staged?: boolean }).staged && output.filePath) {
+    return (
+      <MessageResponse>
+        <Text dimColor>{STAGED_SETTINGS_REVIEW_TEXT}</Text>
+      </MessageResponse>
+    );
+  }
   return renderFileWriteResult(output, progressMessagesForMessage, { style, verbose });
 }
 

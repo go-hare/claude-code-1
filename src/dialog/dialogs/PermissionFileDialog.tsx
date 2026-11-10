@@ -20,10 +20,12 @@ import { toTildePath } from '../../components/permissions/dontAskAgainLabel.js';
 import { FileWriteToolDiff } from '../../components/permissions/FileWritePermissionRequest/FileWriteToolDiff.js';
 import { NotebookEditToolDiff } from '../../components/permissions/NotebookEditPermissionRequest/NotebookEditToolDiff.js';
 import { PermissionPrompt, type PermissionPromptOption } from '../../components/permissions/PermissionPrompt.js';
+import { PermissionRuleExplanation } from '../../components/permissions/PermissionRuleExplanation.js';
 import { useAppState } from '../../state/AppState.js';
 import type { NotebookCellType } from '../../types/notebook.js';
 import { getCwd } from '../../utils/cwd.js';
 import { isSupportedVSCodeTerminal } from '../../utils/ide.js';
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
 import { resolveSandboxFilesystemDisabled, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { getSettingsForSource } from '../../utils/settings/settings.js';
 import type { DialogRendererProps } from '../DialogHost.js';
@@ -34,6 +36,7 @@ import {
   filePermissionDialogTitle,
   filePermissionOffersBlockOutsideReads,
   filePermissionQuestionNode,
+  isFileDirectoryGrantOnly,
   isFileStandingRowVetoed,
   mintFileStandingRow,
   resolveFilePermissionAnswer,
@@ -156,11 +159,12 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
   const [showAmendHint, setShowAmendHint] = useState(false);
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const standingRowVetoed = isFileStandingRowVetoed(p);
+  const directoryGrantOnly = isFileDirectoryGrantOnly(p);
   const offersBlockOutsideReads = filePermissionOffersBlockOutsideReads(p);
   const standing =
-    standingRowVetoed || offersBlockOutsideReads
+    (standingRowVetoed && !directoryGrantOnly) || offersBlockOutsideReads
       ? null
-      : mintFileStandingRow(p.filePath, p.operationType, toolPermissionContext);
+      : mintFileStandingRow(p.filePath, p.operationType, toolPermissionContext, { directoryGrantOnly });
   const cycleShortcut = getShortcutDisplay('confirm:cycleMode', 'Confirmation', 'shift+tab');
   const standingLabel =
     standing === null ? null : standing.value === 'yes-session' && p.operationType !== 'read' ? (
@@ -175,7 +179,11 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
     ? [
         { label: OUTSIDE_READS_OPTION_ALLOW, value: 'yes', feedbackConfig: { type: 'accept' } },
         { label: OUTSIDE_READS_OPTION_BLOCK, value: 'block-outside-reads' },
-        { label: OUTSIDE_READS_OPTION_ASK_AGAIN, value: 'ask-again-outside-reads' },
+        {
+          label: OUTSIDE_READS_OPTION_ASK_AGAIN,
+          value: 'ask-again-outside-reads',
+          feedbackConfig: { type: 'reject' },
+        },
         {
           label: OUTSIDE_READS_OPTION_ALLOW_ASK_AGAIN,
           value: 'allow-outside-read-once',
@@ -194,6 +202,9 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
   );
 
   const showingDiffInIDE = p.showingDiffInIDE === true;
+  const dialogTitle = showingDiffInIDE ? `Opened changes in ${p.ideName ?? 'IDE'} ⧉` : filePermissionDialogTitle(p);
+  const hasDenialLimitFallback =
+    (p.permissionResult as { denialLimitFallback?: unknown } | null)?.denialLimitFallback !== undefined;
 
   const cycleModeAction = useCallback(() => {
     if (standing === null) return;
@@ -202,13 +213,13 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
 
   return (
     <>
-      <PermissionDialog
-        title={filePermissionDialogTitle(p)}
-        subtitle={p.subtitle}
-        innerPaddingX={0}
-        requestSource={p.requestSource}
-      >
+      <PermissionDialog title={dialogTitle} subtitle={p.subtitle} innerPaddingX={0} requestSource={p.requestSource}>
         {symlinkWarning(p.symlinkTarget)}
+        {hasDenialLimitFallback && (
+          <Box paddingX={1}>
+            <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType="edit" />
+          </Box>
+        )}
         {showingDiffInIDE
           ? isSupportedVSCodeTerminal() && (
               <Box paddingX={1} marginBottom={1}>

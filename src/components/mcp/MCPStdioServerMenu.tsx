@@ -1,8 +1,7 @@
 import figures from 'figures';
 import React, { useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, color, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, color, Dialog, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
 import { getMcpConfigByName } from '../../services/mcp/config.js';
 import { useMcpReconnect, useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
 import { describeMcpConfigFilePath, filterMcpPromptsByServer } from '../../services/mcp/utils.js';
@@ -11,7 +10,6 @@ import { errorMessage } from '../../utils/errors.js';
 import { capitalize } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { Spinner } from '../Spinner.js';
 import { CapabilitiesSection } from './CapabilitiesSection.js';
 import type { StdioServerInfo } from './types.js';
@@ -35,7 +33,6 @@ export function MCPStdioServerMenu({
   borderless = false,
 }: Props): React.ReactNode {
   const [theme] = useTheme();
-  const exitState = useExitOnCtrlCDWithKeybindings();
   const mcp = useAppState(s => s.mcp);
   const reconnectMcpServer = useMcpReconnect();
   const toggleMcpServer = useMcpToggleEnabled();
@@ -92,7 +89,7 @@ export function MCPStdioServerMenu({
 
   if (isReconnecting) {
     return (
-      <Box flexDirection="column" gap={1} padding={1}>
+      <Dialog title={`${capitalizedServerName} MCP Server`} onCancel={() => {}} hideBorder={borderless} hideInputGuide>
         <Text color="text">
           Reconnecting to <Text bold>{server.name}</Text>
         </Text>
@@ -101,110 +98,134 @@ export function MCPStdioServerMenu({
           <Text> Restarting MCP server process</Text>
         </Box>
         <Text dimColor>This may take a few moments.</Text>
-      </Box>
+      </Dialog>
     );
   }
 
+  const connectedClient =
+    server.client.type === 'connected'
+      ? (server.client as {
+          protocolEra?: string;
+          negotiatedProtocolVersion?: string;
+          toolsListError?: string;
+        })
+      : undefined;
+
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingX={1} borderStyle={borderless ? undefined : 'round'}>
-        <Box marginBottom={1}>
-          <Text bold>{capitalizedServerName} MCP Server</Text>
-        </Box>
-
-        <Box flexDirection="column" gap={0}>
-          <Box>
-            <Text bold>Status: </Text>
-            {server.client.type === 'disabled' ? (
-              <Text>{color('inactive', theme)(figures.radioOff)} disabled</Text>
-            ) : server.client.type === 'connected' ? (
-              <Text>{color('success', theme)(figures.tick)} connected</Text>
-            ) : server.client.type === 'pending' ? (
-              <>
-                <Text dimColor>{figures.radioOff}</Text>
-                <Text> connecting…</Text>
-              </>
+    <Dialog
+      title={`${capitalizedServerName} MCP Server`}
+      onCancel={onCancel}
+      hideBorder={borderless}
+      inputGuide={exitState =>
+        exitState.pending ? (
+          <Text>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Byline>
+            <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
+            <KeyboardShortcutHint shortcut="Enter" action="select" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
+          </Byline>
+        )
+      }
+    >
+      <Box flexDirection="column" gap={0}>
+        <Box>
+          <Text bold>Status: </Text>
+          {server.client.type === 'disabled' ? (
+            <Text>{color('inactive', theme)(figures.radioOff)} disabled</Text>
+          ) : server.client.type === 'connected' ? (
+            server.client.toolsListError ? (
+              <Text>{color('warning', theme)(figures.warning)} connected · tools fetch failed</Text>
+            ) : server.client.capabilities?.tools && serverToolsCount === 0 ? (
+              <Text>{color('warning', theme)(figures.warning)} connected · no tools</Text>
             ) : (
-              <Text>{color('error', theme)(figures.cross)} failed</Text>
-            )}
-          </Box>
-
-          <Box>
-            <Text bold>Command: </Text>
-            <Text dimColor>{server.config.command}</Text>
-          </Box>
-
-          {server.config.args && server.config.args.length > 0 && (
-            <Box>
-              <Text bold>Args: </Text>
-              <Text dimColor>{server.config.args.join(' ')}</Text>
-            </Box>
-          )}
-
-          <Box>
-            <Text bold>Config location: </Text>
-            <Text dimColor>{describeMcpConfigFilePath(getMcpConfigByName(server.name)?.scope ?? 'dynamic')}</Text>
-          </Box>
-
-          {server.client.type === 'connected' && (
-            <CapabilitiesSection
-              serverToolsCount={serverToolsCount}
-              serverPromptsCount={serverCommandsCount}
-              serverResourcesCount={mcp.resources[server.name]?.length || 0}
-            />
-          )}
-
-          {server.client.type === 'connected' && serverToolsCount > 0 && (
-            <Box>
-              <Text bold>Tools: </Text>
-              <Text dimColor>{serverToolsCount} tools</Text>
-            </Box>
+              <Text>{color('success', theme)(figures.tick)} connected</Text>
+            )
+          ) : server.client.type === 'pending' ? (
+            <>
+              <Text dimColor>{figures.radioOff}</Text>
+              <Text> connecting…</Text>
+            </>
+          ) : (
+            <Text>{color('error', theme)(figures.cross)} failed</Text>
           )}
         </Box>
 
-        {menuOptions.length > 0 && (
-          <Box marginTop={1}>
-            <Select
-              options={menuOptions}
-              onChange={async value => {
-                if (value === 'tools') {
-                  onViewTools();
-                } else if (value === 'reconnectMcpServer') {
-                  setIsReconnecting(true);
-                  try {
-                    const result = await reconnectMcpServer(server.name);
-                    const { message } = handleReconnectResult(result, server.name);
-                    onComplete?.(message);
-                  } catch (err) {
-                    onComplete?.(handleReconnectError(err, server.name));
-                  } finally {
-                    setIsReconnecting(false);
-                  }
-                } else if (value === 'toggle-enabled') {
-                  await handleToggleEnabled();
-                } else if (value === 'back') {
-                  onCancel();
-                }
-              }}
-              onCancel={onCancel}
-            />
+        <Box>
+          <Text bold>Command: </Text>
+          <Text dimColor>{server.config.command}</Text>
+        </Box>
+
+        {server.config.args && server.config.args.length > 0 && (
+          <Box>
+            <Text bold>Args: </Text>
+            <Text dimColor>{server.config.args.join(' ')}</Text>
+          </Box>
+        )}
+
+        {connectedClient && connectedClient.protocolEra !== 'legacy' && connectedClient.negotiatedProtocolVersion && (
+          <Box>
+            <Text bold>Protocol: </Text>
+            <Text dimColor>{connectedClient.negotiatedProtocolVersion}</Text>
+          </Box>
+        )}
+
+        <Box>
+          <Text bold>Config location: </Text>
+          <Text dimColor>{describeMcpConfigFilePath(getMcpConfigByName(server.name)?.scope ?? 'dynamic')}</Text>
+        </Box>
+
+        {server.client.type === 'connected' && (
+          <CapabilitiesSection
+            serverToolsCount={serverToolsCount}
+            serverPromptsCount={serverCommandsCount}
+            serverResourcesCount={mcp.resources[server.name]?.length || 0}
+          />
+        )}
+
+        {server.client.type === 'connected' && serverToolsCount > 0 && (
+          <Box>
+            <Text bold>Tools: </Text>
+            <Text dimColor>{serverToolsCount} tools</Text>
+          </Box>
+        )}
+
+        {server.client.type === 'connected' && server.client.toolsListError && (
+          <Box flexDirection="column">
+            <Text bold>Issue: </Text>
+            <Text dimColor>{server.client.toolsListError}</Text>
           </Box>
         )}
       </Box>
 
-      <Box marginTop={1}>
-        <Text dimColor italic>
-          {exitState.pending ? (
-            <>Press {exitState.keyName} again to exit</>
-          ) : (
-            <Byline>
-              <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
-              <KeyboardShortcutHint shortcut="Enter" action="select" />
-              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
-            </Byline>
-          )}
-        </Text>
-      </Box>
-    </Box>
+      {menuOptions.length > 0 && (
+        <Box marginTop={1}>
+          <Select
+            options={menuOptions}
+            onChange={async value => {
+              if (value === 'tools') {
+                onViewTools();
+              } else if (value === 'reconnectMcpServer') {
+                setIsReconnecting(true);
+                try {
+                  const result = await reconnectMcpServer(server.name);
+                  const { message } = handleReconnectResult(result, server.name);
+                  onComplete?.(message);
+                } catch (err) {
+                  onComplete?.(handleReconnectError(err, server.name));
+                } finally {
+                  setIsReconnecting(false);
+                }
+              } else if (value === 'toggle-enabled') {
+                await handleToggleEnabled();
+              } else if (value === 'back') {
+                onCancel();
+              }
+            }}
+            onCancel={onCancel}
+          />
+        </Box>
+      )}
+    </Dialog>
   );
 }

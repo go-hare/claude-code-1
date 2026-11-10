@@ -1,9 +1,8 @@
 import * as React from 'react';
 import { useState } from 'react';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
-import { Dialog } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Link, Text } from '@anthropic/ink';
 import { FastIcon, getFastIconString } from '../../components/FastIcon.js';
-import { Box, Link, Text } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -125,9 +124,13 @@ export function FastModePicker({
         exitState.pending ? (
           <Text>Press {exitState.keyName} again to exit</Text>
         ) : isUnavailable ? (
-          <Text>Esc to cancel</Text>
+          <KeyboardShortcutHint shortcut="escape" action="cancel" />
         ) : (
-          <Text>Tab to toggle · Enter to confirm · Esc to cancel</Text>
+          <Byline>
+            <KeyboardShortcutHint shortcut="space" action="toggle" />
+            <KeyboardShortcutHint shortcut="enter" action="confirm" />
+            <KeyboardShortcutHint shortcut="escape" action="cancel" />
+          </Byline>
         )
       }
     >

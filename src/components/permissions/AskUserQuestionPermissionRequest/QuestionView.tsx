@@ -12,6 +12,7 @@ import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
+import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
 import { FilePathLink } from '../../FilePathLink.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
@@ -80,6 +81,7 @@ export function QuestionView({
   onRemoveImage,
 }: Props): React.ReactNode {
   const isInPlanMode = useAppState(s => s.toolPermissionContext.mode) === 'plan';
+  const isScreenReader = isScreenReaderModeEnabled();
   const [isFooterFocused, setIsFooterFocused] = useState(false);
   const [isOtherFocused, setIsOtherFocused] = useState(false);
   const latestOtherInputRef = useRef<{ question: string; value: string } | null>(null);
@@ -111,7 +113,13 @@ export function QuestionView({
     (e: KeyboardEvent) => {
       const normalizedKey = e.key.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
       if (!isFooterFocused) {
-        if (!isOtherFocused && !e.ctrl && !e.meta && normalizedKey === String(chatAboutOptionNumber)) {
+        if (
+          !isScreenReader &&
+          !isOtherFocused &&
+          !e.ctrl &&
+          !e.meta &&
+          normalizedKey === String(chatAboutOptionNumber)
+        ) {
           e.preventDefault();
           onRespondToClaude();
         }
@@ -135,7 +143,15 @@ export function QuestionView({
         onCancel();
       }
     },
-    [chatAboutOptionNumber, isFooterFocused, isOtherFocused, handleUpFromFooter, onRespondToClaude, onCancel],
+    [
+      chatAboutOptionNumber,
+      isFooterFocused,
+      isOtherFocused,
+      isScreenReader,
+      handleUpFromFooter,
+      onRespondToClaude,
+      onCancel,
+    ],
   );
 
   const textOptions: OptionWithDescription<string>[] = question.options.map((opt: QuestionOption) => ({
@@ -174,12 +190,18 @@ export function QuestionView({
     },
   };
 
-  const options = [...textOptions, otherOption];
+  const chatOption: OptionWithDescription<string>[] =
+    isScreenReader && !question.multiSelect
+      ? [{ type: 'text' as const, value: '__chat__', label: 'Chat about this' }]
+      : [];
+
+  const options = [...textOptions, otherOption, ...chatOption];
 
   // Check if any option has a preview and it's not multi-select
-  // Previews only supported for single-select questions
+  // Previews only supported for single-select questions (and bypassed in screen reader mode)
   const hasAnyPreview =
     !question.multiSelect &&
+    !isScreenReader &&
     (question.options.some(opt => opt.preview !== undefined) || (optionPreviews?.some(p => p !== undefined) ?? false));
 
   // Delegate to PreviewQuestionView for carousel-style preview mode
@@ -279,13 +301,17 @@ export function QuestionView({
                 options={options}
                 defaultValue={questionStates[question.question]?.selectedValue as string | undefined}
                 onChange={(value: string) => {
+                  if (value === '__chat__') {
+                    onRespondToClaude();
+                    return;
+                  }
                   onUpdateQuestionState(questionText, { selectedValue: value }, false);
                   const textInput = value === '__other__' ? questionStates[questionText]?.textInputValue : undefined;
                   onAnswer(questionText, value, textInput);
                 }}
                 onFocus={handleFocus}
                 onCancel={onCancel}
-                onDownFromLastItem={handleDownFromLastItem}
+                onDownFromLastItem={isScreenReader ? undefined : handleDownFromLastItem}
                 isDisabled={isFooterFocused}
                 layout="compact-vertical"
                 onOpenEditor={handleOpenEditor}
@@ -295,30 +321,34 @@ export function QuestionView({
               />
             )}
           </Box>
-          {/* Footer section - always visible, separate from Select */}
-          <Box flexDirection="column">
-            <Divider color="inactive" />
-            <Box flexDirection="row" gap={1}>
-              {isFooterFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
-              <Text color={isFooterFocused ? 'suggestion' : undefined}>{options.length + 1}. Chat about this</Text>
-            </Box>
-          </Box>
-          <Box marginTop={1}>
-            <Text color="inactive" dimColor>
-              <Byline>
-                <KeyboardShortcutHint shortcut="Enter" action="select" />
-                {questions.length === 1 ? (
-                  <KeyboardShortcutHint shortcut={`${figures.arrowUp}/${figures.arrowDown}`} action="navigate" />
-                ) : (
-                  <Text>Tab/Arrow keys to navigate</Text>
-                )}
-                {isOtherFocused && editorName && (
-                  <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
-                )}
-                <KeyboardShortcutHint shortcut="Esc" action="cancel" />
-              </Byline>
-            </Text>
-          </Box>
+          {/* Footer section - separate from Select in standard mode; omitted in screen-reader mode */}
+          {!isScreenReader && (
+            <>
+              <Box flexDirection="column">
+                <Divider color="inactive" />
+                <Box flexDirection="row" gap={1}>
+                  {isFooterFocused ? <Text color="suggestion">{figures.pointer}</Text> : <Text> </Text>}
+                  <Text color={isFooterFocused ? 'suggestion' : undefined}>{options.length + 1}. Chat about this</Text>
+                </Box>
+              </Box>
+              <Box marginTop={1}>
+                <Text color="inactive" dimColor>
+                  <Byline>
+                    <KeyboardShortcutHint shortcut="Enter" action="select" />
+                    {questions.length === 1 ? (
+                      <KeyboardShortcutHint shortcut={`${figures.arrowUp}/${figures.arrowDown}`} action="navigate" />
+                    ) : (
+                      <Text>Tab/Arrow keys to navigate</Text>
+                    )}
+                    {isOtherFocused && editorName && (
+                      <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                    )}
+                    <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+                  </Byline>
+                </Text>
+              </Box>
+            </>
+          )}
         </Box>
       </Box>
     </Box>

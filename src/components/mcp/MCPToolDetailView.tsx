@@ -1,10 +1,21 @@
+import { MAX_MCP_DESCRIPTION_LENGTH } from '@claude-code/mcp-client';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, Text } from '@anthropic/ink';
 import { extractMcpToolDisplayName, getMcpDisplayName } from '../../services/mcp/mcpStringUtils.js';
 import type { Tool } from '../../Tool.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Dialog } from '@anthropic/ink';
 import type { ServerInfo } from './types.js';
+
+function getMaxMcpDescriptionLength(): number {
+  const raw = process.env.CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH;
+  if (raw) {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return MAX_MCP_DESCRIPTION_LENGTH;
+}
 
 type Props = {
   tool: Tool;
@@ -22,6 +33,7 @@ export function MCPToolDetailView({ tool, server, onBack }: Props): React.ReactN
   const isReadOnly = tool.isReadOnly?.({}) ?? false;
   const isDestructive = tool.isDestructive?.({}) ?? false;
   const isOpenWorld = tool.isOpenWorld?.({}) ?? false;
+  const limit = getMaxMcpDescriptionLength();
 
   React.useEffect(() => {
     async function loadDescription() {
@@ -86,6 +98,9 @@ export function MCPToolDetailView({ tool, server, onBack }: Props): React.ReactN
           <Box flexDirection="column" marginTop={1}>
             <Text bold>Description:</Text>
             <Text wrap="wrap">{toolDescription}</Text>
+            {toolDescription.length > limit && (
+              <Text dimColor>The model receives only about the first {limit} characters.</Text>
+            )}
           </Box>
         )}
 

@@ -27,6 +27,7 @@ import {
   AxcStickyHost,
   Box,
   Divider,
+  NoSelect,
   ScrollBox,
   type ScrollBoxHandle,
   TerminalSizeContext,
@@ -1469,11 +1470,13 @@ function useYogaHeight(ref: RefObject<DOMElement | null>): number {
   return useMeasured(read);
 }
 
-type Props = {
+export type FullscreenLayoutProps = {
   /** Content that scrolls (messages, tool output) */
   scrollable: ReactNode;
   /** Content pinned to the bottom (spinner, prompt, permissions) */
   bottom: ReactNode;
+  /** Optional node rendered at the top of the main transcript column above StickyPromptHeader */
+  top?: ReactNode;
   /**
    * densable abovePrompt (vh). Capped at Ne on its own; the prompt box
    * receives the leftover `max(0, Ne - measured height)`.
@@ -1524,6 +1527,8 @@ type Props = {
   /** densable tot `dockTail` (`Nc`) — fills the prompt anchor margin gap under `dock`. */
   dockTail?: ReactNode;
 };
+
+type Props = FullscreenLayoutProps;
 
 /**
  * Tracks the in-transcript "N new messages" divider position while the
@@ -1751,6 +1756,7 @@ export function FullscreenLayout({
   dock,
   dockWidth = 0,
   dockTail,
+  top,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
   // densable tot `Zot()||XMn()` — only history-search / elicitation take rows-2.
@@ -1925,6 +1931,7 @@ export function FullscreenLayout({
                     full terminal (sidebar is a sibling outside this context). */}
                 <TerminalSizeContext value={{ columns: mainColumns, rows: terminalRows }}>
                   <Box flexDirection="column" flexGrow={1} width={mainColumns} overflow="hidden">
+                    {top}
                     {headerPrompt != null && (
                       <StickyPromptHeader text={headerPrompt.text} onClick={headerPrompt.scrollTo} />
                     )}
@@ -2179,22 +2186,31 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
 // even with scrollTop unchanged (the DECSTBM region top shifts with the
 // ScrollBox, and the diff engine sees "everything moved"). Fixed height
 // keeps the ScrollBox anchored; only the header TEXT changes, not its box.
-function StickyPromptHeader({ text, onClick }: { text: string; onClick: () => void }): React.ReactNode {
+function StickyPromptHeader({
+  text,
+  onClick,
+  leftMargin = 0,
+}: {
+  text: string;
+  onClick: () => void;
+  leftMargin?: number;
+}): React.ReactNode {
   const [hover, setHover] = useState(false);
   return (
-    <Box
-      flexShrink={0}
-      width="100%"
-      height={1}
-      paddingRight={1}
-      backgroundColor={hover ? 'userMessageBackgroundHover' : 'userMessageBackground'}
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <Text color="subtle" wrap="truncate-end">
-        {figures.pointer} {text}
-      </Text>
+    <Box flexShrink={0} width="100%" height={1} flexDirection="row">
+      {leftMargin > 0 && <NoSelect fromLeftEdge minWidth={leftMargin} />}
+      <Box
+        flexGrow={1}
+        paddingRight={1}
+        backgroundColor={hover ? 'userMessageBackgroundHover' : 'userMessageBackground'}
+        onClick={onClick}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <Text color="subtle" wrap="truncate-end">
+          {figures.pointer} {text}
+        </Text>
+      </Box>
     </Box>
   );
 }

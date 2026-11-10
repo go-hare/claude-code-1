@@ -115,14 +115,35 @@ function getContentFieldLabel(config: IndividualHookConfig['config']): string {
 }
 
 export function getContentFieldValue(config: IndividualHookConfig['config']): string {
-  switch (config.type) {
+  const raw = config as {
+    type: string;
+    command?: string;
+    args?: string[];
+    prompt?: string;
+    url?: string;
+    file?: string;
+    script?: string;
+    server?: string;
+    tool?: string;
+    toolName?: string;
+    serverName?: string;
+  };
+  switch (raw.type) {
     case 'command':
-      return config.command;
+      return raw.args ? [raw.command ?? '', ...raw.args].join(' ') : (raw.command ?? '');
     case 'prompt':
-      return config.prompt;
+      return raw.prompt ?? '';
     case 'agent':
-      return config.prompt;
+      return raw.prompt ?? '';
     case 'http':
-      return config.url;
+      return raw.url ?? '';
+    case 'mcp_tool':
+      return raw.server !== undefined && raw.tool !== undefined
+        ? `${raw.server}/${raw.tool}`
+        : (raw.toolName ?? raw.serverName ?? '');
+    case 'script':
+      return raw.file ?? raw.script ?? '';
+    default:
+      return '';
   }
 }

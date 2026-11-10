@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, color, Link, Text, useTheme, Pane, Tab, Tabs, useTabHeaderFocus } from '@anthropic/ink';
+import { Box, Link, Text, Pane, Tab, Tabs, useTabHeaderFocus } from '@anthropic/ink';
+import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { CommandResultDisplay } from '../../types/command.js';
 import type { SandboxDependencyCheck } from '../../utils/sandbox/sandbox-adapter.js';
@@ -18,7 +19,6 @@ type Props = {
 type SandboxMode = 'auto-allow' | 'regular' | 'disabled';
 
 export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNode {
-  const [theme] = useTheme();
   const currentEnabled = SandboxManager.isSandboxingEnabled();
   const currentAutoAllow = SandboxManager.isAutoAllowBashIfSandboxedEnabled();
   const hasWarnings = depCheck.warnings.length > 0;
@@ -35,25 +35,18 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
   };
 
   const currentMode = getCurrentMode();
-  const currentIndicator = color('success', theme)(`(current)`);
 
   const options = [
     {
-      label:
-        currentMode === 'auto-allow'
-          ? `Sandbox BashTool, with auto-allow ${currentIndicator}`
-          : 'Sandbox BashTool, with auto-allow',
+      label: 'Sandbox BashTool, with auto-allow',
       value: 'auto-allow',
     },
     {
-      label:
-        currentMode === 'regular'
-          ? `Sandbox BashTool, with regular permissions ${currentIndicator}`
-          : 'Sandbox BashTool, with regular permissions',
+      label: 'Sandbox BashTool, with regular permissions',
       value: 'regular',
     },
     {
-      label: currentMode === 'disabled' ? `No Sandbox ${currentIndicator}` : 'No Sandbox',
+      label: 'No Sandbox',
       value: 'disabled',
     },
   ];
@@ -86,18 +79,23 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
     }
   }
 
+  const handleCancel = () => onComplete(undefined, { display: 'skip' });
+
   useKeybindings(
     {
-      'confirm:no': () => onComplete(undefined, { display: 'skip' }),
+      'confirm:no': handleCancel,
     },
     { context: 'Settings' },
   );
+
+  const exitState = useExitOnCtrlCDWithKeybindings(handleCancel);
 
   const modeTab = (
     <Tab key="mode" title="Mode">
       <SandboxModeTab
         showSocketWarning={showSocketWarning}
         options={options}
+        currentMode={currentMode}
         onSelect={handleSelect}
         onComplete={onComplete}
       />
@@ -141,9 +139,16 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
 
   return (
     <Pane color="permission">
-      <Tabs title="Sandbox:" color="permission" defaultTab="Mode">
+      <Tabs title="Sandbox" color="permission" defaultTab="Mode" navFromContent={true}>
         {tabs}
       </Tabs>
+      <Box marginTop={1}>
+        <Text dimColor italic>
+          {exitState.pending
+            ? `Press ${exitState.keyName} again to close`
+            : '←/→ to switch · ↑/↓ to navigate · Enter to select · Esc to close'}
+        </Text>
+      </Box>
     </Pane>
   );
 }
@@ -151,11 +156,13 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
 function SandboxModeTab({
   showSocketWarning,
   options,
+  currentMode,
   onSelect,
   onComplete,
 }: {
   showSocketWarning: boolean;
   options: Array<{ label: string; value: string }>;
+  currentMode: SandboxMode;
   onSelect: (value: string) => void;
   onComplete: Props['onComplete'];
 }): React.ReactNode {
@@ -168,10 +175,12 @@ function SandboxModeTab({
         </Box>
       )}
       <Box marginBottom={1}>
-        <Text bold>Configure Mode:</Text>
+        <Text bold>Configure mode</Text>
       </Box>
       <Select
         options={options}
+        defaultValue={currentMode}
+        defaultFocusValue={currentMode}
         onChange={onSelect}
         onCancel={() => onComplete(undefined, { display: 'skip' })}
         onUpFromFirstItem={focusHeader}

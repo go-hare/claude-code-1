@@ -177,7 +177,7 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
         onClose('Stats dialog dismissed', { display: 'system' });
         return;
       }
-      if (key.upArrow && activeTab === 'Overview') {
+      if (key.upArrow) {
         focusHeader();
         return;
       }

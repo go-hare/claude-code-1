@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
-import { type ReactNode, useContext, useEffect, useState } from 'react';
+import { type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { coerce } from 'semver';
 import {
   AccessibilityContext,
@@ -323,6 +323,32 @@ function HeaderClawd({
 
 type RcPillStatus = BridgeStatusInfo;
 
+export const RC_ACTIVE_BADGE_KEY = 'rc-active-badge';
+export const RC_ACTIVE_VERBOSE_CAP = 5;
+
+function shouldShowVerboseRcActive(): boolean {
+  const seen = (getGlobalConfig() as GlobalConfig & { seenNotifications?: Record<string, number> }).seenNotifications;
+  return (seen?.[RC_ACTIVE_BADGE_KEY] ?? 0) < RC_ACTIVE_VERBOSE_CAP;
+}
+
+export function formatRcPillLabel(label: string): string {
+  return label === '/rc active' && !shouldShowVerboseRcActive() ? '/rc' : label;
+}
+
+function recordRcActiveImpression(): void {
+  if (!shouldShowVerboseRcActive()) return;
+  saveGlobalConfig(current => {
+    const seen = (current as GlobalConfig & { seenNotifications?: Record<string, number> }).seenNotifications ?? {};
+    return {
+      ...current,
+      seenNotifications: {
+        ...seen,
+        [RC_ACTIVE_BADGE_KEY]: (seen[RC_ACTIVE_BADGE_KEY] ?? 0) + 1,
+      },
+    } as GlobalConfig;
+  });
+}
+
 function appendFromCliParam(url: string): string {
   try {
     const parsed = new URL(url);
@@ -351,10 +377,30 @@ function useRcHeaderStatus(enabled: boolean): RcPillStatus | null {
   return raw !== null && isBridgeEnabled() ? raw : null;
 }
 
-function RemoteControlStatusPill({ status }: { status: RcPillStatus }): ReactNode {
+function compactRcPillLabel(status: RcPillStatus): string {
+  return chalk.level === 0 && status.label !== '/rc active' ? status.label : '/rc';
+}
+
+function RemoteControlStatusPill({
+  status,
+  highlighted = false,
+  compact = false,
+}: {
+  status: RcPillStatus;
+  highlighted?: boolean;
+  compact?: boolean;
+}): ReactNode {
   const [hovered, setHovered] = useState(false);
   const sessionUrl = useAppState(s => s.replBridgeSessionUrl);
-  const label = status.label;
+  const impressionRecordedRef = useRef(false);
+  const label = compact ? compactRcPillLabel(status) : formatRcPillLabel(status.label);
+
+  useEffect(() => {
+    if (!compact && status.label === '/rc active' && !impressionRecordedRef.current) {
+      impressionRecordedRef.current = true;
+      recordRcActiveImpression();
+    }
+  }, [compact, status.label]);
 
   const handleClick = (event: ClickEvent) => {
     logEvent('tengu_rc_pill_clicked', {
@@ -364,6 +410,8 @@ function RemoteControlStatusPill({ status }: { status: RcPillStatus }): ReactNod
     event.allowDefault();
   };
 
+  const active = highlighted || hovered;
+
   return (
     <Box
       flexShrink={0}
@@ -371,7 +419,7 @@ function RemoteControlStatusPill({ status }: { status: RcPillStatus }): ReactNod
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Text color={hovered ? 'background' : status.color} inverse={hovered} wrap="truncate">
+      <Text color={active ? 'background' : status.color} inverse={active} wrap="truncate">
         {sessionUrl ? <Link url={appendFromCliParam(sessionUrl)}>{label}</Link> : label}
       </Text>
     </Box>
@@ -451,7 +499,7 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
     ? { shouldSplit: false, truncatedModel: modelDisplayName + effortSuffix, truncatedBilling: billingType }
     : formatModelAndBilling(modelDisplayName + effortSuffix, billingType, textWidth);
 
-  const rcWidthReserve = rcStatus ? 3 + stringWidth(rcStatus.label) : 0;
+  const rcWidthReserve = rcStatus ? 3 + stringWidth(formatRcPillLabel(rcStatus.label)) : 0;
   const separator = ' · ';
   const atPrefix = '@';
   const cwdAvailableWidth =

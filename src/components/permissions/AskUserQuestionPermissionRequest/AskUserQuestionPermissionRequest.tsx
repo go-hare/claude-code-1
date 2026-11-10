@@ -20,6 +20,7 @@ import { logError } from '../../../utils/log.js';
 import { applyMarkdown } from '../../../utils/markdown.js';
 import { isPlanModeInterviewPhaseEnabled } from '../../../utils/planModeV2.js';
 import { getPlanFilePath } from '../../../utils/plans.js';
+import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { askUserQuestionTimeoutToMs } from '../../../utils/settings/settings.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { applyEngineConfirmDisplay, normalizeAskQuestions } from '../../../dialog/permissionAsk.js';
@@ -86,6 +87,7 @@ function AskUserQuestionPermissionRequestBody({
   );
   const { rows: terminalRows } = useTerminalSize();
   const [theme] = useTheme();
+  const isScreenReader = isScreenReaderModeEnabled();
   // Official 2.1.200: default never; only auto-continue when explicitly configured
   // (or CLAUDE_AFK_TIMEOUT_MS). Memoize once per dialog open.
   const afkTimeoutMs = useMemo(() => askUserQuestionTimeoutToMs(), []);
@@ -113,7 +115,7 @@ function AskUserQuestionPermissionRequestBody({
     const PREVIEW_OVERHEAD = 11;
 
     for (const q of questions) {
-      const hasPreview = q.options.some(opt => opt.preview);
+      const hasPreview = !isScreenReader && !q.multiSelect && q.options.some(opt => opt.preview);
 
       if (hasPreview) {
         // Compute the max preview content lines that would actually display
@@ -156,7 +158,7 @@ function AskUserQuestionPermissionRequestBody({
       globalContentHeight: Math.min(Math.max(maxHeight, MIN_CONTENT_HEIGHT), maxAllowedHeight),
       globalContentWidth: Math.max(maxWidth, MIN_CONTENT_WIDTH),
     };
-  }, [questions, terminalRows, theme, highlight]);
+  }, [questions, terminalRows, theme, highlight, isScreenReader]);
   const metadataSource = result.success ? result.data.metadata?.source : undefined;
 
   const [pastedContentsByQuestion, setPastedContentsByQuestion] = useState<
@@ -244,7 +246,7 @@ function AskUserQuestionPermissionRequestBody({
     const questionsWithAnswers = questions
       .map((q: Question) => {
         const answer = answers[q.question];
-        const hasPreview = !q.multiSelect && q.options.some(opt => opt.preview !== undefined);
+        const hasPreview = !isScreenReader && !q.multiSelect && q.options.some(opt => opt.preview !== undefined);
         const notes = hasPreview ? questionStates[q.question]?.textInputValue?.trim() : undefined;
         const lines = [`- "${q.question}"`, answer ? `  Answer: ${answer}` : '  (No answer provided)'];
         if (notes) {
@@ -274,7 +276,17 @@ function AskUserQuestionPermissionRequestBody({
 
     onDone();
     toolUseConfirm.onReject(feedback, imageBlocks && imageBlocks.length > 0 ? imageBlocks : undefined);
-  }, [questions, answers, questionStates, onDone, toolUseConfirm, metadataSource, isInPlanMode, allImageAttachments]);
+  }, [
+    questions,
+    answers,
+    questionStates,
+    onDone,
+    toolUseConfirm,
+    metadataSource,
+    isInPlanMode,
+    allImageAttachments,
+    isScreenReader,
+  ]);
 
   const submitAnswers = useCallback(
     async (answersToSubmit: Record<string, string>, options?: { afkTimeoutMs?: number }) => {
@@ -308,9 +320,10 @@ function AskUserQuestionPermissionRequestBody({
       const annotations: Record<string, { preview?: string; notes?: string }> = {};
       for (const q of questions) {
         const answer = answersToSubmit[q.question];
-        const notes = questionStates[q.question]?.textInputValue;
+        const hasPreview = !isScreenReader && !q.multiSelect && q.options.some(opt => opt.preview !== undefined);
+        const notes = hasPreview ? questionStates[q.question]?.textInputValue : undefined;
         // Find the selected option's preview content
-        const selectedOption = answer ? q.options.find(opt => opt.label === answer) : undefined;
+        const selectedOption = hasPreview && answer ? q.options.find(opt => opt.label === answer) : undefined;
         const preview = selectedOption?.preview;
         if (preview || notes?.trim()) {
           annotations[q.question] = {
@@ -337,13 +350,22 @@ function AskUserQuestionPermissionRequestBody({
         contentBlocks && contentBlocks.length > 0 ? contentBlocks : undefined,
       );
     },
-    [toolUseConfirm, onDone, metadataSource, questions, questionStates, isInPlanMode, allImageAttachments],
+    [
+      toolUseConfirm,
+      onDone,
+      metadataSource,
+      questions,
+      questionStates,
+      isInPlanMode,
+      allImageAttachments,
+      isScreenReader,
+    ],
   );
 
   // Official 2.1.200: auto-continue with answers selected so far after idle.
   // Disabled while the terminal is unfocused (user may be in another app).
   // Gate on resolved ms only — invalid CLAUDE_AFK_TIMEOUT_MS must not enable.
-  const afkEnabled = isTerminalFocused && afkTimeoutMs !== null;
+  const afkEnabled = !isScreenReader && isTerminalFocused && afkTimeoutMs !== null;
   const handleAfkTimeout = useCallback(
     (timeoutMs: number) => {
       void submitAnswers(answers, { afkTimeoutMs: timeoutMs }).catch(logError);

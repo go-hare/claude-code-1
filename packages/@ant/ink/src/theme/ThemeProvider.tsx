@@ -52,6 +52,9 @@ type ThemeContextValue = {
   currentTheme: ThemeName;
   resolvedTheme: Theme;
   activeThemeOverrides: Record<string, unknown> | undefined;
+  customThemes?: unknown[];
+  activeCustomTheme?: unknown;
+  reloadCustomThemes?: () => Promise<void>;
   setPreviewOverrides: (overrides: Record<string, unknown> | null) => void;
 };
 
@@ -67,6 +70,9 @@ const ThemeContext = createContext<ThemeContextValue>({
   currentTheme: DEFAULT_THEME,
   resolvedTheme: getTheme(DEFAULT_THEME),
   activeThemeOverrides: undefined,
+  customThemes: [],
+  activeCustomTheme: undefined,
+  reloadCustomThemes: () => Promise.resolve(),
   setPreviewOverrides: () => {},
 });
 
@@ -172,11 +178,13 @@ export function ThemeProvider({ children, initialState, onThemeSave = defaultSav
       },
       cancelPreview: () => {
         setPreviewTheme(null);
-        setPreviewOverrides(null);
       },
       currentTheme,
       resolvedTheme,
       activeThemeOverrides,
+      customThemes: [],
+      activeCustomTheme: undefined,
+      reloadCustomThemes: () => Promise.resolve(),
       setPreviewOverrides,
     }),
     [themeSetting, previewTheme, currentTheme, resolvedTheme, activeThemeOverrides, onThemeSave],

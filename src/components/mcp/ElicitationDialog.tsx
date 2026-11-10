@@ -74,6 +74,16 @@ type Props = {
 
 const isTextField = (s: PrimitiveSchemaDefinition) => ['string', 'number', 'integer'].includes(s.type);
 
+const RELATED_TASK_META_KEY = 'io.modelcontextprotocol/related-task';
+
+export function parseRelatedTaskMetadata(meta: Record<string, unknown> | undefined): { taskId: string } | null {
+  const raw = meta?.[RELATED_TASK_META_KEY] ?? meta?.relatedTask;
+  if (raw !== null && typeof raw === 'object' && typeof (raw as { taskId?: unknown }).taskId === 'string') {
+    return { taskId: (raw as { taskId: string }).taskId };
+  }
+  return null;
+}
+
 /** Form property schemas may carry optional `default` (not on every PrimitiveSchema branch). */
 type FormPropertySchema = PrimitiveSchemaDefinition & {
   default?: string | number | boolean | string[];
@@ -172,8 +182,10 @@ function ElicitationFormDialog({
   onResponse: Props['onResponse'];
 }): React.ReactNode {
   const { serverName, signal } = event;
-  const request = event.params as ElicitRequestFormParams;
+  const request = event.params as ElicitRequestFormParams & { _meta?: Record<string, unknown> };
   const { message, requestedSchema } = request;
+  const relatedTask = parseRelatedTaskMetadata(request._meta);
+  const taskSuffix = relatedTask ? ` (task ${relatedTask.taskId.slice(0, 8)})` : '';
   const hasFields = Object.keys(requestedSchema.properties).length > 0;
   const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | null>(hasFields ? null : 'accept');
   const [formValues, setFormValues] = useState<Record<string, string | number | boolean | string[]>>(() => {
@@ -1167,7 +1179,7 @@ function ElicitationFormDialog({
 
   return (
     <Dialog
-      title={formatElicitationTitle(serverName, columns, clampFieldRows)}
+      title={formatElicitationTitle(serverName, columns, clampFieldRows, taskSuffix)}
       subtitle={subtitle}
       color="permission"
       onCancel={() => onResponse('cancel')}

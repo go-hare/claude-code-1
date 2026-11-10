@@ -1,11 +1,13 @@
 import { join } from 'path';
 import React, { useCallback, useState } from 'react';
+import { getOriginalCwd } from '../bootstrap/state.js';
 import type { ExitState } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { setClipboard, Box, Text, Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getCwd } from '../utils/cwd.js';
 import { writeFileSync_DEPRECATED } from '../utils/slowOperations.js';
+import { isRemoteWorkspace } from '../utils/ultraplanKeyword.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/select.js';
 import TextInput from './TextInput.js';
@@ -45,7 +47,8 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
 
   const handleFilenameSubmit = () => {
     const finalFilename = filename.endsWith('.txt') ? filename : filename.replace(/\.[^.]+$/, '') + '.txt';
-    const filepath = join(getCwd(), finalFilename);
+    const baseDir = isRemoteWorkspace() ? getOriginalCwd() : getCwd();
+    const filepath = join(baseDir, finalFilename);
 
     try {
       writeFileSync_DEPRECATED(filepath, content, {
@@ -74,6 +77,11 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
     }
   }, [showFilenameInput, handleGoBack, onDone]);
 
+  const inDifferentLaunchDir = isRemoteWorkspace() && getOriginalCwd() !== getCwd();
+  const fileDescription = inDifferentLaunchDir
+    ? 'Save the conversation to a file in the directory claude was launched from'
+    : 'Save the conversation to a file in the current directory';
+
   const options = [
     {
       label: 'Copy to clipboard',
@@ -83,7 +91,7 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
     {
       label: 'Save to file',
       value: 'file',
-      description: 'Save the conversation to a file in the current directory',
+      description: fileDescription,
     },
   ];
 
@@ -115,7 +123,7 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
   return (
     <Dialog
       title="Export conversation"
-      subtitle="Select export method:"
+      subtitle="Select export method"
       color="permission"
       onCancel={handleCancel}
       inputGuide={renderInputGuide}

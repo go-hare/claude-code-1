@@ -24,6 +24,34 @@ import {
   shouldShowMonitorSuggestions,
 } from '../permissionMonitor.js';
 
+const MAX_DISPLAYED_NETWORK_HOSTS = 8;
+const MAX_NETWORK_HOSTS_CHARS = 160;
+
+function renderNetworkAllowHosts(hosts: readonly string[] | undefined): React.ReactNode {
+  if (hosts === undefined || hosts.length === 0) return null;
+  const first = hosts[0]!;
+  const firstTrimmed =
+    first.length > MAX_NETWORK_HOSTS_CHARS ? `…${first.slice(first.length - (MAX_NETWORK_HOSTS_CHARS - 1))}` : first;
+  const shown = [firstTrimmed];
+  let used = Math.min(shown[0]!.length + 2, MAX_NETWORK_HOSTS_CHARS / 2);
+  for (const host of hosts.slice(1)) {
+    if (shown.length >= MAX_DISPLAYED_NETWORK_HOSTS) break;
+    if (used + host.length > MAX_NETWORK_HOSTS_CHARS) continue;
+    shown.push(host);
+    used += host.length + 2;
+  }
+  const remaining = hosts.length - shown.length;
+  const more = remaining > 0 ? ` (+${remaining} more, ${hosts.length} in all)` : '';
+  return (
+    <Box marginBottom={1}>
+      <Text>
+        Also lets this command reach, beyond the sandbox allowlist: <Text bold>{shown.join(', ')}</Text>
+        {more}
+      </Text>
+    </Box>
+  );
+}
+
 function previewNode(preview: UrlPreview): React.ReactNode {
   if (preview.kind === 'withheld') {
     return <Text dimColor>{preview.marker}</Text>;
@@ -53,6 +81,7 @@ function monitorBody(p: MonitorPermissionPayload): React.ReactNode {
   }
   if (p.ws) {
     const urlText = monitorPreviewText(p.ws.url);
+    const protocolsWithheld = (p.ws as { protocolsWithheld?: boolean }).protocolsWithheld === true;
     const protocols = Array.isArray(p.ws.protocols) ? p.ws.protocols.filter(item => typeof item === 'string') : [];
     return (
       <>
@@ -61,7 +90,11 @@ function monitorBody(p: MonitorPermissionPayload): React.ReactNode {
             Open WebSocket <Text bold>{urlText}</Text>
           </Text>
         </PermissionPreviewGutter>
-        {protocols.length > 0 ? (
+        {protocolsWithheld ? (
+          <Text>
+            subprotocols: <Text bold>(cannot be shown in full — deny unless expected)</Text>
+          </Text>
+        ) : protocols.length > 0 ? (
           <Text>
             subprotocols: <Text bold>{protocols.join(', ')}</Text>
           </Text>
@@ -76,7 +109,7 @@ function monitorBody(p: MonitorPermissionPayload): React.ReactNode {
 }
 
 export function PermissionMonitorDialog({ payload, answer }: DialogRendererProps): React.ReactNode {
-  const p = payload as MonitorPermissionPayload;
+  const p = payload as MonitorPermissionPayload & { networkAllowHosts?: readonly string[] };
   const row = shouldShowMonitorSuggestions(p) ? buildMonitorSuggestionsRow(p) : null;
   const monitorDescription = typeof p.monitorDescription === 'string' ? p.monitorDescription : '';
   const toolType = p.mcp || p.ws ? 'tool' : 'command';
@@ -105,6 +138,7 @@ export function PermissionMonitorDialog({ payload, answer }: DialogRendererProps
       </Box>
       <PermissionOverflowBox>{monitorBody(p)}</PermissionOverflowBox>
       <Box flexDirection="column" paddingX={1}>
+        {renderNetworkAllowHosts(p.networkAllowHosts)}
         <PermissionRuleExplanation permissionResult={p.permissionResult as PermissionDecision} toolType={toolType} />
         <PermissionPrompt
           options={options}

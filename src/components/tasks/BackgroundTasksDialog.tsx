@@ -40,9 +40,12 @@ import {
 } from '../../services/analytics/index.js';
 import type { AppState } from '../../state/AppStateStore.js';
 import { count } from '../../utils/array.js';
+import { truncateToWidth } from '../../utils/format.js';
 import { toInkColor } from '../../utils/ink.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { ConfirmSelect } from '../ConfirmSelect.js';
+import { Select } from '../CustomSelect/select.js';
 import { ItemList } from '../ItemList.js';
 import { AsyncAgentDetailDialog } from './AsyncAgentDetailDialog.js';
 import { AutoModeScanDetailDialog } from './AutoModeScanDetailDialog.js';
@@ -54,7 +57,21 @@ import { RemoteSessionProgress } from './RemoteSessionProgress.js';
 import { ShellDetailDialog } from './ShellDetailDialog.js';
 import { describeTeammateActivity } from './taskStatusUtils.js';
 
-type ViewState = { mode: 'list' } | { mode: 'detail'; itemId: string } | { mode: 'confirmStopReview'; itemId: string };
+type ViewState =
+  | { mode: 'list' }
+  | { mode: 'actions'; itemId: string }
+  | { mode: 'detail'; itemId: string }
+  | { mode: 'confirmStopReview'; itemId: string };
+
+type TaskAction = 'view' | 'foreground' | 'stop';
+
+const ACTION_LABELS: Record<TaskAction, string> = {
+  view: 'View',
+  foreground: 'Foreground',
+  stop: 'Stop',
+};
+
+const ACTIONS_HEADING_RESERVE = 16;
 
 type Props = {
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
@@ -322,7 +339,8 @@ export function BackgroundTasksDialog({
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const setAppState = useSetAppState();
-  const { rows: termRows } = useTerminalSize();
+  const { rows: termRows, columns: termColumns } = useTerminalSize();
+  const screenReader = isScreenReaderModeEnabled();
   const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
   const typedTasks = tasks as Record<string, TaskState> | undefined;
 
@@ -535,11 +553,7 @@ export function BackgroundTasksDialog({
     setSelectedIndex(index);
   };
 
-  const handleRowSelect = (rawIndex: number): void => {
-    const index = optionToRowIndexRef.current.get(rawIndex) ?? rawIndex;
-    setSelectedIndex(index);
-    const current = rows[index] ?? allSelectableItems[selectedIndexLive.current];
-    if (!current) return;
+  const openItem = (current: ListItem): void => {
     if (current.type === 'self_managed_tasks') {
       selectedIdRef.current = current.firstTaskId;
       setShowSystemTasks(true);
@@ -552,6 +566,100 @@ export function BackgroundTasksDialog({
       onDone('Viewing agent', { display: 'system' });
     } else if (canOpenBackgroundTaskDetail(current.type)) {
       setViewState({ mode: 'detail', itemId: current.id });
+    }
+  };
+
+  const foregroundItem = (currentSelection: ListItem): boolean => {
+    if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
+      enterTeammateView(currentSelection.id, setAppState);
+      onDone('Viewing teammate', { display: 'system' });
+      return true;
+    }
+    if (
+      currentSelection.type === 'local_agent' &&
+      isPanelAgentTask(currentSelection.task) &&
+      !isCompletedAgentListItem(currentSelection)
+    ) {
+      enterTeammateView(currentSelection.id, setAppState);
+      onDone('Viewing agent', { display: 'system' });
+      return true;
+    }
+    if (currentSelection.type === 'leader') {
+      exitTeammateView(setAppState);
+      onDone('Viewing leader', { display: 'system' });
+      return true;
+    }
+    return false;
+  };
+
+  const stopItem = (currentSelection: ListItem): void => {
+    if (currentSelection.type === 'local_bash' && currentSelection.status === 'running') {
+      void killShellTask(currentSelection.id);
+    } else if (
+      currentSelection.type === 'local_agent' &&
+      (currentSelection.status === 'running' || isStoppableCompletedKeepaliveAgent(currentSelection.task))
+    ) {
+      void killAgentTask(currentSelection.id);
+    } else if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
+      void killTeammateTask(currentSelection.id);
+    } else if (currentSelection.type === 'local_workflow' && currentSelection.status === 'running') {
+      const runId = currentSelection.task.workflowRunId ?? currentSelection.id;
+      try {
+        const { getWorkflowService } =
+          require('../../workflow/service.js') as typeof import('../../workflow/service.js');
+        getWorkflowService().kill(runId);
+      } catch {
+        /* service unavailable */
+      }
+      if (killWorkflowTask) {
+        killWorkflowTask(currentSelection.id, setAppState);
+      }
+    } else if (currentSelection.type === 'monitor_mcp' && currentSelection.status === 'running' && killMonitorMcp) {
+      killMonitorMcp(currentSelection.id, setAppState);
+    } else if (currentSelection.type === 'monitor_ws' && currentSelection.status === 'running') {
+      // densable xCs: oF(id, registry, {userStop, taskStop})
+      killMonitorWs(currentSelection.id, setAppState);
+    } else if (currentSelection.type === 'dream' && currentSelection.status === 'running') {
+      void killDreamTask(currentSelection.id);
+    } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
+      void killAutoModeScanTask(currentSelection.id);
+    } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
+      if (currentSelection.task.isUltraplan) {
+        void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
+      } else if (currentSelection.task.isRemoteReview) {
+        setViewState({ mode: 'confirmStopReview', itemId: currentSelection.id });
+      } else {
+        void killRemoteAgentTask(currentSelection.id);
+      }
+    }
+  };
+
+  const handleRowSelect = (rawIndex: number): void => {
+    const index = optionToRowIndexRef.current.get(rawIndex) ?? rawIndex;
+    setSelectedIndex(index);
+    const current = rows[index] ?? allSelectableItems[selectedIndexLive.current];
+    if (!current) return;
+    if (!screenReader || current.type === 'self_managed_tasks') {
+      openItem(current);
+      return;
+    }
+    if (getActionsForItem(current).length > 0) {
+      setViewState({ mode: 'actions', itemId: current.id });
+    }
+  };
+
+  const handleActionSelect = (action: TaskAction, item: ListItem): void => {
+    setViewState({ mode: 'list' });
+    switch (action) {
+      case 'view':
+        openItem(item);
+        return;
+      case 'foreground':
+        foregroundItem(item);
+        return;
+      case 'stop':
+        stopItem(item);
+        return;
     }
   };
 
@@ -569,64 +677,12 @@ export function BackgroundTasksDialog({
         ignoreNextKillRef.current = false;
         return;
       }
-      if (currentSelection.type === 'local_bash' && currentSelection.status === 'running') {
-        void killShellTask(currentSelection.id);
-      } else if (
-        currentSelection.type === 'local_agent' &&
-        (currentSelection.status === 'running' || isStoppableCompletedKeepaliveAgent(currentSelection.task))
-      ) {
-        void killAgentTask(currentSelection.id);
-      } else if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
-        void killTeammateTask(currentSelection.id);
-      } else if (currentSelection.type === 'local_workflow' && currentSelection.status === 'running') {
-        const runId = currentSelection.task.workflowRunId ?? currentSelection.id;
-        try {
-          const { getWorkflowService } =
-            require('../../workflow/service.js') as typeof import('../../workflow/service.js');
-          getWorkflowService().kill(runId);
-        } catch {
-          /* service unavailable */
-        }
-        if (killWorkflowTask) {
-          killWorkflowTask(currentSelection.id, setAppState);
-        }
-      } else if (currentSelection.type === 'monitor_mcp' && currentSelection.status === 'running' && killMonitorMcp) {
-        killMonitorMcp(currentSelection.id, setAppState);
-      } else if (currentSelection.type === 'monitor_ws' && currentSelection.status === 'running') {
-        // densable xCs: oF(id, registry, {userStop, taskStop})
-        killMonitorWs(currentSelection.id, setAppState);
-      } else if (currentSelection.type === 'dream' && currentSelection.status === 'running') {
-        void killDreamTask(currentSelection.id);
-      } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
-        void killAutoModeScanTask(currentSelection.id);
-      } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
-        if (currentSelection.task.isUltraplan) {
-          void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
-        } else if (currentSelection.task.isRemoteReview) {
-          setViewState({ mode: 'confirmStopReview', itemId: currentSelection.id });
-        } else {
-          void killRemoteAgentTask(currentSelection.id);
-        }
-      }
+      stopItem(currentSelection);
     }
 
     if (e.key === 'f' && !e.ctrl && !e.meta) {
-      if (currentSelection.type === 'in_process_teammate' && currentSelection.status === 'running') {
+      if (foregroundItem(currentSelection)) {
         e.preventDefault();
-        enterTeammateView(currentSelection.id, setAppState);
-        onDone('Viewing teammate', { display: 'system' });
-      } else if (
-        currentSelection.type === 'local_agent' &&
-        isPanelAgentTask(currentSelection.task) &&
-        !isCompletedAgentListItem(currentSelection)
-      ) {
-        e.preventDefault();
-        enterTeammateView(currentSelection.id, setAppState);
-        onDone('Viewing agent', { display: 'system' });
-      } else if (currentSelection.type === 'leader') {
-        e.preventDefault();
-        exitTeammateView(setAppState);
-        onDone('Viewing leader', { display: 'system' });
       }
     }
   };
@@ -684,6 +740,12 @@ export function BackgroundTasksDialog({
   const onDoneEvent = useEffectEvent(onDone);
 
   useEffect(() => {
+    if (viewState.mode === 'actions') {
+      if (!allSelectableItems.some(item => item.id === viewState.itemId)) {
+        setViewState({ mode: 'list' });
+      }
+      return;
+    }
     if (viewState.mode !== 'list') {
       const task = (typedTasks ?? {})[viewState.itemId];
       if (!task || (task.type !== 'local_workflow' && !isBackgroundTasksDialogRow(task))) {
@@ -698,7 +760,7 @@ export function BackgroundTasksDialog({
         }
       }
     }
-  }, [viewState, typedTasks, onDoneEvent]);
+  }, [viewState, typedTasks, allSelectableItems, onDoneEvent]);
 
   const goBackToList = () => {
     if (onBack) {
@@ -714,7 +776,7 @@ export function BackgroundTasksDialog({
   const hasMultipleRunningLocalAgents = count(agentTasks, t => t.status === 'running') > 1;
 
   // If an item is selected, show the appropriate view
-  if (viewState.mode !== 'list' && typedTasks) {
+  if (viewState.mode !== 'list' && viewState.mode !== 'actions' && typedTasks) {
     const task = typedTasks[viewState.itemId];
     if (!task) {
       return null;
@@ -948,41 +1010,52 @@ export function BackgroundTasksDialog({
   );
 
   const actions = [
-    <KeyboardShortcutHint key="upDown" shortcut="↑/↓" action="select" />,
-    ...(!currentSelection || canOpenBackgroundTaskDetail(currentSelection.type)
-      ? [<KeyboardShortcutHint key="enter" shortcut="Enter" action="view" />]
-      : []),
-    ...(currentSelection?.type === 'self_managed_tasks'
-      ? [<KeyboardShortcutHint key="show" shortcut="Enter" action="show" />]
-      : []),
-    ...((currentSelection?.type === 'in_process_teammate' && currentSelection.status === 'running') ||
-    (currentSelection?.type === 'local_agent' &&
-      isPanelAgentTask(currentSelection.task) &&
-      !isCompletedAgentListItem(currentSelection))
-      ? [<KeyboardShortcutHint key="foreground" shortcut="f" action="foreground" />]
-      : []),
-    ...(((currentSelection?.type === 'local_bash' ||
-      currentSelection?.type === 'local_agent' ||
-      currentSelection?.type === 'in_process_teammate' ||
-      currentSelection?.type === 'local_workflow' ||
-      currentSelection?.type === 'monitor_mcp' ||
-      currentSelection?.type === 'monitor_ws' ||
-      currentSelection?.type === 'dream' ||
-      currentSelection?.type === 'auto_mode_scan' ||
-      currentSelection?.type === 'remote_agent') &&
-      currentSelection.status === 'running') ||
-    (currentSelection?.type === 'local_agent' && isStoppableCompletedKeepaliveAgent(currentSelection.task))
-      ? [
-          <KeyboardShortcutHint key="kill" shortcut="x" action="stop" />,
-          ...(currentSelection.type === 'local_agent' && hasMultipleRunningLocalAgents
-            ? [<KeyboardShortcutHint key="kill-all" shortcut={killAgentsShortcut} action="stop all agents" />]
+    ...(screenReader
+      ? []
+      : [
+          <KeyboardShortcutHint key="upDown" shortcut="↑/↓" action="select" />,
+          ...(!currentSelection || canOpenBackgroundTaskDetail(currentSelection.type)
+            ? [<KeyboardShortcutHint key="enter" shortcut="Enter" action="view" />]
             : []),
-        ]
+          ...(currentSelection?.type === 'self_managed_tasks'
+            ? [<KeyboardShortcutHint key="show" shortcut="Enter" action="show" />]
+            : []),
+          ...((currentSelection?.type === 'in_process_teammate' && currentSelection.status === 'running') ||
+          (currentSelection?.type === 'local_agent' &&
+            isPanelAgentTask(currentSelection.task) &&
+            !isCompletedAgentListItem(currentSelection))
+            ? [<KeyboardShortcutHint key="foreground" shortcut="f" action="foreground" />]
+            : []),
+          ...(((currentSelection?.type === 'local_bash' ||
+            currentSelection?.type === 'local_agent' ||
+            currentSelection?.type === 'in_process_teammate' ||
+            currentSelection?.type === 'local_workflow' ||
+            currentSelection?.type === 'monitor_mcp' ||
+            currentSelection?.type === 'monitor_ws' ||
+            currentSelection?.type === 'dream' ||
+            currentSelection?.type === 'auto_mode_scan' ||
+            currentSelection?.type === 'remote_agent') &&
+            currentSelection.status === 'running') ||
+          (currentSelection?.type === 'local_agent' && isStoppableCompletedKeepaliveAgent(currentSelection.task))
+            ? [<KeyboardShortcutHint key="kill" shortcut="x" action="stop" />]
+            : []),
+        ]),
+    ...(currentSelection?.type === 'local_agent' &&
+    canStopItem(currentSelection) &&
+    hasMultipleRunningLocalAgents &&
+    killAgentsShortcut
+      ? [<KeyboardShortcutHint key="kill-all" shortcut={killAgentsShortcut} action="stop all agents" />]
       : []),
-    <KeyboardShortcutHint key="esc" shortcut="Esc" action="close" />,
+    <KeyboardShortcutHint key="esc" shortcut="Esc" action={viewState.mode === 'actions' ? 'go back' : 'close'} />,
   ];
 
-  const handleCancel = () => onDone('Background dialog dismissed', { display: 'skip' });
+  const handleCancel = () => {
+    if (viewState.mode === 'actions') {
+      setViewState({ mode: 'list' });
+      return;
+    }
+    onDone('Background dialog dismissed', { display: 'skip' });
+  };
 
   function renderInputGuide(exitState: ExitState): React.ReactNode {
     if (exitState.pending) {
@@ -1174,6 +1247,8 @@ export function BackgroundTasksDialog({
   }, [rows, selectedIndex, rowToOptionIndex]);
 
   const visibleOptionCount = Math.min(itemListOptions.length, Math.max(7, Math.floor(termRows / 2)));
+  const actionsItem =
+    viewState.mode === 'actions' ? allSelectableItems.find(item => item.id === viewState.itemId) : undefined;
 
   return (
     <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
@@ -1184,7 +1259,21 @@ export function BackgroundTasksDialog({
         color="background"
         inputGuide={renderInputGuide}
       >
-        {allSelectableItems.length === 0 ? (
+        {actionsItem ? (
+          <>
+            <Text bold wrap="truncate-end">
+              Actions for{' '}
+              {truncateToWidth(getItemActionLabel(actionsItem), Math.max(1, termColumns - ACTIONS_HEADING_RESERVE))}
+            </Text>
+            <Select
+              options={getActionsForItem(actionsItem).map(action => ({
+                label: ACTION_LABELS[action],
+                value: action,
+              }))}
+              onChange={action => handleActionSelect(action as TaskAction, actionsItem)}
+            />
+          </>
+        ) : allSelectableItems.length === 0 ? (
           <Text dimColor>No tasks currently running</Text>
         ) : (
           <Box flexDirection="column">
@@ -1200,6 +1289,46 @@ export function BackgroundTasksDialog({
       </Dialog>
     </Box>
   );
+}
+
+function canForegroundItem(item: ListItem): boolean {
+  return (
+    (item.type === 'in_process_teammate' && item.status === 'running') ||
+    (item.type === 'local_agent' && isPanelAgentTask(item.task) && !isCompletedAgentListItem(item))
+  );
+}
+
+function canStopItem(item: ListItem): boolean {
+  if (item.type === 'local_agent' && isStoppableCompletedKeepaliveAgent(item.task)) {
+    return true;
+  }
+  return (
+    item.status === 'running' &&
+    (item.type === 'local_bash' ||
+      item.type === 'local_agent' ||
+      item.type === 'in_process_teammate' ||
+      item.type === 'local_workflow' ||
+      item.type === 'monitor_mcp' ||
+      item.type === 'monitor_ws' ||
+      item.type === 'dream' ||
+      item.type === 'auto_mode_scan' ||
+      item.type === 'remote_agent')
+  );
+}
+
+export function getActionsForItem(item: ListItem): TaskAction[] {
+  return [
+    ...(canOpenBackgroundTaskDetail(item.type) ? (['view'] as const) : []),
+    ...(canForegroundItem(item) ? (['foreground'] as const) : []),
+    ...(canStopItem(item) ? (['stop'] as const) : []),
+  ];
+}
+
+function getItemActionLabel(item: ListItem): string {
+  if (item.type === 'leader' || item.type === 'self_managed_tasks') {
+    return item.label;
+  }
+  return getBackgroundTaskItemPresentation(item.task)?.label ?? item.label;
 }
 
 function buildItemListOption(
