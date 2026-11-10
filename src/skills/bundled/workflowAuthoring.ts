@@ -13,8 +13,8 @@ import { isBundledSkillsDisabled } from '../../utils/residualFinalEnvGates.js'
 import { isWorkflowFeatureEnabled } from '../../utils/workflowDisableGate.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 import {
+  getWorkflowAuthoringPrompt,
   WORKFLOW_AUTHORING_MENU_DESCRIPTION,
-  WORKFLOW_AUTHORING_PROMPT,
   WORKFLOW_AUTHORING_SKILL_DESCRIPTION,
   WORKFLOW_AUTHORING_SKILL_NAME,
 } from './workflowAuthoringContent.js'
@@ -22,9 +22,9 @@ import {
 /** Official $w */
 export const WORKFLOW_AUTHORING_SKILL = WORKFLOW_AUTHORING_SKILL_NAME
 
-/** Official gTt */
+/** Official RMn */
 export function getWorkflowAuthoringPromptBlocks(): ContentBlockParam[] {
-  return [{ type: 'text', text: WORKFLOW_AUTHORING_PROMPT }]
+  return [{ type: 'text', text: getWorkflowAuthoringPrompt() }]
 }
 
 /**

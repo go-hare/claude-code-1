@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { buildEffectiveSystemPrompt } from '../systemPrompt'
+import {
+  buildEffectiveSystemPrompt,
+  splitCustomSystemPrompt,
+} from '../systemPrompt'
 
 const defaultPrompt = ['You are a helpful assistant.', 'Follow instructions.']
 
@@ -84,5 +87,38 @@ describe('buildEffectiveSystemPrompt', () => {
       appendSystemPrompt: 'extra',
     })
     expect(Array.from(result)).toEqual(['custom', 'extra'])
+  })
+
+  test('splits customSystemPrompt around __SYSTEM_PROMPT_DYNAMIC_BOUNDARY__ on its own line', () => {
+    const custom =
+      'Static prefix\n__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\nDynamic suffix'
+    expect(splitCustomSystemPrompt(custom)).toEqual([
+      'Static prefix\n',
+      '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__',
+      '\nDynamic suffix',
+    ])
+    const result = buildPrompt({ customSystemPrompt: custom })
+    expect(Array.from(result)).toEqual([
+      'Static prefix\n',
+      '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__',
+      '\nDynamic suffix',
+    ])
+  })
+
+  test('mainThreadAgentDefinition.appendSystemPrompt appends agent prompt after base prompt', () => {
+    const agentDef = {
+      getSystemPrompt: () => 'agent prompt',
+      agentType: 'custom',
+      appendSystemPrompt: true,
+    } as any
+    const result = buildPrompt({
+      mainThreadAgentDefinition: agentDef,
+      appendSystemPrompt: 'extra',
+    })
+    expect(Array.from(result)).toEqual([
+      ...defaultPrompt,
+      'agent prompt',
+      'extra',
+    ])
   })
 })

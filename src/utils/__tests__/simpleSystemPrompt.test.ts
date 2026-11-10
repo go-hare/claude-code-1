@@ -164,10 +164,13 @@ describe('buildLeanSimpleSystemPrompt', () => {
 })
 
 describe('getLeanActionCautionSection', () => {
-  test('includes faithful reporting guidance', () => {
+  test('includes faithful reporting guidance and look at the target (Wmo)', () => {
     const body = getLeanActionCautionSection({ ownershipFrame: false })
     expect(body).toContain('confirm first')
     expect(body).toContain("doesn't extend to the next")
+    expect(body).toContain(
+      'Before deleting or overwriting, look at the target.',
+    )
     expect(body).toContain('Report outcomes faithfully')
   })
   test('ownership shortens confirm sentence', () => {

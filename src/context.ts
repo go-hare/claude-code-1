@@ -27,8 +27,11 @@ import {
   getPerforceModePromptAddendum,
   isPerforceModeEnabled,
 } from './utils/perforceMode.js'
+import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
+import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 
-const MAX_STATUS_CHARS = 1000
+export const MAX_STATUS_CHARS = 2000
 
 // System prompt injection for cache breaking (ant-only, ephemeral debugging state)
 let systemPromptInjection: string | null = null
@@ -93,10 +96,13 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
     })
 
     // Check if status exceeds character limit
+    const shellTool = isPowerShellToolEnabled()
+      ? POWERSHELL_TOOL_NAME
+      : BASH_TOOL_NAME
     const truncatedStatus =
       status.length > MAX_STATUS_CHARS
         ? status.substring(0, MAX_STATUS_CHARS) +
-          '\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using BashTool)'
+          `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
         : status
 
     logForDiagnosticsNoPII('info', 'git_status_completed', {
@@ -175,7 +181,11 @@ export const getSystemContext = memoize(
       ...(gitStatus && { gitStatus }),
       // Official CLAUDE_CODE_PERFORCE_MODE — system-context checkout hint.
       ...(isPerforceModeEnabled()
-        ? { perforceMode: getPerforceModePromptAddendum('Bash') }
+        ? {
+            perforceMode: getPerforceModePromptAddendum(
+              isPowerShellToolEnabled() ? POWERSHELL_TOOL_NAME : BASH_TOOL_NAME,
+            ),
+          }
         : {}),
       ...(feature('BREAK_CACHE_COMMAND') && injection
         ? {
@@ -186,26 +196,72 @@ export const getSystemContext = memoize(
   },
 )
 
+export type PromptContextBlock = {
+  name: string
+  text: string
+}
+
 /**
- * densable rgn / J3 — `prompt.context` may rewrite instructionFiles (agents-md).
- * A failed dispatch keeps the GEn CLAUDE.md walk.
+ * densable rgn / J3 / f2n — `prompt.context` may rewrite instructionFiles (agents-md)
+ * and/or context blocks. A failed dispatch keeps the GEn CLAUDE.md walk.
  */
 export async function applyPromptContextInstructionFiles(
   files: MemoryFileInfo[],
+  blocks?: PromptContextBlock[] | Record<string, string>,
 ): Promise<MemoryFileInfo[]> {
   if (!hasMatchingFunctionHook('prompt.context')) return files
   const instructionFiles = files.map(instructionFileOf)
+  const initialBlocks: PromptContextBlock[] = Array.isArray(blocks)
+    ? blocks.map(b => ({ name: b.name, text: b.text }))
+    : blocks !== undefined
+      ? Object.entries(blocks).map(([name, text]) => ({ name, text }))
+      : []
   try {
     const returned = (await runFunctionHookChain(
       'prompt.context',
-      { blocks: [], instructionFiles },
+      { blocks: initialBlocks, instructionFiles },
       async event => ({
         blocks: event.blocks,
         instructionFiles: event.instructionFiles,
       }),
-    )) as { instructionFiles?: unknown }
+    )) as { blocks?: unknown; instructionFiles?: unknown }
+    if (Array.isArray(returned?.blocks)) {
+      const nextBlocks = (returned.blocks as Array<Record<string, unknown>>)
+        .filter(
+          (b): b is PromptContextBlock =>
+            b !== null &&
+            typeof b === 'object' &&
+            typeof b.name === 'string' &&
+            typeof b.text === 'string',
+        )
+        .map(b => ({ name: b.name, text: b.text }))
+      if (Array.isArray(blocks)) {
+        blocks.splice(0, blocks.length, ...nextBlocks)
+      } else if (blocks !== undefined) {
+        for (const k of Object.keys(blocks)) {
+          delete blocks[k]
+        }
+        for (const { name, text } of nextBlocks) {
+          blocks[name] = text
+        }
+      }
+    }
     const next = returned?.instructionFiles
     if (!Array.isArray(next)) return files
+    const unchanged =
+      next.length === instructionFiles.length &&
+      next.every((item, idx) => {
+        const prev = instructionFiles[idx]
+        if (!prev || typeof item !== 'object' || item === null) return false
+        const cand = item as Record<string, unknown>
+        return (
+          cand.path === prev.path &&
+          cand.kind === prev.kind &&
+          cand.content === prev.content &&
+          cand.parent === prev.parent
+        )
+      })
+    if (unchanged) return files
     return next.map(file => memoryFileOf(file, files))
   } catch {
     return files
@@ -241,23 +297,58 @@ export const getUserContext = memoize(
       (isBareMode() && getAdditionalDirectoriesForClaudeMd().length === 0)
     // Await the async I/O (readFile/readdir directory walk) so the event
     // loop yields naturally at the first fs.readFile.
-    const claudeMd = shouldDisableClaudeMd
+    const rawMemoryFiles = shouldDisableClaudeMd
+      ? []
+      : filterInjectedMemoryFiles(await getMemoryFiles())
+    const initialClaudeMd = shouldDisableClaudeMd
       ? null
-      : getClaudeMds(
-          await applyPromptContextInstructionFiles(
-            filterInjectedMemoryFiles(await getMemoryFiles()),
-          ),
-        )
-    // Cache for the auto-mode classifier (yoloClassifier.ts reads this
-    // instead of importing claudemd.ts directly, which would create a
-    // cycle through permissions/filesystem → permissions → yoloClassifier).
-    setCachedClaudeMdContent(claudeMd || null)
+      : getClaudeMds(rawMemoryFiles)
 
     // densable 2.1.234 #5 / SEA UPb: account email only when not on
     // ANTHROPIC_UNIX_SOCKET; instruct model to identify-only, never exfiltrate.
     const userEmail = process.env.ANTHROPIC_UNIX_SOCKET
       ? undefined
       : getOauthAccountInfo()?.emailAddress
+
+    const blockEntries: PromptContextBlock[] = [
+      { name: 'claudeMd', text: initialClaudeMd ?? '' },
+      ...(userEmail
+        ? [
+            {
+              name: 'userEmail',
+              text: `The user's email address is ${userEmail}. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.`,
+            },
+          ]
+        : []),
+      { name: 'currentDate', text: `Today's date is ${getLocalISODate()}.` },
+    ]
+
+    const hookedMemoryFiles = await applyPromptContextInstructionFiles(
+      rawMemoryFiles,
+      blockEntries,
+    )
+    const filesChanged = hookedMemoryFiles !== rawMemoryFiles
+    const recomputedClaudeMd = shouldDisableClaudeMd
+      ? null
+      : filesChanged
+        ? getClaudeMds(hookedMemoryFiles)
+        : initialClaudeMd
+
+    const resultBlocks: Record<string, string> = {}
+    for (const { name, text } of blockEntries) {
+      const effectiveText =
+        name === 'claudeMd' && filesChanged && recomputedClaudeMd !== null
+          ? recomputedClaudeMd
+          : text
+      if (name === 'claudeMd' && !effectiveText) continue
+      resultBlocks[name] = effectiveText
+    }
+    const claudeMd = resultBlocks.claudeMd || null
+
+    // Cache for the auto-mode classifier (yoloClassifier.ts reads this
+    // instead of importing claudemd.ts directly, which would create a
+    // cycle through permissions/filesystem → permissions → yoloClassifier).
+    setCachedClaudeMdContent(claudeMd)
 
     logForDiagnosticsNoPII('info', 'user_context_completed', {
       duration_ms: Date.now() - startTime,
@@ -266,12 +357,6 @@ export const getUserContext = memoize(
       has_user_email: Boolean(userEmail),
     })
 
-    return {
-      ...(claudeMd && { claudeMd }),
-      ...(userEmail && {
-        userEmail: `The user's email address is ${userEmail}. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.`,
-      }),
-      currentDate: `Today's date is ${getLocalISODate()}.`,
-    }
+    return resultBlocks
   },
 )

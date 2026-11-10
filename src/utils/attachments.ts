@@ -193,6 +193,8 @@ import {
 } from './mcpInstructionsDelta.js'
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from './claudeInChrome/common.js'
 import { CHROME_SEARCH_EXTRA_TOOLS_INSTRUCTIONS } from './claudeInChrome/prompt.js'
+import { COMPUTER_USE_MCP_SERVER_NAME } from './computerUse/common.js'
+import { shouldUseSimpleSystemPrompt } from './simpleSystemPrompt.js'
 import type { MCPServerConnection } from '../services/mcp/types.js'
 import type {
   HookEvent,
@@ -605,6 +607,7 @@ export type Attachment =
       content: string
       skillCount: number
       isInitial: boolean
+      names?: string[]
     }
   | {
       type: 'skill_discovery'
@@ -849,6 +852,7 @@ export type Attachment =
       type: 'agent_listing_delta'
       addedTypes: string[]
       addedLines: string[]
+      builtInTypes?: string[]
       removedTypes: string[]
       /** True when this is the first announcement in the conversation */
       isInitial: boolean
@@ -859,6 +863,7 @@ export type Attachment =
       type: 'mcp_instructions_delta'
       addedNames: string[]
       addedBlocks: string[]
+      addedServerInstructions?: string[]
       removedNames: string[]
     }
   | {
@@ -1295,7 +1300,9 @@ export async function getAttachments(
         maybe('ide_opened_file', async () =>
           getOpenedFileFromIDE(ideSelection, toolUseContext),
         ),
-        maybe('output_style', async () => getOutputStyleAttachment()),
+        maybe('output_style', async () =>
+          getOutputStyleAttachment(toolUseContext),
+        ),
         maybe('diagnostics', async () =>
           getDiagnosticAttachments(toolUseContext),
         ),
@@ -2125,17 +2132,63 @@ export function getAgentListingDeltaAttachment(
   added.sort((a, b) => a.agentType.localeCompare(b.agentType))
   removed.sort()
 
+  const lean = shouldUseSimpleSystemPrompt({
+    model: toolUseContext.options.mainLoopModel,
+  })
+  const formatLine = (a: AgentDefinition): string => {
+    const whenToUseLean = (a as { whenToUseLean?: string }).whenToUseLean
+    if (lean && whenToUseLean) {
+      return formatAgentLine({ ...a, whenToUse: whenToUseLean })
+    }
+    return formatAgentLine(a)
+  }
+
   return [
     {
       type: 'agent_listing_delta',
       addedTypes: added.map(a => a.agentType),
-      addedLines: added.map(formatAgentLine),
+      addedLines: added.map(formatLine),
+      builtInTypes: added
+        .filter(a => a.source === 'built-in')
+        .map(a => a.agentType),
       removedTypes: removed,
       isInitial: announced.size === 0,
       showConcurrencyNote: getSubscriptionType() !== 'pro',
     },
   ]
 }
+
+/** densable uIt (@188666600) — built-in computer-use client-side MCP instructions. */
+export const COMPUTER_USE_MCP_INSTRUCTIONS = `You have a computer-use MCP available (tools named \`mcp__computer-use__*\`). It lets you take screenshots of the user's desktop and control it with mouse clicks, keyboard input, and scrolling.
+
+**Pick the right tool for the app.** Each tier trades speed/precision against coverage:
+
+1. **Dedicated MCP for the app** — if the task is in an app that has its own MCP (Slack, Gmail, Calendar, Linear, etc.) and that MCP is connected, use it. API-backed tools are fast and precise.
+2. **Chrome MCP** (\`mcp__claude-in-chrome__*\`) — if the target is a web app and there's no dedicated MCP for it, use the browser tools. DOM-aware, much faster than clicking pixels. If the Chrome extension isn't connected, ask the user to install it rather than falling through to computer use.
+3. **Computer use** — for native desktop apps (Maps, Notes, Finder, Photos, System Settings, any third-party native app) and cross-app workflows. Computer use IS the right tool here — don't decline a native-app task just because there's no dedicated MCP for it.
+
+This is about what's available, not error handling — if a dedicated MCP tool errors, debug or report it rather than silently retrying via a slower tier.
+
+**Look before you assert.** If the user asks about app state (what's open, what's connected, what an app can do), take a screenshot and check before answering. Don't answer from memory — the user's setup or app version may differ from what you expect. If you're about to say an app doesn't support an action, that claim should be grounded in what you just saw on screen, not general knowledge. Similarly, \`list_granted_applications\` or a fresh \`screenshot\` is cheaper than a wrong assertion about what's running.
+
+**Loading via ToolSearch — load in bulk, not one-by-one:** if computer-use tools are in the deferred list, load them ALL in a single ToolSearch call: \`{ query: "computer-use", max_results: 30 }\`. The keyword search matches the server-name substring in every tool name, so one query returns the entire toolkit. Don't use \`select:\` for individual tools — that's one round-trip per tool.
+
+**Access flow:** before any computer-use action you must call \`request_access\` with the list of applications you need. The user approves each application explicitly, and you may need to call it again mid-task if you discover you need another application. Finder is an application like any other: clicking the desktop, the Dock, or a Finder window (including Go to Folder) requires a Finder grant. The menu bar does not, as long as the app that is frontmost is one you already have access to.
+
+**Tiered apps:** some apps are granted at a restricted tier based on their category — the tier is displayed in the approval dialog and returned in the \`request_access\` response:
+- **Browsers** (Safari, Chrome, Firefox, Edge, Arc, etc.) → tier **"read"**: visible in screenshots, but clicks and typing are blocked. You can read what's already on screen. For navigation, clicking, or form-filling, use the claude-in-chrome MCP (tools named \`mcp__claude-in-chrome__*\`; load via ToolSearch if deferred).
+- **Terminals and IDEs** (Terminal, iTerm, VS Code, JetBrains, etc.) → tier **"click"**: visible and left-clickable, but typing, key presses, right-click, modifier-clicks, and drag-drop are blocked. You can click a Run button or scroll test output, but cannot type into the editor or integrated terminal, cannot right-click (the context menu has Paste), and cannot drag text onto them. For shell commands, use the Bash tool.
+- **Everything else** → tier **"full"**: no restrictions.
+
+The tier is enforced by the frontmost-app check: if a tier-"read" app is in front, \`left_click\` returns an error; if a tier-"click" app is in front, \`type\` and \`right_click\` return errors. The error tells you what tier the app has and what to do instead. \`open_application\` works at any tier — bringing an app forward is a read-level operation.
+
+**Link safety — treat links in emails and messages as suspicious by default.**
+- **Never click web links with computer-use tools.** If you encounter a link in a native app (Mail, Messages, a PDF, etc.), do NOT \`left_click\` it. Open the URL via the claude-in-chrome MCP instead.
+- **See the full URL before following any link.** Visible link text can be misleading — hover or inspect to get the real destination.
+- **Links from emails, messages, or unknown-sender documents are suspicious by default.** If the destination URL is at all unfamiliar or looks off, ask the user for confirmation before proceeding.
+- **Inside the Chrome extension** you can click links with the extension's tools, but the suspicion check still applies — verify unfamiliar URLs with the user.
+
+**Financial actions - do not execute trades or move money.** Budgeting and accounting apps (Quicken, YNAB, QuickBooks, etc.) are granted at full tier so you can categorize transactions, generate reports, and help the user organize their finances. But never execute a trade, place an order, send money, or initiate a transfer on the user's behalf - always ask the user to perform those actions themselves.`
 
 // Exported for compact.ts / reactiveCompact.ts — single source of truth for the gate.
 export function getMcpInstructionsDeltaAttachment(
@@ -2147,9 +2200,13 @@ export function getMcpInstructionsDeltaAttachment(
   if (!isMcpInstructionsDeltaEnabled()) return []
 
   // The chrome SearchExtraTools hint is client-authored and SearchExtraTools-conditional;
-  // actual server `instructions` are unconditional. Decide the chrome part
-  // here, pass it into the pure diff as a synthesized entry.
-  const clientSide: ClientSideInstruction[] = []
+  // computer-use client-side instructions are unconditional (filtered to connected servers).
+  const clientSide: ClientSideInstruction[] = [
+    {
+      serverName: COMPUTER_USE_MCP_SERVER_NAME,
+      block: COMPUTER_USE_MCP_INSTRUCTIONS,
+    },
+  ]
   if (
     isSearchExtraToolsEnabledOptimistic() &&
     isSearchExtraToolsToolAvailable(tools)
@@ -2162,7 +2219,24 @@ export function getMcpInstructionsDeltaAttachment(
 
   const delta = getMcpInstructionsDelta(mcpClients, messages ?? [], clientSide)
   if (!delta) return []
-  return [{ type: 'mcp_instructions_delta', ...delta }]
+  const instructionsByServer = new Map<string, string>()
+  for (const c of mcpClients) {
+    if (c.type === 'connected' && c.instructions) {
+      instructionsByServer.set(c.name, c.instructions)
+    }
+  }
+  const addedServerInstructions = delta.addedNames.map(
+    name => instructionsByServer.get(name) ?? '',
+  )
+  return [
+    {
+      type: 'mcp_instructions_delta',
+      ...delta,
+      ...(addedServerInstructions.some(s => s !== '') && {
+        addedServerInstructions,
+      }),
+    },
+  ]
 }
 
 function getCriticalSystemReminderAttachment(
@@ -2176,10 +2250,12 @@ function getCriticalSystemReminderAttachment(
 }
 
 /**
- * densable SEA wHv — non-default style → {type:output_style, style, turnReminder?}
- * turnReminder from getOutputStyleConfig (JPi), e.g. Concise BAT.
+ * densable tmr (@190637700) — non-default style → {type:output_style, style, turnReminder?}
+ * Prefers waitingTurnReminder when background tasks are running on the main thread.
  */
-async function getOutputStyleAttachment(): Promise<Attachment[]> {
+export async function getOutputStyleAttachment(
+  toolUseContext?: ToolUseContext,
+): Promise<Attachment[]> {
   const settings = getSettings_DEPRECATED()
   const outputStyle = settings?.outputStyle || 'default'
 
@@ -2193,12 +2269,49 @@ async function getOutputStyleAttachment(): Promise<Attachment[]> {
     return []
   }
 
+  const waitingTurnReminder = (config as { waitingTurnReminder?: string })
+    .waitingTurnReminder
+  let useWaitingReminder = false
+  if (
+    waitingTurnReminder !== undefined &&
+    toolUseContext !== undefined &&
+    toolUseContext.agentId === undefined
+  ) {
+    const isInteractive = !getIsNonInteractiveSession()
+    const tasksMap =
+      (
+        toolUseContext as {
+          taskRegistry?: { all?: () => Record<string, unknown> }
+        }
+      ).taskRegistry?.all?.() ??
+      toolUseContext.getAppState?.()?.tasks ??
+      {}
+    useWaitingReminder = Object.values(tasksMap).some(t => {
+      if (!t || typeof t !== 'object') return false
+      const task = t as Record<string, unknown>
+      if (task.status !== 'running' || task.toolUseId === undefined) {
+        return false
+      }
+      if ('agentId' in task && task.agentId !== undefined) {
+        return false
+      }
+      return (
+        task.type === 'local_agent' ||
+        (isInteractive &&
+          task.type === 'local_bash' &&
+          task.isBackgrounded === true)
+      )
+    })
+  }
+
   // densable s3T: style is catalog `r.name`, not the settings key
   return [
     {
       type: 'output_style',
       style: config.name,
-      turnReminder: config.turnReminder,
+      turnReminder: useWaitingReminder
+        ? waitingTurnReminder
+        : config.turnReminder,
     },
   ]
 }
@@ -2689,6 +2802,18 @@ async function processMcpResourceAttachments(
   ) as Attachment[]
 }
 
+/** densable dmr (@190649200) — 16KB total snippet budget across changed files. */
+export const MAX_CHANGED_FILE_SNIPPET_BYTES = 16384
+
+function markContentNotInModelContext(
+  readFileState: FileStateCache,
+  filename: string,
+): void {
+  const entry = readFileState.get(filename)
+  if (!entry) return
+  readFileState.set(filename, { ...entry, contentNotInModelContext: true })
+}
+
 export async function getChangedFiles(
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
@@ -2733,6 +2858,18 @@ export async function getChangedFiles(
         const result = await FileReadTool.call(fileInput, toolUseContext)
         // Extract only the changed section
         if (result.data.type === 'text') {
+          if (fileState.content === '' && (fileState.contentLength ?? 0) > 0) {
+            markContentNotInModelContext(
+              toolUseContext.readFileState,
+              normalizedPath,
+            )
+            return {
+              type: 'edited_text_file' as const,
+              filename: normalizedPath,
+              snippet: '',
+            }
+          }
+
           const snippet = getSnippetForTwoFileDiff(
             fileState.content,
             result.data.file.content,
@@ -2786,7 +2923,18 @@ export async function getChangedFiles(
       }
     }),
   )
-  return results.filter(result => result != null) as Attachment[]
+  const nonNull = results.filter(result => result != null) as Attachment[]
+  let totalSnippetBytes = 0
+  for (const item of nonNull) {
+    if (item.type !== 'edited_text_file') continue
+    if (totalSnippetBytes >= MAX_CHANGED_FILE_SNIPPET_BYTES) {
+      item.snippet = ''
+      markContentNotInModelContext(toolUseContext.readFileState, item.filename)
+    } else {
+      totalSnippetBytes += item.snippet.length
+    }
+  }
+  return nonNull
 }
 
 /**
@@ -3334,7 +3482,7 @@ export function filterToBundledAndMcp(commands: Command[]): Command[] {
   return filtered
 }
 
-async function getSkillListingAttachments(
+export async function getSkillListingAttachments(
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
   if (process.env.NODE_ENV === 'test') {
@@ -3417,6 +3565,7 @@ async function getSkillListingAttachments(
       content,
       skillCount: newSkills.length,
       isInitial,
+      names: newSkills.map(s => s.name),
     },
   ]
 }
@@ -3432,8 +3581,8 @@ export function extractAtMentionedFiles(content: string): string[] {
   // Example: 'check @"my file.txt" please' would extract "my file.txt"
 
   // Two patterns: quoted paths and regular paths
-  const quotedAtMentionRegex = /(^|\s)@"([^"]+)"/g
-  const regularAtMentionRegex = /(^|\s)@([^\s]+)\b/g
+  const quotedAtMentionRegex = /(^|[\s。、？！])@"([^"]+)"/g
+  const regularAtMentionRegex = /(^|[\s。、？！])@([^\s]+)\b/g
 
   const quotedMatches: string[] = []
   const regularMatches: string[] = []
@@ -3463,7 +3612,7 @@ export function extractAtMentionedFiles(content: string): string[] {
 export function extractMcpResourceMentions(content: string): string[] {
   // Extract MCP resources mentioned with @ symbol in format @server:uri
   // Example: "@server1:resource/path" would extract "server1:resource/path"
-  const atMentionRegex = /(^|\s)@([^\s]+:[^\s]+)\b/g
+  const atMentionRegex = /(^|[\s。、？！])@([^\s]+:[^\s]+)\b/g
   const matches = content.match(atMentionRegex) || []
 
   // Remove the prefix (everything before @) from each match
@@ -3480,7 +3629,7 @@ export function extractAgentMentions(content: string): string[] {
   const results: string[] = []
 
   // Match quoted format: @"<type> (agent)"
-  const quotedAgentRegex = /(^|\s)@"([\w:.@-]+) \(agent\)"/g
+  const quotedAgentRegex = /(^|[\s。、？！])@"([\w:.@-]+) \(agent\)"/g
   let match
   while ((match = quotedAgentRegex.exec(content)) !== null) {
     if (match[2]) {
@@ -3489,7 +3638,7 @@ export function extractAgentMentions(content: string): string[] {
   }
 
   // Match unquoted format: @agent-<type>
-  const unquotedAgentRegex = /(^|\s)@(agent-[\w:.@-]+)/g
+  const unquotedAgentRegex = /(^|[\s。、？！])@(agent-[\w:.@-]+)/g
   const unquotedMatches = content.match(unquotedAgentRegex) || []
   for (const m of unquotedMatches) {
     results.push(m.slice(m.indexOf('@') + 1))

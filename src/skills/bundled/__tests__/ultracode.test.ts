@@ -50,7 +50,9 @@ describe('registerUltracodeSkill', () => {
     expect(text).toContain('Workflow Orchestration Playbook')
     expect(text).toContain('explicitly opted into multi-agent orchestration')
     expect(text).toContain('does **not** set session ultracode')
-    expect(text).toContain('load the `workflow-authoring` skill')
+    expect(text).toContain(
+      'see **Ultracode** in the workflow authoring reference',
+    )
     expect(text).toContain('pipeline')
     // densable 248: script-API dump moved to workflow-authoring skill
     expect(text).not.toContain('Script body hooks')

@@ -52,4 +52,27 @@ describe('densable 2.1.289 wrapable unique-English 1–2', () => {
     expect(AGENT_TOOL_NAME).toBe('Agent')
     expect(ARTIFACT_TOOL_NAME).toBe('Artifact')
   })
+
+  test('coordinator wms system prompt aligns 2.1.289 sections 2–6', () => {
+    const { getCoordinatorSystemPrompt } =
+      require('../coordinatorMode.js') as typeof import('../coordinatorMode.js')
+    const prompt = getCoordinatorSystemPrompt()
+    expect(prompt).toContain(
+      'When your tool list has both a `mcp__claude_code_remote__` copy and a `mcp__github__` copy, call the `mcp__claude_code_remote__` one.',
+    )
+    expect(prompt).toContain(
+      'Omit the model parameter so workers inherit the session model',
+    )
+    expect(prompt).toContain('<subagent_tokens>N</subagent_tokens>')
+    expect(prompt).toContain(
+      'prefer a specialized `subagent_type` when the task matches its described trigger',
+    )
+    expect(prompt).toContain(
+      "**Trust but verify worker reports** — a worker's summary describes what it intended to do",
+    )
+    expect(prompt).toContain('### Executing user-approved actions')
+    expect(prompt).toContain(
+      '<summary>Agent "Investigate auth bug" finished</summary>',
+    )
+  })
 })

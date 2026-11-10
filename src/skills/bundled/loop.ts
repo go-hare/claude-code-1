@@ -1,14 +1,12 @@
 /**
- * densable `/loop` skill (SEA 2.1.221 `vjT` / `TjT` / `bjT` / `aqm`).
- *
- * densable 2.1.248 #46: self-paced dynamic + empty-prompt autonomous default
- * are always on (no tengu_kairos_loop_dynamic / _prompt GB).
+ * densable `/loop` skill (SEA 2.1.289 `R` / `y` / `se`).
  *
  * Modes:
  *   - empty → autonomous / loop.md + ScheduleWakeup self-pace
  *   - interval-only → autonomous / loop.md + CronCreate
- *   - prompt (optional interval) → dynamic / CronCreate (TjT)
+ *   - prompt (optional interval) → dynamic / CronCreate (R)
  */
+import { ASK_USER_QUESTION_TOOL_NAME } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/prompt.js'
 import {
   CRON_CREATE_TOOL_NAME,
   CRON_DELETE_TOOL_NAME,
@@ -16,9 +14,15 @@ import {
   isKairosCronEnabled,
 } from '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js'
 import { SCHEDULE_WAKEUP_TOOL_NAME } from '@claude-code/builtin-tools/tools/ScheduleWakeupTool/constants.js'
+import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js'
 import { TASK_LIST_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskListTool/constants.js'
 import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
+import { getAllowedChannels } from 'src/bootstrap/state.js'
+import { isPolicyLimitsAllowed } from 'src/cli/leftoverTulip.js'
 import { logEvent } from 'src/services/analytics/index.js'
+import { isRemotePolicyAllowed } from 'src/services/policyLimits/index.js'
+import type { Command } from 'src/types/command.js'
+import { getClaudeAIOAuthTokens } from 'src/utils/auth.js'
 import {
   AUTONOMOUS_LOOP_DYNAMIC_SENTINEL,
   AUTONOMOUS_LOOP_SENTINEL,
@@ -33,10 +37,15 @@ import {
   readLoopFile,
   type LoopFile,
 } from 'src/utils/loopFire.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+import { getAPIProvider } from 'src/utils/model/providers.js'
+import {
+  type BundledSkillDefinition,
+  getBundledSkills,
+  registerBundledSkill,
+} from '../bundledSkills.js'
 
 const DEFAULT_INTERVAL = '10m'
-/** densable Monitor wire name (Tw). */
+/** densable Monitor wire name (Va). */
 const MONITOR_TOOL_NAME = 'Monitor'
 
 const LEADING_INTERVAL = /^\d+[smhd]$/
@@ -53,13 +62,58 @@ const INTERVAL_CRON_TABLE = `| Interval pattern      | Cron expression     | Not
 
 **If the interval doesn't cleanly divide its unit** (e.g. \`7m\` → \`*/7 * * * *\` gives uneven gaps at :56→:00; \`90m\` → 1.5h which cron can't express), pick the nearest clean interval and tell the user what you rounded to before scheduling.`
 
-/** densable `lqm` — push-notif stop guidance when agent push is on. */
+/** densable `g()` — push-notif stop guidance when agent push is on. */
 function stopPushNotifGuidance(): string {
   if (!isLoopPushNotifGuidanceEnabled()) return ''
   return ` Before you stop, send a one-line outcome via PushNotification — the user may be away and waiting to hear it's done. Skip this if you're stopping because the user just told you to; they're already here.`
 }
 
-/** densable `gjT` — normalize "every N unit" match to Ns/Nm/Nh/Nd. */
+function isCloudScheduleEligible(): boolean {
+  return (
+    !process.env.CLAUDE_CODE_REMOTE &&
+    process.env.CLAUDE_CODE_SESSION_KIND !== 'bg' &&
+    getAPIProvider() === 'firstParty' &&
+    Boolean(getClaudeAIOAuthTokens()?.accessToken) &&
+    isRemotePolicyAllowed('allow_remote_sessions') &&
+    isPolicyLimitsAllowed('allow_routines')
+  )
+}
+
+/** densable `x()` — Offer cloud first section when cloud schedule is eligible and no channels are configured. */
+function buildOfferCloudFirstSection(): string {
+  if (!isCloudScheduleEligible() || getAllowedChannels().length > 0) {
+    return ''
+  }
+  return `
+## Offer cloud first
+
+Before any scheduling step, check whether EITHER is true:
+- the parsed interval (rule 1 or 2) is **≥60 minutes**, or
+- regardless of which rule matched, the original input uses daily phrasing ("every morning", "daily", "every day", "each night", "every weekday")
+
+If either is true, call ${ASK_USER_QUESTION_TOOL_NAME} first:
+- \`question\`: "This loop stops when you close this session. Set it up as a cloud schedule instead so it keeps running?"
+- \`header\`: "Schedule"
+- \`options\`: \`[{label: "Cloud schedule (recommended)", description: "Runs in Anthropic's cloud even after you close this session"}, {label: "This session only", description: "Runs in this terminal until you exit"}]\`
+
+If they pick **Cloud schedule**: do NOT call ${CRON_CREATE_TOOL_NAME}. Invoke the \`schedule\` skill directly via the ${SKILL_TOOL_NAME} tool with \`args\` set to their original input verbatim (e.g. \`${SKILL_TOOL_NAME}({skill: "schedule", args: "every morning tell me a joke"})\`), then follow that skill's instructions to completion. Do NOT tell the user to run /schedule themselves. **Then stop — do not continue to any section below** (no ${CRON_CREATE_TOOL_NAME}, no ${SCHEDULE_WAKEUP_TOOL_NAME}, no "execute the prompt now").
+If they pick **This session only**:
+- If the trigger was a parsed ≥60-minute interval (rule 1 or 2): continue below with that interval.
+- If the trigger was daily phrasing only (rule 3, no parsed interval): do NOT call ${CRON_CREATE_TOOL_NAME}. Explain that a daily-cadence loop won't fire before this session closes, so there's nothing useful to schedule locally — suggest they either pick Cloud schedule, or re-run \`/loop\` with an explicit shorter interval (e.g. \`/loop 1h <prompt>\`) if they want a session loop. Then stop.
+If neither trigger condition was met: continue below.
+`
+}
+
+/** densable `C()` — confirmation footer note for cloud schedule. */
+function buildCloudConfirmationNote(): string {
+  if (!isCloudScheduleEligible()) return ''
+  if (getAllowedChannels().length > 0) {
+    return ` End the confirmation with this exact line on its own, italicized: \`_Runs until you close this session · For durable cloud-based loops, use /schedule_\``
+  }
+  return ` Only if you did NOT show the cloud-offer ${ASK_USER_QUESTION_TOOL_NAME} above (i.e., neither trigger condition applied), end the confirmation with this exact line on its own, italicized: \`_Runs until you close this session · For durable cloud-based loops, use /schedule_\`. If the user already answered that question, omit this line.`
+}
+
+/** densable `L` — normalize "every N unit" match to Ns/Nm/Nh/Nd. */
 function everyMatchToInterval(match: RegExpMatchArray): string {
   const n = match[1]!
   const unit = match[2]!.toLowerCase()
@@ -86,7 +140,7 @@ Examples:
   /loop check the deploy every 20m`
 }
 
-/** densable `TjT` — dynamic self-pace when no interval (248 always on). */
+/** densable `R` — dynamic self-pace when no interval (always on). */
 function buildDynamicPrompt(args: string): string {
   const dynamicBody = `The user wants you to self-pace. Decide what makes the next iteration worth running — a passage of time, or an observable event.
 
@@ -97,6 +151,7 @@ function buildDynamicPrompt(args: string): string {
    - \`delaySeconds\`: with a ${MONITOR_TOOL_NAME} armed this is the **fallback heartbeat** — how long to wait if no event fires (lean 1200–1800s; idle ticks more frequent than the task needs are pure overhead). Without a ${MONITOR_TOOL_NAME} this is the cadence — pick based on what you observed. Read the tool's own description for cache-aware delay guidance.
    - \`reason\`: one short sentence on why you picked that delay.
    - \`prompt\`: the full original /loop input verbatim, prefixed with \`/loop \` so the next firing re-enters this skill and continues the loop. For example, if the user typed \`/loop check the deploy\`, pass \`/loop check the deploy\` as the prompt.
+   - \`noop\`: \`true\` if this tick changed nothing ("still waiting", "quiet hold"); \`false\` if it did something worth keeping. Consecutive \`noop: true\` ticks collapse in the terminal.
    If it doesn't need another iteration, stop instead (step 6) — re-arming is a per-turn choice, not a default.
 5. **If you were woken by a \`<task-notification>\`** rather than this prompt: handle the event in the context of the loop task, then make the same decision. If the loop should continue, call ${SCHEDULE_WAKEUP_TOOL_NAME} again with the same \`prompt\` and the same 1200–1800s \`delaySeconds\` from step 4 (the ${MONITOR_TOOL_NAME} remains the wake signal; the new wakeup is only the fallback heartbeat). If the event means the work is finished, stop (step 6).
 6. **To stop the loop** — the task is complete, further iterations can't make progress, or the user asked you to stop — call ${SCHEDULE_WAKEUP_TOOL_NAME} with \`stop: true\` (no other fields) and ${TASK_STOP_TOOL_NAME} any ${MONITOR_TOOL_NAME} you armed (use ${TASK_LIST_TOOL_NAME} to find the task ID if it is no longer in context). Stopping is the loop's normal ending — the user can restart it anytime with /loop.${stopPushNotifGuidance()}`
@@ -120,7 +175,7 @@ Examples:
 - \`check the deploy\` → no interval → dynamic mode, prompt \`check the deploy\` (rule 3)
 - \`check every PR\` → no interval → dynamic mode, prompt \`check every PR\` (rule 3 — "every" not followed by time)
 - \`5m\` → empty prompt → show usage
-
+${buildOfferCloudFirstSection()}
 ## Fixed-interval mode (rules 1 and 2)
 
 Convert the interval to a cron expression:
@@ -129,7 +184,7 @@ ${INTERVAL_CRON_TABLE}
 
 Then:
 1. Call ${CRON_CREATE_TOOL_NAME} with: \`cron\` (the expression above), \`prompt\` (the parsed prompt verbatim), \`recurring: true\`.
-2. Briefly confirm: what's scheduled, the cron expression, the human-readable cadence, that recurring tasks auto-expire after ${DEFAULT_MAX_AGE_DAYS} days, and that the user can cancel sooner with ${CRON_DELETE_TOOL_NAME} (include the job ID).
+2. Briefly confirm: what's scheduled, the cron expression, the human-readable cadence, that recurring tasks auto-expire after ${DEFAULT_MAX_AGE_DAYS} days, and that the user can cancel sooner with ${CRON_DELETE_TOOL_NAME} (include the job ID).${buildCloudConfirmationNote()}
 3. **Then immediately execute the parsed prompt now** — don't wait for the first cron fire. If it's a slash command, invoke it via the Skill tool; otherwise act on it directly.
 
 ## Dynamic mode (rule 3 — no interval)
@@ -142,7 +197,7 @@ ${args}`
 }
 
 /**
- * densable `aqm` — empty / interval-only → autonomous or loop.md default.
+ * densable `y` — empty / interval-only → autonomous or loop.md default.
  */
 function buildAutonomousDefaultPrompt(
   loopFile: LoopFile | null,
@@ -182,6 +237,7 @@ The user invoked \`/loop\` with no prompt and no interval. Run the autonomous ch
    - \`delaySeconds\`: with a ${MONITOR_TOOL_NAME} armed this is the fallback heartbeat (lean 1200–1800s). Without one, pick based on what you observed this turn — quiet branch? wait longer. Lots in flight? wait shorter. Read the tool's own description for cache-aware delay guidance.
    - \`reason\`: one short sentence on why you picked that delay.
    - \`prompt\`: the literal string \`${sentinel}\` — the dynamic-mode sentinel expands at fire time to the full instructions (first fire / first fire post-compact / loop.md edited) or a dynamic-pacing-specific short reminder (subsequent fires). Do not pass the full instructions; that is handled automatically.
+   - \`noop\`: \`true\` if this tick changed nothing ("still waiting", "quiet hold"); \`false\` if it did something worth keeping. Consecutive \`noop: true\` ticks collapse in the terminal.
    If it isn't, stop instead (step 6) — re-arming is a per-turn choice, not a default.
 5. **If woken by a \`<task-notification>\`** rather than this prompt: handle the event, then make the same decision. If the loop should continue, call ${SCHEDULE_WAKEUP_TOOL_NAME} again with \`${sentinel}\` and the same 1200–1800s \`delaySeconds\` (the ${MONITOR_TOOL_NAME} remains the wake signal; the new wakeup is only the fallback heartbeat). If the event means the work is finished, stop (step 6).
 6. **To stop the loop** — the task is complete, further iterations can't make progress, or the user asked you to stop — call ${SCHEDULE_WAKEUP_TOOL_NAME} with \`stop: true\` (no other fields) and ${TASK_STOP_TOOL_NAME} any ${MONITOR_TOOL_NAME} you armed (use ${TASK_LIST_TOOL_NAME} to find the task ID if it is no longer in context). Stopping is the loop's normal ending — the user can restart it anytime with /loop.${stopPushNotifGuidance()}`
@@ -230,13 +286,16 @@ ${body}`
 export function registerLoopSkill(): void {
   registerBundledSkill({
     name: 'loop',
-    // densable 2.1.248 register @204828749 — always self-pace, no GB ternary
+    menuDescription:
+      'Repeat a prompt or command on an interval (e.g. /loop 5m /foo)',
+    aliases: ['proactive'],
     description:
       'Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace.',
     whenToUse:
       'When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.',
     argumentHint: '[interval] [prompt]',
     userInvocable: true,
+    argsMayContainSlashCommands: true,
     isEnabled: isKairosCronEnabled,
     async getPromptForCommand(args, context) {
       const trimmed = args.trim()
@@ -293,5 +352,12 @@ export function registerLoopSkill(): void {
       if (!isSystem) clearLoopEndedOnLoopStart()
       return [{ type: 'text', text: buildDynamicPrompt(trimmed) }]
     },
-  })
+  } as BundledSkillDefinition & { argsMayContainSlashCommands?: boolean })
+
+  const registered = getBundledSkills().find(s => s.name === 'loop') as
+    | (Command & { argsMayContainSlashCommands?: boolean })
+    | undefined
+  if (registered) {
+    registered.argsMayContainSlashCommands = true
+  }
 }

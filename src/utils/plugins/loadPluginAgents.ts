@@ -165,6 +165,7 @@ function parsePluginAgentMarkdown(params: {
   // Parse agent metadata from frontmatter
   const whenToUse =
     coerceDescriptionToString(frontmatter.description, agentType) ??
+    coerceDescriptionToString(frontmatter.when_to_use, agentType) ??
     coerceDescriptionToString(frontmatter['when-to-use'], agentType) ??
     `Agent from ${pluginName} plugin`
 

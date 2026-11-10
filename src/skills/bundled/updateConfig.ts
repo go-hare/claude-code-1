@@ -8,7 +8,30 @@ import { registerBundledSkill } from '../bundledSkills.js'
  * This keeps the skill prompt in sync with the actual types.
  */
 function generateSettingsSchema(): string {
-  const jsonSchema = toJSONSchema(SettingsSchema(), { io: 'input' })
+  const jsonSchema = toJSONSchema(SettingsSchema(), { io: 'input' }) as {
+    properties?: Record<string, unknown>
+  }
+  const attribution = jsonSchema.properties?.attribution as
+    | { description?: string; anyOf?: Array<{ type?: string }> }
+    | undefined
+  const objectVariant =
+    typeof attribution === 'object' && attribution !== null
+      ? attribution.anyOf?.find(
+          variant => typeof variant === 'object' && variant.type === 'object',
+        )
+      : undefined
+  if (
+    jsonSchema.properties &&
+    typeof attribution === 'object' &&
+    attribution !== null &&
+    typeof objectVariant === 'object' &&
+    objectVariant !== null
+  ) {
+    jsonSchema.properties.attribution = {
+      description: attribution.description,
+      ...objectVariant,
+    }
+  }
   return jsonStringify(jsonSchema, null, 2)
 }
 
@@ -30,9 +53,9 @@ Settings load in order: user → project → local (later overrides earlier).
 \`\`\`json
 {
   "permissions": {
-    "allow": ["Bash(npm:*)", "Edit(.claude)", "Read"],
-    "deny": ["Bash(rm -rf:*)"],
-    "ask": ["Write(/etc/*)"],
+    "allow": ["Bash(npm *)", "Edit(.claude)", "Read"],
+    "deny": ["Bash(rm -rf *)"],
+    "ask": ["Edit(//etc/*)"],
     "defaultMode": "default" | "plan" | "acceptEdits" | "dontAsk",
     "additionalDirectories": ["/extra/dir"]
   }
@@ -41,8 +64,9 @@ Settings load in order: user → project → local (later overrides earlier).
 
 **Permission Rule Syntax:**
 - Exact match: \`"Bash(npm run test)"\`
-- Prefix wildcard: \`"Bash(git:*)"\` - matches \`git status\`, \`git commit\`, etc.
+- Prefix wildcard: \`"Bash(git *)"\` - matches \`git\`, \`git status\`, \`git commit\`, etc.
 - Tool only: \`"Read"\` - allows all Read operations
+- File paths: \`"Edit(src/**)"\` - path rules in \`permissions\` use \`Edit(path)\` for every file-writing tool (Write, Edit, NotebookEdit) and \`Read(path)\` for reads. \`Write(path)\`, \`NotebookEdit(path)\` and \`Glob(path)\` rules are not matched by file permission checks. Bare tool names (\`"Write"\`), deny/ask \`Tool(param:value)\` rules and hook \`if\` conditions still use each tool's own name
 
 ### Environment Variables
 \`\`\`json
@@ -57,7 +81,7 @@ Settings load in order: user → project → local (later overrides earlier).
 ### Model & Agent
 \`\`\`json
 {
-  "model": "sonnet",  // or "opus", "haiku", full model ID
+  "model": "sonnet",  // or "fable", "opus", "haiku", full model ID
   "agent": "agent-name",
   "alwaysThinkingEnabled": true
 }
@@ -72,7 +96,7 @@ Settings load in order: user → project → local (later overrides earlier).
   }
 }
 \`\`\`
-Set \`commit\` or \`pr\` to empty string \`""\` to hide that attribution.
+Set \`commit\` or \`pr\` to empty string \`""\` to hide that attribution. To hide all of it, set both to \`""\` and also set \`"sessionUrl": false\`. Write this object form, not \`"attribution": false\`: older Claude Code versions reject true or false here and then skip the whole settings file.
 
 ### MCP Server Management
 \`\`\`json
@@ -95,9 +119,11 @@ Plugin syntax: \`plugin-name@source\` where source is \`claude-code-marketplace\
 
 ### Other Settings
 - \`language\`: Preferred response language (e.g., "japanese")
-- \`cleanupPeriodDays\`: Days to keep transcripts (default: 30; 0 disables persistence entirely)
+- \`cleanupPeriodDays\`: Days to keep transcripts before automatic cleanup (default: 30; minimum 1)
 - \`respectGitignore\`: Whether to respect .gitignore (default: true)
 - \`spinnerTipsEnabled\`: Show tips in spinner
+- \`timeFormat\`: Clock format for times shown in the UI: "auto" (default), "12-hour", "24-hour", "24-hour-utc", or a strftime pattern such as "%H:%M"
+- \`timeZone\`: IANA time zone for times shown in the UI, e.g. "UTC" (default: system time zone)
 - \`spinnerVerbs\`: Customize spinner verbs (\`{ "mode": "append" | "replace", "verbs": [...] }\`)
 - \`spinnerTipsOverride\`: Override spinner tips (\`{ "excludeDefault": true, "tips": ["Custom tip"] }\`)
 - \`syntaxHighlightingDisabled\`: Disable diff highlighting
@@ -206,7 +232,7 @@ Hooks can return JSON to control behavior:
 - \`reason\` - Explanation for decision
 - \`hookSpecificOutput\` - Event-specific output (must include \`hookEventName\`):
   - \`additionalContext\` - Text injected into model context
-  - \`permissionDecision\` - "allow", "deny", "ask", or "defer" (PreToolUse only; defer is print-mode only)
+  - \`permissionDecision\` - "allow", "deny", or "ask" (PreToolUse only)
   - \`permissionDecisionReason\` - Reason for the permission decision (PreToolUse only)
   - \`updatedInput\` - Modified tool input (PreToolUse only)
 
@@ -331,9 +357,9 @@ When the user's request is ambiguous, use AskUserQuestion to clarify:
 - Whether to add to existing arrays or replace them
 - Specific values when multiple options exist
 
-## Decision: Config Tool vs Direct Edit
+## Decision: /config command vs Direct Edit
 
-**Use the Config tool** for these simple settings:
+**Suggest the \`/config\` slash command** for these simple settings:
 - \`theme\`, \`editorMode\`, \`verbose\`, \`model\`
 - \`language\`, \`alwaysThinkingEnabled\`
 - \`permissions.defaultMode\`
@@ -359,7 +385,7 @@ When adding to permission arrays or hook arrays, **merge with existing**, don't 
 
 **WRONG** (replaces existing permissions):
 \`\`\`json
-{ "permissions": { "allow": ["Bash(npm:*)"] } }
+{ "permissions": { "allow": ["Bash(npm *)"] } }
 \`\`\`
 
 **RIGHT** (preserves existing + adds new):
@@ -367,9 +393,9 @@ When adding to permission arrays or hook arrays, **merge with existing**, don't 
 {
   "permissions": {
     "allow": [
-      "Bash(git:*)",      // existing
+      "Bash(git *)",      // existing
       "Edit(.claude)",    // existing
-      "Bash(npm:*)"       // new
+      "Bash(npm *)"       // new
     ]
   }
 }
@@ -410,7 +436,7 @@ User: "Format my code after Claude writes it"
 User: "Allow npm commands without prompting"
 
 1. **Read**: Existing permissions
-2. **Merge**: Add \`Bash(npm:*)\` to allow array
+2. **Merge**: Add \`Bash(npm *)\` to allow array
 3. **Result**: Combined with existing allows
 
 ### Environment Variables
@@ -445,6 +471,8 @@ If a hook isn't running:
 export function registerUpdateConfigSkill(): void {
   registerBundledSkill({
     name: 'update-config',
+    menuDescription:
+      'Change settings: hooks, permissions, environment variables',
     description:
       'Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.',
     allowedTools: ['Read'],

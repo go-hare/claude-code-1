@@ -24,7 +24,12 @@ import { formatFileSize } from '../utils/format.js'
 import { getProjectDir } from '../utils/sessionPaths.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import {
+  countCharInString,
+  truncateAtWordBoundary,
+} from '../utils/stringUtils.js'
+import {
   MEMORY_FRONTMATTER_EXAMPLE,
+  resolveTypesSection,
   TRUSTING_RECALL_SECTION,
   TYPES_SECTION_INDIVIDUAL,
   WHAT_NOT_TO_SAVE_SECTION,
@@ -36,6 +41,8 @@ export const MAX_ENTRYPOINT_LINES = 200
 // ~125 chars/line at 200 lines. At p97 today; catches long-line indexes that
 // slip past the line cap (p100 observed: 197KB under 200 lines).
 export const MAX_ENTRYPOINT_BYTES = 25_000
+export const MAX_MEMORY_FILE_BYTES = 4096
+export const MAX_MEMORY_FILE_SIZE_HINT = `Keep each memory file under ${formatFileSize(MAX_MEMORY_FILE_BYTES)} including frontmatter (recall shows only the first ${formatFileSize(MAX_MEMORY_FILE_BYTES)}) and the description to one specific line; when a file outgrows that, split or summarize it rather than continuing it in a second file.`
 const AUTO_MEM_DISPLAY_NAME = 'auto memory'
 
 export type EntrypointTruncation = {
@@ -84,6 +91,20 @@ export function truncateEntrypointContent(raw: string): EntrypointTruncation {
     truncated = truncated.slice(0, cutAt > 0 ? cutAt : MAX_ENTRYPOINT_BYTES)
   }
 
+  const keptLines =
+    trimmed[truncated.length] === '\n'
+      ? countCharInString(truncated, '\n') + 1
+      : 0
+  const cutStart = truncated.length + 1
+  const nextNewline = trimmed.indexOf('\n', cutStart)
+  const firstCutLine = trimmed
+    .slice(cutStart, nextNewline < 0 ? undefined : nextNewline)
+    .trim()
+  const cutOffDetail =
+    keptLines === 0
+      ? `everything after the first ${truncated.length} characters of line 1 was cut off`
+      : `${lineCount - keptLines} of ${lineCount} lines were cut off, starting at line ${keptLines + 1}${firstCutLine ? ` ("${truncateAtWordBoundary(firstCutLine, 80)}")` : ''}`
+
   const reason =
     wasByteTruncated && !wasLineTruncated
       ? `${formatFileSize(byteCount)} (limit: ${formatFileSize(MAX_ENTRYPOINT_BYTES)}) — index entries are too long`
@@ -94,7 +115,7 @@ export function truncateEntrypointContent(raw: string): EntrypointTruncation {
   return {
     content:
       truncated +
-      `\n\n> WARNING: ${ENTRYPOINT_NAME} is ${reason}. Only part of it was loaded. Keep index entries to one line under ~200 chars; move detail into topic files.`,
+      `\n\n> WARNING: ${ENTRYPOINT_NAME} is ${reason}. Only part of it was loaded: ${cutOffDetail}. Keep index entries to one line under ~200 chars; move detail into topic files.`,
     lineCount,
     byteCount,
     wasLineTruncated,
@@ -201,6 +222,7 @@ export function buildMemoryLines(
   memoryDir: string,
   extraGuidelines?: string[],
   skipIndex = false,
+  options?: { inlineTypes?: boolean },
 ): string[] {
   const howToSave = skipIndex
     ? [
@@ -210,6 +232,7 @@ export function buildMemoryLines(
         '',
         ...MEMORY_FRONTMATTER_EXAMPLE,
         '',
+        `- ${MAX_MEMORY_FILE_SIZE_HINT}`,
         '- Keep the name, description, and type fields in memory files up-to-date with the content',
         '- Organize memory semantically by topic, not chronologically',
         '- Update or remove memories that turn out to be wrong or outdated',
@@ -233,6 +256,10 @@ export function buildMemoryLines(
         '- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.',
       ]
 
+  const typesSection = options?.inlineTypes
+    ? TYPES_SECTION_INDIVIDUAL
+    : resolveTypesSection(TYPES_SECTION_INDIVIDUAL)
+
   const lines: string[] = [
     `# ${displayName}`,
     '',
@@ -242,7 +269,7 @@ export function buildMemoryLines(
     '',
     'If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.',
     '',
-    ...TYPES_SECTION_INDIVIDUAL,
+    ...typesSection,
     ...WHAT_NOT_TO_SAVE_SECTION,
     '',
     ...howToSave,
@@ -290,7 +317,13 @@ export function buildMemoryPrompt(params: {
     // No memory file yet
   }
 
-  const lines = buildMemoryLines(displayName, memoryDir, extraGuidelines)
+  const lines = buildMemoryLines(
+    displayName,
+    memoryDir,
+    extraGuidelines,
+    false,
+    { inlineTypes: true },
+  )
 
   if (entrypointContent.trim()) {
     const t = truncateEntrypointContent(entrypointContent)
@@ -435,6 +468,18 @@ export async function loadMemoryPrompt(): Promise<string | null> {
         'auto' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
     return buildAssistantDailyLogPrompt(skipIndex)
+  }
+
+  // densable f2t (@183750250): CLAUDE_COWORK_MEMORY_GUIDELINES replaces full auto-memory prompt.
+  const coworkGuidelines = process.env.CLAUDE_COWORK_MEMORY_GUIDELINES?.trim()
+  if (autoEnabled && coworkGuidelines) {
+    const autoDir = getAutoMemPath()
+    await ensureMemoryDirExists(autoDir)
+    logMemoryDirCounts(autoDir, {
+      memory_type:
+        'auto' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return `# auto memory\n${coworkGuidelines}`
   }
 
   // Cowork injects memory-policy text via env var; thread into all builders.

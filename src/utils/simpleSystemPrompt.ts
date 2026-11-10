@@ -287,17 +287,21 @@ ${input.cyberRiskInstruction}
 }
 
 /**
- * Official arg(e) action_caution section — only when Jb (simple system prompt) is on.
- * Ownership-frame variant shortens the confirm-first sentence.
+ * Official Wmo(e) action_caution section — only when Jb (simple system prompt) is on.
+ * Ownership-frame variant shortens the confirm-first sentence when explicitly passed.
  */
 export function getLeanActionCautionSection(input?: {
   ownershipFrame?: boolean
   env?: NodeJS.ProcessEnv
 }): string {
-  const env = input?.env ?? process.env
-  const ownership = input?.ownershipFrame ?? isOwnershipFrameEnabled(env)
+  const ownership =
+    input?.ownershipFrame !== undefined
+      ? input.ownershipFrame
+      : input?.env !== undefined
+        ? isOwnershipFrameEnabled(input.env)
+        : false
   const confirm = ownership
     ? 'For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking.'
     : "For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next."
-  return `${confirm} Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target — if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.`
+  return `${confirm} Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.`
 }

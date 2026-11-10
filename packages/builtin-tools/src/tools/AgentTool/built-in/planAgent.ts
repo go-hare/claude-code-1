@@ -6,15 +6,22 @@ import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWrite
 import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { GREP_TOOL_NAME } from '@claude-code/builtin-tools/tools/GrepTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/NotebookEditTool/constants.js'
+import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
+import { getPlatform } from 'src/utils/platform.js'
+import { findGitBashPathOrNull } from 'src/utils/windowsPaths.js'
 import { AGENT_TOOL_NAME } from '../constants.js'
 import type { BuiltInAgentDefinition } from '../loadAgentsDir.js'
 import { EXPLORE_AGENT } from './exploreAgent.js'
 
 function getPlanV2SystemPrompt(): string {
+  const bashAvailable =
+    getPlatform() !== 'windows' || findGitBashPathOrNull() !== null
+  const shellToolName = bashAvailable ? BASH_TOOL_NAME : POWERSHELL_TOOL_NAME
+  const embedded = hasEmbeddedSearchTools() && bashAvailable
   // Ant-native builds alias find/grep to embedded bfs/ugrep and remove the
   // dedicated Glob/Grep tools, so point at find/grep instead.
-  const searchToolsHint = hasEmbeddedSearchTools()
+  const searchToolsHint = embedded
     ? `\`find\`, \`grep\`, and ${FILE_READ_TOOL_NAME}`
     : `${GLOB_TOOL_NAME}, ${GREP_TOOL_NAME}, and ${FILE_READ_TOOL_NAME}`
 
@@ -44,8 +51,8 @@ You will be provided with a set of requirements and optionally a perspective on 
    - Understand the current architecture
    - Identify similar features as reference
    - Trace through relevant code paths
-   - Use ${BASH_TOOL_NAME} ONLY for read-only operations (ls, git status, git log, git diff, find${hasEmbeddedSearchTools() ? ', grep' : ''}, cat, head, tail)
-   - NEVER use ${BASH_TOOL_NAME} for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification
+   - Use ${shellToolName} ONLY for read-only operations (${bashAvailable ? `ls, git status, git log, git diff, find${embedded ? ', grep' : ''}, cat, head, tail` : 'Get-ChildItem, git status, git log, git diff, Get-Content, Select-Object -First/-Last'})
+   - NEVER use ${shellToolName} for: ${bashAvailable ? 'mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install' : 'New-Item, Remove-Item, Copy-Item, Move-Item, git add, git commit, npm install, pip install'}, or any file creation/modification
 
 3. **Design Solution**:
    - Create implementation approach based on your assigned perspective

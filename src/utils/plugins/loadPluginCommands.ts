@@ -12,7 +12,11 @@ import {
   substituteArguments,
 } from '../argumentSubstitution.js'
 import { logForDebugging } from '../debug.js'
-import { EFFORT_LEVELS, parseEffortValue } from '../effort.js'
+import {
+  EFFORT_LEVELS,
+  getDisplayedEffortLevel,
+  parseEffortValue,
+} from '../effort.js'
 import { isBareMode } from '../envUtils.js'
 import { isENOENT } from '../errors.js'
 import {
@@ -243,22 +247,28 @@ function createPluginCommand(
         isSkill ? 'Plugin skill' : 'Plugin command',
       )
 
-    // Substitute ${CLAUDE_PLUGIN_ROOT} in allowed-tools before parsing
+    // Substitute ${CLAUDE_PLUGIN_ROOT} (and ${CLAUDE_SKILL_DIR} in skill mode) in allowed-tools before parsing
+    const rawSkillDirForTools = dirname(file.filePath)
+    const substituteAllowedToolVars = (raw: string): string => {
+      let substituted = substitutePluginVariables(raw, {
+        path: pluginPath,
+        source: sourceName,
+      })
+      if (config.isSkillMode) {
+        substituted = substituted.replace(
+          /\$\{CLAUDE_SKILL_DIR\}/g,
+          () => rawSkillDirForTools,
+        )
+      }
+      return substituted
+    }
     const rawAllowedTools = frontmatter['allowed-tools']
     const substitutedAllowedTools =
       typeof rawAllowedTools === 'string'
-        ? substitutePluginVariables(rawAllowedTools, {
-            path: pluginPath,
-            source: sourceName,
-          })
+        ? substituteAllowedToolVars(rawAllowedTools)
         : Array.isArray(rawAllowedTools)
           ? rawAllowedTools.map(tool =>
-              typeof tool === 'string'
-                ? substitutePluginVariables(tool, {
-                    path: pluginPath,
-                    source: sourceName,
-                  })
-                : tool,
+              typeof tool === 'string' ? substituteAllowedToolVars(tool) : tool,
             )
           : rawAllowedTools
     const allowedTools = parseSlashCommandToolsFromFrontmatter(
@@ -290,12 +300,15 @@ function createPluginCommand(
         : undefined
 
     // Handle model configuration, resolving aliases like 'haiku', 'sonnet', 'opus'
-    const model =
-      frontmatter.model === 'inherit'
-        ? undefined
-        : frontmatter.model
-          ? parseUserSpecifiedModel(frontmatter.model as string)
-          : undefined
+    const modelRaw = frontmatter.model
+    let model: string | undefined
+    if (typeof modelRaw === 'string' && modelRaw.trim().length > 0) {
+      const trimmed = modelRaw.trim()
+      model =
+        trimmed.toLowerCase() === 'inherit'
+          ? 'inherit'
+          : parseUserSpecifiedModel(trimmed)
+    }
 
     const effortRaw = frontmatter['effort']
     const effort =
@@ -409,6 +422,17 @@ function createPluginCommand(
         finalContent = finalContent.replace(
           /\$\{CLAUDE_SESSION_ID\}/g,
           getSessionId(),
+        )
+
+        // Replace ${CLAUDE_EFFORT} with the effective effort level
+        const effectiveModel =
+          (model === 'inherit' ? undefined : model) ??
+          context.options?.mainLoopModel ??
+          ''
+        const effectiveEffort = effort ?? context.getAppState?.()?.effortValue
+        finalContent = finalContent.replaceAll(
+          '${CLAUDE_EFFORT}',
+          getDisplayedEffortLevel(effectiveModel, effectiveEffort),
         )
 
         finalContent = await executeShellCommandsInPrompt(

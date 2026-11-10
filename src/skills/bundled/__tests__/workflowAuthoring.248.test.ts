@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -23,6 +24,7 @@ import {
   registerWorkflowAuthoringSkill,
 } from '../workflowAuthoring.js'
 import {
+  getWorkflowAuthoringPrompt,
   WORKFLOW_AUTHORING_MENU_DESCRIPTION,
   WORKFLOW_AUTHORING_PROMPT,
   WORKFLOW_AUTHORING_PROMPT_SHA16,
@@ -33,8 +35,9 @@ import {
   WORKFLOW_AUTHORING_SKILL_NAME,
 } from '../workflowAuthoringContent.js'
 
-// mock.module is process-global — pin GB/settings so co-suites that leave
-// getFeatureValue → false (or settings.disableBundledSkills) do not zero T().
+// mock.module is process-global — snapshot at top-level before any beforeAll
+// runs, and install/restore mocks in beforeAll/afterAll so sibling suites
+// (e.g. loop.test.ts, goldOfficialMissingSkills.test.ts) keep real exports.
 const settingsSnap = snapshotModuleExports(
   await import('src/utils/settings/settings.js'),
 )
@@ -42,19 +45,24 @@ const growthbookSnap = snapshotModuleExports(
   await import('src/services/analytics/growthbook.js'),
 )
 
-mock.module(
-  'src/utils/settings/settings.js',
-  createSettingsMock(settingsSnap, {
-    getInitialSettings: () => ({}),
-    getSettingsForSource: () => ({}),
-  }),
-)
+beforeAll(() => {
+  mock.module(
+    'src/utils/settings/settings.js',
+    createSettingsMock(settingsSnap, {
+      getInitialSettings: () => ({}),
+      getSettingsForSource: () => ({}),
+    }),
+  )
 
-mock.module('src/services/analytics/growthbook.js', () => ({
-  ...growthbookSnap,
-  getFeatureValue_CACHED_MAY_BE_STALE: (_key: string, defaultValue: unknown) =>
-    defaultValue ?? true,
-}))
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+    getFeatureValue_CACHED_MAY_BE_STALE: (key: string, defaultValue: unknown) =>
+      growthbookSnap.getFeatureValue_CACHED_MAY_BE_STALE(
+        key,
+        defaultValue ?? true,
+      ),
+  }))
+})
 
 afterAll(() => {
   restoreSettingsMockWith(mock.module, settingsSnap)
@@ -132,9 +140,18 @@ describe('densable 2.1.248 #40 workflow-authoring', () => {
     expect(WORKFLOW_AUTHORING_PROMPT).toContain(
       'A workflow structures work across many agents',
     )
+    expect(WORKFLOW_AUTHORING_PROMPT).toContain(
+      "Schemas need {type: 'object', properties: {...}} at root and required ⊆ properties",
+    )
+    expect(WORKFLOW_AUTHORING_PROMPT).toContain(
+      'Subagents get the same CLAUDE.md files injected at start that you did',
+    )
     expect(sha16(WORKFLOW_AUTHORING_PROMPT)).toBe(
       WORKFLOW_AUTHORING_PROMPT_SHA16,
     )
+    expect(
+      getWorkflowAuthoringPrompt({ forceSubagentModel: true }),
+    ).not.toContain('opts.model overrides')
 
     clearBundledSkills()
     registerWorkflowAuthoringSkill()
@@ -158,9 +175,7 @@ describe('densable 2.1.248 #40 workflow-authoring', () => {
     expect(WORKFLOW_TOOL_PROMPT).toContain(
       'ONLY call this tool when the user has explicitly opted',
     )
-    expect(WORKFLOW_TOOL_PROMPT).toContain(
-      'load the `workflow-authoring` skill',
-    )
+    expect(WORKFLOW_TOOL_PROMPT).toContain('workflow authoring reference')
     expect(WORKFLOW_TOOL_PROMPT.length).toBeLessThan(4000)
     expect(WORKFLOW_TOOL_PROMPT).not.toContain('Script body hooks')
     expect(WORKFLOW_TOOL_PROMPT).not.toContain(

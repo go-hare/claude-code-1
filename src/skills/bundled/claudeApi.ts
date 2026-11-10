@@ -1,8 +1,13 @@
 import { readdir } from 'fs/promises'
 import { logEvent } from '../../services/analytics/index.js'
+import type { Command } from '../../types/command.js'
 import { getCwd } from '../../utils/cwd.js'
 import { isClaudeApiSkillDisabled } from '../../utils/residualMoreEnvGates.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+import {
+  type BundledSkillDefinition,
+  getBundledSkills,
+  registerBundledSkill,
+} from '../bundledSkills.js'
 
 // claudeApiContent.js bundles .md strings. Lazy-load inside
 // getPromptForCommand / files() so they only enter memory when /claude-api is invoked.
@@ -106,11 +111,14 @@ export function processSkillFiles(
  * Lives here (not in claudeApiContent) so skill markdown stays lazy.
  */
 export const CLAUDE_API_SUBCOMMANDS = [
+  'cost-optimize',
   'migrate',
   'managed-agents-onboard',
   'prompt-audit',
   'upgrade',
-  'cost-optimize',
+  'build-eval',
+  'hillclimb',
+  'preserved-thinking-migration',
 ] as const
 
 export type ClaudeApiSubcommand =
@@ -197,13 +205,27 @@ export function registerClaudeApiSkill({
 }: {
   disabled?: boolean
 } = {}): void {
+  const getArgumentCompletions = async (
+    argsBeforeCursor: string,
+    currentToken?: unknown,
+  ) => {
+    if (argsBeforeCursor.length > 0) return []
+    const prefix =
+      typeof currentToken === 'string' ? currentToken.toLowerCase() : ''
+    return CLAUDE_API_SUBCOMMANDS.filter(s => s.startsWith(prefix)).map(s => ({
+      value: s,
+      displayValue: s,
+    }))
+  }
+
   registerBundledSkill({
     name: 'claude-api',
+    menuDescription: CLAUDE_API_MENU_DESCRIPTION,
     description: CLAUDE_API_SKILL_DESCRIPTION,
-    // Gold menuDescription; Command has no separate field — surface via whenToUse.
     whenToUse: CLAUDE_API_MENU_DESCRIPTION,
-    allowedTools: ['Read', 'Grep', 'Glob', 'WebFetch'],
+    allowedTools: ['WebFetch(domain:platform.claude.com)'],
     userInvocable: true,
+    disableBridgeInvocation: true,
     isEnabled: () => !disabled,
     files: () =>
       import('./claudeApiContent.js').then(content =>
@@ -234,5 +256,14 @@ export function registerClaudeApiSkill({
         },
       ]
     },
-  })
+    getArgumentCompletions:
+      getArgumentCompletions as unknown as Command['getArgumentCompletions'],
+  } as BundledSkillDefinition & { disableBridgeInvocation?: boolean })
+
+  const registered = getBundledSkills().find(s => s.name === 'claude-api') as
+    | (Command & { disableBridgeInvocation?: boolean })
+    | undefined
+  if (registered) {
+    registered.disableBridgeInvocation = true
+  }
 }

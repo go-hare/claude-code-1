@@ -1,6 +1,7 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -15,32 +16,69 @@ const gb = new Map<string, unknown>()
 
 const realGrowthbook = await import('../../../services/analytics/growthbook.js')
 const growthbookSnap = snapshotModuleExports(realGrowthbook)
-mock.module('src/services/analytics/growthbook.js', () => ({
-  ...growthbookSnap,
-  getFeatureValue_CACHED_MAY_BE_STALE: (key: string, defaultValue: unknown) =>
-    gb.has(key) ? gb.get(key) : defaultValue,
-  getFeatureValue_CACHED_WITH_REFRESH: (key: string, defaultValue: unknown) =>
-    gb.has(key) ? gb.get(key) : defaultValue,
-}))
 
 const realAnalytics = await import('../../../services/analytics/index.js')
 const analyticsSnap = snapshotModuleExports(realAnalytics)
-mock.module('src/services/analytics/index.js', () => ({
-  ...analyticsSnap,
-  logEvent: () => {},
-}))
-
-mock.module('src/utils/debug.js', debugMock)
 
 const realConfig = await import('../../../utils/config.js')
 const configSnap = snapshotModuleExports(realConfig)
-mock.module('src/utils/config.js', () => ({
-  ...configSnap,
-  getGlobalConfig: () => ({
-    ...((configSnap.getGlobalConfig as () => object)() ?? {}),
-    agentPushNotifEnabled: false,
-  }),
-}))
+
+const realCronPrompt = await import(
+  '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js'
+)
+const cronPromptSnap = snapshotModuleExports(realCronPrompt)
+
+beforeAll(() => {
+  mock.module('src/services/analytics/growthbook.js', () => ({
+    ...growthbookSnap,
+    getFeatureValue_CACHED_MAY_BE_STALE: (
+      key: string,
+      defaultValue: unknown,
+    ) =>
+      gb.has(key)
+        ? gb.get(key)
+        : growthbookSnap.getFeatureValue_CACHED_MAY_BE_STALE(key, defaultValue),
+    getFeatureValue_CACHED_WITH_REFRESH: (
+      key: string,
+      defaultValue: unknown,
+      refreshIntervalMs?: number,
+    ) =>
+      gb.has(key)
+        ? gb.get(key)
+        : growthbookSnap.getFeatureValue_CACHED_WITH_REFRESH(
+            key,
+            defaultValue,
+            refreshIntervalMs ?? 0,
+          ),
+  }))
+
+  mock.module('src/services/analytics/index.js', () => ({
+    ...analyticsSnap,
+    logEvent: () => {},
+  }))
+
+  mock.module('src/utils/debug.js', debugMock)
+
+  mock.module('src/utils/config.js', () => ({
+    ...configSnap,
+    getGlobalConfig: () => ({
+      ...((configSnap.getGlobalConfig as () => object)() ?? {}),
+      agentPushNotifEnabled: false,
+    }),
+  }))
+
+  // Cron gate always on for skill registration
+  mock.module(
+    '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js',
+    () => ({
+      ...cronPromptSnap,
+      CRON_CREATE_TOOL_NAME: 'CronCreate',
+      CRON_DELETE_TOOL_NAME: 'CronDelete',
+      DEFAULT_MAX_AGE_DAYS: 7,
+      isKairosCronEnabled: () => true,
+    }),
+  )
+})
 
 afterAll(() => {
   mock.module('src/services/analytics/growthbook.js', () => ({
@@ -48,18 +86,13 @@ afterAll(() => {
   }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
   mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  mock.module(
+    '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js',
+    () => ({
+      ...cronPromptSnap,
+    }),
+  )
 })
-
-// Cron gate always on for skill registration
-mock.module(
-  '@claude-code/builtin-tools/tools/ScheduleCronTool/prompt.js',
-  () => ({
-    CRON_CREATE_TOOL_NAME: 'CronCreate',
-    CRON_DELETE_TOOL_NAME: 'CronDelete',
-    DEFAULT_MAX_AGE_DAYS: 7,
-    isKairosCronEnabled: () => true,
-  }),
-)
 
 import type { PromptCommand } from '../../../types/command.js'
 import { clearBundledSkills, getBundledSkills } from '../../bundledSkills.js'
@@ -86,11 +119,16 @@ describe('registerLoopSkill', () => {
     clearBundledSkills()
   })
 
-  test('registers loop skill', () => {
+  test('registers loop skill with 289 metadata', () => {
     const skill = getBundledSkills().find(s => s.name === 'loop')
     expect(skill).toBeDefined()
     expect(skill!.type).toBe('prompt')
     expect(skill!.userInvocable).toBe(true)
+    expect(skill!.menuDescription).toBe(
+      'Repeat a prompt or command on an interval (e.g. /loop 5m /foo)',
+    )
+    expect(skill!.aliases).toEqual(['proactive'])
+    expect(asPrompt(skill!).argsMayContainSlashCommands).toBe(true)
   })
 
   test('empty args → autonomous dynamic default (248 jKe always-on)', async () => {
@@ -101,6 +139,7 @@ describe('registerLoopSkill', () => {
     const text = textOf(blocks)
     expect(text).toContain('autonomous default with dynamic pacing')
     expect(text).toContain('<<autonomous-loop-dynamic>>')
+    expect(text).toContain('Consecutive `noop: true` ticks collapse')
   })
 
   test('jKe on + no interval → dynamic mode prompt', async () => {
@@ -115,6 +154,7 @@ describe('registerLoopSkill', () => {
     expect(text).toContain('Dynamic mode')
     expect(text).toContain('ScheduleWakeup')
     expect(text).toContain('/loop check the deploy')
+    expect(text).toContain('Consecutive `noop: true` ticks collapse')
   })
 
   test('jKe on + leading interval → still mentions CronCreate fixed path', async () => {

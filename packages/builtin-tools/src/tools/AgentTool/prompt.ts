@@ -70,9 +70,13 @@ function getToolsDescription(agent: AgentDefinition): string {
  * Format one agent line for the agent_listing_delta attachment message:
  * `- type: whenToUse (Tools: ...)`.
  */
-export function formatAgentLine(agent: AgentDefinition): string {
+export function formatAgentLine(
+  agent: AgentDefinition & { whenToUseLean?: string },
+  lean?: boolean,
+): string {
   const toolsDescription = getToolsDescription(agent)
-  return `- ${agent.agentType}: ${agent.whenToUse} (Tools: ${toolsDescription})`
+  const description = (lean && agent.whenToUseLean) || agent.whenToUse
+  return `- ${agent.agentType}: ${description} (Tools: ${toolsDescription})`
 }
 
 /**
@@ -186,6 +190,11 @@ ${forkEnabled ? 'For fresh agents, terse' : 'Terse'} command-style prompts produ
 **Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
 `
 
+  const lean = shouldUseLeanAgentPrompt({
+    model: availability?.model,
+    leanPrompt: availability?.leanPrompt,
+  })
+
   // When the gate is on, the agent list lives in an agent_listing_delta
   // attachment (see attachments.ts) instead of inline here. This keeps the
   // tool description static across MCP/plugin/permission changes so the
@@ -195,7 +204,7 @@ ${forkEnabled ? 'For fresh agents, terse' : 'Terse'} command-style prompts produ
   const agentListSection = listViaAttachment
     ? `Available agent types are listed in <system-reminder> messages in the conversation.`
     : `Available agent types and the tools they have access to:
-${effectiveAgents.map(agent => formatAgentLine(agent)).join('\n')}`
+${effectiveAgents.map(agent => formatAgentLine(agent, lean)).join('\n')}`
 
   // densable s when n=false: `${AVo}, so choose ${i?'`"fork"` or ':''}one of the listed agent types.`
   const omitGuidance = generalPurposeAvailable
@@ -261,11 +270,6 @@ If the target is already known, use the direct tool: ${FILE_READ_TOOL_NAME} for 
     isSharesCwdSiblingGateOn() && canStampSharesCwdNote()
       ? 'When dispatching two or more agents that will write or edit files in the same repository, give EACH `isolation: "worktree"` — parallel agents sharing a working directory overwrite each other\'s work.'
       : ''
-
-  const lean = shouldUseLeanAgentPrompt({
-    model: availability?.model,
-    leanPrompt: availability?.leanPrompt,
-  })
 
   if (lean) {
     const shortBgNote =
@@ -435,6 +439,14 @@ The prompt is self-contained: it states the goal, lists what to check, and caps 
 assistant: Audit's back. Three blockers: no tests for the new prompt path, GrowthBook gate wired but not in build_flags.yaml, and one uncommitted file.
 </example>
 
+<example>
+user: "so is the gate wired up or not"
+<commentary>
+User asks mid-wait. The audit was launched to answer exactly this, and it hasn't returned. Give status, not a fabricated result.
+</commentary>
+assistant: Still waiting on the audit — that's one of the things it's checking. Should land shortly.
+</example>
+
 `
       : `<example>
 user: "What's left on this branch before we can ship?"
@@ -453,15 +465,14 @@ The prompt is self-contained: it states the goal, lists what to check, and caps 
 }<example>
 user: "Can you get a second opinion on whether this migration is safe?"
 assistant: <thinking>I'll ask the code-reviewer agent — it won't see my analysis, so it can give an independent read.</thinking>
-<commentary>
-A non-fork subagent_type is specified, so the agent starts fresh. It needs full context in the prompt. The briefing explains what to assess and why.
-</commentary>
 ${AGENT_TOOL_NAME}({
-  name: "migration-review",
   description: "Independent migration review",
   subagent_type: "code-reviewer",
   prompt: "Review migration 0042_user_schema.sql for safety. Context: we're adding a NOT NULL column to a 50M-row table. Existing rows get a backfill default. I want a second opinion on whether the backfill approach is safe under concurrent writes — I've checked locking behavior but want independent verification. Report: is this safe, and if not, what specifically breaks?"
 })
+<commentary>
+The agent starts with no context from this conversation, so the prompt briefs it: what to assess, the relevant background, and what form the answer should take.
+</commentary>
 </example>
 `
   }`

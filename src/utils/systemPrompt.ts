@@ -12,6 +12,27 @@ import { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
 export { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
+const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
+
+/**
+ * densable hSe (@185935760) — split string customSystemPrompt around
+ * SYSTEM_PROMPT_DYNAMIC_BOUNDARY when present on its own line.
+ */
+export function splitCustomSystemPrompt(prompt: string): string[] {
+  const lines = prompt.split('\n')
+  const idx = lines.findIndex(
+    line => line.trim() === SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+  )
+  if (idx === -1) return [prompt]
+  const prefix = `${lines.slice(0, idx).join('\n')}\n`
+  const suffix = `\n${lines.slice(idx + 1).join('\n')}`
+  return [
+    ...(prefix.trim() ? [prefix] : []),
+    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    ...(suffix.trim() ? [suffix] : []),
+  ]
+}
+
 function withChromeAppend(appendSystemPrompt: string | undefined): string[] {
   const resolved = resolveChromeAppendSystemPrompt(appendSystemPrompt)
   return resolved ? [resolved] : []
@@ -54,7 +75,7 @@ export function buildEffectiveSystemPrompt({
 }: {
   mainThreadAgentDefinition: AgentDefinition | undefined
   toolUseContext: Pick<ToolUseContext, 'options'>
-  customSystemPrompt: string | undefined
+  customSystemPrompt: string | string[] | undefined
   defaultSystemPrompt: string[]
   appendSystemPrompt: string | undefined
   overrideSystemPrompt?: string | null
@@ -88,6 +109,13 @@ export function buildEffectiveSystemPrompt({
       : mainThreadAgentDefinition.getSystemPrompt()
     : undefined
 
+  const baseSystemPrompt =
+    typeof customSystemPrompt === 'string'
+      ? splitCustomSystemPrompt(customSystemPrompt)
+      : Array.isArray(customSystemPrompt)
+        ? customSystemPrompt
+        : defaultSystemPrompt
+
   // Log agent memory loaded event for main loop agents
   if (mainThreadAgentDefinition?.memory) {
     logEvent('tengu_agent_memory_loaded', {
@@ -118,12 +146,22 @@ export function buildEffectiveSystemPrompt({
     ])
   }
 
+  const shouldAppendAgentPrompt = Boolean(
+    mainThreadAgentDefinition &&
+      'appendSystemPrompt' in mainThreadAgentDefinition &&
+      (mainThreadAgentDefinition as { appendSystemPrompt?: boolean })
+        .appendSystemPrompt,
+  )
+  if (agentSystemPrompt && shouldAppendAgentPrompt) {
+    return asSystemPrompt([
+      ...baseSystemPrompt,
+      agentSystemPrompt,
+      ...withChromeAppend(appendSystemPrompt),
+    ])
+  }
+
   return asSystemPrompt([
-    ...(agentSystemPrompt
-      ? [agentSystemPrompt]
-      : customSystemPrompt
-        ? [customSystemPrompt]
-        : defaultSystemPrompt),
+    ...(agentSystemPrompt ? [agentSystemPrompt] : baseSystemPrompt),
     ...withChromeAppend(appendSystemPrompt),
   ])
 }
