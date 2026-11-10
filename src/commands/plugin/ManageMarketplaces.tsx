@@ -507,7 +507,7 @@ export function ManageMarketplaces({
               : state,
           ),
         );
-      } else if ((input === 'r' || input === 'R') && marketplaceIndex >= 0) {
+      } else if ((input === 'd' || input === 'D' || input === 'r' || input === 'R') && marketplaceIndex >= 0) {
         const marketplace = marketplaceStates[marketplaceIndex];
         if (marketplace) {
           setSelectedMarketplace(marketplace);
@@ -805,7 +805,7 @@ export function ManageMarketplaces({
                   {indicators.length > 0 && <Text color="warning">[{indicators.join(', ')}]</Text>}
                 </Box>
                 <Text dimColor>{re(state.source)}</Text>
-                {state.note && <Text dimColor>{re(state.note)}</Text>}
+                {state.note && <Text color="warning">{re(state.note)}</Text>}
                 <Text dimColor>
                   {state.pluginCount !== undefined && <>{state.pluginCount} available</>}
                   {state.installedPlugins && state.installedPlugins.length > 0 && (
@@ -892,7 +892,7 @@ function ManageMarketplacesKeyHints({
             <ConfigurableShortcutHint action="select:accept" context="Select" fallback="Enter" description="select" />
           )}
           {!hasPendingActions && <KeyboardShortcutHint shortcut="u" action="update" />}
-          {!hasPendingActions && <KeyboardShortcutHint shortcut="r" action="remove" />}
+          {!hasPendingActions && <KeyboardShortcutHint shortcut="d" action="remove" />}
           <ConfigurableShortcutHint
             action="confirm:no"
             context="Confirmation"

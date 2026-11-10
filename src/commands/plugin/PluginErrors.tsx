@@ -5,7 +5,44 @@ import {
   type PluginError,
 } from '../../types/plugin.js';
 
-export function formatErrorMessage(error: PluginError): string {
+export type PluginErrorExtended =
+  | PluginError
+  | {
+      type: 'dependency-version-unsatisfied';
+      source: string;
+      plugin: string;
+      dependency: string;
+      required: string;
+      installed?: string;
+    }
+  | {
+      type: 'plugin-not-installed';
+      source: string;
+      plugin: string;
+      installedListHeldNote?: string;
+    }
+  | {
+      type: 'autoupdate-deferred-entry-helper';
+      source: string;
+      plugin?: string;
+      message: string;
+    }
+  | {
+      type: 'autoupdate-disabled-by-policy';
+      source: string;
+      plugin?: string;
+      message: string;
+    }
+  | {
+      type: 'autoupdate-blocked-by-pinner';
+      source: string;
+      plugin?: string;
+      heldAt?: string;
+      blockedBy: string[];
+      disabledPinners: string[];
+    };
+
+export function formatErrorMessage(error: PluginErrorExtended): string {
   switch (error.type) {
     case 'path-traversal':
       return `${error.component} path escapes the plugin directory: ${error.path}`;
@@ -53,6 +90,8 @@ export function formatErrorMessage(error: PluginError): string {
       return error.reason === 'not-enabled'
         ? `Dependency "${error.dependency}" is disabled`
         : `Dependency "${error.dependency}" is not installed`;
+    case 'dependency-version-unsatisfied':
+      return `Requires "${error.dependency}" ${error.required}, installed ${error.installed ?? 'version unknown'}`;
     case 'lsp-config-invalid':
       return `Invalid LSP server config for "${error.serverName}": ${error.validationError}`;
     case 'lsp-server-start-failed':
@@ -67,6 +106,22 @@ export function formatErrorMessage(error: PluginError): string {
       return `LSP server "${error.serverName}" ${error.method} failed: ${error.error}`;
     case 'plugin-cache-miss':
       return `Plugin "${error.plugin}" not cached at ${error.installPath}`;
+    case 'plugin-not-installed':
+      if (error.installedListHeldNote !== undefined) {
+        return `Plugin "${error.plugin}" is enabled in project settings, but whether it is installed could not be checked`;
+      }
+      return `Plugin "${error.plugin}" is enabled in project settings but isn't installed here`;
+    case 'autoupdate-deferred-entry-helper':
+    case 'autoupdate-disabled-by-policy':
+      return error.message;
+    case 'autoupdate-blocked-by-pinner': {
+      const heldPart = error.heldAt ? ` at ${error.heldAt}` : '';
+      const disabledPart =
+        error.disabledPinners.length > 0
+          ? ` (${error.disabledPinners.join(', ')} ${error.disabledPinners.length === 1 ? 'is' : 'are'} disabled)`
+          : '';
+      return `Autoupdate held${heldPart} — version constraint from ${error.blockedBy.join(', ')}${disabledPart}`;
+    }
     case 'generic-error':
       return error.error;
     case 'synced-plugin-shadowed':
@@ -76,7 +131,7 @@ export function formatErrorMessage(error: PluginError): string {
   return getPluginErrorMessage(_exhaustive);
 }
 
-export function getErrorGuidance(error: PluginError): string | null {
+export function getErrorGuidance(error: PluginErrorExtended): string | null {
   switch (error.type) {
     case 'path-traversal':
       return 'Keep command paths inside the plugin directory';
@@ -112,7 +167,7 @@ export function getErrorGuidance(error: PluginError): string | null {
       return `Remove "${error.duplicateOf}" from your MCP config if you want the plugin's version instead`;
     }
     case 'hook-load-failed':
-      return 'Check hooks.json file syntax and structure';
+      return "Check the plugin's hooks configuration and that its hooks file is readable";
     case 'component-load-failed':
       return `Check ${error.component} directory structure and file permissions`;
     case 'mcpb-download-failed':
@@ -132,6 +187,8 @@ export function getErrorGuidance(error: PluginError): string | null {
       return error.reason === 'not-enabled'
         ? `Enable "${error.dependency}" or uninstall "${error.plugin}"`
         : `Install "${error.dependency}" or uninstall "${error.plugin}"`;
+    case 'dependency-version-unsatisfied':
+      return `Update "${error.dependency}" to satisfy ${error.required}, or uninstall "${error.plugin}"`;
     case 'lsp-config-invalid':
       return 'Check LSP server configuration in the plugin manifest';
     case 'lsp-server-start-failed':
@@ -141,6 +198,24 @@ export function getErrorGuidance(error: PluginError): string | null {
       return 'Check LSP server logs with --debug for details';
     case 'plugin-cache-miss':
       return 'Run /plugin to refresh the plugin cache';
+    case 'plugin-not-installed': {
+      if (error.installedListHeldNote !== undefined) return error.installedListHeldNote;
+      const safeSource = /^\w[\w.@-]*$/.test(error.source)
+        ? `claude plugin install ${error.source} --scope project`
+        : null;
+      return safeSource
+        ? `Run \`${safeSource}\` to install it for this project`
+        : 'Install it at project scope to fix this';
+    }
+    case 'autoupdate-deferred-entry-helper':
+    case 'autoupdate-disabled-by-policy':
+      return null;
+    case 'autoupdate-blocked-by-pinner': {
+      const pinner = error.disabledPinners.length > 0 ? error.disabledPinners[0] : error.blockedBy[0];
+      return pinner
+        ? `Update or uninstall "${pinner}" to unblock${error.disabledPinners.length > 0 ? ' (it is currently disabled)' : ''}`
+        : null;
+    }
     case 'marketplace-load-failed':
       return error.reason === 'cache-miss'
         ? error.catalogReadFailed

@@ -872,6 +872,16 @@ export function BrowseMarketplace({
                 : Object.keys(selectedPlugin.entry.agents).join(', ')}
             </Text>
           )}
+          {selectedPlugin.entry.skills && (
+            <Text dimColor>
+              · Skills:{' '}
+              {typeof selectedPlugin.entry.skills === 'string'
+                ? selectedPlugin.entry.skills
+                : Array.isArray(selectedPlugin.entry.skills)
+                  ? selectedPlugin.entry.skills.join(', ')
+                  : Object.keys(selectedPlugin.entry.skills).join(', ')}
+            </Text>
+          )}
           {selectedPlugin.entry.hooks && (
             <Text dimColor>· Hooks: {Object.keys(selectedPlugin.entry.hooks).join(', ')}</Text>
           )}
@@ -885,10 +895,24 @@ export function BrowseMarketplace({
                   : 'configured'}
             </Text>
           )}
+          {selectedPlugin.entry.lspServers && (
+            <Text dimColor>
+              · LSP Servers:{' '}
+              {typeof selectedPlugin.entry.lspServers === 'string'
+                ? selectedPlugin.entry.lspServers
+                : Array.isArray(selectedPlugin.entry.lspServers)
+                  ? selectedPlugin.entry.lspServers
+                      .flatMap(item => (typeof item === 'string' ? [item] : Object.keys(item)))
+                      .join(', ')
+                  : Object.keys(selectedPlugin.entry.lspServers).join(', ')}
+            </Text>
+          )}
           {!selectedPlugin.entry.commands &&
             !selectedPlugin.entry.agents &&
+            !selectedPlugin.entry.skills &&
             !selectedPlugin.entry.hooks &&
-            !selectedPlugin.entry.mcpServers && (
+            !selectedPlugin.entry.mcpServers &&
+            !selectedPlugin.entry.lspServers && (
               <>
                 {typeof selectedPlugin.entry.source === 'object' &&
                 'source' in selectedPlugin.entry.source &&
@@ -933,7 +957,7 @@ export function BrowseMarketplace({
               {detailsMenuIndex === index && <Text>{'> '}</Text>}
               {detailsMenuIndex !== index && <Text>{'  '}</Text>}
               <Text bold={detailsMenuIndex === index}>
-                {isInstalling && option.action === 'install' ? 'Installing…' : option.label}
+                {isInstalling && option.action.startsWith('install') ? 'Installing…' : option.label}
               </Text>
             </Box>
           ))}

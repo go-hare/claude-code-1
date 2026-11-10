@@ -1,16 +1,22 @@
 import * as React from 'react';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { getOauthProfileFromOauthToken } from '../../services/oauth/getOauthProfile.js';
+import { isUsageCreditsHintEnabled } from '../../services/rateLimitMessages.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getClaudeAIOAuthTokens, isClaudeAISubscriber } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';
 import { logError } from '../../utils/log.js';
 import { Login } from '../login/login.js';
 
+function buildUpgradeUrl(campaign: string): string {
+  return `https://claude.ai/upgrade/max?utm_source=claude_code&utm_medium=cli&utm_campaign=${campaign}`;
+}
+
 export async function call(
   onDone: LocalJSXCommandOnDone,
   context: LocalJSXCommandContext,
 ): Promise<React.ReactNode | null> {
+  const url = buildUpgradeUrl('upgrade_command');
   try {
     // Check if user is already on the highest Max plan (20x)
     if (isClaudeAISubscriber()) {
@@ -27,16 +33,18 @@ export async function call(
       }
 
       if (isMax20x) {
+        const usageCreditsCommand = isUsageCreditsHintEnabled() ? '/usage-credits' : undefined;
         setTimeout(
           onDone,
           0,
-          'You are already on the highest Max subscription plan. For additional usage, run /login to switch to an API usage-billed account.',
+          usageCreditsCommand
+            ? `You’re already on the highest Max subscription plan. For additional usage, run ${usageCreditsCommand}.`
+            : 'You are already on the highest Max subscription plan. For additional usage, run /login to switch to an API usage-billed account.',
         );
         return null;
       }
     }
 
-    const url = 'https://claude.ai/upgrade/max';
     await openBrowser(url);
 
     return (
@@ -50,7 +58,7 @@ export async function call(
     );
   } catch (error) {
     logError(error as Error);
-    setTimeout(onDone, 0, 'Failed to open browser. Please visit https://claude.ai/upgrade/max to upgrade.');
+    setTimeout(onDone, 0, `Failed to open browser. Please visit ${url} to upgrade.`);
   }
   return null;
 }

@@ -50,9 +50,31 @@ export function buildFinalValues(
   return finalValues;
 }
 
-/** densable `Ki` — string + options (not multiple) → select choices. */
+const BOOLEAN_OPTIONS = ['true', 'false'];
+
+/** densable `pYt` — boolean → ['true', 'false']; string + options (not multiple) → select choices. */
 export function stringOptions(schema: McpbUserConfigurationOption | undefined): string[] | undefined {
+  if (schema?.type === 'boolean') return BOOLEAN_OPTIONS;
   return schema?.type === 'string' && schema.multiple !== true ? schema.options : undefined;
+}
+
+export function numberInputHint(schema: { min?: number; max?: number }): string {
+  return `It takes a number${
+    schema.min !== undefined || schema.max !== undefined
+      ? ` between ${schema.min ?? '-∞'} and ${schema.max ?? '∞'}`
+      : ''
+  }.`;
+}
+
+export function numberOfInput(input: string, schema: { min?: number; max?: number }): number | undefined {
+  const trimmed = input.trim();
+  const num = Number(trimmed);
+  return trimmed !== '' &&
+    Number.isFinite(num) &&
+    (schema.min === undefined || num >= schema.min) &&
+    (schema.max === undefined || num <= schema.max)
+    ? num
+    : undefined;
 }
 
 export type PluginOptionField =
@@ -70,12 +92,13 @@ export type PluginOptionField =
       required: boolean;
       mask: '*' | undefined;
       placeholder: string | undefined;
+      validate?: (value: string) => string | null;
       hint: () => string | undefined;
     };
 
 /**
- * densable `Ao` field list: string+options → select; sensitive mask `*`;
- * existing secret placeholder `(unchanged)`.
+ * densable `Ao` field list: boolean / string+options → select; sensitive mask `*`;
+ * existing secret placeholder `(unchanged)`; number validate.
  */
 export function buildFieldDescriptors(
   fields: string[],
@@ -103,12 +126,19 @@ export function buildFieldDescriptors(
       required: schema?.required === true && !existingSecret,
       mask: sensitive ? '*' : undefined,
       placeholder: existingSecret ? '(unchanged)' : undefined,
+      validate:
+        schema?.type === 'number'
+          ? value => {
+              const line = (value.split(/\r\n|\r|\n/, 1)[0] ?? '').trim();
+              return line === '' || numberOfInput(line, schema) !== undefined ? null : numberInputHint(schema);
+            }
+          : undefined,
       hint: () => schema?.description,
     };
   });
 }
 
-/** densable `Ao` initial buffer: skip sensitive; select prefers initial/default in options else first option. */
+/** densable `Ao` / `NOn` initial buffer: skip sensitive; boolean → String(isHeldTrue); select prefers initial/default in options else first option. */
 export function initialCollectedValues(
   fields: string[],
   configSchema: PluginOptionSchema,
@@ -117,6 +147,11 @@ export function initialCollectedValues(
   const collected: Record<string, string> = {};
   for (const key of fields) {
     const schema = configSchema[key];
+    if (schema?.type === 'boolean') {
+      const raw = initialValues?.[key] ?? schema.default;
+      collected[key] = String(raw === true || raw === 'true');
+      continue;
+    }
     const existing = schema?.sensitive === true ? undefined : initialValues?.[key];
     const options = stringOptions(schema);
     if (options === undefined) {
@@ -141,10 +176,11 @@ type Props = {
   onCancel: () => void;
 };
 
-/** densable MN `k(P)` — required empty text blocks submit. */
+/** densable MN `k(P)` — required empty text or invalid number blocks submit. */
 export function requiredFieldError(field: PluginOptionField, value: string): string | null {
   if (field.type !== 'text') return null;
   if (field.required && value.trim() === '') return `${field.label} is required`;
+  if (field.validate) return field.validate(value);
   return null;
 }
 
@@ -259,6 +295,7 @@ export function PluginOptionsDialog({
           const focused = index === focus;
           const display = field.type === 'text' && field.mask ? field.mask.repeat(stringWidth(raw)) : raw;
           const placeholder = field.type === 'text' && field.placeholder !== undefined && raw === '';
+          const hintText = field.hint();
           return (
             <Box key={field.key} flexDirection="column" marginTop={index === 0 ? 0 : 1}>
               <Text bold={focused}>
@@ -266,6 +303,7 @@ export function PluginOptionsDialog({
                 {field.label}
                 {field.type === 'text' && field.required ? <Text color="error"> *</Text> : null}
               </Text>
+              {hintText ? <Text dimColor>{`  ${hintText}`}</Text> : null}
               {field.type === 'select' ? (
                 <Text dimColor={!focused}>
                   {'  '}

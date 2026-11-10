@@ -6,7 +6,7 @@
 
 import * as React from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Box, Byline, Text } from '@anthropic/ink';
+import { Box, Byline, StatusIcon, Text } from '@anthropic/ink';
 import {
   compareConsentedEntryHelper,
   formatHeadersHelperPaneMismatch,
@@ -131,8 +131,21 @@ export function useHeadersHelperPaneConsent(helper: HeadersHelperPaneShown | nul
   );
 }
 
+const HIDDEN_CHARACTERS_WARNING =
+  'The command contains non-ASCII, hidden or control characters (shown as \\u{…} escapes). Do not proceed unless you expected them.';
+
+function escapeHeadersHelperCommand(command: string): { text: string; escaped: boolean } {
+  let escaped = false;
+  const text = command.replace(/[^\x20-\x5b\x5d-\x7e]/gu, ch => {
+    if (ch === '\\') return '\\\\';
+    escaped = true;
+    return `\\u{${(ch.codePointAt(0) ?? 0).toString(16)}}`;
+  });
+  return { text, escaped };
+}
+
 /**
- * densable 2.1.238 — show catalog headersHelper on /plugin details.
+ * densable 2.1.289 `al` — show catalog headersHelper on /plugin details.
  * Recording is the parent `dwo.record` (pass `onShown`); this view does not
  * write a module-level Map.
  */
@@ -141,12 +154,14 @@ export function PluginHeadersHelperDisclosure({
   entry,
   marketplaceName,
   marketplaceSource,
+  verb = 'Installing',
   onShown,
 }: {
   pluginId: string;
   entry: PluginMarketplaceEntry;
   marketplaceName?: string;
   marketplaceSource?: MarketplaceSource;
+  verb?: string;
   onShown?: (helper: HeadersHelperPaneShown) => void;
 }): React.ReactNode {
   const helper = resolveShownArchiveHeadersHelper({
@@ -168,15 +183,19 @@ export function PluginHeadersHelperDisclosure({
   } catch {
     // keep raw
   }
+  const { text: commandText, escaped } = escapeHeadersHelperCommand(helper.command);
+  const hiddenCharactersWarning = escaped ? HIDDEN_CHARACTERS_WARNING : null;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text bold>headersHelper</Text>
-      <Text dimColor>
-        Fetching this plugin&apos;s archive sends helper-minted headers to {destination}; the local command it runs
-        (headersHelper) is:
+      <Text color="warning">
+        <StatusIcon status="warning" withSpace />
+        {verb} runs a local command and sends its output as headers to:
       </Text>
-      <Text>{helper.command}</Text>
+      <Text>{`  ${destination}`}</Text>
+      {hiddenCharactersWarning && <Text color="error">{`  ${hiddenCharactersWarning}`}</Text>}
+      <Text dimColor>{'  The command:'}</Text>
+      <Text>{`  ${commandText}`}</Text>
     </Box>
   );
 }

@@ -10,8 +10,23 @@ import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useSearchInput } from '../../../hooks/useSearchInput.js';
-import { type KeyboardEvent, Box, Text, useTerminalFocus } from '@anthropic/ink';
+import {
+  type KeyboardEvent,
+  type PasteEvent,
+  Box,
+  Byline,
+  Dialog,
+  KeyboardShortcutHint,
+  Pane,
+  Tab,
+  Tabs,
+  Text,
+  useTabHeaderFocus,
+  useTabsWidth,
+  useTerminalFocus,
+} from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
+import * as autoModeDenialsModule from '../../../utils/autoModeDenials.js';
 import { type AutoModeDenial, getAutoModeDenials } from '../../../utils/autoModeDenials.js';
 import type {
   PermissionBehavior,
@@ -29,7 +44,6 @@ import {
 import type { UnreachableRule } from '../../../utils/permissions/shadowedRuleDetection.js';
 import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { jsonStringify } from '../../../utils/slowOperations.js';
-import { Pane, Tab, Tabs, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
 import { SearchBox } from '../../SearchBox.js';
 import type { Option } from '../../ui/option.js';
 import { AddPermissionRules } from './AddPermissionRules.js';
@@ -62,6 +76,26 @@ function getRuleBehaviorLabel(ruleBehavior: PermissionBehavior): string {
   }
 }
 
+function removeDenial(denial: AutoModeDenial): void {
+  const mod = autoModeDenialsModule as {
+    removeDenial?: (d: AutoModeDenial) => void;
+    removeAutoModeDenial?: (d: AutoModeDenial) => void;
+  };
+  if (typeof mod.removeDenial === 'function') {
+    mod.removeDenial(denial);
+    return;
+  }
+  if (typeof mod.removeAutoModeDenial === 'function') {
+    mod.removeAutoModeDenial(denial);
+    return;
+  }
+  const current = getAutoModeDenials() as AutoModeDenial[];
+  const idx = current.indexOf(denial);
+  if (idx !== -1) {
+    current.splice(idx, 1);
+  }
+}
+
 // Component for showing tool details and managing the interactive deletion workflow
 function RuleDetails({
   rule,
@@ -84,40 +118,39 @@ function RuleDetails({
     </Box>
   );
 
-  const footer = (
-    <Box marginLeft={3}>
-      {exitState.pending ? (
-        <Text dimColor>Press {exitState.keyName} again to exit</Text>
-      ) : (
-        <Text dimColor>Esc to cancel</Text>
-      )}
-    </Box>
-  );
-
   // Managed settings can't be edited
   if (rule.source === 'policySettings') {
     return (
-      <>
-        <Box
-          flexDirection="column"
-          gap={1}
-          borderStyle="round"
-          paddingLeft={1}
-          paddingRight={1}
-          borderColor="permission"
-        >
-          <Text bold color="permission">
-            Rule details
-          </Text>
-          {ruleDescription}
-          <Text italic>
-            This rule is configured by managed settings and cannot be modified.
-            {'\n'}
-            Contact your system administrator for more information.
-          </Text>
-        </Box>
-        {footer}
-      </>
+      <Dialog
+        title="Rule details"
+        onCancel={onCancel}
+        color="permission"
+        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="cancel" />}
+      >
+        {ruleDescription}
+        <Text italic>
+          This rule is configured by managed settings and cannot be modified.
+          {'\n'}
+          Contact your system administrator for more information.
+        </Text>
+      </Dialog>
+    );
+  }
+
+  if (rule.source === 'flagSettings' || rule.source === 'command') {
+    const sourceDescription = rule.source === 'flagSettings' ? 'the --settings flag' : 'a slash command';
+    return (
+      <Dialog
+        title="Rule details"
+        onCancel={onCancel}
+        color="permission"
+        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="cancel" />}
+      >
+        {ruleDescription}
+        <Text italic>
+          {`This rule comes from a read-only source (${sourceDescription}) and cannot be modified here.`}
+        </Text>
+      </Dialog>
     );
   }
 
@@ -131,7 +164,18 @@ function RuleDetails({
         <Text>Are you sure you want to delete this permission rule?</Text>
         <ConfirmSelect hideIndexes focus="cancel" onConfirm={onDelete} onCancel={onCancel} />
       </Box>
-      {footer}
+      <Box marginLeft={3}>
+        {exitState.pending ? (
+          <Text dimColor>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Text dimColor>
+            <Byline>
+              <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+              <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+            </Byline>
+          </Text>
+        )}
+      </Box>
     </>
   );
 }
@@ -373,16 +417,29 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
   const isSearchModeActive =
     !selectedRule && !addingRuleToTab && !validatedRule && !isAddingWorkspaceDirectory && !removingDirectory;
 
-  const {
-    query: searchQuery,
-    setQuery: setSearchQuery,
-    cursorOffset: searchCursorOffset,
-  } = useSearchInput({
+  const searchInput = useSearchInput({
     isActive: isSearchModeActive && isSearchMode,
     onExit: () => {
       setIsSearchMode(false);
     },
   });
+  const { query: searchQuery, setQuery: setSearchQuery, cursorOffset: searchCursorOffset } = searchInput;
+
+  const handlePaste = useCallback(
+    (e: PasteEvent) => {
+      const upstreamHandlePaste = (searchInput as { handlePaste?: (e: PasteEvent) => void }).handlePaste;
+      if (upstreamHandlePaste) {
+        upstreamHandlePaste(e);
+        return;
+      }
+      if (!isSearchModeActive || !isSearchMode || e.text.length === 0) return;
+      e.preventDefault();
+      const firstLine = e.text.split(/\r\n|\r|\n/, 2)[0] ?? '';
+      if (firstLine.length === 0) return;
+      setSearchQuery(searchQuery.slice(0, searchCursorOffset) + firstLine + searchQuery.slice(searchCursorOffset));
+    },
+    [searchInput, isSearchModeActive, isSearchMode, searchQuery, searchCursorOffset, setSearchQuery],
+  );
 
   // Handle entering search mode
   const handleKeyDown = useCallback(
@@ -400,6 +457,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
         setIsSearchMode(true);
         setSearchQuery('');
       } else if (
+        !e.defaultPrevented &&
         e.key.length === 1 &&
         // Don't enter search mode for vim-nav / space / retry key
         e.key !== 'j' &&
@@ -491,9 +549,21 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
 
     const approvedDenials = denialsFor(s.approved);
     if (approvedDenials.length > 0 || changes.length > 0) {
-      const approvedMsg =
-        approvedDenials.length > 0 ? [`Approved ${approvedDenials.map(d => chalk.bold(d.display)).join(', ')}`] : [];
-      onExit([...approvedMsg, ...changes].join('\n'));
+      for (const denial of approvedDenials) {
+        removeDenial(denial);
+      }
+      const commands = approvedDenials.map(d => d.display);
+      const approvedMsg = commands.length > 0 ? [`Approved ${commands.map(cmd => chalk.bold(cmd)).join(', ')}`] : [];
+      onExit(
+        [...approvedMsg, ...changes].join('\n'),
+        commands.length > 0
+          ? {
+              metaMessages: [
+                `Permission granted for: ${commands.join(', ')}. You may now retry ${commands.length === 1 ? 'this command' : 'these commands'} if you would like.`,
+              ],
+            }
+          : undefined,
+      );
     } else {
       onExit('Permissions dialog dismissed', {
         display: 'system',
@@ -658,7 +728,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     !!selectedRule || !!addingRuleToTab || !!validatedRule || isAddingWorkspaceDirectory || !!removingDirectory;
 
   return (
-    <Box flexDirection="column" onKeyDown={handleKeyDown}>
+    <Box flexDirection="column" onKeyDown={handleKeyDown} onPaste={handlePaste}>
       <Pane color="permission">
         <Tabs
           title="Permissions"
@@ -686,7 +756,14 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
             ...(toolPermissionContext.isAutoModeAvailable !== false
               ? [
                   <Tab key="automode" id="automode" title="Auto mode">
-                    <AutoModeRulesTab searchQuery={searchQuery} isFocused={isTerminalFocused} />
+                    <AutoModeRulesTab
+                      searchQuery={searchQuery}
+                      isSearchMode={isSearchMode}
+                      isFocused={isTerminalFocused}
+                      cursorOffset={searchCursorOffset}
+                      onCancel={handleRulesCancel}
+                      onHeaderFocusChange={handleHeaderFocusChange}
+                    />
                   </Tab>,
                 ]
               : []),

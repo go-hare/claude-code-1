@@ -198,4 +198,31 @@ describe('parsePluginArgs', () => {
   test('marketplace without action returns type only', () => {
     expect(parsePluginArgs('marketplace')).toEqual({ type: 'marketplace' })
   })
+
+  test('2.1.289 parses list, directory, config alias, and tag', () => {
+    expect(parsePluginArgs('list')).toEqual({ type: 'list' })
+    expect(parsePluginArgs('list --enabled')).toEqual({
+      type: 'list',
+      filter: 'enabled',
+    })
+    expect(parsePluginArgs('ls --disabled')).toEqual({
+      type: 'list',
+      filter: 'disabled',
+    })
+    expect(parsePluginArgs('directory github')).toEqual({
+      type: 'directory',
+      query: 'github',
+    })
+    expect(parsePluginArgs('config my-plugin')).toEqual({
+      type: 'configure',
+      plugin: 'my-plugin',
+    })
+    expect(parsePluginArgs('tag ./pkg --push --dry-run -f')).toEqual({
+      type: 'tag',
+      path: './pkg',
+      push: true,
+      dryRun: true,
+      force: true,
+    })
+  })
 })

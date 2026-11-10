@@ -490,7 +490,10 @@ describe('densable 2.1.289 yEe scroll place + AbovePrompt* contexts', () => {
     expect(body).toContain('maxHeight={paneAllocated}')
     expect(body).toContain('overflowY="hidden"')
     expect(body).toContain('height: paneAllocated')
-    expect(body).toContain('paneScrollBy(sign * rows)')
+    expect(body).toContain(
+      'paneScrollBy(sign * rows, relativeWheelPointer(paneClipRef, event))',
+    )
+    expect(body).toContain('escapeRefused')
     expect(body).toContain('computeWheelStep')
     expect(body).toContain('ensurePaneWheelAccel')
     expect(body).not.toContain('paneWheelScroll(event')
@@ -1618,5 +1621,87 @@ describe('densable 2.1.289 NLe/DQt client mutex store', () => {
     expect(getPluginClientFocusedId()).toBe('a')
     clearPluginClientFocusedId('a')
     expect(getPluginClientFocusedId()).toBe(null)
+  })
+})
+
+describe('densable 2.1.289 AskUserQuestion rewrite + PromptHint tail + Markdown linkSchemes', () => {
+  test('validateAskUserQuestionRewrite and restoreAskUserQuestionResult match 289 YXe/Meo/zXe', async () => {
+    const {
+      askUserQuestionRewriteProblem,
+      validateAskUserQuestionRewrite,
+      restoreAskUserQuestionResult,
+    } = await import('../PluginRasterPanes.js')
+
+    const original = [
+      {
+        question: 'Pick a color?',
+        header: 'Color',
+        multiSelect: false,
+        options: [{ label: 'Red', description: 'warm', preview: 'R' }],
+      },
+    ]
+    const relabeled = [
+      {
+        question: 'Which color should we use?',
+        header: 'Theme',
+        multiSelect: false,
+        options: [{ label: 'Red', description: 'warm', preview: 'R' }],
+      },
+    ]
+    expect(askUserQuestionRewriteProblem(relabeled, original)).toBeUndefined()
+    expect(validateAskUserQuestionRewrite(relabeled, original)).toEqual(
+      relabeled,
+    )
+
+    // Option label mismatch is rejected and falls back to original
+    const badOptions = [
+      {
+        question: 'Which color should we use?',
+        header: 'Theme',
+        multiSelect: false,
+        options: [{ label: 'Blue', description: 'cold', preview: 'R' }],
+      },
+    ]
+    expect(askUserQuestionRewriteProblem(badOptions, original)).toContain(
+      "change question 1's options",
+    )
+    expect(validateAskUserQuestionRewrite(badOptions, original)).toBe(original)
+
+    // Restore maps rewritten question keys back to original question keys
+    const restored = restoreAskUserQuestionResult(
+      {
+        behavior: 'allow',
+        updatedInput: {
+          answers: { 'Which color should we use?': 'Red' } as Record<
+            string,
+            string
+          >,
+          annotations: {
+            'Which color should we use?': { preview: 'R' },
+          } as Record<string, unknown>,
+        },
+      },
+      relabeled,
+      original,
+    )
+    expect(restored.updatedInput?.answers).toEqual({
+      'Pick a color?': 'Red',
+    })
+    expect(restored.updatedInput?.annotations).toEqual({
+      'Pick a color?': { preview: 'R' },
+    })
+  })
+
+  test('PluginRasterPanes hosts linkSchemes, hasSelection guard, onHoldsBandChange, and tail-only hint', () => {
+    const src = readFileSync(PANES, 'utf8')
+    expect(src).toContain("new Set(['https', 'http', 'file'])")
+    expect(src).toContain('selection.hasSelection()')
+    expect(src).toContain('onHoldsBandChange?: (holds: boolean) => void')
+    expect(src).toContain(
+      'settled.pluginTree !== undefined || settled.hint !== defaultHint',
+    )
+    expect(src).toContain(
+      "defaultHint !== '' ? `${defaultHint} · ${tailOnly}` : ` · ${tailOnly}`",
+    )
   })
 })

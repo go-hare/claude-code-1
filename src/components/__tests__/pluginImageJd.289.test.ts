@@ -39,7 +39,7 @@ describe('densable 2.1.289 PluginImage uses Jd via HC().terminalImages', () => {
       'createKittyRefusedLogger({ plugin, requestId, key: elementKey })',
     )
     expect(src).toContain('subscribeKittyGraphicsSupported')
-    expect(src).toContain('if (!triedAllocate) return undefined')
+    expect(src).toContain('describeImageBlitRefusal(')
     expect(src).toContain('encodeKittyTransmit(')
     expect(src).not.toContain('Math.min(columns, KITTY_PLACEHOLDER_MAX)')
     expect(src).toContain(
@@ -93,5 +93,59 @@ describe('densable 2.1.289 PluginImage uses Jd via HC().terminalImages', () => {
     expect(src).toContain('nextWide = randomInt(SMALL_ID_LIMIT, WIDE_ID_LIMIT)')
     expect(src).not.toContain('export class Jd')
     expect(src).not.toContain('export function Jd')
+  })
+
+  test('describeImageBlitRefusal surfaces 289 mo diagnostics for placeholders and file probe', async () => {
+    const { describeImageBlitRefusal } = await import('../PluginRaster.js')
+    expect(
+      describeImageBlitRefusal({
+        hasRoot: false,
+        placeholders: { state: 'settled', value: true, source: 'probe' },
+        hasId: true,
+        isReference: false,
+        files: { state: 'unasked' },
+      }),
+    ).toBe('the Image is not drawn under a terminal root')
+    expect(
+      describeImageBlitRefusal({
+        hasRoot: true,
+        placeholders: {
+          state: 'settled',
+          value: false,
+          source: 'env: inside tmux or screen',
+        },
+        hasId: false,
+        isReference: false,
+        files: { state: 'unasked' },
+      }),
+    ).toBe(
+      'the Image draws its alt here: the terminal draws no placeholder images (env: inside tmux or screen)',
+    )
+    expect(
+      describeImageBlitRefusal({
+        hasRoot: true,
+        placeholders: { state: 'settled', value: true, source: 'probe' },
+        hasId: true,
+        isReference: true,
+        files: { state: 'asking' },
+      }),
+    ).toBe(
+      'the terminal has not yet said whether it reads files on this machine; asked now, blit again',
+    )
+    expect(
+      describeImageBlitRefusal({
+        hasRoot: true,
+        placeholders: { state: 'settled', value: true, source: 'probe' },
+        hasId: true,
+        isReference: true,
+        files: {
+          state: 'settled',
+          value: false,
+          source: 'probe: no reply to the file query',
+        },
+      }),
+    ).toBe(
+      'the Image draws its alt here: this terminal cannot read files on this machine (probe: no reply to the file query); a { file } or { shm } source shows nothing, bytes still draw',
+    )
   })
 })

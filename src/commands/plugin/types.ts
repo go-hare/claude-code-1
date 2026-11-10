@@ -10,11 +10,26 @@ export type ViewState =
   | { type: 'validate'; path?: string } // 校验指定路径下的插件包
   | { type: 'eval'; path?: string } // densable Dr — evals/*.md trigger ring
   | {
+      type: 'tag'
+      path?: string
+      push?: boolean
+      dryRun?: boolean
+      force?: boolean
+      unknownFlag?: string
+    }
+  | { type: 'plugin-list'; filter?: 'enabled' | 'disabled' }
+  | { type: 'stats' }
+  | {
       type: 'browse-marketplace' // 在指定市场中浏览/安装插件
       targetMarketplace: string // 目标市场标识
       targetPlugin?: string // 可选：预选插件名
     }
-  | { type: 'discover-plugins'; targetPlugin?: string } // 发现页；可预选搜索插件名
+  | {
+      type: 'discover-plugins'
+      targetPlugin?: string
+      marketplace?: string
+      searchQuery?: string
+    } // 发现页；可预选搜索插件名或搜索词
   | {
       type: 'manage-plugins' // 已安装插件管理（启用/禁用/卸载）
       targetPlugin?: string // 可选：聚焦某插件
@@ -35,4 +50,6 @@ export type PluginSettingsProps = {
   onComplete: LocalJSXCommandOnDone // 子流程结束回调（可带结果文案与展示方式）
   args?: string // CLI 透传的子命令参数字符串
   showMcpRedirectMessage?: boolean // 从 `/mcp` 跳转时展示 MCP 相关提示
+  showSkillsRedirectMessage?: boolean // 从 `/skills` 跳转时展示提示
+  showSkillDoctorRedirectMessage?: boolean // 从 `/skill-doctor` 跳转时展示提示
 }

@@ -2,16 +2,27 @@
 export type ParsedCommand =
   | { type: 'menu' }
   | { type: 'help' }
+  | { type: 'list'; filter?: 'enabled' | 'disabled' }
   | { type: 'install'; marketplace?: string; plugin?: string }
   | { type: 'install-from-source'; plugin: string; marketplaceSource: string }
   | { type: 'usage-error'; message: string }
   | { type: 'manage' }
+  | { type: 'stats' }
+  | { type: 'directory'; query?: string }
   | { type: 'uninstall'; plugin?: string }
   | { type: 'enable'; plugin?: string }
   | { type: 'disable'; plugin?: string }
   | { type: 'configure'; plugin?: string }
   | { type: 'validate'; path?: string }
   | { type: 'eval'; path?: string }
+  | {
+      type: 'tag'
+      path?: string
+      push: boolean
+      dryRun: boolean
+      force: boolean
+      unknownFlag?: string
+    }
   | {
       type: 'marketplace'
       action?: 'add' | 'remove' | 'update' | 'list'
@@ -78,6 +89,20 @@ export function parsePluginArgs(args?: string): ParsedCommand {
     case '-h':
       return { type: 'help' }
 
+    case 'list':
+    case 'ls': {
+      const flag = parts
+        .slice(1)
+        .find(token => token === '--enabled' || token === '--disabled')
+      if (flag) {
+        return {
+          type: 'list',
+          filter: flag === '--enabled' ? 'enabled' : 'disabled',
+        }
+      }
+      return { type: 'list' }
+    }
+
     case 'install':
     case 'i': {
       const fromMarketplace = parseInstallMarketplaceFlag(parts.slice(1))
@@ -117,6 +142,15 @@ export function parsePluginArgs(args?: string): ParsedCommand {
     case 'manage':
       return { type: 'manage' }
 
+    case 'stats':
+      return { type: 'stats' }
+
+    case 'directory':
+    case 'search': {
+      const query = parts.slice(1).join(' ').trim()
+      return { type: 'directory', query: query || undefined }
+    }
+
     case 'uninstall':
       return { type: 'uninstall', plugin: parts[1] }
 
@@ -127,6 +161,7 @@ export function parsePluginArgs(args?: string): ParsedCommand {
       return { type: 'disable', plugin: parts[1] }
 
     case 'configure':
+    case 'config':
       return { type: 'configure', plugin: parts[1] }
 
     case 'validate': {
@@ -137,6 +172,23 @@ export function parsePluginArgs(args?: string): ParsedCommand {
     case 'eval': {
       const target = parts.slice(1).join(' ').trim()
       return { type: 'eval', path: target || undefined }
+    }
+
+    case 'tag': {
+      const knownFlags = new Set(['--push', '--dry-run', '--force', '-f'])
+      const rest = parts.slice(1)
+      const flags = rest.filter(token => token.startsWith('-'))
+      const positional = rest.filter(token => !token.startsWith('-'))
+      const unknownFlag =
+        flags.find(flag => !knownFlags.has(flag)) ?? positional[1]
+      return {
+        type: 'tag',
+        path: positional[0],
+        push: flags.includes('--push'),
+        dryRun: flags.includes('--dry-run'),
+        force: flags.includes('--force') || flags.includes('-f'),
+        ...(unknownFlag !== undefined && { unknownFlag }),
+      }
     }
 
     case 'marketplace':

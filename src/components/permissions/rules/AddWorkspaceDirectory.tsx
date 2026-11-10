@@ -2,19 +2,23 @@ import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDebounceCallback } from 'usehooks-ts';
-import { addDirHelpMessage, validateDirectoryForWorkspace } from '../../../commands/add-dir/validation.js';
+import {
+  type AddDirectoryResult,
+  addDirHelpMessage,
+  validateDirectoryForWorkspace,
+} from '../../../commands/add-dir/validation.js';
 import TextInput from '../../../components/TextInput.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { getDirectoryCompletions } from '../../../utils/suggestions/directoryCompletion.js';
 import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import { Select } from '../../CustomSelect/select.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { PromptInputFooterSuggestions, type SuggestionItem } from '../../PromptInput/PromptInputFooterSuggestions.js';
 
 type Props = {
   onAddDirectory: (path: string, remember?: boolean) => void;
+  onAlreadyAccessible?: (result: Extract<AddDirectoryResult, { resultType: 'alreadyInWorkingDirectory' }>) => boolean;
   onCancel: () => void;
   permissionContext: ToolPermissionContext;
   directoryPath?: string; // When directoryPath is provided, show selection options instead of input
@@ -50,7 +54,7 @@ function PermissionDescription(): React.ReactNode {
 
 function DirectoryDisplay({ path }: { path: string }): React.ReactNode {
   return (
-    <Box flexDirection="column" paddingX={2} gap={1}>
+    <Box flexDirection="column" gap={1}>
       <Text color="permission">{path}</Text>
       <PermissionDescription />
     </Box>
@@ -60,6 +64,8 @@ function DirectoryDisplay({ path }: { path: string }): React.ReactNode {
 function DirectoryInput({
   value,
   onChange,
+  cursorOffset,
+  onChangeCursorOffset,
   onSubmit,
   error,
   suggestions,
@@ -67,6 +73,8 @@ function DirectoryInput({
 }: {
   value: string;
   onChange: (value: string) => void;
+  cursorOffset: number;
+  onChangeCursorOffset: (offset: number) => void;
   onSubmit: (value: string) => void;
   error: string | null;
   suggestions: SuggestionItem[];
@@ -75,21 +83,27 @@ function DirectoryInput({
   return (
     <Box flexDirection="column">
       <Text>Enter the path to the directory:</Text>
-      <Box borderDimColor borderStyle="round" marginY={1} paddingLeft={1}>
+      <Box borderDimColor borderStyle="round" marginTop={1} paddingLeft={1}>
         <TextInput
           showCursor
+          focus={true}
           placeholder={`Directory path${figures.ellipsis}`}
           value={value}
           onChange={onChange}
           onSubmit={onSubmit}
           columns={80}
-          cursorOffset={value.length}
-          onChangeCursorOffset={() => {}}
+          cursorOffset={cursorOffset}
+          onChangeCursorOffset={onChangeCursorOffset}
+          disableCursorMovementForUpDownKeys={true}
         />
       </Box>
       {suggestions.length > 0 && (
         <Box marginBottom={1}>
-          <PromptInputFooterSuggestions suggestions={suggestions} selectedSuggestion={selectedSuggestion} />
+          <PromptInputFooterSuggestions
+            suggestions={suggestions}
+            selectedSuggestion={selectedSuggestion}
+            noPad={true}
+          />
         </Box>
       )}
       {error && <Text color="error">{error}</Text>}
@@ -99,11 +113,13 @@ function DirectoryInput({
 
 export function AddWorkspaceDirectory({
   onAddDirectory,
+  onAlreadyAccessible,
   onCancel,
   permissionContext,
   directoryPath,
 }: Props): React.ReactNode {
   const [directoryInput, setDirectoryInput] = useState('');
+  const [cursorOffset, setCursorOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
@@ -130,6 +146,7 @@ export function AddWorkspaceDirectory({
   const applySuggestion = useCallback((suggestion: SuggestionItem) => {
     const newPath = suggestion.id + '/';
     setDirectoryInput(newPath);
+    setCursorOffset(newPath.length);
     setError(null);
     // Suggestions will update via the useEffect
   }, []);
@@ -141,11 +158,14 @@ export function AddWorkspaceDirectory({
 
       if (result.resultType === 'success') {
         onAddDirectory(result.absolutePath, false);
-      } else {
-        setError(addDirHelpMessage(result));
+        return;
       }
+      if (result.resultType === 'alreadyInWorkingDirectory' && !result.isExactMatch && onAlreadyAccessible?.(result)) {
+        return;
+      }
+      setError(addDirHelpMessage(result));
     },
-    [permissionContext, onAddDirectory],
+    [permissionContext, onAddDirectory, onAlreadyAccessible],
   );
 
   // Handle Esc to cancel (Ctrl+C handled by global keybindings)
@@ -165,16 +185,6 @@ export function AddWorkspaceDirectory({
           return;
         }
 
-        // Enter: apply selected suggestion and submit
-        if (e.key === 'return') {
-          e.preventDefault();
-          const suggestion = suggestions[selectedSuggestion];
-          if (suggestion) {
-            void handleSubmit(suggestion.id + '/');
-          }
-          return;
-        }
-
         if (e.key === 'up' || (e.ctrl && e.key === 'p')) {
           e.preventDefault();
           setSelectedSuggestion(prev => (prev <= 0 ? suggestions.length - 1 : prev - 1));
@@ -188,7 +198,7 @@ export function AddWorkspaceDirectory({
         }
       }
     },
-    [suggestions, selectedSuggestion, applySuggestion, handleSubmit],
+    [suggestions, selectedSuggestion, applySuggestion],
   );
 
   const handleSelect = useCallback(
@@ -220,23 +230,13 @@ export function AddWorkspaceDirectory({
         color="permission"
         isCancelActive={false}
         inputGuide={
-          directoryPath
-            ? undefined
-            : exitState =>
-                exitState.pending ? (
-                  <Text>Press {exitState.keyName} again to exit</Text>
-                ) : (
-                  <Byline>
-                    <KeyboardShortcutHint shortcut="Tab" action="complete" />
-                    <KeyboardShortcutHint shortcut="Enter" action="add" />
-                    <ConfigurableShortcutHint
-                      action="confirm:no"
-                      context="Settings"
-                      fallback="Esc"
-                      description="cancel"
-                    />
-                  </Byline>
-                )
+          directoryPath ? undefined : (
+            <Byline>
+              <KeyboardShortcutHint shortcut="Tab" action="complete" />
+              <KeyboardShortcutHint shortcut="Enter" action="add" />
+              <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+            </Byline>
+          )
         }
       >
         {directoryPath ? (
@@ -245,11 +245,13 @@ export function AddWorkspaceDirectory({
             <Select options={options} onChange={handleSelect} onCancel={() => handleSelect('no')} />
           </Box>
         ) : (
-          <Box flexDirection="column" gap={1} marginX={2}>
+          <Box flexDirection="column" gap={1}>
             <PermissionDescription />
             <DirectoryInput
               value={directoryInput}
               onChange={setDirectoryInput}
+              cursorOffset={cursorOffset}
+              onChangeCursorOffset={setCursorOffset}
               onSubmit={handleSubmit}
               error={error}
               suggestions={suggestions}

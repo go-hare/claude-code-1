@@ -68,6 +68,8 @@ type Props = {
   onInstallComplete?: () => void | Promise<void>;
   onSearchModeChange?: (isActive: boolean) => void;
   targetPlugin?: string;
+  initialMarketplace?: string;
+  initialSearchQuery?: string;
 };
 
 type ViewState =
@@ -90,6 +92,8 @@ export function DiscoverPlugins({
   onInstallComplete,
   onSearchModeChange,
   targetPlugin,
+  initialMarketplace,
+  initialSearchQuery,
 }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const store = useAppStateStore();
@@ -136,7 +140,7 @@ export function DiscoverPlugins({
   const [installCounts, setInstallCounts] = useState<Map<string, number> | null>(null);
 
   // Search state
-  const [isSearchMode, setIsSearchModeRaw] = useState(false);
+  const [isSearchMode, setIsSearchModeRaw] = useState(Boolean(initialSearchQuery));
   const setIsSearchMode = useCallback(
     (active: boolean) => {
       setIsSearchModeRaw(active);
@@ -154,20 +158,29 @@ export function DiscoverPlugins({
       setIsSearchMode(false);
     },
   });
+  useEffect(() => {
+    if (initialSearchQuery) {
+      setSearchQuery(initialSearchQuery);
+      setIsSearchMode(true);
+    }
+  }, [initialSearchQuery, setSearchQuery, setIsSearchMode]);
   const isTerminalFocused = useTerminalFocus();
   const { columns: terminalWidth } = useTerminalSize();
 
   // Filter plugins based on search query
   const filteredPlugins = useMemo(() => {
-    if (!searchQuery) return availablePlugins;
+    const base = initialMarketplace
+      ? availablePlugins.filter(p => p.marketplaceName === initialMarketplace)
+      : availablePlugins;
+    if (!searchQuery) return base;
     const lowerQuery = searchQuery.toLowerCase();
-    return availablePlugins.filter(
+    return base.filter(
       plugin =>
         plugin.entry.name.toLowerCase().includes(lowerQuery) ||
         plugin.entry.description?.toLowerCase().includes(lowerQuery) ||
         plugin.marketplaceName.toLowerCase().includes(lowerQuery),
     );
-  }, [availablePlugins, searchQuery]);
+  }, [availablePlugins, initialMarketplace, searchQuery]);
 
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -514,15 +527,7 @@ export function DiscoverPlugins({
         if (input === '/' && keyIsNotCtrlOrMeta) {
           setIsSearchMode(true);
           setSearchQuery('');
-        } else if (
-          keyIsNotCtrlOrMeta &&
-          input.length > 0 &&
-          !/^\s+$/.test(input) &&
-          // Don't enter search mode for navigation keys
-          input !== 'j' &&
-          input !== 'k' &&
-          input !== 'i'
-        ) {
+        } else if (keyIsNotCtrlOrMeta && input.length === 1 && input !== ' ') {
           setIsSearchMode(true);
           setSearchQuery(input);
         }
@@ -928,8 +933,16 @@ function DiscoverPluginsKeyHint({
 /**
  * Context-aware empty state message for the Discover screen
  */
-function EmptyStateMessage({ reason }: { reason: EmptyMarketplaceReason | null }): React.ReactNode {
+function EmptyStateMessage({
+  reason,
+}: {
+  reason: EmptyMarketplaceReason | 'directory-failed' | 'all-hidden-by-policy' | 'all-plugins-project-installed' | null;
+}): React.ReactNode {
   switch (reason) {
+    case 'directory-failed':
+      return <Text dimColor>No plugins to show until the Anthropic Directory loads.</Text>;
+    case 'all-hidden-by-policy':
+      return <Text dimColor>Your organization&apos;s policy hides every plugin that would be listed here.</Text>;
     case 'git-not-installed':
       return (
         <>
@@ -963,6 +976,13 @@ function EmptyStateMessage({ reason }: { reason: EmptyMarketplaceReason | null }
         <>
           <Text dimColor>All available plugins are already installed.</Text>
           <Text dimColor>Check for new plugins later or add more marketplaces.</Text>
+        </>
+      );
+    case 'all-plugins-project-installed':
+      return (
+        <>
+          <Text dimColor>All available plugins are installed for this project.</Text>
+          <Text dimColor>Use the Browse tab to install at user scope.</Text>
         </>
       );
     case 'no-marketplaces-configured':

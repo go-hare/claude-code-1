@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  isTransientError,
   PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE,
   pluginMenuCloseReloadOutcome,
 } from '../PluginSettings.js'
-import { getErrorGuidance } from '../PluginErrors.js'
+import { formatErrorMessage, getErrorGuidance } from '../PluginErrors.js'
 
 describe('densable 2.1.283 /plugin close auto-reload (Ll)', () => {
   test('none when needsRefresh is false', () => {
@@ -61,5 +62,56 @@ describe('densable 2.1.283 plugin cache-miss guidance', () => {
         reason: 'network',
       }),
     ).toBeNull()
+  })
+
+  test('2.1.289 isTransientError includes cache-miss and marketplace-not-found; new error branches format cleanly', () => {
+    expect(
+      isTransientError({
+        type: 'marketplace-load-failed',
+        source: 'x',
+        marketplace: 'official',
+        reason: 'cache-miss',
+      }),
+    ).toBe(true)
+    expect(
+      isTransientError({
+        type: 'marketplace-not-found',
+        source: 'x',
+        marketplace: 'official',
+        availableMarketplaces: [],
+      }),
+    ).toBe(true)
+    expect(
+      getErrorGuidance({
+        type: 'hook-load-failed',
+        source: 'x',
+        plugin: 'demo',
+        hookPath: '/tmp/h',
+        reason: 'bad',
+      }),
+    ).toBe(
+      "Check the plugin's hooks configuration and that its hooks file is readable",
+    )
+    expect(
+      formatErrorMessage({
+        type: 'dependency-version-unsatisfied',
+        source: 'x',
+        plugin: 'demo',
+        dependency: 'core',
+        required: '^2.0.0',
+        installed: '1.0.0',
+      }),
+    ).toBe('Requires "core" ^2.0.0, installed 1.0.0')
+    expect(
+      formatErrorMessage({
+        type: 'autoupdate-blocked-by-pinner',
+        source: 'x',
+        heldAt: '1.2.0',
+        blockedBy: ['dep-a'],
+        disabledPinners: ['dep-a'],
+      }),
+    ).toBe(
+      'Autoupdate held at 1.2.0 — version constraint from dep-a (dep-a is disabled)',
+    )
   })
 })

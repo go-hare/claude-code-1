@@ -2,9 +2,8 @@ import figures from 'figures';
 import * as React from 'react';
 import { useState } from 'react';
 import TextInput from '../../../components/TextInput.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { Box, Newline, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Newline, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js';
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js';
@@ -23,7 +22,6 @@ export type PermissionRuleInputProps = {
 export function PermissionRuleInput({ onCancel, onSubmit, ruleBehavior }: PermissionRuleInputProps): React.ReactNode {
   const [inputValue, setInputValue] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
-  const exitState = useExitOnCtrlCDWithKeybindings();
 
   // Use configurable keybinding for ESC to cancel
   // Use Settings context so 'n' key doesn't cancel (allows typing 'n' in input)
@@ -41,46 +39,48 @@ export function PermissionRuleInput({ onCancel, onSubmit, ruleBehavior }: Permis
     onSubmit(ruleValue, ruleBehavior);
   };
 
+  const title = `Add ${ruleBehavior} permission rule`;
+
   return (
-    <>
-      <Box flexDirection="column" gap={1} borderStyle="round" paddingLeft={1} paddingRight={1} borderColor="permission">
-        <Text bold color="permission">
-          Add {ruleBehavior} permission rule
-        </Text>
-        <Box flexDirection="column">
-          <Text>
-            Permission rules are a tool name, optionally followed by a specifier in parentheses.
-            <Newline />
-            e.g., <Text bold>{permissionRuleValueToString({ toolName: WebFetchTool.name })}</Text>
-            <Text bold={false}> or </Text>
-            <Text bold>
-              {permissionRuleValueToString({
-                toolName: BashTool.name,
-                ruleContent: 'ls:*',
-              })}
-            </Text>
+    <Dialog
+      title={title}
+      onCancel={onCancel}
+      color="permission"
+      isCancelActive={false}
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="Enter" action="submit" />
+          <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+        </Byline>
+      }
+    >
+      <Box flexDirection="column">
+        <Text>
+          Permission rules are a tool name, optionally followed by a specifier in parentheses.
+          <Newline />
+          e.g., <Text bold>{permissionRuleValueToString({ toolName: WebFetchTool.name })}</Text>
+          <Text bold={false}> or </Text>
+          <Text bold>
+            {permissionRuleValueToString({
+              toolName: BashTool.name,
+              ruleContent: 'ls *',
+            })}
           </Text>
-          <Box borderDimColor borderStyle="round" marginY={1} paddingLeft={1}>
-            <TextInput
-              showCursor
-              value={inputValue}
-              onChange={setInputValue}
-              onSubmit={handleSubmit}
-              placeholder={`Enter permission rule${figures.ellipsis}`}
-              columns={textInputColumns}
-              cursorOffset={cursorOffset}
-              onChangeCursorOffset={setCursorOffset}
-            />
-          </Box>
+        </Text>
+        <Box borderDimColor borderStyle="round" marginY={1} paddingLeft={1}>
+          <TextInput
+            showCursor
+            focus={true}
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={handleSubmit}
+            placeholder={`Enter permission rule${figures.ellipsis}`}
+            columns={textInputColumns}
+            cursorOffset={cursorOffset}
+            onChangeCursorOffset={setCursorOffset}
+          />
         </Box>
       </Box>
-      <Box marginLeft={3}>
-        {exitState.pending ? (
-          <Text dimColor>Press {exitState.keyName} again to exit</Text>
-        ) : (
-          <Text dimColor>Enter to submit · Esc to cancel</Text>
-        )}
-      </Box>
-    </>
+    </Dialog>
   );
 }

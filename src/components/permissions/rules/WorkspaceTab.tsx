@@ -88,6 +88,7 @@ export function WorkspaceTab({
         visibleOptionCount={Math.min(10, options.length)}
         onUpFromFirstItem={focusHeader}
         isDisabled={headerFocused}
+        hidePromptWhileDisabled={true}
       />
     </Box>
   );

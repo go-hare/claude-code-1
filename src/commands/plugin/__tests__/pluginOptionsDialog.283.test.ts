@@ -162,4 +162,35 @@ describe('Ao field list select vs text (2.1.283)', () => {
     expect(requiredFieldError(fields[0]!, '   ')).toBe('Name is required')
     expect(requiredFieldError(fields[0]!, 'ok')).toBe(null)
   })
+
+  test('2.1.289 boolean select options and number min/max validation', () => {
+    const schema: PluginOptionSchema = {
+      enabled: {
+        type: 'boolean',
+        title: 'Enabled',
+        description: 'toggle it',
+      },
+      port: {
+        type: 'number',
+        title: 'Port',
+        description: 'port num',
+        min: 1,
+        max: 65535,
+      },
+    }
+    const fields = buildFieldDescriptors(['enabled', 'port'], schema, undefined)
+    expect(fields[0]).toMatchObject({
+      type: 'select',
+      key: 'enabled',
+      options: ['true', 'false'],
+    })
+    expect(fields[1]?.type).toBe('text')
+    expect(requiredFieldError(fields[1]!, 'abc')).toBe(
+      'It takes a number between 1 and 65535.',
+    )
+    expect(requiredFieldError(fields[1]!, '0')).toBe(
+      'It takes a number between 1 and 65535.',
+    )
+    expect(requiredFieldError(fields[1]!, '8080')).toBeNull()
+  })
 })

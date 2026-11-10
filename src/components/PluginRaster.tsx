@@ -19,6 +19,38 @@ import {
   subscribeKittyGraphicsSupported,
   KITTY_SINK_REFUSED,
 } from '../utils/plugins/kittyGraphics.js';
+import { Jk, tD, type TerminalCapabilityReading } from '../../packages/@ant/ink/src/core/terminalCapabilities.js';
+
+export function isKittyReferenceSource(source: unknown): boolean {
+  return (
+    source !== null && typeof source === 'object' && (Object.hasOwn(source, 'file') || Object.hasOwn(source, 'shm'))
+  );
+}
+
+/** densable 2.1.289 `mo` — Image blit refusal diagnostics. */
+export function describeImageBlitRefusal(input: {
+  hasRoot: boolean;
+  placeholders: TerminalCapabilityReading;
+  hasId: boolean;
+  isReference: boolean;
+  files: ReturnType<ReturnType<typeof Jk>['imageFiles']['get']>;
+}): string | undefined {
+  const { hasRoot, placeholders, hasId, isReference, files } = input;
+  const hasPlaceholders = placeholders.state === 'settled' && placeholders.value;
+  const canReadFiles = !isReference || (files.state === 'settled' && files.value);
+  const filesPending = !canReadFiles && files.state !== 'settled';
+  const filesSource = files.state === 'settled' ? files.source : '';
+  if (!hasRoot) return 'the Image is not drawn under a terminal root';
+  if (!hasPlaceholders) {
+    return `the Image draws its alt here: the terminal draws no placeholder images (${placeholders.source})`;
+  }
+  if (!hasId) return 'the Image draws its alt here: every 8-bit image id is in use';
+  if (filesPending) {
+    return 'the terminal has not yet said whether it reads files on this machine; asked now, blit again';
+  }
+  if (canReadFiles) return undefined;
+  return `the Image draws its alt here: this terminal cannot read files on this machine (${filesSource}); a { file } or { shm } source shows nothing, bytes still draw`;
+}
 
 /** densable `ko` — waiting palette retry. */
 const PALETTE_WAIT_MS = 250;
@@ -227,19 +259,21 @@ export function PluginImage(props: PluginImageProps): ReactNode {
   useLayoutEffect(() => {
     // densable `ko`: allocate(k, xo) on `HC().terminalImages` when yo() has bits.
     const bits = kittyImageIdBits();
-    const triedAllocate = terminalImages !== null && bits !== undefined;
     const id =
       terminalImages === null || bits === undefined
         ? undefined
         : terminalImages.allocate(bits, createKittyRefusedLogger({ plugin, requestId, key: elementKey }));
     setAllocated(id !== undefined && terminalImages !== null ? { id, images: terminalImages } : undefined);
     const detach = attachImageWidgetSwap(plugin, requestId, elementKey, source => {
-      if (terminalImages === null) return 'the Image is not drawn under a terminal root';
-      // Probe still open, or this terminal cannot draw placeholders: keep alt
-      // and accept the blit. Exhausted is only allocate() returning undefined.
-      if (!triedAllocate) return undefined;
-      if (id === undefined) {
-        return 'the Image draws its alt here: every 8-bit image id is in use';
+      const refusal = describeImageBlitRefusal({
+        hasRoot: terminalImages !== null,
+        placeholders: tD().get('kittyGraphics'),
+        hasId: id !== undefined,
+        isReference: isKittyReferenceSource(source),
+        files: Jk().imageFiles.get(),
+      });
+      if (refusal !== undefined || id === undefined || terminalImages === null) {
+        return refusal;
       }
       const consumed = isKittyShmSource(source);
       if (consumed && terminalImages.isBackedUp(id)) {
@@ -273,6 +307,14 @@ export function PluginImage(props: PluginImageProps): ReactNode {
 
   useLayoutEffect(() => {
     if (allocated === undefined) return;
+    const isRef = isKittyReferenceSource(initialSource);
+    const filesReading = Jk().imageFiles.get();
+    const canReadFiles = !isRef || (filesReading.state === 'settled' && filesReading.value);
+    if (!canReadFiles) {
+      transmittedRef.current = { sourceKey: undefined, source: undefined, box: undefined };
+      setKittyId(undefined);
+      return;
+    }
     let sourceKey: string | undefined;
     if (initialSource !== undefined) {
       try {

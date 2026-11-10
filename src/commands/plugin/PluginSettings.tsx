@@ -10,7 +10,7 @@ import {
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { getBootstrapSession } from '../../utils/sessionRoot.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline, Pane, Tab, Tabs } from '@anthropic/ink';
+import { Byline, Pane, StatusIcon, Tab, Tabs } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -21,6 +21,8 @@ import { errorMessage } from '../../utils/errors.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { re } from '../../utils/plugins/escapeSafeText.js';
+import { getLoadedFunctionHooksModules } from '../../utils/plugins/functionHooksModules.js';
+import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js';
 import { loadMarketplacesWithGracefulDegradation } from '../../utils/plugins/marketplaceHelpers.js';
 import { loadKnownMarketplacesConfig, removeMarketplaceSource } from '../../utils/plugins/marketplaceManager.js';
 import { useSessionServices } from '../../context/sessionServices.js';
@@ -97,30 +99,93 @@ function MarketplaceList({ onComplete }: { onComplete: (result?: string) => void
   return <Text>Loading marketplaces...</Text>;
 }
 
-function McpRedirectBanner(): React.ReactNode {
-  if ((process.env.USER_TYPE as string) !== 'ant') {
-    return null;
-  }
+function PluginList({
+  onComplete,
+  filter,
+}: {
+  onComplete: (result?: string) => void;
+  filter?: 'enabled' | 'disabled';
+}): React.ReactNode {
+  const errors = useAppState(s => s.plugins.errors);
+  const enabled = useAppState(s => s.plugins.enabled);
+  const disabled = useAppState(s => s.plugins.disabled);
 
+  useEffect(() => {
+    const registry = loadInstalledPluginsV2();
+    const ids = Object.keys(registry.plugins).sort();
+    if (ids.length === 0) {
+      onComplete('No plugins installed. Use `/plugin install` to install a plugin.');
+      return;
+    }
+    const editableScopes = getPluginEditableScopes();
+    const loadedEnabledSources = new Set(enabled.map(p => p.source));
+    const lines = ['Installed plugins:'];
+    let shown = 0;
+    for (const pluginId of ids) {
+      const pluginName = pluginId.split('@')[0] ?? pluginId;
+      const isEnabled = editableScopes.has(pluginId);
+      if (filter !== undefined && (filter === 'enabled') !== isEnabled) {
+        continue;
+      }
+      const hasError = errors.some(
+        err =>
+          !isAdvisoryPluginError(err) && (err.source === pluginId || ('plugin' in err && err.plugin === pluginName)),
+      );
+      const status = hasError
+        ? `${figures.cross} failed to load`
+        : isEnabled
+          ? `${figures.tick} enabled`
+          : `${figures.cross} disabled`;
+      const reloadHint =
+        !hasError && isEnabled !== loadedEnabledSources.has(pluginId) ? ' — run /reload-plugins to apply' : '';
+      const loadedVersion = (enabled.find(p => p.source === pluginId) ?? disabled.find(p => p.source === pluginId))
+        ?.manifest.version;
+      for (const install of registry.plugins[pluginId] ?? []) {
+        const ver = install.version || loadedVersion;
+        const meta = ver ? `${ver}, ${install.scope}` : install.scope;
+        lines.push(`  • ${pluginId} (${meta}) ${status}${reloadHint}`);
+        shown++;
+      }
+    }
+    if (shown === 0) {
+      onComplete(`No ${filter} plugins.`);
+      return;
+    }
+    onComplete(lines.join('\n'));
+  }, [onComplete, errors, enabled, disabled, filter]);
+
+  return <Text>Loading plugins...</Text>;
+}
+
+function ActiveModsBanner({ names }: { names: string[] }): React.ReactNode {
   return (
-    <Box
-      flexDirection="row"
-      alignItems="flex-start"
-      paddingLeft={1}
-      marginTop={1}
-      borderLeft
-      borderRight={false}
-      borderTop={false}
-      borderBottom={false}
-      borderColor="permission"
-      borderStyle="single"
-    >
-      <Box flexShrink={0}>
-        <Text bold italic color="permission">
-          i{' '}
-        </Text>
-      </Box>
-      <Text>[ANT-ONLY] MCP servers are now managed in /plugins. Use /mcp no-redirect to test old UI</Text>
+    <Box marginTop={1}>
+      <Text dimColor wrap="truncate-end">
+        <Byline>
+          <Text>
+            {names.length} {plural(names.length, 'mod')} active
+          </Text>
+          <Text>{names.map(n => re(n)).join(', ')}</Text>
+        </Byline>
+      </Text>
+    </Box>
+  );
+}
+
+function SkillsRedirectBanner(): React.ReactNode {
+  return (
+    <Box marginTop={1}>
+      <StatusIcon status="info" withSpace />
+      <Text>Skills are now managed here under the Skills section.</Text>
+    </Box>
+  );
+}
+
+function SkillDoctorRedirectBanner(): React.ReactNode {
+  return (
+    <Box marginTop={1}>
+      <StatusIcon status="info" withSpace />
+      <Text>/skill-doctor moved — skill usage and context costs now live in this Stats tab.</Text>
     </Box>
   );
 }
@@ -223,8 +288,11 @@ function buildPluginAction(pluginName: string): ErrorRowAction {
 
 const TRANSIENT_ERROR_TYPES = new Set(['git-auth-failed', 'git-timeout', 'network-error']);
 
-function isTransientError(error: PluginError): boolean {
-  return TRANSIENT_ERROR_TYPES.has(error.type);
+export function isTransientError(error: PluginError): boolean {
+  if (TRANSIENT_ERROR_TYPES.has(error.type)) return true;
+  if (error.type === 'marketplace-load-failed' && error.reason === 'cache-miss') return true;
+  if (error.type === 'marketplace-not-found') return true;
+  return false;
 }
 
 /**
@@ -256,7 +324,7 @@ function buildErrorRows(
     rows.push({
       label: pluginName ?? error.source,
       message: formatErrorMessage(error),
-      guidance: 'Restart to retry loading plugins',
+      guidance: getErrorGuidance(error) ?? 'Restart to retry loading plugins',
       action: { kind: 'none' },
     });
   }
@@ -421,9 +489,10 @@ function ErrorsTabContent({
   // Transient errors (git/network) — show at top with "restart to retry"
   const transientErrors = errors.filter(isTransientError);
 
-  // Marketplace-related loading errors not already covered by install failures
+  // Marketplace-related loading errors not already covered by install failures or transient errors
   const extraMarketplaceErrors = errors.filter(
     e =>
+      !isTransientError(e) &&
       (e.type === 'marketplace-not-found' ||
         e.type === 'marketplace-load-failed' ||
         e.type === 'marketplace-blocked-by-policy') &&
@@ -466,13 +535,26 @@ function ErrorsTabContent({
     transientErrors,
     pluginScopes,
   );
-  const warningRows: ErrorRow[] = (warnings ?? []).map(w => ({
-    label: w.plugin ?? w.source ?? w.type,
-    message: w.warning ?? `Advisory warning: ${w.type}`,
-    action: { kind: 'none' },
-    scope: (w.plugin ? pluginScopes.get(w.plugin) : undefined) ?? (w.source ? pluginScopes.get(w.source) : undefined),
-    isAdvisory: true,
-  }));
+  const warningRows: ErrorRow[] = (warnings ?? []).map(w => {
+    const targetPlugin = w.plugin ?? (w.source?.includes('@') ? w.source.split('@')[0] : w.source);
+    return {
+      label: w.plugin ?? w.source ?? w.type,
+      message: w.warning ?? `Advisory warning: ${w.type}`,
+      action:
+        w.type === 'mcpb-needs-config' && targetPlugin
+          ? {
+              kind: 'navigate',
+              tab: 'installed',
+              viewState: {
+                type: 'manage-plugins',
+                targetPlugin,
+              },
+            }
+          : { kind: 'none' },
+      scope: (w.plugin ? pluginScopes.get(w.plugin) : undefined) ?? (w.source ? pluginScopes.get(w.source) : undefined),
+      isAdvisory: true,
+    };
+  });
   const rows = [...baseRows, ...warningRows];
 
   // Handle escape to exit the plugin menu
@@ -562,6 +644,11 @@ function ErrorsTabContent({
         <Box marginLeft={1}>
           <Text dimColor>No plugin errors</Text>
         </Box>
+        {actionMessage && (
+          <Box marginTop={1} marginLeft={1}>
+            <Text color="claude">{actionMessage}</Text>
+          </Box>
+        )}
         <Box marginTop={1}>
           <Text dimColor italic>
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="go back" />
@@ -576,7 +663,7 @@ function ErrorsTabContent({
       {rows.map((row, idx) => {
         const isSelected = idx === clampedIndex;
         const tone = row.isAdvisory ? 'warning' : 'error';
-        const icon = isSelected ? figures.pointer : row.isAdvisory ? figures.warning : figures.cross;
+        const icon = isSelected ? figures.pointer : row.isAdvisory ? figures.triangleUpOutline : figures.cross;
         return (
           <Box key={idx} marginLeft={1} flexDirection="column" marginBottom={1}>
             <Text>
@@ -864,6 +951,28 @@ function getInitialViewState(parsedCommand: ParsedCommand): ViewState {
       };
     case 'manage':
       return { type: 'manage-plugins' };
+    case 'stats':
+      return { type: 'stats' };
+    case 'directory':
+      return {
+        type: 'discover-plugins',
+        marketplace: 'claude-plugin-directory',
+        searchQuery: parsedCommand.query,
+      };
+    case 'list':
+      return {
+        type: 'plugin-list',
+        filter: parsedCommand.filter,
+      };
+    case 'tag':
+      return {
+        type: 'tag',
+        path: parsedCommand.path,
+        push: parsedCommand.push,
+        dryRun: parsedCommand.dryRun,
+        force: parsedCommand.force,
+        unknownFlag: parsedCommand.unknownFlag,
+      };
     case 'uninstall':
       return {
         type: 'manage-plugins',
@@ -922,16 +1031,22 @@ function getInitialViewState(parsedCommand: ParsedCommand): ViewState {
 
 function getInitialTab(viewState: ViewState): TabId {
   if (viewState.type === 'manage-plugins') return 'installed';
+  if (viewState.type === 'stats') return 'stats';
   if (viewState.type === 'manage-marketplaces') return 'marketplaces';
   return 'discover';
 }
 
-export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: PluginSettingsProps): React.ReactNode {
-  const isStatsSubcommand = args?.trim().toLowerCase() === 'stats';
-  const parsedCommand = parsePluginArgs(isStatsSubcommand ? undefined : args);
+export function PluginSettings({
+  onComplete,
+  args,
+  showMcpRedirectMessage: _showMcpRedirectMessage,
+  showSkillsRedirectMessage,
+  showSkillDoctorRedirectMessage,
+}: PluginSettingsProps): React.ReactNode {
+  const parsedCommand = parsePluginArgs(args);
   const initialViewState = getInitialViewState(parsedCommand);
   const [viewState, setViewState] = useState<ViewState>(initialViewState);
-  const [activeTab, setActiveTab] = useState<TabId>(isStatsSubcommand ? 'stats' : getInitialTab(initialViewState));
+  const [activeTab, setActiveTab] = useState<TabId>(getInitialTab(initialViewState));
   const [inputValue, setInputValue] = useState(
     viewState.type === 'add-marketplace' ? viewState.initialValue || '' : '',
   );
@@ -1143,10 +1258,13 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         </Text>
         <Text> </Text>
         <Text dimColor>Management:</Text>
+        <Text> /plugin list [--enabled|--disabled] - List installed plugins</Text>
         <Text> /plugin manage - Manage installed plugins</Text>
         <Text> /plugin stats - Show skill usage and context costs</Text>
+        <Text> /plugin directory [query] - Search the Anthropic Directory in Discover</Text>
         <Text> /plugin enable &lt;plugin&gt; - Enable a plugin</Text>
         <Text> /plugin disable &lt;plugin&gt; - Disable a plugin</Text>
+        <Text> /plugin configure &lt;plugin&gt; - Set userConfig options</Text>
         <Text> /plugin uninstall &lt;plugin&gt; - Uninstall a plugin</Text>
         <Text> </Text>
         <Text dimColor>Marketplaces:</Text>
@@ -1161,10 +1279,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         <Text> </Text>
         <Text dimColor>Validation:</Text>
         <Text> /plugin validate &lt;path&gt; - Validate a manifest file or directory</Text>
-        <Text>
-          {' '}
-          /plugin eval &lt;path&gt; - Run trigger evaluations for a skill against the queries in its evals/ folder
-        </Text>
+        <Text> /plugin tag [path] [--push] [--dry-run] [-f] - Create a release tag for the plugin</Text>
         <Text> </Text>
         <Text dimColor>Other:</Text>
         <Text> /plugin - Main plugin menu</Text>
@@ -1180,6 +1295,10 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
 
   if (viewState.type === 'eval') {
     return <PluginEval onComplete={completePluginMenu} path={viewState.path} />;
+  }
+
+  if (viewState.type === 'plugin-list') {
+    return <PluginList onComplete={completePluginMenu} filter={viewState.filter} />;
   }
 
   if (viewState.type === 'marketplace-menu') {
@@ -1209,6 +1328,25 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
       />
     );
   }
+  const activeModNames = getLoadedFunctionHooksModules()
+    .filter(mod => !mod.pluginStorageId?.endsWith('@builtin'))
+    .map(mod => mod.name);
+  const redirectBanner =
+    showSkillsRedirectMessage && activeTab === 'installed' ? (
+      <SkillsRedirectBanner />
+    ) : showSkillDoctorRedirectMessage && activeTab === 'stats' ? (
+      <SkillDoctorRedirectBanner />
+    ) : undefined;
+  const banner =
+    activeModNames.length > 0 ? (
+      <>
+        <ActiveModsBanner names={activeModNames} />
+        {redirectBanner}
+      </>
+    ) : (
+      redirectBanner
+    );
+
   // Render tabbed interface using the design system Tabs component
   return (
     <Pane color="suggestion">
@@ -1218,7 +1356,7 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
         onTabChange={handleTabChange}
         color="suggestion"
         disableNavigation={childSearchActive}
-        banner={showMcpRedirectMessage && activeTab === 'installed' ? <McpRedirectBanner /> : undefined}
+        banner={banner}
       >
         <Tab id="discover" title="Discover">
           {viewState.type === 'browse-marketplace' ? (
@@ -1242,6 +1380,8 @@ export function PluginSettings({ onComplete, args, showMcpRedirectMessage }: Plu
               onInstallComplete={markPluginsChanged}
               onSearchModeChange={setChildSearchActive}
               targetPlugin={viewState.type === 'discover-plugins' ? viewState.targetPlugin : undefined}
+              initialMarketplace={viewState.type === 'discover-plugins' ? viewState.marketplace : undefined}
+              initialSearchQuery={viewState.type === 'discover-plugins' ? viewState.searchQuery : undefined}
             />
           )}
         </Tab>

@@ -12,7 +12,7 @@ describe('densable 2.1.247 leftover callee 接', () => {
     expect(src).toContain("namespace: 'pluginCache'")
     expect(src).toContain('relPath: [ORPHANED_AT_FILENAME]')
     expect(src).toContain('cacheRoot === officialPluginCacheRoot()')
-    expect(src).toContain('isPluginCacheVersionDirPath(versionPath, cacheRoot)')
+    expect(src).toContain('isPluginCacheVersionDirPath(absolute, cacheRoot)')
   })
 
   test('TB is leftover-wired XX("installed", Fs())', () => {
@@ -193,8 +193,8 @@ describe('densable 2.1.247 leftover callee 接', () => {
     expect(schema).toContain(
       'Model-drafted feedback (the SendFeedback tool). "notify" (default) shows a one-line notice when a draft is queued; "quiet" shows only the footer counter; "off" disables the tool entirely so drafts are never queued.',
     )
-    expect(command).toContain('getFeedbackCommandAvailability()')
-    expect(command).toContain(".kind === 'post'")
+    expect(gates).toContain('function getFeedbackCommandAvailability')
+    expect(command).toContain("load: () => import('./feedback.js')")
     expect(command).toContain(
       "description: 'Send feedback to Anthropic or report a bug'",
     )
@@ -328,6 +328,10 @@ describe('densable 2.1.247 leftover callee 接', () => {
       join(import.meta.dir, '../../processUserInput/processUserInput.ts'),
       'utf8',
     )
+    const promptSubmit = readFileSync(
+      join(import.meta.dir, '../../processUserInput/promptSubmit.ts'),
+      'utf8',
+    )
     const addDir = readFileSync(
       join(import.meta.dir, '../../../commands/add-dir/add-dir.tsx'),
       'utf8',
@@ -345,7 +349,7 @@ describe('densable 2.1.247 leftover callee 接', () => {
     expect(hooks).not.toContain('persistHookOutput(result.stderr')
     expect(userInput).not.toContain('MAX_HOOK_OUTPUT_LENGTH')
     expect(userInput).not.toContain('output truncated - exceeded')
-    expect(userInput).toContain(
+    expect(promptSubmit).toContain(
       "attachment.type !== 'hook_success' || attachment.content",
     )
     expect(addDir).toContain(

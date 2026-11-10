@@ -13,6 +13,7 @@ import {
   useOptionalKeybindingContext,
   useApp,
   useRegisterKeybindingContext,
+  useSelection,
   measureElement,
   type DOMElement,
   type Key,
@@ -21,7 +22,9 @@ import {
 } from '@anthropic/ink';
 import {
   Component,
+  cloneElement,
   createContext,
+  isValidElement,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -34,6 +37,7 @@ import {
   type ComponentProps,
   type ComponentType,
   type ErrorInfo,
+  type ReactElement,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -845,6 +849,17 @@ export function floorOffset(value: number): number {
 /** @deprecated Prefer `floorOffset` — same densable `e$`. */
 export const floorBandOffset = floorOffset;
 
+/** densable `dEe` — wheel pointer relative to the scroll clip box's cachedLayout. */
+export function relativeWheelPointer(
+  clipRef: RefObject<DOMElement | null>,
+  event: WheelEvent,
+): { column: number; row: number } | undefined {
+  const layout = (clipRef.current as { cachedLayout?: { x: number; y: number } } | null)?.cachedLayout;
+  return event.col !== undefined && event.row !== undefined && layout !== undefined
+    ? { column: event.col - layout.x, row: event.row - layout.y }
+    : undefined;
+}
+
 /**
  * densable `yEe` lite — offset / followEnd / scrollBy (in-flight queue) / place.
  * Ide HAVE: PluginAbovePromptSite syncs dims into `pluginSites` via
@@ -865,7 +880,7 @@ export function useBandScrollPlace(input: {
   offset: number;
   placed: number;
   followEnd: boolean;
-  scrollBy: (delta: number) => void;
+  scrollBy: (delta: number, pointer?: { column: number; row: number }) => void;
   place: (fn: (prev: number) => number) => void;
   commit: (next: number) => void;
   followEndOn: () => void;
@@ -881,6 +896,7 @@ export function useBandScrollPlace(input: {
   const followEndRef = useRef(followEnd);
   const inFlightRef = useRef(false);
   const queuedDeltaRef = useRef(0);
+  const queuedPointerRef = useRef<{ column: number; row: number } | undefined>(undefined);
   // densable yEe Kt — skip finally drain after unmount.
   const aliveRef = useRef(true);
   const personScrollRef = useRef({
@@ -942,7 +958,11 @@ export function useBandScrollPlace(input: {
       setPlaced(site.offset);
     }
   }, [rasterFrame]);
-  const dispatchPersonIfRegistered = (nextOffset: number, by: number): Promise<void> => {
+  const dispatchPersonIfRegistered = (
+    nextOffset: number,
+    by: number,
+    pointer?: { column: number; row: number },
+  ): Promise<void> => {
     const siteMeta = personScrollRef.current;
     // densable yEe commits for Pane + AbovePrompt once Ide site is registered.
     if (siteMeta.plugin === '' || siteMeta.requestId === '') return Promise.resolve();
@@ -958,6 +978,7 @@ export function useBandScrollPlace(input: {
       bodyRows: dims.current.bodyRows,
       contentRows: dims.current.contentRows,
       plugin: siteMeta.plugin,
+      ...(pointer !== undefined && { pointer }),
     }).then(() => undefined);
   };
   const commit = useCallback((next: number): number => {
@@ -971,7 +992,11 @@ export function useBandScrollPlace(input: {
   }, []);
   // Person path: the ui.scroll hook commits the site. React follows only if
   // that commit landed. An unregistered site still moves locally.
-  const commitIfPersonAllowed = (target: number, by: number): Promise<void> => {
+  const commitIfPersonAllowed = (
+    target: number,
+    by: number,
+    pointer?: { column: number; row: number },
+  ): Promise<void> => {
     const siteMeta = personScrollRef.current;
     const registered =
       siteMeta.plugin !== '' &&
@@ -981,7 +1006,7 @@ export function useBandScrollPlace(input: {
       commit(target);
       return Promise.resolve();
     }
-    return dispatchPersonIfRegistered(target, by).then(() => {
+    return dispatchPersonIfRegistered(target, by, pointer).then(() => {
       const site = getPluginScrollSite(siteMeta.plugin, siteMeta.requestId, siteMeta.component);
       if (site?.offset === target) commit(target);
     });
@@ -1002,7 +1027,7 @@ export function useBandScrollPlace(input: {
     },
     [commit],
   );
-  const fireScroll = (delta: number): void => {
+  const fireScroll = (delta: number, pointer?: { column: number; row: number }): void => {
     inFlightRef.current = true;
     const target = clamp(liveOffset() + delta);
     const by = target - liveOffset();
@@ -1011,26 +1036,30 @@ export function useBandScrollPlace(input: {
       if (!aliveRef.current) {
         inFlightRef.current = false;
         queuedDeltaRef.current = 0;
+        queuedPointerRef.current = undefined;
         return;
       }
       inFlightRef.current = false;
       const queued = queuedDeltaRef.current;
+      const queuedPointer = queuedPointerRef.current;
       queuedDeltaRef.current = 0;
-      if (queued !== 0) fireScroll(queued);
+      queuedPointerRef.current = undefined;
+      if (queued !== 0) fireScroll(queued, queuedPointer);
     };
     if (by === 0) {
       after();
       return;
     }
-    void commitIfPersonAllowed(target, by).finally(after);
+    void commitIfPersonAllowed(target, by, pointer).finally(after);
   };
-  const scrollBy = (delta: number): void => {
+  const scrollBy = (delta: number, pointer?: { column: number; row: number }): void => {
     if (delta === 0) return;
     if (inFlightRef.current) {
       queuedDeltaRef.current += delta;
+      queuedPointerRef.current = pointer;
       return;
     }
-    fireScroll(delta);
+    fireScroll(delta, pointer);
   };
   const followEndOn = (): void => {
     followEndRef.current = true;
@@ -3780,6 +3809,9 @@ function isPressableMarkdownLink(href: string, pressableLinks: unknown): boolean
   return pressableLinks.some(item => typeof item === 'string' && normalizeMarkdownLinkHref(item) === target);
 }
 
+const PLUGIN_MARKDOWN_LINK_SCHEMES: ReadonlySet<string> = new Set(['https', 'http', 'file']);
+const PLUGIN_MARKDOWN_LINK_DELAY_MS = 500;
+
 function PluginMarkdown({
   text,
   dimColor,
@@ -3794,12 +3826,18 @@ function PluginMarkdown({
   pressableLinks?: unknown;
 }): ReactNode {
   const clock = useContext(ClockContext);
+  const selection = useSelection();
   const [mountedAt] = useState(() => clock?.now() ?? Date.now());
-  const body = (
-    <Markdown dimColor={dimColor} stripPromptTags={false}>
-      {text}
-    </Markdown>
-  );
+  const cancelPendingRef = useRef<(() => void) | null>(null);
+  const latestPressRef = useRef({ press, pressableLinks });
+  latestPressRef.current = { press, pressableLinks };
+  useEffect(() => () => cancelPendingRef.current?.(), []);
+  const markdownProps = {
+    dimColor,
+    linkSchemes: PLUGIN_MARKDOWN_LINK_SCHEMES,
+    stripPromptTags: false,
+  };
+  const body = <Markdown {...markdownProps}>{text}</Markdown>;
   if (press === undefined) {
     return elementKey === undefined ? (
       body
@@ -3826,7 +3864,30 @@ function PluginMarkdown({
           return;
         }
         event.stopImmediatePropagation();
-        firePress(press.plugin, press.handle, { href });
+        cancelPendingRef.current?.();
+        if (selection.hasSelection()) return;
+        const unsubscribe = selection.subscribe(() => {
+          if (selection.hasSelection()) cancelPendingRef.current?.();
+        });
+        const fire = () => {
+          cancelPendingRef.current = null;
+          unsubscribe();
+          const current = latestPressRef.current;
+          if (current.press !== undefined && isPressableMarkdownLink(href, current.pressableLinks)) {
+            firePress(current.press.plugin, current.press.handle, { href });
+          }
+        };
+        const cancelTimer = clock
+          ? clock.setTimeout(fire, PLUGIN_MARKDOWN_LINK_DELAY_MS)
+          : (() => {
+              const timer = setTimeout(fire, PLUGIN_MARKDOWN_LINK_DELAY_MS);
+              return () => clearTimeout(timer);
+            })();
+        cancelPendingRef.current = () => {
+          cancelPendingRef.current = null;
+          unsubscribe();
+          cancelTimer();
+        };
       }}
     >
       {body}
@@ -4472,6 +4533,22 @@ export function DrawingNode({
   );
 }
 
+function extractEngineSlotProps(node: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(node)) return undefined;
+  if (node.type === 'engine') {
+    return isRecord(node.props) ? node.props : undefined;
+  }
+  if (node.type === 'Button' || node.type === 'Input' || node.type === 'Select') {
+    return undefined;
+  }
+  const props = isRecord(node.props) ? node.props : {};
+  for (const child of childList(node, props)) {
+    const found = extractEngineSlotProps(child);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /**
  * densable `fr` / `ar` consumer: `Hoe().ui.render` then `pt`. Fail and
  * engine reply settle as gold `RZ` so `pr` can see `isFallback`.
@@ -4479,9 +4556,15 @@ export function DrawingNode({
 function useRenderDrawing(
   input: Record<string, unknown> | null,
   inputKey: string,
-): { drawn: unknown; drawnPlugin: string; markThrown: () => void } {
+): {
+  drawn: unknown;
+  drawnPlugin: string;
+  engineProps: Record<string, unknown> | undefined;
+  markThrown: () => void;
+} {
   const [drawn, setDrawn] = useState<unknown>(undefined);
   const [drawnPlugin, setDrawnPlugin] = useState('');
+  const [engineProps, setEngineProps] = useState<Record<string, unknown> | undefined>(undefined);
   const inputRef = useRef(input);
   inputRef.current = input;
   const version = useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
@@ -4491,6 +4574,7 @@ function useRenderDrawing(
     if (current === null) {
       setDrawn(undefined);
       setDrawnPlugin('');
+      setEngineProps(undefined);
       return;
     }
     const abort = new AbortController();
@@ -4501,6 +4585,7 @@ function useRenderDrawing(
             extractDrawnPlugin(tree, String(current.component ?? ''), String(current.requestId ?? '')) ??
             getLastUiRenderPlugin();
           setDrawnPlugin(owner);
+          setEngineProps(extractEngineSlotProps(tree));
           setDrawn(isEngineDrawing(tree) ? RZ : tree);
         }
       },
@@ -4510,7 +4595,10 @@ function useRenderDrawing(
           `ui.render (${String(current.component)} ${String(current.requestId ?? '')}): site failed: ${err instanceof Error ? err.message : String(err)}`,
           { level: 'error' },
         );
-        if (!abort.signal.aborted) setDrawn(RZ);
+        if (!abort.signal.aborted) {
+          setEngineProps(undefined);
+          setDrawn(RZ);
+        }
       },
     );
     return () => {
@@ -4518,9 +4606,10 @@ function useRenderDrawing(
     };
   }, [inputKey, version]);
   const markThrown = useCallback(() => {
+    setEngineProps(undefined);
     setDrawn(RZ);
   }, []);
-  return { drawn, drawnPlugin, markThrown };
+  return { drawn, drawnPlugin, engineProps, markThrown };
 }
 
 function PluginSiteFields({
@@ -4926,6 +5015,7 @@ function PluginPaneSiteBody({
     [bumpFocusPlace],
   );
   const paneContentRef = useRef<DOMElement | null>(null);
+  const paneClipRef = useRef<DOMElement | null>(null);
   const dockHostRef = useRef<DOMElement | null>(null);
   const heldFocusRef = useRef<{ node: DOMElement; index: number } | null>(null);
   const [focusTop, setFocusTop] = useState(-1);
@@ -5373,12 +5463,21 @@ function PluginPaneSiteBody({
   const overlayActive = useIsOverlayActive();
   const viewingAgent = useAppState(s => s.viewSelectionMode === 'viewing-agent');
   const footerSelected = useAppState(s => s.footerSelection !== null);
+  // densable mee `[qe,We]=g(!1); x(()=>We(!1),[M,v])` — if a plugin refuses
+  // close on Escape, do not swallow subsequent Escape presses.
+  const [escapeRefused, setEscapeRefused] = useState(false);
+  useEffect(() => {
+    setEscapeRefused(false);
+  }, [paneHeld, pane]);
   useKeybinding(
     'chat:cancel',
     () => {
       const id = paneIdRef.current;
       if (id === undefined) return false;
-      void closePluginPane(id, { kind: 'person' });
+      if (!promptEmpty || queueEditing || getPanesState().closing.includes(id)) return false;
+      void closePluginPane(id, { kind: 'person' }).then(() => {
+        setEscapeRefused(getPanesState().open.some(openPane => openPane.id === id));
+      });
       return;
     },
     {
@@ -5395,7 +5494,8 @@ function PluginPaneSiteBody({
         !dialogOpen &&
         !overlayActive &&
         !viewingAgent &&
-        !footerSelected,
+        !footerSelected &&
+        !escapeRefused,
     },
   );
   const node = rebuild(drawn, pane.plugin, pane.id, undefined, 'Pane', paneFocusables, paneSelect, paneInput);
@@ -5445,7 +5545,7 @@ function PluginPaneSiteBody({
                         event.stopPropagation();
                         return;
                       }
-                      paneScrollBy(sign * rows);
+                      paneScrollBy(sign * rows, relativeWheelPointer(paneClipRef, event));
                       event.preventDefault();
                       event.stopPropagation();
                     }
@@ -5495,6 +5595,7 @@ function PluginPaneSiteBody({
                 ) : null}
                 {/* densable pee clip: height:fill?Ao, maxHeight:Ao, overflowY:hidden > fEe(offset). */}
                 <Box
+                  ref={paneClipRef}
                   flexDirection="column"
                   flexShrink={fill ? 1 : 0}
                   flexGrow={fill ? 1 : 0}
@@ -5540,11 +5641,14 @@ export function PluginAbovePromptSite({
   isWorking,
   hasSurvey = false,
   promptEmpty = true,
+  onHoldsBandChange,
 }: {
   isWorking: boolean;
   hasSurvey?: boolean;
   /** densable JW `Un===""` — prompt draft empty (REPL `inputValue === ''`). */
   promptEmpty?: boolean;
+  /** densable `_Ee` `onHoldsBandChange` (`N`) — true while visible band holds hotkeys. */
+  onHoldsBandChange?: (holds: boolean) => void;
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
@@ -5556,6 +5660,7 @@ export function PluginAbovePromptSite({
   const panesFocusRequest = useSyncExternalStore(subscribePanes, () => getPanesState().focusRequest);
   const panesOpenCount = useSyncExternalStore(subscribePanes, () => getPanesState().open.length);
   const contentRef = useRef<DOMElement | null>(null);
+  const bandClipRef = useRef<DOMElement | null>(null);
   const leftoverHostRef = useRef<DOMElement | null>(null);
   const heldFocusRef = useRef<{ node: DOMElement; index: number } | null>(null);
   const [focusPlaceBump, setFocusPlaceBump] = useState(0);
@@ -6152,7 +6257,21 @@ export function PluginAbovePromptSite({
   });
 
   // densable `u$` / `HZ` — Button hotkeys while band ring (not Input/Select).
-  const bandHotkeys = useMemo(() => hotkeyMapOfDrawing(drawn), [drawn]);
+  const bandHotkeys = useMemo(
+    () => (bandCollapsed ? new Map<string, { plugin: string; handle: unknown }>() : hotkeyMapOfDrawing(drawn)),
+    [bandCollapsed, drawn],
+  );
+  // densable `_Ee` `Us=Xo.size>0; Xt(()=>{N?.(Us&&!Qo(Zo))},...); Xt(()=>()=>N?.(!1),[N])`.
+  const holdsBand = bandHotkeys.size > 0 && hasPluginTree;
+  useLayoutEffect(() => {
+    onHoldsBandChange?.(holdsBand);
+  }, [holdsBand, onHoldsBandChange]);
+  useLayoutEffect(
+    () => () => {
+      onHoldsBandChange?.(false);
+    },
+    [onHoldsBandChange],
+  );
   useInput(
     (input, key, event) => {
       const hits = resolveHotkeyPresses(input, key, bandHotkeys);
@@ -6197,7 +6316,7 @@ export function PluginAbovePromptSite({
         event.stopPropagation();
         return;
       }
-      scrollBy(sign * step);
+      scrollBy(sign * step, relativeWheelPointer(bandClipRef, event));
       event.preventDefault();
       event.stopPropagation();
     },
@@ -6284,6 +6403,7 @@ export function PluginAbovePromptSite({
                 onWheel={hasCue && !bandBlocked ? bandWheel : undefined}
               >
                 <Box
+                  ref={bandClipRef}
                   flexDirection="column"
                   flexShrink={0}
                   maxHeight={windowRows + listRows}
@@ -6381,6 +6501,254 @@ export function PluginRenderedTree({
 }
 
 /**
+ * densable 2.1.289 `Meo` — validate that an AskUserQuestion rewrite only
+ * relabels question text/header (same count, same multiSelect, same option
+ * labels/previews, unique question texts).
+ */
+export function askUserQuestionRewriteProblem(
+  rewritten: readonly unknown[],
+  original: readonly unknown[],
+): string | undefined {
+  if (rewritten.length !== original.length) {
+    return `change how many questions there are (${original.length} asked, ${rewritten.length} drawn)`;
+  }
+  for (const [index, asked] of original.entries()) {
+    const drawn = rewritten[index];
+    if (drawn === undefined) return `leave question ${index + 1} out`;
+    if (!isRecord(asked) || !isRecord(drawn)) return 'leave question schema invalid';
+    if ((drawn.multiSelect ?? false) !== (asked.multiSelect ?? false)) {
+      return `change whether question ${index + 1} is multi-select`;
+    }
+    const askedOpts = Array.isArray(asked.options) ? asked.options : [];
+    const drawnOpts = Array.isArray(drawn.options) ? drawn.options : [];
+    const askedLabels = askedOpts.map(o => (isRecord(o) ? o.label : undefined));
+    const drawnLabels = drawnOpts.map(o => (isRecord(o) ? o.label : undefined));
+    if (JSON.stringify(drawnLabels) !== JSON.stringify(askedLabels)) {
+      return `change question ${index + 1}'s options (asked ${JSON.stringify(askedLabels)}, drawn ${JSON.stringify(drawnLabels)})`;
+    }
+    const askedPreviews = askedOpts.map(o => (isRecord(o) ? o.preview : undefined));
+    const drawnPreviews = drawnOpts.map(o => (isRecord(o) ? o.preview : undefined));
+    if (JSON.stringify(drawnPreviews) !== JSON.stringify(askedPreviews)) {
+      return `change question ${index + 1}'s previews`;
+    }
+    const drawnText = drawn.question;
+    const sameQuestion = (row: unknown, rowIndex: number): boolean =>
+      rowIndex !== index && isRecord(row) && row.question === drawnText;
+    const quoted = JSON.stringify(drawnText);
+    if (rewritten.some(sameQuestion)) {
+      return `give two questions one text (${quoted})`;
+    }
+    if (original.some(sameQuestion)) {
+      return `give question ${index + 1} another question's text (${quoted})`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * densable 2.1.289 `YXe` — validate rewritten AskUserQuestion questions; fall
+ * back to `original` with a warning log on schema/shape mismatch.
+ */
+export function validateAskUserQuestionRewrite(rewritten: unknown, original: readonly unknown[]): readonly unknown[] {
+  if (rewritten === undefined || rewritten === original || JSON.stringify(rewritten) === JSON.stringify(original)) {
+    return original;
+  }
+  if (
+    !Array.isArray(rewritten) ||
+    !rewritten.every(
+      item =>
+        isRecord(item) &&
+        typeof item.question === 'string' &&
+        item.question.length > 0 &&
+        Array.isArray(item.options) &&
+        item.options.every(opt => isRecord(opt) && typeof opt.label === 'string'),
+    )
+  ) {
+    logForDebugging(
+      `ui.render (AskUserQuestion): rewritten questions do not match the tool's input schema; drawing the original`,
+      { level: 'warn' },
+    );
+    return original;
+  }
+  const problem = askUserQuestionRewriteProblem(rewritten, original);
+  if (problem !== undefined) {
+    logForDebugging(
+      `ui.render (AskUserQuestion): a rewrite may relabel the questions but not ${problem}; drawing the original`,
+      { level: 'warn' },
+    );
+    return original;
+  }
+  return rewritten;
+}
+
+/**
+ * densable 2.1.289 `zXe` — map submitted answer/annotation keys from rewritten
+ * question texts back to the original question texts.
+ */
+export type AskUserQuestionSubmission = {
+  behavior?: string;
+  updatedInput?: {
+    answers?: Record<string, string>;
+    annotations?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+export function restoreAskUserQuestionResult<T extends AskUserQuestionSubmission>(
+  result: T,
+  drawnQuestions: readonly unknown[],
+  askedQuestions: readonly unknown[],
+): T {
+  if (result.behavior !== 'allow' || drawnQuestions === askedQuestions || result.updatedInput === undefined) {
+    return result;
+  }
+  const remapRecord = <V,>(
+    record: Record<string, V> | undefined,
+    transform: (value: V, index: number) => V,
+  ): Record<string, V> | undefined => {
+    if (record === undefined) return undefined;
+    const out: Record<string, V> = {};
+    for (const [key, val] of Object.entries(record)) {
+      const idx = drawnQuestions.findIndex(q => isRecord(q) && q.question === key);
+      const orig = idx === -1 ? undefined : askedQuestions[idx];
+      const origKey = isRecord(orig) && typeof orig.question === 'string' ? orig.question : key;
+      out[origKey] = orig === undefined ? val : transform(val, idx);
+    }
+    return out;
+  };
+  const updatedInput = result.updatedInput;
+  const answers = remapRecord(updatedInput.answers, (val, idx) => {
+    const drawnQ = drawnQuestions[idx];
+    const askedQ = askedQuestions[idx];
+    const drawnOpts = isRecord(drawnQ) && Array.isArray(drawnQ.options) ? drawnQ.options : [];
+    const askedOpts = isRecord(askedQ) && Array.isArray(askedQ.options) ? askedQ.options : [];
+    const optIdx = drawnOpts.findIndex(o => isRecord(o) && o.label === val);
+    if (optIdx === -1) return val;
+    const origOpt = askedOpts[optIdx];
+    return isRecord(origOpt) && typeof origOpt.label === 'string' ? origOpt.label : val;
+  });
+  const annotations = remapRecord(updatedInput.annotations, val => val);
+  return {
+    ...result,
+    updatedInput: {
+      ...updatedInput,
+      ...(answers !== undefined && { answers }),
+      ...(annotations !== undefined && { annotations }),
+    },
+  };
+}
+
+function remapAskedKeysToDrawn<V>(
+  record: Record<string, V> | undefined,
+  askedQuestions: readonly unknown[],
+  drawnQuestions: readonly unknown[],
+): Record<string, V> | undefined {
+  if (record === undefined || drawnQuestions === askedQuestions) return record;
+  const out: Record<string, V> = {};
+  for (const [key, val] of Object.entries(record)) {
+    const idx = askedQuestions.findIndex(q => isRecord(q) && q.question === key);
+    const drawn = idx === -1 ? undefined : drawnQuestions[idx];
+    const drawnKey = isRecord(drawn) && typeof drawn.question === 'string' ? drawn.question : key;
+    out[drawnKey] = val;
+  }
+  return out;
+}
+
+function mapDrawnQuestionKeyToAsked(
+  questionKey: string,
+  drawnQuestions: readonly unknown[],
+  askedQuestions: readonly unknown[],
+): string {
+  const idx = drawnQuestions.findIndex(q => isRecord(q) && q.question === questionKey);
+  if (idx === -1) return questionKey;
+  const orig = askedQuestions[idx];
+  return isRecord(orig) && typeof orig.question === 'string' ? orig.question : questionKey;
+}
+
+function rewriteAskUserQuestionEngineChild(
+  node: ReactNode,
+  askedQuestions: readonly unknown[],
+  drawnQuestions: readonly unknown[],
+): ReactNode {
+  if (drawnQuestions === askedQuestions || !isValidElement(node)) return node;
+  const element = node as ReactElement<Record<string, unknown>>;
+  const props = element.props;
+  const patches: Record<string, unknown> = {};
+  if ('questions' in props && Array.isArray(props.questions)) {
+    patches.questions = drawnQuestions;
+    const idx = typeof props.currentQuestionIndex === 'number' ? props.currentQuestionIndex : 0;
+    const drawnQ = drawnQuestions[idx];
+    const askedQ = askedQuestions[idx];
+    if ('question' in props && drawnQ !== undefined) {
+      patches.question = drawnQ;
+      if (
+        isRecord(drawnQ) &&
+        isRecord(askedQ) &&
+        typeof drawnQ.question === 'string' &&
+        drawnQ.question !== askedQ.question
+      ) {
+        patches.displayQuestion = drawnQ.question;
+      }
+    }
+    if (isRecord(props.answers)) {
+      patches.answers = remapAskedKeysToDrawn(props.answers as Record<string, unknown>, askedQuestions, drawnQuestions);
+    }
+    if (isRecord(props.questionStates)) {
+      patches.questionStates = remapAskedKeysToDrawn(
+        props.questionStates as Record<string, unknown>,
+        askedQuestions,
+        drawnQuestions,
+      );
+    }
+    if (typeof props.onAnswer === 'function') {
+      const origOnAnswer = props.onAnswer as (
+        questionText: string,
+        label: string | string[],
+        textInput?: string,
+        shouldAdvance?: boolean,
+      ) => void;
+      patches.onAnswer = (
+        questionText: string,
+        label: string | string[],
+        textInput?: string,
+        shouldAdvance?: boolean,
+      ) => {
+        origOnAnswer(
+          mapDrawnQuestionKeyToAsked(questionText, drawnQuestions, askedQuestions),
+          label,
+          textInput,
+          shouldAdvance,
+        );
+      };
+    }
+    if (typeof props.onUpdateQuestionState === 'function') {
+      const origOnUpdate = props.onUpdateQuestionState as (
+        questionText: string,
+        updates: unknown,
+        isTextInput?: boolean,
+      ) => void;
+      patches.onUpdateQuestionState = (questionText: string, updates: unknown, isTextInput?: boolean) => {
+        origOnUpdate(mapDrawnQuestionKeyToAsked(questionText, drawnQuestions, askedQuestions), updates, isTextInput);
+      };
+    }
+  }
+  const rawChildren = props.children;
+  let nextChildren = rawChildren;
+  if (Array.isArray(rawChildren)) {
+    nextChildren = rawChildren.map(child =>
+      rewriteAskUserQuestionEngineChild(child as ReactNode, askedQuestions, drawnQuestions),
+    );
+  } else if (isValidElement(rawChildren)) {
+    nextChildren = rewriteAskUserQuestionEngineChild(rawChildren, askedQuestions, drawnQuestions);
+  }
+  if (Object.keys(patches).length === 0 && nextChildren === rawChildren) {
+    return node;
+  }
+  return cloneElement(element, patches, ...(nextChildren !== undefined ? [nextChildren as ReactNode] : []));
+}
+
+/**
  * densable 2.1.289 `AskUserQuestion` `ui.render` site (`cc-plugin-mods-guide`
  * Clawd cooking `Raster` header + `{ type: "engine", ref: 0 }` slot).
  * Synchronous pass-through with zero wrapper layout when no hook matches.
@@ -6417,7 +6785,7 @@ export function PluginAskUserQuestionSite({
     return children;
   }
   return (
-    <PluginAskUserQuestionActiveSite requestId={requestId} askProps={askProps}>
+    <PluginAskUserQuestionActiveSite requestId={requestId} questions={questions} askProps={askProps}>
       {children}
     </PluginAskUserQuestionActiveSite>
   );
@@ -6425,10 +6793,12 @@ export function PluginAskUserQuestionSite({
 
 function PluginAskUserQuestionActiveSite({
   requestId,
+  questions,
   askProps,
   children,
 }: {
   requestId: string;
+  questions: readonly unknown[];
   askProps: Record<string, unknown>;
   children: ReactNode;
 }): ReactNode {
@@ -6449,19 +6819,27 @@ function PluginAskUserQuestionActiveSite({
     () => `${requestId}\0${columns}\0${rows}\0${String(isFullscreen)}\0${JSON.stringify(askProps)}`,
     [requestId, columns, rows, isFullscreen, askProps],
   );
-  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(renderInput, inputKey);
+  const { drawn, drawnPlugin, engineProps, markThrown } = useRenderDrawing(renderInput, inputKey);
   const ownerPlugin = useMemo(
     () => extractDrawnPlugin(drawn, 'AskUserQuestion', requestId) ?? drawnPlugin,
     [drawn, drawnPlugin, requestId],
   );
+  const rewrittenQuestions = useMemo(
+    () => validateAskUserQuestionRewrite(engineProps?.questions, questions),
+    [engineProps?.questions, questions],
+  );
+  const engineElement = useMemo(
+    () => rewriteAskUserQuestionEngineChild(children, questions, rewrittenQuestions),
+    [children, questions, rewrittenQuestions],
+  );
   const [resetKey, setResetKey] = useState(0);
   if (!hasPluginDrawing(drawn)) {
-    return children;
+    return engineElement;
   }
   return (
     <PaneErrorBoundary
       resetKey={resetKey}
-      fallback={children}
+      fallback={engineElement}
       onError={error => {
         markThrown();
         reportDrawWhileDrawn('AskUserQuestion', [ownerPlugin], error, addNotification);
@@ -6473,7 +6851,7 @@ function PluginAskUserQuestionActiveSite({
         plugin={ownerPlugin}
         requestId={requestId}
         index={0}
-        engine={children}
+        engine={engineElement}
         component="AskUserQuestion"
       />
     </PaneErrorBoundary>
@@ -6499,11 +6877,13 @@ export function PluginPromptHintSite({
   isWorking,
   isInteractive,
   onSuppressDefaultHint,
+  onTail,
 }: {
   isDraft: boolean;
   isWorking: boolean;
   isInteractive: boolean;
   onSuppressDefaultHint?: (suppress: boolean) => void;
+  onTail?: (tail: string) => void;
 }): ReactNode {
   const ver = useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
   const hasHook = !isInteractive && hasMatchingFunctionHook('ui.render', { component: 'PromptHint' });
@@ -6516,6 +6896,7 @@ export function PluginPromptHintSite({
       isWorking={isWorking}
       renderVer={ver}
       onSuppressDefaultHint={onSuppressDefaultHint}
+      onTail={onTail}
     />
   );
 }
@@ -6525,11 +6906,13 @@ function PluginPromptHintActiveSite({
   isWorking,
   renderVer,
   onSuppressDefaultHint,
+  onTail,
 }: {
   isDraft: boolean;
   isWorking: boolean;
   renderVer: number;
   onSuppressDefaultHint?: (suppress: boolean) => void;
+  onTail?: (tail: string) => void;
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
@@ -6605,25 +6988,30 @@ function PluginPromptHintActiveSite({
     };
   }, [evalKey, columns, rows, isFullscreen, isDraft, isWorking, defaultHint]);
 
+  const isCurrentReading = settled !== undefined && settled.isDraft === isDraft && settled.isWorking === isWorking;
+  // densable Hx (`standsIn`): tail-only does NOT suppress the default hint row.
   const suppressesDefault =
-    !isDraft &&
-    settled !== undefined &&
-    settled.isDraft === isDraft &&
-    settled.isWorking === isWorking &&
-    (settled.pluginTree !== undefined || settled.hint !== defaultHint || settled.tail !== '');
+    !isDraft && isCurrentReading && (settled.pluginTree !== undefined || settled.hint !== defaultHint);
+  const tailOnly =
+    isCurrentReading && settled.pluginTree === undefined && settled.hint === defaultHint ? settled.tail : '';
 
   useLayoutEffect(() => {
     onSuppressDefaultHint?.(suppressesDefault);
   }, [onSuppressDefaultHint, suppressesDefault]);
 
   useLayoutEffect(() => {
+    onTail?.(tailOnly);
+  }, [onTail, tailOnly]);
+
+  useLayoutEffect(() => {
     return () => {
       onSuppressDefaultHint?.(false);
+      onTail?.('');
     };
-  }, [onSuppressDefaultHint]);
+  }, [onSuppressDefaultHint, onTail]);
 
   if (settled === undefined) return null;
-  if (settled.pluginTree !== undefined && settled.isDraft === isDraft && settled.isWorking === isWorking) {
+  if (settled.pluginTree !== undefined && isCurrentReading) {
     return (
       <Box paddingX={2}>
         <PluginRenderedTree
@@ -6632,6 +7020,15 @@ function PluginPromptHintActiveSite({
           requestId="prompt-hint"
           component="PromptHint"
         />
+      </Box>
+    );
+  }
+  if (tailOnly !== '') {
+    return (
+      <Box paddingX={2}>
+        <Text dimColor wrap="truncate">
+          {defaultHint !== '' ? `${defaultHint} · ${tailOnly}` : ` · ${tailOnly}`}
+        </Text>
       </Box>
     );
   }

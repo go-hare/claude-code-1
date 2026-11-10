@@ -1,9 +1,9 @@
 /**
- * densable 2.1.246 #2 — `/permissions` Auto mode tab (`Ur` / `Kr` / `Hr` / `Xr` / `Vr`).
+ * densable 2.1.289 — `/permissions` Auto mode tab (`kn` / `Ce` / `gt` / `vt` / `Sn` / `Fm` / `Vn`).
  */
 import * as React from 'react';
-import { useCallback, useMemo, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Box, Text, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
 import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import TextInput from '../../../components/TextInput.js';
@@ -23,12 +23,20 @@ import {
   writeEnvironmentDocument,
 } from '../../../services/autoModeSetup/permissionTabWrite.js';
 import { getSettingsForSource } from '../../../utils/settings/settings.js';
+import { SearchBox } from '../../SearchBox.js';
 
-type Entry = {
+const AUTO_MODE_SOURCES = ['userSettings', 'flagSettings', 'policySettings'] as const;
+export type AutoModeRuleSource = (typeof AUTO_MODE_SOURCES)[number];
+
+export type AutoModeRuleEntry = {
   section: AutoModeTabSection;
   text: string;
   index: number;
+  source: AutoModeRuleSource;
+  legacy?: boolean;
 };
+
+type Entry = AutoModeRuleEntry;
 
 type Mode =
   | { kind: 'list' }
@@ -39,24 +47,70 @@ type Mode =
   | { kind: 'details'; entry: Entry }
   | { kind: 'delete'; entry: Entry };
 
-function readUserEntries(): Entry[] {
-  const autoMode = getSettingsForSource('userSettings')?.autoMode;
-  if (!autoMode || typeof autoMode !== 'object' || Array.isArray(autoMode)) {
-    return [];
+function sourceTag(source: AutoModeRuleSource): 'flag' | 'org' | null {
+  switch (source) {
+    case 'userSettings':
+      return null;
+    case 'flagSettings':
+      return 'flag';
+    case 'policySettings':
+      return 'org';
   }
-  const block = autoMode as Record<string, unknown>;
+}
+
+function sourceDisplayName(source: AutoModeRuleSource): string {
+  switch (source) {
+    case 'userSettings':
+      return 'user settings';
+    case 'flagSettings':
+      return 'the --settings flag';
+    case 'policySettings':
+      return 'managed settings';
+  }
+}
+
+export function entryKey(entry: Entry): string {
+  return `${entry.section}:${entry.source}:${entry.legacy ? 'legacy-' : ''}${entry.index}`;
+}
+
+export function formatAutoModeEntryLabel(entry: Entry): string {
+  const label = sectionLabel(entry.section);
+  const tag = entry.legacy ? 'legacy' : sourceTag(entry.source);
+  const badge = tag ? ` · ${tag}` : '';
+  return `${label}${badge}: ${entry.text}`;
+}
+
+export function readAutoModeEntries(): Entry[] {
   const entries: Entry[] = [];
-  for (const section of AUTO_MODE_TAB_SECTIONS) {
-    if (section === 'environment') continue;
-    const rows = block[section];
-    if (!Array.isArray(rows)) continue;
-    rows.forEach((text, index) => {
-      if (typeof text === 'string') {
-        entries.push({ section, text, index });
+  for (const source of AUTO_MODE_SOURCES) {
+    const autoMode = getSettingsForSource(source)?.autoMode;
+    if (!autoMode || typeof autoMode !== 'object' || Array.isArray(autoMode)) {
+      continue;
+    }
+    const block = autoMode as Record<string, unknown>;
+    for (const section of AUTO_MODE_TAB_SECTIONS) {
+      if (section === 'environment') continue;
+      const rows = block[section];
+      if (Array.isArray(rows)) {
+        rows.forEach((text, index) => {
+          if (typeof text === 'string') {
+            entries.push({ section, text, index, source });
+          }
+        });
       }
-    });
+      if (section === 'soft_deny' && Array.isArray(block.deny)) {
+        block.deny.forEach((text, index) => {
+          if (typeof text === 'string') {
+            entries.push({ section: 'soft_deny', text, index, source, legacy: true });
+          }
+        });
+      }
+    }
   }
-  return entries;
+  return AUTO_MODE_TAB_SECTIONS.flatMap(section => {
+    const inSection = entries.filter(e => e.section === section);
+    return AUTO_MODE_SOURCES.flatMap(source => inSection.filter(e => e.source === source));
+  });
 }
 
 function readEnvironmentDocument(): string {
@@ -78,10 +132,18 @@ function sectionPlaceholder(section: AutoModeTabSection): string {
 
 export function AutoModeRulesTab({
   searchQuery = '',
+  isSearchMode = false,
   isFocused,
+  cursorOffset: searchCursorOffset,
+  onCancel,
+  onHeaderFocusChange,
 }: {
   searchQuery?: string;
+  isSearchMode?: boolean;
   isFocused: boolean;
+  cursorOffset?: number;
+  onCancel?: () => void;
+  onHeaderFocusChange?: (focused: boolean) => void;
 }): React.ReactNode {
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [tick, setTick] = useState(0);
@@ -90,6 +152,18 @@ export function AutoModeRulesTab({
   const [error, setError] = useState<string | null>(null);
   const exitState = useExitOnCtrlCDWithKeybindings();
   const { columns } = useTerminalSize();
+  const tabWidth = useTabsWidth();
+  const { headerFocused, focusHeader, blurHeader } = useTabHeaderFocus();
+
+  useEffect(() => {
+    if (isSearchMode && headerFocused) {
+      blurHeader();
+    }
+  }, [isSearchMode, headerFocused, blurHeader]);
+
+  useEffect(() => {
+    onHeaderFocusChange?.(headerFocused);
+  }, [headerFocused, onHeaderFocusChange]);
 
   const refresh = useCallback(() => {
     setTick(n => n + 1);
@@ -98,7 +172,7 @@ export function AutoModeRulesTab({
 
   const entries = useMemo(() => {
     void tick;
-    const all = readUserEntries();
+    const all = readAutoModeEntries();
     const q = searchQuery.trim().toLowerCase();
     if (!q) return all;
     return all.filter(entry => entry.text.toLowerCase().includes(q));
@@ -111,7 +185,10 @@ export function AutoModeRulesTab({
     setError(null);
   }, []);
 
-  useKeybinding('confirm:no', cancel, { context: 'Settings' });
+  useKeybinding('confirm:no', cancel, {
+    context: 'Settings',
+    isActive: mode.kind !== 'list',
+  });
 
   if (mode.kind === 'pick-section') {
     return (
@@ -216,7 +293,8 @@ export function AutoModeRulesTab({
   }
 
   if (mode.kind === 'delete') {
-    const lastInSection = entries.filter(e => e.section === mode.entry.section).length <= 1;
+    const lastInSection =
+      entries.filter(e => e.section === mode.entry.section && e.source === 'userSettings' && !e.legacy).length <= 1;
     return (
       <Box flexDirection="column">
         <Text bold color="error">
@@ -252,8 +330,25 @@ export function AutoModeRulesTab({
           Rule details
         </Text>
         <Text bold>{entry.text}</Text>
-        <Text dimColor>{sectionLabel(entry.section)} · user settings</Text>
-        {isSentinel ? (
+        <Text dimColor>
+          {sectionLabel(entry.section)} · {sourceDisplayName(entry.source)}
+        </Text>
+        {entry.legacy ? (
+          <Text italic>
+            This rule comes from the legacy autoMode.deny key, which the classifier still enforces as a soft deny.{' '}
+            {entry.source === 'userSettings'
+              ? 'This editor writes only the modern keys — move the rule to autoMode.soft_deny in your settings file to manage it here.'
+              : `It is delivered by ${sourceDisplayName(entry.source)} and cannot be modified here.`}
+          </Text>
+        ) : entry.source === 'policySettings' ? (
+          <Text italic>
+            This rule is configured by managed settings and cannot be modified.
+            {'\n'}
+            Contact your system administrator for more information.
+          </Text>
+        ) : entry.source === 'flagSettings' ? (
+          <Text italic>This rule comes from a read-only source (the --settings flag) and cannot be modified here.</Text>
+        ) : isSentinel ? (
           <Text italic>{`"${AUTO_MODE_DEFAULTS_SENTINEL}" is splice plumbing, not an editable rule.`}</Text>
         ) : (
           <Select
@@ -284,11 +379,15 @@ export function AutoModeRulesTab({
   }
 
   const options = [
-    { label: 'Add auto mode rule…', value: 'add' },
-    { label: 'Edit environment…', value: 'env' },
+    ...(searchQuery.trim()
+      ? []
+      : [
+          { label: 'Add auto mode rule…', value: 'add' },
+          { label: 'Edit environment…', value: 'env' },
+        ]),
     ...entries.map(entry => ({
-      label: `${sectionLabel(entry.section)}: ${entry.text}`,
-      value: `entry:${entry.section}:${entry.index}`,
+      label: formatAutoModeEntryLabel(entry),
+      value: `entry:${entryKey(entry)}`,
     })),
   ];
 
@@ -297,10 +396,23 @@ export function AutoModeRulesTab({
       <Text>
         Extra rules for the auto mode classifier. Rules are plain sentences; new rules are saved to your user settings.
       </Text>
+      <Box marginBottom={1} marginTop={1} flexDirection="column">
+        <SearchBox
+          query={searchQuery}
+          isFocused={isSearchMode && !headerFocused}
+          isTerminalFocused={isFocused}
+          width={tabWidth}
+          cursorOffset={searchCursorOffset}
+        />
+      </Box>
       {error ? <Text color="error">{error}</Text> : null}
       <Select
         options={options}
         onChange={value => {
+          if (headerFocused) {
+            blurHeader();
+            onHeaderFocusChange?.(false);
+          }
           if (value === 'add') {
             setMode({ kind: 'pick-section' });
             return;
@@ -317,16 +429,19 @@ export function AutoModeRulesTab({
             return;
           }
           if (value.startsWith('entry:')) {
-            const [, section, indexRaw] = value.split(':');
-            const index = Number(indexRaw);
-            const entry = entries.find(e => e.section === section && e.index === index);
+            const key = value.slice('entry:'.length);
+            const entry = entries.find(e => entryKey(e) === key);
             if (entry) setMode({ kind: 'details', entry });
           }
         }}
         onCancel={() => {
-          /* parent Esc */
+          onCancel?.();
         }}
-        isDisabled={!isFocused}
+        visibleOptionCount={Math.min(10, options.length)}
+        isDisabled={!isFocused || isSearchMode || headerFocused}
+        hidePromptWhileDisabled={true}
+        pointerWhileDisabled={!isSearchMode}
+        onUpFromFirstItem={focusHeader}
       />
     </Box>
   );

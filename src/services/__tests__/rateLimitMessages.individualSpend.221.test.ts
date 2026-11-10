@@ -53,7 +53,11 @@ afterEach(() => {
   hasClaudeAiBillingAccessMock.mockImplementation(() => false)
 })
 
-function rejected(partial: Partial<ClaudeAILimits>): ClaudeAILimits {
+import type { RateLimitMessageLimits } from '../rateLimitMessages.js'
+
+function rejected(
+  partial: Partial<RateLimitMessageLimits>,
+): RateLimitMessageLimits {
   return {
     status: 'rejected',
     unifiedRateLimitFallbackAvailable: false,
@@ -110,5 +114,50 @@ describe('getRateLimitErrorMessage densable 2.1.221 individual spend', () => {
     )
     expect(msg).toContain('monthly spend limit')
     expect(msg).toContain('claude.ai/settings/usage?from=cc_cli_limit_message')
+  })
+
+  test('2.1.289 group_pool, channel scope, Fable limit, and non-spend-cap window fallback', () => {
+    getSubscriptionTypeMock.mockImplementation(() => 'team')
+    hasClaudeAiBillingAccessMock.mockImplementation(() => false)
+    expect(
+      getRateLimitErrorMessage(
+        rejected({ overageScope: 'group_pool' }),
+        'claude-opus-4-6',
+      ),
+    ).toBe(
+      "You've hit your team's shared budget · ask your admin to raise it at claude.ai/admin-settings/usage",
+    )
+
+    expect(
+      getRateLimitErrorMessage(
+        rejected({
+          overageDisabledReason: 'org_spend_cap_reached',
+          overageScope: 'channel',
+        }),
+        'claude-opus-4-6',
+      ),
+    ).toBe(
+      "You've hit your channel's monthly spend limit · an org owner or channel manager can raise it in the channel's Claude settings",
+    )
+
+    expect(
+      getRateLimitErrorMessage(
+        rejected({
+          rateLimitType: 'seven_day_overage_included',
+        }),
+        'claude-fable-5',
+      ),
+    ).toBe("You've hit your Fable limit")
+
+    expect(
+      getRateLimitErrorMessage(
+        rejected({
+          rateLimitType: 'five_hour',
+          overageStatus: 'rejected',
+          overageDisabledReason: 'overage_not_provisioned',
+        }),
+        'claude-opus-4-6',
+      ),
+    ).toBe("You've hit your session limit")
   })
 })

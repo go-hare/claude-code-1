@@ -114,7 +114,10 @@ function LimitBar({
 }
 
 export function Usage(): React.ReactNode {
-  const [utilization, setUtilization] = useState<Utilization | null>(null);
+  const [utilization, setUtilization] = useState<Utilization | null>(
+    () => seedUtilizationFromOpenHeaders()?.utilization ?? null,
+  );
+  const [enrichError, setEnrichError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { columns } = useTerminalSize();
@@ -125,22 +128,35 @@ export function Usage(): React.ReactNode {
   const loadUtilization = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setEnrichError(null);
     const seed = seedUtilizationFromOpenHeaders();
     if (seed) {
-      setUtilization(seed.utilization);
+      setUtilization(prev => (seed.source === 'headers' ? seed.utilization : (prev ?? seed.utilization)));
     }
     try {
       const data = await fetchUtilization();
       setUtilization(data);
+      setEnrichError(null);
     } catch (err) {
+      const axiosError = err as { response?: { status?: number; data?: unknown } };
+      const isRateLimited = axiosError.response?.status === 429;
       if (seed) {
-        setError(
-          seed.source === 'persisted' ? 'Showing last-known usage (could not refresh)' : 'Could not refresh usage data',
+        setEnrichError(
+          seed.source === 'persisted'
+            ? isRateLimited
+              ? 'Showing last-known usage (rate limited — try again in a moment)'
+              : 'Showing last-known usage (could not refresh)'
+            : isRateLimited
+              ? 'Per-model breakdown unavailable (rate limited — try again in a moment)'
+              : 'Could not refresh usage data',
         );
         return;
       }
+      if (isRateLimited) {
+        setError('Usage endpoint is rate limited. Please try again in a moment.');
+        return;
+      }
       logError(err as Error);
-      const axiosError = err as { response?: { data?: unknown } };
       const responseBody = axiosError.response?.data ? jsonStringify(axiosError.response.data) : undefined;
       setError(responseBody ? `Failed to load usage data: ${responseBody}` : 'Failed to load usage data');
     } finally {
@@ -157,7 +173,7 @@ export function Usage(): React.ReactNode {
     () => {
       void loadUtilization();
     },
-    { context: 'Settings', isActive: !!error && !isLoading },
+    { context: 'Settings', isActive: (!!error || !!enrichError) && !isLoading },
   );
 
   if (error) {
@@ -196,16 +212,19 @@ export function Usage(): React.ReactNode {
     {
       title: 'Current session',
       limit: utilization.five_hour,
+      alwaysShowDateInReset: false,
     },
     {
       title: 'Current week (all models)',
       limit: utilization.seven_day,
+      alwaysShowDateInReset: true,
     },
     ...(showSonnetBar
       ? [
           {
             title: 'Current week (Sonnet only)',
             limit: utilization.seven_day_sonnet,
+            alwaysShowDateInReset: true,
           },
         ]
       : []),
@@ -216,7 +235,16 @@ export function Usage(): React.ReactNode {
       {limits.some(({ limit }) => limit) || <Text dimColor>/usage is only available for subscription plans.</Text>}
 
       {limits.map(
-        ({ title, limit }) => limit && <LimitBar key={title} title={title} limit={limit} maxWidth={maxWidth} />,
+        ({ title, limit, alwaysShowDateInReset }) =>
+          limit && (
+            <LimitBar
+              key={title}
+              title={title}
+              limit={limit}
+              maxWidth={maxWidth}
+              alwaysShowDateInReset={alwaysShowDateInReset}
+            />
+          ),
       )}
 
       <SpendLimitSection maxWidth={maxWidth} />
@@ -227,8 +255,16 @@ export function Usage(): React.ReactNode {
 
       <LoopsUsageTable maxWidth={maxWidth} />
 
+      {enrichError && <Text dimColor>{enrichError}</Text>}
+      {isLoading && !enrichError && <Text dimColor>Refreshing…</Text>}
+
       <Text dimColor>
-        <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+        <Byline>
+          {enrichError && (
+            <ConfigurableShortcutHint action="settings:retry" context="Settings" fallback="r" description="retry" />
+          )}
+          <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+        </Byline>
       </Text>
     </Box>
   );

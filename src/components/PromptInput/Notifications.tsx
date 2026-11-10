@@ -21,7 +21,13 @@ import {
   type NotificationSegment,
   useNotifications,
 } from 'src/context/notifications.js';
-import { logEvent } from 'src/services/analytics/index.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js';
+import { uniq } from '../../utils/array.js';
+import { logForDebugging } from '../../utils/debug.js';
+import { qre, tellerOf } from '../../utils/plugins/pluginDrawError.js';
 import { useAppState } from 'src/state/AppState.js';
 import { useVoiceState } from '../../context/voice.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
@@ -342,10 +348,17 @@ function ToastBoxes({ toasts, paused }: { toasts: readonly ToastItem[]; paused: 
   );
 }
 
-function onToastStackError(error: Error): void {
+function onToastStackError(error: Error, toasts: readonly ToastItem[] = getToasts()): void {
   // densable AX/EX toast-stack BO unique English. Distinct from FEe pane hold.
+  const teller = tellerOf(uniq(toasts.flatMap(toast => (toast.plugin ? [toast.plugin] : []))));
+  logEvent('tengu_feature_bad', {
+    feature_name: 'plugin_function_hooks_toast_stack' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    error_code: 'threw_while_drawn' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  });
+  const text = `ui.toast threw while drawn: ${qre(error instanceof Error ? error.message : String(error))}; no toast is drawn until the stack changes`;
+  logForDebugging(`${teller.lead}: ${text}`, { level: 'warn' });
   logError(new Error('ui.toast: the toast stack threw while drawn'));
-  logError(new Error(`ui.toast threw while drawn: ${error.message}; no toast is drawn until the stack changes`));
+  logError(new Error(text));
 }
 
 /**
@@ -356,7 +369,7 @@ export function ToastStackView(): React.ReactNode {
   const toasts = useSyncExternalStore(subscribeToasts, getToasts, getToasts);
   const paused = useToastPause();
   return (
-    <SentryErrorBoundary key={toasts.length} name="ui.toast" onError={onToastStackError}>
+    <SentryErrorBoundary key={toasts.length} name="ui.toast" onError={err => onToastStackError(err, toasts)}>
       <ToastBoxes toasts={toasts} paused={paused} />
     </SentryErrorBoundary>
   );

@@ -14,7 +14,10 @@ import { formatResetTime } from '../utils/format.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
 import type { ClaudeAILimits } from './claudeAiLimits.js'
 
-const FEEDBACK_CHANNEL_ANT = '#briarpatch-cc'
+export type RateLimitMessageLimits = Omit<ClaudeAILimits, 'rateLimitType'> & {
+  rateLimitType?: ClaudeAILimits['rateLimitType'] | 'seven_day_overage_included'
+  overageScope?: 'group_pool' | 'channel' | string
+}
 
 /**
  * All possible rate limit error message prefixes
@@ -47,7 +50,7 @@ export type RateLimitMessage = {
  * Returns null if no message should be shown
  */
 export function getRateLimitMessage(
-  limits: ClaudeAILimits,
+  limits: RateLimitMessageLimits,
   model: string,
 ): RateLimitMessage | null {
   // Check overage scenarios first (when subscription is rejected but overage is available)
@@ -112,7 +115,7 @@ export function getRateLimitMessage(
  * Returns the message string or null if no error message should be shown
  */
 export function getRateLimitErrorMessage(
-  limits: ClaudeAILimits,
+  limits: RateLimitMessageLimits,
   model: string,
 ): string | null {
   const message = getRateLimitMessage(limits, model)
@@ -130,7 +133,7 @@ export function getRateLimitErrorMessage(
  * Returns the warning message string or null if no warning should be shown
  */
 export function getRateLimitWarning(
-  limits: ClaudeAILimits,
+  limits: RateLimitMessageLimits,
   model: string,
 ): string | null {
   const message = getRateLimitMessage(limits, model)
@@ -153,6 +156,11 @@ const SPEND_CAP_DISABLED_REASONS = new Set([
   'org_level_disabled_until',
   'org_spend_cap_reached',
 ] as const)
+
+const CHANNEL_MONTHLY_SPEND_LIMIT = "channel's monthly spend limit"
+const CHANNEL_MONTHLY_USAGE_LIMIT = "channel's monthly usage limit"
+const CHANNEL_RAISE_SUFFIX =
+  " · an org owner or channel manager can raise it in the channel's Claude settings"
 
 /**
  * densable uen Gj() @184960481 — `I("tengu_vellum_anchor", !1)`.
@@ -206,7 +214,9 @@ function getUsageCreditsRaiseHint(): string {
  * null for overage / missing resetsAt. seven_day_sonnet uses $Wa(): pro or
  * enterprise → weekly limit, else Sonnet limit.
  */
-function formatSessionOrWeeklyResetHint(limits: ClaudeAILimits): string {
+function formatSessionOrWeeklyResetHint(
+  limits: RateLimitMessageLimits,
+): string {
   const resetTime = limits.resetsAt
     ? formatResetTime(limits.resetsAt, true)
     : undefined
@@ -232,15 +242,20 @@ function formatSessionOrWeeklyResetHint(limits: ClaudeAILimits): string {
           : 'Sonnet limit'
       break
     }
+    case 'seven_day_overage_included':
     case 'overage':
     case undefined:
+      // seven_day_overage_included is not mapped to a reset hint in formatSessionOrWeeklyResetHint
       limitName = null
       break
   }
   return limitName ? ` · your ${limitName} resets ${resetTime}` : ''
 }
 
-function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
+function getLimitReachedText(
+  limits: RateLimitMessageLimits,
+  model: string,
+): string {
   const usageBased = isUsageBasedBilling()
   const hasBillingAccess = hasClaudeAiBillingAccess()
   const usageLimitAdminSuffix = hasBillingAccess
@@ -253,9 +268,43 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     : undefined
   const resetMessage = resetTime ? ` · resets ${resetTime}` : ''
 
+  const disabledReason = limits.overageDisabledReason
+  const isWindowRateLimitType =
+    limits.rateLimitType === 'five_hour' ||
+    limits.rateLimitType === 'seven_day' ||
+    limits.rateLimitType === 'seven_day_opus' ||
+    limits.rateLimitType === 'seven_day_sonnet' ||
+    limits.rateLimitType === 'seven_day_overage_included'
+
+  // densable 2.1.289 Qwn: non-spend-cap overageDisabledReason with a window
+  // rateLimitType falls back to the typed window limit reached message.
+  if (
+    !usageBased &&
+    disabledReason &&
+    isWindowRateLimitType &&
+    !(SPEND_CAP_DISABLED_REASONS as Set<string>).has(disabledReason)
+  ) {
+    const typed = getTypedLimitReachedText(limits, resetMessage, model)
+    if (typed !== null) {
+      return typed
+    }
+  }
+
+  // densable 2.1.289 Qwn: group_pool shared budget.
+  if (!usageBased && limits.overageScope === 'group_pool') {
+    const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
+    const suffix = hasBillingAccess
+      ? ' · raise it at claude.ai/admin-settings/usage'
+      : ' · ask your admin to raise it at claude.ai/admin-settings/usage'
+    return formatLimitReachedText(
+      "team's shared budget",
+      `${suffix}${sessionWeeklyHint}`,
+      model,
+    )
+  }
+
   // densable 2.1.221 / uen: outer hqe spend-cap is `if(!tx() && hqe.has)`.
   // usage_based falls through to the inner hqe arm (individual usage limit).
-  const disabledReason = limits.overageDisabledReason
   if (
     !usageBased &&
     disabledReason &&
@@ -264,6 +313,13 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     const isIndividualSpendCap = disabledReason === 'org_spend_cap_reached'
     const subscriptionType = getSubscriptionType()
     const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
+    if (limits.overageScope === 'channel') {
+      return formatLimitReachedText(
+        CHANNEL_MONTHLY_SPEND_LIMIT,
+        `${CHANNEL_RAISE_SUFFIX}${sessionWeeklyHint}`,
+        model,
+      )
+    }
     if (subscriptionType === 'team' || subscriptionType === 'enterprise') {
       const limit = isIndividualSpendCap
         ? 'individual spend limit'
@@ -340,6 +396,13 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
       (SPEND_CAP_DISABLED_REASONS as Set<string>).has(disabledReason)
     ) {
       const innerReset = overageResetTime ? ` · resets ${overageResetTime}` : ''
+      if (limits.overageScope === 'channel') {
+        return formatLimitReachedText(
+          CHANNEL_MONTHLY_USAGE_LIMIT,
+          `${CHANNEL_RAISE_SUFFIX}${innerReset}`,
+          model,
+        )
+      }
       return formatLimitReachedText(
         disabledReason === 'org_spend_cap_reached'
           ? 'individual usage limit'
@@ -371,10 +434,12 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
     })
   }
 
-  // densable uen den(): typed five_hour / seven_day / opus / sonnet (+ Gj).
-  const typed = getTypedLimitReachedText(limits, resetMessage, model)
-  if (typed !== null) {
-    return typed
+  // densable uen den(): typed five_hour / seven_day / opus / sonnet / fable (+ Gj).
+  if (isWindowRateLimitType) {
+    const typed = getTypedLimitReachedText(limits, resetMessage, model)
+    if (typed !== null) {
+      return typed
+    }
   }
   // densable uen: if (r) wb("usage limit", u); else
   // wb("usage limit", A, {progressSavedSuffix: A !== "" && Gj()}).
@@ -387,10 +452,10 @@ function getLimitReachedText(limits: ClaudeAILimits, model: string): string {
 }
 
 /**
- * densable uen den() @184964566 / ghe():
- *   seven_day_sonnet → wb(ghe(), t, r, {progressSavedSuffix: Gj()})
- *   five_hour | seven_day | seven_day_opus → wb(Ew[type], t, r, {progressSavedSuffix: Gj()})
- *   seven_day_overage_included (Fable 5) is not in tip RateLimitType — not mapped.
+ * densable 2.1.289 Jwn / rDt:
+ *   seven_day_sonnet → o_(rDt(), t, r, {progressSavedSuffix: v1()})
+ *   five_hour | seven_day | seven_day_opus → o_(Vye[type], t, r, {progressSavedSuffix: v1()})
+ *   seven_day_overage_included → o_('Fable limit', t, r)
  */
 function sonnetOrWeeklyLimitName(): string {
   const subscriptionType = getSubscriptionType()
@@ -400,7 +465,7 @@ function sonnetOrWeeklyLimitName(): string {
 }
 
 function getTypedLimitReachedText(
-  limits: ClaudeAILimits,
+  limits: RateLimitMessageLimits,
   resetMessage: string,
   model: string,
 ): string | null {
@@ -425,12 +490,14 @@ function getTypedLimitReachedText(
       return formatLimitReachedText('Opus limit', resetMessage, model, {
         progressSavedSuffix,
       })
+    case 'seven_day_overage_included':
+      return formatLimitReachedText('Fable limit', resetMessage, model)
     default:
       return null
   }
 }
 
-function getEarlyWarningText(limits: ClaudeAILimits): string | null {
+function getEarlyWarningText(limits: RateLimitMessageLimits): string | null {
   let limitName: string | null = null
   switch (limits.rateLimitType) {
     case 'seven_day':
@@ -444,6 +511,9 @@ function getEarlyWarningText(limits: ClaudeAILimits): string | null {
       break
     case 'seven_day_sonnet':
       limitName = 'Sonnet limit'
+      break
+    case 'seven_day_overage_included':
+      limitName = 'Fable limit'
       break
     case 'overage':
       limitName = 'extra usage'
@@ -493,7 +563,7 @@ function getEarlyWarningText(limits: ClaudeAILimits): string | null {
  * Only used for warnings because actual rate limit hits will see an interactive menu of options.
  */
 function getWarningUpsellText(
-  rateLimitType: ClaudeAILimits['rateLimitType'],
+  rateLimitType: RateLimitMessageLimits['rateLimitType'],
 ): string | null {
   const subscriptionType = getSubscriptionType()
   const hasExtraUsageEnabled =
@@ -534,7 +604,7 @@ function getWarningUpsellText(
  * Get notification text for overage mode transitions
  * Used for transient notifications when entering overage mode
  */
-export function getUsingOverageText(limits: ClaudeAILimits): string {
+export function getUsingOverageText(limits: RateLimitMessageLimits): string {
   const resetTime = limits.resetsAt
     ? formatResetTime(limits.resetsAt, true)
     : ''
@@ -570,12 +640,7 @@ function formatLimitReachedText(
   _model: string,
   opts?: { progressSavedSuffix?: boolean },
 ): string {
-  // densable uen wb(): o?.progressSavedSuffix ? " · progress saved" : ""
+  // densable 2.1.289 o_(): o?.progressSavedSuffix ? " · progress saved" : ""
   const progressSaved = opts?.progressSavedSuffix ? ' · progress saved' : ''
-  // Enhanced messaging for Ant users
-  if (process.env.USER_TYPE === 'ant') {
-    return `You've hit your ${limit}${resetMessage}${progressSaved}. If you have feedback about this limit, post in ${FEEDBACK_CHANNEL_ANT}. You can reset your limits with /reset-limits`
-  }
-
   return `You've hit your ${limit}${resetMessage}${progressSaved}`
 }
