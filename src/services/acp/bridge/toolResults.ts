@@ -115,7 +115,8 @@ export function toolUpdateFromToolResult(
       return {}
     }
 
-    case 'ExitPlanMode': {
+    case 'ExitPlanMode':
+    case 'ExitPlanModeV2': {
       return { title: 'Exited Plan Mode' }
     }
 

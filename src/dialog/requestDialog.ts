@@ -100,6 +100,12 @@ async function requestStreaming<TPayload, TResult>(
       signal: abort.signal,
       queueBehind: options?.queueBehind,
       ...(options?.place !== undefined ? { place: options.place } : {}),
+      ...(options?.askOrder !== undefined
+        ? { askOrder: options.askOrder }
+        : {}),
+      ...(options?.countedAsk !== undefined
+        ? { countedAsk: options.countedAsk }
+        : {}),
       ...(options?.succeeds !== undefined
         ? { succeeds: options.succeeds }
         : {}),

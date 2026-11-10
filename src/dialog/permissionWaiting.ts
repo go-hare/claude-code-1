@@ -13,8 +13,10 @@
 import { formatPermissionNeeds } from '../utils/bgNeedsInputBridge.js'
 import { getPermissionConfirm } from './permissionConfirmRegistry.js'
 import {
+  AUTO_MODE_SERVER_FALLBACK_KIND,
   FABLE_OVERAGE_CONSENT_PROMPT_KIND,
   GOAL_PROPOSAL_KIND,
+  IT2_SETUP_KIND,
   MCP_ELICITATION_KIND,
   MCP_ELICITATION_WAITING_KIND,
   MCP_URL_ELICITATION_KIND,
@@ -37,12 +39,14 @@ type PermissionPayload = {
 /** densable y2A exact strings for Host kinds that are not P1u `approve …`. */
 export const GOLD_Y2A_WAITING: Readonly<Record<string, string>> = {
   [PERMISSION_ASK_USER_QUESTION_KIND]: 'input needed',
+  [IT2_SETUP_KIND]: 'input needed',
   [SANDBOX_NETWORK_ACCESS_KIND]: 'sandbox request',
   [MCP_URL_ELICITATION_KIND]: 'input needed',
   [MCP_ELICITATION_KIND]: 'input needed',
   [MCP_ELICITATION_WAITING_KIND]: 'input needed',
   [REFUSAL_FALLBACK_PROMPT_KIND]: 'dialog open',
   [FABLE_OVERAGE_CONSENT_PROMPT_KIND]: 'dialog open',
+  [AUTO_MODE_SERVER_FALLBACK_KIND]: 'dialog open',
   [GOAL_PROPOSAL_KIND]: 'goal proposal',
 }
 

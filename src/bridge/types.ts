@@ -125,6 +125,8 @@ export type BridgeConfig = {
   debugFile?: string
   /** Per-session timeout in milliseconds. Sessions exceeding this are killed. */
   sessionTimeoutMs?: number
+  /** Forward --chrome / --no-chrome to spawned sessions when explicitly specified. */
+  chrome?: boolean
 }
 
 // --- Dependency interfaces (for testability) ---

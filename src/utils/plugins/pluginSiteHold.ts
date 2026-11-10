@@ -57,6 +57,7 @@ export type ScreenSiteNode = {
   }
   style?: { overflow?: string; overflowY?: string }
   scrollTop?: number
+  scrollTopRendered?: number
   childNodes?: readonly { yogaNode?: { getComputedHeight(): number } }[]
 }
 
@@ -117,7 +118,7 @@ export function jo(
   clip: ScreenSiteNode,
   loc: { top: number; itemTop: number; itemHeight: number },
 ): OnScreenRows | null | undefined {
-  const u = clip.scrollTop
+  const u = clip.scrollTopRendered ?? clip.scrollTop
   const c = clip.yogaNode
   const m = node.yogaNode?.getComputedHeight()
   if (u === undefined || !c || !m) return undefined

@@ -50,6 +50,23 @@ describe('buildStandardPermissionOptions', () => {
     )
   })
 
+  test('Bash with 2.1.289 space-wildcard suggestion strips trailing " *"', () => {
+    const options = buildStandardPermissionOptions({
+      toolName: 'Bash',
+      input: { command: 'ls -la' },
+      allowPersistent: true,
+      suggestions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'ls *' }],
+          behavior: 'allow',
+          destination: 'session',
+        },
+      ],
+    })
+    expect(options[1]?.name).toBe("Yes, and don't ask again for ls commands")
+  })
+
   test('Write session-scoped Edit grant uses during-this-session label', () => {
     const options = buildStandardPermissionOptions({
       toolName: 'Write',

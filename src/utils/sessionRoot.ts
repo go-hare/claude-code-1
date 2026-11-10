@@ -103,6 +103,7 @@ export type Session = {
   sessionFlags: SessionFlags
   sessionRefsGate: SessionRefsGate
   sessionScratch: SessionScratch
+  readonly onceLatches: SessionOnceLatches
   surfaceCapabilities: SurfaceCapabilities
   toolProgressThrottle: ToolProgressThrottle
   turnBudget: TurnBudget
@@ -201,6 +202,9 @@ export function bindSession(e: SessionKind, t: SessionProject): Session {
       e.kind === 'fork' ? e.root.sessionRefsGate : new SessionRefsGate(),
     sessionScratch:
       e.kind === 'fork' ? e.root.sessionScratch : new SessionScratch(),
+    get onceLatches() {
+      return sessionOnceLatchBag.of(S)
+    },
     surfaceCapabilities:
       e.kind === 'fork'
         ? e.root.surfaceCapabilities

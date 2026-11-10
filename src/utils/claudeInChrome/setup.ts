@@ -318,6 +318,10 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
       ),
     )
 
+  const systemPrompt = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_CFC_PROMPT)
+    ? ''
+    : getChromeSystemPrompt()
+
   if (isNativeBuild) {
     return {
       mcpConfig: {
@@ -330,7 +334,7 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
         },
       },
       allowedTools,
-      systemPrompt: getChromeSystemPrompt(),
+      systemPrompt,
     }
   }
 
@@ -346,7 +350,7 @@ export function setupClaudeInChrome(options?: SetupClaudeInChromeOptions): {
       },
     },
     allowedTools,
-    systemPrompt: getChromeSystemPrompt(),
+    systemPrompt,
   }
 }
 
@@ -400,7 +404,8 @@ export async function installChromeNativeHostManifest(
   }
 
   const manifestContent = jsonStringify(manifest, null, 2)
-  let anyManifestUpdated = false
+  let anyManifestExistedBefore = false
+  let anyManifestNewlyCreated = false
 
   // Install manifest to all browser directories
   for (const manifestDir of manifestDirs) {
@@ -410,6 +415,9 @@ export async function installChromeNativeHostManifest(
     const existingContent = await readFile(manifestPath, 'utf-8').catch(
       () => null,
     )
+    if (existingContent !== null) {
+      anyManifestExistedBefore = true
+    }
     if (existingContent === manifestContent) {
       continue
     }
@@ -420,7 +428,9 @@ export async function installChromeNativeHostManifest(
       logForDebugging(
         `[Claude in Chrome] Installed native host manifest at: ${manifestPath}`,
       )
-      anyManifestUpdated = true
+      if (existingContent === null) {
+        anyManifestNewlyCreated = true
+      }
     } catch (error) {
       // Log but don't fail - the browser might not be installed
       logForDebugging(
@@ -435,9 +445,14 @@ export async function installChromeNativeHostManifest(
     registerWindowsNativeHosts(manifestPath)
   }
 
-  // densable: open reconnect page so Web Store extension re-binds after first write.
-  // Local connect path opts out via openReconnectPage: false.
-  if (anyManifestUpdated && openReconnectPage) {
+  // densable pK: open reconnect page only on true first-time install
+  // (b && !g && !skipReconnectAutoOpen). Local connect path opts out via
+  // openReconnectPage: false.
+  if (
+    !anyManifestExistedBefore &&
+    anyManifestNewlyCreated &&
+    openReconnectPage
+  ) {
     void isChromeExtensionInstalled().then(isInstalled => {
       if (isInstalled) {
         logForDebugging(

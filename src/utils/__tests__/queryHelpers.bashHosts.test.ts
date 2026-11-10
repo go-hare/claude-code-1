@@ -57,4 +57,26 @@ describe('extractBashHostsFromMessages', () => {
       'api.stripe.com',
     ])
   })
+
+  test('collects hosts from PowerShell tool_use commands', () => {
+    const messages = [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'PowerShell',
+              input: {
+                command: 'Invoke-RestMethod https://api.github.com/repos',
+              },
+            },
+          ],
+        },
+      },
+    ] as unknown as Message[]
+    expect([...extractBashHostsFromMessages(messages)]).toEqual([
+      'api.github.com',
+    ])
+  })
 })

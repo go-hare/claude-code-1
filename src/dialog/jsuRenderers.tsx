@@ -333,14 +333,12 @@ const autoModeFlaggedAllowRenderer: DialogRenderer = ({ payload, answer }) => {
 
 /** densable fme — auto-mode classifier billing notice. */
 const autoModeServerFallbackRenderer: DialogRenderer = ({ payload, answer }) => {
-  const p = (payload ?? {}) as { title?: string; paragraphs?: string[] };
-  return (
-    <AutoModeServerFallbackNotice
-      title={typeof p.title === 'string' ? p.title : ''}
-      paragraphs={Array.isArray(p.paragraphs) ? p.paragraphs : []}
-      onDone={result => answer(result)}
-    />
-  );
+  const p = payload as { title?: string; paragraphs?: string[] } | null | undefined;
+  if (!p?.title || !Array.isArray(p.paragraphs) || p.paragraphs.length === 0) {
+    answer('continue');
+    return null;
+  }
+  return <AutoModeServerFallbackNotice title={p.title} paragraphs={p.paragraphs} onDone={result => answer(result)} />;
 };
 
 /** densable jsu — full pealed non-permission set */

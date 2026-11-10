@@ -8,6 +8,7 @@ import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import { runTools } from '../services/tools/toolOrchestration.js'
 import { findToolByName, type Tool, type Tools } from '../Tool.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileEditTool/constants.js'
 import type { Input as FileReadInput } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
 import {
@@ -931,7 +932,11 @@ function* iterBashCommandsFromMessages(
       Array.isArray(message.message!.content)
     ) {
       for (const content of message.message!.content) {
-        if (content.type === 'tool_use' && content.name === BASH_TOOL_NAME) {
+        if (
+          content.type === 'tool_use' &&
+          (content.name === BASH_TOOL_NAME ||
+            content.name === POWERSHELL_TOOL_NAME)
+        ) {
           const { input } = content
           if (
             typeof input !== 'object' ||

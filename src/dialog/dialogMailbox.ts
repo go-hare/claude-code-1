@@ -15,6 +15,10 @@ export type DialogRequestOptions = {
   queueBehind?: boolean
   /** densable place — W7 `{place:"under"}`. */
   place?: 'under' | 'queue'
+  /** densable askOrder — monotonic ordering key for place === "queue". */
+  askOrder?: number
+  /** densable countedAsk — optional external ask-tally handle. */
+  countedAsk?: OpenDialogEntry['countedAsk']
   /** densable succeeds — wne `{succeeds:!0}` may steal holdsTop. */
   succeeds?: boolean
 }
@@ -86,6 +90,12 @@ export function createDialogMailbox(): DialogMailbox {
         payload,
         queueBehind: options?.queueBehind,
         ...(options?.place !== undefined ? { place: options.place } : {}),
+        ...(options?.askOrder !== undefined
+          ? { askOrder: options.askOrder }
+          : {}),
+        ...(options?.countedAsk !== undefined
+          ? { countedAsk: options.countedAsk }
+          : {}),
         ...(holdsTop !== undefined ? { holdsTop } : {}),
         ...(userInvoked !== undefined ? { userInvoked } : {}),
         ...(options?.succeeds !== undefined

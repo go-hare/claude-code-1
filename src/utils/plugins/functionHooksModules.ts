@@ -3459,6 +3459,19 @@ function engineAudio(
   }
 }
 
+/** densable `kV` / `uOe` — `$.fs.read` and `$.fs.write` 4 MiB byte cap. */
+const FS_BYTE_LIMIT = 4_194_304
+
+async function resolvePluginFsBaseCwd(cwd?: unknown): Promise<string> {
+  if (typeof cwd === 'string' && cwd !== '') return cwd
+  try {
+    const { getCwd } = await import('../cwd.js')
+    return getCwd()
+  } catch {
+    return process.cwd()
+  }
+}
+
 /**
  * densable: every `$.fs` op refuses a network or device path before touching
  * the filesystem. `list` already did; read/write/stat/exists/ancestors share it.
@@ -3467,14 +3480,9 @@ async function refusePluginFsNetworkPath(
   rawPath: string,
   op: string,
   plugin?: string,
+  cwd?: string,
 ): Promise<void> {
-  let baseCwd = process.cwd()
-  try {
-    const { getCwd } = await import('../cwd.js')
-    baseCwd = getCwd()
-  } catch {
-    // fallback to process.cwd()
-  }
+  const baseCwd = await resolvePluginFsBaseCwd(cwd)
   const target = resolve(baseCwd, rawPath)
   let projectRoot: string | null = null
   try {
@@ -4274,6 +4282,49 @@ async function spawnDetached(argv: unknown): Promise<{ pid: number }> {
   return { pid: child.pid ?? 0 }
 }
 
+/** densable `UB` — `$.http.fetch` 4 MiB request/response body cap. */
+const HTTP_FETCH_BODY_LIMIT = 4_194_304
+/** densable `jse` — `$.http.fetch` 30s timeout. */
+const HTTP_FETCH_TIMEOUT_MS = 30_000
+
+async function readHttpFetchResponseBody(
+  response: Response,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const body = response.body
+  if (body === null) return ''
+  if (body === undefined || typeof body.getReader !== 'function') {
+    const text = await response.text()
+    const buf = Buffer.from(text, 'utf8')
+    return buf.byteLength > maxBytes
+      ? new TextDecoder().decode(buf.subarray(0, maxBytes))
+      : text
+  }
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      signal.throwIfAborted()
+      const { done, value } = await reader.read()
+      if (done) break
+      const remaining = maxBytes - total
+      if (value.byteLength >= remaining) {
+        chunks.push(value.subarray(0, remaining))
+        total += remaining
+        await reader.cancel()
+        break
+      }
+      chunks.push(value)
+      total += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks))
+}
+
 async function fetchHttp(
   url: string,
   init?: Record<string, unknown>,
@@ -4319,6 +4370,14 @@ async function fetchHttp(
       )
     }
   }
+  if (
+    typeof init?.body === 'string' &&
+    init.body.length > HTTP_FETCH_BODY_LIMIT
+  ) {
+    throw new Error(
+      `${prefix}$.http.fetch: ${parsedUrl.href} refused: a request body of ${init.body.length} characters is over the ${HTTP_FETCH_BODY_LIMIT}-character limit`,
+    )
+  }
   const callerHeaders: Record<string, string> = {}
   if (isEventRecord(init?.headers)) {
     for (const [k, v] of Object.entries(init.headers)) {
@@ -4332,16 +4391,62 @@ async function fetchHttp(
     parsedUrl.host === authEntry.host
       ? { ...callerHeaders, ...authEntry.headers }
       : callerHeaders
-  const response = await fetch(parsedUrl.href, {
-    method: typeof init?.method === 'string' ? init.method : undefined,
-    headers: Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
-    body: typeof init?.body === 'string' ? init.body : undefined,
-  })
-  return {
-    ok: response.ok,
-    status: response.status,
-    headers: Object.fromEntries(response.headers.entries()),
-    text: await response.text(),
+  const timeoutMs =
+    typeof init?.timeoutMs === 'number' &&
+    Number.isFinite(init.timeoutMs) &&
+    init.timeoutMs > 0
+      ? Math.min(init.timeoutMs, HTTP_FETCH_TIMEOUT_MS)
+      : HTTP_FETCH_TIMEOUT_MS
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    const response = await fetch(parsedUrl.href, {
+      method: typeof init?.method === 'string' ? init.method : undefined,
+      headers:
+        Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+      signal: controller.signal,
+    })
+    const contentLength = Number(response.headers.get('content-length'))
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > HTTP_FETCH_BODY_LIMIT
+    ) {
+      await response.body?.cancel()
+      throw new Error(
+        `${prefix}$.http.fetch: ${parsedUrl.href} refused: body of ${contentLength} bytes is over the ${HTTP_FETCH_BODY_LIMIT}-byte limit`,
+      )
+    }
+    const text = await readHttpFetchResponseBody(
+      response,
+      HTTP_FETCH_BODY_LIMIT,
+      controller.signal,
+    )
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      text,
+    }
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message.startsWith(`${prefix}$.http.fetch:`)
+    ) {
+      throw err
+    }
+    if (timedOut) {
+      throw new Error(
+        `${prefix}$.http.fetch(${parsedUrl.href}) aborted: no complete answer within ${timeoutMs}ms`,
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -4815,30 +4920,73 @@ export async function handleHostOp(
   }
   if (op === 'fs.read') {
     const path = pathFrom(args)
-    if (typeof path !== 'string') return undefined
-    await refusePluginFsNetworkPath(path, 'fs.read', plugin)
-    return readFileSync(path, 'utf8')
+    if (typeof path !== 'string' || path === '') {
+      if (rec !== undefined) hostCheck(op, 'takes a path', plugin)
+      return undefined
+    }
+    const opts = !rec && isEventRecord(args[1]) ? args[1] : undefined
+    const hasAs =
+      (rec !== undefined && Object.hasOwn(rec, 'as')) ||
+      (opts !== undefined && Object.hasOwn(opts, 'as'))
+    const asMode = hasAs
+      ? rec !== undefined && Object.hasOwn(rec, 'as')
+        ? rec.as
+        : opts?.as
+      : 'text'
+    if (asMode !== 'text' && asMode !== 'bytes') {
+      hostCheck(op, 'as is "text" or "bytes"', plugin)
+    }
+    const baseCwd = await resolvePluginFsBaseCwd(rec?.cwd ?? opts?.cwd)
+    const resolvedPath = resolve(baseCwd, path)
+    await refusePluginFsNetworkPath(path, 'fs.read', plugin, baseCwd)
+    const buf = readFileSync(resolvedPath)
+    if (buf.byteLength > FS_BYTE_LIMIT) {
+      const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+      const reason = `the file is over the ${FS_BYTE_LIMIT}-byte limit`
+      logForDebugging(
+        `$.fs.read (${plugin ?? ''}): ${resolvedPath} refused: ${reason}`,
+      )
+      throw new Error(`${who}$.fs.read: ${path} refused: ${reason}`)
+    }
+    return asMode === 'bytes'
+      ? { base64: buf.toString('base64') }
+      : buf.toString('utf8')
   }
   if (op === 'fs.write') {
-    const { writeFileSync } = await import('fs')
     const path = rec ? stringArg(rec.path) : stringArg(args[0])
     const text = rec ? rec.text : args[1]
-    if (typeof path !== 'string') return undefined
-    await refusePluginFsNetworkPath(path, 'fs.write', plugin)
-    writeFileSync(path, typeof text === 'string' ? text : String(text ?? ''))
+    if (typeof path !== 'string' || path === '') {
+      if (rec !== undefined) hostCheck(op, 'takes a path', plugin)
+      return undefined
+    }
+    if (rec !== undefined && typeof text !== 'string') {
+      hostCheck(op, 'takes the text to write', plugin)
+    }
+    const baseCwd = await resolvePluginFsBaseCwd(rec?.cwd)
+    const resolvedPath = resolve(baseCwd, path)
+    await refusePluginFsNetworkPath(path, 'fs.write', plugin, baseCwd)
+    const content = typeof text === 'string' ? text : String(text ?? '')
+    const byteLen = Buffer.byteLength(content, 'utf8')
+    if (byteLen > FS_BYTE_LIMIT) {
+      const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+      const reason = `${byteLen} bytes is over the ${FS_BYTE_LIMIT}-byte limit`
+      logForDebugging(
+        `$.fs.write (${plugin ?? ''}): ${resolvedPath} refused: ${reason}`,
+      )
+      throw new Error(`${who}$.fs.write: ${path} refused: ${reason}`)
+    }
+    mkdirSync(dirname(resolvedPath), { recursive: true })
+    writeFileSync(resolvedPath, content, 'utf8')
+    logForDebugging(
+      `$.fs.write (${plugin ?? ''}): ${resolvedPath} (${byteLen} bytes)`,
+    )
     return undefined
   }
   if (op === 'fs.list') {
     const { readdirSync, statSync } = await import('fs')
-    let baseCwd = process.cwd()
-    try {
-      const { getCwd } = await import('../cwd.js')
-      baseCwd = getCwd()
-    } catch {
-      // fallback to process.cwd()
-    }
+    const baseCwd = await resolvePluginFsBaseCwd(rec?.cwd)
     const rawPath = pathFrom(args) ?? '.'
-    await refusePluginFsNetworkPath(rawPath, 'fs.list', plugin)
+    await refusePluginFsNetworkPath(rawPath, 'fs.list', plugin, baseCwd)
     const target = resolve(baseCwd, rawPath)
     const entries = readdirSync(target, { withFileTypes: true })
     const listed: Array<{
@@ -4881,14 +5029,8 @@ export async function handleHostOp(
     const { lstatSync, realpathSync, statSync } = await import('fs')
     const rawPath = pathFrom(args)
     if (typeof rawPath !== 'string') return undefined
-    await refusePluginFsNetworkPath(rawPath, 'fs.stat', plugin)
-    let baseCwd = process.cwd()
-    try {
-      const { getCwd } = await import('../cwd.js')
-      baseCwd = getCwd()
-    } catch {
-      // fallback to process.cwd()
-    }
+    const baseCwd = await resolvePluginFsBaseCwd(rec?.cwd)
+    await refusePluginFsNetworkPath(rawPath, 'fs.stat', plugin, baseCwd)
     const target = resolve(baseCwd, rawPath)
     const lst = lstatSync(target)
     const isLink = lst.isSymbolicLink()
@@ -4918,11 +5060,12 @@ export async function handleHostOp(
     }
   }
   if (op === 'fs.exists') {
-    const { existsSync } = await import('fs')
     const path = pathFrom(args)
-    if (typeof path !== 'string') return false
-    await refusePluginFsNetworkPath(path, 'fs.exists', plugin)
-    return existsSync(path)
+    if (typeof path !== 'string' || path === '') return false
+    const baseCwd = await resolvePluginFsBaseCwd(rec?.cwd)
+    const resolvedPath = resolve(baseCwd, path)
+    await refusePluginFsNetworkPath(path, 'fs.exists', plugin, baseCwd)
+    return existsSync(resolvedPath)
   }
   if (op === 'state.get') {
     const key = stateKey(readStateRef(args[0], 'get'))
@@ -11303,6 +11446,12 @@ function runUiHost(
     if (input.title !== undefined) {
       const titleCheck = hostTextCheck(input.title)
       if (titleCheck !== undefined) hostCheck(op, titleCheck, plugin)
+      if (
+        typeof input.title === 'string' &&
+        paneTitleHoldsControl(input.title)
+      ) {
+        hostCheck(op, 'title holds a control character', plugin)
+      }
     }
     for (const key of ['focus', 'closeOnEscape', 'holdToasts'] as const) {
       if (input[key] !== undefined && input[key] !== true) {
@@ -13243,6 +13392,21 @@ function runUiCopy(
     : { isCopied: false, reason: 'no-clipboard' }
 }
 
+function paneTitleHoldsControl(title: string): boolean {
+  for (const ch of title) {
+    const cp = ch.codePointAt(0) ?? 0
+    if (
+      cp <= 0x1f ||
+      (cp >= 0x7f && cp <= 0x9f) ||
+      (cp >= 0xd800 && cp <= 0xdfff) ||
+      cp === 0x10eeee
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 /** densable `u1n` — walk parents via project-memory files. */
 async function runFsAncestors(
   input: Record<string, unknown>,
@@ -13278,20 +13442,30 @@ async function runFsAncestors(
   const { isSettingSourceEnabled } = await import('../settings/constants.js')
   if (!isSettingSourceEnabled('projectSettings')) return []
   if (process.env.CLAUDE_CODE_REMOTE) return []
-  const { getProjectRoot } = await import('../../bootstrap/state.js')
   const { processMemoryFile } = await import('../claudemd.js')
-  const root = getProjectRoot()
-  const start =
-    typeof input.of === 'string' && input.of !== '' ? input.of : root
-  await refusePluginFsNetworkPath(start, 'fs.ancestors', _plugin)
-  if (typeof input.below === 'string' && input.below !== '') {
-    await refusePluginFsNetworkPath(input.below, 'fs.ancestors', _plugin)
+  const root = await resolvePluginFsBaseCwd(input.cwd)
+  if (typeof input.of === 'string' && input.of !== '') {
+    await refusePluginFsNetworkPath(input.of, 'fs.ancestors', _plugin, root)
+  } else {
+    await refusePluginFsNetworkPath(root, 'fs.ancestors', _plugin, root)
   }
+  if (typeof input.below === 'string' && input.below !== '') {
+    await refusePluginFsNetworkPath(input.below, 'fs.ancestors', _plugin, root)
+  }
+  const target =
+    typeof input.of === 'string' && input.of !== ''
+      ? resolve(root, input.of)
+      : root
+  const start = target === root ? root : dirname(target)
+  const resolvedBelow =
+    typeof input.below === 'string' && input.below !== ''
+      ? resolve(root, input.below)
+      : undefined
   const below =
-    typeof input.below === 'string'
-      ? input.below.endsWith(sep)
-        ? input.below
-        : `${input.below}${sep}`
+    resolvedBelow !== undefined
+      ? resolvedBelow.endsWith(sep)
+        ? resolvedBelow
+        : `${resolvedBelow}${sep}`
       : undefined
   const dirs: string[] = []
   let dir = start

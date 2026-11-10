@@ -1926,6 +1926,7 @@ export type ParsedArgs = {
   debugFile?: string
   sessionTimeoutMs?: number
   permissionMode?: string
+  chrome?: boolean
   name?: string
   /** Value passed to --spawn (if any); undefined if no --spawn flag was given. */
   spawnMode: SpawnMode | undefined
@@ -1964,6 +1965,7 @@ export function parseArgs(args: string[]): ParsedArgs {
   let debugFile: string | undefined
   let sessionTimeoutMs: number | undefined
   let permissionMode: string | undefined
+  let chrome: boolean | undefined
   let name: string | undefined
   let help = false
   let spawnMode: SpawnMode | undefined
@@ -1995,6 +1997,10 @@ export function parseArgs(args: string[]): ParsedArgs {
       permissionMode = args[++i]!
     } else if (arg.startsWith('--permission-mode=')) {
       permissionMode = arg.slice('--permission-mode='.length)
+    } else if (arg === '--chrome') {
+      chrome = true
+    } else if (arg === '--no-chrome') {
+      chrome = false
     } else if (arg === '--name' && i + 1 < args.length) {
       name = args[++i]!
     } else if (arg.startsWith('--name=')) {
@@ -2082,6 +2088,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     debugFile,
     sessionTimeoutMs,
     permissionMode,
+    chrome,
     name,
     spawnMode,
     capacity,
@@ -2098,6 +2105,7 @@ export function parseArgs(args: string[]): ParsedArgs {
       debugFile,
       sessionTimeoutMs,
       permissionMode,
+      chrome,
       name,
       spawnMode,
       capacity,
@@ -2157,6 +2165,10 @@ ${
     : ''
 }  --permission-mode <mode>         Permission mode for spawned sessions
                                    (${modes})
+  --[no-]chrome                    Claude in Chrome for spawned sessions
+                                   (default: off; a session started from a
+                                   project follows this machine's /chrome
+                                   setting)
   --debug-file <path>              Write debug logs to file
   -v, --verbose                    Enable verbose output
   -h, --help                       Show this help
@@ -2219,6 +2231,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     debugFile,
     sessionTimeoutMs,
     permissionMode,
+    chrome,
     name,
     spawnMode: parsedSpawnMode,
     capacity: parsedCapacity,
@@ -2712,6 +2725,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     sessionIngressUrl,
     debugFile,
     sessionTimeoutMs,
+    chrome,
   }
 
   logForDebugging(
@@ -2944,6 +2958,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     sandbox,
     debugFile,
     permissionMode,
+    chrome,
     onDebug: logForDebugging,
     onActivity: (sessionId, activity) => {
       logForDebugging(

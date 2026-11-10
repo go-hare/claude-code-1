@@ -16,7 +16,7 @@ import {
   unlink,
 } from 'fs/promises'
 import { createServer, type Server, type Socket } from 'net'
-import { homedir, platform } from 'os'
+import { homedir, hostname, platform } from 'os'
 import { join } from 'path'
 import { z } from 'zod'
 import { lazySchema } from '../lazySchema.js'
@@ -283,14 +283,23 @@ class ChromeNativeHost {
         )
         break
 
-      case 'get_status':
+      case 'get_status': {
+        const rawHost =
+          (platform() === 'win32' ? process.env.COMPUTERNAME : undefined) ||
+          hostname()
+        const computerName = rawHost
+          .replace(/\p{Cc}/gu, '')
+          .replace(/\.local$/i, '')
+          .slice(0, 64)
         sendChromeMessage(
           jsonStringify({
             type: 'status_response',
             native_host_version: VERSION,
+            computer_name: computerName,
           }),
         )
         break
+      }
 
       case 'tool_response': {
         if (this.mcpClients.size > 0) {

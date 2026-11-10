@@ -58,6 +58,7 @@ type SessionSpawnerDeps = {
   sandbox: boolean
   debugFile?: string
   permissionMode?: string
+  chrome?: boolean
   onDebug: (msg: string) => void
   onActivity?: (sessionId: string, activity: SessionActivity) => void
   onPermissionRequest?: (
@@ -302,6 +303,9 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         ...(deps.permissionMode
           ? ['--permission-mode', deps.permissionMode]
           : []),
+        ...(deps.chrome === undefined
+          ? []
+          : [deps.chrome ? '--chrome' : '--no-chrome']),
       ]
 
       // densable 2.1.238 #21 NDl: Vso/MDl/Eot/wot. Do not apply mrn.

@@ -19,6 +19,7 @@ export type SurfaceHost = {
   post: (id: number, text: string) => void
   startTimer: (id: number, intervalMs: number) => number
   stopTimer: (id: number, timer: number) => void
+  fault?: (id: number, reason: string) => void
 }
 
 type InnerRuntime = {
@@ -51,6 +52,10 @@ export const SURFACE_TRAMPOLINE_SOURCE = `((host, limits) => {
   const _Error = Error
   const _TypeError = TypeError
   const _isFinite = Number.isFinite
+  const _String = String
+  const _Promise = Promise
+  const _resolve = _Promise.resolve.bind(_Promise)
+  const _then = _Promise.prototype.then
   const _h = h
   const instances = new _Map()
   let pending = null
@@ -275,34 +280,71 @@ export const SURFACE_TRAMPOLINE_SOURCE = `((host, limits) => {
     return text
   }
 
+  // What a rejection says, read here and handed to the host as text.
+  const reasonText = error => {
+    try {
+      const isError = typeof error === 'object' && error !== null
+      const message = isError ? error.message : error
+      return typeof message === 'string' ? message : _String(message)
+    } catch {
+      return 'a rejection that could not be read'
+    }
+  }
+
+  // Tells the host a fault. A desktop frame is served this script as it is,
+  // and one shipped before \`fault\` hands over a host without it: there the
+  // reason is thrown on whole, as it came out when nobody heard.
+  const faulted = (id, error) => {
+    if (typeof host.fault !== 'function') throw error
+    host.fault(id, reasonText(error))
+  }
+
+  // What a user function returned, heard when it is a promise: an async
+  // handler that throws rejects one, and a rejection nobody hears is the
+  // process's to end a session over. Heard, it is the instance's fault.
+  const heard = (id, out) => {
+    const isHeld =
+      (typeof out === 'object' && out !== null) || typeof out === 'function'
+    if (!isHeld) return out
+    try {
+      _then.call(_resolve(out), undefined, error => faulted(id, error))
+    } catch (error) {
+      faulted(id, error)
+    }
+    return out
+  }
+
   // Every user function is called bare (no receiver): its \`this\` is
   // undefined, never the instance record. Only render answers anything: the
-  // tree's JSON text; a listener's return value stays here.
-  function act(instance, kind, payload) {
+  // tree's JSON text; a listener's return value stays here, heard.
+  function act(id, instance, kind, payload) {
     switch (kind) {
       case 'render': {
         instance.scheduled = false
         const render = instance.fn
-        return exportTree(instance, render(instance.props, instance.surface))
+        return exportTree(
+          instance,
+          heard(id, render(instance.props, instance.surface)),
+        )
       }
       case 'pointer': {
         const listener = instance.pointer
-        if (listener !== null) listener(payload)
+        if (listener !== null) heard(id, listener(payload))
         return undefined
       }
       case 'key': {
         const listener = instance.key
-        if (listener !== null) listener(payload)
+        if (listener !== null) heard(id, listener(payload))
         return undefined
       }
       case 'tick': {
         const fn = instance.timers.get(payload)
-        if (fn !== undefined) fn()
+        if (fn !== undefined) heard(id, fn())
         return undefined
       }
       case 'held': {
         const fn = instance.held.get(payload.handle)
-        if (fn !== undefined) fn(payload.event)
+        if (fn !== undefined) heard(id, fn(payload.event))
         return undefined
       }
       default:
@@ -332,7 +374,7 @@ export const SURFACE_TRAMPOLINE_SOURCE = `((host, limits) => {
     },
     stage: (id, kind, payload) => {
       const instance = instanceOf(id)
-      pending = () => act(instance, kind, payload)
+      pending = () => act(id, instance, kind, payload)
     },
     // The closures exportTree held for elements a redraw retired.
     dropHeld: (id, handles) => {

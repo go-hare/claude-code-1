@@ -19,6 +19,7 @@ import {
   toAcpNotifications,
 } from './notifications.js'
 import { getMatchingModelUsage } from './modelUsage.js'
+import { getContextWindowForModel } from '../../../utils/context.js'
 
 // Top-level const alias retained from the original module. Only the
 // forwardSessionUpdates default branch and replayHistoryMessages reference it.
@@ -132,12 +133,19 @@ export async function forwardSessionUpdates(
               usage.cache_creation_input_tokens ?? 0
           }
 
-          // Resolve context window size from modelUsage via prefix matching
+          // Resolve context window size from modelUsage via prefix matching,
+          // falling back to getContextWindowForModel(lastAssistantModel) so 1M
+          // models report their 1M window even when modelUsage is absent.
           const modelUsage = msg.modelUsage
-          if (modelUsage && lastAssistantModel) {
-            const match = getMatchingModelUsage(modelUsage, lastAssistantModel)
+          if (lastAssistantModel) {
+            const match = modelUsage
+              ? getMatchingModelUsage(modelUsage, lastAssistantModel)
+              : undefined
             if (match?.contextWindow) {
               lastContextWindowSize = match.contextWindow
+            } else {
+              lastContextWindowSize =
+                getContextWindowForModel(lastAssistantModel)
             }
           }
 

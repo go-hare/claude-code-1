@@ -15,6 +15,7 @@ import {
   installSurfaceRuntime,
   type SurfaceRuntime,
 } from './functionHooksSurfaceRuntime.js'
+import { qre } from './pluginDrawError.js'
 import { logForDebugging } from '../debug.js'
 
 const LOADING = Object.freeze({ status: 'loading' as const })
@@ -193,6 +194,7 @@ type SurfaceHostFns = {
   schedule: () => void
   post: (data: unknown) => void
   startTimer: (ms: number, tick: () => void) => () => void
+  fault: (reason: string) => void
 }
 
 type SurfaceEnvironment = {
@@ -401,11 +403,13 @@ function clientDetail(plugin: string, module: string, message: string): string {
  * Empty → `the module failed without a message`.
  */
 export function scrubClientFaultReason(
-  plugin: string,
-  module: string,
-  message: string,
+  pluginOrMessage: string,
+  module?: string,
+  message?: string,
 ): string {
-  let sanitized = sanitizeClientFailMessage(message)
+  const hasPrefixArgs = module !== undefined && message !== undefined
+  const rawMessage = hasPrefixArgs ? message : pluginOrMessage
+  let sanitized = sanitizeClientFailMessage(rawMessage)
   {
     let rebuilt = ''
     for (const ch of sanitized) {
@@ -414,14 +418,18 @@ export function scrubClientFaultReason(
     }
     sanitized = rebuilt
   }
-  const prefix = `${plugin}: `
-  const client = `Client ${module}: `
-  const withoutPlugin = sanitized.startsWith(prefix)
-    ? sanitized.slice(prefix.length)
+  const withoutClient = hasPrefixArgs
+    ? (() => {
+        const prefix = `${pluginOrMessage}: `
+        const client = `Client ${module}: `
+        const withoutPlugin = sanitized.startsWith(prefix)
+          ? sanitized.slice(prefix.length)
+          : sanitized
+        return withoutPlugin.startsWith(client)
+          ? withoutPlugin.slice(client.length)
+          : withoutPlugin
+      })()
     : sanitized
-  const withoutClient = withoutPlugin.startsWith(client)
-    ? withoutPlugin.slice(client.length)
-    : withoutPlugin
   const trimmed = withoutClient.trim()
   const body = trimmed === '' ? CLIENT_FAULT_EMPTY_REASON : trimmed
   if (body.length <= CLIENT_FAULT_REASON_CHARS) return body
@@ -636,7 +644,7 @@ function schedule(record: ClientRecord): void {
   if (record.unpromptedRenders >= UNPROMPTED_RENDER_CAP) {
     const err = `set its state again after each of ${record.unpromptedRenders} renders, nothing heard between; set state on a pointer or key event, a tick, a press or new props, and let a render settle`
     if (record.isRendering) throw new Error(err)
-    failRecord(record, err, 'render')
+    failRecord(record, err, 'run')
     return
   }
   record.isDirty = true
@@ -1315,6 +1323,17 @@ async function buildEnvironment(
         mount?.timers.get(timer)?.()
         mount?.timers.delete(timer)
       },
+      fault: (id, reason) => {
+        const mount = mounts.get(id)
+        if (!mount) {
+          logForDebugging(
+            `${pluginName}: Client: a promise an instance since unmounted returned was rejected: ${qre(reason)}`,
+            { level: 'warn' },
+          )
+          return
+        }
+        mount.host.fault(reason)
+      },
     },
     SURFACE_LIMITS,
     `${pluginName} surface`,
@@ -1584,6 +1603,13 @@ function mountWhenReady(record: ClientRecord): void {
             startTimer: (ms, tick) => {
               const id = setInterval(tick, Math.max(ms, CLOCK_MIN_MS))
               return () => clearInterval(id)
+            },
+            fault: reason => {
+              if (!record.surface || record.isDestroyed) return
+              const err = new Error(
+                `${record.plugin}: Client ${record.module}: a promise it returned was rejected: ${scrubClientFaultReason(reason)}`,
+              )
+              failRecord(record, errorMessage(err), 'run')
             },
           },
         })

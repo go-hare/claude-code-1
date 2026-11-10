@@ -5,7 +5,12 @@
  */
 
 import { dirname, join, resolve } from 'path'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js'
 import { logForDebugging } from '../debug.js'
+import { logForDiagnosticsNoPII } from '../diagLogs.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 
 /** densable `oBr`. */
@@ -226,6 +231,27 @@ export function L1t(
   if (reported.has(key)) return null
   reported.add(key)
   const attrs = pluginFromLead(teller.lead)
+  const isClient = kind === 'Client'
+  const errorCode = isClient ? 'client_threw_while_drawn' : 'threw_while_drawn'
+  const isBad = !isClient && Object.hasOwn(Ymn, component)
+  const payload = {
+    ...(attrs ?? {}),
+    component,
+    feature_name: 'plugin_function_hooks_draw',
+    error_code: errorCode,
+  }
+  logEvent(
+    isBad ? 'tengu_feature_bad' : 'tengu_feature_sad',
+    payload as unknown as Record<
+      string,
+      AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+    >,
+  )
+  logForDiagnosticsNoPII(
+    isBad ? 'error' : 'warn',
+    'plugin_function_hooks_draw',
+    payload,
+  )
   const name = attrs?.plugin_name_redacted ?? 'unattributed'
   const provenance = attrs?.provenance ?? 'unattributed'
   return `ui.render (${component}): a plugin's ${kind} threw while drawn (plugin ${name}, ${provenance})`

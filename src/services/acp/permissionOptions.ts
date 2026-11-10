@@ -217,7 +217,9 @@ function isMcpAllowChangeSet(
 }
 
 function permissionRulePrefix(value: string): string {
-  return value.endsWith(':*') ? value.slice(0, -2) : value
+  return value.endsWith(':*') || value.endsWith(' *')
+    ? value.slice(0, -2)
+    : value
 }
 
 function displayList(values: string[]): string {

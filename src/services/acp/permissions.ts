@@ -80,7 +80,7 @@ export function createAcpCanUseTool(
     const supportsTerminalOutput = checkTerminalOutput(clientCapabilities)
 
     // ── ExitPlanMode special handling ────────────────────────────
-    if (tool.name === 'ExitPlanMode') {
+    if (tool.name === 'ExitPlanMode' || tool.name === 'ExitPlanModeV2') {
       return handleExitPlanMode(
         conn,
         sessionId,
