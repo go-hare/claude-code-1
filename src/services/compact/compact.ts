@@ -285,7 +285,27 @@ export function truncateHeadForPTLRetry(
       if (acc >= tokenGap) break
     }
   } else {
-    dropCount = Math.max(1, Math.floor(groups.length * 0.2))
+    // When the error only reports the limit (e.g. Gemini "exceeds the maximum
+    // number of tokens allowed 1048576"), dropping 20% of group *count* can
+    // shed only a few tiny text turns while leaving 99% of token mass in later
+    // tool-heavy rounds. Ensure we drop at least 20% of groups AND at least
+    // 25% of estimated token volume across the groups.
+    const minGroupDrop = Math.max(1, Math.floor(groups.length * 0.2))
+    const groupTokens = groups.map(g =>
+      roughTokenCountEstimationForMessages(
+        g as Parameters<typeof roughTokenCountEstimationForMessages>[0],
+      ),
+    )
+    const totalTokens = groupTokens.reduce((sum, n) => sum + n, 0)
+    const targetTokenDrop = Math.ceil(totalTokens * 0.25)
+    let accTokens = 0
+    let tokenDropCount = 0
+    for (const t of groupTokens) {
+      accTokens += t
+      tokenDropCount++
+      if (accTokens >= targetTokenDrop) break
+    }
+    dropCount = Math.max(minGroupDrop, tokenDropCount)
   }
 
   // Keep at least one group so there's something to summarize.
@@ -555,7 +575,10 @@ export async function compactConversation(
         preCompactTokenCount,
         cacheSafeParams: retryCacheSafeParams,
         // densable Pqn/qjt: full compact does not pass thinking/advisor plans.
-        stripNonEssential,
+        // Once head truncation triggers (ptlAttempts > 0), the prompt-cache
+        // prefix is already broken — enable stripNonEssential so retry skips
+        // the doomed cache-sharing fork and strips thinking/tool payloads.
+        stripNonEssential: stripNonEssential || ptlAttempts > 0,
       })
       summary = getAssistantMessageText(summaryResponse)
       if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break

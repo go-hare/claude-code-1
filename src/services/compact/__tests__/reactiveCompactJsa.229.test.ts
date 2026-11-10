@@ -36,12 +36,21 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 
 const realConfig = await import('../../../utils/config.js')
 const configSnap = snapshotModuleExports(realConfig)
+const realSettings = await import('../../../utils/settings/settings.js')
+const settingsSnap = snapshotModuleExports(realSettings)
 let autoCompactEnabled = true
 mock.module('src/utils/config.js', () => ({
   ...configSnap,
   getGlobalConfig: () => ({
     ...((configSnap.getGlobalConfig?.() as object) ?? {}),
     autoCompactEnabled,
+  }),
+}))
+mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
+  getInitialSettings: () => ({
+    ...((settingsSnap.getInitialSettings?.() as object) ?? {}),
+    autoCompactEnabled: undefined,
   }),
 }))
 

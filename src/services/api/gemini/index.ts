@@ -134,6 +134,12 @@ export async function* queryModelGemini(
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     const collectedMessages: AssistantMessage[] = []
     let partialMessage: BetaMessage | null = null
+    let usage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }
     let ttftMs = 0
     const start = Date.now()
 
@@ -142,6 +148,12 @@ export async function* queryModelGemini(
         case 'message_start':
           partialMessage = event.message
           ttftMs = Date.now() - start
+          if (event.message.usage) {
+            usage = {
+              ...usage,
+              ...(event.message.usage as unknown as typeof usage),
+            }
+          }
           break
         case 'content_block_start': {
           const idx = event.index
@@ -188,6 +200,7 @@ export async function* queryModelGemini(
           const message: AssistantMessage = {
             message: {
               ...partialMessage,
+              usage: { ...usage },
               content: normalizeContentFromAPI(
                 [block] as unknown as BetaMessage['content'],
                 tools,
@@ -203,7 +216,22 @@ export async function* queryModelGemini(
           yield message
           break
         }
-        case 'message_delta':
+        case 'message_delta': {
+          if (event.usage) {
+            usage = {
+              ...usage,
+              ...(event.usage as unknown as typeof usage),
+            }
+          }
+          const stopReason = event.delta?.stop_reason ?? null
+          for (const msg of collectedMessages) {
+            msg.message.usage = usage as AssistantMessage['message']['usage']
+            if (stopReason !== null) {
+              msg.message.stop_reason = stopReason
+            }
+          }
+          break
+        }
         case 'message_stop':
           break
       }
@@ -222,8 +250,8 @@ export async function* queryModelGemini(
       input: convertMessagesToLangfuse(messagesForAPI, systemPrompt),
       output: convertOutputToLangfuse(collectedMessages),
       usage: {
-        input_tokens: 0,
-        output_tokens: 0,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
       },
       startTime: new Date(start),
       endTime: new Date(),

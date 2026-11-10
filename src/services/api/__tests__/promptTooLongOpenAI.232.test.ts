@@ -17,6 +17,12 @@ const OPENAI_STYLE =
 
 const ANTHROPIC_STYLE = 'prompt is too long: 137500 tokens > 135000 maximum'
 
+const GEMINI_LIMIT_ONLY_STYLE =
+  '400 The input token count exceeds the maximum number of tokens allowed 1048576.'
+
+const GEMINI_WITH_ACTUAL_STYLE =
+  '400 The input token count (1052341) exceeds the maximum number of tokens allowed (1048576).'
+
 describe('isPromptTooLongErrorMessage', () => {
   test('Anthropic / Vertex classic', () => {
     expect(isPromptTooLongErrorMessage(ANTHROPIC_STYLE)).toBe(true)
@@ -30,6 +36,11 @@ describe('isPromptTooLongErrorMessage', () => {
         "This model's maximum prompt length is 500000 but the request contains 501727 tokens.",
       ),
     ).toBe(true)
+  })
+
+  test('Gemini input token count exceeds maximum number of tokens allowed', () => {
+    expect(isPromptTooLongErrorMessage(GEMINI_LIMIT_ONLY_STYLE)).toBe(true)
+    expect(isPromptTooLongErrorMessage(GEMINI_WITH_ACTUAL_STYLE)).toBe(true)
   })
 
   test('densable gzr: input is too long for requested model', () => {
@@ -64,6 +75,17 @@ describe('parsePromptTooLongTokenCounts OpenAI shape', () => {
     expect(actualTokens).toBe(137500)
     expect(limitTokens).toBe(135000)
   })
+
+  test('parses Gemini input token count forms', () => {
+    expect(parsePromptTooLongTokenCounts(GEMINI_LIMIT_ONLY_STYLE)).toEqual({
+      actualTokens: undefined,
+      limitTokens: 1048576,
+    })
+    expect(parsePromptTooLongTokenCounts(GEMINI_WITH_ACTUAL_STYLE)).toEqual({
+      actualTokens: 1052341,
+      limitTokens: 1048576,
+    })
+  })
 })
 
 describe('getAssistantMessageFromError OpenAI PTL → reactive path', () => {
@@ -79,6 +101,18 @@ describe('getAssistantMessageFromError OpenAI PTL → reactive path', () => {
     expect(String(assistant.errorDetails)).toContain('maximum prompt length')
     const gap = getPromptTooLongTokenGap(assistant)
     expect(gap).toBe(500193 - 500000)
+  })
+
+  test('normalizes Gemini 1048576 PTL to Prompt is too long so reactive compact and /compact retry', () => {
+    const err = new Error(GEMINI_LIMIT_ONLY_STYLE)
+    const assistant = getAssistantMessageFromError(err, 'gemini-4-argon')
+    expect(assistant.isApiErrorMessage).toBe(true)
+    expect(isPromptTooLongMessage(assistant)).toBe(true)
+    const text = (
+      assistant.message.content as { type: string; text: string }[]
+    ).find(b => b.type === 'text')?.text
+    expect(text).toBe(PROMPT_TOO_LONG_ERROR_MESSAGE)
+    expect(String(assistant.errorDetails)).toBe(GEMINI_LIMIT_ONLY_STYLE)
   })
 })
 

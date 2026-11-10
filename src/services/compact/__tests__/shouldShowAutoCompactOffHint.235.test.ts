@@ -7,12 +7,23 @@ import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 const realConfig = await import('../../../utils/config.js')
 const configSnap = snapshotModuleExports(realConfig)
 
+const realSettings = await import('../../../utils/settings/settings.js')
+const settingsSnap = snapshotModuleExports(realSettings)
+
 let autoCompactEnabled = true
 mock.module('src/utils/config.js', () => ({
   ...configSnap,
   getGlobalConfig: () => ({
     ...((configSnap.getGlobalConfig?.() as object) ?? {}),
     autoCompactEnabled,
+  }),
+}))
+
+mock.module('src/utils/settings/settings.js', () => ({
+  ...settingsSnap,
+  getInitialSettings: () => ({
+    ...((settingsSnap.getInitialSettings?.() as object) ?? {}),
+    autoCompactEnabled: undefined,
   }),
 }))
 
@@ -47,6 +58,7 @@ afterEach(() => {
 
 afterAll(() => {
   mock.module('src/utils/config.js', () => ({ ...configSnap }))
+  mock.module('src/utils/settings/settings.js', () => ({ ...settingsSnap }))
   mock.module('src/utils/settings/constants.js', () => ({ ...constantsSnap }))
 })
 

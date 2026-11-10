@@ -124,10 +124,29 @@ export function isPromptTooLongErrorMessage(raw: string): boolean {
   if (lower.includes('prompt is too long')) return true
   // densable gzr: "input is too long for requested model"
   if (lower.includes('input is too long for requested model')) return true
-  // OpenAI / xAI Chat Completions style
+  // densable z$r: "input length and `max_tokens` exceed context limit"
+  if (
+    lower.includes('input length and') &&
+    lower.includes('exceed context limit')
+  ) {
+    return true
+  }
+  // Gemini / Vertex AI:
+  // - "The input token count exceeds the maximum number of tokens allowed 1048576."
+  // - "The input token count (1052341) exceeds the maximum number of tokens allowed (1048576)"
+  if (
+    (lower.includes('input token count') && lower.includes('exceed')) ||
+    lower.includes('exceeds the maximum number of tokens')
+  ) {
+    return true
+  }
+  // OpenAI / xAI / DeepSeek / vLLM Chat Completions style
   if (
     lower.includes('maximum prompt length') ||
-    lower.includes('max prompt length')
+    lower.includes('max prompt length') ||
+    lower.includes('maximum context length') ||
+    lower.includes('max context length') ||
+    lower.includes('context_length_exceeded')
   ) {
     return true
   }
@@ -163,9 +182,19 @@ export function parsePromptTooLongTokenCounts(rawMessage: string): {
       limitTokens: parseInt(match[2]!, 10),
     }
   }
-  // OpenAI / Grok: maximum prompt length is LIMIT … request contains ACTUAL
+  // Gemini with both counts: "The input token count (1052341) exceeds the maximum number of tokens allowed (1048576)"
   match = rawMessage.match(
-    /maximum prompt length is\s*(\d+)[\s\S]*?request contains\s*(\d+)\s*tokens?/i,
+    /input token count[^\d]*(\d+)[\s\S]*?exceeds[^\d]*(\d+)/i,
+  )
+  if (match) {
+    return {
+      actualTokens: parseInt(match[1]!, 10),
+      limitTokens: parseInt(match[2]!, 10),
+    }
+  }
+  // OpenAI / Grok: maximum prompt/context length is LIMIT … request contains / resulted in / requested ACTUAL
+  match = rawMessage.match(
+    /maximum (?:prompt|context) length is\s*(\d+)[\s\S]*?(?:request contains|resulted in|requested)\s*(\d+)\s*tokens?/i,
   )
   if (match) {
     return {
@@ -181,6 +210,16 @@ export function parsePromptTooLongTokenCounts(rawMessage: string): {
     return {
       actualTokens: parseInt(match[1]!, 10),
       limitTokens: parseInt(match[2]!, 10),
+    }
+  }
+  // Gemini limit-only form: "The input token count exceeds the maximum number of tokens allowed 1048576."
+  match = rawMessage.match(
+    /exceeds the maximum number of tokens allowed[^\d]*(\d+)/i,
+  )
+  if (match) {
+    return {
+      actualTokens: undefined,
+      limitTokens: parseInt(match[1]!, 10),
     }
   }
   return {
