@@ -12,6 +12,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js';
 
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { getTheme, type Theme } from '../../utils/theme.js';
 
 import { GlimmerMessage } from './GlimmerMessage.js';
@@ -32,7 +33,13 @@ import { getDefaultCharacters, interpolateColor, parseRGB, toRGBColor } from './
 
 const SEP_WIDTH = stringWidth(' · ');
 const THINKING_BARE_WIDTH = stringWidth('thinking');
-const SHOW_TOKENS_AFTER_MS = 30_000;
+const SHOW_TOKENS_AFTER_MS = 16_000;
+const TOKEN_SNAP_THRESHOLD = 2000;
+
+/** densable OC — quantize animated RGB intensities to 1/8th steps. */
+function quantizeEighth(value: number): number {
+  return Math.round(value * 8) / 8;
+}
 
 // Thinking shimmer constants. Previously lived in a separate ThinkingShimmerText
 // component with its own useAnimationFrame(50) — inlined here to reuse our
@@ -287,24 +294,48 @@ export function SpinnerAnimationRow({
         ? (cyclePosition % cycleLength) - 10
         : glimmerMessageWidth + 10 - (cyclePosition % cycleLength);
 
-  const flashOpacity = reducedMotion ? 0 : mode === 'tool-use' ? (Math.sin((time / 1000) * Math.PI) + 1) / 2 : 0;
+  const flashOpacity = reducedMotion
+    ? 0
+    : mode === 'tool-use'
+      ? quantizeEighth((Math.sin((time / 1000) * Math.PI) + 1) / 2)
+      : 0;
 
-  // === Token counter animation (smooth increment, driven by 50ms clock) ===
+  // === Token counter animation (smooth increment/decrement, driven by 50ms steps) ===
   const tokenCounterRef = useRef(currentResponseLength);
+  const tokenStepTimeRef = useRef(time);
+  const tokenAgentRef = useRef(agentId);
+  if (
+    tokenAgentRef.current !== agentId ||
+    Math.abs(currentResponseLength - tokenCounterRef.current) > TOKEN_SNAP_THRESHOLD
+  ) {
+    tokenAgentRef.current = agentId;
+    tokenCounterRef.current = currentResponseLength;
+    tokenStepTimeRef.current = time;
+  }
   if (reducedMotion) {
     tokenCounterRef.current = currentResponseLength;
+    tokenStepTimeRef.current = time;
   } else {
-    const gap = currentResponseLength - tokenCounterRef.current;
-    if (gap > 0) {
-      let increment;
-      if (gap < 70) {
-        increment = 3;
-      } else if (gap < 200) {
-        increment = Math.max(8, Math.ceil(gap * 0.15));
-      } else {
-        increment = 50;
+    const steps = Math.floor((time - tokenStepTimeRef.current) / 50);
+    if (steps > 0) {
+      tokenStepTimeRef.current += steps * 50;
+      for (let i = 0; i < steps; i++) {
+        const gap = currentResponseLength - tokenCounterRef.current;
+        if (gap === 0) break;
+        const absGap = Math.abs(gap);
+        let increment: number;
+        if (absGap < 70) {
+          increment = 3;
+        } else if (absGap < 200) {
+          increment = Math.max(8, Math.ceil(absGap * 0.15));
+        } else {
+          increment = 50;
+        }
+        tokenCounterRef.current =
+          gap > 0
+            ? Math.min(tokenCounterRef.current + increment, currentResponseLength)
+            : Math.max(tokenCounterRef.current - increment, currentResponseLength);
       }
-      tokenCounterRef.current = Math.min(tokenCounterRef.current + increment, currentResponseLength);
     }
   }
   const displayedResponseLength = tokenCounterRef.current;
@@ -333,7 +364,14 @@ export function SpinnerAnimationRow({
   const sep = SEP_WIDTH;
 
   const wantsThinking = thinkingText !== null;
-  const wantsTimerAndTokens = verbose || hasRunningTeammates || effectiveElapsedMs > SHOW_TOKENS_AFTER_MS;
+  const wantsTimerAndTokens =
+    verbose ||
+    wantsThinking ||
+    isCompacting ||
+    totalTokens > 0 ||
+    effectiveElapsedMs > SHOW_TOKENS_AFTER_MS ||
+    Boolean(spinnerSuffix) ||
+    hasRunningTeammates;
 
   const availableSpace = columns - messageWidth - 5;
 
@@ -357,8 +395,7 @@ export function SpinnerAnimationRow({
 
   const showTokens = wantsTimerAndTokens && totalTokens > 0 && availableSpace > usedAfterTimer + tokensWidth;
 
-  const thinkingOnly =
-    showThinking && statusKind.kind === 'thinking' && !spinnerSuffix && !showTimer && !showTokens && true;
+  const thinkingOnly = showThinking && statusKind.kind === 'thinking' && !spinnerSuffix && !showTimer && !showTokens;
 
   // === Thinking shimmer color (formerly ThinkingShimmerText's own timer) ===
   // Same sine-wave opacity, but derived from our shared `time` instead of a
@@ -366,16 +403,21 @@ export function SpinnerAnimationRow({
   const thinkingElapsedSec = (time - THINKING_DELAY_MS) / 1000;
   const thinkingOpacity =
     time < THINKING_DELAY_MS ? 0 : (Math.sin((thinkingElapsedSec * Math.PI * 2) / THINKING_GLOW_PERIOD_S) + 1) / 2;
-  const thinkingShimmerBase = interpolateColor(THINKING_INACTIVE, THINKING_INACTIVE_SHIMMER, thinkingOpacity);
+  const thinkingShimmerBase = interpolateColor(
+    THINKING_INACTIVE,
+    THINKING_INACTIVE_SHIMMER,
+    quantizeEighth(thinkingOpacity),
+  );
   const warningRGB = theme.warning ? parseRGB(theme.warning) : null;
   // densable mo: lerp the gray shimmer toward warning as thinkingIntensity rises.
   const thinkingShimmerColor = toRGBColor(
     warningRGB && thinkingIntensity > 0
-      ? interpolateColor(thinkingShimmerBase, warningRGB, thinkingIntensity)
+      ? interpolateColor(thinkingShimmerBase, warningRGB, quantizeEighth(thinkingIntensity))
       : thinkingShimmerBase,
   );
   const thinkingLabelColor = !warningRGB && thinkingIntensity > 0.5 ? 'warning' : undefined;
   const thoughtForColor = thinkingIntensity > 0 ? 'warning' : undefined;
+  const isScreenReader = isScreenReaderModeEnabled();
 
   // === Build status parts ===
   const parts = [
@@ -386,14 +428,14 @@ export function SpinnerAnimationRow({
           </Text>,
         ]
       : []),
-    ...(showTimer
+    ...(!isScreenReader && showTimer
       ? [
           <Text dimColor key="elapsedTime">
             {timerText}
           </Text>,
         ]
       : []),
-    ...(showTokens
+    ...(!isScreenReader && showTokens
       ? [
           <Box flexDirection="row" key="tokens">
             {!hasRunningTeammates && <SpinnerModeGlyph mode={mode} />}
@@ -401,7 +443,7 @@ export function SpinnerAnimationRow({
           </Box>,
         ]
       : []),
-    ...(showThinking && thinkingText
+    ...(!isScreenReader && showThinking && thinkingText
       ? [
           statusKind.kind === 'thinking' && !reducedMotion ? (
             <Text key="thinking" color={thinkingLabelColor ?? thinkingShimmerColor}>
@@ -485,13 +527,17 @@ function SpinnerModeGlyph({ mode }: { mode: SpinnerMode }): React.ReactNode {
     case 'thinking':
       return (
         <Box width={2}>
-          <Text dimColor>{figures.arrowDown}</Text>
+          <Text aria-hidden dimColor>
+            {figures.arrowDown}
+          </Text>
         </Box>
       );
     case 'requesting':
       return (
         <Box width={2}>
-          <Text dimColor>{figures.arrowUp}</Text>
+          <Text aria-hidden dimColor>
+            {figures.arrowUp}
+          </Text>
         </Box>
       );
   }

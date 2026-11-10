@@ -1,12 +1,11 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-import { Box, Text, Link } from '@anthropic/ink';
+import { Box, Text } from '@anthropic/ink';
 import * as React from 'react';
 import figures from 'figures';
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { VimMode, PromptInputMode } from '../../types/textInputTypes.js';
 import type { ToolPermissionContext } from '../../Tool.js';
-import { isVimModeEnabled } from './utils.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import {
   permissionModeIndicator,
@@ -25,7 +24,7 @@ import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { TeamStatus } from '../teams/TeamStatus.js';
 import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
-import { useAppState, useAppStateStore } from 'src/state/AppState.js';
+import { AppStoreContext, useAppState } from 'src/state/AppState.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
@@ -203,7 +202,8 @@ type Props = {
     show: boolean;
     key?: string;
   };
-  vimMode: VimMode | undefined;
+  vimMode: VimMode | string | undefined;
+  hideVimModeIndicator?: boolean;
   mode: PromptInputMode;
   toolPermissionContext: ToolPermissionContext;
   suppressHint: boolean;
@@ -220,6 +220,10 @@ type Props = {
   historyFailedMatch: boolean;
   onOpenTasksDialog?: (taskId?: string) => void;
   leftArrowAgain?: boolean;
+};
+
+type StatusLineWithHideVim = {
+  hideVimModeIndicator?: boolean;
 };
 
 function ProactiveCountdown(): React.ReactNode {
@@ -255,6 +259,7 @@ function ProactiveCountdown(): React.ReactNode {
 export function PromptInputFooterLeftSide({
   exitMessage,
   vimMode,
+  hideVimModeIndicator,
   mode,
   toolPermissionContext,
   suppressHint,
@@ -271,6 +276,13 @@ export function PromptInputFooterLeftSide({
   onOpenTasksDialog,
   leftArrowAgain,
 }: Props): React.ReactNode {
+  const store = useContext(AppStoreContext);
+  const settingsHideVim = useSyncExternalStore(
+    store ? store.subscribe : NO_OP_SUBSCRIBE,
+    () => (store?.getState().settings?.statusLine as StatusLineWithHideVim | undefined)?.hideVimModeIndicator ?? false,
+    () => (store?.getState().settings?.statusLine as StatusLineWithHideVim | undefined)?.hideVimModeIndicator ?? false,
+  );
+
   if (exitMessage.show) {
     return (
       <Text dimColor key="exit-message">
@@ -281,12 +293,13 @@ export function PromptInputFooterLeftSide({
   if (isPasting) {
     return (
       <Text dimColor key="pasting-message">
-        Pasting text…
+        Pasting…
       </Text>
     );
   }
 
-  const showVim = isVimModeEnabled() && vimMode === 'INSERT' && !isSearching;
+  const effectiveHideVim = hideVimModeIndicator ?? settingsHideVim;
+  const showVim = vimMode !== undefined && !effectiveHideVim && vimMode !== 'NORMAL' && !isSearching;
 
   return (
     <Box justifyContent="flex-start" gap={1}>
@@ -294,9 +307,9 @@ export function PromptInputFooterLeftSide({
         <HistorySearchInput value={historyQuery} onChange={setHistoryQuery} historyFailedMatch={historyFailedMatch} />
       )}
       {showVim ? (
-        <Text dimColor key="vim-insert">
-          -- INSERT --
-        </Text>
+        <Box flexShrink={0} key="vim-indicator">
+          <Text dimColor>-- {vimMode} --</Text>
+        </Box>
       ) : null}
       <ModeIndicator
         mode={mode}
@@ -336,7 +349,7 @@ const ModePill = memo(function ModePill({
       {cycleShortcut ? (
         <Text dimColor>
           {' '}
-          <KeyboardShortcutHint shortcut={cycleShortcut} action="cycle" parens />
+          <KeyboardShortcutHint shortcut={cycleShortcut} action="cycle" parens format={{ keyCase: 'lower' }} />
         </Text>
       ) : null}
     </Text>
@@ -373,10 +386,6 @@ function ModeIndicator({
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
   const tasks = useAppState(s => s.tasks);
   const teamContext = useAppState(s => s.teamContext);
-  // Set once in initialState (main.tsx --remote mode) and never mutated — lazy
-  // init captures the immutable value without a subscription.
-  const store = useAppStateStore();
-  const [remoteSessionUrl] = useState(() => store.getState().remoteSessionUrl);
   const viewSelectionMode = useAppState(s => s.viewSelectionMode);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const replTabIsDiff = useAppState(s => s.replTab === 'diff');
@@ -516,14 +525,6 @@ function ModeIndicator({
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
   // (teammate pills get their own row)
   const parts = [
-    // Remote session indicator
-    ...(remoteSessionUrl
-      ? [
-          <Link url={remoteSessionUrl} key="remote">
-            <Text color="ide">{figures.circleDouble} remote</Text>
-          </Link>,
-        ]
-      : []),
     // BackgroundTaskStatus is NOT in parts — it renders as a Box sibling so
     // its click-target Box isn't nested inside the <Text wrap="truncate">
     // wrapper (reconciler throws on Box-in-Text).

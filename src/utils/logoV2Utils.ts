@@ -1,18 +1,24 @@
+import { coerce } from 'semver'
 import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.js'
 import { stringWidth } from '@anthropic/ink'
 import type { LogOption } from '../types/logs.js'
 import { getSubscriptionName, isClaudeAISubscriber } from './auth.js'
+import { getGlobalConfig } from './config.js'
 import { getCwd } from './cwd.js'
+import { isEnvTruthy } from './envUtils.js'
 import { getDisplayPath } from './file.js'
 import {
   truncate,
   truncateToWidth,
   truncateToWidthNoEllipsis,
 } from './format.js'
+import { shouldHideCwd } from './hideCwd.js'
+import { type APIProvider, getAPIProvider } from './model/providers.js'
 import { getStoredChangelogFromMemory, parseChangelog } from './releaseNotes.js'
 import { gt } from './semver.js'
 import { loadMessageLogs } from './sessionStorage.js'
 import { getInitialSettings } from './settings/settings.js'
+import { plural } from './stringUtils.js'
 
 // Layout constants
 const MAX_LEFT_WIDTH = 50
@@ -20,6 +26,28 @@ const MAX_USERNAME_LENGTH = 20
 const BORDER_PADDING = 4
 const DIVIDER_WIDTH = 1
 const CONTENT_PADDING = 2
+
+export const CHANGELOG_DOCS_URL = 'https://code.claude.com/docs/en/changelog'
+export const CHANGELOG_DOCS_LABEL = CHANGELOG_DOCS_URL.replace(
+  /^https:\/\//,
+  '',
+)
+
+const PROVIDER_BILLING_LABELS: Record<
+  Exclude<APIProvider, 'firstParty'>,
+  string
+> = {
+  bedrock: 'Amazon Bedrock',
+  vertex: 'Google Vertex AI',
+  foundry: 'Microsoft Foundry',
+  anthropicAws: 'Claude Platform on AWS',
+  anthropicGoogleCloud: 'Claude Platform on Google Cloud',
+  mantle: 'Amazon Bedrock (Mantle)',
+  gateway: 'Cloud gateway',
+  openai: 'OpenAI',
+  gemini: 'Google Gemini',
+  grok: 'xAI Grok',
+}
 
 export type LayoutMode = 'horizontal' | 'compact'
 
@@ -250,12 +278,18 @@ export function getLogoDisplayData(): {
   const displayPath = process.env.DEMO_VERSION
     ? '/code/claude'
     : getDisplayPath(getCwd())
-  const cwd = serverUrl
-    ? `${displayPath} in ${serverUrl.replace(/^https?:\/\//, '')}`
-    : displayPath
-  const billingType = isClaudeAISubscriber()
-    ? getSubscriptionName()
-    : 'API Usage Billing'
+  const cwd = shouldHideCwd()
+    ? ''
+    : serverUrl
+      ? `${displayPath} in ${serverUrl.replace(/^https?:\/\//, '')}`
+      : displayPath
+  const provider = getAPIProvider()
+  const billingType =
+    provider !== 'firstParty'
+      ? PROVIDER_BILLING_LABELS[provider]
+      : isClaudeAISubscriber()
+        ? getSubscriptionName()
+        : 'API Usage Billing'
   const agentName = getInitialSettings().agent
 
   return {
@@ -347,4 +381,184 @@ export function getRecentReleaseNotesSync(maxItems: number): string[] {
 
   // Return raw notes without filtering or premature truncation
   return allNotes.slice(0, maxItems)
+}
+
+const BUG_FIX_RE =
+  /^(fix(ed|es)?|resolve[ds]?|correct(ed|s)?|prevent(ed|s)?|(\S+\s+){0,2}no longer|revert(ed|s)?|bug fix(es)?)\b/
+const FEATURE_RE =
+  /^(add(ed|s)?|new|introduce[ds]?|support(ed|s)?|launch(ed|es)?|ship(ped|s)?|enable[ds]?)\b/
+const BRACKET_PREFIX_RE = /^\[[^\]]+\]\s*/
+const SCOPE_PREFIX_RE = /^[a-z0-9 /._`-]{1,40}:\s*/
+const BUG_FIX_ROLLUP_RE = /^(various )?bug ?fixes\b.*\bimprovements$/
+const MAX_NOTE_CLASSIFY_LEN = 500
+
+type ReleaseNoteCategory = 'feature' | 'bugFix' | 'other' | 'bugFixRollup'
+
+function classifyStrippedNote(text: string): 'feature' | 'bugFix' | 'other' {
+  if (BUG_FIX_RE.test(text) || text.includes('regression')) return 'bugFix'
+  if (FEATURE_RE.test(text)) return 'feature'
+  return 'other'
+}
+
+function classifyReleaseNote(raw: string): ReleaseNoteCategory {
+  const normalized = raw.slice(0, MAX_NOTE_CLASSIFY_LEN).trim().toLowerCase()
+  if (BUG_FIX_ROLLUP_RE.test(normalized)) return 'bugFixRollup'
+  const direct = classifyStrippedNote(normalized)
+  if (direct !== 'other') return direct
+  return classifyStrippedNote(
+    normalized.replace(BRACKET_PREFIX_RE, '').replace(SCOPE_PREFIX_RE, ''),
+  )
+}
+
+function formatOxfordList(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+}
+
+export function summarizeReleaseNotes(input: {
+  entries: readonly string[]
+}): string | null {
+  const entries = input.entries.filter(
+    entry => typeof entry === 'string' && entry.trim() !== '',
+  )
+  if (entries.length === 0) return null
+
+  let features = 0
+  let bugFixes = 0
+  let others = 0
+  for (const entry of entries) {
+    switch (classifyReleaseNote(entry)) {
+      case 'feature':
+        features++
+        break
+      case 'bugFix':
+        bugFixes++
+        break
+      case 'other':
+        others++
+        break
+      case 'bugFixRollup':
+        break
+    }
+  }
+
+  const parts: string[] = []
+  if (features > 0) parts.push(`${features} ${plural(features, 'feature')}`)
+  if (bugFixes > 0) {
+    parts.push(`${bugFixes} ${plural(bugFixes, 'bugfix', 'bugfixes')}`)
+  }
+  if (others > 0) {
+    const noun = parts.length > 0 ? 'other change' : 'change'
+    parts.push(`${others} ${plural(others, noun)}`)
+  }
+  if (parts.length === 0) return 'Updated to latest.'
+  return `Updated to latest. Got ${formatOxfordList(parts)}.`
+}
+
+function isValidSemver(value: string | undefined): value is string {
+  return Boolean(value && coerce(value) !== null)
+}
+
+export function hasUnseenReleaseVersion(
+  lastSeen: string | undefined,
+  currentVersion: string = MACRO.VERSION,
+): boolean {
+  if (!isValidSemver(currentVersion)) return false
+  if (!isValidSemver(lastSeen)) return true
+  try {
+    const cur = coerce(currentVersion)
+    const prev = coerce(lastSeen)
+    if (!cur || !prev) return true
+    return gt(cur.version, prev.version)
+  } catch {
+    return true
+  }
+}
+
+function parseForceFirstLaunchEnv():
+  | { pretendLastSeen: string | undefined }
+  | undefined {
+  const raw = process.env.CLAUDE_CODE_FORCE_FIRST_LAUNCH
+  if (raw === undefined) return undefined
+  if (isValidSemver(raw)) return { pretendLastSeen: raw }
+  return isEnvTruthy(raw) ? { pretendLastSeen: undefined } : undefined
+}
+
+function getEntriesBetweenVersions(
+  changelogContent: string,
+  fromExclusive: string | undefined,
+  toInclusive: string,
+): string[] {
+  const parsed = parseChangelog(changelogContent)
+  const sortedVersions = Object.keys(parsed)
+    .filter(v => isValidSemver(v))
+    .sort((a, b) => (gt(a, b) ? -1 : 1))
+
+  if (fromExclusive === undefined) {
+    const latest = sortedVersions[0]
+    return latest ? (parsed[latest] ?? []) : []
+  }
+
+  const fromVer = coerce(fromExclusive)?.version
+  const toVer = coerce(toInclusive)?.version
+  if (!fromVer || !toVer) return []
+
+  const out: string[] = []
+  for (const version of sortedVersions) {
+    const v = coerce(version)?.version
+    if (!v) continue
+    if (gt(v, fromVer) && !gt(v, toVer)) {
+      const notes = parsed[version]
+      if (notes) out.push(...notes)
+    }
+  }
+  return out
+}
+
+let cachedStartupUpdateSummary: string | null | undefined
+
+export function _resetStartupUpdateSummaryForTesting(): void {
+  cachedStartupUpdateSummary = undefined
+}
+
+export function getStartupUpdateSummary(
+  currentVersion: string = MACRO.VERSION,
+): string | null {
+  if (cachedStartupUpdateSummary !== undefined) {
+    return cachedStartupUpdateSummary
+  }
+  try {
+    const forced = parseForceFirstLaunchEnv()
+    const changelog = getStoredChangelogFromMemory()
+    if (forced) {
+      const entries = getEntriesBetweenVersions(
+        changelog,
+        forced.pretendLastSeen,
+        currentVersion,
+      )
+      cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
+      return cachedStartupUpdateSummary
+    }
+
+    const lastSeen = getGlobalConfig().lastReleaseNotesSeen
+    if (
+      !isValidSemver(lastSeen) ||
+      !hasUnseenReleaseVersion(lastSeen, currentVersion)
+    ) {
+      cachedStartupUpdateSummary = null
+      return null
+    }
+
+    const entries = getEntriesBetweenVersions(
+      changelog,
+      lastSeen,
+      currentVersion,
+    )
+    cachedStartupUpdateSummary = summarizeReleaseNotes({ entries })
+    return cachedStartupUpdateSummary
+  } catch {
+    cachedStartupUpdateSummary = null
+    return null
+  }
 }

@@ -1,6 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { useContext } from 'react';
+import { AccessibilityContext, Box, Text } from '@anthropic/ink';
 import {
   AGENT_COLOR_TO_THEME_COLOR,
   AGENT_COLORS,
@@ -38,25 +39,23 @@ function getTeammateThemeColor(): keyof Theme | undefined {
 
 type PromptCharProps = {
   isLoading: boolean;
+  isScreenReader: boolean;
   // Dead code elimination: parameter named themeColor to avoid "teammate" string in external builds
   themeColor?: keyof Theme;
 };
 
 /**
- * Renders the prompt character (❯).
+ * Renders the prompt character (❯, or $ in screen-reader mode).
  * Teammate color overrides the default color when set.
  */
-function PromptChar({ isLoading, themeColor }: PromptCharProps): React.ReactNode {
-  // densable Kx idle: `e(n,{dimColor:!0,children:be})` — no USER_TYPE subtle, not isLoading-gated.
-  // Agent/teammate: color only. Loading dim stays on the colored pointer.
-  if (themeColor) {
-    return (
-      <Text color={themeColor} dimColor={isLoading}>
-        {figures.pointer}&nbsp;
-      </Text>
-    );
-  }
-  return <Text dimColor>{figures.pointer}&nbsp;</Text>;
+function PromptChar({ isLoading, isScreenReader, themeColor }: PromptCharProps): React.ReactNode {
+  const color = themeColor ?? undefined;
+  const pointer = isScreenReader ? <>$&nbsp;</> : <>{figures.pointer}&nbsp;</>;
+  return (
+    <Text color={color} dimColor={isLoading}>
+      {pointer}
+    </Text>
+  );
 }
 
 export function PromptInputModeIndicator({
@@ -65,21 +64,31 @@ export function PromptInputModeIndicator({
   viewingAgentName,
   viewingAgentColor,
 }: Props): React.ReactNode {
+  const isScreenReader = useContext(AccessibilityContext);
   const teammateColor = getTeammateThemeColor();
-
-  // Convert viewed teammate's color to theme color
-  // Falls back to PromptChar idle dimColor (gold Kx).
   const viewedTeammateThemeColor = viewingAgentColor ? AGENT_COLOR_TO_THEME_COLOR[viewingAgentColor] : undefined;
+  const ariaHidden = !isScreenReader || (!viewingAgentName && mode === 'bash');
 
   return (
-    <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">
+    <Box
+      aria-hidden={ariaHidden}
+      alignItems="flex-start"
+      alignSelf="flex-start"
+      flexWrap="nowrap"
+      justifyContent="flex-start"
+    >
       {viewingAgentName ? (
-        // Use teammate's color on the standard prompt character, matching established style
-        <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} />
+        <PromptChar isLoading={isLoading} isScreenReader={isScreenReader} themeColor={viewedTeammateThemeColor} />
       ) : mode === 'bash' ? (
-        <Text color="bashBorder">!&nbsp;</Text>
+        <Text color="bashBorder" dimColor={isLoading}>
+          !&nbsp;
+        </Text>
       ) : (
-        <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />
+        <PromptChar
+          isLoading={isLoading}
+          isScreenReader={isScreenReader}
+          themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined}
+        />
       )}
     </Box>
   );

@@ -13,6 +13,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { DockWidthContext, PromptChromeBudgetContext } from '../FullscreenLayout.js';
+import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { useNotifications } from 'src/context/notifications.js';
 import { useCommandQueue } from 'src/hooks/useCommandQueue.js';
 import { type IDEAtMentioned, useIdeAtMentioned } from 'src/hooks/useIdeAtMentioned.js';
@@ -44,7 +45,11 @@ import { getNativeCSIuTerminalDisplayName } from '../../commands/terminalSetup/t
 import { type Command, hasCommand } from '../../commands.js';
 import { useIsModalOverlayActive } from '../../context/overlayContext.js';
 import { useHasBlockingOpenDialogs } from '../../dialog/DialogStoreContext.js';
-import { usePromptOverlayDialog, useSetPromptOverlayDialog } from '../../context/promptOverlayContext.js';
+import {
+  usePromptOverlayAnchorRef,
+  usePromptOverlayDialog,
+  useSetPromptOverlayDialog,
+} from '../../context/promptOverlayContext.js';
 import {
   formatImageRef,
   formatPastedTextRef,
@@ -57,6 +62,7 @@ import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import { formatHistoryBorderLabel, type HistoryMode, useArrowKeyHistory } from '../../hooks/useArrowKeyHistory.js';
 import { useDoublePress } from '../../hooks/useDoublePress.js';
 import { useHistorySearch } from '../../hooks/useHistorySearch.js';
+import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useInputBuffer } from '../../hooks/useInputBuffer.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
@@ -65,17 +71,19 @@ import { useTasksV2 } from '../../hooks/useTasksV2.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTypeahead } from '../../hooks/useTypeahead.js';
 import {
+  AccessibilityContext,
   Box,
   type BorderTextOptions,
   type ClickEvent,
   type Key,
-  type KeyboardEvent,
+  KeyboardEvent,
   color,
   instances,
   stringWidth,
   Text,
   useInput,
   useProbeExternalClear,
+  wrapText,
 } from '@anthropic/ink';
 import { useOptionalKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js';
@@ -213,7 +221,7 @@ import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications, PinnedNotifications } f
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
 import { PromptInputModeIndicator } from './PromptInputModeIndicator.js';
-import { PromptInputQueuedCommands } from './PromptInputQueuedCommands.js';
+import { formatQueuedIdeSelection, PromptInputQueuedCommands } from './PromptInputQueuedCommands.js';
 import { useMaybeTruncateInput } from './useMaybeTruncateInput.js';
 import { usePromptInputPlaceholder } from './usePromptInputPlaceholder.js';
 import { useShowFastIconHint } from './useShowFastIconHint.js';
@@ -226,6 +234,19 @@ import {
 import { isNonSpacePrintable, isVimModeEnabled } from './utils.js';
 import { resolveViewedTask, viewedAgentNameForPlaceholder } from './viewedAgent.js';
 import { getThemeSetting } from '../../utils/themeSetting.js';
+import { truncateToWidth } from '../../utils/format.js';
+
+const IDE_LEADING_PILL_MAX_COLUMNS = 32;
+
+export function formatIdeSelectionLeadingPill(label: string): string {
+  const sanitized = label.replace(/]/g, ')').replace(/[\r\n]/g, ' ');
+  return `[${wrapText(sanitized, IDE_LEADING_PILL_MAX_COLUMNS, 'truncate-middle')}] `.normalize('NFC');
+}
+
+function ideSelectionSignature(selection: IDESelection): string {
+  const base = `${selection.source ?? 'ide'}|${selection.filePath ?? ''}`;
+  return selection.text ? `${base}|${selection.lineStart ?? ''}|${selection.lineCount}|${selection.text.length}` : base;
+}
 
 type Props = {
   debug: boolean;
@@ -234,6 +255,8 @@ type Props = {
   abortController?: AbortController | null;
   /** densable pop-to-edit `returnIdeSelection`. */
   onRestoreIdeSelection?: (selection: IDESelection | undefined) => void;
+  /** densable `dismissIdeSelection` — Backspace at offset 0 deletes leadingPill. */
+  onDismissIdeSelection?: () => void;
   toolPermissionContext: ToolPermissionContext;
   setToolPermissionContext: (ctx: ToolPermissionContext) => void;
   apiKeyStatus: VerificationStatus;
@@ -349,6 +372,7 @@ function PromptInput({
   ideSelection,
   abortController,
   onRestoreIdeSelection,
+  onDismissIdeSelection,
   toolPermissionContext,
   setToolPermissionContext,
   apiKeyStatus,
@@ -593,14 +617,23 @@ function PromptInput({
   }
   const store = useAppStateStore();
   const setAppState = useSetAppState();
+  const { columns, rows } = useTerminalSize();
   const tasks = useAppState(s => s.tasks);
   const replBridgeConnected = useAppState(s => s.replBridgeConnected);
   const replBridgeExplicit = useAppState(s => s.replBridgeExplicit);
   const replBridgeReconnecting = useAppState(s => s.replBridgeReconnecting);
-  // Must match BridgeStatusIndicator's render condition (PromptInputFooter.tsx) —
-  // the pill returns null for implicit-and-not-reconnecting, so nav must too,
-  // otherwise bridge becomes an invisible selection stop.
-  const bridgeFooterVisible = replBridgeConnected && (replBridgeExplicit || replBridgeReconnecting);
+  const replBridgeOutboundOnly = useAppState(s => s.replBridgeOutboundOnly);
+  const replBridgeError = useAppState(s => s.replBridgeError);
+  // densable QVe `ds = !Me && Os && Es >= LYt && ok()` — fullscreen renders `/rc`
+  // in CondensedLogo instead of the footer, so bridge is only a footer stop in
+  // non-fullscreen when columns >= 60 and S1t holds.
+  const bridgeFooterVisible = feature('BRIDGE_MODE')
+    ? !isFullscreenEnvEnabled() &&
+      columns >= 60 &&
+      !replBridgeOutboundOnly &&
+      isBridgeEnabled() &&
+      (replBridgeError !== undefined || (replBridgeConnected && (replBridgeExplicit || replBridgeReconnecting)))
+    : false;
   // Tmux pill (ant-only) — visible when there's an active tungsten session
   const hasTungstenSession = useAppState(s => process.env.USER_TYPE === 'ant' && s.tungstenActiveSession !== undefined);
   const tmuxFooterVisible = process.env.USER_TYPE === 'ant' && hasTungstenSession;
@@ -1244,7 +1277,8 @@ function PromptInput({
     if (thinkTriggers.length && isUltrathinkEnabled()) {
       addNotification({
         key: 'ultrathink-active',
-        text: 'Effort set to high for this turn',
+        kind: 'feedback',
+        text: 'Deeper reasoning requested for this turn',
         priority: 'immediate',
         timeoutMs: 5000,
       });
@@ -1257,7 +1291,8 @@ function PromptInput({
     if (isUltraplanProductEnabled() && ultraplanTriggers.length) {
       addNotification({
         key: 'ultraplan-active',
-        text: 'This prompt will launch an ultraplan session in Claude Code on the web',
+        kind: 'feedback',
+        text: 'This prompt will launch an ultraplan cloud session',
         priority: 'immediate',
         timeoutMs: 5000,
       });
@@ -1270,7 +1305,8 @@ function PromptInput({
     if (isUltrareviewEnabled() && ultrareviewTriggers.length) {
       addNotification({
         key: 'ultrareview-active',
-        text: 'Run /ultrareview after Claude finishes to review these changes in the cloud',
+        kind: 'contextual',
+        text: 'Run /code-review ultra after Claude finishes to review these changes in the cloud',
         priority: 'immediate',
         timeoutMs: 5000,
       });
@@ -2795,9 +2831,30 @@ function PromptInput({
 
   useBuddyNotification();
 
+  const isScreenReader = useContext(AccessibilityContext);
+  const [dismissedIdeSig, setDismissedIdeSig] = useState<string | null>(null);
+  const activeIdeSelection =
+    ideSelection && ideSelectionSignature(ideSelection) !== dismissedIdeSig ? ideSelection : undefined;
+  const dismissIdeSelection = useCallback(() => {
+    if (ideSelection) {
+      setDismissedIdeSig(ideSelectionSignature(ideSelection));
+    }
+    onDismissIdeSelection?.();
+  }, [ideSelection, onDismissIdeSelection]);
+  const { status: ideConnectionStatus } = useIdeConnectionStatus(mcpClients);
+  const leadingPill = useMemo(() => {
+    const label = viewingAgentTaskId ? null : formatQueuedIdeSelection(ideConnectionStatus, activeIdeSelection);
+    return label === null
+      ? undefined
+      : {
+          text: formatIdeSelectionLeadingPill(label),
+          onDelete: dismissIdeSelection,
+        };
+  }, [viewingAgentTaskId, ideConnectionStatus, activeIdeSelection, dismissIdeSelection]);
+  const leadingPillText = leadingPill?.text ?? '';
+
   const companionReactionState = useAppState(s => s.companionReaction);
   const companionSpeaking = buddyEnabled ? companionReactionState !== undefined : false;
-  const { columns, rows } = useTerminalSize();
   const promptInputColumns = columns - companionReservedColumns(columns, companionSpeaking);
   const textInputColumns = promptInputColumns - 3;
 
@@ -2818,16 +2875,20 @@ function PromptInput({
       // During history search the displayed text is historyMatch, not
       // input, and showCursor is false anyway — skip rather than
       // compute an offset against the wrong string.
-      if (!input || isSearchingHistory) return;
-      const c = Cursor.fromText(input, textInputColumns, cursorOffset);
+      if (isSearchingHistory) return;
+      setAppState(prev =>
+        prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+      );
+      if (!input) return;
+      const c = Cursor.fromText(leadingPillText + input, textInputColumns, leadingPillText.length + cursorOffset);
       const viewportStart = c.getViewportStartLine(maxVisibleLines);
       const offset = c.measuredText.getOffsetFromPosition({
         line: e.localRow + viewportStart,
         column: e.localCol,
       });
-      setCursorOffset(offset);
+      setCursorOffset(Math.max(0, offset - leadingPillText.length));
     },
-    [input, textInputColumns, isSearchingHistory, cursorOffset, maxVisibleLines],
+    [input, leadingPillText, textInputColumns, isSearchingHistory, cursorOffset, maxVisibleLines, setAppState],
   );
 
   const handleOpenTasksDialog = useCallback(
@@ -2976,6 +3037,44 @@ function PromptInput({
   useSetPromptOverlayDialog(null);
   const dockWidth = useContext(DockWidthContext);
   const overlayDialog = usePromptOverlayDialog();
+  const promptOverlayAnchorRef = usePromptOverlayAnchorRef();
+
+  const [hoveredSuggestionId, setHoveredSuggestionId] = useState<string | null>(null);
+  const pendingClickSuggestionIndexRef = useRef<number | null>(null);
+  const fireSuggestionReturnKey = useCallback(() => {
+    typeaheadKeyDown(
+      new KeyboardEvent({
+        kind: 'key',
+        name: 'return',
+        sequence: '\r',
+        raw: '\r',
+        ctrl: false,
+        meta: false,
+        shift: false,
+        option: false,
+        fn: false,
+        super: false,
+      }),
+    );
+  }, [typeaheadKeyDown]);
+  useEffect(() => {
+    const pending = pendingClickSuggestionIndexRef.current;
+    if (pending === null || selectedSuggestion !== pending) return;
+    pendingClickSuggestionIndexRef.current = null;
+    fireSuggestionReturnKey();
+  }, [selectedSuggestion, fireSuggestionReturnKey]);
+  const handleSelectSuggestion = useCallback(
+    (index: number, _id: string) => {
+      setHoveredSuggestionId(null);
+      if (index === selectedSuggestion) {
+        fireSuggestionReturnKey();
+        return;
+      }
+      pendingClickSuggestionIndexRef.current = index;
+      setSuggestionsState(prev => ({ ...prev, selectedSuggestion: index }));
+    },
+    [selectedSuggestion, fireSuggestionReturnKey, setSuggestionsState],
+  );
 
   // densable UI(Bt): vo(history) then $F(typeahead); short-circuit on prevent/stopImmediate.
   // Hook must run unconditionally — placed before the early returns below
@@ -3264,11 +3363,15 @@ function PromptInput({
         flexDirection="row"
         alignItems="center"
         justifyContent="center"
-        borderColor={getBorderColor()}
-        borderStyle="round"
-        borderLeft={false}
-        borderRight={false}
-        borderBottom
+        {...(isScreenReader
+          ? {}
+          : {
+              borderColor: getBorderColor(),
+              borderStyle: 'round' as const,
+              borderLeft: false,
+              borderRight: false,
+              borderBottom: true as const,
+            })}
         width={promptInputColumns}
       >
         <Text dimColor italic>
@@ -3278,11 +3381,32 @@ function PromptInput({
     );
   }
 
+  const getInputMode = () => mode;
   const textInputElement = isVimModeEnabled() ? (
-    <VimTextInput {...baseProps} initialMode={vimMode} onModeChange={setVimModeAndStore} />
+    <VimTextInput
+      {...baseProps}
+      allowPrintableKeybindings
+      leadingPill={leadingPill}
+      getInputMode={getInputMode}
+      initialMode={vimMode}
+      onModeChange={setVimModeAndStore}
+    />
   ) : (
-    <TextInput {...baseProps} />
+    <TextInput {...baseProps} allowPrintableKeybindings leadingPill={leadingPill} getInputMode={getInputMode} />
   );
+
+  const ultraEffortTag = ultracodeActive
+    ? color('effortUltra', resolveThemeSetting(getThemeSetting()))('ultracode')
+    : undefined;
+  const fastModeTag = showFastIcon
+    ? isScreenReader
+      ? fastModeCooldown
+        ? 'fast mode (cooling down)'
+        : 'fast mode'
+      : showFastIconHint
+        ? `${getFastIconString(true, fastModeCooldown)} ${chalk.dim('/fast')}`
+        : getFastIconString(true, fastModeCooldown)
+    : undefined;
 
   const historyChip = formatHistoryBorderLabel(historyIndex, historyTotal, historyEdited);
   const promptBorderText: BorderTextOptions | undefined = historyChip
@@ -3298,7 +3422,7 @@ function PromptInput({
   const aboveNotificationWidth = dockWidth > 0 ? Math.max(0, promptInputColumns - dockWidth) : '100%';
 
   return (
-    <Box flexDirection="column" marginTop={briefOwnsGap ? 0 : 1}>
+    <Box ref={promptOverlayAnchorRef} flexDirection="column" marginTop={briefOwnsGap ? 0 : 1}>
       {!isFullscreenEnvEnabled() && (
         <PromptInputQueuedCommands abortController={abortController} mcpClients={mcpClients} />
       )}
@@ -3307,38 +3431,68 @@ function PromptInput({
           <Text dimColor>Waiting for permission…</Text>
         </Box>
       )}
-      <PinnedNotifications />
       {swarmBanner ? (
         <>
-          <Text color={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}>
-            {(() => {
-              const fill = swarmBanner.text
-                ? swarmBannerFillColumns(promptInputColumns, stringWidth(swarmBanner.text))
-                : promptInputColumns;
-              const fillEl =
-                swarmBanner.gradient && swarmBanner.gradient.length > 0
-                  ? swarmBannerGradientSegments(fill, swarmBanner.gradient).map((seg, i) => (
-                      <Text key={i} color={seg.color as keyof Theme}>
-                        {'─'.repeat(seg.dashes)}
-                      </Text>
-                    ))
-                  : '─'.repeat(fill);
-              if (!swarmBanner.text) return fillEl;
-              return (
-                <>
-                  {fillEl}
+          {isScreenReader ? (
+            swarmBanner.text || fastModeTag ? (
+              <Text color={swarmBanner.bgColor}>
+                {swarmBanner.text ? (
                   <Text
-                    backgroundColor={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}
+                    backgroundColor={swarmBanner.bgColor === 'promptBorder' ? undefined : swarmBanner.bgColor}
                     color="inverseText"
                   >
                     {' '}
                     {swarmBanner.text}{' '}
                   </Text>
-                  {'─'}
-                </>
-              );
-            })()}
-          </Text>
+                ) : null}
+                {fastModeTag ? <Text color="fastMode"> {fastModeTag}</Text> : null}
+              </Text>
+            ) : null
+          ) : (
+            <Text color={(swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ?? swarmBanner.bgColor}>
+              {(() => {
+                const fastTagWidth = fastModeTag ? stringWidth(fastModeTag) + 2 : 0;
+                const maxBannerCols = promptInputColumns - fastTagWidth - 3;
+                const bannerText = swarmBanner.text
+                  ? maxBannerCols > 0
+                    ? truncateToWidth(stripAnsi(swarmBanner.text).trim(), maxBannerCols)
+                    : ''
+                  : '';
+                const bannerTextWidth = stringWidth(bannerText);
+                const fill =
+                  bannerTextWidth > 0
+                    ? swarmBannerFillColumns(promptInputColumns - fastTagWidth, bannerTextWidth)
+                    : fastTagWidth > 0
+                      ? Math.max(0, promptInputColumns - fastTagWidth - 1)
+                      : swarmBannerFillColumns(promptInputColumns, 0);
+                const fillEl =
+                  swarmBanner.gradient && swarmBanner.gradient.length > 0
+                    ? swarmBannerGradientSegments(fill, swarmBanner.gradient).map((seg, i) => (
+                        <Text key={i} color={seg.color as keyof Theme}>
+                          {'─'.repeat(seg.dashes)}
+                        </Text>
+                      ))
+                    : '─'.repeat(fill);
+                if (!bannerText && !fastModeTag) return fillEl;
+                const badgeBg =
+                  (swarmBanner.gradient?.at(-1) as keyof Theme | undefined) ??
+                  (swarmBanner.bgColor === 'promptBorder' ? undefined : swarmBanner.bgColor);
+                return (
+                  <>
+                    {fillEl}
+                    {fastModeTag ? ` ${fastModeTag} ` : null}
+                    {bannerText ? (
+                      <Text backgroundColor={badgeBg} color="inverseText">
+                        {' '}
+                        {bannerText}{' '}
+                      </Text>
+                    ) : null}
+                    {'─'}
+                  </>
+                );
+              })()}
+            </Text>
+          )}
           <Box flexDirection="row" width={promptInputColumns}>
             <PromptInputModeIndicator
               mode={mode}
@@ -3350,37 +3504,46 @@ function PromptInput({
               {textInputElement}
             </Box>
           </Box>
-          <Text color={swarmBanner.bgColor}>{'─'.repeat(promptInputColumns)}</Text>
+          {!isScreenReader ? <Text color={swarmBanner.bgColor}>{'─'.repeat(promptInputColumns)}</Text> : null}
         </>
       ) : (
-        <Box
-          flexDirection="row"
-          alignItems="flex-start"
-          justifyContent="flex-start"
-          {...(hostBlocksKeys
-            ? {}
-            : {
-                borderColor: getBorderColor(),
-                borderStyle: 'round' as const,
-                borderLeft: false,
-                borderRight: false,
-                borderBottom: true as const,
-              })}
-          width={promptInputColumns}
-          flexShrink={0}
-          borderText={hostBlocksKeys ? undefined : promptBorderText}
-        >
-          <PromptInputModeIndicator
-            mode={mode}
-            isLoading={isLoading}
-            viewingAgentName={viewingAgentName}
-            viewingAgentColor={viewingAgentColor}
-          />
-          <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
-            {textInputElement}
+        <>
+          {isScreenReader && ultraEffortTag ? <Text>{ultraEffortTag}</Text> : null}
+          {isScreenReader && fastModeTag ? (
+            <Text color="fastMode" dimColor={fastModeCooldown}>
+              {fastModeTag}
+            </Text>
+          ) : null}
+          <Box
+            flexDirection="row"
+            alignItems="flex-start"
+            justifyContent="flex-start"
+            {...(hostBlocksKeys || isScreenReader
+              ? {}
+              : {
+                  borderColor: getBorderColor(),
+                  borderStyle: 'round' as const,
+                  borderLeft: false,
+                  borderRight: false,
+                  borderBottom: true as const,
+                })}
+            width={promptInputColumns}
+            flexShrink={0}
+            borderText={hostBlocksKeys || isScreenReader ? undefined : promptBorderText}
+          >
+            <PromptInputModeIndicator
+              mode={mode}
+              isLoading={isLoading}
+              viewingAgentName={viewingAgentName}
+              viewingAgentColor={viewingAgentColor}
+            />
+            <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
+              {textInputElement}
+            </Box>
           </Box>
-        </Box>
+        </>
       )}
+      <PinnedNotifications />
       <PromptInputFooter
         apiKeyStatus={apiKeyStatus}
         debug={debug}
@@ -3395,6 +3558,9 @@ function PromptInput({
         suggestions={suggestions}
         selectedSuggestion={selectedSuggestion}
         maxColumnWidth={maxColumnWidth}
+        hoveredSuggestionId={hoveredSuggestionId}
+        onHoverSuggestion={setHoveredSuggestionId}
+        onSelectSuggestion={handleSelectSuggestion}
         toolPermissionContext={effectiveToolPermissionContext}
         helpOpen={helpOpen}
         suppressHint={input.length > 0 || pluginSuppressesHint}
@@ -3404,7 +3570,7 @@ function PromptInput({
         bridgeSelected={bridgeSelected}
         tmuxSelected={tmuxSelected}
         teammateFooterIndex={teammateFooterIndex}
-        ideSelection={ideSelection}
+        ideSelection={activeIdeSelection}
         mcpClients={mcpClients}
         isPasting={isPasting}
         isInputWrapped={isInputWrapped}
@@ -3446,7 +3612,7 @@ function PromptInput({
             messages={messages}
             onAutoUpdaterResult={onAutoUpdaterResult}
             onChangeIsUpdating={setIsAutoUpdating}
-            ideSelection={ideSelection}
+            ideSelection={activeIdeSelection}
             mcpClients={mcpClients}
             isInputWrapped={isInputWrapped}
             hasStash={hasStash}

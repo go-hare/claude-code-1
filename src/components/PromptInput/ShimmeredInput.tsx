@@ -1,18 +1,41 @@
 import * as React from 'react';
-import { Ansi, Box, Text, useAnimationFrame } from '@anthropic/ink';
+import { Ansi, Box, type Color, isXtermJs, Text, useAnimationFrame } from '@anthropic/ink';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { AppStoreContext } from '../../state/AppState.js';
 import { segmentTextByHighlights, type TextHighlight } from '../../utils/textHighlighting.js';
+import type { Theme } from '../../utils/theme.js';
 import { ShimmerChar } from '../Spinner/ShimmerChar.js';
+
+type ExtendedTextHighlight = TextHighlight & {
+  backgroundColor?: keyof Theme | Color;
+  bold?: boolean;
+  italic?: boolean;
+  strikethrough?: boolean;
+};
 
 type Props = {
   text: string;
-  highlights: TextHighlight[];
+  highlights: ExtendedTextHighlight[];
 };
 
 type LinePart = {
   text: string;
-  highlight: TextHighlight | undefined;
+  highlight: ExtendedTextHighlight | undefined;
   start: number;
 };
+
+const noopSubscribe = (): (() => void) => () => {};
+
+function useReducedMotion(): boolean {
+  const store = React.useContext(AppStoreContext);
+  const prefersReducedMotion = React.useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    () => store?.getState().settings.prefersReducedMotion,
+    () => store?.getState().settings.prefersReducedMotion,
+  );
+  if (prefersReducedMotion) return true;
+  return isXtermJs() && getFeatureValue_CACHED_MAY_BE_STALE('tengu_cedar_marsh', false);
+}
 
 export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
   // The shimmer animation (below) re-renders this component at 20fps while the
@@ -40,7 +63,7 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
         if (part.length > 0) {
           lines[lines.length - 1]!.push({
             text: part,
-            highlight: segment.highlight,
+            highlight: segment.highlight as ExtendedTextHighlight | undefined,
             start: pos,
           });
         }
@@ -70,8 +93,10 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
     return { lines, hasShimmer, sweepStart, cycleLength };
   }, [text, highlights]);
 
-  const [ref, time] = useAnimationFrame(hasShimmer ? 50 : null);
-  const glimmerIndex = hasShimmer ? sweepStart + (Math.floor(time / 50) % cycleLength) : -100;
+  const reducedMotion = useReducedMotion();
+  const shouldAnimate = hasShimmer && !reducedMotion;
+  const [ref, time] = useAnimationFrame(shouldAnimate ? 50 : null);
+  const glimmerIndex = shouldAnimate ? sweepStart + (Math.floor(time / 50) % cycleLength) : -100;
 
   return (
     <Box ref={ref} flexDirection="column">
@@ -84,7 +109,7 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
               if (part.highlight?.shimmerColor && part.highlight.color) {
                 // Shimmer path is theme-key only (ultrathink/buddy); raw Color
                 // highlights (spellcheck underline) never set shimmerColor.
-                const messageColor = part.highlight.color as keyof import('../../utils/theme.js').Theme;
+                const messageColor = part.highlight.color as keyof Theme;
                 const shimmerColor = part.highlight.shimmerColor;
                 return (
                   <Text key={partIndex}>
@@ -105,9 +130,13 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
                 <Text
                   key={partIndex}
                   color={part.highlight?.color}
+                  backgroundColor={part.highlight?.backgroundColor}
                   dimColor={part.highlight?.dimColor}
+                  bold={part.highlight?.bold}
+                  italic={part.highlight?.italic}
                   inverse={part.highlight?.inverse}
                   underline={part.highlight?.underline}
+                  strikethrough={part.highlight?.strikethrough}
                 >
                   <Ansi>{part.text}</Ansi>
                 </Text>

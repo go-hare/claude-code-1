@@ -1,14 +1,18 @@
 import React from 'react';
 import { useClipboardImageHint } from '../hooks/useClipboardImageHint.js';
+import type { LeadingPill } from '../hooks/useTextInput.js';
 import { useVimInput } from '../hooks/useVimInput.js';
 import { Box, color, isNativeCursorEnabled, useTerminalFocus, useTheme } from '@anthropic/ink';
-import type { VimTextInputProps } from '../types/textInputTypes.js';
+import type { PromptInputMode, VimTextInputProps } from '../types/textInputTypes.js';
 import { leftoverXt, leftoverXy } from '../utils/leftoverXy.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { BaseTextInput } from './BaseTextInput.js';
 
 export type Props = VimTextInputProps & {
   highlights?: TextHighlight[];
+  leadingPill?: LeadingPill;
+  allowPrintableKeybindings?: boolean;
+  getInputMode?: () => PromptInputMode;
 };
 
 export default function VimTextInput(props: Props): React.ReactNode {
@@ -43,6 +47,8 @@ export default function VimTextInput(props: Props): React.ReactNode {
     invert: isTerminalFocused ? leftoverXy : leftoverXt,
     themeText: color('text', theme),
     columns: props.columns,
+    leadingPill: props.leadingPill,
+    getInputMode: props.getInputMode,
     maxVisibleLines: props.maxVisibleLines,
     onImagePaste: props.onImagePaste,
     disableCursorMovementForUpDownKeys: props.disableCursorMovementForUpDownKeys,

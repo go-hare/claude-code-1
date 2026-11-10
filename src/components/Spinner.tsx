@@ -40,6 +40,8 @@ import { getCurrentTurnTokenBudget, getTurnOutputTokens } from '../bootstrap/sta
 import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js';
 import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
+import { truncateToWidth } from '../utils/truncate.js';
 export type { SpinnerMode } from './Spinner/index.js';
 
 const STATUS_CLAUDE = 'https://status.claude.com';
@@ -255,7 +257,7 @@ function SpinnerWithVerbInner({
   agentId,
 }: Props): React.ReactNode {
   const settings = useSettings();
-  const reducedMotion = settings.prefersReducedMotion ?? false;
+  const reducedMotion = (settings.prefersReducedMotion ?? false) || isScreenReaderModeEnabled();
 
   // NOTE: useAnimationFrame(50) lives in SpinnerAnimationRow, not here.
   // This component only re-renders when props or app state change —
@@ -588,11 +590,12 @@ type BriefSpinnerProps = {
 
 function BriefSpinner({ mode, overrideMessage }: BriefSpinnerProps): React.ReactNode {
   const settings = useSettings();
-  const reducedMotion = settings.prefersReducedMotion ?? false;
+  const isScreenReader = isScreenReaderModeEnabled();
+  const reducedMotion = (settings.prefersReducedMotion ?? false) || isScreenReader;
   // densable _n `[h]=g(()=>hN(DTt())??"Working")`, label `t??h` — brief mode
   // does not read the Ihr store's defaultVerb.
   const [randomVerb] = useState(() => sample(getSpinnerVerbs()) ?? 'Working');
-  const verb = overrideMessage ?? randomVerb;
+  const rawVerb = overrideMessage ?? randomVerb;
   const connStatus = useAppState(s => s.remoteConnectionStatus);
 
   // Track CLI activity so OS/IDE "busy" indicators fire in brief mode too
@@ -617,12 +620,20 @@ function BriefSpinner({ mode, overrideMessage }: BriefSpinnerProps): React.React
   // Connection trouble overrides the verb — `claude assistant` is a pure viewer,
   // nothing useful is happening while the WS is down.
   const showConnWarning = connStatus === 'reconnecting' || connStatus === 'disconnected';
-  const connText = connStatus === 'reconnecting' ? 'Reconnecting' : 'Disconnected';
+  const { columns } = useTerminalSize();
+  const { labelBudget, rightText } = leftoverBhrIdleBudget(columns, runningCount, showConnWarning);
+  const verb = truncateToWidth(rawVerb, labelBudget);
+  const connText = truncateToWidth(connStatus === 'reconnecting' ? 'Reconnecting' : 'Disconnected', labelBudget);
+  const activeLabel = showConnWarning ? connText : verb;
 
   // Dots padded to a fixed 3 columns so the right-aligned count doesn't
   // jitter as the cycle advances.
   const dotFrame = Math.floor(time / 300) % 3;
-  const dots = reducedMotion ? '…  ' : '.'.repeat(dotFrame + 1).padEnd(3);
+  const dots = reducedMotion
+    ? SPINNER_VERB_HAS_ELLIPSIS.test(activeLabel)
+      ? '   '
+      : '…  '
+    : '.'.repeat(dotFrame + 1).padEnd(3);
 
   // Shimmer: reverse-sweep highlight across the verb. Skip for connection
   // warnings (shimmer reads as "working"; Reconnecting/Disconnected is not).
@@ -631,8 +642,6 @@ function BriefSpinner({ mode, overrideMessage }: BriefSpinnerProps): React.React
     reducedMotion || showConnWarning ? -100 : computeGlimmerIndex(Math.floor(time / SHIMMER_INTERVAL_MS), verbWidth);
   const { before, shimmer, after } = computeShimmerSegments(verb, glimmerIndex);
 
-  const { columns } = useTerminalSize();
-  const rightText = runningCount > 0 ? `${runningCount} in background` : '';
   // Manual right-align via space padding — flexGrow spacers inside
   // FullscreenLayout's `main` slot don't resolve a width and caused the
   // diff engine to miss dot-frame updates.
@@ -693,13 +702,14 @@ export function BriefIdleStatus(): React.ReactNode {
 
 export function Spinner(): React.ReactNode {
   const settings = useSettings();
-  const reducedMotion = settings.prefersReducedMotion ?? false;
+  const isScreenReader = isScreenReaderModeEnabled();
+  const reducedMotion = (settings.prefersReducedMotion ?? false) || isScreenReader;
   const [ref, time] = useAnimationFrame(reducedMotion ? null : 120);
 
-  // Reduced motion: static dot instead of animated spinner
+  // Reduced motion / screen-reader: static dot instead of animated spinner
   if (reducedMotion) {
     return (
-      <Box ref={ref} flexWrap="wrap" height={1} width={2}>
+      <Box ref={ref} aria-hidden flexWrap="wrap" height={1} width={2}>
         <Text color="text">●</Text>
       </Box>
     );
@@ -709,7 +719,7 @@ export function Spinner(): React.ReactNode {
   const frame = Math.floor(time / 120) % spinnerFrames.length;
 
   return (
-    <Box ref={ref} flexWrap="wrap" height={1} width={2}>
+    <Box ref={ref} aria-hidden flexWrap="wrap" height={1} width={2}>
       <Text color="text">{spinnerFrames[frame]}</Text>
     </Box>
   );

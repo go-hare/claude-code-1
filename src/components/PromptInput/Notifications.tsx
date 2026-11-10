@@ -1,9 +1,11 @@
 import { feature } from 'bun:bundle';
+import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
 import {
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -16,57 +18,69 @@ import {
   compareNotificationPriority,
   isNotificationVisible,
   type Notification,
+  type NotificationSegment,
   useNotifications,
 } from 'src/context/notifications.js';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useAppState } from 'src/state/AppState.js';
 import { useVoiceState } from '../../context/voice.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
-import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import {
   AccessibilityContext,
   Box,
+  ClockContext,
   type DOMElement,
-  Text,
+  isGhosttyXtversion,
+  Link,
+  type RGBColor,
   stringWidth,
+  Text,
+  useAnimationTimer,
   useApp,
   useTerminalSize,
+  useTheme,
   wrapText,
 } from '@anthropic/ink';
 import { TranscriptOverlayOffsetContext } from '../transcriptOverlayOffset.js';
 import {
+  dismissToastItem,
   expireToasts,
   getToasts,
   holdToastItem,
   pauseToasts,
   subscribeToasts,
-  dismissToastItem,
+  TOAST_HOLD_MAX_MS,
   type ToastItem,
 } from '../toastStore.js';
 import { notificationsHoldToasts } from '../../utils/replDiffMouseHost.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
 import { useCompactWarningSuppression } from '../../services/compact/compactWarningHook.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
+import { getIsRemoteMode, getLastApiCompletionTimestamp } from '../../bootstrap/state.js';
+import { summarizePromptCache } from '../../commands/cost/promptCacheTracker.js';
+import { useMemoryUsage } from '../../hooks/useMemoryUsage.js';
 import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { getExternalEditor } from '../../utils/editor.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
-import { formatDuration } from '../../utils/format.js';
+import { formatDuration, formatFileSize } from '../../utils/format.js';
+import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { setEnvHookNotifier } from '../../utils/hooks/fileChangedWatcher.js';
 import { toIDEDisplayName } from '../../utils/ide.js';
 import { logError } from '../../utils/log.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
+import { getTheme } from '../../utils/theme.js';
 import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
 import { AutoUpdaterWrapper } from '../AutoUpdaterWrapper.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { IdeStatusIndicator } from '../IdeStatusIndicator.js';
-import { MemoryUsageIndicator } from '../MemoryUsageIndicator.js';
 import { SentryErrorBoundary } from '../SentryErrorBoundary.js';
+import { interpolateColor, parseRGB, toRGBColor } from '../Spinner/utils.js';
 import { TokenWarning } from '../TokenWarning.js';
 import { SandboxPromptFooterHint } from './SandboxPromptFooterHint.js';
 
@@ -168,59 +182,139 @@ function toastShape(
   return { columns: Math.min(width, widest + frame), lines, rows: lines.length + 1 + (framed ? 2 : 0) };
 }
 
+/** densable `ju` — reduced motion from user setting or Ghostty gate. */
+function useReducedMotion(): boolean {
+  const prefersReducedMotion = useAppState(s => Boolean(s.settings.prefersReducedMotion));
+  if (prefersReducedMotion) return true;
+  return isGhosttyXtversion() && getFeatureValue_CACHED_MAY_BE_STALE('tengu_cedar_marsh', false);
+}
+
 /**
- * densable `hke` / `wU` — absolute toasts on the scroll column.
- * `vkt` (TranscriptOverlayOffsetContext) shifts tops when the sticky header
- * occupies row 0. Empty or paused (`WJ`) paints nothing.
- * Click starts the leave. The box is sized from the wrapped text.
+ * densable `VX` — pause stacked plugin toasts ONLY on `paneHoldsToasts`
+ * (never `diffPanelVisible`), and restore `pauseToasts(false)` on unmount.
  */
-export function ToastStackView(): React.ReactNode {
-  const offset = React.useContext(TranscriptOverlayOffsetContext);
-  const screenReader = React.useContext(AccessibilityContext);
+function useToastPause(): boolean {
+  const paused = useAppState(s => Boolean(s.paneHoldsToasts));
+  useEffect(() => {
+    pauseToasts(paused);
+    return () => {
+      pauseToasts(false);
+    };
+  }, [paused]);
+  return paused;
+}
+
+/** densable `OX` — per-toast slide-in column offset (0 when still or done). */
+function useSlideColumns(shownAt: number, columns: number, still: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  const offset = slideColumns(shownAt, columns, now, still);
+  useEffect(() => {
+    if (offset === 0) return;
+    const timer = setTimeout(() => setNow(Date.now()), TOAST_FRAME_MS);
+    return () => clearTimeout(timer);
+  }, [now, offset]);
+  return offset;
+}
+
+/** densable `vU` — single toast box; releases hover hold on unmount. */
+function ToastBox({
+  toast,
+  shape,
+  top,
+  framed,
+}: {
+  toast: ToastItem;
+  shape: { columns: number; lines: string[]; rows: number };
+  top: number;
+  framed: boolean;
+}): ReactNode {
+  const [hovered, setHovered] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const still = reducedMotion || !framed;
+  const rightOffset = useSlideColumns(toast.shownAt, shape.columns, still);
+  const leaving = toast.phase === 'leaving';
+
+  useEffect(() => {
+    return () => {
+      holdToastItem(toast.id, false);
+    };
+  }, [toast.id]);
+
+  return (
+    <Box
+      position="absolute"
+      top={top}
+      right={rightOffset}
+      width={shape.columns}
+      height={shape.rows}
+      flexDirection="column"
+      borderStyle={framed ? 'round' : undefined}
+      borderDimColor={!hovered}
+      paddingX={framed ? 1 : 0}
+      opaque
+      noSelect
+      onMouseEnter={() => {
+        setHovered(true);
+        holdToastItem(toast.id, true);
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        holdToastItem(toast.id, false);
+      }}
+      onClick={event => {
+        event.stopImmediatePropagation();
+        if (event.isWindowActivation) return;
+        dismissToastItem(toast.id);
+      }}
+    >
+      <Text dimColor wrap="truncate-end">
+        {toast.plugin ?? ''}
+      </Text>
+      {shape.lines.map((line, lineIndex) => (
+        <Text key={lineIndex} dimColor={leaving} wrap="truncate-end">
+          {line}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+/** densable `wU` — stacked toast boxes on the scroll column. */
+function ToastBoxes({ toasts, paused }: { toasts: readonly ToastItem[]; paused: boolean }): ReactNode {
+  const offset = useContext(TranscriptOverlayOffsetContext);
+  const screenReader = useContext(AccessibilityContext);
   const { columns, rows } = useTerminalSize();
-  const toasts = useSyncExternalStore(subscribeToasts, getToasts, getToasts);
-  const paused = useAppState(notificationsHoldToasts);
   const columnRef = useRef<DOMElement | null>(null);
-  const [heldKey, setHeldKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const measuredHeight = useYogaHeight(columnRef);
   const framed = !screenReader;
-  const still = Boolean(screenReader) || !framed;
-  const sliding = !still && toasts.some(toast => now - toast.shownAt < TOAST_FADE_MS);
+
   useEffect(() => {
-    pauseToasts(paused);
-  }, [paused]);
-  useEffect(() => {
-    if (paused) return;
+    if (paused || toasts.length === 0) return;
     expireToasts(Date.now());
   }, [now, toasts, paused]);
+
   useEffect(() => {
-    if (paused) return;
+    if (paused || toasts.length === 0) return;
     const tick = Date.now();
-    let nextLeave = Infinity;
+    let nextWake = Infinity;
     for (const toast of toasts) {
-      if (toast.heldAt !== undefined) continue;
-      if (toast.leavesAt < nextLeave) nextLeave = toast.leavesAt;
+      const wakeAt = toast.heldAt !== undefined ? toast.heldAt + TOAST_HOLD_MAX_MS : toast.leavesAt;
+      if (wakeAt < nextWake) nextWake = wakeAt;
     }
-    if (!sliding && nextLeave === Infinity) return;
-    const delay = sliding ? TOAST_FRAME_MS : Math.max(TOAST_FRAME_MS, nextLeave - tick);
+    if (!Number.isFinite(nextWake)) return;
+    const delay = Math.max(TOAST_FRAME_MS, nextWake - tick);
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
-  }, [sliding, now, toasts, paused]);
+  }, [now, toasts, paused]);
+
+  if (paused || toasts.length === 0) return null;
   const roomColumns = Math.max(1, columns - TOAST_EDGE_COLUMNS);
   const roomRows = (measuredHeight > 0 ? measuredHeight : rows - TOAST_STACK_BOTTOM) - offset;
   const shapes = toasts.map(toast => toastShape(toast, roomColumns, framed));
   const heights = shapes.map(shape => shape.rows);
   const shownCount = fittingToastCount(heights, TOAST_STACK_MOST, roomRows, toasts.length);
-  const shown = paused || toasts.length === 0 ? [] : toasts.slice(-shownCount);
-  const shownKey = shown.map(toast => toast.id).join('\n');
-  useEffect(() => {
-    if (heldKey !== null && !shownKey.split('\n').includes(heldKey)) {
-      holdToastItem(heldKey, false);
-      setHeldKey(null);
-    }
-  }, [heldKey, shownKey]);
-  if (paused || toasts.length === 0) return null;
+  const shown = toasts.slice(-shownCount);
   const shownShapes = shapes.slice(-shownCount);
   const hidden = toasts.length - shown.length;
   const tops = stackedTops(
@@ -235,48 +329,36 @@ export function ToastStackView(): React.ReactNode {
           <Text dimColor>{` +${hidden} more `}</Text>
         </Box>
       ) : null}
-      {shown.map((toast, index) => {
-        const shape = shownShapes[index] ?? { columns: 1, lines: [] as string[], rows: 1 };
-        return (
-          <Box
-            key={toast.id}
-            position="absolute"
-            top={tops[index] ?? 0}
-            right={slideColumns(toast.shownAt, shape.columns, now, still)}
-            width={shape.columns}
-            height={shape.rows}
-            flexDirection="column"
-            borderStyle={framed ? 'round' : undefined}
-            borderDimColor={heldKey !== toast.id}
-            paddingX={framed ? 1 : 0}
-            opaque
-            noSelect
-            onMouseEnter={() => {
-              holdToastItem(toast.id, true);
-              setHeldKey(toast.id);
-            }}
-            onMouseLeave={() => {
-              holdToastItem(toast.id, false);
-              setHeldKey(current => (current === toast.id ? null : current));
-            }}
-            onClick={event => {
-              event.stopImmediatePropagation();
-              if (event.isWindowActivation) return;
-              dismissToastItem(toast.id);
-            }}
-          >
-            <Text dimColor wrap="truncate-end">
-              {toast.plugin ?? ''}
-            </Text>
-            {shape.lines.map((line, lineIndex) => (
-              <Text key={lineIndex} dimColor={toast.phase === 'leaving'} wrap="truncate-end">
-                {line}
-              </Text>
-            ))}
-          </Box>
-        );
-      })}
+      {shown.map((toast, index) => (
+        <ToastBox
+          key={toast.id}
+          toast={toast}
+          shape={shownShapes[index] ?? { columns: 1, lines: [], rows: 1 }}
+          top={tops[index] ?? 0}
+          framed={framed}
+        />
+      ))}
     </>
+  );
+}
+
+function onToastStackError(error: Error): void {
+  // densable AX/EX toast-stack BO unique English. Distinct from FEe pane hold.
+  logError(new Error('ui.toast: the toast stack threw while drawn'));
+  logError(new Error(`ui.toast threw while drawn: ${error.message}; no toast is drawn until the stack changes`));
+}
+
+/**
+ * densable `hke` — absolute toasts on the scroll column wrapped in a dedicated
+ * `SentryErrorBoundary` that resets when `toasts.length` changes.
+ */
+export function ToastStackView(): React.ReactNode {
+  const toasts = useSyncExternalStore(subscribeToasts, getToasts, getToasts);
+  const paused = useToastPause();
+  return (
+    <SentryErrorBoundary key={toasts.length} name="ui.toast" onError={onToastStackError}>
+      <ToastBoxes toasts={toasts} paused={paused} />
+    </SentryErrorBoundary>
   );
 }
 
@@ -284,17 +366,66 @@ type Props = {
   apiKeyStatus: VerificationStatus;
   autoUpdaterResult: AutoUpdaterResult | null;
   isAutoUpdating: boolean;
-  debug: boolean;
+  debug?: boolean;
   verbose: boolean;
   messages: Message[];
   onAutoUpdaterResult: (result: AutoUpdaterResult) => void;
   onChangeIsUpdating: (isUpdating: boolean) => void;
-  ideSelection: IDESelection | undefined;
+  ideSelection?: IDESelection | undefined;
   mcpClients?: MCPServerConnection[];
   isInputWrapped?: boolean;
   hasStash?: boolean;
   isNarrow?: boolean;
 };
+
+/** densable `Jge` — segment renderer supporting `dim`, `bold`, `color`, and `url` (`Link`). */
+function NotificationSegments({ segments }: { segments: NotificationSegment[] }): ReactNode {
+  return segments.map((segment, i) => {
+    const textNode = (
+      <Text key={i} color={segment.color} dimColor={segment.dim} bold={segment.bold}>
+        {segment.text}
+      </Text>
+    );
+    return segment.url === undefined ? (
+      textNode
+    ) : (
+      <Link key={i} url={segment.url}>
+        {textNode}
+      </Link>
+    );
+  });
+}
+
+/** densable `Ire` — single pinned notice with default `warning` color and `"⚠ "` prefix. */
+function PinnedNotificationRow({ notice }: { notice: Notification }): ReactNode {
+  const wrap = notice.wrap ? 'wrap' : 'truncate';
+  const color = notice.color ?? 'warning';
+  if ('jsx' in notice) {
+    return (
+      <Text color={color} wrap={wrap}>
+        {'⚠ '}
+        {notice.jsx}
+      </Text>
+    );
+  }
+  if ('segments' in notice && notice.segments) {
+    return (
+      <Text color={color} wrap={wrap}>
+        {'⚠ '}
+        <NotificationSegments segments={notice.segments} />
+      </Text>
+    );
+  }
+  if ('text' in notice) {
+    return (
+      <Text color={color} wrap={wrap}>
+        {'⚠ '}
+        {notice.text}
+      </Text>
+    );
+  }
+  return null;
+}
 
 /** densable `E1` — pinned notifications block rendered above the prompt border. */
 export function PinnedNotifications(): ReactNode {
@@ -304,31 +435,66 @@ export function PinnedNotifications(): ReactNode {
   return (
     <Box flexDirection="column" paddingX={2}>
       {sorted.map(notice => (
-        <NotificationBody key={notice.key} notification={notice} />
+        <PinnedNotificationRow key={notice.key} notice={notice} />
       ))}
     </Box>
   );
 }
 
+const GOAL_PULSE_STEPS = 20;
+const GOAL_PULSE_PERIOD_MS = 4000;
+const GOAL_PULSE_FRAME_MS = GOAL_PULSE_PERIOD_MS / GOAL_PULSE_STEPS;
+const GOAL_PULSE_DEPTH = 0.18;
+const GOAL_PULSE_BLACK = { r: 0, g: 0, b: 0 };
+
+/** densable `BDt` — 20-step 4s cosine pulse palette toward black. */
+function buildGoalPulsePalette(base: { r: number; g: number; b: number }, quantize: boolean): RGBColor[] {
+  return Array.from({ length: GOAL_PULSE_STEPS }, (_, index) => {
+    const wave = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / GOAL_PULSE_STEPS);
+    const amount = GOAL_PULSE_DEPTH * (quantize ? Math.round(wave * 8) / 8 : wave);
+    return toRGBColor(interpolateColor(base, GOAL_PULSE_BLACK, amount));
+  });
+}
+
 /** densable `zre` — `/goal active` indicator trailing the prompt notification row. */
 function ActiveGoalIndicator({ withSeparator }: { withSeparator: boolean }): ReactNode {
   const setAt = useAppState(s => s.activeGoal?.setAt);
+  const clock = useContext(ClockContext);
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
+  const anchorRef = useRef<{ setAt: number; clockStart: number } | null>(null);
+  const clockNow = clock ? () => clock.now() : Date.now;
+  if (setAt !== undefined && anchorRef.current?.setAt !== setAt) {
+    anchorRef.current = { setAt, clockStart: clockNow() - (Date.now() - setAt) };
+  }
   useEffect(() => {
-    if (setAt === undefined) return;
-    const elapsed = Math.max(0, Date.now() - setAt);
+    if (setAt === undefined || anchorRef.current === null) return;
+    const elapsed = Math.max(0, (clock ? clock.now() : Date.now()) - anchorRef.current.clockStart);
     const step = elapsed < 60_000 ? 1000 : 60_000;
     const delay = step - (elapsed % step);
+    if (clock) {
+      return clock.setTimeout(bump, delay);
+    }
     const timer = setTimeout(bump, delay);
     return () => clearTimeout(timer);
-  }, [setAt, tick]);
-  if (setAt === undefined) return null;
-  const elapsed = Math.max(0, Date.now() - setAt);
+  }, [setAt, tick, clock]);
+
+  const [currentTheme] = useTheme();
+  const permissionColor = getTheme(currentTheme).permission;
+  const pulsePalette = useMemo(() => {
+    if (chalk.level < 3) return null;
+    const rgb = parseRGB(permissionColor);
+    return rgb ? buildGoalPulsePalette(rgb, isGhosttyXtversion()) : null;
+  }, [permissionColor]);
+  const animMs = useAnimationTimer(setAt !== undefined && pulsePalette ? GOAL_PULSE_FRAME_MS : null);
+  const frameIndex = Math.floor(animMs / GOAL_PULSE_FRAME_MS) % GOAL_PULSE_STEPS;
+
+  if (setAt === undefined || anchorRef.current === null) return null;
+  const elapsed = Math.max(0, clockNow() - anchorRef.current.clockStart);
   const suffix = elapsed < 1000 ? '' : ` (${formatDuration(elapsed, { mostSignificantOnly: true })})`;
   return (
     <Box flexShrink={0}>
       {withSeparator ? <Text dimColor>{' · '}</Text> : null}
-      <Text color="permission">
+      <Text color={pulsePalette?.[frameIndex] ?? 'permission'}>
         <Text aria-hidden>{'◎ '}</Text>
         {`/goal active${suffix}`}
       </Text>
@@ -340,11 +506,7 @@ export function NotificationBody({ notification }: { notification: Notification 
   if ('segments' in notification && notification.segments) {
     return (
       <Text wrap="truncate" key={notification.key}>
-        {notification.segments.map((segment, i) => (
-          <Text key={i} dimColor={segment.dim} color={segment.color}>
-            {segment.text}
-          </Text>
-        ))}
+        <NotificationSegments segments={notification.segments} />
       </Text>
     );
   }
@@ -368,14 +530,11 @@ export function NotificationBody({ notification }: { notification: Notification 
 export function Notifications({
   apiKeyStatus,
   autoUpdaterResult,
-  debug,
   isAutoUpdating,
   verbose,
   messages,
   onAutoUpdaterResult,
   onChangeIsUpdating,
-  ideSelection,
-  mcpClients,
   isInputWrapped = false,
   hasStash = false,
 }: Props): ReactNode {
@@ -393,7 +552,6 @@ export function Notifications({
   const isBriefOnlyState = useAppState(s => s.isBriefOnly);
   const isBriefOnly = feature('KAIROS') || feature('KAIROS_BRIEF') ? isBriefOnlyState : false;
   const hold = useAppState(notificationsHoldToasts);
-  const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const notifications = useAppState(s => s.notifications);
   const { addNotification, removeNotification } = useNotifications();
   const claudeAiLimits = useClaudeAiLimits();
@@ -411,10 +569,6 @@ export function Notifications({
     });
     return () => setEnvHookNotifier(null);
   }, [addNotification]);
-
-  // Check if we should show the IDE selection indicator
-  const shouldShowIdeSelection =
-    ideStatus === 'connected' && (ideSelection?.filePath || (ideSelection?.text && ideSelection.lineCount > 0));
 
   // Check if we're in overage mode for UI indicators
   const isInOverageMode = claudeAiLimits.isUsingOverage;
@@ -479,109 +633,38 @@ export function Notifications({
     removeNotification,
   ]);
 
-  // Surface update status in the shared notification queue (fullscreen used to
-  // clip the inline AutoUpdater row to a single height=1 slot).
-  useEffect(() => {
-    if (autoUpdaterResult?.status === 'available' && autoUpdaterResult.version) {
-      addNotification({
-        key: 'auto-updater-result',
-        text: `Update available (${autoUpdaterResult.version}) · run claude update`,
-        color: 'warning',
-        priority: 'high',
-        timeoutMs: 60_000,
-      });
-      return;
-    }
-    if (autoUpdaterResult?.status === 'success' && autoUpdaterResult.version) {
-      addNotification({
-        key: 'auto-updater-result',
-        text: `✓ Update installed · Restart to apply (${autoUpdaterResult.version})`,
-        color: 'success',
-        priority: 'high',
-        timeoutMs: 30_000,
-      });
-      return;
-    }
-    if (autoUpdaterResult?.status === 'no_permissions') {
-      addNotification({
-        key: 'auto-updater-result',
-        text: 'Auto-update failed: no write permission to npm prefix · Run claude doctor',
-        color: 'error',
-        priority: 'high',
-        timeoutMs: 20_000,
-      });
-      return;
-    }
-    if (
-      autoUpdaterResult?.status === 'install_failed' &&
-      autoUpdaterResult.failureHint === 'windows_running_exe_lock'
-    ) {
-      addNotification({
-        key: 'auto-updater-result',
-        text: 'Auto-update failed: claude.exe in use (close other Claude Code sessions, including VS Code) · Run claude doctor',
-        color: 'error',
-        priority: 'high',
-        timeoutMs: 20_000,
-      });
-      return;
-    }
-    if (autoUpdaterResult?.status === 'install_failed') {
-      addNotification({
-        key: 'auto-updater-result',
-        text: 'Auto-update failed · Try claude doctor',
-        color: 'error',
-        priority: 'high',
-        timeoutMs: 20_000,
-      });
-      return;
-    }
-    if (isAutoUpdating) {
-      addNotification({
-        key: 'auto-updater-result',
-        text: 'Auto-updating…',
-        priority: 'low',
-        timeoutMs: 15_000,
-      });
-    }
-  }, [autoUpdaterResult, isAutoUpdating, addNotification]);
-
-  const onToastStackError = (error: Error): void => {
-    // densable AX/EX toast-stack BO unique English. Distinct from FEe pane hold.
-    logError(new Error('ui.toast: the toast stack threw while drawn'));
-    logError(new Error(`ui.toast threw while drawn: ${error.message}; no toast is drawn until the stack changes`));
-  };
-
   const showLoginNotice = apiKeyStatus === 'invalid' || apiKeyStatus === 'missing';
   const showVerboseTokens = verbose && !showLoginNotice;
   const currentVisible = isNotificationVisible(notifications.current, hold);
   // densable nse `co=!Me` — success copy yields the row to the compact warning.
   const showUpdaterSuccess = !isShowingCompactMessage;
-  // densable Ex `Xo` — left side is occupied when a notice is up OR an update is running.
+  const hasVisibleAutoUpdaterResult =
+    autoUpdaterResult !== null &&
+    (autoUpdaterResult.status === 'available' ||
+      autoUpdaterResult.status === 'install_failed' ||
+      autoUpdaterResult.status === 'no_permissions' ||
+      (autoUpdaterResult.status === 'success' && showUpdaterSuccess && Boolean(autoUpdaterResult.version)));
+  // densable Ex `Xo` — left side is occupied when a notice is up OR an update is running/rendered.
   const hasLeftContent = Boolean(
     currentVisible ||
       (isInOverageMode && !isTeamOrEnterprise) ||
       showLoginNotice ||
       showVerboseTokens ||
       isAutoUpdating ||
-      shouldShowIdeSelection ||
-      debug ||
-      autoUpdaterResult !== null,
+      hasVisibleAutoUpdaterResult,
   );
 
   return (
-    <SentryErrorBoundary name="ui.toast" onError={onToastStackError}>
+    <SentryErrorBoundary>
       {/* densable Ex: row of [Nn, stashed, ActiveGoalIndicator]. */}
       <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" flexShrink={0} overflowX="hidden">
         <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
           <NotificationContent
-            ideSelection={ideSelection}
-            mcpClients={mcpClients}
             notifications={notifications}
             hold={hold}
             isInOverageMode={isInOverageMode ?? false}
             isTeamOrEnterprise={isTeamOrEnterprise}
             apiKeyStatus={apiKeyStatus}
-            debug={debug}
             verbose={verbose}
             tokenUsage={tokenUsage}
             autoUpdaterElement={
@@ -609,21 +692,32 @@ export function Notifications({
   );
 }
 
+function MemoryUsageIndicator(): ReactNode {
+  const memoryUsage = useMemoryUsage();
+  if (getIsRemoteMode() || !memoryUsage || memoryUsage.status !== 'critical') {
+    return null;
+  }
+  const size = formatFileSize(memoryUsage.heapUsed);
+  const isFullscreen = isFullscreenEnvEnabled();
+  return (
+    <Box>
+      <Text color="error" wrap="truncate">
+        {`Critical memory usage (${size}) — restart and resume with claude --continue${!isFullscreen ? ', or run /compact' : ''}`}
+      </Text>
+    </Box>
+  );
+}
+
 function NotificationContent({
-  ideSelection,
-  mcpClients,
   notifications,
   hold,
   isInOverageMode,
   isTeamOrEnterprise,
   apiKeyStatus,
-  debug,
   verbose,
   tokenUsage,
   autoUpdaterElement,
 }: {
-  ideSelection: IDESelection | undefined;
-  mcpClients?: MCPServerConnection[];
   notifications: {
     current: Notification | null;
     queue: Notification[];
@@ -633,11 +727,31 @@ function NotificationContent({
   isInOverageMode: boolean;
   isTeamOrEnterprise: boolean;
   apiKeyStatus: VerificationStatus;
-  debug: boolean;
   verbose: boolean;
   tokenUsage: number;
   autoUpdaterElement: ReactNode;
 }): ReactNode {
+  const isRemoteMode = getIsRemoteMode();
+  const subscriptionType = getSubscriptionType();
+  const isProPlan = !isRemoteMode && subscriptionType === 'pro';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isProPlan) return;
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, [isProPlan]);
+  const lastCacheActivityAt = isProPlan
+    ? (getLastApiCompletionTimestamp() ?? summarizePromptCache().lastActivityAt)
+    : null;
+  const expiredCacheHint =
+    !isRemoteMode &&
+    subscriptionType === 'pro' &&
+    lastCacheActivityAt !== null &&
+    tokenUsage >= 50_000 &&
+    now - lastCacheActivityAt > 300_000
+      ? `~${Math.round(tokenUsage / 1000)}k uncached · /clear to start fresh`
+      : null;
+
   // Poll apiKeyHelper inflight state to show slow-helper notice.
   // Gated on configuration — most users never set apiKeyHelper, so the
   // effect is a no-op for them (no interval allocated).
@@ -675,7 +789,7 @@ function NotificationContent({
       {isInOverageMode && !isTeamOrEnterprise && (
         <Box>
           <Text dimColor wrap="truncate">
-            Now using extra usage
+            Now using usage credits
           </Text>
         </Box>
       )}
@@ -708,13 +822,6 @@ function NotificationContent({
           </Text>
         </Box>
       )}
-      {debug && (
-        <Box>
-          <Text color="warning" wrap="truncate">
-            Debug mode
-          </Text>
-        </Box>
-      )}
       {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && verbose && (
         <Box>
           <Text dimColor wrap="truncate">
@@ -722,8 +829,14 @@ function NotificationContent({
           </Text>
         </Box>
       )}
+      {expiredCacheHint && (
+        <Box>
+          <Text dimColor wrap="truncate">
+            {expiredCacheHint}
+          </Text>
+        </Box>
+      )}
       {autoUpdaterElement}
-      <IdeStatusIndicator ideSelection={ideSelection} mcpClients={mcpClients} />
       {feature('VOICE_MODE')
         ? voiceEnabled &&
           voiceError && (
@@ -734,9 +847,9 @@ function NotificationContent({
             </Box>
           )
         : null}
-      <MemoryUsageIndicator />
       <SandboxPromptFooterHint />
       {isNotificationVisible(notifications.current, hold) && <NotificationBody notification={notifications.current} />}
+      <MemoryUsageIndicator />
     </>
   );
 }

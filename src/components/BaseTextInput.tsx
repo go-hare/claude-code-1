@@ -1,6 +1,8 @@
 import React from 'react';
+import stripAnsi from 'strip-ansi';
 import { renderPlaceholder } from '../hooks/renderPlaceholder.js';
 import { usePasteHandler } from '../hooks/usePasteHandler.js';
+import type { LeadingPill } from '../hooks/useTextInput.js';
 import {
   FUNCTIONAL_KEY_NAMES,
   insertInputFromKeyboardEvent,
@@ -8,14 +10,64 @@ import {
 } from '../utils/keyboardEventInput.js';
 import { Ansi, Box, Input, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
 import type { DOMElement, KeyboardEvent, PasteEvent } from '@anthropic/ink';
-import type { BaseInputState, BaseTextInputProps } from '../types/textInputTypes.js';
+import type { BaseInputState, BaseTextInputProps, PromptInputMode } from '../types/textInputTypes.js';
 import { leftoverXy } from '../utils/leftoverXy.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { HighlightedInput } from './PromptInput/ShimmeredInput.js';
 
+type RenderedRowMapping = {
+  textStart: number;
+  renderedStart: number;
+  length: number;
+};
+
+function mapOffsetToRendered(rows: RenderedRowMapping[], offset: number, isEnd: boolean): number {
+  let lo = 0;
+  let hi = rows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const textStart = rows[mid]!.textStart;
+    if (isEnd ? textStart < offset : textStart <= offset) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  const row = rows[lo - 1];
+  return row ? row.renderedStart + Math.min(offset - row.textStart, row.length) : 0;
+}
+
+/**
+ * Remap highlight `[start, end]` from full-text code-unit offsets into
+ * `renderedValue` offsets across soft-wrapped / viewport-sliced rows.
+ */
+export function remapHighlightsToRenderedText(
+  highlights: TextHighlight[],
+  renderedValue: string,
+  renderedRowStartOffsets: number[],
+): TextHighlight[] {
+  const lineLengths = stripAnsi(renderedValue)
+    .split('\n')
+    .map(line => line.length);
+  const rows: RenderedRowMapping[] = [];
+  let renderedStart = 0;
+  for (const [index, textStart] of renderedRowStartOffsets.entries()) {
+    const length = lineLengths[index] ?? 0;
+    rows.push({ textStart, renderedStart, length });
+    renderedStart += length + 1;
+  }
+  return highlights
+    .map(h => ({
+      ...h,
+      start: mapOffsetToRendered(rows, h.start, false),
+      end: mapOffsetToRendered(rows, h.end, true),
+    }))
+    .filter(h => h.end > h.start);
+}
+
 type BaseTextInputComponentProps = BaseTextInputProps & {
-  inputState: BaseInputState;
+  inputState: BaseInputState & { renderedRowStartOffsets?: number[] };
   children?: React.ReactNode;
   terminalFocus: boolean;
   highlights?: TextHighlight[];
@@ -23,6 +75,9 @@ type BaseTextInputComponentProps = BaseTextInputProps & {
   hidePlaceholderText?: boolean;
   /** densable UTt `cursorCellPainted` — voice hex already painted the caret cell. */
   cursorCellPainted?: boolean;
+  leadingPill?: LeadingPill;
+  allowPrintableKeybindings?: boolean;
+  getInputMode?: () => PromptInputMode;
 };
 
 /**
@@ -149,19 +204,49 @@ export function BaseTextInput({
       ? props.highlights.filter(h => h.dimColor || props.cursorOffset < h.start || props.cursorOffset >= h.end)
       : props.highlights;
 
-  const { viewportCharOffset, viewportCharEnd } = inputState;
-  const filteredHighlights =
-    cursorFiltered && viewportCharOffset > 0
-      ? cursorFiltered
-          .filter(h => h.end > viewportCharOffset && h.start < viewportCharEnd)
-          .map(h => ({
-            ...h,
-            start: Math.max(0, h.start - viewportCharOffset),
-            end: h.end - viewportCharOffset,
-          }))
-      : cursorFiltered;
+  const leadingPillText = props.leadingPill?.text ?? '';
+  const pillAdjustedHighlights: TextHighlight[] | undefined = leadingPillText
+    ? [
+        {
+          start: 0,
+          end: leadingPillText.length - 1,
+          color: 'ide',
+          priority: 30,
+        },
+        ...(cursorFiltered ?? []).map(h => ({
+          ...h,
+          start: h.start + leadingPillText.length,
+          end: h.end + leadingPillText.length,
+        })),
+      ]
+    : cursorFiltered;
 
-  const hasHighlights = filteredHighlights && filteredHighlights.length > 0;
+  const { viewportCharOffset, viewportCharEnd, renderedRowStartOffsets } = inputState;
+  const filteredHighlights =
+    pillAdjustedHighlights && pillAdjustedHighlights.length > 0 && renderedRowStartOffsets
+      ? remapHighlightsToRenderedText(pillAdjustedHighlights, renderedValue, renderedRowStartOffsets)
+      : pillAdjustedHighlights && viewportCharOffset > 0
+        ? pillAdjustedHighlights
+            .filter(h => h.end > viewportCharOffset && h.start < viewportCharEnd)
+            .map(h => ({
+              ...h,
+              start: Math.max(0, h.start - viewportCharOffset),
+              end: h.end - viewportCharOffset,
+            }))
+        : pillAdjustedHighlights;
+
+  const hasPlaceholderContent = showPlaceholder && Boolean(props.placeholderElement || renderedPlaceholder);
+  const hasHighlights = Boolean(filteredHighlights && filteredHighlights.length > 0 && !hasPlaceholderContent);
+
+  const inputProps = {
+    ref: setBoxRef,
+    autoFocus: isActive,
+    disabled: !isActive,
+    allowPrintableKeybindings: props.allowPrintableKeybindings,
+    caret,
+    onKeyDown: isActive ? handleKeyDown : undefined,
+    onPaste: isActive ? onPaste : undefined,
+  };
 
   // densable UTt @202724600:
   //   highlight: n7 children = [preserve Box(Z), se, i]
@@ -170,7 +255,7 @@ export function BaseTextInput({
   // and not bare Input/Box row siblings (that flexes hint into a second column).
   // densable 2.1.218 #13: aria-preserve-whitespace on the input value so
   // trailing spaces (including the cursor cell) are not trimEnd'd in SR mode.
-  if (hasHighlights) {
+  if (hasHighlights && filteredHighlights) {
     // Gold highlight: se has wrap:"truncate-end".
     const highlightHint = showArgumentHint ? (
       <Text dimColor wrap="truncate-end">
@@ -179,15 +264,7 @@ export function BaseTextInput({
       </Text>
     ) : null;
     return (
-      <Input
-        ref={setBoxRef}
-        autoFocus={isActive}
-        disabled={!isActive}
-        textEntry={isActive}
-        caret={caret}
-        onKeyDown={isActive ? handleKeyDown : undefined}
-        onPaste={isActive ? onPaste : undefined}
-      >
+      <Input {...inputProps}>
         <Box flexShrink={0} accessibility={{ preserveWhitespace: true }}>
           <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
         </Box>
@@ -205,27 +282,19 @@ export function BaseTextInput({
     </Text>
   ) : null;
 
-  const valueNode =
-    showPlaceholder && props.placeholderElement ? (
-      props.placeholderElement
-    ) : showPlaceholder && renderedPlaceholder ? (
-      <Ansi>{renderedPlaceholder}</Ansi>
-    ) : (
-      <Text aria-preserve-whitespace>
-        <Ansi>{renderedValue}</Ansi>
-      </Text>
-    );
+  const valueNode = hasPlaceholderContent ? (
+    <>
+      {leadingPillText ? <Text color="ide">{leadingPillText}</Text> : null}
+      {props.placeholderElement ?? <Ansi>{renderedPlaceholder ?? ''}</Ansi>}
+    </>
+  ) : (
+    <Text aria-preserve-whitespace>
+      <Ansi>{renderedValue}</Ansi>
+    </Text>
+  );
 
   return (
-    <Input
-      ref={setBoxRef}
-      autoFocus={isActive}
-      disabled={!isActive}
-      textEntry={isActive}
-      caret={caret}
-      onKeyDown={isActive ? handleKeyDown : undefined}
-      onPaste={isActive ? onPaste : undefined}
-    >
+    <Input {...inputProps}>
       <Text wrap="truncate-end" dimColor={props.dimColor}>
         {valueNode}
         {argumentHint}

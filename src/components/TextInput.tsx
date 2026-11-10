@@ -4,9 +4,9 @@ import React, { useRef } from 'react';
 import { useVoiceState } from '../context/voice.js';
 import { useClipboardImageHint } from '../hooks/useClipboardImageHint.js';
 import { useSettings } from '../hooks/useSettings.js';
-import { useTextInput } from '../hooks/useTextInput.js';
+import { type LeadingPill, useTextInput } from '../hooks/useTextInput.js';
 import { Box, color, isNativeCursorEnabled, useAnimationFrame, useTerminalFocus, useTheme } from '@anthropic/ink';
-import type { BaseTextInputProps } from '../types/textInputTypes.js';
+import type { BaseTextInputProps, PromptInputMode } from '../types/textInputTypes.js';
 import { leftoverXt, leftoverXy } from '../utils/leftoverXy.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
@@ -35,6 +35,9 @@ const SILENCE_THRESHOLD = 0.15;
 
 export type Props = BaseTextInputProps & {
   highlights?: TextHighlight[];
+  leadingPill?: LeadingPill;
+  allowPrintableKeybindings?: boolean;
+  getInputMode?: () => PromptInputMode;
 };
 
 export default function TextInput(props: Props): React.ReactNode {
@@ -107,6 +110,8 @@ export default function TextInput(props: Props): React.ReactNode {
     invert,
     themeText: color('text', theme),
     columns: props.columns,
+    leadingPill: props.leadingPill,
+    getInputMode: props.getInputMode,
     maxVisibleLines: props.maxVisibleLines,
     onImagePaste: props.onImagePaste,
     disableCursorMovementForUpDownKeys: props.disableCursorMovementForUpDownKeys,

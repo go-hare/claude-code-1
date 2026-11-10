@@ -20,9 +20,13 @@ type TruncatedMessage = {
 export function maybeTruncateMessageForInput(
   text: string,
   nextPasteId: number,
+  force = false,
 ): TruncatedMessage {
   // If the text is short enough, return it as-is
-  if (text.length <= TRUNCATION_THRESHOLD) {
+  if (
+    (!force && text.length <= TRUNCATION_THRESHOLD) ||
+    text.length <= PREVIEW_LENGTH
+  ) {
     return {
       truncatedText: text,
       placeholderContent: '',
@@ -62,31 +66,76 @@ export function maybeTruncateInput(
   input: string,
   pastedContents: Record<number, PastedContent>,
 ): { newInput: string; newPastedContents: Record<number, PastedContent> } {
+  if (input.length <= TRUNCATION_THRESHOLD) {
+    return { newInput: input, newPastedContents: pastedContents }
+  }
+
   // Get the next available ID for the truncated content
   const existingIds = Object.keys(pastedContents).map(Number)
   const nextPasteId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1
 
+  const startLength = Math.floor(PREVIEW_LENGTH / 2)
+  const endBound = input.length - Math.floor(PREVIEW_LENGTH / 2)
+  const inlinedTextIds = new Set<number>()
+  const keptTextIds = new Set<number>()
+  const hoistedNonTextMatches: string[] = []
+  let expanded = input
+  const refs = parseReferences(input)
+
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]!
+    const entry = pastedContents[ref.id]
+    if (!entry) continue
+    const refEnd = ref.index + ref.match.length
+    const inTruncatedZone = refEnd > startLength && ref.index < endBound
+    if (entry.type !== 'text') {
+      if (inTruncatedZone) {
+        hoistedNonTextMatches.unshift(ref.match)
+        expanded = expanded.slice(0, ref.index) + expanded.slice(refEnd)
+      }
+      continue
+    }
+    if (!inTruncatedZone) {
+      keptTextIds.add(ref.id)
+      continue
+    }
+    expanded =
+      expanded.slice(0, ref.index) + entry.content + expanded.slice(refEnd)
+    inlinedTextIds.add(ref.id)
+  }
+
   // Apply truncation
   const { truncatedText, placeholderContent } = maybeTruncateMessageForInput(
-    input,
+    expanded,
     nextPasteId,
+    true,
   )
 
   if (!placeholderContent) {
     return { newInput: input, newPastedContents: pastedContents }
   }
 
-  return {
-    newInput: truncatedText,
-    newPastedContents: {
-      ...pastedContents,
-      [nextPasteId]: {
-        id: nextPasteId,
-        type: 'text',
-        content: placeholderContent,
-      },
-    },
+  let newInput = truncatedText
+  if (hoistedNonTextMatches.length > 0) {
+    newInput =
+      truncatedText.slice(0, startLength) +
+      hoistedNonTextMatches.join('') +
+      truncatedText.slice(startLength)
   }
+
+  const newPastedContents: Record<number, PastedContent> = {}
+  for (const [key, val] of Object.entries(pastedContents)) {
+    const id = Number(key)
+    if (inlinedTextIds.has(id) && !keptTextIds.has(id)) continue
+    newPastedContents[id] = val
+  }
+  newPastedContents[nextPasteId] = {
+    id: nextPasteId,
+    type: 'text',
+    content: placeholderContent,
+  }
+
+  return { newInput, newPastedContents }
 }
 
 /**

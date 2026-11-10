@@ -59,7 +59,8 @@ export function useFastModeNotification(): void {
       setAppState(prev => ({ ...prev, fastMode: false }));
       addNotification({
         key: OVERAGE_REJECTED_KEY,
-        color: 'warning',
+        kind: 'feedback',
+        color: 'error',
         priority: 'immediate',
         text: message,
       });

@@ -9,6 +9,7 @@ import {
   isAutoCompactEnabled,
 } from '../services/compact/autoCompact.js';
 import { useCompactWarningSuppression } from '../services/compact/compactWarningHook.js';
+import { isEnvTruthy } from '../utils/envUtils.js';
 import { getUpgradeMessage } from '../utils/model/contextWindowUpgradeCheck.js';
 
 type Props = {
@@ -51,7 +52,7 @@ function CollapseLabel({ upgradeMessage }: { upgradeMessage: string | null }): R
     const problem = errors > 0 ? `collapse errors: ${errors}` : `collapse idle (${emptySpawns} empty runs)`;
     return (
       <Text color="warning" wrap="truncate">
-        {total > 0 ? `${collapsed} / ${total} summarized \u00b7 ${problem}` : problem}
+        {total > 0 ? `${collapsed} / ${total} summarized · ${problem}` : problem}
       </Text>
     );
   }
@@ -61,13 +62,13 @@ function CollapseLabel({ upgradeMessage }: { upgradeMessage: string | null }): R
   const label = `${collapsed} / ${total} summarized`;
   return (
     <Text dimColor wrap="truncate">
-      {upgradeMessage ? `${label} \u00b7 ${upgradeMessage}` : label}
+      {upgradeMessage ? `${label} · ${upgradeMessage}` : label}
     </Text>
   );
 }
 
 export function TokenWarning({ tokenUsage, model }: Props): React.ReactNode {
-  const { percentLeft, isAboveWarningThreshold, isAboveErrorThreshold } = calculateTokenWarningState(tokenUsage, model);
+  const { percentLeft, isAboveWarningThreshold } = calculateTokenWarningState(tokenUsage, model);
 
   // Use reactive hook to check if warning should be suppressed
   const suppressWarning = useCompactWarningSuppression();
@@ -122,18 +123,21 @@ export function TokenWarning({ tokenUsage, model }: Props): React.ReactNode {
   const autocompactLabel = reactiveOnlyMode
     ? `${100 - displayPercentLeft}% context used`
     : `${displayPercentLeft}% until auto-compact`;
+  const compactDisabled = isEnvTruthy(process.env.DISABLE_COMPACT);
 
   return (
     <Box flexDirection="row">
       {showAutoCompactWarning ? (
         <Text dimColor wrap="truncate">
-          {upgradeMessage ? `${autocompactLabel} \u00b7 ${upgradeMessage}` : autocompactLabel}
+          {upgradeMessage ? `${autocompactLabel} · ${upgradeMessage}` : autocompactLabel}
         </Text>
       ) : (
-        <Text color={isAboveErrorThreshold ? 'error' : 'warning'} wrap="truncate">
+        <Text color="error" wrap="truncate">
           {upgradeMessage
-            ? `Context low (${percentLeft}% remaining) \u00b7 ${upgradeMessage}`
-            : `Context low (${percentLeft}% remaining) \u00b7 Run /compact to compact & continue`}
+            ? `Context low (${percentLeft}% remaining) · ${upgradeMessage}`
+            : compactDisabled
+              ? `Context low (${percentLeft}% remaining)`
+              : `Context low (${percentLeft}% remaining) · Run /compact to compact & continue`}
         </Text>
       )}
     </Box>

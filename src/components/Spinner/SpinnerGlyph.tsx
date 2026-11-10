@@ -51,7 +51,7 @@ export function SpinnerGlyph({
     char = REDUCED_MOTION_DOT;
     if (baseRGB) {
       const mid = interpolateColor(baseRGB, PULSE_BLACK, 0.5);
-      const interpolated = interpolateColor(mid, baseRGB, pulse);
+      const interpolated = interpolateColor(mid, baseRGB, Math.round(pulse * 8) / 8);
       color = toRGBColor(interpolated);
     } else {
       color = colorKey;
@@ -67,7 +67,7 @@ export function SpinnerGlyph({
       const baseColorStr = theme[messageColor];
       const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
       if (baseRGB) {
-        color = toRGBColor(interpolateColor(baseRGB, ERROR_RED, stalledIntensity));
+        color = toRGBColor(interpolateColor(baseRGB, ERROR_RED, Math.round(stalledIntensity * 8) / 8));
       } else {
         color = stalledIntensity > 0.5 ? 'error' : messageColor;
       }
@@ -78,7 +78,7 @@ export function SpinnerGlyph({
       const warningRGB = warningStr ? parseRGB(warningStr) : null;
       bold = thinkingIntensity >= 0.5;
       if (baseRGB && warningRGB) {
-        color = toRGBColor(interpolateColor(baseRGB, warningRGB, thinkingIntensity));
+        color = toRGBColor(interpolateColor(baseRGB, warningRGB, Math.round(thinkingIntensity * 8) / 8));
       } else {
         color = thinkingIntensity > 0.5 ? 'warning' : messageColor;
       }

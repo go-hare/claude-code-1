@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { useState } from 'react';
-import { Text } from '@anthropic/ink';
+import { useEffect, useState } from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { logEvent } from '../../services/analytics/index.js';
 import {
   checkCachedPassesEligibility,
@@ -25,7 +25,7 @@ function resetIfPassesRefreshed(): void {
   }
 }
 
-function shouldShowGuestPassesUpsell(): boolean {
+export function shouldShowGuestPassesUpsell(): boolean {
   const { eligible, hasCache } = checkCachedPassesEligibility();
   // Only show if eligible and cache exists (don't block on fetch)
   if (!eligible || !hasCache) return false;
@@ -44,6 +44,8 @@ export function useShowGuestPassesUpsell(): boolean {
   return show;
 }
 
+let countedThisSession = false;
+
 export function incrementGuestPassesSeenCount(): void {
   let newCount = 0;
   saveGlobalConfig(prev => {
@@ -58,15 +60,28 @@ export function incrementGuestPassesSeenCount(): void {
   });
 }
 
-// Condensed layout for mini welcome screen
+// Condensed layout for mini welcome screen / StatusNotices announcement slot
 export function GuestPassesUpsell(): React.ReactNode {
   const reward = getCachedReferrerReward();
   return (
     <Text dimColor>
       <Text color="claude">[✻]</Text> <Text color="claude">[✻]</Text> <Text color="claude">[✻]</Text> ·{' '}
       {reward
-        ? `Share Claude Code and earn ${formatCreditAmount(reward)} of extra usage · /passes`
+        ? `Share Claude Code and earn ${formatCreditAmount(reward)} in usage credits · /passes`
         : '3 guest passes at /passes'}
     </Text>
+  );
+}
+
+export function GuestPassesNotice(): React.ReactNode {
+  useEffect(() => {
+    if (countedThisSession) return;
+    countedThisSession = true;
+    incrementGuestPassesSeenCount();
+  }, []);
+  return (
+    <Box>
+      <GuestPassesUpsell />
+    </Box>
   );
 }

@@ -22,11 +22,35 @@ import { Message } from '../Message.js';
 /** densable `Dx` — Uye / CA prefix (U+29C9 + space). */
 export const QUEUED_IDE_SELECTION_PREFIX = '⧉ ';
 
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const ANSI_ESCAPE_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable Y3t ANSI escape stripper
+  /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)/g;
+const BIDI_OVERRIDE_RE = /[‪-‮⁦-⁩]/g;
+const HIDDEN_CONTROL_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: densable qee C0/C1 control stripper
+  /[\x00-\x08\x0E-\x1F\x7F-\x9F]/g;
+
+function stripAnsiIterated(input: string): string {
+  let out = input;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = out.replace(ANSI_ESCAPE_RE, '');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
 function selectionFileBasename(filePath: string): string {
   const slash = filePath.lastIndexOf('/');
   const back = filePath.lastIndexOf('\\');
   const i = slash >= 0 ? slash : back;
-  return filePath.slice(i + 1);
+  const raw = filePath.slice(i + 1);
+  return stripAnsiIterated(raw.replace(LONE_SURROGATE_RE, ''))
+    .replace(BIDI_OVERRIDE_RE, '')
+    .replace(HIDDEN_CONTROL_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -174,7 +198,7 @@ function PromptInputQueuedCommandsImpl({
           }
           // [Image #N] placeholders are inline in the text value (inserted at
           // paste time), so the queue preview shows them without stub blocks.
-          return createUserMessage({ content });
+          return createUserMessage({ content, origin: cmd.origin });
         }),
       ),
       processedCommands,
@@ -203,7 +227,7 @@ function PromptInputQueuedCommandsImpl({
     ) : null;
 
   return (
-    <Box marginTop={1} flexDirection="column">
+    <Box flexDirection="column">
       {prepared.messages.map((message, i) => {
         const cmd = prepared.processedCommands[i];
         const nextCmd = prepared.processedCommands[i + 1];
@@ -221,7 +245,7 @@ function PromptInputQueuedCommandsImpl({
             <Message
               message={message}
               lookups={EMPTY_LOOKUPS}
-              addMargin={false}
+              addMargin={i === 0 || (cmd !== undefined && isQueuedCommandEditable(cmd))}
               tools={[]}
               commands={[]}
               verbose={false}

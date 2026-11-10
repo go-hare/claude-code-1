@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Box, Text, stringWidth } from '@anthropic/ink';
 import TextInput from '../TextInput.js';
+import { isVimModeEnabled } from './utils.js';
 
 type Props = {
   value: string;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 function HistorySearchInput({ value, onChange, historyFailedMatch }: Props): React.ReactNode {
+  const vimEnabled = isVimModeEnabled();
   return (
     <Box gap={1}>
       <Text dimColor>{historyFailedMatch ? 'no matching prompt:' : 'search prompts:'}</Text>
@@ -24,6 +26,7 @@ function HistorySearchInput({ value, onChange, historyFailedMatch }: Props): Rea
         multiline={false}
         dimColor={true}
       />
+      {vimEnabled && value === '' && <Text dimColor>esc i / for slash commands</Text>}
     </Box>
   );
 }

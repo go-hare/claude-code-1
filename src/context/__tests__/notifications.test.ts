@@ -23,7 +23,7 @@ function textNotif(
 }
 
 describe('applyNonImmediateNotification', () => {
-  test('same key on current: replace content and reset timeout', () => {
+  test('same key on current without fold: deduplicates and preserves timeout', () => {
     const current = textNotif({
       key: 'effort-level',
       priority: 'high',
@@ -37,12 +37,12 @@ describe('applyNonImmediateNotification', () => {
 
     const applied = applyNonImmediateNotification(bucket(current), incoming)
 
-    expect(applied.timeoutAction).toBe('reset')
-    expect(applied.notifications.current).toEqual(incoming)
+    expect(applied.timeoutAction).toBe('none')
+    expect(applied.notifications.current).toBe(current)
     expect(applied.notifications.queue).toEqual([])
   })
 
-  test('same key in queue: replace queued entry without touching current', () => {
+  test('same key in queue without fold: deduplicates without touching current', () => {
     const current = textNotif({
       key: 'other',
       priority: 'medium',
@@ -66,7 +66,7 @@ describe('applyNonImmediateNotification', () => {
 
     expect(applied.timeoutAction).toBe('none')
     expect(applied.notifications.current).toBe(current)
-    expect(applied.notifications.queue).toEqual([incoming])
+    expect(applied.notifications.queue).toEqual([queued])
   })
 
   test('fold on current merges and resets timeout', () => {
@@ -164,14 +164,15 @@ describe('applyNonImmediateNotification', () => {
     }
     const incoming: Notification = {
       ...current,
+      invalidates: ['idle-return-hint'],
       segments: [
         { text: 'new task? ', dim: true },
         { text: '/clear', color: 'suggestion' },
       ],
     }
-    const applied = applyNonImmediateNotification(bucket(current), incoming)
-    expect(applied.timeoutAction).toBe('reset')
-    expect(applied.notifications.current).toEqual(incoming)
+    const applied = applyNonImmediateNotification(bucket(null), incoming)
+    expect(applied.timeoutAction).toBe('none')
+    expect(applied.notifications.queue).toEqual([incoming])
     expect(applied.notifications.pinned).toEqual([])
   })
 })

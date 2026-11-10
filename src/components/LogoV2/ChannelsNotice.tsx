@@ -1,32 +1,36 @@
-// Conditionally require()'d in LogoV2.tsx behind feature('KAIROS') ||
-// feature('KAIROS_CHANNELS'). No feature() guard here — the whole file
-// tree-shakes via the require pattern when both flags are false (see
-// docs/feature-gating.md). Do NOT import this module statically from
+// Conditionally require()'d in statusNoticeDefinitions.tsx behind
+// feature('KAIROS') || feature('KAIROS_CHANNELS'). No feature() guard here —
+// the whole file tree-shakes via the require pattern when both flags are false
+// (see docs/feature-gating.md). Do NOT import this module statically from
 // unguarded code.
 
 import * as React from 'react';
 import { useState } from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { type ChannelEntry, getAllowedChannels, getHasDevChannels } from '../../bootstrap/state.js';
 import { getBuiltinPlugins } from '../../plugins/builtinPlugins.js';
-import { Box, Text } from '@anthropic/ink';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';
+import { getAPIProvider } from '../../utils/model/providers.js';
 import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js';
 
 export function ChannelsNotice(): React.ReactNode {
   // Snapshot all reads at mount. This notice enters scrollback immediately
   // after the logo; any re-render past that point forces a full terminal
   // reset.
-  const [{ channels, list, unmatched }] = useState(() => {
+  const [{ channels, is3P, list, unmatched }] = useState(() => {
     const ch = getAllowedChannels();
-    if (ch.length === 0)
+    if (ch.length === 0) {
       return {
         channels: ch,
+        is3P: false,
         list: '',
         unmatched: [] as Unmatched[],
       };
+    }
     const l = ch.map(formatEntry).join(', ');
     return {
       channels: ch,
+      is3P: getAPIProvider() !== 'firstParty',
       list: l,
       unmatched: findUnmatched(ch),
     };
@@ -43,15 +47,21 @@ export function ChannelsNotice(): React.ReactNode {
         ? '--dangerously-load-development-channels'
         : '--channels';
 
-  // "Listening for" not "active" — at this point we only know the allowlist
-  // was set. Server connection, capability declaration, and whether the name
-  // even matches a configured MCP server are all still unknown.
+  if (is3P) {
+    return (
+      <Box flexDirection="column">
+        <Text color="warning">
+          {flag} ignored ({list})
+        </Text>
+        <Text dimColor>Channels are not available on third-party providers</Text>
+      </Box>
+    );
+  }
+
   return (
-    <Box paddingLeft={2} flexDirection="column">
-      <Text color="error">Listening for channel messages from: {list}</Text>
+    <Box flexDirection="column">
       <Text dimColor>
-        Experimental · inbound messages will be pushed into this session, this carries prompt injection risks. Restart
-        Claude Code without {flag} to disable.
+        Channels (experimental) messages from {list} inject directly in this session · restart without {flag} to stop
       </Text>
       {unmatched.map(u => (
         <Text key={`${formatEntry(u.entry)}:${u.why}`} color="warning">

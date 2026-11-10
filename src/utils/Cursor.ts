@@ -123,9 +123,9 @@ type Position = {
   column: number
 }
 
-/** densable 2.1.239 `lVl` — Pasted/Image/Audio/Truncated chips hop as one unit. */
+/** densable 2.1.289 `st` — Pasted/Image/Audio/Truncated chips and IDE `[⧉ ...]` leading pills hop as one unit. */
 const PLACEHOLDER_RE_SRC =
-  '\\[(?:Pasted text|Image|Audio|\\.\\.\\.Truncated text) #\\d+(?: \\+\\d+ lines)?\\.*\\]'
+  '(?:\\[(?:Pasted text|Image|Audio|\\.\\.\\.Truncated text|✦ Team setup guide) #\\d+(?: \\+\\d+ lines)?\\.*\\]|\\[⧉ [^\\]\\n]+\\])'
 const PLACEHOLDER_ENDING_RE = new RegExp(`${PLACEHOLDER_RE_SRC}$`)
 const PLACEHOLDER_STARTING_RE = new RegExp(`^${PLACEHOLDER_RE_SRC}`)
 const PLACEHOLDER_GLOBAL_RE = new RegExp(PLACEHOLDER_RE_SRC, 'g')
@@ -167,6 +167,27 @@ export class Cursor {
       startLine = Math.max(0, endLine - maxVisibleLines)
     }
     return startLine
+  }
+
+  getViewportLineRange(maxVisibleLines?: number): {
+    startLine: number
+    endLine: number
+  } {
+    const totalLines = this.measuredText.getWrappedLines().length
+    const startLine = this.getViewportStartLine(maxVisibleLines)
+    const endLine =
+      maxVisibleLines !== undefined && maxVisibleLines > 0
+        ? Math.min(totalLines, startLine + maxVisibleLines)
+        : totalLines
+    return { startLine, endLine }
+  }
+
+  getRenderedRowStartOffsets(maxVisibleLines?: number): number[] {
+    const { startLine, endLine } = this.getViewportLineRange(maxVisibleLines)
+    return this.measuredText
+      .getWrappedLines()
+      .slice(startLine, endLine)
+      .map(line => line.displayStartOffset)
   }
 
   getViewportCharOffset(maxVisibleLines?: number): number {
@@ -459,6 +480,7 @@ export class Cursor {
 
   // Helper methods for finding logical line boundaries
   private findLogicalLineStart(fromOffset: number = this.offset): number {
+    if (fromOffset === 0) return 0
     const prevNewline = this.text.lastIndexOf('\n', fromOffset - 1)
     return prevNewline === -1 ? 0 : prevNewline + 1
   }
@@ -1175,12 +1197,19 @@ export class Cursor {
 }
 
 class WrappedLine {
+  public readonly displayText: string
+  public readonly displayStartOffset: number
+
   constructor(
     public readonly text: string,
     public readonly startOffset: number,
     public readonly isPrecededByNewline: boolean,
     public readonly endsWithNewline: boolean = false,
-  ) {}
+  ) {
+    this.displayText = isPrecededByNewline ? text : text.trimStart()
+    this.displayStartOffset =
+      startOffset + (text.length - this.displayText.length)
+  }
 
   equals(other: WrappedLine): boolean {
     return this.text === other.text && this.startOffset === other.startOffset
@@ -1477,9 +1506,7 @@ export class MeasuredText {
   }
 
   public getWrappedText(): WrappedText {
-    return this.wrappedLines.map(line =>
-      line.isPrecededByNewline ? line.text : line.text.trimStart(),
-    )
+    return this.wrappedLines.map(line => line.displayText)
   }
 
   public getWrappedLines(): WrappedLine[] {
@@ -1499,10 +1526,9 @@ export class MeasuredText {
       return wrappedLine.startOffset
     }
 
-    // Account for leading whitespace
-    const leadingWhitespace = wrappedLine.isPrecededByNewline
-      ? 0
-      : wrappedLine.text.length - wrappedLine.text.trimStart().length
+    // Account for leading whitespace trimmed on soft-wrapped continuation lines
+    const leadingWhitespace =
+      wrappedLine.displayStartOffset - wrappedLine.startOffset
 
     // Convert display column to string index
     const displayColumnWithLeading = position.column + leadingWhitespace
@@ -1526,7 +1552,7 @@ export class MeasuredText {
       maxOffset = lineEnd + 1
     }
 
-    return Math.min(offset, maxOffset)
+    return this.snapToGraphemeBoundary(Math.min(offset, maxOffset))
   }
 
   public getLineLength(line: number): number {
@@ -1557,16 +1583,15 @@ export class MeasuredText {
         } else {
           // For wrapped lines, we need to account for trimmed whitespace
           const leadingWhitespace =
-            currentLine.text.length - currentLine.text.trimStart().length
+            currentLine.displayStartOffset - currentLine.startOffset
           if (stringPosInLine < leadingWhitespace) {
             // Cursor is in the trimmed whitespace area, position at start
             displayColumn = 0
           } else {
             // Calculate display width from the trimmed text
-            const trimmedText = currentLine.text.trimStart()
             const posInTrimmed = stringPosInLine - leadingWhitespace
             displayColumn = this.stringIndexToDisplayWidth(
-              trimmedText,
+              currentLine.displayText,
               posInTrimmed,
             )
           }

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { VimMode } from 'src/types/textInputTypes.js'
 import type { PastedContent } from 'src/utils/config.js'
+import { getPromptInputStoreVimMode } from 'src/utils/promptInputCursorStore.js'
 import { maybeTruncateInput } from './inputPaste.js'
+import { isVimModeEnabled } from './utils.js'
 
 type Props = {
   input: string
@@ -8,6 +11,7 @@ type Props = {
   onInputChange: (input: string) => void
   setCursorOffset: (offset: number) => void
   setPastedContents: (contents: Record<number, PastedContent>) => void
+  vimMode?: VimMode
 }
 
 export function useMaybeTruncateInput({
@@ -16,6 +20,7 @@ export function useMaybeTruncateInput({
   onInputChange,
   setCursorOffset,
   setPastedContents,
+  vimMode,
 }: Props) {
   // Track if we've initialized this specific input value
   const [hasAppliedTruncationToInput, setHasAppliedTruncationToInput] =
@@ -37,7 +42,12 @@ export function useMaybeTruncateInput({
     )
 
     onInputChange(newInput)
-    setCursorOffset(newInput.length)
+    const effectiveVimMode = vimMode ?? getPromptInputStoreVimMode()
+    const nextOffset =
+      isVimModeEnabled() && effectiveVimMode === 'NORMAL' && newInput.length > 0
+        ? Math.max(0, newInput.length - 1)
+        : newInput.length
+    setCursorOffset(nextOffset)
     setPastedContents(newPastedContents)
     setHasAppliedTruncationToInput(true)
   }, [
@@ -47,6 +57,7 @@ export function useMaybeTruncateInput({
     onInputChange,
     setPastedContents,
     setCursorOffset,
+    vimMode,
   ])
 
   // Reset hasInitializedInput when input is cleared (e.g., after submission)

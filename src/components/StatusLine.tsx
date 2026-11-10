@@ -13,7 +13,6 @@ import {
   getSessionId,
 } from '../bootstrap/state.js';
 import { DEFAULT_OUTPUT_STYLE_NAME } from '../constants/outputStyles.js';
-import { useNotifications } from '../context/notifications.js';
 import {
   getTotalAPIDuration,
   getTotalCost,
@@ -37,11 +36,13 @@ import { checkHasTrustDialogAccepted } from '../utils/config.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../utils/context.js';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
+import { type EffortLevel, type EffortValue, getDisplayedEffortLevel, modelSupportsEffort } from '../utils/effort.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js';
 import { getLastAssistantMessage } from '../utils/messages.js';
 import { getRuntimeMainLoopModel, type ModelName, renderModelName } from '../utils/model/model.js';
 import { getCurrentSessionTitle } from '../utils/sessionStorage.js';
+import { modelRejectsDisabledThinking } from '../utils/thinking.js';
 import { doesMostRecentAssistantMessageExceed200k, getCurrentUsage } from '../utils/tokens.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
 import { isVimModeEnabled } from './PromptInput/utils.js';
@@ -170,7 +171,14 @@ export function statusLineShouldDisplay(settings: ReadonlySettings): boolean {
   return settings?.statusLineEnabled === true || !!settings?.statusLine?.command;
 }
 
-function buildStatusLineCommandInput(
+export type StatusLinePrStatus = {
+  number: number;
+  url: string;
+  reviewState?: string | null;
+  kind?: string;
+};
+
+export function buildStatusLineCommandInput(
   permissionMode: PermissionMode,
   exceeds200kTokens: boolean,
   settings: ReadonlySettings,
@@ -178,7 +186,21 @@ function buildStatusLineCommandInput(
   addedDirs: string[],
   mainLoopModel: ModelName,
   vimMode?: VimMode,
-): StatusLineCommandInput {
+  fastMode?: boolean,
+  effortValue?: EffortValue,
+  thinkingEnabled?: boolean,
+  prStatus?: StatusLinePrStatus | null,
+): StatusLineCommandInput & {
+  fast_mode: boolean;
+  effort?: { level: EffortLevel };
+  thinking: { enabled: boolean };
+  pr?: {
+    number: number;
+    url: string;
+    review_state?: string;
+    kind?: string;
+  };
+} {
   const agentType = getMainThreadAgentType();
   const worktreeSession = getCurrentWorktreeSession();
   const runtimeModel = getRuntimeMainLoopModel({
@@ -196,6 +218,13 @@ function buildStatusLineCommandInput(
   const sessionName = getCurrentSessionTitle(sessionId);
   const rawUtil = getRawUtilization();
   const rateLimits = statusLineRateLimits(rawUtil, getAPIProvider());
+  const supportsEffort = modelSupportsEffort(runtimeModel);
+  const level = getDisplayedEffortLevel(runtimeModel, effortValue);
+  const enabled = thinkingEnabled !== false || modelRejectsDisabledThinking(runtimeModel);
+  const number = prStatus?.number ?? 0;
+  const url = prStatus?.url ?? '';
+  const review_state = prStatus?.reviewState ?? undefined;
+  const kind = prStatus?.kind;
   return {
     ...createBaseHookInput(),
     ...(sessionName && { session_name: sessionName }),
@@ -229,6 +258,9 @@ function buildStatusLineCommandInput(
     },
     exceeds_200k_tokens: exceeds200kTokens,
     ...promptCacheCommandFields(),
+    fast_mode: Boolean(fastMode),
+    ...(supportsEffort && { effort: { level } }),
+    thinking: { enabled },
     ...(rateLimits && {
       rate_limits: rateLimits,
     }),
@@ -245,6 +277,14 @@ function buildStatusLineCommandInput(
     ...(getIsRemoteMode() && {
       remote: {
         session_id: getSessionId(),
+      },
+    }),
+    ...(prStatus && {
+      pr: {
+        number,
+        url,
+        ...(review_state && { review_state }),
+        ...(kind && { kind }),
       },
     }),
     ...(worktreeSession && {
@@ -271,14 +311,59 @@ export function getLastAssistantMessageId(messages: Message[]): string | null {
   return getLastAssistantMessage(messages)?.uuid ?? null;
 }
 
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+export function resolveStatusLineRefreshIntervalMs(refreshInterval: number | undefined): number | null {
+  return refreshInterval === undefined ? null : Math.max(1, refreshInterval) * 1000;
+}
+
+const STATUSLINE_ANSI_CARRY_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: carry SGR and OSC-8 sequences across statusline lines
+  /\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+export function splitStatusLineOutput(text: string): string[] {
+  const lines = text.split('\n');
+  if (lines.length === 1) return lines;
+  const result = [lines[0]!];
+  let carriedAnsi = '';
+  for (let i = 1; i < lines.length; i++) {
+    carriedAnsi += (lines[i - 1]!.match(STATUSLINE_ANSI_CARRY_RE) ?? []).join('');
+    result.push(carriedAnsi + lines[i]!);
+  }
+  return result;
+}
+
+function StatusLineOutput({ text }: { text: string }): React.ReactNode {
+  const lines = splitStatusLineOutput(text);
+  if (lines.length === 1) {
+    return (
+      <Text dimColor wrap="truncate">
+        <Ansi>{text}</Ansi>
+      </Text>
+    );
+  }
+  return (
+    <Box flexDirection="column">
+      {lines.map((line, index) => (
+        <Text key={index} dimColor wrap="truncate">
+          <Ansi>{line}</Ansi>
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
 function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props): React.ReactNode {
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const permissionMode = useAppState(s => s.toolPermissionContext.mode);
   const additionalWorkingDirectories = useAppState(s => s.toolPermissionContext.additionalWorkingDirectories);
   const statusLineText = useAppState(s => s.statusLineText);
+  const fastMode = useAppState(s => Boolean(s.fastMode));
+  const effortValue = useAppState(s => s.effortValue);
+  const thinkingEnabled = useAppState(s => s.thinkingEnabled);
+  const prStatus = useAppState(s => (s as { prStatus?: StatusLinePrStatus | null }).prStatus ?? null);
   const setAppState = useSetAppState();
   const settings = useSettings();
-  const { addNotification } = useNotifications();
   // AppState-sourced model — same source as API requests. getMainLoopModel()
   // re-reads settings.json on every call, so another session's /model write
   // would leak into this session's statusline (anthropics/claude-code#37596).
@@ -295,6 +380,14 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   addedDirsRef.current = additionalWorkingDirectories;
   const mainLoopModelRef = useRef(mainLoopModel);
   mainLoopModelRef.current = mainLoopModel;
+  const fastModeRef = useRef(fastMode);
+  fastModeRef.current = fastMode;
+  const effortValueRef = useRef(effortValue);
+  effortValueRef.current = effortValue;
+  const thinkingEnabledRef = useRef(thinkingEnabled);
+  thinkingEnabledRef.current = thinkingEnabled;
+  const prStatusRef = useRef(prStatus);
+  prStatusRef.current = prStatus;
 
   // Track previous state to detect changes and cache expensive calculations
   const previousStateRef = useRef<{
@@ -303,12 +396,20 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     permissionMode: PermissionMode;
     vimMode: VimMode | undefined;
     mainLoopModel: ModelName;
+    fastMode: boolean;
+    effortValue: EffortValue | undefined;
+    thinkingEnabled: boolean | undefined;
+    prStatus: StatusLinePrStatus | null;
   }>({
     messageId: null,
     exceeds200kTokens: false,
     permissionMode,
     vimMode,
     mainLoopModel,
+    fastMode,
+    effortValue,
+    thinkingEnabled,
+    prStatus,
   });
 
   // Debounce timer ref
@@ -356,6 +457,10 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
         Array.from(addedDirsRef.current.keys()),
         mainLoopModelRef.current,
         vimModeRef.current,
+        fastModeRef.current,
+        effortValueRef.current,
+        thinkingEnabledRef.current,
+        prStatusRef.current,
       );
 
       const text = await executeStatusLineCommand(statusInput, controller.signal, undefined, logResult);
@@ -399,16 +504,34 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       lastAssistantMessageId !== previousStateRef.current.messageId ||
       permissionMode !== previousStateRef.current.permissionMode ||
       vimMode !== previousStateRef.current.vimMode ||
-      mainLoopModel !== previousStateRef.current.mainLoopModel
+      mainLoopModel !== previousStateRef.current.mainLoopModel ||
+      fastMode !== previousStateRef.current.fastMode ||
+      effortValue !== previousStateRef.current.effortValue ||
+      thinkingEnabled !== previousStateRef.current.thinkingEnabled ||
+      prStatus !== previousStateRef.current.prStatus
     ) {
       // Don't update messageId here — let doUpdate handle it so
       // exceeds200kTokens is recalculated with the latest messages
       previousStateRef.current.permissionMode = permissionMode;
       previousStateRef.current.vimMode = vimMode;
       previousStateRef.current.mainLoopModel = mainLoopModel;
+      previousStateRef.current.fastMode = fastMode;
+      previousStateRef.current.effortValue = effortValue;
+      previousStateRef.current.thinkingEnabled = thinkingEnabled;
+      previousStateRef.current.prStatus = prStatus;
       scheduleUpdate();
     }
-  }, [lastAssistantMessageId, permissionMode, vimMode, mainLoopModel, scheduleUpdate]);
+  }, [
+    lastAssistantMessageId,
+    permissionMode,
+    vimMode,
+    mainLoopModel,
+    fastMode,
+    effortValue,
+    thinkingEnabled,
+    prStatus,
+    scheduleUpdate,
+  ]);
 
   // When the statusLine command changes (hot reload), log the next result
   const statusLineCommand = settings?.statusLine?.command;
@@ -422,6 +545,25 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     void doUpdate();
   }, [statusLineCommand, doUpdate]);
 
+  // Periodic refresh when statusLine.refreshInterval is configured
+  const refreshInterval = settings?.statusLine?.refreshInterval;
+  useEffect(() => {
+    const intervalMs = resolveStatusLineRefreshIntervalMs(refreshInterval);
+    if (intervalMs === null) return;
+    const delay = Math.min(MAX_TIMEOUT_MS, intervalMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      scheduleUpdate();
+      timer = setTimeout(tick, delay);
+    };
+    timer = setTimeout(tick, delay);
+    return () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    };
+  }, [refreshInterval, scheduleUpdate]);
+
   // Separate effect for logging on mount
   useEffect(() => {
     const statusLine = settings?.statusLine;
@@ -434,16 +576,7 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       if (settings.disableAllHooks === true) {
         logForDebugging('Status line is configured but disableAllHooks is true', { level: 'warn' });
       }
-      // executeStatusLineCommand (hooks.ts) returns undefined when trust is
-      // blocked — statusLineText stays undefined forever, user sees nothing,
-      // and tengu_status_line_mount above fires anyway so telemetry looks fine.
       if (!checkHasTrustDialogAccepted()) {
-        addNotification({
-          key: 'statusline-trust-blocked',
-          text: 'statusline skipped · restart to fix',
-          color: 'warning',
-          priority: 'low',
-        });
         logForDebugging('Status line command skipped: workspace trust not accepted', { level: 'warn' });
       }
     }
@@ -522,9 +655,7 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       )}
       {/* Bottom: user-configured /statusline shell stdout (reserves row in fullscreen) */}
       {statusLineText ? (
-        <Text dimColor wrap="truncate">
-          <Ansi>{statusLineText}</Ansi>
-        </Text>
+        <StatusLineOutput text={statusLineText} />
       ) : hasShellCommand && isFullscreenEnvEnabled() ? (
         <Text> </Text>
       ) : null}

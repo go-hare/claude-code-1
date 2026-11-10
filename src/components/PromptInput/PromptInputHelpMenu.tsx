@@ -125,7 +125,7 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
               <KeyboardShortcutHint shortcut={stashShortcut} action="stash prompt" />
             </Text>
           </Box>
-          <Box>
+          <Box flexShrink={0}>
             <Text dimColor={dimColor}>
               <KeyboardShortcutHint shortcut={externalEditorShortcut} action="edit in $EDITOR" />
             </Text>

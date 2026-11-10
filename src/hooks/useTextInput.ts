@@ -7,6 +7,7 @@ import { addToHistory } from '../history.js'
 import type { InputEvent, Key } from '@anthropic/ink'
 import type {
   InlineGhostText,
+  PromptInputMode,
   TextInputState,
 } from '../types/textInputTypes.js'
 import { announceDeletedText } from '@anthropic/ink'
@@ -53,6 +54,11 @@ export function shouldPushKilledTextToRing(mask: string): boolean {
   return mask === ''
 }
 
+export type LeadingPill = {
+  text: string
+  onDelete: () => void
+}
+
 export type UseTextInputProps = {
   value: string
   onChange: (value: string) => void
@@ -80,6 +86,8 @@ export type UseTextInputProps = {
   invert: (text: string) => string
   themeText: (text: string) => string
   columns: number
+  leadingPill?: LeadingPill
+  getInputMode?: () => PromptInputMode
   onImagePaste?: (
     base64Image: string,
     mediaType?: string,
@@ -122,6 +130,8 @@ export function useTextInput({
   cursorChar,
   invert,
   columns,
+  leadingPill,
+  getInputMode,
   onImagePaste: _onImagePaste,
   disableCursorMovementForUpDownKeys = false,
   disableEscapeDoublePress = false,
@@ -133,7 +143,7 @@ export function useTextInput({
   dim,
   liveValueRef: externalLiveValueRef,
   liveOffsetRef: externalLiveOffsetRef,
-}: UseTextInputProps): TextInputState {
+}: UseTextInputProps): TextInputState & { renderedRowStartOffsets: number[] } {
   // Pre-warm the modifiers module for Apple Terminal (has internal guard, safe to call multiple times)
   if (env.terminal === 'Apple_Terminal') {
     prewarmModifiers()
@@ -173,10 +183,11 @@ export function useTextInput({
   }
   // `let` so onInput can rebuild from live refs mid-batch; mapKey handlers
   // read this binding at call time (not capture a frozen Cursor snapshot).
+  let pillText = leadingPill?.text ?? ''
   let cursor = Cursor.fromText(
-    liveValueRef.current,
+    pillText + liveValueRef.current,
     columns,
-    liveOffsetRef.current,
+    pillText.length + liveOffsetRef.current,
   )
   const { addNotification, removeNotification } = useNotifications()
 
@@ -217,11 +228,15 @@ export function useTextInput({
       removeNotification('escape-again-to-clear')
       onClearInput?.()
       if (originalValue) {
-        // densable cns: s && p==="" && trim — skip history for masked fields
+        // densable cns + ELe: s && p==="" && trim — skip history for masked
+        // fields, and prepend `!` when clearing a bash-mode draft.
         if (
           shouldRecordClearedInputInHistory(mask, historyOnClear, originalValue)
         ) {
-          addToHistory(originalValue)
+          const inputMode = getInputMode?.()
+          addToHistory(
+            inputMode === 'bash' ? `!${originalValue}` : originalValue,
+          )
         }
         onChange('')
         setOffset(0)
@@ -246,7 +261,7 @@ export function useTextInput({
   )
 
   function handleCtrlD(): MaybeCursor {
-    if (cursor.text === '') {
+    if (cursor.text === pillText && liveValueRef.current === '') {
       // When input is empty, handle double-press
       handleEmptyCtrlD()
       return cursor
@@ -255,11 +270,23 @@ export function useTextInput({
     return cursor.del()
   }
 
-  function recordKill(killed: string, direction: 'append' | 'prepend'): void {
-    if (shouldPushKilledTextToRing(mask)) {
-      pushToKillRing(killed, direction)
+  function backspaceOrDeletePill(target: Cursor = cursor): Cursor {
+    if (pillText !== '' && target.offset === pillText.length) {
+      return Cursor.fromText(target.text.slice(pillText.length), columns, 0)
     }
-    announceDeletedText(killed, mask)
+    return target.deleteTokenBefore() ?? target.backspaceH()
+  }
+
+  function recordKill(killed: string, direction: 'append' | 'prepend'): string {
+    const cleanKilled =
+      pillText !== '' && killed.startsWith(pillText)
+        ? killed.slice(pillText.length)
+        : killed
+    if (shouldPushKilledTextToRing(mask)) {
+      pushToKillRing(cleanKilled, direction)
+    }
+    announceDeletedText(cleanKilled, mask)
+    return cleanKilled
   }
 
   function killToLineEnd(): Cursor {
@@ -270,9 +297,9 @@ export function useTextInput({
 
   function killToLineStart(): Cursor {
     const { cursor: newCursor, killed } = cursor.deleteToLineStart()
-    recordKill(killed, 'prepend')
+    const cleanKilled = recordKill(killed, 'prepend')
     // densable BTt ft(): Ctrl+U yank hint when unmasked kill is ≥3 chars.
-    if (mask === '' && killed.length >= 3) {
+    if (mask === '' && cleanKilled.length >= 3) {
       addNotification({
         key: 'kill-paste-hint',
         kind: 'hint',
@@ -290,24 +317,38 @@ export function useTextInput({
    * then still writing nextCursor.text left the rejected char in the next keystroke.
    * Owned (non-shared) refs still dual-write — there is no parent to reject.
    */
-  function commitLiveCursor(next: Cursor): void {
-    const previous = cursor.text
-    if (previous !== next.text) {
-      onChange(next.text)
+  function commitLiveCursor(rawNext: Cursor): void {
+    const pillStillPresent =
+      pillText !== '' && rawNext.text.startsWith(pillText)
+    const next =
+      pillStillPresent && rawNext.offset < pillText.length
+        ? new Cursor(rawNext.measuredText, pillText.length)
+        : rawNext
+    const previous = cursor.text.slice(pillText.length)
+    const nextText = pillStillPresent
+      ? next.text.slice(pillText.length)
+      : next.text
+    const nextOffset = next.offset - (pillStillPresent ? pillText.length : 0)
+    if (previous !== nextText) {
+      onChange(nextText)
     }
     // Shared liveInputRef: PromptInput onChange may refuse `?` / `!`. If the
     // parent never dual-wrote, keep the old buffer. Tab→spaces rewrite still
     // updates live (liveValueRef !== previous) so we must not treat that as reject.
     if (
       externalLiveValueRef &&
-      previous !== next.text &&
+      previous !== nextText &&
       liveValueRef.current === previous
     ) {
       return
     }
-    setOffset(next.offset)
-    liveValueRef.current = next.text
-    liveOffsetRef.current = next.offset
+    setOffset(nextOffset)
+    liveValueRef.current = nextText
+    liveOffsetRef.current = nextOffset
+    if (pillText !== '' && !pillStillPresent) {
+      pillText = ''
+      leadingPill?.onDelete()
+    }
   }
 
   const readline = getKeybindingFlavor() === 'readline'
@@ -352,7 +393,7 @@ export function useTextInput({
   function yank(): Cursor {
     const text = getLastKill()
     if (text.length > 0) {
-      const startOffset = cursor.offset
+      const startOffset = Math.max(0, cursor.offset - pillText.length)
       const newCursor = cursor.insert(text)
       recordYank(startOffset, text.length)
       return newCursor
@@ -366,23 +407,24 @@ export function useTextInput({
       return cursor
     }
     const { text, start, length } = popResult
+    const pillStart = pillText.length + start
     // Replace the previously yanked text with the new one
-    const before = cursor.text.slice(0, start)
-    const after = cursor.text.slice(start + length)
+    const before = cursor.text.slice(0, pillStart)
+    const after = cursor.text.slice(pillStart + length)
     const newText = before + text + after
-    const newOffset = start + text.length
+    const newOffset = pillStart + text.length
     updateYankLength(text.length)
     return Cursor.fromText(newText, columns, newOffset)
   }
 
   const handleCtrl = mapInput([
-    ['a', () => cursor.startOfLine()],
+    ['a', () => cursor.startOfLogicalLine()],
     ['b', () => cursor.left()],
     ['c', handleCtrlC],
     ['d', handleCtrlD],
-    ['e', () => cursor.endOfLine()],
+    ['e', () => cursor.endOfLogicalLine()],
     ['f', () => cursor.right()],
-    ['h', () => cursor.deleteTokenBefore() ?? cursor.backspaceH()],
+    ['h', () => backspaceOrDeletePill()],
     ['k', killToLineEnd],
     ['n', () => downOrHistoryDown()],
     ['p', () => upOrHistoryUp()],
@@ -401,7 +443,7 @@ export function useTextInput({
   function handleEnter(key: Key) {
     if (
       multiline &&
-      cursor.offset > 0 &&
+      cursor.offset > pillText.length &&
       cursor.text[cursor.offset - 1] === '\\'
     ) {
       // Track that the user has used backslash+return
@@ -424,6 +466,15 @@ export function useTextInput({
   function upOrHistoryUp() {
     if (disableCursorMovementForUpDownKeys) {
       onHistoryUp?.()
+      return cursor
+    }
+    if (
+      pillText !== '' &&
+      onHistoryUp &&
+      cursor.getPosition().line <=
+        cursor.measuredText.getPositionFromOffset(pillText.length).line
+    ) {
+      onHistoryUp()
       return cursor
     }
     // Try to move by wrapped lines first
@@ -484,18 +535,26 @@ export function useTextInput({
           // Return the current cursor unchanged - handleEscape manages state internally
           return cursor
         }
+      case key.leftArrow && key.super:
+        return () => cursor.startOfLine()
+      case key.rightArrow && key.super:
+        return () => cursor.endOfLine()
       case key.leftArrow && (key.ctrl || key.meta || key.fn):
         return moveBackwardWord
       case key.rightArrow && (key.ctrl || key.meta || key.fn):
         return moveForwardWord
       case key.backspace:
-        return key.meta || key.ctrl
-          ? killWordBefore
-          : () => cursor.deleteTokenBefore() ?? cursor.backspaceH()
+        return key.super
+          ? killToLineStart
+          : key.meta || key.ctrl
+            ? killWordBefore
+            : () => backspaceOrDeletePill()
       case key.delete:
-        return key.meta ? killToLineEnd : () => cursor.del()
+        return key.super || key.meta ? killToLineEnd : () => cursor.del()
       case key.ctrl:
         return handleCtrl
+      case key.super:
+        return NOOP_HANDLER
       case key.home:
         return () => cursor.startOfLine()
       case key.end:
@@ -533,7 +592,7 @@ export function useTextInput({
         return () => {
           if (
             onLeftArrowOnEmpty &&
-            cursor.offset === 0 &&
+            (cursor.offset === 0 || cursor.offset === pillText.length) &&
             originalValue === ''
           ) {
             if (onLeftArrowOnEmptyMessage) {
@@ -574,7 +633,10 @@ export function useTextInput({
                 // eslint-disable-next-line custom-rules/no-lookbehind-regex -- .replace(re, str) on 1-2 char keystrokes: no-match returns same string (Object.is), regex never runs
                 .replace(/(?<=[^\\\r\n])\r$/, '')
                 .replace(/\r/g, '\n')
-              if (cursor.isAtStart() && isInputModeCharacter(input)) {
+              if (
+                cursor.offset === pillText.length &&
+                isInputModeCharacter(input)
+              ) {
                 return cursor.insert(text).left()
               }
               return cursor.insert(text)
@@ -621,9 +683,9 @@ export function useTextInput({
     // Rebuild from live refs so a multi-key stdin batch (typed chars + Enter)
     // does not keep inserting into the props snapshot from this render.
     cursor = Cursor.fromText(
-      liveValueRef.current,
+      pillText + liveValueRef.current,
       columns,
-      liveOffsetRef.current,
+      pillText.length + liveOffsetRef.current,
     )
 
     // Payload is already official KeyboardEvent insert text (or paste
@@ -648,8 +710,7 @@ export function useTextInput({
       // Try to delete tokens first, fall back to character backspace
       let currentCursor = cursor
       for (let i = 0; i < delCount; i++) {
-        currentCursor =
-          currentCursor.deleteTokenBefore() ?? currentCursor.backspaceH()
+        currentCursor = backspaceOrDeletePill(currentCursor)
       }
 
       // Update state once with the final result
@@ -691,7 +752,7 @@ export function useTextInput({
         // coalesced Enter. See default handler above.
         filteredInput[filteredInput.length - 2] !== '\\'
       ) {
-        onSubmit?.(nextCursor.text)
+        onSubmit?.(liveValueRef.current)
       }
     }
   }
@@ -721,5 +782,6 @@ export function useTextInput({
     cursorColumn: cursorPos.column,
     viewportCharOffset: cursor.getViewportCharOffset(maxVisibleLines),
     viewportCharEnd: cursor.getViewportCharEnd(maxVisibleLines),
+    renderedRowStartOffsets: cursor.getRenderedRowStartOffsets(maxVisibleLines),
   }
 }

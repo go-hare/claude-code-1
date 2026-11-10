@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle';
+import figures from 'figures';
 import * as React from 'react';
-import { memo, type ReactNode, useMemo, useRef, useState } from 'react';
+import { memo, type ReactNode, useContext, useMemo, useRef, useState } from 'react';
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { getBridgeStatus } from '../../bridge/bridgeStatusUtil.js';
 import { useSetPromptOverlay } from '../../context/promptOverlayContext.js';
@@ -8,10 +9,11 @@ import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useSettings } from '../../hooks/useSettings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text, useInput } from '@anthropic/ink';
+import { AccessibilityContext, Box, Byline, KeyboardShortcutHint, Link, Text, useInput } from '@anthropic/ink';
+import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
+import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import type { Message } from '../../types/message.js';
 import type { PromptInputMode, VimMode } from '../../types/textInputTypes.js';
@@ -27,6 +29,12 @@ import { PromptInputFooterLeftSide } from './PromptInputFooterLeftSide.js';
 // Inline pipe status is shown only after /pipes sets pipeIpc.statusVisible.
 import { PromptInputFooterSuggestions, type SuggestionItem } from './PromptInputFooterSuggestions.js';
 import { PromptInputHelpMenu } from './PromptInputHelpMenu.js';
+
+type StatusLineWithHideVim = {
+  hideVimModeIndicator?: boolean;
+};
+
+type BridgeStatusValue = ReturnType<typeof getBridgeStatus>;
 
 type Props = {
   apiKeyStatus: VerificationStatus;
@@ -45,6 +53,10 @@ type Props = {
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
   maxColumnWidth?: number;
+  suggestionsEmptyMessage?: string;
+  hoveredSuggestionId?: string | null;
+  onHoverSuggestion?: (id: string | null) => void;
+  onSelectSuggestion?: (index: number, id: string) => void;
   toolPermissionContext: ToolPermissionContext;
   helpOpen: boolean;
   suppressHint: boolean;
@@ -82,6 +94,10 @@ function PromptInputFooter({
   suggestions,
   selectedSuggestion,
   maxColumnWidth,
+  suggestionsEmptyMessage,
+  hoveredSuggestionId,
+  onHoverSuggestion,
+  onSelectSuggestion,
   toolPermissionContext,
   helpOpen,
   suppressHint: suppressHintFromProps,
@@ -105,42 +121,61 @@ function PromptInputFooter({
   leftArrowAgain,
 }: Props): ReactNode {
   const settings = useSettings();
-  const { columns, rows } = useTerminalSize();
+  const { columns } = useTerminalSize();
+  const isScreenReader = useContext(AccessibilityContext);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const lastAssistantMessageId = useMemo(() => getLastAssistantMessageId(messages), [messages]);
   const isNarrow = columns < 80;
-  // In fullscreen the bottom slot is flexShrink:0, so every row here is a row
-  // stolen from the ScrollBox. Drop the optional StatusLine first. Non-fullscreen
-  // has terminal scrollback to absorb overflow, so we never hide StatusLine there.
   const isFullscreen = isFullscreenEnvEnabled();
-  const isShort = isFullscreen && rows < 24;
 
-  // Pill highlights when tasks is the active footer item AND no specific
-  // agent row is selected. When coordinatorTaskIndex >= 0 the pointer has
-  // moved into CoordinatorTaskPanel, so the pill should un-highlight.
-  // coordinatorTaskCount === 0 covers the bash-only case (no agent rows
-  // exist, pill is the only selectable item).
   const coordinatorTaskCount = useCoordinatorTaskCount();
   const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
   const pillSelected = tasksSelected && (coordinatorTaskCount === 0 || coordinatorTaskIndex < 0);
 
-  // Hide `? for shortcuts` if the user has a custom status line, or during ctrl-r
-  const suppressHint = suppressHintFromProps || statusLineShouldDisplay(settings) || isSearching;
-  // Fullscreen: portal data to FullscreenLayout — see promptOverlayContext.tsx
+  const hasStatusLine = statusLineShouldDisplay(settings);
+  const suppressHint = suppressHintFromProps || hasStatusLine || isSearching;
+  const hideVimModeIndicator =
+    (settings?.statusLine as StatusLineWithHideVim | undefined)?.hideVimModeIndicator ?? false;
+  const hasSuggestionContent = suggestions.length > 0 || Boolean(suggestionsEmptyMessage);
   const overlayData = useMemo(
-    () => (isFullscreen && suggestions.length ? { suggestions, selectedSuggestion, maxColumnWidth } : null),
-    [isFullscreen, suggestions, selectedSuggestion, maxColumnWidth],
+    () =>
+      isFullscreen && hasSuggestionContent
+        ? {
+            suggestions,
+            selectedSuggestion,
+            maxColumnWidth,
+            emptyMessage: suggestionsEmptyMessage,
+            hoveredId: hoveredSuggestionId,
+            onSelect: onSelectSuggestion,
+            onHoverChange: onHoverSuggestion,
+          }
+        : null,
+    [
+      isFullscreen,
+      hasSuggestionContent,
+      suggestions,
+      selectedSuggestion,
+      maxColumnWidth,
+      suggestionsEmptyMessage,
+      hoveredSuggestionId,
+      onSelectSuggestion,
+      onHoverSuggestion,
+    ],
   );
   useSetPromptOverlay(overlayData);
 
-  if (suggestions.length && !isFullscreen) {
+  if (hasSuggestionContent && !isFullscreen) {
     return (
       <Box paddingX={2} paddingY={0}>
         <PromptInputFooterSuggestions
           suggestions={suggestions}
           selectedSuggestion={selectedSuggestion}
           maxColumnWidth={maxColumnWidth}
+          emptyMessage={suggestionsEmptyMessage}
+          hoveredId={hoveredSuggestionId}
+          onHoverChange={onHoverSuggestion}
+          onSelect={onSelectSuggestion}
         />
       </Box>
     );
@@ -153,19 +188,21 @@ function PromptInputFooter({
   return (
     <>
       <Box
-        flexDirection={isNarrow ? 'column' : 'row'}
-        justifyContent={isNarrow ? 'flex-start' : 'space-between'}
+        flexDirection={isScreenReader ? 'column' : 'row'}
+        flexWrap="wrap"
+        alignItems="flex-start"
         paddingX={2}
-        gap={isNarrow ? 0 : 1}
+        columnGap={1}
       >
-        <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
-          {mode === 'prompt' && !isShort && !exitMessage.show && !isPasting && statusLineShouldDisplay(settings) && (
+        <Box flexDirection="column" flexShrink={1}>
+          {mode === 'prompt' && !exitMessage.show && !isPasting && hasStatusLine && (
             <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />
           )}
           <PipeStatusInline />
           <PromptInputFooterLeftSide
             exitMessage={exitMessage}
             vimMode={vimMode}
+            hideVimModeIndicator={hideVimModeIndicator}
             mode={mode}
             toolPermissionContext={toolPermissionContext}
             suppressHint={suppressHint}
@@ -183,7 +220,7 @@ function PromptInputFooter({
             leftArrowAgain={leftArrowAgain}
           />
         </Box>
-        <Box flexShrink={1} gap={1}>
+        <Box flexShrink={0} marginLeft="auto" flexDirection="column" alignItems="flex-end">
           {isFullscreen ? null : (
             <Notifications
               apiKeyStatus={apiKeyStatus}
@@ -201,8 +238,7 @@ function PromptInputFooter({
               isNarrow={isNarrow}
             />
           )}
-          {process.env.USER_TYPE === 'ant' && isUndercover() && <Text dimColor>undercover</Text>}
-          <BridgeStatusIndicator bridgeSelected={bridgeSelected} />
+          <FooterRightIndicators debug={debug} bridgeSelected={bridgeSelected} />
         </Box>
       </Box>
       {/* densable MIe: panel count has no USER_TYPE ant gate. */}
@@ -213,39 +249,127 @@ function PromptInputFooter({
 
 export default memo(PromptInputFooter);
 
+function getCloudConnectionDisplay(status: AppState['remoteConnectionStatus']): {
+  suffix: string;
+  color: 'warning' | 'error' | 'ide';
+} {
+  switch (status) {
+    case 'reconnecting':
+      return { suffix: ' · reconnecting…', color: 'warning' };
+    case 'disconnected':
+      return { suffix: ' · disconnected', color: 'error' };
+    case 'connecting':
+    case 'connected':
+    default:
+      return { suffix: '', color: 'ide' };
+  }
+}
+
+const RC_FOOTER_MIN_COLUMNS = 60;
+
+function appendBridgeFromCliParam(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set('from', 'cli');
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function useVisibleBridgeStatus(): BridgeStatusValue | null {
+  const isFullscreen = isFullscreenEnvEnabled();
+  const { columns } = useTerminalSize();
+  const eligible = !isFullscreen && columns >= RC_FOOTER_MIN_COLUMNS;
+  const raw = useAppState(s => {
+    if (!feature('BRIDGE_MODE')) return null;
+    if (!eligible || s.replBridgeOutboundOnly) return null;
+    if (!s.replBridgeEnabled && s.replBridgeError === undefined) return null;
+    return getBridgeStatus({
+      error: s.replBridgeError,
+      connected: s.replBridgeConnected,
+      sessionActive: s.replBridgeSessionActive,
+      reconnecting: s.replBridgeReconnecting,
+    });
+  });
+  if (!feature('BRIDGE_MODE')) return null;
+  return raw !== null && isBridgeEnabled() ? raw : null;
+}
+
+function FooterRightIndicators({
+  debug,
+  bridgeSelected,
+}: {
+  debug: boolean;
+  bridgeSelected: boolean;
+}): React.ReactNode {
+  const remoteSessionUrl = useAppState(s => s.remoteSessionUrl);
+  const remoteConnectionStatus = useAppState(s => s.remoteConnectionStatus);
+  const bridgeStatus = useVisibleBridgeStatus();
+
+  const items: React.ReactNode[] = [];
+
+  if (remoteSessionUrl) {
+    const { suffix, color } = getCloudConnectionDisplay(remoteConnectionStatus);
+    items.push(
+      <Text key="cloud" color={color} wrap="truncate">
+        <Link url={remoteSessionUrl}>
+          {figures.circleDouble} cloud{suffix}
+        </Link>
+      </Text>,
+    );
+  }
+
+  if (debug) {
+    items.push(
+      <Text key="debug" color="warning" wrap="truncate">
+        Debug
+      </Text>,
+    );
+  }
+
+  if (process.env.USER_TYPE === 'ant' && isUndercover()) {
+    items.push(
+      <Text key="undercover" dimColor>
+        undercover
+      </Text>,
+    );
+  }
+
+  if (bridgeStatus !== null) {
+    items.push(<BridgeStatusIndicator key="bridge" status={bridgeStatus} bridgeSelected={bridgeSelected} />);
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <Box flexShrink={0}>
+      <Byline>{items}</Byline>
+    </Box>
+  );
+}
+
 type BridgeStatusProps = {
+  status: BridgeStatusValue;
   bridgeSelected: boolean;
 };
 
-function BridgeStatusIndicator({ bridgeSelected }: BridgeStatusProps): React.ReactNode {
-  if (!feature('BRIDGE_MODE')) return null;
-
-  const enabled = useAppState(s => s.replBridgeEnabled);
-  const connected = useAppState(s => s.replBridgeConnected);
-  const sessionActive = useAppState(s => s.replBridgeSessionActive);
-  const reconnecting = useAppState(s => s.replBridgeReconnecting);
-  const explicit = useAppState(s => s.replBridgeExplicit);
-
-  // Failed state is surfaced via notification (useReplBridge), not a footer pill.
-  if (!isBridgeEnabled() || !enabled) return null;
-
-  const status = getBridgeStatus({
-    error: undefined,
-    connected,
-    sessionActive,
-    reconnecting,
-  });
-
-  // For implicit (config-driven) remote, only show the reconnecting state
-  if (!explicit && status.label !== 'Remote Control reconnecting') {
-    return null;
-  }
-
+function BridgeStatusIndicator({ status, bridgeSelected }: BridgeStatusProps): React.ReactNode {
+  const sessionUrl = useAppState(s => s.replBridgeSessionUrl);
+  const openShortcut = useShortcutDisplay('footer:openSelected', 'Footer', 'Enter');
+  const labelNode = sessionUrl ? <Link url={appendBridgeFromCliParam(sessionUrl)}>{status.label}</Link> : status.label;
   return (
-    <Text color={bridgeSelected ? 'background' : status.color} inverse={bridgeSelected} wrap="truncate">
-      {status.label}
-      {bridgeSelected && <Text dimColor> · Enter to view</Text>}
-    </Text>
+    <Box>
+      <Text color={bridgeSelected ? 'background' : status.color} inverse={bridgeSelected} wrap="truncate">
+        {labelNode}
+      </Text>
+      {bridgeSelected && openShortcut && (
+        <Text dimColor wrap="truncate">
+          {' · '}
+          <KeyboardShortcutHint shortcut={openShortcut} action="view" />
+        </Text>
+      )}
+    </Box>
   );
 }
 

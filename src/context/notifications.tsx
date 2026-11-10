@@ -11,7 +11,9 @@ type Priority = 'low' | 'medium' | 'high' | 'immediate';
 export type NotificationSegment = {
   text: string;
   dim?: boolean;
+  bold?: boolean;
   color?: keyof Theme;
+  url?: string;
 };
 
 type BaseNotification = {
@@ -22,6 +24,9 @@ type BaseNotification = {
   plugin?: string;
   /** densable Nu `u.pinned` — sticky list, not the toast slot. */
   pinned?: boolean;
+  /** densable Ire `v.wrap` — wrap pinned notice instead of truncating. */
+  wrap?: boolean;
+  color?: keyof Theme;
   /**
    * Keys of notifications that this notification invalidates.
    * If a notification is invalidated, it will be removed from the queue
@@ -444,27 +449,12 @@ export function applyNonImmediateNotification(
     }
   }
 
-  // Same key already displayed: replace content (caller resets timeout).
-  if (state.current?.key === notif.key) {
+  // densable `yo`: non-immediate same-key without `fold` is deduplicated
+  // without replacing content or resetting the active timeout.
+  const existingKeys = new Set(state.queue.map(_ => _.key));
+  if (existingKeys.has(notif.key) || state.current?.key === notif.key) {
     return {
-      notifications: withPinned(state, {
-        current: notif,
-        queue: state.queue.filter(_ => _.key !== notif.key),
-      }),
-      timeoutAction: 'reset',
-    };
-  }
-
-  // Same key already queued: replace the queued entry (latest wins).
-  const queueIdx = state.queue.findIndex(_ => _.key === notif.key);
-  if (queueIdx !== -1) {
-    const newQueue = [...state.queue];
-    newQueue[queueIdx] = notif;
-    return {
-      notifications: withPinned(state, {
-        current: state.current,
-        queue: newQueue,
-      }),
+      notifications: state,
       timeoutAction: 'none',
     };
   }
@@ -474,7 +464,7 @@ export function applyNonImmediateNotification(
   return {
     notifications: withPinned(state, {
       current: invalidatesCurrent ? null : state.current,
-      queue: [...state.queue.filter(_ => _.priority !== 'immediate' && !notif.invalidates?.includes(_.key)), notif],
+      queue: [...state.queue.filter(_ => shouldRequeueOnPreempt(_, notif)), notif],
     }),
     // Invalidate clears the current toast timeout; processQueue will arm the next.
     timeoutAction: invalidatesCurrent ? 'clear' : 'none',

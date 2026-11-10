@@ -1,12 +1,19 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Text } from '@anthropic/ink';
+import { feature } from 'bun:bundle';
+import { Box, StatusIcon, type StatusIconStatus, Text } from '@anthropic/ink';
 import * as React from 'react';
+import { getAllowedChannels } from '../bootstrap/state.js';
+import { EmergencyTip, shouldShowEmergencyTip } from '../components/LogoV2/EmergencyTip.js';
+import { GuestPassesNotice, shouldShowGuestPassesUpsell } from '../components/LogoV2/GuestPassesUpsell.js';
 import { getLargeMemoryFiles, MAX_MEMORY_CHARACTER_COUNT, type MemoryFileInfo } from './claudemd.js';
 import figures from 'figures';
 import { getCwd } from './cwd.js';
 import { relative } from 'path';
 import { formatNumber } from './format.js';
 import type { getGlobalConfig } from './config.js';
+import { pickCompanyAnnouncement } from './companyAnnouncement.js';
+import { getDebugLogPath, isDebugMode, isDebugToStdErr } from './debug.js';
+import { isEnvTruthy } from './envUtils.js';
 import {
   getAnthropicApiKeyWithSource,
   getApiKeyFromConfigOrMacOSKeychain,
@@ -17,10 +24,19 @@ import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/Ag
 import { getAgentDescriptionsTotalTokens, AGENT_DESCRIPTIONS_THRESHOLD } from './statusNoticeHelpers.js';
 import { isSupportedJetBrainsTerminal, toIDEDisplayName, getTerminalIdeType } from './ide.js';
 import { isJetBrainsPluginInstalledCachedSync } from './jetbrains.js';
+import { getInitialSettings } from './settings/settings.js';
 import { getUdsStartFailureCause, getUdsStartFailureReason } from './udsMessaging.js';
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const ChannelsNoticeModule =
+  feature('KAIROS') || feature('KAIROS_CHANNELS')
+    ? (require('../components/LogoV2/ChannelsNotice.js') as typeof import('../components/LogoV2/ChannelsNotice.js'))
+    : null;
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 // Types
 export type StatusNoticeType = 'warning' | 'info';
+export type StatusNoticeTier = 'error' | 'warning' | 'info' | 'announcement';
 
 export type StatusNoticeContext = {
   config: ReturnType<typeof getGlobalConfig>;
@@ -30,14 +46,70 @@ export type StatusNoticeContext = {
 
 export type StatusNoticeDefinition = {
   id: string;
+  tier?: StatusNoticeTier;
   type: StatusNoticeType;
+  promo?: boolean;
+  priority?: number;
+  claimsFirstShow?: () => boolean;
+  showAccentBar?: () => boolean;
   isActive: (context: StatusNoticeContext) => boolean;
   render: (context: StatusNoticeContext) => React.ReactNode;
 };
 
+const ANNOUNCEMENT_PRIORITY = {
+  org: 30,
+  launch: 20,
+  campaign: 15,
+  promo: 10,
+  hint: 5,
+} as const;
+
+const STATUS_ROW_TEXT_COLORS: Partial<Record<StatusIconStatus, 'success' | 'error' | 'warning' | 'suggestion'>> = {
+  success: 'success',
+  error: 'error',
+  warning: 'warning',
+  info: 'suggestion',
+  on: 'success',
+};
+
+function NoticeStatusRow({
+  status,
+  children,
+}: {
+  status: StatusIconStatus;
+  children: React.ReactNode;
+}): React.ReactNode {
+  const color = STATUS_ROW_TEXT_COLORS[status];
+  return (
+    <Box flexDirection="row">
+      <Box width={2} flexShrink={0}>
+        <StatusIcon status={status} />
+      </Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text color={color} dimColor={!color}>
+          {children}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function InfoNotice({ command, children }: { command?: string; children: React.ReactNode }): React.ReactNode {
+  const suffix = command ? ` · ${command}` : '';
+  return (
+    <Box>
+      <Text dimColor>
+        {children}
+        {suffix}
+      </Text>
+    </Box>
+  );
+}
+
 // Individual notice definitions
 const largeMemoryFilesNotice: StatusNoticeDefinition = {
   id: 'large-memory-files',
+  tier: 'warning',
   type: 'warning',
   isActive: ctx => getLargeMemoryFiles(ctx.memoryFiles).length > 0,
   render: ctx => {
@@ -48,13 +120,10 @@ const largeMemoryFilesNotice: StatusNoticeDefinition = {
           const displayPath = file.path.startsWith(getCwd()) ? relative(getCwd(), file.path) : file.path;
 
           return (
-            <Box key={file.path} flexDirection="row">
-              <Text color="warning">{figures.warning}</Text>
-              <Text color="warning">
-                Large <Text bold>{displayPath}</Text> will impact performance ({formatNumber(file.content.length)} chars
-                &gt; {formatNumber(MAX_MEMORY_CHARACTER_COUNT)})<Text dimColor> · /memory to edit</Text>
-              </Text>
-            </Box>
+            <NoticeStatusRow key={file.path} status="warning">
+              <Text bold>{displayPath}</Text> is over the {formatNumber(MAX_MEMORY_CHARACTER_COUNT)}-char limit (
+              {formatNumber(file.content.length)} chars)<Text dimColor> · /memory to free up context</Text>
+            </NoticeStatusRow>
           );
         })}
       </>
@@ -64,6 +133,7 @@ const largeMemoryFilesNotice: StatusNoticeDefinition = {
 
 const claudeAiSubscriberExternalTokenNotice: StatusNoticeDefinition = {
   id: 'claude-ai-external-token',
+  tier: 'warning',
   type: 'warning',
   isActive: () => {
     const authTokenInfo = getAuthTokenSource();
@@ -75,12 +145,11 @@ const claudeAiSubscriberExternalTokenNotice: StatusNoticeDefinition = {
   render: () => {
     const authTokenInfo = getAuthTokenSource();
     return (
-      <Box flexDirection="row" marginTop={1}>
-        <Text color="warning">{figures.warning}</Text>
-        <Text color="warning">
-          Auth conflict: Using {authTokenInfo.source} instead of Claude account subscription token. Either unset{' '}
-          {authTokenInfo.source}, or run `claude /logout`.
-        </Text>
+      <Box marginTop={1}>
+        <NoticeStatusRow status="warning">
+          {authTokenInfo.source} overriding Claude subscription login
+          <Text dimColor> · unset it or /logout to sign it out</Text>
+        </NoticeStatusRow>
       </Box>
     );
   },
@@ -88,6 +157,7 @@ const claudeAiSubscriberExternalTokenNotice: StatusNoticeDefinition = {
 
 const apiKeyConflictNotice: StatusNoticeDefinition = {
   id: 'api-key-conflict',
+  tier: 'warning',
   type: 'warning',
   isActive: () => {
     const { source: apiKeySource } = getAnthropicApiKeyWithSource({
@@ -103,12 +173,11 @@ const apiKeyConflictNotice: StatusNoticeDefinition = {
       skipRetrievingKeyFromApiKeyHelper: true,
     });
     return (
-      <Box flexDirection="row" marginTop={1}>
-        <Text color="warning">{figures.warning}</Text>
-        <Text color="warning">
-          Auth conflict: Using {apiKeySource} instead of Anthropic Console key. Either unset {apiKeySource}, or run
-          `claude /logout`.
-        </Text>
+      <Box marginTop={1}>
+        <NoticeStatusRow status="warning">
+          {apiKeySource} overriding saved Console key
+          <Text dimColor> · unset it or /logout to clear the saved key</Text>
+        </NoticeStatusRow>
       </Box>
     );
   },
@@ -116,6 +185,7 @@ const apiKeyConflictNotice: StatusNoticeDefinition = {
 
 const bothAuthMethodsNotice: StatusNoticeDefinition = {
   id: 'both-auth-methods',
+  tier: 'warning',
   type: 'warning',
   isActive: () => {
     const { source: apiKeySource } = getAnthropicApiKeyWithSource({
@@ -135,24 +205,20 @@ const bothAuthMethodsNotice: StatusNoticeDefinition = {
     const authTokenInfo = getAuthTokenSource();
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Box flexDirection="row">
-          <Text color="warning">{figures.warning}</Text>
-          <Text color="warning">
-            Auth conflict: Both a token ({authTokenInfo.source}) and an API key ({apiKeySource}) are set. This may lead
-            to unexpected behavior.
-          </Text>
-        </Box>
-        <Box flexDirection="column" marginLeft={3}>
-          <Text color="warning">
-            · Trying to use {authTokenInfo.source === 'claude.ai' ? 'claude.ai' : authTokenInfo.source}?{' '}
+        <NoticeStatusRow status="warning">
+          Both {authTokenInfo.source} and {apiKeySource} set · auth may not work as expected
+        </NoticeStatusRow>
+        <Box flexDirection="column" paddingLeft={2}>
+          <Text dimColor>
+            · to use {authTokenInfo.source === 'claude.ai' ? 'claude.ai' : authTokenInfo.source}:{' '}
             {apiKeySource === 'ANTHROPIC_API_KEY'
               ? 'Unset the ANTHROPIC_API_KEY environment variable, or claude /logout then say "No" to the API key approval before login.'
               : apiKeySource === 'apiKeyHelper'
                 ? 'Unset the apiKeyHelper setting.'
                 : 'claude /logout'}
           </Text>
-          <Text color="warning">
-            · Trying to use {apiKeySource}?{' '}
+          <Text dimColor>
+            · to use {apiKeySource}:{' '}
             {authTokenInfo.source === 'claude.ai'
               ? 'claude /logout to sign out of claude.ai.'
               : `Unset the ${authTokenInfo.source} environment variable.`}
@@ -165,6 +231,7 @@ const bothAuthMethodsNotice: StatusNoticeDefinition = {
 
 const largeAgentDescriptionsNotice: StatusNoticeDefinition = {
   id: 'large-agent-descriptions',
+  tier: 'warning',
   type: 'warning',
   isActive: context => {
     const totalTokens = getAgentDescriptionsTotalTokens(context.agentDefinitions);
@@ -173,14 +240,11 @@ const largeAgentDescriptionsNotice: StatusNoticeDefinition = {
   render: context => {
     const totalTokens = getAgentDescriptionsTotalTokens(context.agentDefinitions);
     return (
-      <Box flexDirection="row">
-        <Text color="warning">{figures.warning}</Text>
-        <Text color="warning">
-          Large cumulative agent descriptions will impact performance (~
-          {formatNumber(totalTokens)} tokens &gt; {formatNumber(AGENT_DESCRIPTIONS_THRESHOLD)})
-          <Text dimColor> · /agents to manage</Text>
-        </Text>
-      </Box>
+      <NoticeStatusRow status="warning">
+        Agent descriptions are over the {formatNumber(AGENT_DESCRIPTIONS_THRESHOLD)}-token limit (~
+        {formatNumber(totalTokens)} tokens)
+        <Text dimColor> · ask Claude to trim agent descriptions in .claude/agents/</Text>
+      </NoticeStatusRow>
     );
   },
 };
@@ -191,21 +255,87 @@ const largeAgentDescriptionsNotice: StatusNoticeDefinition = {
  */
 const crossSessionMessagingOffNotice: StatusNoticeDefinition = {
   id: 'cross-session-messaging-off',
+  tier: 'warning',
   type: 'warning',
   isActive: () => getUdsStartFailureCause() === 'socket_dir_refused',
   render: () => (
-    <Box flexDirection="row">
-      <Text color="warning">{figures.warning}</Text>
-      <Text color="warning">
-        Cross-session messaging is off: {getUdsStartFailureReason() ?? 'its socket directory could not be set up'}
-        <Text dimColor>{' · run with --debug-file <path> for the full log'}</Text>
-      </Text>
-    </Box>
+    <NoticeStatusRow status="warning">
+      Cross-session messaging is off: {getUdsStartFailureReason() ?? 'its socket directory could not be set up'}
+      <Text dimColor>{' · run with --debug-file <path> for the full log'}</Text>
+    </NoticeStatusRow>
+  ),
+};
+
+function getPromptCachingDisabledVars(): string[] {
+  return [
+    'DISABLE_PROMPT_CACHING',
+    'DISABLE_PROMPT_CACHING_HAIKU',
+    'DISABLE_PROMPT_CACHING_OPUS',
+    'DISABLE_PROMPT_CACHING_SONNET',
+    'DISABLE_PROMPT_CACHING_FABLE',
+  ].filter(name => isEnvTruthy(process.env[name]));
+}
+
+const promptCachingDisabledNotice: StatusNoticeDefinition = {
+  id: 'prompt-caching-disabled',
+  tier: 'warning',
+  type: 'warning',
+  isActive: () => getPromptCachingDisabledVars().length > 0,
+  render: () => {
+    const vars = getPromptCachingDisabledVars();
+    return (
+      <NoticeStatusRow status="warning">
+        Prompt caching off ({vars.join(', ')}), requests will be slower and cost more
+        <Text dimColor> · unset it to re-enable</Text>
+      </NoticeStatusRow>
+    );
+  },
+};
+
+const emergencyTipNotice: StatusNoticeDefinition = {
+  id: 'emergency-tip',
+  tier: 'warning',
+  type: 'warning',
+  isActive: () => shouldShowEmergencyTip(),
+  render: () => <EmergencyTip />,
+};
+
+const channelsNotice: StatusNoticeDefinition = {
+  id: 'channels',
+  tier: 'info',
+  type: 'info',
+  isActive: () => ChannelsNoticeModule !== null && getAllowedChannels().length > 0,
+  render: () => (ChannelsNoticeModule ? <ChannelsNoticeModule.ChannelsNotice /> : null),
+};
+
+const debugModeNotice: StatusNoticeDefinition = {
+  id: 'debug-mode',
+  tier: 'info',
+  type: 'info',
+  isActive: () => isDebugMode(),
+  render: () => (
+    <InfoNotice>Debug mode enabled · logging to {isDebugToStdErr() ? 'stderr' : getDebugLogPath()}</InfoNotice>
+  ),
+};
+
+const tmuxSessionNotice: StatusNoticeDefinition = {
+  id: 'tmux-session',
+  tier: 'info',
+  type: 'info',
+  isActive: () => Boolean(process.env.CLAUDE_CODE_TMUX_SESSION),
+  render: () => (
+    <InfoNotice>
+      tmux session: {process.env.CLAUDE_CODE_TMUX_SESSION} · detach with{' '}
+      {process.env.CLAUDE_CODE_TMUX_PREFIX_CONFLICTS
+        ? `${process.env.CLAUDE_CODE_TMUX_PREFIX} ${process.env.CLAUDE_CODE_TMUX_PREFIX} d (press prefix twice - Claude uses ${process.env.CLAUDE_CODE_TMUX_PREFIX})`
+        : `${process.env.CLAUDE_CODE_TMUX_PREFIX} d`}
+    </InfoNotice>
   ),
 };
 
 const jetbrainsPluginNotice: StatusNoticeDefinition = {
   id: 'jetbrains-plugin-install',
+  tier: 'info',
   type: 'info',
   isActive: context => {
     // Only show if running in JetBrains built-in terminal
@@ -225,7 +355,7 @@ const jetbrainsPluginNotice: StatusNoticeDefinition = {
     const ideType = getTerminalIdeType();
     const ideName = toIDEDisplayName(ideType);
     return (
-      <Box flexDirection="row" gap={1} marginLeft={1}>
+      <Box flexDirection="row" gap={1}>
         <Text color="ide">{figures.arrowUp}</Text>
         <Text>
           Install the <Text color="ide">{ideName}</Text> plugin from the JetBrains Marketplace:{' '}
@@ -236,6 +366,41 @@ const jetbrainsPluginNotice: StatusNoticeDefinition = {
   },
 };
 
+function hasCompanyAnnouncements(): boolean {
+  const announcements = getInitialSettings().companyAnnouncements;
+  return Boolean(announcements && announcements.some(Boolean));
+}
+
+const companyAnnouncementNotice: StatusNoticeDefinition = {
+  id: 'company-announcement',
+  tier: 'announcement',
+  type: 'info',
+  promo: false,
+  priority: ANNOUNCEMENT_PRIORITY.org,
+  isActive: () => hasCompanyAnnouncements(),
+  render: ctx => {
+    const announcement = pickCompanyAnnouncement(true);
+    if (!announcement) return null;
+    const orgName = ctx.config.oauthAccount?.organizationName;
+    return (
+      <Box flexDirection="column">
+        {!process.env.IS_DEMO && orgName && <Text dimColor>Message from {orgName}:</Text>}
+        <Text>{announcement}</Text>
+      </Box>
+    );
+  },
+};
+
+const guestPassesNotice: StatusNoticeDefinition = {
+  id: 'guest-passes',
+  tier: 'announcement',
+  type: 'info',
+  promo: true,
+  priority: ANNOUNCEMENT_PRIORITY.promo,
+  isActive: () => shouldShowGuestPassesUpsell(),
+  render: () => <GuestPassesNotice />,
+};
+
 // All notice definitions
 export const statusNoticeDefinitions: StatusNoticeDefinition[] = [
   largeMemoryFilesNotice,
@@ -243,11 +408,75 @@ export const statusNoticeDefinitions: StatusNoticeDefinition[] = [
   claudeAiSubscriberExternalTokenNotice,
   apiKeyConflictNotice,
   bothAuthMethodsNotice,
-  jetbrainsPluginNotice,
   crossSessionMessagingOffNotice,
+  channelsNotice,
+  promptCachingDisabledNotice,
+  emergencyTipNotice,
+  debugModeNotice,
+  tmuxSessionNotice,
+  jetbrainsPluginNotice,
+  companyAnnouncementNotice,
+  guestPassesNotice,
 ];
 
 // Helper functions for external use
 export function getActiveNotices(context: StatusNoticeContext): StatusNoticeDefinition[] {
   return statusNoticeDefinitions.filter(notice => notice.isActive(context));
+}
+
+const INFO_NOTICE_ORDER = ['debug-mode', 'model-source', 'channels', 'tmux-session'];
+
+function noticeRank(notice: StatusNoticeDefinition): [number, number] {
+  const tier = notice.tier ?? (notice.type === 'warning' ? 'warning' : 'info');
+  if (tier === 'announcement') {
+    const priority = notice.priority ?? 0;
+    if (priority >= ANNOUNCEMENT_PRIORITY.org) return [0, -priority];
+    if (priority >= ANNOUNCEMENT_PRIORITY.launch) return [1, -priority];
+    if (priority >= ANNOUNCEMENT_PRIORITY.campaign) return [2, -priority];
+    return [4, -priority];
+  }
+  const idx = INFO_NOTICE_ORDER.indexOf(notice.id);
+  return [3, idx === -1 ? INFO_NOTICE_ORDER.length : idx];
+}
+
+export type SelectedStatusNotices = {
+  warnings: StatusNoticeDefinition[];
+  slot: StatusNoticeDefinition | null;
+  slotOverflowCount: number;
+};
+
+export function selectNoticesForDisplay(
+  notices: readonly StatusNoticeDefinition[],
+  options: { suppressPromos?: boolean } = {},
+): SelectedStatusNotices {
+  const allowed = notices.filter(n => !(n.promo === true && options.suppressPromos));
+  const warnings = allowed.filter(n => {
+    const tier = n.tier ?? (n.type === 'warning' ? 'warning' : 'info');
+    return tier !== 'info' && tier !== 'announcement';
+  });
+  const candidates = allowed.filter(n => {
+    const tier = n.tier ?? (n.type === 'warning' ? 'warning' : 'info');
+    return tier === 'info' || tier === 'announcement';
+  });
+
+  let winner: StatusNoticeDefinition | null = candidates.find(n => n.claimsFirstShow?.() === true) ?? null;
+  if (winner === null) {
+    for (const candidate of candidates) {
+      if (winner === null) {
+        winner = candidate;
+        continue;
+      }
+      const [candGroup, candSub] = noticeRank(candidate);
+      const [winGroup, winSub] = noticeRank(winner);
+      if (candGroup < winGroup || (candGroup === winGroup && candSub < winSub)) {
+        winner = candidate;
+      }
+    }
+  }
+
+  return {
+    warnings,
+    slot: winner,
+    slotOverflowCount: winner === null ? 0 : candidates.length - 1,
+  };
 }

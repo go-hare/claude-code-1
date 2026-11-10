@@ -11,18 +11,18 @@ export function EmergencyTip(): React.ReactNode {
   // Memoize to prevent re-reads after we save - we want the value at mount time
   const lastShownTip = useMemo(() => getGlobalConfig().lastShownEmergencyTip, []);
 
-  // Only show if this is a new/different tip
-  const shouldShow = tip.tip && tip.tip !== lastShownTip;
+  // Show if persistent or if this is a new/different tip
+  const shouldShow = Boolean(tip.tip) && (tip.persistent === true || tip.tip !== lastShownTip);
 
-  // Save the tip we're showing so we don't show it again
+  // Save the tip we're showing so we don't show it again (unless persistent)
   useEffect(() => {
-    if (shouldShow) {
+    if (shouldShow && !tip.persistent) {
       saveGlobalConfig(current => {
         if (current.lastShownEmergencyTip === tip.tip) return current;
         return { ...current, lastShownEmergencyTip: tip.tip };
       });
     }
-  }, [shouldShow, tip.tip]);
+  }, [shouldShow, tip.tip, tip.persistent]);
 
   if (!shouldShow) {
     return null;
@@ -46,6 +46,7 @@ export function EmergencyTip(): React.ReactNode {
 type TipOfFeed = {
   tip: string;
   color?: 'dim' | 'warning' | 'error';
+  persistent?: boolean;
 };
 
 const DEFAULT_TIP: TipOfFeed = { tip: '', color: 'dim' };
@@ -56,4 +57,10 @@ const DEFAULT_TIP: TipOfFeed = { tip: '', color: 'dim' };
  */
 function getTipOfFeed(): TipOfFeed {
   return getDynamicConfig_CACHED_MAY_BE_STALE<TipOfFeed>(CONFIG_NAME, DEFAULT_TIP);
+}
+
+export function shouldShowEmergencyTip(): boolean {
+  const tip = getTipOfFeed();
+  if (!tip.tip) return false;
+  return tip.persistent === true || tip.tip !== getGlobalConfig().lastShownEmergencyTip;
 }

@@ -54,7 +54,7 @@ export function GlimmerMessage({
     const baseColorStr = theme[messageColor];
     const baseRGB = baseColorStr ? parseRGB(baseColorStr) : null;
     const color: keyof Theme | RGBColor = baseRGB
-      ? toRGBColor(interpolateColor(baseRGB, ERROR_RED, stalledIntensity))
+      ? toRGBColor(interpolateColor(baseRGB, ERROR_RED, Math.round(stalledIntensity * 8) / 8))
       : stalledIntensity > 0.5
         ? 'error'
         : messageColor;
@@ -73,7 +73,7 @@ export function GlimmerMessage({
     const warningRGB = warningStr ? parseRGB(warningStr) : null;
     const color: keyof Theme | RGBColor =
       baseRGB && warningRGB
-        ? toRGBColor(interpolateColor(baseRGB, warningRGB, thinkingIntensity))
+        ? toRGBColor(interpolateColor(baseRGB, warningRGB, Math.round(thinkingIntensity * 8) / 8))
         : thinkingIntensity > 0.5
           ? 'warning'
           : messageColor;

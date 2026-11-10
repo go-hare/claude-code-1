@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { AccessibilityContext, Box, Text, useAnimationFrame } from '@anthropic/ink';
 import { TEARDROP_ASTERISK } from '../../constants/figures.js';
-import { Box, Text, useAnimationFrame } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { hueToRgb, toRGBColor } from '../Spinner/utils.js';
 
@@ -11,10 +12,12 @@ const TOTAL_ANIMATION_MS = SWEEP_DURATION_MS * SWEEP_COUNT;
 const SETTLED_GREY = toRGBColor({ r: 153, g: 153, b: 153 });
 
 export function AnimatedAsterisk({ char = TEARDROP_ASTERISK }: { char?: string }): React.ReactNode {
+  const srContext = useContext(AccessibilityContext);
+  const screenReader = srContext || isScreenReaderModeEnabled();
   // Read prefersReducedMotion once at mount — no useSettings() subscription,
   // since that would re-render whenever settings change.
   const [reducedMotion] = useState(() => getInitialSettings().prefersReducedMotion ?? false);
-  const [done, setDone] = useState(reducedMotion);
+  const [done, setDone] = useState(reducedMotion || screenReader);
   // useAnimationFrame's clock is shared — capture our start offset so the
   // sweep always begins at hue 0 regardless of when we mount.
   const startTimeRef = useRef<number | null>(null);

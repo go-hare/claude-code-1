@@ -1,8 +1,8 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type ReactNode, useState } from 'react';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, type ClickEvent, Text, stringWidth } from '@anthropic/ink';
 import { truncatePathMiddle, truncateToWidth } from '../../utils/format.js';
-import { truncateToWidthNoEllipsis } from '../../utils/truncate.js';
+import { truncateStartToWidth, truncateToWidthNoEllipsis } from '../../utils/truncate.js';
 import type { Theme } from '../../utils/theme.js';
 import { QueryHighlightedText } from './QueryHighlightedText.js';
 
@@ -38,20 +38,26 @@ export const OVERLAY_MAX_ITEMS = 5;
 
 /**
  * Get the icon for a suggestion based on its type
- * Icons: + for files, ◇ for MCP resources, * for agents
+ * Icons: + for files, ◇ for MCP resources/templates, * for agents
  */
 function getIcon(itemId: string): string {
   if (itemId.startsWith('file-')) return '+';
   if (itemId.startsWith('mcp-resource-')) return '◇';
+  if (itemId.startsWith('mcp-template')) return '◇';
   if (itemId.startsWith('agent-')) return '*';
   return '+';
 }
 
 /**
- * Check if an item is a unified suggestion type (file, mcp-resource, or agent)
+ * Check if an item is a unified suggestion type (file, mcp-resource, mcp-template, or agent)
  */
 function isUnifiedSuggestion(itemId: string): boolean {
-  return itemId.startsWith('file-') || itemId.startsWith('mcp-resource-') || itemId.startsWith('agent-');
+  return (
+    itemId.startsWith('file-') ||
+    itemId.startsWith('mcp-resource-') ||
+    itemId.startsWith('mcp-template') ||
+    itemId.startsWith('agent-')
+  );
 }
 
 const SuggestionItemRow = memo(function SuggestionItemRow({
@@ -68,7 +74,7 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   const columns = useTerminalSize().columns;
   const isUnified = isUnifiedSuggestion(item.id);
 
-  // For unified suggestions (file, mcp-resource, agent), use single-line layout with icon
+  // For unified suggestions (file, mcp-resource, mcp-template, agent), use single-line layout with icon
   if (isUnified) {
     const icon = getIcon(item.id);
     const textColor: keyof Theme | undefined = isSelected ? 'suggestion' : undefined;
@@ -76,6 +82,8 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
 
     const isFile = item.id.startsWith('file-');
     const isMcpResource = item.id.startsWith('mcp-resource-');
+    const isMcpTemplateValue = item.id.startsWith('mcp-template-value::');
+    const isMcpTemplate = item.id.startsWith('mcp-template::');
 
     // Calculate layout widths
     // Layout: "X " (2) + displayText + " – " (3) + description + padding (4)
@@ -83,15 +91,19 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
     const paddingWidth = 4;
     const separatorWidth = item.description ? 3 : 0; // ' – ' separator
 
-    // For files, truncate middle of path to show both directory context and filename
+    // For files / mcp-templates, reserve space for description and truncate path/template
     // For MCP resources, limit displayText to 30 chars (truncate from end)
     // For agents, no truncation
     let displayText: string;
-    if (isFile) {
+    if (isFile || isMcpTemplate || isMcpTemplateValue) {
       // Reserve space for description if present, otherwise use all available space
       const descReserve = item.description ? Math.min(20, stringWidth(item.description)) : 0;
       const maxPathLength = columns - iconWidth - paddingWidth - separatorWidth - descReserve;
-      displayText = truncatePathMiddle(item.displayText, maxPathLength);
+      displayText = isFile
+        ? truncatePathMiddle(item.displayText, maxPathLength)
+        : isMcpTemplateValue
+          ? truncatePathMiddle(item.displayText, maxPathLength)
+          : truncateStartToWidth(item.displayText, maxPathLength);
     } else if (isMcpResource) {
       const maxDisplayTextLength = 30;
       displayText = truncateToWidth(item.displayText, maxDisplayTextLength);
@@ -288,21 +300,32 @@ type Props = {
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
   maxColumnWidth?: number;
+  emptyMessage?: string;
   /**
    * When true, the suggestions are rendered inside a position=absolute
    * overlay. We omit minHeight and flex-end so the y-clamp in the
    * renderer doesn't push fewer items down into the prompt area.
    */
   overlay?: boolean;
+  noPad?: boolean;
+  onSelect?: (index: number, id: string) => void;
+  hoveredId?: string | null;
+  onHoverChange?: (id: string | null) => void;
 };
 
 export function PromptInputFooterSuggestions({
   suggestions,
   selectedSuggestion,
   maxColumnWidth: maxColumnWidthProp,
+  emptyMessage,
   overlay,
+  noPad,
+  onSelect,
+  hoveredId,
+  onHoverChange,
 }: Props): ReactNode {
   const { rows, columns } = useTerminalSize();
+  const [internalHoveredId, setInternalHoveredId] = useState<string | null>(null);
   // Row budget (leaving space for prompt). Overlay mode (fullscreen) uses a
   // fixed 5 — the floating box sits over the ScrollBox, so terminal height
   // isn't the constraint.
@@ -310,7 +333,20 @@ export function PromptInputFooterSuggestions({
 
   // No suggestions to display
   if (suggestions.length === 0) {
-    return null;
+    if (!emptyMessage) {
+      return null;
+    }
+    const emptyPadRows = overlay || noPad ? 0 : Math.max(0, budget - 1);
+    return (
+      <Box flexDirection="column" justifyContent={overlay ? undefined : 'flex-end'}>
+        <Text dimColor wrap="truncate">
+          {emptyMessage}
+        </Text>
+        {Array.from({ length: emptyPadRows }, (_, i) => (
+          <Text key={`pad-${i}`}> </Text>
+        ))}
+      </Box>
+    );
   }
 
   // Use prop if provided (stable width from all commands), otherwise calculate from visible
@@ -322,19 +358,59 @@ export function PromptInputFooterSuggestions({
   const visibleItems = suggestions.slice(start, end);
   // In overlay mode the parent is position=absolute with bottom='100%', so
   // padding rows would shift the visible items down into the prompt area.
-  const padRows = overlay ? 0 : Math.max(0, budget - used);
+  const padRows = overlay || noPad ? 0 : Math.max(0, budget - used);
+  const selectedId = suggestions[selectedSuggestion]?.id;
+  const effectiveHoveredId = hoveredId !== undefined ? hoveredId : internalHoveredId;
+  const activeHoveredId =
+    effectiveHoveredId != null && suggestions.some(item => item.id === effectiveHoveredId)
+      ? effectiveHoveredId
+      : undefined;
+  const setHovered = (id: string | null): void => {
+    if (onHoverChange) {
+      onHoverChange(id);
+    } else {
+      setInternalHoveredId(id);
+    }
+  };
+  const interactive = Boolean(onSelect || onHoverChange);
 
   return (
-    <Box flexDirection="column" justifyContent={overlay ? undefined : 'flex-end'}>
-      {visibleItems.map(item => (
-        <SuggestionItemRow
-          key={item.id}
-          item={item}
-          maxColumnWidth={maxColumnWidth}
-          isSelected={item.id === suggestions[selectedSuggestion]?.id}
-          allowWrap={allowWrap}
-        />
-      ))}
+    <Box
+      flexDirection="column"
+      justifyContent={overlay ? undefined : 'flex-end'}
+      onMouseLeave={onSelect ? () => setHovered(null) : undefined}
+    >
+      {visibleItems.map((item, idx) => {
+        const itemIndex = start + idx;
+        const row = (
+          <SuggestionItemRow
+            key={item.id}
+            item={item}
+            maxColumnWidth={maxColumnWidth}
+            isSelected={item.id === (activeHoveredId ?? selectedId)}
+            allowWrap={allowWrap}
+          />
+        );
+        if (!interactive) {
+          return row;
+        }
+        return (
+          <Box
+            key={item.id}
+            onMouseEnter={() => setHovered(item.id)}
+            onClick={
+              onSelect
+                ? (event: ClickEvent) => {
+                    if (event.isWindowActivation) return;
+                    onSelect(itemIndex, item.id);
+                  }
+                : undefined
+            }
+          >
+            {row}
+          </Box>
+        );
+      })}
       {Array.from({ length: padRows }, (_, i) => (
         <Text key={`pad-${i}`}> </Text>
       ))}
