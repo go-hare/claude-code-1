@@ -34,7 +34,7 @@ export function IdeAutoConnectDialog({ onComplete }: IdeAutoConnectDialogProps):
   ];
 
   return (
-    <Dialog title="Do you wish to enable auto-connect to IDE?" color="ide" onCancel={onComplete}>
+    <Dialog title="Do you wish to enable auto-connect to IDE?" color="ide" onCancel={onComplete} exitOnCtrlCD>
       <Select options={options} hideIndexes defaultFocusValue="no" refuseInput={refuseInput} onChange={handleSelect} />
       <Text dimColor>You can also configure this in /config or with the --ide flag</Text>
     </Dialog>

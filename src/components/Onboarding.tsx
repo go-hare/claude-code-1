@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
 import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSetup/terminalSetup.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Link, Newline, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Link, Newline, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { isAnthropicAuthEnabled } from '../utils/auth.js';
 import { shouldSkipOnboardingPreflight } from '../utils/forceLoginMethod.js';
@@ -14,14 +14,19 @@ import { getCustomApiKeyStatus } from '../utils/config.js';
 import { env } from '../utils/env.js';
 import { isRunningOnHomespace } from '../utils/envUtils.js';
 import { PreflightStep } from '../utils/preflightChecks.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { ThemeSetting } from '../utils/theme.js';
 import { ApproveApiKey } from './ApproveApiKey.js';
-import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
-import { Select } from './CustomSelect/select.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
+import { ConsoleOAuthFlow as RawConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
 import { WelcomeV2 } from './LogoV2/WelcomeV2.js';
 import { PressEnterToContinue } from './PressEnterToContinue.js';
 import { ThemePicker } from './ThemePicker.js';
 import { OrderedList } from './ui/OrderedList.js';
+
+const ConsoleOAuthFlow: React.ComponentType<
+  React.ComponentProps<typeof RawConsoleOAuthFlow> & { allowContinueWithoutLogin?: boolean }
+> = RawConsoleOAuthFlow;
 
 type StepId = 'preflight' | 'theme' | 'oauth' | 'api-key' | 'security' | 'terminal-setup';
 
@@ -36,10 +41,10 @@ type Props = {
 
 export function Onboarding({ onDone }: Props): React.ReactNode {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [skipOAuth, setSkipOAuth] = useState(false);
   const [oauthEnabled] = useState(() => isAnthropicAuthEnabled());
   // densable 2.1.247 l = Ae()||Ie() = Q$()||Z$()
   const [skipAnthropicPreflight] = useState(() => shouldSkipOnboardingPreflight());
+  const completedRef = useRef(false);
   const [theme, setTheme] = useTheme();
 
   useEffect(() => {
@@ -48,16 +53,21 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     });
   }, [oauthEnabled]);
 
-  function goToNextStep() {
-    if (currentStepIndex < steps.length - 1) {
-      const nextIndex = currentStepIndex + 1;
+  function goToNextStep(stepDelta = 1) {
+    const nextIndex = currentStepIndex + stepDelta;
+    if (nextIndex < steps.length) {
       setCurrentStepIndex(nextIndex);
-
-      logEvent('tengu_onboarding_step', {
-        oauthEnabled,
-        stepId: steps[nextIndex]?.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      });
+      for (let i = currentStepIndex + 1; i <= nextIndex; i++) {
+        logEvent('tengu_onboarding_step', {
+          oauthEnabled,
+          stepId: steps[i]?.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+      }
     } else {
+      if (completedRef.current) {
+        return;
+      }
+      completedRef.current = true;
       onDone();
     }
   }
@@ -84,7 +94,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
 
   const securityStep = (
     <Box flexDirection="column" gap={1} paddingLeft={1}>
-      <Text bold>Before you start, keep in mind:</Text>
+      <Text bold>Security notes:</Text>
       <Box flexDirection="column" width={70}>
         {/**
          * OrderedList misnumbers items when rendering conditionally,
@@ -92,21 +102,17 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
          */}
         <OrderedList>
           <OrderedList.Item>
-            <Text>Always review changes before accepting</Text>
+            <Text>Claude can make mistakes.</Text>
             <Text dimColor wrap="wrap">
-              Claude can make mistakes — especially when running commands
+              You&apos;re responsible for Claude&apos;s actions and should always
               <Newline />
-              or editing files. You stay in control of every action.
+              review them, especially when running code.
               <Newline />
             </Text>
           </OrderedList.Item>
           <OrderedList.Item>
-            <Text>Only use Claude Code on projects you trust</Text>
-            <Text dimColor wrap="wrap">
-              Untrusted code could contain prompt injection attacks.
-              <Newline />
-              <Link url="https://code.claude.com/docs/en/security" />
-            </Text>
+            <Text>Due to prompt injection risks, only use it with code you trust</Text>
+            <Link url="https://code.claude.com/docs/en/security" />
           </OrderedList.Item>
         </OrderedList>
       </Box>
@@ -128,11 +134,9 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     }
   }, []);
 
-  function handleApiKeyDone(approved: boolean) {
-    if (approved) {
-      setSkipOAuth(true);
-    }
-    goToNextStep();
+  function handleApiKeyDone(shouldSkipOAuth: boolean) {
+    const shouldSkip = shouldSkipOAuth && steps[currentStepIndex + 1]?.id === 'oauth';
+    goToNextStep(shouldSkip ? 2 : 1);
   }
 
   const steps: OnboardingStep[] = [];
@@ -156,11 +160,9 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     steps.push({
       id: 'oauth',
       component: (
-        <SkippableStep skip={skipOAuth} onSkip={goToNextStep}>
-          <Box flexDirection="column" gap={1} paddingLeft={1}>
-            <ConsoleOAuthFlow onDone={goToNextStep} urlOutdent={1} />
-          </Box>
-        </SkippableStep>
+        <Box flexDirection="column" gap={1} paddingLeft={1}>
+          <ConsoleOAuthFlow onDone={goToNextStep} urlOutdent={1} allowContinueWithoutLogin={true} />
+        </Box>
       ),
     });
   }
@@ -179,34 +181,31 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
               <Newline />
               for your terminal:{' '}
               {env.terminal === 'Apple_Terminal'
-                ? 'Option+Enter for newlines and visual bell'
+                ? isScreenReaderModeEnabled()
+                  ? 'Option+Enter for newlines'
+                  : 'Option+Enter for newlines and no audible bell'
                 : 'Shift+Enter for newlines'}
             </Text>
-            <Select
-              options={[
-                {
-                  label: 'Yes, use recommended settings',
-                  value: 'install',
-                },
-                {
-                  label: 'No, maybe later with /terminal-setup',
-                  value: 'no',
-                },
-              ]}
-              onChange={value => {
-                if (value === 'install') {
-                  // Errors already logged in setupTerminal, just swallow and proceed
-                  void setupTerminal(theme)
-                    .catch(() => {})
-                    .finally(goToNextStep);
-                } else {
-                  goToNextStep();
-                }
+            <ConfirmSelect
+              confirmLabel="Yes, use recommended settings"
+              cancelLabel="No, maybe later with /terminal-setup"
+              onConfirm={() => {
+                // Errors already logged in setupTerminal, just swallow and proceed
+                void setupTerminal(theme)
+                  .catch(() => {})
+                  .finally(goToNextStep);
               }}
-              onCancel={() => goToNextStep()}
+              onCancel={goToNextStep}
             />
             <Text dimColor>
-              {exitState.pending ? <>Press {exitState.keyName} again to exit</> : <>Enter to confirm · Esc to skip</>}
+              {exitState.pending ? (
+                <>Press {exitState.keyName} again to exit</>
+              ) : (
+                <Byline>
+                  <KeyboardShortcutHint shortcut="enter" action="confirm" />
+                  <KeyboardShortcutHint shortcut="escape" action="skip" />
+                </Byline>
+              )}
             </Text>
           </Box>
         </Box>
@@ -219,11 +218,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   // Handle Enter on security step and Escape on terminal-setup step
   // Dependencies match what goToNextStep uses internally
   const handleSecurityContinue = useCallback(() => {
-    if (currentStepIndex === steps.length - 1) {
-      onDone();
-    } else {
-      goToNextStep();
-    }
+    goToNextStep();
   }, [currentStepIndex, steps.length, oauthEnabled, onDone]);
 
   const handleTerminalSetupSkip = useCallback(() => {
@@ -263,24 +258,4 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       </Box>
     </Box>
   );
-}
-
-export function SkippableStep({
-  skip,
-  onSkip,
-  children,
-}: {
-  skip: boolean;
-  onSkip(): void;
-  children: React.ReactNode;
-}): React.ReactNode {
-  useEffect(() => {
-    if (skip) {
-      onSkip();
-    }
-  }, [skip, onSkip]);
-  if (skip) {
-    return null;
-  }
-  return children;
 }

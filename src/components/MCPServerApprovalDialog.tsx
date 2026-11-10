@@ -76,6 +76,7 @@ export function MCPServerApprovalDialog({ serverName, isPluginServer = false, on
       title={`New MCP server found in this project: ${formatMcpServerLabel(serverName, isPluginServer)}`}
       color="warning"
       onCancel={() => onChange('no')}
+      exitOnCtrlCD
     >
       <MCPServerDialogCopy />
 
@@ -88,6 +89,8 @@ export function MCPServerApprovalDialog({ serverName, isPluginServer = false, on
           },
           { label: `Continue without using this MCP server`, value: 'no' },
         ]}
+        hideIndexes
+        defaultFocusValue="no"
         onChange={value => onChange(value as 'yes_all' | 'yes' | 'no')}
         onCancel={() => onChange('no')}
       />

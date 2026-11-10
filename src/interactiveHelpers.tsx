@@ -210,12 +210,9 @@ export async function showSetupScreens(
   const config = getGlobalConfig();
   let onboardingShown = false;
   let mcpApprovalSkipWarning: McpApprovalSkipWarning | null = null;
-  // Official: CLAUDE_CODE_POWERUP_ONBOARDING=banner|step forces onboarding UI.
-  if (
-    !config.theme ||
-    !config.hasCompletedOnboarding || // always show onboarding at least once
-    isPowerupOnboardingEnabled()
-  ) {
+  // Official ors: check hasCompletedOnboarding (not config.theme — auto theme leaves theme unset)
+  // plus CLAUDE_CODE_POWERUP_ONBOARDING=banner|step.
+  if (!config.hasCompletedOnboarding || isPowerupOnboardingEnabled()) {
     onboardingShown = true;
     const { Onboarding } = await import('./components/Onboarding.js');
     await showSetupDialog(
@@ -251,11 +248,13 @@ export async function showSetupScreens(
     // GrowthBook checks this to decide whether to include auth headers.
     setSessionTrustAccepted(true);
 
-    // Reset and reinitialize GrowthBook after trust is established.
-    // Defense for login/logout: clears any prior client so the next init
-    // picks up fresh auth headers.
-    resetGrowthBook();
-    void initializeGrowthBook();
+    // densable ors: only reset GrowthBook when onboarding had not completed before this launch.
+    if (config.hasCompletedOnboarding) {
+      void initializeGrowthBook();
+    } else {
+      resetGrowthBook();
+      void initializeGrowthBook();
+    }
 
     // Now that trust is established, prefetch system context if it wasn't already
     void getSystemContext();

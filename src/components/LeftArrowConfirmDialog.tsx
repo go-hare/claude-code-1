@@ -1,7 +1,7 @@
 /**
  * densable LAc — "Background this session?" left-arrow inflight confirm.
  */
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Dialog } from '@anthropic/ink';
 import {
   EMPTY_WORKFLOW_AGENTS,
@@ -10,7 +10,7 @@ import {
   formatWorkflowAgentsSubtitle,
   type WorkflowAgentsCount,
 } from '../utils/leftArrowConfirm.js';
-import { Select } from './CustomSelect/select.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 
 type Props = {
   summary: string;
@@ -39,24 +39,9 @@ export function LeftArrowConfirmDialog({
   const subtitle = [stopped, monitors, carry, workflow].filter(Boolean).join(' ');
   const confirmLabel = formatWorkflowAgentsConfirmLabel(summary !== '', workflowAgents);
 
-  const options = useMemo(
-    () => [
-      { label: confirmLabel, value: 'confirm' as const },
-      { label: 'Stay', value: 'stay' as const },
-    ],
-    [confirmLabel],
-  );
-
   return (
     <Dialog title="Background this session?" subtitle={subtitle || undefined} onCancel={onCancel}>
-      {/* densable LAc: Esc is Dialog onCancel only — no Select onCancel. */}
-      <Select
-        options={options}
-        onChange={v => {
-          if (v === 'confirm') onConfirm();
-          else onCancel();
-        }}
-      />
+      <ConfirmSelect confirmLabel={confirmLabel} cancelLabel="Stay" onConfirm={onConfirm} onCancel={onCancel} />
     </Dialog>
   );
 }

@@ -38,7 +38,7 @@ function InvalidConfigDialog({
   };
 
   return (
-    <Dialog title="Configuration Error" color="error" onCancel={onExit}>
+    <Dialog title="Configuration error" color="error" onCancel={onExit}>
       <Box flexDirection="column" gap={1}>
         <Text>
           The configuration file at <Text bold>{filePath}</Text> contains invalid JSON.

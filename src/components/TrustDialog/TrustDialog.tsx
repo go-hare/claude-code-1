@@ -4,15 +4,17 @@ import { logEvent } from 'src/services/analytics/index.js';
 import { setSessionTrustAccepted } from '../../bootstrap/state.js';
 import type { Command } from '../../commands.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Link, Text } from '@anthropic/ink';
+import { Box, Link, StatusIcon, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
+import { getSettingsForSource } from '../../utils/settings/settings.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
-import { ConfirmSelect, ConfirmSelectHint } from '../ConfirmSelect.js';
+import { plural } from '../../utils/stringUtils.js';
+import { CONFIRM_SELECT_ARM_MS, ConfirmSelect, ConfirmSelectHint, confirmSelectRefused } from '../ConfirmSelect.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
 import {
   ACCESSING_CANCEL_LABEL,
@@ -43,6 +45,28 @@ type Props = {
   commands?: Command[];
 };
 
+function getProxyAuthHelperSources(): string[] {
+  const sources: string[] = [];
+  if (getSettingsForSource('projectSettings')?.proxyAuthHelper) {
+    sources.push('.claude/settings.json');
+  }
+  if (getSettingsForSource('localSettings')?.proxyAuthHelper) {
+    sources.push('.claude/settings.local.json');
+  }
+  return sources;
+}
+
+function getAutoMemoryDirectorySources(): string[] {
+  const sources: string[] = [];
+  if (getSettingsForSource('projectSettings')?.autoMemoryDirectory !== undefined) {
+    sources.push('.claude/settings.json');
+  }
+  if (getSettingsForSource('localSettings')?.autoMemoryDirectory !== undefined) {
+    sources.push('.claude/settings.local.json');
+  }
+  return sources;
+}
+
 export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   const { servers: projectServers } = getMcpConfigsByScope('project');
 
@@ -69,16 +93,24 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   // Check for otelHeadersHelper which executes arbitrary commands
   const otelHeadersHelperSources = getOtelHeadersHelperSources();
   const hasOtelHeadersHelper = otelHeadersHelperSources.length > 0;
+  // Check for proxyAuthHelper which executes arbitrary commands
+  const proxyAuthHelperSources = getProxyAuthHelperSources();
+  const hasProxyAuthHelper = proxyAuthHelperSources.length > 0;
   // Check for dangerous environment variables (not in SAFE_ENV_VARS)
   const dangerousEnvVarsSources = getDangerousEnvVarsSources();
   const hasDangerousEnvVars = dangerousEnvVarsSources.length > 0;
+  // Check for autoMemoryDirectory in project/local settings
+  const autoMemoryDirectorySources = getAutoMemoryDirectorySources();
+  const hasAutoMemoryDirectory = autoMemoryDirectorySources.length > 0;
   // densable 2.1.238 SEA aRs/sRs — marketplace + MCP headersHelper disclosure
   const marketplaceHelperSources = getMarketplaceHelperSources();
   const repoHelperSources = getRepoHeadersHelperSources(marketplaceHelperSources);
   const hasMarketplaceHeadersHelper = marketplaceHelperSources.length > 0;
   const hasRepoHeadersHelpers = repoHelperSources.length > 0;
   const allowDisclosure = getProjectAllowDisclosure();
+  const hasProjectAllowRules = allowDisclosure.sources.length > 0;
   const addDirsDisclosure = getProjectAddDirsDisclosure();
+  const hasProjectAddDirs = addDirsDisclosure.sources.length > 0;
 
   const hasSlashCommandBash =
     commands?.some(
@@ -101,21 +133,9 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   const hasAnyBashExecution = bashSettingSources.length > 0 || hasSlashCommandBash || hasSkillsBash;
 
   const hasTrustDialogAccepted = checkHasTrustDialogAccepted();
-  const [pendingExitCode, setPendingExitCode] = React.useState<number | null>(null);
-
-  // When a non-null exit code is set, render null (clear screen) first,
-  // then trigger shutdown in the next tick so Ink has time to flush
-  // the empty frame before cleanupTerminalModes() unmounts and exits
-  // the alt screen. Without this deferral, gracefulShutdownSync starts
-  // async cleanup immediately after React commit, racing the reconciler
-  // and leaving residual TrustDialog output on the terminal.
-  React.useEffect(() => {
-    if (pendingExitCode !== null) {
-      const code = pendingExitCode;
-      const timer = setTimeout(() => gracefulShutdownSync(code));
-      return () => clearTimeout(timer);
-    }
-  }, [pendingExitCode]);
+  const [openedAt] = React.useState(() => Date.now());
+  const isInputRefused = () => confirmSelectRefused(openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
+  const exitingRef = React.useRef(false);
 
   React.useEffect(() => {
     const isHomeDir = homedir() === getCwd();
@@ -124,28 +144,43 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       hasMcpServers,
       hasHooks,
       hasBashExecution: hasAnyBashExecution,
+      hasProjectAllowRules,
+      hasProjectAddDirs,
       hasApiKeyHelper,
       hasAwsCommands,
       hasGcpCommands,
       hasOtelHeadersHelper,
+      hasProxyAuthHelper,
       hasMarketplaceHeadersHelper,
       hasRepoHeadersHelpers,
       hasDangerousEnvVars,
+      hasAutoMemoryDirectory,
     });
   }, [
     hasMcpServers,
     hasHooks,
     hasAnyBashExecution,
+    hasProjectAllowRules,
+    hasProjectAddDirs,
     hasApiKeyHelper,
     hasAwsCommands,
     hasGcpCommands,
     hasOtelHeadersHelper,
+    hasProxyAuthHelper,
     hasMarketplaceHeadersHelper,
     hasRepoHeadersHelpers,
     hasDangerousEnvVars,
+    hasAutoMemoryDirectory,
   ]);
 
   function onChange(value: 'enable_all' | 'exit') {
+    if (exitingRef.current) {
+      return;
+    }
+    if (isInputRefused()) {
+      return;
+    }
+    exitingRef.current = true;
     if (value === 'exit') {
       gracefulShutdownSync(1);
       return;
@@ -158,13 +193,17 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       hasMcpServers,
       hasHooks,
       hasBashExecution: hasAnyBashExecution,
+      hasProjectAllowRules,
+      hasProjectAddDirs,
       hasApiKeyHelper,
       hasAwsCommands,
       hasGcpCommands,
       hasOtelHeadersHelper,
+      hasProxyAuthHelper,
       hasMarketplaceHeadersHelper,
       hasRepoHeadersHelpers,
       hasDangerousEnvVars,
+      hasAutoMemoryDirectory,
     });
 
     if (isHomeDir) {
@@ -196,22 +235,22 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   // so the default would hang the await forever. With keybinding
   // customization enabled, the chokidar watcher (persistent: true) keeps the
   // event loop alive and the process freezes. Explicitly exit 1 like "No".
-  const exitState = useExitOnCtrlCDWithKeybindings(() => setPendingExitCode(1));
+  const exitState = useExitOnCtrlCDWithKeybindings(() => {
+    exitingRef.current = true;
+    gracefulShutdownSync(1);
+  });
 
   // Use configurable keybinding for ESC to cancel/exit
   useKeybinding(
     'confirm:no',
     () => {
+      if (isInputRefused()) return;
+      if (exitingRef.current) return;
+      exitingRef.current = true;
       gracefulShutdownSync(0);
     },
     { context: 'Confirmation' },
   );
-
-  // When pendingExitCode is set, render nothing so the screen is cleared
-  // before shutdown cleans up the alt screen.  See the useEffect above.
-  if (pendingExitCode !== null) {
-    return null;
-  }
 
   // densable: already trusted and no backstop → queueMicrotask(onDone), not setTimeout.
   if (hasTrustDialogAccepted) {
@@ -232,43 +271,45 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         {allowDisclosure.rawCount > 0 || addDirsDisclosure.rawCount > 0 || hasRepoHeadersHelpers ? (
           <Box flexDirection="column">
             {allowDisclosure.rawCount > 0 ? (
-              <Box flexDirection="column">
+              <>
                 <Text bold color="warning">
-                  This folder pre-approves {allowDisclosure.rawCount} tool permission in{' '}
+                  <StatusIcon status="warning" withSpace />
+                  This folder pre-approves {allowDisclosure.rawCount}{' '}
+                  {plural(allowDisclosure.rawCount, 'tool permission')} in{' '}
                   {formatEnglishSourceList(allowDisclosure.sources)}:
                 </Text>
                 <Text>
                   {'  '}
                   {allowDisclosure.rules.length > 0
-                    ? formatEnglishSourceList(allowDisclosure.rules)
+                    ? formatEnglishSourceList(allowDisclosure.rules, 8)
                     : '(rule names contain unprintable characters)'}
                 </Text>
-              </Box>
+              </>
             ) : null}
             {addDirsDisclosure.rawCount > 0 ? (
-              <Box flexDirection="column">
+              <>
                 <Text bold color="warning">
+                  <StatusIcon status="warning" withSpace />
                   This folder adds {addDirsDisclosure.rawCount}{' '}
-                  {addDirsDisclosure.rawCount === 1 ? 'directory' : 'directories'} to the workspace in{' '}
+                  {plural(addDirsDisclosure.rawCount, 'directory', 'directories')} to the workspace in{' '}
                   {formatEnglishSourceList(addDirsDisclosure.sources)}:
                 </Text>
                 <Text>
                   {'  '}
                   {addDirsDisclosure.dirs.length > 0
-                    ? formatEnglishSourceList(addDirsDisclosure.dirs)
+                    ? formatEnglishSourceList(addDirsDisclosure.dirs, 6)
                     : '(directory names contain unprintable characters)'}
                 </Text>
-              </Box>
+              </>
             ) : null}
             {hasRepoHeadersHelpers ? (
-              <Box flexDirection="column">
-                <Text bold color="warning">
-                  {ACCESSING_HEADERS_HELPER_PREFIX}
-                  {formatEnglishSourceList(repoHelperSources)}
-                </Text>
-                <Text dimColor>{ACCESSING_HEADERS_HELPER_TRUST_NOTE}</Text>
-              </Box>
+              <Text bold color="warning">
+                <StatusIcon status="warning" withSpace />
+                {ACCESSING_HEADERS_HELPER_PREFIX}
+                {formatEnglishSourceList(repoHelperSources)}
+              </Text>
             ) : null}
+            <Text dimColor>{ACCESSING_HEADERS_HELPER_TRUST_NOTE}</Text>
           </Box>
         ) : null}
 
@@ -277,6 +318,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         </Text>
 
         <ConfirmSelect
+          openedAt={openedAt}
+          refuseInput={isInputRefused}
           hideIndexes
           cancelFirst
           focus="cancel"

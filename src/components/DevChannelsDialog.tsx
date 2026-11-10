@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import type { ChannelEntry } from '../bootstrap/state.js';
 import { Box, Text, Dialog } from '@anthropic/ink';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 
 type Props = {
   channels: ChannelEntry[];
@@ -57,12 +57,11 @@ export function DevChannelsDialog({ channels, onAccept }: Props): React.ReactNod
         </Text>
       </Box>
 
-      <Select
-        options={[
-          { label: 'I am using this for local development', value: 'accept' },
-          { label: 'Exit', value: 'exit' },
-        ]}
-        onChange={value => onChange(value as 'accept' | 'exit')}
+      <ConfirmSelect
+        confirmLabel="I am using this for local development"
+        cancelLabel="Exit"
+        onConfirm={() => onChange('accept')}
+        onCancel={() => onChange('exit')}
       />
     </Dialog>
   );

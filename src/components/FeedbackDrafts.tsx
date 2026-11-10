@@ -1,6 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import chalk from 'chalk';
 import figures from 'figures';
-import { Box, Byline, Dialog, KeyboardShortcutHint, StatusIcon, Text, useInput } from '@anthropic/ink';
+import {
+  AccessibilityContext,
+  Box,
+  Byline,
+  Dialog,
+  KeyboardShortcutHint,
+  StatusIcon,
+  Text,
+  useInput,
+  useIsInsideModal,
+  useModalOrTerminalSize,
+  wrapAnsi,
+} from '@anthropic/ink';
 import type { CommandResultDisplay } from '../commands.js';
 import { useSessionServices } from '../context/sessionServices.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -24,6 +37,8 @@ import { setSeededSessionDraftCount } from '../utils/feedbackDrafts/notice.js';
 import { submitQueuedFeedbackDraft } from '../utils/feedbackDrafts/submitDraft.js';
 import { discardFeedbackDraft, listFeedbackDrafts, writeFeedbackDraft } from '../utils/feedbackDrafts/writeDraft.js';
 import { plural } from '../utils/stringUtils.js';
+import { ItemList } from './ItemList.js';
+import { Markdown } from './Markdown.js';
 import TextInput from './TextInput.js';
 
 const TYPE_LABELS: Record<FeedbackType, string> = {
@@ -96,6 +111,92 @@ export function sanitizeFeedbackField(value: string, multiline: boolean): string
 const DETAILS_LIMIT_ERROR = `That edit would push Details past the ${Math.floor(MAX_DETAILS_BYTES / 1024)}KB limit. Trim the details first.`;
 const REVIEW_PRIVACY_FOOTER =
   'We may use these reports to debug related issues and improve Claude Code. Turn off Claude-drafted feedback anytime in /config.';
+const WRITE_NEW_LABEL = '+ Write new feedback';
+const LIST_INLINE_RESERVE_ROWS = 6;
+const LIST_CHROME_ROWS = 3;
+const LIST_MIN_ROWS = 5;
+
+function formatScreenReaderDetails(value: string, columns: number, preview = false): string {
+  if (value.trim() === '') return 'Details empty.';
+  const lines = value.split('\n');
+  const width = Math.max(1, columns - 6);
+  const wrapped = lines.flatMap(line => wrapAnsi(line, width, { hard: true, trim: false }).split('\n'));
+  return [
+    preview
+      ? `Draft preview, ${lines.length} ${plural(lines.length, 'line')}:`
+      : `${lines.length} ${plural(lines.length, 'line')}:`,
+    ...wrapped.map(line => `> ${line}`),
+    preview ? 'End of preview. Review the full draft with /feedback.' : 'End of details.',
+  ].join('\n');
+}
+
+function truncateDetailsRows(value: string, columns: number, maxRows: number): string {
+  const out: string[] = [];
+  let used = 0;
+  const width = Math.max(1, columns);
+  for (const line of value.split('\n')) {
+    const wrapped = wrapAnsi(line, width, { hard: true, trim: false }).split('\n');
+    if (used + wrapped.length <= maxRows) {
+      out.push(line);
+      used += wrapped.length;
+      continue;
+    }
+    const remaining = maxRows - used;
+    if (remaining > 0) {
+      out.push(wrapped.slice(0, remaining).join('').trimEnd());
+    }
+    out.push('…');
+    return out.join('\n');
+  }
+  return value;
+}
+
+/** densable nAt */
+export function FeedbackDetailsBox({
+  value,
+  bold,
+  dim,
+  columns,
+  maxRows,
+  preview,
+}: {
+  value: string;
+  bold?: boolean;
+  dim?: boolean;
+  columns: number;
+  maxRows?: number;
+  preview?: boolean;
+}): React.ReactNode {
+  const screenReader = useContext(AccessibilityContext);
+  const sanitized = sanitizeFeedbackField(value, true);
+  const text = maxRows === undefined ? sanitized : truncateDetailsRows(sanitized, Math.max(1, columns - 2), maxRows);
+  return (
+    <Box
+      borderStyle={screenReader ? undefined : 'single'}
+      borderLeft
+      borderTop={false}
+      borderBottom={false}
+      borderRight={false}
+      borderDimColor
+      paddingLeft={screenReader ? 0 : 1}
+      flexDirection="column"
+    >
+      {screenReader ? (
+        <Text bold={bold} dimColor={dim} wrap="wrap">
+          {formatScreenReaderDetails(text, columns, preview)}
+        </Text>
+      ) : chalk.level === 0 ? (
+        <Text bold={bold} dimColor={dim} wrap="wrap">
+          {text}
+        </Text>
+      ) : (
+        <Markdown promptMode skipTokenCache>
+          {text}
+        </Markdown>
+      )}
+    </Box>
+  );
+}
 
 function FocusTick({ isFocused }: { isFocused: boolean }): React.ReactNode {
   return <Text color={isFocused ? 'suggestion' : undefined}>{isFocused ? `${figures.pointer} ` : '  '}</Text>;
@@ -114,44 +215,136 @@ function EnumValue({ value, isFocused }: { value: string; isFocused: boolean }):
 
 function WriteNewRow({ isSelected }: { isSelected: boolean }): React.ReactNode {
   return (
-    <Box marginLeft={1}>
-      <Text color={isSelected ? 'suggestion' : undefined}>
-        {isSelected ? `${figures.pointer} ` : '  '}+ Write new feedback
-      </Text>
-    </Box>
+    <Text color={isSelected ? 'suggestion' : undefined}>
+      {isSelected ? `${figures.pointer} ` : '  '}
+      {WRITE_NEW_LABEL}
+    </Text>
   );
 }
 
-function DraftListSection({
-  title,
-  drafts,
-  offset,
-  cursor,
+/** densable Me */
+export function formatDraftMeta(draft: FeedbackDraft): string[] {
+  return [
+    TYPE_LABELS[draft.type],
+    formatDraftAge(draft.created_at),
+    sanitizeFeedbackField(draft.cwd, false),
+    draft.transcriptAvailable ? 'transcript available' : 'transcript expired (report only)',
+  ];
+}
+
+function DraftList({
+  thisSession,
+  others,
+  hasWriteNew,
+  defaultFocusIndex,
+  onFocus,
+  onOpen,
+  onWriteNew,
 }: {
-  title: string;
-  drafts: FeedbackDraft[];
-  offset: number;
-  cursor: number;
+  thisSession: FeedbackDraft[];
+  others: FeedbackDraft[];
+  hasWriteNew: boolean;
+  defaultFocusIndex: number;
+  onFocus: (index: number) => void;
+  onOpen: (draft: FeedbackDraft) => void;
+  onWriteNew: () => void;
 }): React.ReactNode {
+  const { rows } = useModalOrTerminalSize(useTerminalSize());
+  const insideModal = useIsInsideModal();
+  const ordered = useMemo(() => [...thisSession, ...others], [thisSession, others]);
+  const totalLines =
+    (thisSession.length > 0 ? 1 : 0) + (others.length > 0 ? 1 : 0) + ordered.length + (hasWriteNew ? 2 : 0);
+  const budget = Math.max(LIST_MIN_ROWS, rows - LIST_CHROME_ROWS - (insideModal ? 0 : LIST_INLINE_RESERVE_ROWS));
+  const visibleOptionCount = totalLines > budget ? budget - 2 : budget;
+
+  const { options, selectableIndexByOptionIndex, optionIndexBySelectableIndex } = useMemo(() => {
+    const built: Array<{
+      heading?: boolean;
+      value: string;
+      label: React.ReactNode;
+      facts?: readonly string[];
+    }> = [];
+    const optToSel = new Map<number, number>();
+    const selToOpt = new Map<number, number>();
+    let selIdx = 0;
+
+    if (thisSession.length > 0) {
+      built.push({
+        heading: true,
+        value: 'this-session',
+        label: <Text bold>This session</Text>,
+      });
+      for (const draft of thisSession) {
+        const optIdx = built.length;
+        optToSel.set(optIdx, selIdx);
+        selToOpt.set(selIdx, optIdx);
+        selIdx++;
+        built.push({
+          value: draft.draft_id,
+          label: sanitizeFeedbackField(draft.title, false),
+          facts: formatDraftMeta(draft),
+        });
+      }
+    }
+
+    if (others.length > 0) {
+      built.push({
+        heading: true,
+        value: 'other-sessions',
+        label: <Text bold>Other sessions</Text>,
+      });
+      for (const draft of others) {
+        const optIdx = built.length;
+        optToSel.set(optIdx, selIdx);
+        selToOpt.set(selIdx, optIdx);
+        selIdx++;
+        built.push({
+          value: draft.draft_id,
+          label: sanitizeFeedbackField(draft.title, false),
+          facts: formatDraftMeta(draft),
+        });
+      }
+    }
+
+    if (hasWriteNew) {
+      built.push({
+        heading: true,
+        value: 'gap',
+        label: <Text> </Text>,
+      });
+      const optIdx = built.length;
+      optToSel.set(optIdx, selIdx);
+      selToOpt.set(selIdx, optIdx);
+      built.push({
+        value: 'write-new',
+        label: WRITE_NEW_LABEL,
+      });
+    }
+
+    return {
+      options: built,
+      selectableIndexByOptionIndex: optToSel,
+      optionIndexBySelectableIndex: selToOpt,
+    };
+  }, [thisSession, others, hasWriteNew]);
+
   return (
-    <Box flexDirection="column">
-      <Text bold>{title}</Text>
-      {drafts.map((draft, index) => {
-        const selected = offset + index === cursor;
-        return (
-          <Box key={draft.draft_id} marginLeft={1}>
-            <Text color={selected ? 'suggestion' : undefined} wrap="truncate-end">
-              {selected ? `${figures.pointer} ` : '  '}[{TYPE_LABELS[draft.type]}]{' '}
-              {sanitizeFeedbackField(draft.title, false)}{' '}
-              <Text dimColor>
-                {formatDraftAge(draft.created_at)} · {sanitizeFeedbackField(draft.cwd, false)} ·{' '}
-                {draft.transcriptAvailable ? 'transcript available' : 'transcript expired (report only)'}
-              </Text>
-            </Text>
-          </Box>
-        );
-      })}
-    </Box>
+    <ItemList
+      options={options}
+      visibleOptionCount={visibleOptionCount}
+      defaultFocusIndex={optionIndexBySelectableIndex.get(defaultFocusIndex) ?? 0}
+      onFocus={optIdx => {
+        const selIdx = selectableIndexByOptionIndex.get(optIdx);
+        if (selIdx !== undefined) onFocus(selIdx);
+      }}
+      onSelect={optIdx => {
+        const selIdx = selectableIndexByOptionIndex.get(optIdx);
+        if (selIdx === undefined) return;
+        const draft = ordered[selIdx];
+        if (draft) onOpen(draft);
+        else onWriteNew();
+      }}
+    />
   );
 }
 
@@ -184,6 +377,7 @@ function FieldEditor({
   onPrev(): void;
   onExit(): void;
 }): React.ReactNode {
+  const screenReader = useContext(AccessibilityContext);
   return (
     <Box flexDirection="column">
       <Box>
@@ -193,18 +387,18 @@ function FieldEditor({
       <Box marginLeft={4}>
         {isFocused ? (
           <Box
-            borderStyle={multiline ? 'single' : undefined}
+            borderStyle={multiline && !screenReader ? 'single' : undefined}
             borderLeft={true}
             borderTop={false}
             borderBottom={false}
             borderRight={false}
             borderDimColor
-            paddingLeft={multiline ? 1 : 0}
+            paddingLeft={multiline && !screenReader ? 1 : 0}
           >
             <TextInput
               value={value}
               onChange={onChange}
-              columns={multiline ? columns - 2 : columns}
+              columns={multiline && !screenReader ? columns - 2 : columns}
               onSubmit={onNext}
               onExit={onExit}
               onHistoryUp={onPrev}
@@ -220,9 +414,7 @@ function FieldEditor({
             />
           </Box>
         ) : multiline ? (
-          <Text bold={bold} dimColor={dim} wrap="wrap">
-            {sanitizeFeedbackField(value, true)}
-          </Text>
+          <FeedbackDetailsBox value={value} bold={bold} dim={dim} columns={columns} />
         ) : (
           <Text bold={bold} dimColor={dim} wrap="wrap">
             {sanitizeFeedbackField(value, false)}
@@ -237,6 +429,7 @@ function FieldEditor({
 export function FeedbackDrafts({ messages, onDone, abortSignal, onWriteNew }: Props): React.ReactNode {
   const [drafts, setDrafts] = useState<FeedbackDraft[] | null>(null);
   const [cursor, setCursor] = useState(0);
+  const screenReader = useContext(AccessibilityContext);
   const [mode, setMode] = useState<PanelMode>('list');
   const [selected, setSelected] = useState<FeedbackDraft | null>(null);
   const [includeTranscript, setIncludeTranscript] = useState(false);
@@ -541,12 +734,13 @@ export function FeedbackDrafts({ messages, onDone, abortSignal, onWriteNew }: Pr
         finish();
         return;
       }
-      if (key.upArrow) setCursor(current => Math.max(0, current - 1));
-      else if (key.downArrow) setCursor(current => Math.min(rowCount - 1, current + 1));
-      else if (key.return && writeNewSelected && onWriteNew) onWriteNew();
-      else if (key.return && current) openReview(current);
-      else if (input.toLowerCase() === 'd' && current) void discardDraft(current);
-      else if (ordered.length === 0 && !key.escape) finish();
+      if (ordered.length > 0) {
+        if (input.toLowerCase() === 'd' && current) void discardDraft(current);
+        return;
+      }
+      if (key.upArrow || key.downArrow) return;
+      if (key.return && onWriteNew) onWriteNew();
+      else if (!key.escape) finish();
       return;
     }
     if (mode === 'review' && selected) {
@@ -581,13 +775,14 @@ export function FeedbackDrafts({ messages, onDone, abortSignal, onWriteNew }: Pr
     }
   });
 
+  const showListRowHints = !(screenReader && ordered.length > 0);
   const inputGuide =
     mode === 'list' ? (
       <Byline>
-        {rowCount > 0 && (
+        {rowCount > 0 && showListRowHints && (
           <KeyboardShortcutHint shortcut="enter" action={writeNewSelected ? 'write new feedback' : 'review'} />
         )}
-        {current !== undefined && <KeyboardShortcutHint shortcut="d" action="discard" />}
+        {current !== undefined && showListRowHints && <KeyboardShortcutHint shortcut="d" action="discard" />}
         <KeyboardShortcutHint shortcut="esc" action="close" />
       </Byline>
     ) : mode === 'review' ? (
@@ -611,7 +806,7 @@ export function FeedbackDrafts({ messages, onDone, abortSignal, onWriteNew }: Pr
       onCancel={goBack}
       isCancelActive={mode !== 'submitting' && !editingText}
       hideInputGuide={mode === 'receipt' || mode === 'submitting'}
-      inputGuide={() => inputGuide}
+      inputGuide={inputGuide}
     >
       {mode === 'list' && drafts === null && <Text dimColor>Loading…</Text>}
       {mode === 'list' && drafts !== null && ordered.length === 0 && (
@@ -630,22 +825,15 @@ export function FeedbackDrafts({ messages, onDone, abortSignal, onWriteNew }: Pr
       )}
       {mode === 'list' && drafts !== null && ordered.length > 0 && (
         <Box flexDirection="column">
-          {thisSession.length > 0 && (
-            <DraftListSection title="This session" drafts={thisSession} offset={0} cursor={cursor} />
-          )}
-          {otherSessions.length > 0 && (
-            <DraftListSection
-              title="Other sessions"
-              drafts={otherSessions}
-              offset={thisSession.length}
-              cursor={cursor}
-            />
-          )}
-          {onWriteNew && (
-            <Box marginTop={1}>
-              <WriteNewRow isSelected={writeNewSelected} />
-            </Box>
-          )}
+          <DraftList
+            thisSession={thisSession}
+            others={otherSessions}
+            hasWriteNew={canWriteNew}
+            defaultFocusIndex={cursor}
+            onFocus={setCursor}
+            onOpen={openReview}
+            onWriteNew={() => onWriteNew?.()}
+          />
           <Box marginTop={1}>
             <Text dimColor wrap="wrap">
               Drafts live only on this machine and are never sent without you. Unsent drafts expire after 30 days.

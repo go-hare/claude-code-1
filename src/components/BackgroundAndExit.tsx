@@ -38,6 +38,7 @@ import { formatSessionFrameLiveCopy } from '../utils/bgCheckpoint.js';
 type Props = {
   messages: readonly BackgroundSeedMessage[];
   isMidTurn?: boolean;
+  responseStreaming?: boolean;
   onDone: (message?: string) => void;
   /**
    * Optional AppState.tasks snapshot (or getter) for official CAo/hNo exit
@@ -312,7 +313,9 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
       if (derived === null) {
         onDone('Nothing to background — exiting.');
         await cancelBgHandoffQuota();
-        await gracefulShutdown(0, 'prompt_input_exit');
+        await gracefulShutdown(0, 'prompt_input_exit', {
+          finalMessage: 'Nothing to background — exiting.',
+        });
         return;
       }
       const seed = await settleBackgroundSeedName(derived);

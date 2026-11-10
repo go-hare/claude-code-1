@@ -1,11 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AccessibilityContext, Box, Byline, KeyboardShortcutHint, StatusIcon, Text } from '@anthropic/ink';
 import figures from 'figures';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js';
 import { useSessionServices } from '../context/sessionServices.js';
+import { FeedbackDetailsBox, sanitizeFeedbackField } from './FeedbackDrafts.js';
 import { useDebouncedDigitInput } from './FeedbackSurvey/useDebouncedDigitInput.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -28,6 +29,9 @@ import { useFeedbackNoticeState, useSessionDraftCount } from '../utils/feedbackD
 import { listFeedbackDrafts } from '../utils/feedbackDrafts/writeDraft.js';
 import { isSendFeedbackEnabled } from '../utils/feedbackDrafts/gates.js';
 
+const FEEDBACK_NOTICE_MIN_ROWS = 20;
+const FEEDBACK_NOTICE_PREVIEW_MAX_ROWS = 6;
+
 type CardState = 'idle' | 'confirmSend' | 'sending' | 'sent' | 'error' | 'dismissPrompt' | 'offConfirm';
 
 type Props = {
@@ -36,6 +40,7 @@ type Props = {
   inputValue: string;
   setInputValue: (value: string) => void;
   onOpenFeedback: () => void;
+  onHoldsBandChange?: (holds: boolean) => void;
 };
 
 /** densable leftover Fqe */
@@ -45,11 +50,13 @@ export function FeedbackDraftNotice({
   inputValue,
   setInputValue,
   onOpenFeedback,
+  onHoldsBandChange,
 }: Props): React.ReactNode {
   const { notice } = useFeedbackNoticeState();
   const queued = useSessionDraftCount();
   const { storageV5, credentials } = useSessionServices();
-  const { columns } = useTerminalSize();
+  const screenReader = useContext(AccessibilityContext);
+  const { rows, columns } = useTerminalSize();
   const [state, setState] = useState<CardState>('idle');
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false);
@@ -58,10 +65,15 @@ export function FeedbackDraftNotice({
   const offTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const declined = useRef(false);
   const enabled = isSendFeedbackEnabled();
-  const quiet = getFeedbackDraftsSetting() === 'quiet';
+  const quiet = getFeedbackDraftsSetting() === 'quiet' || rows < FEEDBACK_NOTICE_MIN_ROWS;
   const visible = enabled && notice !== null;
   const busy = isLoading || surveyActive;
   const modal = state === 'dismissPrompt' || state === 'offConfirm';
+  const holdsBand = modal || (visible && !quiet);
+  useLayoutEffect(() => {
+    onHoldsBandChange?.(holdsBand);
+    return () => onHoldsBandChange?.(false);
+  }, [holdsBand, onHoldsBandChange]);
   const [armed, setArmed] = useState(!busy && !quiet);
 
   useEffect(() => {
@@ -306,7 +318,7 @@ export function FeedbackDraftNotice({
     return (
       <Box marginTop={1} marginBottom={1}>
         <Text>
-          <Text color="success">{figures.tick} </Text>
+          <StatusIcon status="success" withSpace />
           Claude-drafted feedback is off. Turn back on in /config
         </Text>
       </Box>
@@ -331,12 +343,12 @@ export function FeedbackDraftNotice({
       <Text dimColor>Sending…</Text>
     ) : state === 'sent' ? (
       <Text>
-        <Text color="success">{figures.tick} </Text>
+        <StatusIcon status="success" withSpace />
         Sent
       </Text>
     ) : state === 'error' ? (
       <Text>
-        <Text color="error">{figures.cross} </Text>
+        <StatusIcon status="error" withSpace />
         <Text color="error">{error}</Text>{' '}
         <Text dimColor>
           <Byline>
@@ -356,25 +368,32 @@ export function FeedbackDraftNotice({
       </Text>
     );
 
+  const sanitizedTitle = sanitizeFeedbackField(notice.title, false);
   const title = (
     <Box flexShrink={1}>
       <Text wrap="truncate-end">
         <Text color="claude" aria-hidden>
           {figures.pointerSmall}{' '}
         </Text>
-        {kind} drafted: <Text bold>{notice.title}</Text>
+        {kind} drafted: <Text bold>{sanitizedTitle}</Text>
       </Text>
     </Box>
   );
 
   if (busy) return null;
   return (
-    <Box marginTop={1} marginBottom={1} flexDirection="column">
-      {title}
-      <Text dimColor wrap="truncate-end">
-        {notice.detailsPreview.slice(0, Math.max(1, columns - 4))}
-      </Text>
-      {hints}
+    <Box marginTop={1} marginBottom={1}>
+      <Box borderStyle={screenReader ? undefined : 'round'} flexDirection="column" paddingX={screenReader ? 0 : 1}>
+        {title}
+        <FeedbackDetailsBox
+          value={notice.detailsPreview}
+          dim
+          columns={Math.max(1, columns - 4)}
+          maxRows={FEEDBACK_NOTICE_PREVIEW_MAX_ROWS}
+          preview
+        />
+        {hints}
+      </Box>
     </Box>
   );
 }

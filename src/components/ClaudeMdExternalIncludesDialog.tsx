@@ -6,6 +6,7 @@ import {
 import { Box, Dialog, Link, Text } from '@anthropic/ink';
 import type { ExternalClaudeMdInclude } from '../utils/claudemd.js';
 import { saveCurrentProjectConfig } from '../utils/config.js';
+import { plural } from '../utils/stringUtils.js';
 import { ConfirmSelect } from './ConfirmSelect.js';
 
 /** densable phn source — dialog vs /config Jr toggle. */
@@ -48,6 +49,7 @@ export function ClaudeMdExternalIncludesDialog({
   isStandaloneDialog,
   externalIncludes,
 }: Props): React.ReactNode {
+  const [openedAt] = React.useState(() => Date.now());
   React.useEffect(() => {
     // Log when dialog is shown
     logEvent('tengu_claude_md_includes_dialog_shown', {});
@@ -66,28 +68,44 @@ export function ClaudeMdExternalIncludesDialog({
     handleSelection('no');
   }, [handleSelection]);
 
+  const shownIncludes =
+    externalIncludes && externalIncludes.length > 5 ? externalIncludes.slice(0, 3) : externalIncludes;
+  const hiddenCount =
+    externalIncludes && shownIncludes ? Math.max(0, externalIncludes.length - shownIncludes.length) : 0;
+
   return (
     <Dialog
       title="Allow external CLAUDE.md file imports?"
       color="warning"
       onCancel={handleEscape}
+      exitOnCtrlCD={isStandaloneDialog}
       hideBorder={!isStandaloneDialog}
       hideInputGuide={!isStandaloneDialog}
     >
       <Text>
-        This project&apos;s CLAUDE.md imports files outside the current working directory. Never allow this for
-        third-party repositories.
+        This project&apos;s CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow
+        this for third-party repositories.
       </Text>
 
-      {externalIncludes && externalIncludes.length > 0 && (
+      {shownIncludes && shownIncludes.length > 0 && (
         <Box flexDirection="column">
           <Text dimColor>External imports:</Text>
-          {externalIncludes.map((include, i) => (
-            <Text key={i} dimColor>
+          {shownIncludes.map((include, i) => (
+            <Text key={i} dimColor wrap="truncate-middle">
               {'  '}
               {include.path}
             </Text>
           ))}
+          {hiddenCount > 0 && (
+            <>
+              <Text dimColor wrap="truncate">
+                {`  … +${hiddenCount} ${plural(hiddenCount, 'import')} not shown.`}
+              </Text>
+              <Text dimColor wrap="truncate">
+                {'  '}Yes covers those too, plus any this project adds later.
+              </Text>
+            </>
+          )}
         </Box>
       )}
 
@@ -100,6 +118,7 @@ export function ClaudeMdExternalIncludesDialog({
         hideIndexes
         cancelFirst
         focus="cancel"
+        openedAt={openedAt}
         confirmLabel="Yes, allow external imports"
         cancelLabel="No, disable external imports"
         onConfirm={() => handleSelection('yes')}

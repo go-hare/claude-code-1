@@ -2,8 +2,9 @@ import axios from 'axios';
 import { readFile, stat } from 'fs/promises';
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { getLastAPIRequest } from 'src/bootstrap/state.js';
+import { getIsRemoteMode, getLastAPIRequest } from 'src/bootstrap/state.js';
 import { logEventTo1P } from 'src/services/analytics/firstPartyEventLogger.js';
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -11,7 +12,7 @@ import {
 import { getLastAssistantMessage, normalizeMessagesForAPI } from 'src/utils/messages.js';
 import type { CommandResultDisplay } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, StatusIcon, Text, useInput } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { queryHaiku } from '../services/api/claude.js';
 import { startsWithApiErrorPrefix } from '../services/api/errors.js';
@@ -20,6 +21,7 @@ import { checkAndRefreshOAuthTokenIfNeeded } from '../utils/auth.js';
 import { openBrowser } from '../utils/browser.js';
 import { logForDebugging } from '../utils/debug.js';
 import { env } from '../utils/env.js';
+import type { FileStateCache } from '../utils/fileStateCache.js';
 import { type GitRepoState, getGitState, getIsGit } from '../utils/git.js';
 import { getAuthHeaders, getUserAgent } from '../utils/http.js';
 import { getInMemoryErrors, logError } from '../utils/log.js';
@@ -33,7 +35,7 @@ import {
 import { jsonStringify } from '../utils/slowOperations.js';
 import { asSystemPrompt } from '../utils/systemPromptType.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Select } from './CustomSelect/index.js';
 import TextInput from './TextInput.js';
 
 // This value was determined experimentally by testing the URL length limit
@@ -42,6 +44,51 @@ const GITHUB_ISSUES_REPO_URL =
   process.env.USER_TYPE === 'ant'
     ? 'https://github.com/anthropics/claude-cli-internal/issues'
     : 'https://github.com/anthropics/claude-code/issues';
+
+type FeedbackScope = 'session' | 'day' | 'week';
+type FeedbackMode = 'post' | 'bundle' | 'share';
+
+const SCOPE_DESCRIPTIONS: Record<FeedbackScope, string> = {
+  session: 'this session only',
+  day: 'this session + this project’s other sessions from the last 24 hours',
+  week: 'this session + this project’s other sessions from the last 7 days',
+};
+
+const SCOPE_OPTIONS: Array<{ label: string; value: FeedbackScope }> = [
+  { label: 'This session only', value: 'session' },
+  { label: 'This session + the last 24 hours', value: 'day' },
+  { label: 'This session + the last 7 days', value: 'week' },
+];
+
+const MODE_COPY: Record<
+  FeedbackMode,
+  {
+    consentAction: string;
+    consentIntro: string;
+    consentFooter: string;
+    submitting: string;
+  }
+> = {
+  post: {
+    consentAction: 'submit',
+    consentIntro: 'This report will include:',
+    consentFooter: 'We may use these to debug related issues and improve Claude Code.',
+    submitting: 'Submitting report…',
+  },
+  bundle: {
+    consentAction: 'save',
+    consentIntro: 'An archive will be saved to disk containing:',
+    consentFooter:
+      'Nothing leaves this machine until you send the bundle file. Secrets (API keys, tokens, credentials) are redacted before writing.',
+    submitting: 'Saving bundle…',
+  },
+  share: {
+    consentAction: 'share',
+    consentIntro: 'This shared conversation will include:',
+    consentFooter: 'A shareable link will be created so you can post the conversation for debugging and support.',
+    submitting: 'Uploading share…',
+  },
+};
 
 type Props = {
   abortSignal: AbortSignal;
@@ -55,9 +102,12 @@ type Props = {
       messages?: Message[];
     };
   };
+  mode?: FeedbackMode;
+  readFileState?: FileStateCache;
+  command?: string;
 };
 
-type Step = 'userInput' | 'consent' | 'submitting' | 'done';
+type Step = 'userInput' | 'scope' | 'consent' | 'submitting' | 'done';
 
 type FeedbackData = {
   // latestAssistantMessageId is the message ID from the latest main model call
@@ -170,20 +220,26 @@ export function Feedback({
   initialDescription,
   onDone,
   backgroundTasks = {},
+  mode = 'post',
 }: Props): React.ReactNode {
   const [step, setStep] = useState<Step>('userInput');
   const [cursorOffset, setCursorOffset] = useState(0);
   const [description, setDescription] = useState(initialDescription ?? '');
   const [feedbackId, setFeedbackId] = useState<string | null>(null);
+  const [bundlePath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isRemote = getIsRemoteMode();
   const [envInfo, setEnvInfo] = useState<{
     isGit: boolean;
     gitState: GitRepoState | null;
   }>({ isGit: false, gitState: null });
   const [title, setTitle] = useState<string | null>(null);
+  const [scope, setScope] = useState<FeedbackScope>('session');
   const textInputColumns = useTerminalSize().columns - 4;
+  const hideGitHubIssue = getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_lynx', false);
 
   useEffect(() => {
+    if (isRemote) return;
     async function loadEnvInfo() {
       const isGit = await getIsGit();
       let gitState: GitRepoState | null = null;
@@ -193,7 +249,7 @@ export function Feedback({
       setEnvInfo({ isGit, gitState });
     }
     void loadEnvInfo();
-  }, []);
+  }, [isRemote]);
 
   const submitReport = useCallback(async () => {
     setStep('submitting');
@@ -234,8 +290,10 @@ export function Feedback({
 
     const [result, t] = await Promise.all([
       submitFeedback(reportData as FeedbackData, abortSignal),
-      generateTitle(description, abortSignal),
+      hideGitHubIssue ? Promise.resolve(null) : generateTitle(description, abortSignal),
     ]);
+
+    if (abortSignal.aborted) return;
 
     setTitle(t);
 
@@ -258,16 +316,14 @@ export function Feedback({
       if (result.isZdrOrg) {
         setError('Feedback collection is not available for organizations with custom data retention policies.');
       } else {
-        setError('Could not submit feedback. Please try again later.');
+        setError(`Couldn't send feedback. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`);
       }
       // Stay on userInput step so user can retry with their content preserved
       setStep('userInput');
     }
-  }, [description, envInfo.isGit, messages]);
+  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, messages]);
 
-  // Handle cancel - this will be called by Dialog's automatic Esc handling
   const handleCancel = useCallback(() => {
-    // Don't cancel when done - let other keys close the dialog
     if (step === 'done') {
       if (error) {
         onDone('Error submitting feedback / bug report', {
@@ -288,10 +344,14 @@ export function Feedback({
     isActive: step === 'userInput',
   });
 
+  const isTerminalStep = step === 'done' || Boolean(error && step !== 'userInput');
+
   useInput((input, key) => {
+    if (key.ctrl || key.meta) return;
     // Allow any key press to close the dialog when done or when there's an error
     if (step === 'done') {
-      if (key.return && title) {
+      if (mode === 'share') return;
+      if (!hideGitHubIssue && key.return && title) {
         // Open GitHub issue URL when Enter is pressed
         const issueUrl = createGitHubIssueUrl(feedbackId ?? '', title, description, getSanitizedErrorLogs());
         void openBrowser(issueUrl);
@@ -300,6 +360,8 @@ export function Feedback({
         onDone('Error submitting feedback / bug report', {
           display: 'system',
         });
+      } else if (mode === 'bundle' && bundlePath) {
+        onDone(`Feedback bundle saved to \`${bundlePath}\``, { display: 'system' });
       } else {
         onDone('Feedback / bug report submitted', { display: 'system' });
       }
@@ -315,27 +377,38 @@ export function Feedback({
       return;
     }
 
-    if (step === 'consent' && (key.return || input === ' ')) {
-      void submitReport();
+    if (step === 'consent') {
+      if (key.leftArrow) {
+        setStep(mode === 'share' || isRemote ? 'userInput' : 'scope');
+        return;
+      }
+      if (key.return || input === ' ') {
+        void submitReport();
+      }
     }
   });
 
   return (
     <Dialog
-      title="Submit Feedback / Bug Report"
+      title="Submit feedback / bug report"
       onCancel={handleCancel}
-      isCancelActive={step !== 'userInput'}
-      inputGuide={exitState =>
-        exitState.pending ? (
-          <Text>Press {exitState.keyName} again to exit</Text>
-        ) : step === 'userInput' ? (
+      isCancelActive={step !== 'userInput' && !isTerminalStep}
+      hideInputGuide={step === 'done'}
+      inputGuide={
+        step === 'userInput' ? (
           <Byline>
-            <KeyboardShortcutHint shortcut="Enter" action="continue" />
+            <KeyboardShortcutHint shortcut="enter" action="continue" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+          </Byline>
+        ) : step === 'scope' ? (
+          <Byline>
+            <KeyboardShortcutHint shortcut="enter" action="choose" />
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
           </Byline>
         ) : step === 'consent' ? (
           <Byline>
-            <KeyboardShortcutHint shortcut="Enter" action="submit" />
+            <KeyboardShortcutHint shortcut="enter" action={MODE_COPY[mode].consentAction} />
+            <KeyboardShortcutHint shortcut="left" action="change" />
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
           </Byline>
         ) : null
@@ -354,11 +427,21 @@ export function Feedback({
               }
             }}
             columns={textInputColumns}
-            onSubmit={() => setStep('consent')}
-            onExitMessage={() => onDone('Feedback cancelled', { display: 'system' })}
+            onSubmit={value => {
+              if (mode !== 'share' && !value.trim()) {
+                setError('Please describe the issue before submitting.');
+                return;
+              }
+              setError(null);
+              setStep(mode === 'share' || isRemote ? 'consent' : 'scope');
+            }}
+            onExitMessage={show => {
+              if (show) onDone('Feedback cancelled', { display: 'system' });
+            }}
             cursorOffset={cursorOffset}
             onChangeCursorOffset={setCursorOffset}
             showCursor
+            focus
           />
           {error && (
             <Box flexDirection="column" gap={1}>
@@ -369,9 +452,24 @@ export function Feedback({
         </Box>
       )}
 
+      {step === 'scope' && (
+        <Box flexDirection="column" gap={1}>
+          <Text>How much session history should we include?</Text>
+          <Select
+            options={SCOPE_OPTIONS}
+            defaultFocusValue={scope}
+            onChange={val => {
+              setScope(val);
+              setStep('consent');
+            }}
+            onCancel={handleCancel}
+          />
+        </Box>
+      )}
+
       {step === 'consent' && (
         <Box flexDirection="column">
-          <Text>This report will include:</Text>
+          <Text>{MODE_COPY[mode].consentIntro}</Text>
           <Box marginLeft={2} flexDirection="column">
             <Text>
               - Your feedback / bug description: <Text dimColor>{description}</Text>
@@ -382,7 +480,12 @@ export function Feedback({
                 {env.platform}, {env.terminal}, v{MACRO.VERSION}
               </Text>
             </Text>
-            {envInfo.gitState && (
+            {mode !== 'share' && isRemote && (
+              <Text>
+                - Remote workspace: <Text dimColor>git metadata is not collected from this machine</Text>
+              </Text>
+            )}
+            {mode !== 'share' && envInfo.gitState && (
               <Text>
                 - Git repo metadata:{' '}
                 <Text dimColor>
@@ -394,17 +497,20 @@ export function Feedback({
                 </Text>
               </Text>
             )}
-            <Text>- Current session transcript</Text>
+            <Text>
+              - Session transcript:{' '}
+              <Text dimColor>{mode === 'share' ? SCOPE_DESCRIPTIONS.session : SCOPE_DESCRIPTIONS[scope]}</Text>
+            </Text>
+            {mode !== 'share' && (
+              <Text>
+                - Recent error messages:{' '}
+                <Text dimColor>up to the last 100 since you launched Claude Code (may include file paths)</Text>
+              </Text>
+            )}
           </Box>
           <Box marginTop={1}>
             <Text wrap="wrap" dimColor>
-              We will use your feedback to debug related issues or to improve Claude Code&apos;s functionality (eg. to
-              reduce the risk of bugs occurring in the future).
-            </Text>
-          </Box>
-          <Box marginTop={1}>
-            <Text>
-              Press <Text bold>Enter</Text> to confirm and submit.
+              {MODE_COPY[mode].consentFooter}
             </Text>
           </Box>
         </Box>
@@ -412,21 +518,81 @@ export function Feedback({
 
       {step === 'submitting' && (
         <Box flexDirection="row" gap={1}>
-          <Text>Submitting report…</Text>
+          <Text>{MODE_COPY[mode].submitting}</Text>
         </Box>
       )}
 
-      {step === 'done' && (
+      {step === 'done' && mode === 'bundle' && (
         <Box flexDirection="column">
-          {error ? <Text color="error">{error}</Text> : <Text color="success">Thank you for your report!</Text>}
-          {feedbackId && <Text dimColor>Feedback ID: {feedbackId}</Text>}
+          <Text color="success">
+            <StatusIcon status="success" withSpace />
+            Feedback bundle saved
+          </Text>
+          {bundlePath && (
+            <Box marginTop={1} flexDirection="column">
+              <Text>
+                Bundle: <Text dimColor>{bundlePath}</Text>
+              </Text>
+              <Text>
+                Reference ID: <Text dimColor>{feedbackId}</Text>
+              </Text>
+              <Box marginTop={1}>
+                <Text wrap="wrap">
+                  Send this file to your Anthropic account representative or attach it to your support request.
+                </Text>
+              </Box>
+            </Box>
+          )}
           <Box marginTop={1}>
-            <Text>Press </Text>
-            <Text bold>Enter </Text>
-            <Text>to open your browser and draft a GitHub issue, or any other key to close.</Text>
+            <Text dimColor>Press any key to close</Text>
           </Box>
         </Box>
       )}
+
+      {step === 'done' &&
+        mode === 'post' &&
+        (hideGitHubIssue ? (
+          <Box flexDirection="column">
+            {error ? (
+              <Text color="error">{error}</Text>
+            ) : (
+              <Text color="success">
+                <StatusIcon status="success" withSpace />
+                Feedback sent
+              </Text>
+            )}
+            {feedbackId && (
+              <>
+                <Box marginTop={1}>
+                  <Text>
+                    Reference ID: <Text dimColor>{feedbackId}</Text>
+                  </Text>
+                </Box>
+                <Box marginTop={1}>
+                  <Text wrap="wrap">If you&apos;re working with Anthropic support, please include the ID above.</Text>
+                </Box>
+              </>
+            )}
+            <Box marginTop={1}>
+              <Text dimColor italic>
+                Any key to close
+              </Text>
+            </Box>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            {error ? <Text color="error">{error}</Text> : <Text color="success">Thank you for your report!</Text>}
+            {feedbackId && <Text dimColor>Feedback ID: {feedbackId}</Text>}
+            <Box marginTop={1}>
+              <Text dimColor italic>
+                <Byline>
+                  <KeyboardShortcutHint shortcut="enter" action="open GitHub issue" />
+                  <Text>any key to close</Text>
+                </Byline>
+              </Text>
+            </Box>
+          </Box>
+        ))}
     </Dialog>
   );
 }

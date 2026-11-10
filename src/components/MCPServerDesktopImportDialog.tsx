@@ -1,12 +1,25 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js';
 import { writeToStdout } from 'src/utils/process.js';
-import { Box, color, Text, useTheme, Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  color,
+  Dialog,
+  type KeyboardEvent,
+  KeyboardShortcutHint,
+  StatusIcon,
+  Text,
+  useTheme,
+} from '@anthropic/ink';
 import { addMcpConfig, getAllMcpConfigs } from '../services/mcp/config.js';
 import type { ConfigScope, McpServerConfig, ScopedMcpServerConfig } from '../services/mcp/types.js';
+import { logForDebugging } from '../utils/debug.js';
+import { errorMessage } from '../utils/errors.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { plural } from '../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
-import { SelectMulti } from './CustomSelect/SelectMulti.js';
+import { ItemList } from './ItemList.js';
 
 type Props = {
   servers: Record<string, McpServerConfig>;
@@ -14,45 +27,62 @@ type Props = {
   onDone(): void;
 };
 
+type ImportFailure = {
+  serverName: string;
+  reason: string;
+};
+
 export function MCPServerDesktopImportDialog({ servers, scope, onDone }: Props): React.ReactNode {
   const serverNames = Object.keys(servers);
   const [existingServers, setExistingServers] = useState<Record<string, ScopedMcpServerConfig>>({});
+  const [theme] = useTheme();
+  const screenReader = isScreenReaderModeEnabled();
 
   useEffect(() => {
-    void getAllMcpConfigs().then(({ servers }) => setExistingServers(servers));
+    void getAllMcpConfigs()
+      .then(({ servers: loaded }) => setExistingServers(loaded))
+      .catch(err => {
+        logForDebugging(`Failed to read existing MCP configs for Desktop import: ${errorMessage(err)}`, {
+          level: 'error',
+        });
+      });
   }, []);
 
   const collisions = serverNames.filter(name => existingServers[name] !== undefined);
+  const collisionsKey = collisions.join('\n');
+  const [selectionState, setSelectionState] = useState<{ collisionsKey: string; names: string[] } | null>(null);
+  const selectedNames =
+    selectionState?.collisionsKey === collisionsKey
+      ? selectionState.names
+      : serverNames.filter(name => !collisions.includes(name));
+  const [submitting, setSubmitting] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(0);
 
-  async function onSubmit(selectedServers: string[]) {
-    let importedCount = 0;
+  const toggleServer = (serverName: string): void => {
+    setSelectionState({
+      collisionsKey,
+      names: selectedNames.includes(serverName)
+        ? selectedNames.filter(name => name !== serverName)
+        : [...selectedNames, serverName],
+    });
+  };
 
-    for (const serverName of selectedServers) {
-      const serverConfig = servers[serverName];
-      if (serverConfig) {
-        // If the server name already exists, find a new name with _1, _2, etc.
-        let finalName = serverName;
-        if (existingServers[finalName] !== undefined) {
-          let counter = 1;
-          while (existingServers[`${serverName}_${counter}`] !== undefined) {
-            counter++;
-          }
-          finalName = `${serverName}_${counter}`;
-        }
-
-        await addMcpConfig(finalName, serverConfig, scope);
-        importedCount++;
+  const resolveFinalName = useCallback(
+    (serverName: string): string => {
+      if (existingServers[serverName] === undefined) {
+        return serverName;
       }
-    }
+      let counter = 1;
+      while (existingServers[`${serverName}_${counter}`] !== undefined) {
+        counter++;
+      }
+      return `${serverName}_${counter}`;
+    },
+    [existingServers],
+  );
 
-    done(importedCount);
-  }
-
-  const [theme] = useTheme();
-
-  // Define done before using in useCallback
-  const done = useCallback(
-    (importedCount: number) => {
+  const finishImport = useCallback(
+    ({ importedCount, failures }: { importedCount: number; failures: ImportFailure[] }) => {
       if (importedCount > 0) {
         writeToStdout(
           `\n${color('success', theme)(`Successfully imported ${importedCount} MCP ${plural(importedCount, 'server')} to ${scope} config.`)}\n`,
@@ -60,17 +90,76 @@ export function MCPServerDesktopImportDialog({ servers, scope, onDone }: Props):
       } else {
         writeToStdout('\nNo servers were imported.');
       }
+      for (const { serverName, reason } of failures) {
+        writeToStdout(`\n${color('error', theme)(`Could not import ${serverName}: ${reason}`)}\n`);
+      }
       onDone();
-
       void gracefulShutdown();
     },
     [theme, scope, onDone],
   );
 
-  // Handle ESC to cancel (import 0 servers)
+  async function onSubmit(selectedServers: string[]) {
+    const failures: ImportFailure[] = [];
+    let importedCount = 0;
+
+    for (const serverName of selectedServers) {
+      const serverConfig = servers[serverName];
+      if (!serverConfig) continue;
+      try {
+        await addMcpConfig(resolveFinalName(serverName), serverConfig, scope);
+        importedCount++;
+      } catch (err) {
+        failures.push({ serverName, reason: errorMessage(err) });
+      }
+    }
+
+    finishImport({ importedCount, failures });
+  }
+
   const handleEscCancel = useCallback(() => {
-    done(0);
-  }, [done]);
+    finishImport({ importedCount: 0, failures: [] });
+  }, [finishImport]);
+
+  const handleSelect = (index: number): void => {
+    if (submitting) return;
+    const serverName = serverNames[index];
+    if (serverName === undefined) {
+      setSubmitting(true);
+      onSubmit(serverNames.filter(name => selectedNames.includes(name))).catch(err => {
+        writeToStdout(`\n${color('error', theme)(errorMessage(err))}\n`);
+        onDone();
+        void gracefulShutdown();
+      });
+      return;
+    }
+    toggleServer(serverName);
+  };
+
+  const handleRowKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== ' ') return;
+    event.preventDefault();
+    const serverName = serverNames[focusedIndex];
+    if (serverName !== undefined && !submitting) {
+      toggleServer(serverName);
+    }
+  };
+
+  const options = [
+    ...serverNames.map(serverName => {
+      const isChecked = selectedNames.includes(serverName);
+      return {
+        label: serverName,
+        value: serverName,
+        icon: <StatusIcon status={isChecked ? 'on' : 'off'} aria-label={isChecked ? 'checked:' : 'unchecked:'} />,
+        facts: collisions.includes(serverName) ? ['already exists'] : [],
+      };
+    }),
+    {
+      label: 'Import selected',
+      value: '__import__',
+    },
+  ];
 
   return (
     <>
@@ -89,22 +178,15 @@ export function MCPServerDesktopImportDialog({ servers, scope, onDone }: Props):
         )}
         <Text>Please select the servers you want to import:</Text>
 
-        <SelectMulti
-          options={serverNames.map(server => ({
-            label: `${server}${collisions.includes(server) ? ' (already exists)' : ''}`,
-            value: server,
-          }))}
-          defaultValue={serverNames.filter(name => !collisions.includes(name))} // Only preselect non-colliding servers
-          onSubmit={onSubmit}
-          onCancel={handleEscCancel}
-          hideIndexes
-        />
+        <Box flexDirection="column" onKeyDown={handleRowKeyDown}>
+          <ItemList options={options} onSelect={handleSelect} onFocus={setFocusedIndex} />
+        </Box>
       </Dialog>
       <Box paddingX={1}>
         <Text dimColor italic>
           <Byline>
-            <KeyboardShortcutHint shortcut="Space" action="select" />
-            <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+            {!screenReader && <KeyboardShortcutHint shortcut="space" action="toggle" />}
+            {!screenReader && <KeyboardShortcutHint shortcut="enter" action="select" />}
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
           </Byline>
         </Text>

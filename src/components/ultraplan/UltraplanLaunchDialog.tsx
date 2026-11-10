@@ -1,19 +1,18 @@
 import * as React from 'react';
-import { Box, Text, Link } from '@anthropic/ink';
+import { Box, Dialog, Link, Text } from '@anthropic/ink';
 import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '../design-system/Dialog.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { CCR_TERMS_URL } from '../../commands/ultraplan.js';
 import { getPromptIdentifier, getDialogConfig, type PromptIdentifier } from 'src/utils/ultraplan/prompt.js';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 type ChoiceValue = 'run' | 'cancel';
 
+const EMPTY_PROMPT_FALLBACK = '(nothing printable)';
+
 interface UltraplanLaunchDialogProps {
+  prompt?: string;
+  deliveredByRelay?: boolean;
   onChoice: (
     choice: ChoiceValue,
     opts: {
@@ -31,31 +30,29 @@ function dispatchPromptIdentifier() {
   return getPromptIdentifier();
 }
 
-export function UltraplanLaunchDialog({ onChoice }: UltraplanLaunchDialogProps): React.ReactNode {
-  // Whether the user has never seen the ultraplan terms before
+export function UltraplanLaunchDialog({
+  prompt: promptProp,
+  deliveredByRelay = false,
+  onChoice,
+}: UltraplanLaunchDialogProps): React.ReactNode {
   const [showTermsLink] = React.useState(dispatchShowTermsLink);
-
-  // Stable prompt identifier for this dialog instance
   const [promptIdentifier] = React.useState(dispatchPromptIdentifier);
 
-  // Dialog copy derived from the prompt identifier
   const dialogConfig = React.useMemo(() => {
     return getDialogConfig(promptIdentifier);
   }, [promptIdentifier]);
 
-  // Whether the remote-control bridge is currently active
+  const pendingBlurb = useAppState(state => state.ultraplanLaunchPending?.blurb);
   const isBridgeEnabled = useAppState(state => state.replBridgeEnabled);
-
   const setAppState = useSetAppState();
 
-  // ------------------------------------------------------------------
-  // Choice handler
-  // ------------------------------------------------------------------
+  const cleanedPrompt = React.useMemo(() => {
+    const raw = promptProp ?? pendingBlurb ?? '';
+    return raw.replace(/[\r\n\t]+/g, ' ').trim();
+  }, [promptProp, pendingBlurb]);
 
   const handleChoice = React.useCallback(
     (value: ChoiceValue) => {
-      // If the user chose "run" while the bridge is enabled, disconnect it
-      // first so the ultraplan session doesn't collide with remote control.
       const disconnectedBridge = value === 'run' && isBridgeEnabled;
 
       if (disconnectedBridge) {
@@ -72,14 +69,13 @@ export function UltraplanLaunchDialog({ onChoice }: UltraplanLaunchDialogProps):
         });
       }
 
-      // Persist that the user has now seen the ultraplan terms
       if (value !== 'cancel' && showTermsLink) {
         saveGlobalConfig(prev => (prev.hasSeenUltraplanTerms ? prev : { ...prev, hasSeenUltraplanTerms: true }));
       }
 
       onChoice(value, { disconnectedBridge, promptIdentifier });
     },
-    [onChoice, isBridgeEnabled, setAppState, showTermsLink],
+    [onChoice, isBridgeEnabled, setAppState, showTermsLink, promptIdentifier],
   );
 
   const handleCancel = React.useCallback(() => {
@@ -87,35 +83,48 @@ export function UltraplanLaunchDialog({ onChoice }: UltraplanLaunchDialogProps):
   }, [handleChoice]);
 
   const runDescription = isBridgeEnabled
-    ? 'Disable remote control and launch in Claude Code on the web'
-    : 'launch in Claude Code on the web';
+    ? 'Disable remote control and launch in a cloud session'
+    : 'launch in a cloud session';
 
   const options = [
     {
-      label: 'Run ultraplan',
+      label: showTermsLink ? 'Yes' : 'Run ultraplan',
       value: 'run' as const,
       description: runDescription,
     },
-    { label: 'Not now', value: 'cancel' as const },
+    { label: showTermsLink ? 'No' : 'Not now', value: 'cancel' as const },
   ];
+
+  const promptPrefix = deliveredByRelay ? 'Prompt (sent from a connected channel): ' : 'Prompt: ';
+  const promptPreview = cleanedPrompt === '' ? EMPTY_PROMPT_FALLBACK : cleanedPrompt;
 
   return (
     <Dialog title="Run ultraplan in the cloud?" subtitle={dialogConfig.timeEstimate} onCancel={handleCancel}>
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text dimColor>{dialogConfig.dialogBody}</Text>
-          {showTermsLink ? (
-            <Text dimColor>
-              For more information on Claude Code on the web:
-              <Link url={CCR_TERMS_URL}>{CCR_TERMS_URL}</Link>
-            </Text>
-          ) : null}
-        </Box>
-
-        {/* Pipeline description (hidden when bridge will be disconnected) */}
-        <Text dimColor>
-          {isBridgeEnabled ? 'This will disable Remote Control for this session.' : dialogConfig.dialogPipeline}
+        <Text wrap="truncate-end">
+          <Text dimColor>{promptPrefix}</Text>
+          {promptPreview}
         </Text>
+
+        {showTermsLink ? (
+          <>
+            <Text dimColor>{dialogConfig.dialogBody}</Text>
+            <Box flexDirection="column">
+              <Text dimColor>
+                More information: <Link url={CCR_TERMS_URL}>{CCR_TERMS_URL}</Link>
+              </Text>
+            </Box>
+            <Text>Proceed?</Text>
+          </>
+        ) : (
+          <>
+            <Box flexDirection="column">
+              <Text dimColor>{dialogConfig.dialogBody}</Text>
+              {isBridgeEnabled && <Text dimColor>This will disable Remote Control for this session.</Text>}
+            </Box>
+            {!isBridgeEnabled && <Text dimColor>{dialogConfig.dialogPipeline}</Text>}
+          </>
+        )}
 
         <Select options={options} onChange={handleChoice} />
       </Box>

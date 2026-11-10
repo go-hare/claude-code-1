@@ -255,7 +255,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
           description: `Stays at ${worktreeSession.worktreePath}. Reattach with: tmux attach -t ${worktreeSession.tmuxSessionName}`,
         },
         {
-          label: 'Keep worktree, kill tmux session',
+          label: 'Keep worktree, end tmux session',
           value: 'keep-kill-tmux',
           description: `Keeps worktree at ${worktreeSession.worktreePath}, terminates tmux session.`,
         },
@@ -281,7 +281,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
   const defaultValue = hasTmuxSession ? 'keep-with-tmux' : 'keep';
 
   return (
-    <Dialog title="Exiting worktree session" subtitle={subtitle} onCancel={handleCancel}>
+    <Dialog title="Exiting worktree session" subtitle={subtitle} onCancel={handleCancel} exitOnCtrlCD>
       <Select defaultFocusValue={defaultValue} options={options} onChange={handleSelect} />
     </Dialog>
   );

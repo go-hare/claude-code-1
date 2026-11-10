@@ -1,7 +1,7 @@
 import React from 'react';
-import { Text, Dialog } from '@anthropic/ink';
+import { Dialog, Text } from '@anthropic/ink';
 import { saveGlobalConfig } from '../utils/config.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 
 type Props = {
   customApiKeyTruncated: string;
@@ -37,27 +37,28 @@ export function ApproveApiKey({ customApiKeyTruncated, onDone }: Props): React.R
   }
 
   return (
-    <Dialog title="Detected a custom API key in your environment" color="warning" onCancel={() => onChange('no')}>
+    <Dialog
+      title="Detected a custom API key in your environment"
+      color="warning"
+      onCancel={() => onChange('no')}
+      exitOnCtrlCD
+    >
       <Text>
         <Text bold>ANTHROPIC_API_KEY</Text>
         <Text>: sk-ant-...{customApiKeyTruncated}</Text>
       </Text>
       <Text>Do you want to use this API key?</Text>
-      <Select
-        defaultValue="no"
-        defaultFocusValue="no"
-        options={[
-          { label: 'Yes', value: 'yes' },
-          {
-            label: (
-              <Text>
-                No (<Text bold>recommended</Text>)
-              </Text>
-            ),
-            value: 'no',
-          },
-        ]}
-        onChange={value => onChange(value as 'yes' | 'no')}
+      <ConfirmSelect
+        hideIndexes
+        focus="cancel"
+        cancelLabel={
+          (
+            <Text>
+              No (<Text bold>recommended</Text>)
+            </Text>
+          ) as unknown as string
+        }
+        onConfirm={() => onChange('yes')}
         onCancel={() => onChange('no')}
       />
     </Dialog>

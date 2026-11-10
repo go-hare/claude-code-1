@@ -23,8 +23,8 @@ describe('densable 2.1.289 p8 fullscreen upsell copy', () => {
       '· Mouse support — click to move your cursor or expand results',
     )
     expect(dialogSrc).toContain('· Selected text auto-copies to your clipboard')
-    expect(dialogSrc).toContain("label: 'Yes, try it'")
-    expect(dialogSrc).toContain("label: 'Not now'")
+    expect(dialogSrc).toContain('confirmLabel="Yes, try it"')
+    expect(dialogSrc).toContain('cancelLabel="Not now"')
   })
 
   test('does not keep pre-289 prose / Enable label', () => {

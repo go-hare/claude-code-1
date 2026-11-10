@@ -92,7 +92,7 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
     if (showFilenameInput) {
       return (
         <Byline>
-          <KeyboardShortcutHint shortcut="Enter" action="save" />
+          <KeyboardShortcutHint shortcut="enter" action="save" />
           <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="go back" />
         </Byline>
       );
@@ -111,9 +111,10 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
     isActive: showFilenameInput,
   });
 
+  // densable 289 S: title="Export conversation", subtitle="Select export method" (previously "Select export method:")
   return (
     <Dialog
-      title="Export Conversation"
+      title="Export conversation"
       subtitle="Select export method:"
       color="permission"
       onCancel={handleCancel}

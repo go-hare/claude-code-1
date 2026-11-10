@@ -3,21 +3,20 @@ import { toString as qrToString } from 'qrcode';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { getOriginalCwd } from '../bootstrap/state.js';
+import { BRIDGE_FAILED_INDICATOR, BRIDGE_READY_INDICATOR } from '../constants/figures.js';
+import { useRegisterOverlay } from '../context/overlayContext.js';
+// eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw 'd'/'r' keys for disconnect/reconnect
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text, useInput } from '@anthropic/ink';
+import { useKeybindings } from '../keybindings/useKeybinding.js';
+import { useAppState, useSetAppState } from '../state/AppState.js';
 import {
   buildActiveFooterText,
   buildIdleFooterText,
   FAILED_FOOTER_TEXT,
   getBridgeStatus,
 } from '../bridge/bridgeStatusUtil.js';
-import { BRIDGE_FAILED_INDICATOR, BRIDGE_READY_INDICATOR } from '../constants/figures.js';
-import { useRegisterOverlay } from '../context/overlayContext.js';
-// eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw 'd' key for disconnect, not a configurable keybinding action
-import { Box, Text, useInput } from '@anthropic/ink';
-import { useKeybindings } from '../keybindings/useKeybinding.js';
-import { useAppState, useSetAppState } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
 import { getBranch } from '../utils/git.js';
-import { Dialog } from '@anthropic/ink';
 
 type Props = {
   onDone: () => void;
@@ -32,7 +31,9 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
   const connectUrl = useAppState(s => s.replBridgeConnectUrl);
   const sessionUrl = useAppState(s => s.replBridgeSessionUrl);
   const error = useAppState(s => s.replBridgeError);
+  const errorKind = useAppState(s => s.replBridgeErrorKind);
   const explicit = useAppState(s => s.replBridgeExplicit);
+  const enabled = useAppState(s => s.replBridgeEnabled);
   const environmentId = useAppState(s => s.replBridgeEnvironmentId);
   const sessionId = useAppState(s => s.replBridgeSessionId);
   const verbose = useAppState(s => s.verbose);
@@ -44,27 +45,24 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
 
   const repoName = basename(getOriginalCwd());
 
-  // Fetch branch name on mount
   useEffect(() => {
     getBranch()
       .then(setBranchName)
       .catch(() => {});
   }, []);
 
-  // The URL to display/QR: session URL when connected, connect URL when ready
   const displayUrl = sessionActive ? sessionUrl : connectUrl;
 
-  // Generate QR code when URL changes or QR is toggled on
   useEffect(() => {
     if (!showQR || !displayUrl) {
       setQrText('');
       return;
     }
     qrToString(displayUrl, {
-      type: 'terminal',
+      type: 'utf8',
       errorCorrectionLevel: 'L',
       small: true,
-    })
+    } as Parameters<typeof qrToString>[1])
       .then(setQrText)
       .catch(() => setQrText(''));
   }, [showQR, displayUrl]);
@@ -79,21 +77,35 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
     { context: 'Confirmation' },
   );
 
-  useInput(input => {
-    if (input === 'd') {
-      // Persist opt-out only for CLI-flag/command-activated bridge.
-      // Config-driven and GB-auto-connect users get session-only disconnect
-      // — writing false would silently undo a Settings choice or opt a
-      // GB-rollout user out permanently.
-      if (explicit) {
+  useInput((input, key) => {
+    if (input === 'd' && !key.ctrl && !key.meta) {
+      if (explicit && enabled && error === undefined) {
         saveGlobalConfig(current => {
           if (current.remoteControlAtStartup === false) return current;
           return { ...current, remoteControlAtStartup: false };
         });
       }
       setAppState(prev => {
-        if (!prev.replBridgeEnabled) return prev;
-        return { ...prev, replBridgeEnabled: false };
+        if (!prev.replBridgeEnabled && prev.replBridgeError === undefined) return prev;
+        return {
+          ...prev,
+          replBridgeEnabled: false,
+          replBridgeError: undefined,
+          replBridgeErrorKind: undefined,
+        };
+      });
+      onDone();
+    }
+    if (input === 'r' && !key.ctrl && !key.meta && !enabled && error !== undefined && errorKind === 'auth') {
+      setAppState(prev => {
+        if (prev.replBridgeEnabled || prev.replBridgeError === undefined) return prev;
+        return {
+          ...prev,
+          replBridgeEnabled: true,
+          replBridgeError: undefined,
+          replBridgeErrorKind: undefined,
+          replBridgeExplicit: true,
+        };
       });
       onDone();
     }
@@ -108,20 +120,21 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
   const indicator = error ? BRIDGE_FAILED_INDICATOR : BRIDGE_READY_INDICATOR;
   const qrLines = qrText ? qrText.split('\n').filter(l => l.length > 0) : [];
 
-  // Build suffix with repo and branch (matches standalone bridge format)
   const contextParts: string[] = [];
   if (repoName) contextParts.push(repoName);
   if (branchName) contextParts.push(branchName);
-  const contextSuffix = contextParts.length > 0 ? ' \u00b7 ' + contextParts.join(' \u00b7 ') : '';
+  const contextSuffix = contextParts.length > 0 ? ' · ' + contextParts.join(' · ') : '';
 
-  // Footer text matches standalone bridge
-  const footerText = error
-    ? FAILED_FOOTER_TEXT
-    : displayUrl
-      ? sessionActive
-        ? buildActiveFooterText(displayUrl)
-        : buildIdleFooterText(displayUrl)
-      : undefined;
+  const footerText =
+    error !== undefined && errorKind === 'ended_elsewhere'
+      ? undefined
+      : error
+        ? FAILED_FOOTER_TEXT
+        : displayUrl
+          ? sessionActive
+            ? buildActiveFooterText(displayUrl)
+            : buildIdleFooterText(displayUrl)
+          : undefined;
 
   return (
     <Dialog title="Remote Control" onCancel={onDone} hideInputGuide>
@@ -145,7 +158,16 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
           </Box>
         )}
         {footerText && <Text dimColor>{footerText}</Text>}
-        <Text dimColor>d to disconnect · space for QR code · Enter/Esc to close</Text>
+        <Text dimColor>
+          <Byline>
+            <KeyboardShortcutHint shortcut="d" action={error !== undefined ? 'dismiss' : 'disconnect'} />
+            {error !== undefined && !enabled && errorKind === 'auth' && (
+              <KeyboardShortcutHint shortcut="r" action="reconnect" />
+            )}
+            {Boolean(displayUrl) && <Text>space for QR code</Text>}
+            <KeyboardShortcutHint shortcut="enter/esc" action="close" />
+          </Byline>
+        </Text>
       </Box>
     </Dialog>
   );

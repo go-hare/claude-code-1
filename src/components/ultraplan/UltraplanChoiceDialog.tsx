@@ -2,7 +2,7 @@ import * as React from 'react';
 import { join } from 'path';
 import { stat, writeFile } from 'fs/promises';
 import figures from 'figures';
-import { Box, Text, useInput, wrapText } from '@anthropic/ink';
+import { Box, Text, useInput, type WheelEvent, wrapText } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Select } from '../CustomSelect/select.js';
 import { Dialog } from '../design-system/Dialog.js';
@@ -201,15 +201,26 @@ export function UltraplanChoiceDialog({
     [],
   );
 
+  const handleWheel = React.useCallback(
+    (event: WheelEvent) => {
+      event.preventDefault();
+      if (!isScrollable) return;
+      const step = event.deltaY > 0 ? 3 : -3;
+      setScrollOffset(prev => Math.max(0, Math.min(prev + step, maxOffset)));
+    },
+    [isScrollable, maxOffset],
+  );
+
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <Dialog
       title="Ultraplan approved"
       subtitle="How should the plan be implemented?"
       onCancel={() => {}}
+      isCancelActive={false}
       hideInputGuide
     >
-      <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column" marginBottom={1} onWheel={handleWheel}>
         {/* Plan preview */}
         <Box flexDirection="column" marginBottom={1}>
           <Text>{visibleText}</Text>

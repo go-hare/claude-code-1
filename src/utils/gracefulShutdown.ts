@@ -52,6 +52,14 @@ import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
 import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
 import { profileReport } from './startupProfiler.js'
+import { getCurrentWorktreeSession } from './worktree.js'
+
+/** densable `tlr` — G0 USASCII + SI. */
+const G0_USASCII = '\x1b(B\x0f'
+/** densable `$7t` — disable DEC 2031 theme reports (`CSI ? 2031 l`). */
+const DISABLE_THEME_REPORTS = '\x1b[?2031l'
+/** densable `x` — reset OSC 111/110 surface bg/fg colors. */
+const RESET_SURFACE_COLORS = '\x1b]111\x07\x1b]110\x07'
 
 /**
  * Clean up terminal modes synchronously before process exit.
@@ -72,12 +80,17 @@ export function cleanupTerminalModes(): void {
   }
 
   try {
+    const inst = instances.get(process.stdout)
     // Disable mouse tracking FIRST, before the React unmount tree-walk.
     // The terminal needs a round-trip to process this and stop sending
     // events; doing it now (not after unmount) gives that time while
     // we're busy unmounting. Otherwise events arrive during cooked-mode
     // cleanup and either echo to the screen or leak to the shell.
-    writeSync(1, DISABLE_MOUSE_TRACKING)
+    writeSync(
+      1,
+      (inst?.modes.reset('mousePixels') ?? '') + DISABLE_MOUSE_TRACKING,
+    )
+    inst?.modes.reset('mouse')
     // Exit alt screen FIRST so printResumeHint() (and all sequences below)
     // land on the main buffer.
     //
@@ -93,7 +106,6 @@ export function cleanupTerminalModes(): void {
     //      here first makes onRender() scribble a REPL frame onto main.
     // Calling unmount() now does the final render on the alt buffer,
     // unsubscribes from signal-exit, and writes 1049l exactly once.
-    const inst = instances.get(process.stdout)
     // Sticky-main (Axc frameSink) is not alt-screen; still unmount so
     // useAxcFrameSink cleanup / Axc.restore() can send RESET_SCROLL_REGION.
     if (inst?.isAltScreenActive || inst?.frameSink) {
@@ -125,16 +137,30 @@ export function cleanupTerminalModes(): void {
     // saved cursor position. Safe to skip full unmount: this function already
     // sends all the terminal-reset sequences, and the process is exiting.
     inst?.detachForShutdown()
+    // Reset any remaining active terminal modes (e.g. surface OSC 110/111,
+    // themeReports, bracketedPaste, focusEvents) and G0 USASCII charset.
+    const modesReset = inst?.modes.resetAll() ?? ''
+    if (modesReset) {
+      writeSync(1, modesReset)
+    }
+    writeSync(1, G0_USASCII)
+    if (!modesReset.includes(RESET_SURFACE_COLORS)) {
+      writeSync(1, RESET_SURFACE_COLORS)
+    }
     // Disable extended key reporting — always send both since terminals
     // silently ignore whichever they don't implement
     writeSync(1, DISABLE_MODIFY_OTHER_KEYS)
     writeSync(1, DISABLE_KITTY_KEYBOARD)
     // Disable focus events (DECSET 1004)
     writeSync(1, DFE)
+    // Disable theme reports (DECSET 2031)
+    writeSync(1, DISABLE_THEME_REPORTS)
     // Disable bracketed paste mode
     writeSync(1, DBP)
     // Show cursor
     writeSync(1, SHOW_CURSOR)
+    // Reset scroll region with DECSC/DECRC so cursor position is preserved
+    writeSync(1, '\x1b7' + RESET_SCROLL_REGION + '\x1b8')
     // Clear iTerm2 progress bar - prevents lingering progress indicator
     // that can cause bell sounds when returning to the terminal tab
     writeSync(1, CLEAR_ITERM2_PROGRESS)
@@ -167,6 +193,7 @@ export function cleanupTerminalModes(): void {
 }
 
 let resumeHintPrinted = false
+let resumeHintOmitsWorktree = false
 
 /**
  * Print a hint about how to resume the session.
@@ -201,10 +228,19 @@ function printResumeHint(): void {
         resumeArg = sessionId
       }
 
+      const worktreeSession = resumeHintOmitsWorktree
+        ? undefined
+        : getCurrentWorktreeSession()
+      const worktreeName =
+        worktreeSession && !worktreeSession.enteredExisting
+          ? worktreeSession.worktreeName
+          : undefined
+      const worktreeFlag = worktreeName ? `--worktree ${worktreeName} ` : ''
+
       writeSync(
         1,
         chalk.dim(
-          `\nResume this session with:\nclaude --resume ${resumeArg}\n`,
+          `\nResume this session with:\nclaude ${worktreeFlag}--resume ${resumeArg}\n`,
         ),
       )
       resumeHintPrinted = true
@@ -511,6 +547,7 @@ export function claimShutdown(): void {
 export function resetShutdownState(): void {
   shutdownInProgress = false
   resumeHintPrinted = false
+  resumeHintOmitsWorktree = false
   printModeSignalHandlersRegistered = false
   if (failsafeTimer !== undefined) {
     clearTimeout(failsafeTimer)
@@ -541,6 +578,11 @@ export async function gracefulShutdown(
      * hint because the session was handed off to a background job.
      */
     suppressResumeHint?: boolean
+    /**
+     * When set, omit `--worktree <name>` from the printed resume hint
+     * (densable WMo.resumeHintOmitsWorktree).
+     */
+    removeWorktree?: unknown
   },
 ): Promise<void> {
   if (shutdownInProgress) {
@@ -570,6 +612,7 @@ export async function gracefulShutdown(
   if (options?.suppressResumeHint) {
     resumeHintPrinted = true
   }
+  resumeHintOmitsWorktree = options?.removeWorktree !== undefined
 
   // Exit alt screen and print resume hint FIRST, before any async operations
   // (including dynamic import of hooks). Previously we awaited import('./hooks.js')

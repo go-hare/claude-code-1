@@ -1,9 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, Text } from '@anthropic/ink';
 import { getDisplayPath } from '../utils/file.js';
 import { removePathFromRepo, validateRepoAtPath } from '../utils/githubRepoPathMapping.js';
-import { Select } from './CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { ItemList } from './ItemList.js';
 import { Spinner } from './Spinner.js';
 
 type Props = {
@@ -25,11 +24,6 @@ export function TeleportRepoMismatchDialog({
 
   const handleChange = useCallback(
     async (value: string): Promise<void> => {
-      if (value === 'cancel') {
-        onCancel();
-        return;
-      }
-
       setValidating(true);
       setErrorMessage(null);
 
@@ -48,23 +42,19 @@ export function TeleportRepoMismatchDialog({
 
       setErrorMessage(`${getDisplayPath(value)} no longer contains the correct repository. Select another path.`);
     },
-    [targetRepo, availablePaths, onSelectPath, onCancel],
+    [targetRepo, availablePaths, onSelectPath],
   );
 
   const options = [
     ...availablePaths.map(path => ({
-      label: (
-        <Text>
-          Use <Text bold>{getDisplayPath(path)}</Text>
-        </Text>
-      ),
+      label: getDisplayPath(path),
       value: path,
     })),
     { label: 'Cancel', value: 'cancel' },
   ];
 
   return (
-    <Dialog title="Teleport to Repo" onCancel={onCancel} color="background">
+    <Dialog title="Teleport to Repo" onCancel={onCancel} exitOnCtrlCD color="background">
       {availablePaths.length > 0 ? (
         <>
           <Box flexDirection="column" gap={1}>
@@ -80,7 +70,17 @@ export function TeleportRepoMismatchDialog({
               <Text> Validating repository…</Text>
             </Box>
           ) : (
-            <Select options={options} onChange={value => void handleChange(value)} />
+            <ItemList
+              options={options}
+              onSelect={index => {
+                const selectedPath = availablePaths[index];
+                if (selectedPath === undefined) {
+                  onCancel();
+                  return;
+                }
+                void handleChange(selectedPath);
+              }}
+            />
           )}
         </>
       ) : (

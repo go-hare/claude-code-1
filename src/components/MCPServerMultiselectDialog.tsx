@@ -2,16 +2,16 @@ import partition from 'lodash-es/partition.js';
 import uniq from 'lodash-es/uniq.js';
 import React, { useCallback } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { formatMcpServerLabel } from '../services/mcp/formatMcpServerLabel.js';
 import { approveSessionMcpServers, rejectSessionMcpServers } from '../services/mcp/mcpSessionApprovedServers.js';
 import { getProjectPathForConfig } from '../utils/config.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { SelectMulti } from './CustomSelect/SelectMulti.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
-import { MCPServerDialogCopy } from './MCPServerDialogCopy.js';
 import type { McpApprovalPersistResult } from './MCPServerApprovalDialog.js';
+import { MCPServerDialogCopy } from './MCPServerDialogCopy.js';
 
 type Props = {
   serverNames: string[];
@@ -22,6 +22,7 @@ type Props = {
 
 export function MCPServerMultiselectDialog({ serverNames, pluginServerNames, onDone }: Props): React.ReactNode {
   const pluginNames = pluginServerNames ?? new Set<string>();
+  const screenReader = isScreenReaderModeEnabled();
 
   function onSubmit(selectedServers: string[]) {
     const [approvedServers, rejectedServers] = partition(serverNames, server => selectedServers.includes(server));
@@ -71,6 +72,7 @@ export function MCPServerMultiselectDialog({ serverNames, pluginServerNames, onD
         subtitle="Select any you wish to enable."
         color="warning"
         onCancel={handleEscRejectAll}
+        exitOnCtrlCD
         hideInputGuide
       >
         <MCPServerDialogCopy />
@@ -80,7 +82,8 @@ export function MCPServerMultiselectDialog({ serverNames, pluginServerNames, onD
             label: formatMcpServerLabel(server, pluginNames.has(server)),
             value: server,
           }))}
-          defaultValue={serverNames}
+          defaultValue={screenReader ? [] : serverNames}
+          submitButtonText="Enable selected"
           onSubmit={onSubmit}
           onCancel={handleEscRejectAll}
           hideIndexes
@@ -89,8 +92,7 @@ export function MCPServerMultiselectDialog({ serverNames, pluginServerNames, onD
       <Box paddingX={1}>
         <Text dimColor italic>
           <Byline>
-            <KeyboardShortcutHint shortcut="Space" action="select" />
-            <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+            <KeyboardShortcutHint shortcut="space" action="select" />
             <ConfigurableShortcutHint
               action="confirm:no"
               context="Confirmation"

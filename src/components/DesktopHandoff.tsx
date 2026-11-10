@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { CommandResultDisplay } from '../commands.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for "any key" dismiss and y/n prompt
-import { Box, Text, useInput, LoadingState } from '@anthropic/ink';
+import { Box, Dialog, LoadingState, Text, useInput } from '@anthropic/ink';
 import { getDesktopInstallStatus, openCurrentSessionInDesktop } from '../utils/desktopDeepLink.js';
 import { openBrowser } from '../utils/browser.js';
+import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 
 import { requestBgDetach } from '../daemon/rendezvousServer.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
@@ -33,8 +34,21 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [downloadMessage, setDownloadMessage] = useState<string>('');
 
-  // Handle keyboard input for error and prompt-download states
-  useInput(input => {
+  const handleCancel = useCallback(() => {
+    onDone(`Cancelled. Learn more about Claude Desktop at ${DESKTOP_DOCS_URL}`, { display: 'system' });
+  }, [onDone]);
+
+  useInput((input, key) => {
+    if (key.escape) {
+      return;
+    }
+    if (key.meta && (input === 'c' || input === 'd')) {
+      handleCancel();
+      return;
+    }
+    if (key.ctrl || key.meta) {
+      return;
+    }
     if (state === 'error') {
       onDone(error ?? 'Unknown error', { display: 'system' });
       return;
@@ -42,10 +56,9 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
     if (state === 'prompt-download') {
       if (input === 'y' || input === 'Y') {
         openBrowser(getDownloadUrl()).catch(() => {});
-        onDone(
-          `Starting download. Re-run /desktop once you\u2019ve installed the app.\nLearn more at ${DESKTOP_DOCS_URL}`,
-          { display: 'system' },
-        );
+        onDone(`Starting download. Re-run /desktop once you’ve installed the app.\nLearn more at ${DESKTOP_DOCS_URL}`, {
+          display: 'system',
+        });
       } else if (input === 'n' || input === 'N') {
         onDone(`The desktop app is required for /desktop. Learn more at ${DESKTOP_DOCS_URL}`, { display: 'system' });
       }
@@ -54,7 +67,6 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
 
   useEffect(() => {
     async function performHandoff(): Promise<void> {
-      // Check Desktop install status
       setState('checking');
       const installStatus = await getDesktopInstallStatus();
 
@@ -70,8 +82,6 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
         return;
       }
 
-      // leftover 239 Q6e(..., "desktop_handoff") — K9/jfE persist remains
-      // invent-ban (no storageV5). Cancel side-effect is _6i.
       try {
         const { beginQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
         beginQuotaAutoResumeHandoff('desktop_handoff');
@@ -79,16 +89,13 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
         /* best-effort */
       }
 
-      // Flush session storage to ensure transcript is fully written
       setState('flushing');
       await flushSessionStorage();
 
-      // Open the deep link (uses claude-dev:// in dev mode)
       setState('opening');
       const result = await openCurrentSessionInDesktop();
 
       if (!result.success) {
-        // leftover 239 kHe after qyg fail
         try {
           const { endQuotaAutoResumeHandoff } = await import('../services/quotaAutoResume.js');
           endQuotaAutoResumeHandoff();
@@ -100,14 +107,11 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
         return;
       }
 
-      // Success - exit the CLI
       setState('success');
 
-      // Give the user a moment to see the success message
       setTimeout(
-        async (onDone: Props['onDone']) => {
-          onDone('Session transferred to Claude Desktop', { display: 'system' });
-          // Gold: if(wt()) KW({broadcast:!0}); await Mn(0,"other")
+        async (doneCallback: Props['onDone']) => {
+          doneCallback('Session transferred to Claude Desktop', { display: 'system' });
           if (isBgSession()) requestBgDetach({ broadcast: true });
           await gracefulShutdown(0, 'other');
         },
@@ -117,7 +121,6 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
     }
 
     performHandoff().catch(err => {
-      // leftover 239 kHe after Q6e/open throw
       void import('../services/quotaAutoResume.js')
         .then(({ endQuotaAutoResumeHandoff }) => {
           endQuotaAutoResumeHandoff();
@@ -130,19 +133,28 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
 
   if (state === 'error') {
     return (
-      <Box flexDirection="column" paddingX={2} tabIndex={0} autoFocus>
-        <Text color="error">Error: {error}</Text>
-        <Text dimColor>Press any key to continue…</Text>
-      </Box>
+      <Dialog title="Claude Desktop" onCancel={handleCancel} inputGuide="Press any key to continue…">
+        <Box flexDirection="column">
+          <Text color="error">Error: {error}</Text>
+        </Box>
+      </Dialog>
     );
   }
 
   if (state === 'prompt-download') {
     return (
-      <Box flexDirection="column" paddingX={2} tabIndex={0} autoFocus>
-        <Text>{downloadMessage}</Text>
-        <Text>Download now? (y/n)</Text>
-      </Box>
+      <Dialog
+        title="Claude Desktop"
+        onCancel={handleCancel}
+        inputGuide={
+          <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+        }
+      >
+        <Box flexDirection="column">
+          <Text>{downloadMessage}</Text>
+          <Text>Download now? (y/n)</Text>
+        </Box>
+      </Dialog>
     );
   }
 

@@ -1,18 +1,25 @@
 import figures from 'figures';
 import React, { useEffect, useState } from 'react';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { logForDebugging } from '../utils/debug.js';
 import type { GitFileStatus } from '../utils/git.js';
 import { getFileStatus, stashToCleanState } from '../utils/git.js';
-import { Select } from './CustomSelect/index.js';
+import { ConfirmSelect } from './ConfirmSelect.js';
 import { Spinner } from './Spinner.js';
 
 type TeleportStashProps = {
-  onStashAndContinue: () => void;
+  onStashAndContinue: () => void | Promise<void>;
   onCancel: () => void;
+  cancelQuits?: boolean;
 };
 
-export function TeleportStash({ onStashAndContinue, onCancel }: TeleportStashProps): React.ReactNode {
+function noop(): void {}
+
+export function TeleportStash({
+  onStashAndContinue,
+  onCancel,
+  cancelQuits = true,
+}: TeleportStashProps): React.ReactNode {
   const [gitFileStatus, setGitFileStatus] = useState<GitFileStatus | null>(null);
   const changedFiles = gitFileStatus !== null ? [...gitFileStatus.tracked, ...gitFileStatus.untracked] : [];
   const [loading, setLoading] = useState(true);
@@ -45,28 +52,25 @@ export function TeleportStash({ onStashAndContinue, onCancel }: TeleportStashPro
       logForDebugging('Stashing changes before teleport...');
       const success = await stashToCleanState('Teleport auto-stash');
 
-      if (success) {
-        logForDebugging('Successfully stashed changes');
-        onStashAndContinue();
-      } else {
+      if (!success) {
         setError('Failed to stash changes');
+        setStashing(false);
+        return;
       }
+      logForDebugging('Successfully stashed changes');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       logForDebugging(`Error stashing changes: ${errorMessage}`, {
         level: 'error',
       });
       setError('Failed to stash changes');
+      setStashing(false);
+      return;
+    }
+    try {
+      await onStashAndContinue();
     } finally {
       setStashing(false);
-    }
-  };
-
-  const handleSelectChange = (value: string) => {
-    if (value === 'stash') {
-      void handleStash();
-    } else {
-      onCancel();
     }
   };
 
@@ -88,18 +92,25 @@ export function TeleportStash({ onStashAndContinue, onCancel }: TeleportStashPro
           Error: {error}
         </Text>
         <Box marginTop={1}>
-          <Text dimColor>Press </Text>
-          <Text bold>Escape</Text>
-          <Text dimColor> to cancel</Text>
+          <Text dimColor>
+            <KeyboardShortcutHint shortcut="escape" action="cancel" bold />
+          </Text>
         </Box>
       </Box>
     );
   }
 
   const showFileCount = changedFiles.length > 8;
+  const stashingNonQuit = stashing && !cancelQuits;
 
   return (
-    <Dialog title="Working Directory Has Changes" onCancel={onCancel}>
+    <Dialog
+      key={stashingNonQuit ? 'stashing' : 'asking'}
+      title="Working directory has changes"
+      onCancel={stashingNonQuit ? noop : onCancel}
+      exitOnCtrlCD={cancelQuits || stashingNonQuit}
+      inputGuide={stashingNonQuit ? 'Teleport continues when the stash finishes…' : undefined}
+    >
       <Text>Teleport will switch git branches. The following changes were found:</Text>
 
       <Box flexDirection="column" paddingLeft={2}>
@@ -122,12 +133,11 @@ export function TeleportStash({ onStashAndContinue, onCancel }: TeleportStashPro
           <Text> Stashing changes...</Text>
         </Box>
       ) : (
-        <Select
-          options={[
-            { label: 'Stash changes and continue', value: 'stash' },
-            { label: 'Exit', value: 'exit' },
-          ]}
-          onChange={handleSelectChange}
+        <ConfirmSelect
+          confirmLabel="Stash changes and continue"
+          cancelLabel={cancelQuits ? 'Exit' : 'Cancel'}
+          onConfirm={() => void handleStash()}
+          onCancel={onCancel}
         />
       )}
     </Dialog>

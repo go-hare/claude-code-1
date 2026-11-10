@@ -198,6 +198,7 @@ import { applyMainThreadAgentHooks } from './utils/hooks/applyMainThreadAgentHoo
 import { filterCommandsForRemoteMode, getCommands } from './commands.js';
 import type { StatsStore } from './context/stats.js';
 import {
+  buildSettingsFixPrompt,
   launchAssistantInstallWizard,
   launchAssistantSessionChooser,
   launchInvalidSettingsDialog,
@@ -381,6 +382,8 @@ import {
   setClientType,
   setCwdState,
   setDirectConnectServerUrl,
+  getFlagSettingsExpectedContent,
+  getFlagSettingsPath,
   setFlagSettingsPath,
   setInitialMainLoopModel,
   setInlinePlugins,
@@ -3838,10 +3841,18 @@ async function run(): Promise<CommanderCommand> {
         const { errors } = getSettingsWithErrors();
         const nonMcpErrors = errors.filter(e => !e.mcpErrorMetadata);
         if (nonMcpErrors.length > 0) {
-          await launchInvalidSettingsDialog(root, {
+          const settingsResult = await launchInvalidSettingsDialog(root, {
             settingsErrors: nonMcpErrors,
             onExit: () => gracefulShutdownSync(1),
           });
+          if (settingsResult === 'fix') {
+            const fixPrompt = buildSettingsFixPrompt(nonMcpErrors, {
+              flagSettingsPath: getFlagSettingsExpectedContent() === undefined ? getFlagSettingsPath() : undefined,
+            });
+            if (fixPrompt) {
+              inputPrompt = inputPrompt ? `${fixPrompt}\n\n${inputPrompt}` : fixPrompt;
+            }
+          }
         }
       }
 

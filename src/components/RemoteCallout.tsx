@@ -11,9 +11,10 @@ type RemoteCalloutSelection = 'enable' | 'dismiss';
 
 type Props = {
   onDone: (selection: RemoteCalloutSelection) => void;
+  defaultFocusValue?: RemoteCalloutSelection;
 };
 
-export function RemoteCallout({ onDone }: Props): React.ReactNode {
+export function RemoteCallout({ onDone, defaultFocusValue }: Props): React.ReactNode {
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
 
@@ -35,7 +36,7 @@ export function RemoteCallout({ onDone }: Props): React.ReactNode {
 
   const options: OptionWithDescription<RemoteCalloutSelection>[] = [
     {
-      label: 'Enable Remote Control for this session',
+      label: 'Enable Remote Control',
       description: 'Opens a secure connection to claude.ai.',
       value: 'enable',
     },
@@ -51,14 +52,22 @@ export function RemoteCallout({ onDone }: Props): React.ReactNode {
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Box marginBottom={1} flexDirection="column">
           <Text>
-            Remote Control lets you access this CLI session from the web (claude.ai/code) or the Claude app, so you can
-            pick up where you left off on any device.
+            Take this session with you and pick up right where you left off on any device. Open the Code tab in the
+            Claude mobile app, or visit claude.ai/code in a browser.
           </Text>
           <Text> </Text>
-          <Text>You can disconnect remote access anytime by running /remote-control again.</Text>
+          <Text>
+            The session keeps running on this machine. Use your other devices as a remote control. Disconnect anytime
+            with /remote-control.
+          </Text>
         </Box>
         <Box>
-          <Select options={options} onChange={handleSelect} onCancel={handleCancel} />
+          <Select
+            defaultFocusValue={defaultFocusValue}
+            options={options}
+            onChange={handleSelect}
+            onCancel={handleCancel}
+          />
         </Box>
       </Box>
     </PermissionDialog>

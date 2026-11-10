@@ -96,6 +96,7 @@ export function ExitFlow({
       <BackgroundAndExit
         messages={msgSnap}
         isMidTurn={resolveMidTurn()}
+        responseStreaming={resolveStreaming() === true}
         onDone={msg => onDone(msg)}
         getTasks={getTasks}
       />

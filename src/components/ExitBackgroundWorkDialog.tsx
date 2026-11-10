@@ -73,6 +73,7 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     <Dialog
       title="Background work is running"
       subtitle="The following will stop when you exit:"
+      exitOnCtrlCD
       onCancel={() => {
         track('stay');
         onCancel();

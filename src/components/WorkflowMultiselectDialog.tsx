@@ -33,8 +33,8 @@ function renderInputGuide(exitState: ExitState): React.ReactNode {
   return (
     <Byline>
       <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
-      <KeyboardShortcutHint shortcut="Space" action="toggle" />
-      <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+      <KeyboardShortcutHint shortcut="space" action="toggle" />
+      <KeyboardShortcutHint shortcut="enter" action="confirm" />
       <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
     </Byline>
   );
@@ -66,12 +66,14 @@ export function WorkflowMultiselectDialog({ onSubmit, defaultSelections }: Props
 
   return (
     <Dialog
-      title="Select GitHub workflows to install"
-      subtitle="We'll create a workflow file in your repository for each one you select."
+      title="Install GitHub App"
+      subtitle="Select GitHub workflows to install"
       onCancel={handleCancel}
+      exitOnCtrlCD
       inputGuide={renderInputGuide}
     >
-      <Box>
+      <Box flexDirection="column">
+        <Text dimColor>We&apos;ll create a workflow file in your repository for each one you select.</Text>
         <Text dimColor>
           More workflow examples (issue triage, CI fixes, etc.) at:{' '}
           <Link url="https://github.com/anthropics/claude-code-action/blob/main/examples/">

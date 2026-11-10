@@ -1,9 +1,7 @@
 import chalk from 'chalk';
-import figures from 'figures';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { Text } from '@anthropic/ink';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
+import { Byline, Dialog, KeyboardShortcutHint, LoadingState, StatusIcon, Text } from '@anthropic/ink';
 import { toError } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
 import { getSettingSourceName, type SettingSource } from '../utils/settings/constants.js';
@@ -11,10 +9,9 @@ import { updateSettingsForSource } from '../utils/settings/settings.js';
 import { getEnvironmentSelectionInfo } from '../utils/teleport/environmentSelection.js';
 import type { EnvironmentResource } from '../utils/teleport/environments.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
-import { Select } from './CustomSelect/select.js';
-import { Byline, Dialog, KeyboardShortcutHint, LoadingState } from '@anthropic/ink';
+import { ItemList } from './ItemList.js';
 
-const DIALOG_TITLE = 'Select Remote Environment';
+const DIALOG_TITLE = 'Select remote environment';
 const SETUP_HINT = `Configure environments at: https://claude.ai/code`;
 
 type Props = {
@@ -105,12 +102,7 @@ export function RemoteEnvironmentDialog({ onDone }: Props): React.ReactNode {
     );
   }
 
-  // Single environment - just show info
-  if (environments.length === 1) {
-    return <SingleEnvironmentContent environment={selectedEnvironment} onDone={onDone} />;
-  }
-
-  // Multiple environments - show selection UI
+  // Show environment selection list (densable ce)
   return (
     <MultipleEnvironmentsContent
       environments={environments}
@@ -120,31 +112,6 @@ export function RemoteEnvironmentDialog({ onDone }: Props): React.ReactNode {
       onSelect={handleSelect}
       onCancel={onDone}
     />
-  );
-}
-
-function EnvironmentLabel({ environment }: { environment: EnvironmentResource }): React.ReactNode {
-  return (
-    <Text>
-      {figures.tick} Using <Text bold>{environment.name}</Text> <Text dimColor>({environment.environment_id})</Text>
-    </Text>
-  );
-}
-
-function SingleEnvironmentContent({
-  environment,
-  onDone,
-}: {
-  environment: EnvironmentResource;
-  onDone: () => void;
-}): React.ReactNode {
-  // Handle Enter to continue
-  useKeybinding('confirm:yes', onDone, { context: 'Confirmation' });
-
-  return (
-    <Dialog title={DIALOG_TITLE} subtitle={SETUP_HINT} onCancel={onDone}>
-      <EnvironmentLabel environment={environment} />
-    </Dialog>
   );
 }
 
@@ -164,16 +131,18 @@ function MultipleEnvironmentsContent({
   onCancel: () => void;
 }): React.ReactNode {
   const sourceSuffix =
-    selectedEnvironmentSource && selectedEnvironmentSource !== 'localSettings'
+    selectedEnvironmentSource &&
+    selectedEnvironmentSource !== 'localSettings' &&
+    selectedEnvironmentSource !== 'userSettings'
       ? ` (from ${getSettingSourceName(selectedEnvironmentSource)} settings)`
       : '';
 
-  const subtitle = (
+  const subtitle = selectedEnvironmentSource ? (
     <Text>
       Currently using: <Text bold>{selectedEnvironment.name}</Text>
       {sourceSuffix}
     </Text>
-  );
+  ) : undefined;
 
   return (
     <Dialog title={DIALOG_TITLE} subtitle={subtitle} onCancel={onCancel} hideInputGuide>
@@ -181,24 +150,27 @@ function MultipleEnvironmentsContent({
       {loadingState === 'updating' ? (
         <LoadingState message="Updating…" />
       ) : (
-        <Select
+        <ItemList
           options={environments.map(env => ({
-            label: (
-              <Text>
-                {env.name} <Text dimColor>({env.environment_id})</Text>
-              </Text>
-            ),
+            label: env.name,
             value: env.environment_id,
+            icon:
+              env.environment_id === selectedEnvironment.environment_id ? (
+                <StatusIcon status="success" aria-label="current:" />
+              ) : undefined,
+            facts: [env.environment_id],
           }))}
-          defaultValue={selectedEnvironment.environment_id}
-          onChange={onSelect}
-          onCancel={() => onSelect('cancel')}
-          layout="compact-vertical"
+          onSelect={index => {
+            const env = environments[index];
+            if (env) {
+              onSelect(env.environment_id);
+            }
+          }}
         />
       )}
       <Text dimColor>
         <Byline>
-          <KeyboardShortcutHint shortcut="Enter" action="select" />
+          <KeyboardShortcutHint shortcut="enter" action="select" />
           <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
         </Byline>
       </Text>

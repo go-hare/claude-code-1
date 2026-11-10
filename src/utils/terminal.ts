@@ -93,18 +93,30 @@ export function renderTruncatedContent(
     wrapWidth,
   )
 
-  const estimatedRemaining = preTruncated
-    ? Math.max(
-        remainingLines,
-        Math.ceil(trimmedContent.length / wrapWidth) - MAX_LINES_TO_SHOW,
-      )
-    : remainingLines
+  let estimatedRemaining = remainingLines
+  if (preTruncated) {
+    let newlineCount = 0
+    let idx = -1
+    for (;;) {
+      idx = trimmedContent.indexOf('\n', idx + 1)
+      if (idx === -1) break
+      newlineCount++
+    }
+    const totalLinesEstimate = Math.max(
+      newlineCount + 1,
+      Math.ceil(trimmedContent.length / wrapWidth),
+    )
+    estimatedRemaining = Math.max(
+      remainingLines,
+      totalLinesEstimate - MAX_LINES_TO_SHOW,
+    )
+  }
 
   return [
     aboveTheFold,
     estimatedRemaining > 0
       ? chalk.dim(
-          `… +${estimatedRemaining} lines${suppressExpandHint ? '' : ` ${ctrlOToExpand()}`}`,
+          `… +${estimatedRemaining.toLocaleString('en-US')} ${estimatedRemaining === 1 ? 'line' : 'lines'}${suppressExpandHint ? '' : ` ${ctrlOToExpand()}`}`,
         )
       : '',
   ]
