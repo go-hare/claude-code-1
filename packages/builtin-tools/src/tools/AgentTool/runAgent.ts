@@ -88,7 +88,7 @@ import {
 } from 'src/utils/hooks/agentHooksOriginTrust.js'
 import { registerFrontmatterHooks } from 'src/utils/hooks/registerFrontmatterHooks.js'
 import { clearSessionHooks } from 'src/utils/hooks/sessionHooks.js'
-import { executeSubagentStartHooks } from 'src/utils/hooks.js'
+import { executeStopHooks, executeSubagentStartHooks } from 'src/utils/hooks.js'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
@@ -1275,6 +1275,9 @@ export async function* runAgent({
     agentToolUseContext.langfuseTrace = subTrace
   }
 
+  // densable runAgent `eo` — true only when the query loop finishes.
+  // An abort/throw leaves it false so finally still fires SubagentStop.
+  let queryCompleted = false
   try {
     for await (const message of query({
       messages: initialMessages,
@@ -1428,11 +1431,36 @@ export async function* runAgent({
       throw new AbortError()
     }
 
+    queryCompleted = true
+
     // Run callback if provided (only built-in agents have callbacks)
     if (isBuiltInAgent(agentDefinition) && agentDefinition.callback) {
       agentDefinition.callback()
     }
   } finally {
+    // densable cleanup stage "SubagentStop": when the query did not finish
+    // (Esc / abort), fire SubagentStop once. No permission mode, no parent
+    // signal (that signal is already aborted), 5000ms. Failures are logged.
+    if (!queryCompleted) {
+      try {
+        for await (const _hookResult of executeStopHooks(
+          undefined,
+          undefined,
+          5000,
+          false,
+          agentId,
+          agentToolUseContext,
+          undefined,
+          agentDefinition.agentType,
+        )) {
+          // drain; do not yield into the aborted parent stream
+        }
+      } catch (err) {
+        logForDebugging(
+          `[runAgent] SubagentStop on interrupted query failed: ${err}`,
+        )
+      }
+    }
     // densable kbe — drop delivery-map row so a later spawn of this id is clean
     try {
       const { clearHandbackDelivery } =
