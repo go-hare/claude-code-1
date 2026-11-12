@@ -2219,6 +2219,8 @@ describe('densable 2.1.289 print extras unique English', () => {
     expect(print).toContain('formatPollEventsPrompt')
     expect(print).toContain('remintPollEventEnvelope')
     expect(print).toContain('POLL_EVENT_MISSING_PAYLOAD')
+    expect(print).not.toContain("case 'remote_tool_call'")
+    expect(PRINT_CONTROL_EXTRA_SUBTYPES).not.toContain('remote_tool_call')
   })
 
   test('dispatch message_rated success and chrome disconnected Qe', () => {

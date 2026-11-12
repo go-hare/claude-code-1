@@ -500,6 +500,8 @@ export const SDKHookCallbackRequestSchema = lazySchema(() =>
       callback_id: z.string(),
       input: HookInputSchema(),
       tool_use_id: z.string().optional(),
+      issued_at: z.number().int().nonnegative().optional(),
+      deadline_ms: z.number().int().positive().optional(),
     })
     .describe('Delivers a hook callback with its input data.'),
 )
@@ -653,6 +655,231 @@ export const SDKControlGetSettingsRequestSchema = lazySchema(() =>
     .describe(
       'Returns the effective merged settings and the raw per-source settings.',
     ),
+)
+
+export const SDKControlRenameSessionRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('rename_session'),
+      title: z.string(),
+      source: z.enum(['remote', 'host']).optional(),
+    })
+    .describe('Renames the current session.'),
+)
+
+export const SDKControlGetSessionCostRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_session_cost') })
+    .describe('Returns the running USD cost of this session.'),
+)
+
+export const SDKControlListModelsRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('list_models') })
+    .describe('Lists models the host can select.'),
+)
+
+export const SDKControlGetUsageRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_usage') })
+    .describe('Returns the session usage summary.'),
+)
+
+export const SDKControlGetBinaryVersionRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_binary_version') })
+    .describe('Returns the CLI version string.'),
+)
+
+export const SDKControlGetTaskOutputRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('get_task_output'),
+      task_id: z.string(),
+      max_bytes: z.number().optional(),
+    })
+    .describe('Returns the tail of a background task output file.'),
+)
+
+export const SDKControlReloadOutputStylesRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('reload_output_styles') })
+    .describe('Reloads output styles and returns the available names.'),
+)
+
+export const SDKControlReloadSkillsRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('reload_skills') })
+    .describe('Reloads skills from disk.'),
+)
+
+export const SDKControlFileSuggestionsRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('file_suggestions'),
+      query: z.string().optional(),
+    })
+    .describe('Returns file-path suggestions for the host composer.'),
+)
+
+export const SDKControlGetPlanRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_plan') })
+    .describe('Returns the current plan file, if one exists.'),
+)
+
+export const SDKControlGetWorkspaceDiffRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_workspace_diff') })
+    .describe('Returns the workspace diff for the remote sidebar.'),
+)
+
+export const SDKControlGetHooksListingRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_hooks_listing') })
+    .describe('Returns the registered hooks listing.'),
+)
+
+export const SDKControlUpdateSettingsRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('update_settings'),
+      source: z.string(),
+      settings: z.record(z.string(), z.unknown()),
+    })
+    .describe('Writes settings into one source layer.'),
+)
+
+export const SDKControlGetMemoryDialogRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_memory_dialog') })
+    .describe('Asks for the memory dialog. Not available on this connection.'),
+)
+
+export const SDKControlGetSkillsDialogRequestSchema = lazySchema(() =>
+  z
+    .object({ subtype: z.literal('get_skills_dialog') })
+    .describe('Asks for the skills dialog. Not available on this connection.'),
+)
+
+export const SDKControlMcpCallRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('mcp_call'),
+      tool: z.string(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+    })
+    .describe('Invokes an MCP tool from the host.'),
+)
+
+/**
+ * densable `Na` — CLI → attached client. `$.prompt.read` in a headless
+ * session asks the client that named `ui_prompt_read` on attach.
+ */
+export const SDKControlUiPromptReadRequestSchema = lazySchema(() =>
+  z
+    .object({
+      subtype: z.literal('ui_prompt_read'),
+      surface: z.string(),
+      client_id: z.string(),
+    })
+    .describe("Reads the attached client's composer draft and cursor."),
+)
+
+export const SDKControlUiPromptReadResponseSchema = lazySchema(() =>
+  z.object({
+    text: z.string(),
+    cursor: z.number().int().nonnegative(),
+  }),
+)
+
+/** densable `ka` — `$.ui.copy` to a remote surface. Answer `{copied}`. */
+export const SDKControlUiCopyRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('ui_copy'),
+    surface: z.string(),
+    client_id: z.string(),
+    plugin: z.string(),
+    text: z.string(),
+  }),
+)
+
+/** densable `Ma` — `prompt.fill` to the attached composer. Answer `{filled}`. */
+export const SDKControlUiPromptFillRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('ui_prompt_fill'),
+    surface: z.string(),
+    client_id: z.string(),
+    text: z.string(),
+    mode: z.enum(['replace', 'append', 'insert']),
+    decorations: z.array(z.unknown()).optional(),
+  }),
+)
+
+/** densable `Pa` — `prompt.suggest`. Answer `{shown}`. */
+export const SDKControlUiPromptSuggestRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('ui_prompt_suggest'),
+    surface: z.string(),
+    client_id: z.string(),
+    text: z.string(),
+  }),
+)
+
+/** densable `Ia` — `ui.selection` asks every attached client. Answer `{text, instance_id}`. */
+export const SDKControlUiReadSelectionRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('ui_read_selection'),
+    surface: z.string(),
+    client_id: z.string(),
+  }),
+)
+
+/** densable `askOnce` — ask the attached client to announce again. */
+export const SDKControlRemoteToolsReannounceRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('remote_tools_reannounce'),
+    worker_epoch: z.number().int().positive(),
+    deadline_ms: z.number().int().positive(),
+  }),
+)
+
+/** densable `q` — liveness probe before a stale remote call. */
+export const SDKControlRemoteToolsProbeRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('remote_tools_probe'),
+    instance_id: z.string(),
+    issued_at: z.number().int().nonnegative(),
+    deadline_ms: z.number().int().positive(),
+  }),
+)
+
+/** densable `mqo` — CLI forwards a remote tool call to the announced machine. */
+export const SDKControlRemoteToolCallRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('remote_tool_call'),
+    instance_id: z.string(),
+    host: z.string(),
+    name: z.string(),
+    input: z.record(z.string(), z.unknown()),
+    envelope: z.record(z.string(), z.unknown()),
+    tool_use_id: z.string(),
+    issued_at: z.number().int().nonnegative(),
+    deadline_ms: z.number().int().positive(),
+  }),
+)
+
+/** densable `hqo` — CLI forwards a plumbing call (`sync_files`). */
+export const SDKControlRemotePlumbingCallRequestSchema = lazySchema(() =>
+  z.object({
+    subtype: z.literal('remote_plumbing_call'),
+    instance_id: z.string(),
+    host: z.string(),
+    name: z.string(),
+    args: z.record(z.string(), z.unknown()),
+    issued_at: z.number().int().nonnegative(),
+    deadline_ms: z.number().int().positive(),
+  }),
 )
 
 export const SDKControlGetSettingsResponseSchema = lazySchema(() =>
@@ -973,6 +1200,31 @@ export const SDKControlRequestInnerSchema = lazySchema(() =>
     SDKControlBackgroundTasksRequestSchema(),
     SDKControlApplyFlagSettingsRequestSchema(),
     SDKControlGetSettingsRequestSchema(),
+    SDKControlRenameSessionRequestSchema(),
+    SDKControlGetSessionCostRequestSchema(),
+    SDKControlListModelsRequestSchema(),
+    SDKControlGetUsageRequestSchema(),
+    SDKControlGetBinaryVersionRequestSchema(),
+    SDKControlGetTaskOutputRequestSchema(),
+    SDKControlReloadOutputStylesRequestSchema(),
+    SDKControlReloadSkillsRequestSchema(),
+    SDKControlFileSuggestionsRequestSchema(),
+    SDKControlGetPlanRequestSchema(),
+    SDKControlGetWorkspaceDiffRequestSchema(),
+    SDKControlGetHooksListingRequestSchema(),
+    SDKControlUpdateSettingsRequestSchema(),
+    SDKControlGetMemoryDialogRequestSchema(),
+    SDKControlGetSkillsDialogRequestSchema(),
+    SDKControlMcpCallRequestSchema(),
+    SDKControlUiPromptReadRequestSchema(),
+    SDKControlUiCopyRequestSchema(),
+    SDKControlUiPromptFillRequestSchema(),
+    SDKControlUiPromptSuggestRequestSchema(),
+    SDKControlUiReadSelectionRequestSchema(),
+    SDKControlRemoteToolCallRequestSchema(),
+    SDKControlRemotePlumbingCallRequestSchema(),
+    SDKControlRemoteToolsProbeRequestSchema(),
+    SDKControlRemoteToolsReannounceRequestSchema(),
     SDKControlElicitationRequestSchema(),
     SDKControlOauthTokenRefreshRequestSchema(),
     SDKControlHostAuthTokenRefreshRequestSchema(),

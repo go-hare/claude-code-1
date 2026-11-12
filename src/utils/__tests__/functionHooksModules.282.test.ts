@@ -999,13 +999,16 @@ describe('function-hooks classic pattern', () => {
     ).rejects.toThrow('$.prompt.submit takes { text } (a non-empty prompt)')
     expect(
       await callPluginInterface('demo', { name: 'prompt', method: 'read' }, []),
-    ).toEqual({ text: '' })
-    await callPluginInterface('demo', { name: 'prompt', method: 'fill' }, [
-      { text: 'draft' },
-    ])
+    ).toEqual({ text: '', cursor: 0 })
+    // densable Iss.write: no client that named ui_prompt_fill → not filled.
+    expect(
+      await callPluginInterface('demo', { name: 'prompt', method: 'fill' }, [
+        { text: 'draft' },
+      ]),
+    ).toEqual({ isFilled: false, refusal: 'no_composer' })
     expect(
       await callPluginInterface('demo', { name: 'prompt', method: 'read' }, []),
-    ).toEqual({ text: 'draft' })
+    ).toEqual({ text: '', cursor: 0 })
     const submitted = callPluginInterface(
       'demo',
       { name: 'prompt', method: 'submit' },
@@ -1680,9 +1683,10 @@ describe('function-hooks classic pattern', () => {
         'demo',
       ),
     ).toEqual({ deny: 'no element of its own is drawn under that key' })
+    // densable Y7: no Ink on stdout → terminal is not drawing.
     expect(
       await handleHostOp('ui.copy', [{ text: 'hi', surface: 'terminal' }]),
-    ).toEqual({ isCopied: true })
+    ).toEqual({ isCopied: false, reason: 'no-surface' })
     // densable Jko stamps Y7()[0]; no Ink on stdout → still no-surface.
     expect(await handleHostOp('ui.copy', [{ text: 'hi' }])).toEqual({
       isCopied: false,
@@ -1699,6 +1703,8 @@ describe('function-hooks classic pattern', () => {
     )
     expect(copySrc).toContain('no client there took it; nothing copied')
     expect(copySrc).toContain('over the write bound')
+    expect(copySrc).toContain('path ${path}')
+    expect(copySrc).toContain('getClipboardPath()')
     {
       let box = { text: 'hi', cursor: 2 }
       const composer = createPromptEditComposer({

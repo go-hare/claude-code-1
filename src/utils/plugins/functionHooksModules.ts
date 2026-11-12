@@ -26,7 +26,7 @@ import type { EffortValue } from '../effort.js'
 import { densableThinkingForceParams } from '../thinking.js'
 import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
-import { instances, stringWidth } from '@anthropic/ink'
+import { getClipboardPath, instances, stringWidth } from '@anthropic/ink'
 import {
   getRenderVersion,
   invalidateRender,
@@ -607,6 +607,7 @@ export function createPromptEditComposer(host: {
 } {
   const abort = new AbortController()
   let hooked = false
+  promptBoxBound = true
   let queued: PromptEditRecord[] = []
   let inFlight: PromptEditRecord | undefined
   let scheduled = false
@@ -677,6 +678,7 @@ export function createPromptEditComposer(host: {
     dispose() {
       queued = []
       abort.abort()
+      promptBoxBound = false
     },
   }
 }
@@ -2421,6 +2423,8 @@ const STORE_DOS_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
 const pluginStore = new Map<string, unknown>()
 let promptBoxText = ''
 let promptBoxCursor = 0
+/** densable `px()?.surface==="terminal"` — set when a composer is bound. */
+let promptBoxBound = false
 let uiResolvePressCounter = 0
 
 const SESSION_AUTHORIZE_ENDPOINT = 'https://api.anthropic.com'
@@ -4748,18 +4752,64 @@ export async function handleHostOp(
     return runPromptSubmit(rec ?? {}, plugin)
   }
   if (op === 'prompt.read') {
+    // densable Iss.read: sU("ui_prompt_read") then requester.readPrompt,
+    // else the local box. Unanswered → empty box.
+    const client = attachedClientAnswering('ui_prompt_read')
+    if (client) {
+      const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+      const answer = await getCurrentStructuredIO()?.requestUiPromptRead(
+        client.surface,
+        client.clientId,
+      )
+      if (!answer) return { text: '', cursor: 0 }
+      return {
+        text: answer.text,
+        cursor: Math.min(answer.cursor, answer.text.length),
+      }
+    }
     const storeState = getPromptInputCursorState()
     const text =
       storeState.active || storeState.value !== ''
         ? storeState.value
         : promptBoxText
-    return { text }
+    const cursor =
+      storeState.cursor !== null ? storeState.cursor : promptBoxCursor
+    return { text, cursor: Math.min(Math.max(0, cursor), text.length) }
   }
   if (op === 'prompt.fill') {
-    return runPromptFill(rec ?? {}, plugin)
+    // densable Iss.write: sU("ui_prompt_fill") else local composer.
+    const client = attachedClientAnswering('ui_prompt_fill')
+    // densable Iss.write: no client → {isFilled:false, refusal:"no_composer"}.
+    // Text longer than 1e6 is not filled.
+    if (!client) return { isFilled: false, refusal: 'no_composer' }
+    const text = typeof rec?.text === 'string' ? rec.text : ''
+    if (text.length > UI_HOST_TEXT_MAX) return { isFilled: false }
+    const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+    const mode =
+      rec?.mode === 'append' || rec?.mode === 'insert' ? rec.mode : 'replace'
+    const filled = await getCurrentStructuredIO()?.requestUiPromptFill({
+      surface: client.surface,
+      clientId: client.clientId,
+      text,
+      mode,
+      decorations: Array.isArray(rec?.decorations)
+        ? rec.decorations
+        : undefined,
+    })
+    return { isFilled: filled === true }
   }
   if (op === 'prompt.suggest') {
-    return { isShown: true, ok: true }
+    // densable Iss.propose: {isShown} only. No client or over 1e6 → false.
+    const text = typeof rec?.text === 'string' ? rec.text : ''
+    const client = attachedClientAnswering('ui_prompt_suggest')
+    if (!client || text.length > UI_HOST_TEXT_MAX) return { isShown: false }
+    const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+    const shown = await getCurrentStructuredIO()?.requestUiPromptSuggest(
+      client.surface,
+      client.clientId,
+      text,
+    )
+    return { isShown: shown === true }
   }
   if (
     op === 'store.get' ||
@@ -11412,11 +11462,11 @@ function runInterfaceCall(
   )
 }
 
-function runUiHost(
+async function runUiHost(
   op: string,
   input: Record<string, unknown>,
   plugin?: string,
-): unknown {
+): Promise<unknown> {
   if (op === 'ui.invalidate') {
     const event = input.event
     if (
@@ -11620,7 +11670,33 @@ function runUiHost(
     return runUiFocus({ ...input, plugin: plugin ?? input.plugin }, plugin)
   }
   if (op === 'ui.selection') {
-    // densable 2.1.289 Ga / xrs: { text, requestId? } or undefined when empty.
+    // densable N$t / Tae: every client that named ui_read_selection is asked.
+    const { listSurfaceViewportClients } = await import(
+      './surfaceViewportClients.js'
+    )
+    const clients = listSurfaceViewportClients().filter(
+      c =>
+        Array.isArray(c.answers) &&
+        (c.answers as unknown[]).includes('ui_read_selection'),
+    )
+    if (clients.length > 0) {
+      // densable N$t: Promise.any — the first non-empty selection wins.
+      const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+      const io = getCurrentStructuredIO()
+      if (io) {
+        const first = await Promise.any(
+          clients.map(async c => {
+            const answer = await io.requestUiReadSelection(
+              c.surface,
+              c.clientId,
+            )
+            if (!answer || answer.text === '') throw new Error('empty')
+            return answer
+          }),
+        ).catch(() => undefined)
+        return first ? toUiSelection(first) : undefined
+      }
+    }
     return toUiSelection(runUiSelection())
   }
   if (op === 'ui.copy') {
@@ -11638,6 +11714,32 @@ function runUiHost(
         'surface is not the name of a surface (terminal, desktop, mobile, vscode)',
         plugin,
       )
+    }
+    const name = plugin && plugin !== '' ? plugin : 'unattributed'
+    if (typeof surface === 'string' && !drawingSurfaces().includes(surface)) {
+      logForDebugging(
+        `$.ui.copy (${name}): no surface draws (${surface}); nothing copied`,
+      )
+      return { isCopied: false, reason: 'no-surface' }
+    }
+    if (typeof surface === 'string' && surface !== 'terminal') {
+      // densable vko: the client that named ui_copy on this surface answers.
+      const client = attachedClientAnswering('ui_copy', surface)
+      const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+      const copied =
+        client !== undefined &&
+        (await getCurrentStructuredIO()?.requestUiCopy(
+          client.surface,
+          client.clientId,
+          name,
+          String(input.text),
+        )) === true
+      logForDebugging(
+        `$.ui.copy (${name}): ${String(input.text).length} chars to ${surface}: ${copied ? 'copied' : 'no client there took it; nothing copied'}`,
+      )
+      return copied
+        ? { isCopied: true }
+        : { isCopied: false, reason: 'no-clipboard' }
     }
     return runUiCopy(stamped, plugin)
   }
@@ -13351,7 +13453,35 @@ function runUiSelection(): { text: string; instance_id?: string } | undefined {
  * Desktop/vscode surfaces stay Drop.
  */
 function attachedCopySurfaces(): string[] {
-  return instances.get(process.stdout) !== undefined ? ['terminal'] : []
+  return promptBoxBound ? ['terminal'] : []
+}
+
+/** densable `Y7` — terminal only while a composer is bound. */
+function drawingSurfaces(): string[] {
+  const { listDrawingSurfaces } =
+    require('./surfaceViewportClients.js') as typeof import('./surfaceViewportClients.js')
+  return [...attachedCopySurfaces(), ...listDrawingSurfaces()]
+}
+
+/** densable `iU` — prompt.fill / prompt.suggest refuse past this length. */
+const UI_HOST_TEXT_MAX = 1_000_000
+
+/** densable `sU(answer)` — first attached client that named this answer. */
+function attachedClientAnswering(
+  answer: string,
+  surface?: string,
+): { surface: string; clientId: string } | undefined {
+  const { listSurfaceViewportClients } =
+    require('./surfaceViewportClients.js') as typeof import('./surfaceViewportClients.js')
+  const found = listSurfaceViewportClients().find(
+    c =>
+      (surface === undefined || c.surface === surface) &&
+      Array.isArray(c.answers) &&
+      (c.answers as unknown[]).includes(answer),
+  )
+  return found
+    ? { surface: found.surface, clientId: found.clientId }
+    : undefined
 }
 
 /** densable `Jko` stamp: fill surface from Y7()[0] when omitted. */
@@ -13384,10 +13514,14 @@ function runUiCopy(
   const payload = osc52Payload(text)
   const within = payload !== '' && payload.length <= OSC52_WRITE_BOUND
   if (within) process.stdout.write(payload)
+  // densable Qko: path is Fue() (native / tmux-buffer / osc52). Copied when
+  // OSC 52 was written, or the path is not osc52.
+  const path = getClipboardPath()
+  const copied = within || path !== 'osc52'
   logForDebugging(
-    `$.ui.copy (${name}): ${text.length} chars, path osc52, OSC 52 ${within ? 'written' : 'over the write bound'}; ${within ? 'copied' : 'nothing copied'}`,
+    `$.ui.copy (${name}): ${text.length} chars, path ${path}, OSC 52 ${within ? 'written' : 'over the write bound'}; ${copied ? 'copied' : 'nothing copied'}`,
   )
-  return within
+  return copied
     ? { isCopied: true }
     : { isCopied: false, reason: 'no-clipboard' }
 }

@@ -8,7 +8,7 @@ import {
   downloadUserSettings,
   redownloadUserSettings,
 } from 'src/services/settingsSync/index.js'
-import { StructuredIO } from 'src/cli/structuredIO.js'
+import { setCurrentStructuredIO, StructuredIO } from 'src/cli/structuredIO.js'
 import { RemoteIO } from 'src/cli/remoteIO.js'
 import {
   type Command,
@@ -958,6 +958,9 @@ export async function runHeadless(
   }
 
   const structuredIO = getStructuredIO(inputPrompt, options)
+  if (structuredIO instanceof StructuredIO) {
+    setCurrentStructuredIO(structuredIO)
+  }
 
   // densable 2.1.219 `_Is(_)`: register stream-json/SDK writer so async bg
   // agents (runAgent isAsync) can emit agent_progress via Yud() without the
@@ -8517,6 +8520,92 @@ function runHeadlessStreaming(
           ) {
             // densable extras; rewind_conversation / mcp_call / dialogs /
             // update_settings / reload_skills stay owned elsewhere.
+          } else if (req.subtype === 'rename_session') {
+            const title =
+              typeof (req as { title?: unknown }).title === 'string'
+                ? (req as { title: string }).title
+                : ''
+            if (!title.trim()) {
+              sendControlResponseError(msg, 'title is required')
+            } else {
+              try {
+                const { saveCustomTitle } = await import(
+                  'src/utils/sessionStorage.js'
+                )
+                const source =
+                  (req as { source?: unknown }).source === 'host'
+                    ? 'user'
+                    : 'remote'
+                await saveCustomTitle(
+                  getSessionId() as import('crypto').UUID,
+                  title,
+                  undefined,
+                  source,
+                )
+                sendControlResponseSuccess(msg, { title })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'get_session_cost') {
+            const { getTotalCostUSD } = await import('src/bootstrap/state.js')
+            sendControlResponseSuccess(msg, {
+              total_cost_usd: getTotalCostUSD(),
+            })
+          } else if (req.subtype === 'list_models') {
+            try {
+              const { getModelOptions } = await import(
+                'src/utils/model/modelOptions.js'
+              )
+              sendControlResponseSuccess(msg, {
+                models: getModelOptions().map(option => ({
+                  value: option.value,
+                  label: option.label,
+                  description: option.description,
+                })),
+              })
+            } catch (err) {
+              sendControlResponseError(msg, errorMessage(err))
+            }
+          } else if (req.subtype === 'get_usage') {
+            const { formatTotalCost } = await import('src/cost-tracker.js')
+            sendControlResponseSuccess(msg, { text: formatTotalCost() })
+          } else if (req.subtype === 'get_binary_version') {
+            sendControlResponseSuccess(msg, { version: MACRO.VERSION })
+          } else if (req.subtype === 'get_task_output') {
+            const taskId =
+              typeof (req as { task_id?: unknown }).task_id === 'string'
+                ? (req as { task_id: string }).task_id
+                : ''
+            if (!taskId) {
+              sendControlResponseError(msg, 'task_id is required')
+            } else {
+              try {
+                const { getTaskOutput } = await import(
+                  'src/utils/task/diskOutput.js'
+                )
+                const maxBytes =
+                  typeof (req as { max_bytes?: unknown }).max_bytes === 'number'
+                    ? (req as { max_bytes: number }).max_bytes
+                    : undefined
+                const output = await getTaskOutput(taskId, maxBytes)
+                sendControlResponseSuccess(msg, { output })
+              } catch (err) {
+                sendControlResponseError(msg, errorMessage(err))
+              }
+            }
+          } else if (req.subtype === 'reload_output_styles') {
+            try {
+              const { clearAllOutputStylesCache, getAllOutputStyles } =
+                await import('src/constants/outputStyles.js')
+              clearAllOutputStylesCache()
+              const styles = await getAllOutputStyles(getCwd())
+              sendControlResponseSuccess(msg, {
+                available_output_styles: Object.keys(styles),
+              })
+            } catch (err) {
+              sendControlResponseError(msg, errorMessage(err))
+            }
           } else if (req.subtype === 'file_suggestions') {
             try {
               const query =

@@ -212,4 +212,56 @@ describe('Official 2.1 background_tasks control', () => {
     })
     expect(req.subtype).toBe('background_tasks')
   })
+
+  test('host query subtypes parse', () => {
+    for (const request of [
+      { subtype: 'rename_session', title: 'a', source: 'host' },
+      { subtype: 'get_session_cost' },
+      { subtype: 'list_models' },
+      { subtype: 'get_usage' },
+      { subtype: 'get_binary_version' },
+      { subtype: 'get_task_output', task_id: 't1', max_bytes: 100 },
+      { subtype: 'reload_output_styles' },
+      { subtype: 'reload_skills' },
+      { subtype: 'file_suggestions', query: 'src/' },
+      { subtype: 'get_plan' },
+      { subtype: 'get_workspace_diff' },
+      { subtype: 'get_hooks_listing' },
+      {
+        subtype: 'update_settings',
+        source: 'userSettings',
+        settings: { effortLevel: 'high' },
+      },
+      { subtype: 'mcp_call', tool: 'srv/tool', arguments: {} },
+      {
+        subtype: 'ui_prompt_read',
+        surface: 'desktop',
+        client_id: 'host-1',
+      },
+      {
+        subtype: 'remote_tool_call',
+        instance_id: 'inst-1',
+        host: 'desk',
+        name: 'Bash',
+        input: { command: 'pwd' },
+        envelope: { op: 'call' },
+        tool_use_id: 'toolu_1',
+        issued_at: 1,
+        deadline_ms: 58000,
+      },
+      {
+        subtype: 'remote_plumbing_call',
+        instance_id: 'inst-1',
+        host: 'desk',
+        name: 'sync_files',
+        args: {},
+        issued_at: 1,
+        deadline_ms: 58000,
+      },
+    ] as const) {
+      expect(SDKControlRequestInnerSchema().parse(request).subtype).toBe(
+        request.subtype,
+      )
+    }
+  })
 })

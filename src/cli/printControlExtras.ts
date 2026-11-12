@@ -17,6 +17,11 @@ import {
 import { logForDebugging } from 'src/utils/debug.js'
 import type { QueuedCommand } from 'src/types/textInputTypes.js'
 import { isPolicyLimitsAllowed } from './leftoverTulip.js'
+import {
+  acceptRemoteMachineAnnounce,
+  remoteToolsWorkerEpoch,
+} from 'src/services/tools/remoteToolHost.js'
+import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js'
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
   `${subtype} is not available on this connection`
@@ -1284,6 +1289,148 @@ export const DEVICE_HOOKS_NOT_READY =
 export const REMOTE_TOOLS_DISABLED_PREFIX = 'remote_tools_disabled: '
 export const REMOTE_TOOLS_NOT_READY =
   'remote_tools_not_ready: internal_error; retry'
+
+const ANNOUNCE_HOST_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
+
+/**
+ * densable `switches()` before the account-flag read. Channel off, then the
+ * forward switch. There is no flag fetch here, so `not_ready` / `flag_off`
+ * are not invented.
+ */
+export function remoteToolsAnnounceError(): string | undefined {
+  if (
+    process.env.CLAUDE_CODE_REMOTE_TOOLS_SESSION_CHANNEL === '0' ||
+    process.env.CLAUDE_CODE_REMOTE_TOOLS_SESSION_CHANNEL === 'false'
+  ) {
+    return `${REMOTE_TOOLS_DISABLED_PREFIX}session_channel_off`
+  }
+  if (
+    process.env.CLAUDE_CODE_REMOTE_TOOLS_FORWARD !== '1' &&
+    process.env.CLAUDE_CODE_REMOTE_TOOLS_FORWARD !== 'true'
+  ) {
+    return `${REMOTE_TOOLS_DISABLED_PREFIX}switch_off`
+  }
+  return undefined
+}
+
+/** densable `pqo` host.name + tools[].name, enough to register the machine. */
+/** densable `Lbn` — an announce larger than 1 MiB is invalid. */
+export const REMOTE_ANNOUNCE_MAX_BYTES = 1024 * 1024
+
+export function parseRemoteToolsAnnounce(request: Record<string, unknown>):
+  | {
+      ok: true
+      instanceId: string
+      name: string
+      tools: { name: string; protocolVersions: number[] }[]
+      ignoredTools: string[]
+      passthrough: string[]
+      plumbing: string[]
+      protocolVersions: number[]
+      homeDir?: string
+    }
+  | { ok: false; error: string } {
+  const encoded = Buffer.byteLength(JSON.stringify(request), 'utf8')
+  if (encoded > REMOTE_ANNOUNCE_MAX_BYTES) {
+    return { ok: false, error: 'invalid_announce: request larger than 1 MiB' }
+  }
+  const host = request.host
+  if (host === null || typeof host !== 'object' || Array.isArray(host)) {
+    return { ok: false, error: 'invalid_announce: host malformed' }
+  }
+  const name = (host as { name?: unknown }).name
+  const epoch = (host as { epoch?: unknown }).epoch
+  if (typeof name !== 'string' || !ANNOUNCE_HOST_NAME.test(name)) {
+    return { ok: false, error: 'invalid_announce: host.name malformed' }
+  }
+  if (typeof epoch !== 'string' || epoch === '') {
+    return { ok: false, error: 'invalid_announce: host.epoch malformed' }
+  }
+  const instanceId = request.instance_id
+  if (typeof instanceId !== 'string' || instanceId === '') {
+    return { ok: false, error: 'invalid_announce: instance_id malformed' }
+  }
+  const rawHome = (host as { home_dir?: unknown }).home_dir
+  const homeDir =
+    typeof rawHome === 'string' && rawHome.length > 0 && rawHome.length <= 1024
+      ? rawHome
+      : undefined
+  const rawTools = Array.isArray(request.tools) ? request.tools : []
+  const tools: { name: string; protocolVersions: number[] }[] = []
+  const ignoredTools: string[] = []
+  const protocolVersions: number[] = []
+  for (const [index, tool] of rawTools.entries()) {
+    if (tool === null || typeof tool !== 'object') {
+      ignoredTools.push(`tools[${index}]`)
+      continue
+    }
+    const toolName = (tool as { name?: unknown }).name
+    const versions = (tool as { protocol_versions?: unknown }).protocol_versions
+    const ownVersions: number[] = []
+    if (Array.isArray(versions)) {
+      for (const version of versions) {
+        if (
+          typeof version === 'number' &&
+          Number.isInteger(version) &&
+          version > 0 &&
+          !ownVersions.includes(version)
+        ) {
+          ownVersions.push(version)
+          if (!protocolVersions.includes(version))
+            protocolVersions.push(version)
+        }
+      }
+    }
+    if (
+      typeof toolName !== 'string' ||
+      toolName === '' ||
+      tools.some(item => item.name === toolName)
+    ) {
+      ignoredTools.push(
+        typeof toolName === 'string' && toolName !== ''
+          ? toolName
+          : `tools[${index}]`,
+      )
+      continue
+    }
+    tools.push({ name: toolName, protocolVersions: ownVersions })
+  }
+  const MCP_NAME = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/
+  const passthrough: string[] = []
+  if (Array.isArray(request.passthrough)) {
+    for (const [index, tool] of request.passthrough.entries()) {
+      const toolName =
+        tool !== null && typeof tool === 'object'
+          ? (tool as { name?: unknown }).name
+          : undefined
+      if (typeof toolName === 'string' && MCP_NAME.test(toolName)) {
+        passthrough.push(toolName)
+      } else {
+        ignoredTools.push(
+          typeof toolName === 'string' && toolName !== ''
+            ? toolName
+            : `passthrough[${index}]`,
+        )
+      }
+    }
+  }
+  const plumbing = Array.isArray(request.plumbing)
+    ? request.plumbing.filter(
+        (name): name is string => typeof name === 'string' && name !== '',
+      )
+    : []
+  return {
+    ok: true,
+    instanceId,
+    name,
+    tools,
+    ignoredTools,
+    passthrough,
+    plumbing,
+    protocolVersions,
+    ...(homeDir !== undefined && { homeDir }),
+  }
+}
 
 export const LIST_DENIED_PREFIX = 'list denied: '
 export const LIST_DIRECTORY_DENIED = 'list denied: unexpected_error'
@@ -2644,7 +2791,73 @@ export function dispatchPrintControlExtra(
   }
 
   if (subtype === 'remote_tools_announce') {
-    deps.sendError(`${REMOTE_TOOLS_DISABLED_PREFIX}${DEVICE_HOOKS_NOT_MANAGED}`)
+    const blocked = remoteToolsAnnounceError()
+    if (blocked) {
+      deps.sendError(blocked)
+      return true
+    }
+    deps.defer(async () => {
+      // densable readAccountFlag: violin wood on → on, else off. A throw
+      // is pending (`not_ready`), not a guessed internal_error.
+      let flag: 'on' | 'off' | 'pending' = 'pending'
+      try {
+        flag = (await checkGate_CACHED_OR_BLOCKING('tengu_violin_wood'))
+          ? 'on'
+          : 'off'
+      } catch {
+        flag = 'pending'
+      }
+      if (flag === 'pending') {
+        deps.sendError(
+          'remote_tools_not_ready: feature flags not yet available; retry',
+        )
+        return
+      }
+      if (flag === 'off') {
+        deps.sendError(`${REMOTE_TOOLS_DISABLED_PREFIX}flag_off`)
+        return
+      }
+      const parsed = parseRemoteToolsAnnounce(request)
+      if (!parsed.ok) {
+        deps.sendError(parsed.error)
+        return
+      }
+      const accepted = acceptRemoteMachineAnnounce({
+        instanceId: parsed.instanceId,
+        name: parsed.name,
+        tools: parsed.tools.map(tool => ({
+          name: tool.name,
+          refusedInputFields: [],
+          protocolVersions: tool.protocolVersions,
+        })),
+        ignoredTools: parsed.ignoredTools,
+        passthrough: parsed.passthrough,
+        plumbing: parsed.plumbing,
+        protocolVersions: parsed.protocolVersions,
+        homeDir: parsed.homeDir,
+      })
+      logEvent('tengu_remote_tools_announce', {
+        outcome:
+          accepted.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        served: parsed.tools.length,
+        ignored: accepted.ignoredTools.length,
+        passthrough: accepted.passthrough,
+        plumbing: accepted.plumbing,
+        displaced: accepted.displaced,
+      })
+      deps.sendSuccess({
+        status: accepted.status,
+        worker_epoch: remoteToolsWorkerEpoch(),
+        protocol_version: accepted.protocolVersion,
+        ignored: accepted.ignoredTools.length,
+        passthrough: accepted.passthrough,
+        plumbing: accepted.plumbing,
+        displaced: accepted.displaced,
+        ...(accepted.ignoredTools.length > 0 && {
+          ignored_tools: accepted.ignoredTools.slice(0, 32),
+        }),
+      })
+    })
     return true
   }
 

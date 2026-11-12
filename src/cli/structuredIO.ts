@@ -14,6 +14,7 @@ import {
   SDKControlHostAuthTokenRefreshResponseSchema,
   SDKControlOauthTokenRefreshResponseSchema,
   SDKControlRequestUserDialogResponseSchema,
+  SDKControlUiPromptReadResponseSchema,
 } from 'src/entrypoints/sdk/controlSchemas.js'
 import { DEFAULT_SDK_AUTH_REFRESH_CONTROL_TIMEOUT_MS } from 'src/utils/residualFinalEnvGates.js'
 import {
@@ -250,9 +251,48 @@ export function isJsonRpcRequestMessage(message: JSONRPCMessage): boolean {
   return message.id !== null
 }
 
+let currentStructuredIO: StructuredIO | undefined
+
+/** densable `r` for the live headless stream. prompt.read sends through it. */
+export function setCurrentStructuredIO(io: StructuredIO | undefined): void {
+  currentStructuredIO = io
+}
+
+export function getCurrentStructuredIO(): StructuredIO | undefined {
+  return currentStructuredIO
+}
+
 export class StructuredIO {
   readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
+  /**
+   * densable `L` with `holdAtDeadline`. The first deadline already returned
+   * timed_out. The same request stays so a late answer can be classified
+   * without replacing that result.
+   */
+  private readonly heldRequests = new Map<
+    string,
+    {
+      heldAt: number
+      late: Promise<Record<string, unknown>>
+      resolveLate: (body: Record<string, unknown>) => void
+      /** densable `ft`: queued, in_flight, or delivered. */
+      delivery: 'queued' | 'in_flight' | 'delivered'
+    }
+  >()
+  /** densable `ft`, sampled at enqueue. `accepted` promotes in_flight. */
+  private readonly remoteDelivery = new Map<
+    string,
+    'queued' | 'in_flight' | 'delivered'
+  >()
+  /**
+   * densable `D` in `W`. An `outcome_of` answer marked `sender_below_floor`
+   * is held until the deadline, then used instead of timed_out.
+   */
+  private readonly belowFloorAnswers = new Map<
+    string,
+    Record<string, unknown>
+  >()
 
   // CCR worker GET {external, internal}; null when the transport
   // doesn't restore. Assigned by RemoteIO.
@@ -674,6 +714,39 @@ export class StructuredIO {
         ) {
           return undefined
         }
+        const pendingRequest = request.request.request as {
+          subtype?: string
+          envelope?: { op?: unknown }
+        }
+        if (
+          pendingRequest.subtype === 'remote_tool_call' &&
+          pendingRequest.envelope?.op === 'outcome_of' &&
+          resp.subtype === 'success' &&
+          resp.response?.sender_below_floor === true
+        ) {
+          const { sender_below_floor: _mark, ...body } = resp.response
+          this.belowFloorAnswers.set(resp.request_id, body)
+          logForDebugging(
+            `remote tool ${resp.request_id} held a below-floor answer; still waiting`,
+          )
+          return undefined
+        }
+        const held = this.heldRequests.get(resp.request_id)
+        if (held) {
+          this.heldRequests.delete(resp.request_id)
+          this.pendingRequests.delete(resp.request_id)
+          // densable `late`: the body is classified on the side. It does
+          // not resolve the promise that already returned timed_out.
+          const body =
+            resp.subtype === 'success' && resp.response
+              ? resp.response
+              : { kind: 'failed', detail: resp.error ?? 'send failed' }
+          held.resolveLate(body)
+          logForDebugging(
+            `remote tool ${resp.request_id} answered after its deadline; the result already returned timed_out`,
+          )
+          return undefined
+        }
         this.trackResolvedToolUseId(request.request)
         this.pendingRequests.delete(resp.request_id)
         // Notify the bridge when the SDK consumer resolves a can_use_tool
@@ -844,6 +917,7 @@ export class StructuredIO {
     schema: z.Schema,
     signal?: AbortSignal,
     requestId: string = randomUUID(),
+    holdMs?: number,
   ): Promise<Response> {
     const message: SDKControlRequest = {
       type: 'control_request',
@@ -857,6 +931,15 @@ export class StructuredIO {
       throw new Error('Request aborted')
     }
     this.outbound.enqueue(message)
+    // densable `ft`. A reader already waiting took it (in_flight). Still in
+    // the array means the write has not started (queued).
+    const subtype = (request as { subtype?: string }).subtype
+    if (subtype === 'remote_tool_call' || subtype === 'remote_tools_probe') {
+      this.remoteDelivery.set(
+        requestId,
+        this.outbound.queued > 0 ? 'queued' : 'in_flight',
+      )
+    }
     if (
       (request as { subtype?: string }).subtype === 'can_use_tool' &&
       this.onControlRequestSent
@@ -883,6 +966,49 @@ export class StructuredIO {
         once: true,
       })
     }
+    let holdTimer: ReturnType<typeof setTimeout> | undefined
+    const clearHold = () => {
+      if (holdTimer !== undefined) clearTimeout(holdTimer)
+      holdTimer = undefined
+    }
+    // densable holdAtDeadline: the first deadline returns timed_out. The
+    // same request stays for one more deadline. A late answer goes to the
+    // side callback and is not this result.
+    if (holdMs !== undefined) {
+      holdTimer = setTimeout(() => {
+        const pending = this.pendingRequests.get(requestId)
+        if (!pending) return
+        let resolveLate: (body: Record<string, unknown>) => void = () => {}
+        const late = new Promise<Record<string, unknown>>(resolve => {
+          resolveLate = resolve
+        })
+        // Mark before reject so the finally does not drop the request.
+        let delivery = this.remoteDelivery.get(requestId) ?? 'in_flight'
+        if (delivery === 'queued' && this.outbound.queued === 0) {
+          delivery = 'in_flight'
+        }
+        this.remoteDelivery.delete(requestId)
+        this.heldRequests.set(requestId, {
+          heldAt: Date.now(),
+          late,
+          resolveLate,
+          delivery,
+        })
+        const timeout = new Error('The operation was aborted due to timeout')
+        timeout.name = 'TimeoutError'
+        pending.reject(timeout)
+        // The first timer is cleared once the result returns. This second
+        // one must keep running: it is the extra deadline the request stands.
+        setTimeout(() => {
+          this.pendingRequests.delete(requestId)
+          const still = this.heldRequests.get(requestId)
+          if (!still) return
+          this.heldRequests.delete(requestId)
+          // Second deadline with no body. The side wait ends as a deadline.
+          still.resolveLate({ kind: 'deadline' })
+        }, holdMs)
+      }, holdMs)
+    }
     try {
       return await new Promise<Response>((resolve, reject) => {
         this.pendingRequests.set(requestId, {
@@ -899,10 +1025,13 @@ export class StructuredIO {
         })
       })
     } finally {
+      if (!this.heldRequests.has(requestId)) {
+        clearHold()
+        this.pendingRequests.delete(requestId)
+      }
       if (signal) {
         signal.removeEventListener('abort', aborted)
       }
-      this.pendingRequests.delete(requestId)
     }
   }
 
@@ -1105,18 +1234,28 @@ export class StructuredIO {
         abort: AbortSignal | undefined,
       ): Promise<HookJSONOutput> => {
         try {
+          const deadlineMs = timeout ?? 30_000
           const result = await this.sendRequest<HookJSONOutput>(
             {
               subtype: 'hook_callback',
               callback_id: callbackId,
               input: input as any,
               tool_use_id: toolUseID || undefined,
+              issued_at: Date.now(),
+              deadline_ms: deadlineMs,
             },
             hookJSONOutputSchema(),
-            abort,
+            abort ?? AbortSignal.timeout(deadlineMs),
           )
           return result
         } catch (error) {
+          if (error instanceof Error && error.name === 'TimeoutError') {
+            const seconds = Math.round((timeout ?? 30_000) / 1000)
+            logForDebugging(
+              `A hook did not answer within ${seconds}s; continuing without it. If it keeps missing, hooks from that machine pause until it registers again.`,
+            )
+            return {}
+          }
           console.error(`Error in hook callback ${callbackId}:`, error)
           return {}
         }
@@ -1160,6 +1299,385 @@ export class StructuredIO {
    * Official requestOAuthTokenRefresh — control_request subtype
    * oauth_token_refresh; response accessToken (nullable). Timeout 30s (fNb).
    */
+  /**
+   * densable `Iss.read` → `sendUiHostRequest({subtype:"ui_prompt_read"})`.
+   * Unanswered or unparsable resolves the empty box. 5s.
+   */
+  async requestUiPromptRead(
+    surface: string,
+    clientId: string,
+  ): Promise<{ text: string; cursor: number } | undefined> {
+    try {
+      return await this.sendRequest<{ text: string; cursor: number }>(
+        { subtype: 'ui_prompt_read', surface, client_id: clientId },
+        SDKControlUiPromptReadResponseSchema(),
+        AbortSignal.timeout(5000),
+      )
+    } catch {
+      return undefined
+    }
+  }
+
+  /** densable `Pss.copy` → `{copied}`. 5s. */
+  async requestUiCopy(
+    surface: string,
+    clientId: string,
+    plugin: string,
+    text: string,
+  ): Promise<boolean> {
+    try {
+      const answer = await this.sendRequest<{ copied?: boolean }>(
+        {
+          subtype: 'ui_copy',
+          surface,
+          client_id: clientId,
+          plugin,
+          text,
+        },
+        z.object({ copied: z.boolean().optional() }),
+        AbortSignal.timeout(5000),
+      )
+      return answer.copied === true
+    } catch {
+      return false
+    }
+  }
+
+  /** densable `Pss.fillPrompt` → `{filled}`. 5s. */
+  async requestUiPromptFill(request: {
+    surface: string
+    clientId: string
+    text: string
+    mode: 'replace' | 'append' | 'insert'
+    decorations?: unknown[]
+  }): Promise<boolean> {
+    try {
+      const answer = await this.sendRequest<{ filled?: boolean }>(
+        {
+          subtype: 'ui_prompt_fill',
+          surface: request.surface,
+          client_id: request.clientId,
+          text: request.text,
+          mode: request.mode,
+          ...(request.decorations &&
+            request.decorations.length > 0 && {
+              decorations: request.decorations,
+            }),
+        },
+        z.object({ filled: z.boolean().optional() }),
+        AbortSignal.timeout(5000),
+      )
+      return answer.filled === true
+    } catch {
+      return false
+    }
+  }
+
+  /** densable `Pss.suggestPrompt` → `{shown}`. 5s. */
+  async requestUiPromptSuggest(
+    surface: string,
+    clientId: string,
+    text: string,
+  ): Promise<boolean> {
+    try {
+      const answer = await this.sendRequest<{ shown?: boolean }>(
+        {
+          subtype: 'ui_prompt_suggest',
+          surface,
+          client_id: clientId,
+          text,
+        },
+        z.object({ shown: z.boolean().optional() }),
+        AbortSignal.timeout(5000),
+      )
+      return answer.shown === true
+    } catch {
+      return false
+    }
+  }
+
+  /** densable `Pss.readSelection` → `{text, instance_id}`. 5s. */
+  async requestUiReadSelection(
+    surface: string,
+    clientId: string,
+  ): Promise<{ text: string; instance_id?: string } | undefined> {
+    try {
+      return await this.sendRequest<{ text: string; instance_id?: string }>(
+        { subtype: 'ui_read_selection', surface, client_id: clientId },
+        z.object({
+          text: z.string(),
+          instance_id: z.string().optional(),
+        }),
+        AbortSignal.timeout(5000),
+      )
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * densable `L`'s holder. `late` is the body that arrives after the first
+   * deadline, already classified by the caller. `withdraw` / `takeBack`
+   * cancel the standing request. `accepted` is true once the write was
+   * handed to the stream.
+   */
+  takeHeldRemoteTool(requestId: string):
+    | {
+        late: Promise<Record<string, unknown>>
+        withdraw: () => void
+        takeBack: () => boolean
+        accepted: () => boolean
+        delivery: () => 'queued' | 'in_flight' | 'delivered'
+      }
+    | undefined {
+    const held = this.heldRequests.get(requestId)
+    if (!held) return undefined
+    const drop = (kind: 'cancelled' | 'taken_back') => {
+      this.pendingRequests.delete(requestId)
+      this.heldRequests.delete(requestId)
+      this.outbound.enqueue({
+        type: 'control_cancel_request',
+        request_id: requestId,
+      })
+      // The standing wait ends here. The first result already returned.
+      held.resolveLate({ kind })
+    }
+    return {
+      late: held.late,
+      withdraw: () => drop('cancelled'),
+      takeBack: () => {
+        drop('taken_back')
+        return true
+      },
+      accepted: () => held.delivery === 'delivered',
+      delivery: () => held.delivery,
+    }
+  }
+
+  /**
+   * densable `sendServedCallRequest` / `mqo` — forward `remote_tool_call`.
+   * Deadline is the call's own `deadlineMs` (gold `RU`, default 58000).
+   * The first deadline returns `{kind:'deadline', requestId}` and leaves
+   * the request standing. It does not send a second call.
+   */
+  async requestRemoteToolCall(
+    request: {
+      instanceId: string
+      host: string
+      name: string
+      input: Record<string, unknown>
+      envelope: Record<string, unknown>
+      toolUseId: string
+      issuedAt: number
+      deadlineMs: number
+    },
+    onUpload?: (
+      phase: 'sending' | 'accepted' | 'not_accepted' | 'indeterminate',
+    ) => void,
+  ): Promise<Record<string, unknown> | undefined> {
+    const requestId = randomUUID()
+    try {
+      if (this.inputClosed) {
+        onUpload?.('not_accepted')
+        return {
+          kind: 'unreachable',
+          detail: "this session's event stream is closed; nothing was sent",
+        }
+      }
+      // densable upload leg. `sending` is the write starting. Still in the
+      // outbound array is `queued` — nothing has been written, so it is not
+      // accepted. A handed-off write is `in_flight`, then `delivered`.
+      const answer = this.sendRequest<Record<string, unknown>>(
+        {
+          subtype: 'remote_tool_call',
+          instance_id: request.instanceId,
+          host: request.host,
+          name: request.name,
+          input: request.input,
+          envelope: request.envelope,
+          tool_use_id: request.toolUseId,
+          issued_at: Math.max(0, Math.trunc(request.issuedAt)),
+          deadline_ms: request.deadlineMs,
+        },
+        z.record(z.string(), z.unknown()),
+        undefined,
+        requestId,
+        request.deadlineMs,
+      )
+      const issuedAt = Math.max(0, Math.trunc(request.issuedAt))
+      const startedAt = Date.now()
+      onUpload?.('sending')
+      if (this.remoteDelivery.get(requestId) !== 'queued') {
+        onUpload?.('accepted')
+        if (this.remoteDelivery.get(requestId) === 'in_flight') {
+          this.remoteDelivery.set(requestId, 'delivered')
+        }
+        const acceptedAt = Date.now()
+        logForDebugging(
+          `remote tool ${requestId} post accepted queue_ms=${startedAt - issuedAt} post_ms=${acceptedAt - startedAt}`,
+        )
+      } else {
+        // densable `x`: queued with nobody reading is not accepted.
+        onUpload?.('not_accepted')
+        logForDebugging(
+          `remote tool ${requestId} post not accepted phase=not_accepted queue_ms=${startedAt - issuedAt}`,
+        )
+      }
+      return await answer
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        const held = this.heldRequests.get(requestId)
+        // densable `L`: still queued at the deadline is stalled, not a
+        // standing timed_out. Withdrawable calls are taken back.
+        const below = this.belowFloorAnswers.get(requestId)
+        if (below) {
+          this.belowFloorAnswers.delete(requestId)
+          this.pendingRequests.delete(requestId)
+          this.heldRequests.delete(requestId)
+          logForDebugging(
+            `remote tool ${requestId} query deadline; taking the below-floor answer held for it`,
+          )
+          return below
+        }
+        if (held?.delivery === 'queued') {
+          const approval = request.envelope.approval
+          const deny =
+            approval !== null &&
+            typeof approval === 'object' &&
+            (approval as { decision?: unknown }).decision === 'deny'
+          const withdrawable = request.envelope.op !== 'outcome_of' && !deny
+          const holder = this.takeHeldRemoteTool(requestId)
+          if (withdrawable) holder?.takeBack()
+          else holder?.withdraw()
+          return { kind: 'stalled', takenBack: withdrawable, requestId }
+        }
+        return { kind: 'deadline', requestId }
+      }
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { kind: 'cancelled' }
+      }
+      if (!this.inputClosed) {
+        onUpload?.('indeterminate')
+        logForDebugging(
+          `remote tool ${requestId} post not accepted phase=indeterminate`,
+        )
+        return {
+          kind: 'delivery_unknown',
+          detail: err instanceof Error ? err.message : String(err),
+        }
+      }
+      return {
+        kind: 'failed',
+        detail: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  /**
+   * densable `askOnce` — one shot asking the attached client to announce
+   * again. The deadline is the wait's own.
+   */
+  async requestRemoteToolsReannounce(request: {
+    workerEpoch: number
+    deadlineMs: number
+  }): Promise<void> {
+    try {
+      await this.sendRequest(
+        {
+          subtype: 'remote_tools_reannounce',
+          worker_epoch: request.workerEpoch,
+          deadline_ms: request.deadlineMs,
+        },
+        z.object({}).passthrough(),
+        AbortSignal.timeout(request.deadlineMs),
+      )
+    } catch {
+      // The wait keeps going whether or not the client answered.
+    }
+  }
+
+  /**
+   * densable `q` — `remote_tools_probe`. An answer is `{result:{epoch}}`.
+   * No answer, or a throw, is the probe outcome `q` already named.
+   */
+  async requestRemoteToolsProbe(request: {
+    instanceId: string
+    issuedAt: number
+    deadlineMs: number
+  }): Promise<Record<string, unknown> | undefined> {
+    const requestId = randomUUID()
+    try {
+      return await this.sendRequest<Record<string, unknown>>(
+        {
+          subtype: 'remote_tools_probe',
+          instance_id: request.instanceId,
+          issued_at: Math.max(0, Math.trunc(request.issuedAt)),
+          deadline_ms: request.deadlineMs,
+        },
+        z.record(z.string(), z.unknown()),
+        undefined,
+        requestId,
+        request.deadlineMs,
+      )
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        const delivery = this.remoteDelivery.get(requestId)
+        this.remoteDelivery.delete(requestId)
+        // densable `L` with hold off. A write that started and did not
+        // finish is unconfirmed. Still queued is a missed probe.
+        if (delivery === 'in_flight') return { kind: 'unconfirmed' }
+        return { kind: 'deadline' }
+      }
+      return { kind: 'unsent' }
+    }
+  }
+
+  /**
+   * densable `E` / `hqo` — `remote_plumbing_call`. Hold is off. The
+   * deadline cancels the standing request.
+   */
+  async requestRemotePlumbingCall(request: {
+    instanceId: string
+    host: string
+    name: string
+    args: Record<string, unknown>
+    issuedAt: number
+    deadlineMs: number
+  }): Promise<Record<string, unknown> | undefined> {
+    try {
+      if (this.inputClosed) {
+        return {
+          kind: 'unreachable',
+          detail: "this session's event stream is closed; nothing was sent",
+        }
+      }
+      return await this.sendRequest<Record<string, unknown>>(
+        {
+          subtype: 'remote_plumbing_call',
+          instance_id: request.instanceId,
+          host: request.host,
+          name: request.name,
+          args: request.args,
+          issued_at: Math.max(0, Math.trunc(request.issuedAt)),
+          deadline_ms: request.deadlineMs,
+        },
+        z.record(z.string(), z.unknown()),
+        AbortSignal.timeout(request.deadlineMs),
+      )
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        return { kind: 'timed_out', capMs: request.deadlineMs }
+      }
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { kind: 'cancelled' }
+      }
+      return {
+        kind: 'transport_error',
+        detail: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
   async requestOAuthTokenRefresh(): Promise<string | null> {
     const result = await this.sendRequest<{ accessToken: string | null }>(
       { subtype: 'oauth_token_refresh' },
