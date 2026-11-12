@@ -45,6 +45,7 @@ import { lazySchema } from 'src/utils/lazySchema.js'
 import { logError } from 'src/utils/log.js'
 import { stampNewMemoryContent } from 'src/memdir/stampNewMemoryContent.js'
 import { expandPath } from 'src/utils/path.js'
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkWritePermissionForTool,
@@ -252,7 +253,20 @@ export const FileWriteTool = buildTool({
     // shown — phantom. Under-count: tool_use already indexes file_path.
     return ''
   },
-  async validateInput({ file_path, content }, toolUseContext: ToolUseContext) {
+  async validateInput(
+    { file_path, content, ...rest },
+    toolUseContext: ToolUseContext,
+  ) {
+    // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
+    const hostRefusal = remoteHostForwardRefusal(
+      {
+        file_path,
+        content,
+        ...rest,
+      },
+      FILE_WRITE_TOOL_NAME,
+    )
+    if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
     const fullFilePath = expandPath(file_path)
 
     // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 7)

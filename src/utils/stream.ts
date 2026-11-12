@@ -35,6 +35,11 @@ export class Stream<T> implements AsyncIterator<T> {
     })
   }
 
+  /** densable `ft`: a value still in the array has not been written. */
+  get queued(): number {
+    return this.queue.length
+  }
+
   enqueue(value: T): void {
     if (this.readResolve) {
       const resolve = this.readResolve

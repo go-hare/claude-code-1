@@ -28,6 +28,7 @@ import {
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { getClaudeConfigHomeDir, isBareMode } from 'src/utils/envUtils.js'
 import { getErrnoCode, isENOENT } from 'src/utils/errors.js'
 import {
@@ -457,7 +458,16 @@ export const FileReadTool = buildTool({
     return ''
   },
   renderToolUseErrorMessage,
-  async validateInput({ file_path, pages }, toolUseContext: ToolUseContext) {
+  async validateInput(
+    { file_path, pages, ...rest },
+    toolUseContext: ToolUseContext,
+  ) {
+    // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
+    const hostRefusal = remoteHostForwardRefusal(
+      { file_path, pages, ...rest },
+      FILE_READ_TOOL_NAME,
+    )
+    if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
     // Validate pages parameter (pure string parsing, no I/O)
     if (pages !== undefined) {
       const parsed = parsePDFPageRange(pages)

@@ -8,6 +8,7 @@ import { FILE_NOT_FOUND_CWD_NOTE, suggestPathUnderCwd } from 'src/utils/file.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { expandPath, toRelativePath } from 'src/utils/path.js'
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { checkReadPermissionForTool } from 'src/utils/permissions/filesystem.js'
 import {
   noteApprovedFileToolPath,
@@ -204,7 +205,11 @@ export const GrepTool = buildTool({
   async preparePermissionMatcher({ pattern }) {
     return rulePattern => matchWildcardPattern(rulePattern, pattern)
   },
-  async validateInput({ path }): Promise<ValidationResult> {
+  async validateInput(input): Promise<ValidationResult> {
+    // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
+    const hostRefusal = remoteHostForwardRefusal(input, GREP_TOOL_NAME)
+    if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
+    const { path } = input
     // If path is provided, validate that it exists
     if (path) {
       const fs = getFsImplementation()

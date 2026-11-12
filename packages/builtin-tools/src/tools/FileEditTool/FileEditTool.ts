@@ -18,6 +18,7 @@ import { getCwd } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { isENOENT } from 'src/utils/errors.js'
 import {
   FILE_NOT_FOUND_CWD_NOTE,
@@ -181,6 +182,9 @@ export const FileEditTool = buildTool({
   renderToolUseRejectedMessage,
   renderToolUseErrorMessage,
   async validateInput(input: FileEditInput, toolUseContext: ToolUseContext) {
+    // densable BT() && xd(n) — named host is not forwarded (errorCode 14)
+    const hostRefusal = remoteHostForwardRefusal(input, FILE_EDIT_TOOL_NAME)
+    if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
     const { file_path, old_string, new_string, replace_all = false } = input
     // Use expandPath for consistent path normalization (especially on Windows
     // where "/" vs "\" can cause readFileState lookup mismatches)

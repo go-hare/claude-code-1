@@ -73,6 +73,57 @@ import {
 import { executePermissionDeniedHooks } from '../../utils/hooks.js'
 import { logError } from '../../utils/log.js'
 import {
+  announceWaitAlreadyExpired,
+  isRemoteToolsForwardEnabled,
+  machineAdoptingMcpTool,
+  markRemoteMachineAway,
+  noteRemoteMachineHeard,
+  REMOTE_ANNOUNCE_WAIT_MS,
+  REMOTE_TOOL_HOST_FIELD,
+  remoteHostForwardRefusal,
+  remoteHostGaveUpEarlierMessage,
+  remoteHostGaveUpMessage,
+  remoteHostNotAvailableMessage,
+  REMOTE_HOST_INTERRUPTED,
+  remoteHostAnsweredErrorMessage,
+  remoteHostDisconnectedMessage,
+  remoteHostEnvelopeMessage,
+  remoteHostGoneMessage,
+  remoteHostProbeStalledMessage,
+  remoteHostQueuedWithdrawnMessage,
+  remoteHostTakenBackMessage,
+  remoteHostTimedOutMessage,
+  remoteHostTooLargeMessage,
+  remoteHostTransitFailedMessage,
+  remoteHostUnreadableEnvelopeMessage,
+  remoteHostUnresponsiveMessage,
+  remoteHostUnreachableOutcome,
+  remoteHostUnverifiedRefusalMessage,
+  remoteHostWriteUnresolvedMessage,
+  machineServingTool,
+  askRemoteToolsReannounce,
+  remoteHostRoute,
+  requestedRemoteHost,
+  announcedRemoteMachines,
+  resolveAnnouncedMachine,
+  waitForAnnouncedMachine,
+  type AnnouncedRemoteMachine,
+} from './remoteToolHost.js'
+import {
+  callRemoteTool,
+  callRemotePlumbing,
+  checkStandingRemoteTool,
+  classifyHeldBody,
+  classifyRemoteToolsProbe,
+  noteRemoteToolHost,
+  REMOTE_PLUMBING_TOOLS,
+  REMOTE_TOOL_DEADLINE_MS,
+  REMOTE_TOOL_MAX_REQUEST_BYTES,
+  REMOTE_TOOL_PROBE_CAP_MS,
+  type RemoteToolHeld,
+} from './remoteToolCall.js'
+import { getCurrentStructuredIO } from '../../cli/structuredIO.js'
+import {
   CANCEL_MESSAGE,
   createProgressMessage,
   createStopHookSummaryMessage,
@@ -218,6 +269,191 @@ export function classifyToolError(error: unknown): string {
   return 'UnknownError'
 }
 
+/** Requests left standing after their first deadline, keyed by request id. */
+const standingRemoteTools = new Map<string, RemoteToolHeld>()
+
+/** densable `h.held` — the standing request for this id, if it is still up. */
+export function standingRemoteTool(
+  requestId: string,
+): RemoteToolHeld | undefined {
+  return standingRemoteTools.get(requestId)
+}
+
+/**
+ * densable `onHeldAtDeadline`. The tool_result is already timed_out.
+ * `late` classifies the body that arrives on the same request and does
+ * not replace that result. `outcome_of` cannot be taken back.
+ */
+/**
+ * densable `Dge`. The sentence the user sees. `W`'s own detail stays in
+ * the debug log.
+ */
+/** The text of a remote result, after densable `ae` rewrites an envelope. */
+function remoteResultText(
+  response: Record<string, unknown> | undefined,
+  machine: { name: string; source: 'session' | 'bridge'; homeDir?: string },
+): {
+  content: string | Array<Record<string, unknown>>
+  isError: boolean
+  output?: Record<string, unknown>
+} {
+  const envelope = response?.envelope
+  if (envelope !== null && typeof envelope === 'object') {
+    const record = envelope as Record<string, unknown>
+    const rewritten = remoteHostEnvelopeMessage(
+      machine.name,
+      machine.source,
+      record,
+      response?.content ?? response?.text,
+      machine.homeDir,
+    )
+    if (rewritten !== undefined) {
+      return rewritten
+    }
+    return {
+      content: remoteHostUnreadableEnvelopeMessage(machine.name),
+      isError: true,
+    }
+  }
+  const raw =
+    typeof response?.text === 'string'
+      ? response.text
+      : jsonStringify(response ?? {})
+  if (response?.is_error === true) {
+    return {
+      content: remoteHostAnsweredErrorMessage(machine.name, raw),
+      isError: true,
+    }
+  }
+  return { content: raw, isError: false }
+}
+
+function remoteToolOutcomeMessage(
+  sent: {
+    kind: string
+    detail?: string
+    capMs?: number
+    request?: 'probe' | 'call'
+    takenBack?: boolean
+    requestId?: string
+    why?: string
+    unsent?: boolean
+    whyDropped?: 'write_unresolved' | 'unverified_refusal'
+    machineNotAnswering?: boolean
+    requestBytes?: number
+    unreadableResult?: boolean
+    left?: boolean
+    misses?: number
+    whileRunning?: boolean
+  },
+  machine: { name: string; source: 'session' | 'bridge'; homeDir?: string },
+): string {
+  const name = machine.name
+  const capMs = sent.capMs ?? REMOTE_TOOL_DEADLINE_MS
+  switch (sent.kind) {
+    case 'timed_out':
+      return remoteHostTimedOutMessage(name, capMs, sent.left === true)
+    case 'stalled':
+      if (sent.request === 'probe') {
+        return remoteHostProbeStalledMessage(name, capMs)
+      }
+      return sent.takenBack
+        ? remoteHostTakenBackMessage(name, capMs)
+        : remoteHostQueuedWithdrawnMessage(name, capMs)
+    case 'unreachable':
+      return remoteHostUnreachableOutcome(
+        name,
+        sent.detail ?? '',
+        machine.source,
+        sent.machineNotAnswering === true,
+      )
+    case 'dropped':
+      if (sent.whyDropped === 'unverified_refusal') {
+        return remoteHostUnverifiedRefusalMessage(name)
+      }
+      return sent.whyDropped === 'write_unresolved'
+        ? remoteHostWriteUnresolvedMessage(name)
+        : remoteHostDisconnectedMessage(name)
+    case 'host_gone':
+      return remoteHostGoneMessage(
+        name,
+        sent.why ?? 'restarted',
+        sent.unsent === true,
+      )
+    case 'host_unresponsive':
+      return remoteHostUnresponsiveMessage(
+        name,
+        sent.misses ?? 3,
+        sent.capMs ?? 10_000,
+        sent.whileRunning === true,
+      )
+    case 'too_large':
+      return remoteHostTooLargeMessage(
+        name,
+        sent.requestBytes ?? 0,
+        REMOTE_TOOL_MAX_REQUEST_BYTES,
+      )
+    case 'transport_error':
+      if (sent.unreadableResult === true) {
+        return remoteHostUnreadableEnvelopeMessage(name)
+      }
+      return remoteHostTransitFailedMessage(name, sent.detail ?? 'send failed')
+    default:
+      return sent.detail ?? sent.kind
+  }
+}
+
+function noteHeldRemoteTool(
+  sent: { requestId?: string; capMs?: number; sentUnderEpoch?: string },
+  toolName: string,
+  withdrawable: boolean,
+): void {
+  if (!sent.requestId) return
+  const holder = getCurrentStructuredIO()?.takeHeldRemoteTool(sent.requestId)
+  if (!holder) return
+  const requestId = sent.requestId
+  const drop = () => {
+    if (!requestId) return
+    standingRemoteTools.delete(requestId)
+  }
+  const held: RemoteToolHeld = {
+    late: classifyHeldBody(holder.late, {
+      capMs: sent.capMs ?? REMOTE_TOOL_DEADLINE_MS,
+      sentUnderEpoch: sent.sentUnderEpoch,
+    }),
+    withdraw: () => {
+      drop()
+      holder.withdraw()
+    },
+    takeBack: () => {
+      if (!withdrawable) return false
+      drop()
+      return holder.takeBack()
+    },
+    accepted: () => holder.accepted(),
+  }
+  if (requestId) standingRemoteTools.set(requestId, held)
+  void held.late.then(late => {
+    const envelope = late.response?.envelope
+    const outcome =
+      envelope !== null && typeof envelope === 'object'
+        ? (envelope as { outcome?: unknown; output_tail?: unknown })
+        : undefined
+    if (outcome?.outcome === 'in_progress') {
+      const tail =
+        typeof outcome.output_tail === 'string' ? outcome.output_tail : ''
+      logForDebugging(
+        `remote tool ${toolName} still running after its deadline: ${tail}`,
+      )
+    } else {
+      logForDebugging(
+        `remote tool ${toolName} answered after its deadline: ${late.kind}`,
+      )
+    }
+    drop()
+  })
+}
+
 function getNextImagePasteId(messages: Message[]): number {
   let maxId = 0
   for (const message of messages) {
@@ -357,6 +593,27 @@ export async function* runToolUse(
 
   // Check if the tool exists
   if (!tool) {
+    // densable `zi` when `!KJ()`: a machine serves it and this session has
+    // no copy. Forwarding on is `KJ`; off is `auo`.
+    const servedBy = machineServingTool(toolName)
+    if (servedBy && !isRemoteToolsForwardEnabled()) {
+      const detail = remoteHostNotAvailableMessage(servedBy.name, toolName)
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
     const sanitizedToolName = sanitizeToolNameForAnalytics(toolName)
     logForDebugging(`Unknown tool ${toolName}: ${toolUse.id}`)
     logEvent('tengu_tool_use_error', {
@@ -396,6 +653,406 @@ export async function* runToolUse(
         toolUseResult: `Error: No such tool available: ${toolName}`,
         sourceToolAssistantUUID: assistantMessage.uuid,
       }),
+    }
+    return
+  }
+
+  // densable `dr` / `lr`: forwarding off, or no machine name, stays local.
+  // A resolved online machine that serves the tool is `W`. Anything else
+  // is the route's own error (`sOn`, `zAt`, `cuo`).
+  let hostRoute:
+    | ReturnType<typeof remoteHostRoute>
+    | { kind: 'remote'; machine: AnnouncedRemoteMachine } = { kind: 'local' }
+  const adopting =
+    tool.isMcp === true ? machineAdoptingMcpTool(tool.name) : undefined
+  if (adopting && requestedRemoteHost(toolUse.input) === undefined) {
+    hostRoute = { kind: 'remote', machine: adopting }
+  } else if (tool.remoteExecution?.supported === true) {
+    const requested = requestedRemoteHost(toolUse.input)
+    const unknown =
+      requested !== undefined &&
+      isRemoteToolsForwardEnabled() &&
+      resolveAnnouncedMachine(requested).kind === 'unknown'
+    if (unknown && requested !== undefined) {
+      const already = announceWaitAlreadyExpired()
+      if (already !== undefined) {
+        hostRoute = {
+          kind: 'error',
+          message: remoteHostGaveUpEarlierMessage(requested, already),
+        }
+      } else {
+        // densable `Gbo` — only an unknown name waits.
+        askRemoteToolsReannounce(request => {
+          void getCurrentStructuredIO()?.requestRemoteToolsReannounce(request)
+        }, REMOTE_ANNOUNCE_WAIT_MS)
+        const waited = await waitForAnnouncedMachine(
+          requested,
+          toolUseContext.abortController.signal,
+        )
+        hostRoute =
+          waited === 'gave_up'
+            ? {
+                kind: 'error',
+                message: remoteHostGaveUpMessage(
+                  requested,
+                  announceWaitAlreadyExpired() ?? 0,
+                ),
+              }
+            : remoteHostRoute(
+                toolUse.input,
+                tool.name,
+                getCurrentStructuredIO() !== undefined,
+              )
+      }
+    } else {
+      hostRoute = remoteHostRoute(
+        toolUse.input,
+        tool.name,
+        getCurrentStructuredIO() !== undefined,
+      )
+    }
+  }
+  if (hostRoute.kind === 'error') {
+    const detail = hostRoute.message
+    logForDebugging(`remote tool ${toolName}: ${detail}`)
+    yield {
+      message: createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+            is_error: true,
+            tool_use_id: toolUse.id,
+          },
+        ],
+        toolUseResult: detail,
+        sourceToolAssistantUUID: assistantMessage.uuid,
+      }),
+    }
+    return
+  }
+
+  if (hostRoute.kind === 'remote') {
+    const machine = hostRoute.machine
+    const inputRecord =
+      toolUse.input !== null && typeof toolUse.input === 'object'
+        ? (toolUse.input as Record<string, unknown>)
+        : {}
+    if (REMOTE_PLUMBING_TOOLS.has(tool.name)) {
+      const plumbing = await callRemotePlumbing({
+        host: {
+          instanceId: machine.instanceId,
+          hostName: machine.name,
+          stale: machine.stale,
+          live: { status: machine.status, lastHeardAt: machine.lastHeardAt },
+        },
+        name: tool.name,
+        args: inputRecord,
+        signal: toolUseContext.abortController.signal,
+        send: request =>
+          getCurrentStructuredIO()?.requestRemotePlumbingCall(request) ??
+          Promise.resolve(undefined),
+      })
+      if (plumbing.kind === 'result') {
+        const rendered = remoteResultText(plumbing.response, machine)
+        yield {
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: rendered.content as ToolResultBlockParam['content'],
+                is_error: rendered.isError,
+                tool_use_id: toolUse.id,
+              },
+            ],
+            toolUseResult: rendered.output ?? rendered.content,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        }
+        return
+      }
+      const detail = remoteToolOutcomeMessage(plumbing, machine)
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    const sent = await callRemoteTool({
+      host: {
+        instanceId: machine.instanceId,
+        hostName: machine.name,
+        stale: machine.stale,
+        live: { status: machine.status, lastHeardAt: machine.lastHeardAt },
+      },
+      name: tool.name,
+      input: inputRecord,
+      // densable leg 1 is op "call". call_id is this tool use, so a
+      // later outcome_of can name the same call.
+      envelope: { op: 'call', call_id: toolUse.id },
+      toolUseId: toolUse.id,
+      signal: toolUseContext.abortController.signal,
+      sentUnderEpoch: machine.epoch,
+      send: request =>
+        getCurrentStructuredIO()?.requestRemoteToolCall(request, phase => {
+          logForDebugging(
+            phase === 'not_accepted' || phase === 'indeterminate'
+              ? `remote tool ${toolName} post not accepted phase=${phase}`
+              : `remote tool ${toolName} upload ${phase}`,
+          )
+        }) ?? Promise.resolve(undefined),
+      probe: async () => {
+        const io = getCurrentStructuredIO()
+        if (!io) return 'unsent'
+        const answer = await io.requestRemoteToolsProbe({
+          instanceId: machine.instanceId,
+          issuedAt: Date.now(),
+          deadlineMs: REMOTE_TOOL_PROBE_CAP_MS,
+        })
+        const probe = classifyRemoteToolsProbe(answer)
+        if (probe === 'answered') {
+          const result = answer?.result
+          const epoch =
+            result !== null &&
+            typeof result === 'object' &&
+            typeof (result as { epoch?: unknown }).epoch === 'string'
+              ? (result as { epoch: string }).epoch
+              : undefined
+          noteRemoteMachineHeard(machine.name, epoch)
+        }
+        return probe
+      },
+      onProbeMissed: () => markRemoteMachineAway(machine.name, 'probe_missed'),
+      rebind: () => {
+        const current = announcedRemoteMachines().find(
+          item => item.name === machine.name,
+        )
+        if (!current || current.instanceId === machine.instanceId) {
+          return undefined
+        }
+        return {
+          instanceId: current.instanceId,
+          hostName: current.name,
+          stale: current.stale,
+          live: { status: current.status, lastHeardAt: current.lastHeardAt },
+        }
+      },
+    })
+    if (sent.kind === 'unreachable' || sent.kind === 'host_gone') {
+      markRemoteMachineAway(machine.name)
+    }
+    if (sent.kind === 'timed_out') {
+      noteHeldRemoteTool(sent, toolName, true)
+      const standing = sent.requestId
+        ? standingRemoteTool(sent.requestId)
+        : undefined
+      if (standing) {
+        const checked = await checkStandingRemoteTool({
+          held: standing,
+          name: tool.name,
+          callId: toolUse.id,
+          signal: toolUseContext.abortController.signal,
+          poll: envelope =>
+            callRemoteTool({
+              host: {
+                instanceId: machine.instanceId,
+                hostName: machine.name,
+                stale: false,
+                live: {
+                  status: 'online',
+                  lastHeardAt: Date.now(),
+                },
+              },
+              name: tool.name,
+              input: inputRecord,
+              envelope,
+              toolUseId: toolUse.id,
+              signal: toolUseContext.abortController.signal,
+              send: request =>
+                getCurrentStructuredIO()?.requestRemoteToolCall(request) ??
+                Promise.resolve(undefined),
+            }),
+        })
+        if (checked.kind === 'result') {
+          const rendered = remoteResultText(checked.response, machine)
+          yield {
+            message: createUserMessage({
+              content: [
+                {
+                  type: 'tool_result',
+                  content: rendered.content as ToolResultBlockParam['content'],
+                  is_error: rendered.isError,
+                  tool_use_id: toolUse.id,
+                },
+              ],
+              toolUseResult: rendered.output ?? rendered.content,
+              sourceToolAssistantUUID: assistantMessage.uuid,
+            }),
+          }
+          return
+        }
+        const detail = remoteToolOutcomeMessage(checked, machine)
+        yield {
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+                is_error: true,
+                tool_use_id: toolUse.id,
+              },
+            ],
+            toolUseResult: detail,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        }
+        return
+      }
+    }
+    if (sent.kind === 'needs_approval') {
+      const envelope =
+        sent.response?.envelope !== null &&
+        typeof sent.response?.envelope === 'object'
+          ? (sent.response.envelope as {
+              ask?: { message?: unknown }
+              call_id?: unknown
+            })
+          : undefined
+      const ask = envelope?.ask?.message
+      const callId =
+        typeof envelope?.call_id === 'string' ? envelope.call_id : toolUse.id
+      const decision = await canUseTool(
+        tool,
+        inputRecord as { [key: string]: string },
+        toolUseContext,
+        assistantMessage,
+        toolUse.id,
+      )
+      const approved = decision.behavior === 'allow'
+      const again = await callRemoteTool({
+        host: {
+          instanceId: machine.instanceId,
+          hostName: machine.name,
+          stale: false,
+          live: { status: 'online', lastHeardAt: Date.now() },
+        },
+        name: tool.name,
+        input: inputRecord,
+        envelope: {
+          op: 'outcome_of',
+          call_id: callId,
+          decision: approved ? 'allow' : 'deny',
+          ...(!approved && { approval: { decision: 'deny' } }),
+        },
+        toolUseId: toolUse.id,
+        signal: toolUseContext.abortController.signal,
+        send: request =>
+          getCurrentStructuredIO()?.requestRemoteToolCall(request) ??
+          Promise.resolve(undefined),
+      })
+      if (again.kind === 'timed_out') noteHeldRemoteTool(again, toolName, false)
+      if (again.kind === 'result') {
+        const rendered = remoteResultText(again.response, machine)
+        const text = rendered.content
+        yield {
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: text as ToolResultBlockParam['content'],
+                is_error: rendered.isError,
+                tool_use_id: toolUse.id,
+              },
+            ],
+            toolUseResult: rendered.output ?? text,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        }
+        return
+      }
+      const detail = remoteToolOutcomeMessage(again, machine)
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    if (sent.kind === 'result') {
+      const rendered = remoteResultText(sent.response, machine)
+      const text = rendered.content
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: text as ToolResultBlockParam['content'],
+              is_error: rendered.isError,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: rendered.output ?? text,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    if (sent.kind === 'cancelled') {
+      const detail = REMOTE_HOST_INTERRUPTED
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    {
+      const detail = remoteToolOutcomeMessage(sent, machine)
+      logForDebugging(
+        `remote tool ${toolName} on ${machine.name}: ${sent.detail ?? sent.kind}`,
+      )
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
     }
     return
   }
@@ -1163,11 +1820,18 @@ async function checkPermissionsAndCallTool(
     ]
   }
 
+  // densable `xd` reads `_host` before schema parse. strictObject strips
+  // the field, so put a real machine name back for validateInput.
+  const namedHost = requestedRemoteHost(input)
+  const validateTarget =
+    namedHost !== undefined &&
+    parsedInput.data !== null &&
+    typeof parsedInput.data === 'object'
+      ? { ...parsedInput.data, [REMOTE_TOOL_HOST_FIELD]: namedHost }
+      : parsedInput.data
+
   // Validate input values. Each tool has its own validation logic
-  const isValidCall = await tool.validateInput?.(
-    parsedInput.data,
-    toolUseContext,
-  )
+  const isValidCall = await tool.validateInput?.(validateTarget, toolUseContext)
   if (isValidCall?.result === false) {
     logForDebugging(
       `${tool.name} tool validation error: ${isValidCall.message?.slice(0, 200)}`,

@@ -1,10 +1,15 @@
 import { z } from 'zod/v4'
 import type { TaskStateBase } from 'src/Task.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { stopTask } from 'src/tasks/stopTask.js'
 import { isParkedKeepaliveAgent } from 'src/utils/task/framework.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
+import {
+  namesRemoteHost,
+  remoteHostNotForwardedMessage,
+} from 'src/services/tools/remoteToolHost.js'
 import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.js'
 import { renderToolResultMessage } from './UI.js'
 
@@ -45,6 +50,19 @@ export const TaskStopTool = buildTool({
   // KillShell / KillBash are deprecated names - kept as aliases for backward compatibility
   // with existing transcripts and SDK users
   aliases: ['KillShell', 'KillBash'],
+  // densable y1 — tengu_violin_varnish, default off.
+  get remoteExecution() {
+    let supported = false
+    try {
+      supported =
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_violin_varnish', false) ===
+        true
+    } catch {
+      supported = false
+    }
+    return { supported }
+  },
+  backgrounding: 'never' as const,
   maxResultSizeChars: 100_000,
   userFacingName: () => 'Stop Task',
   get inputSchema(): InputSchema {
@@ -60,7 +78,16 @@ export const TaskStopTool = buildTool({
   toAutoClassifierInput(input) {
     return input.task_id ?? input.shell_id ?? ''
   },
-  async validateInput({ task_id, shell_id }, { getAppState }) {
+  async validateInput(input, { getAppState }) {
+    // densable xd(r) — a named host is refused before the local lookup (errorCode 3)
+    if (namesRemoteHost(input)) {
+      return {
+        result: false,
+        message: remoteHostNotForwardedMessage(),
+        errorCode: 3,
+      }
+    }
+    const { task_id, shell_id } = input
     // Support both task_id and shell_id (deprecated KillShell compat)
     const id = task_id ?? shell_id
     if (!id) {

@@ -25,6 +25,7 @@ import type { AssistantMessage } from 'src/types/message.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js';
 import { isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv } from 'src/utils/residualFinalEnvGates.js';
 import { errorMessage as getErrorMessage, ShellError } from 'src/utils/errors.js';
 import { truncate } from 'src/utils/format.js';
@@ -347,6 +348,18 @@ export const PowerShellTool = buildTool({
   searchHint: 'execute Windows PowerShell commands',
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @197110170
   enablesCodeExecution: true,
+  // densable rn() — windows only. xtn is dangerouslyDisableSandbox
+  // plus run_in_background. deciding fields match Ys.
+  get remoteExecution() {
+    return process.platform === 'win32'
+      ? {
+          supported: true,
+          refusedInputFields: ['dangerouslyDisableSandbox', 'run_in_background'],
+          decidingInputFields: ['command', 'run_in_background', 'dangerouslyDisableSandbox'],
+        }
+      : { supported: false };
+  },
+  backgrounding: 'self',
   maxResultSizeChars: 30_000,
   strict: true,
 
@@ -429,6 +442,9 @@ export const PowerShellTool = buildTool({
   },
 
   async validateInput(input: PowerShellToolInput): Promise<ValidationResult> {
+    // densable BT() && xd(n) — named host is not forwarded (errorCode 12)
+    const hostRefusal = remoteHostForwardRefusal(input, POWERSHELL_TOOL_NAME);
+    if (hostRefusal) return { ...hostRefusal, errorCode: 12 };
     // Defense-in-depth: also guarded in call() for direct callers.
     // densable I0d(vxo(e), e.command)
     {

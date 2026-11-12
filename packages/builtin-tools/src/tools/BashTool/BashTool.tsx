@@ -43,6 +43,7 @@ import { truncate } from 'src/utils/format.js';
 import { getFsImplementation } from 'src/utils/fsOperations.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { expandPath } from 'src/utils/path.js';
+import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { maybeRecordPluginHint } from 'src/utils/plugins/hintRecommendation.js';
 import { exec } from 'src/utils/Shell.js';
@@ -738,6 +739,9 @@ export const BashTool = buildTool({
     return `Running ${desc}`;
   },
   async validateInput(input: BashToolInput): Promise<ValidationResult> {
+    // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
+    const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
+    if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
     if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
       const sleepPattern = detectBlockedSleepPattern(input.command);
       if (sleepPattern !== null) {

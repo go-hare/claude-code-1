@@ -48,6 +48,7 @@ import {
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
+import { remoteHostSchemaProperty } from '../services/tools/remoteToolHost.js'
 import { createUserMessage } from './messages.js'
 import {
   getAPIProvider,
@@ -197,6 +198,18 @@ export async function toolToAPISchema(
     // This ensures external non-EAP users don't see swarm features in the schema
     if (!isAgentSwarmsEnabled()) {
       input_schema = filterSwarmFieldsFromSchema(tool.name, input_schema)
+    }
+
+    // densable `$2` + `bwt`: forwarding on adds optional `_host` for a
+    // remote-capable tool. `yPe` (`KJ`) is false with no announced machine,
+    // so `bwt` does not strip it.
+    const hostField = remoteHostSchemaProperty()
+    if (hostField && tool.remoteExecution?.supported === true) {
+      const properties = {
+        ...((input_schema.properties ?? {}) as Record<string, unknown>),
+        ...hostField,
+      }
+      input_schema = { ...input_schema, properties }
     }
 
     const leanPrompt = shouldUseSimpleSystemPrompt({ model: options.model })
