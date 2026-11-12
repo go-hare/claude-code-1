@@ -8,12 +8,14 @@ import {
   dequeuePermissionConfirm,
   enqueuePermissionConfirm,
 } from './toolPermission/PermissionContext.js'
+import { isViolinWoodEnabledSync } from '../cli/violinWood.js'
 import {
   type RemotePermissionResponse,
   type RemoteSessionConfig,
   type RemoteUserDialogResponse,
   RemoteSessionManager,
 } from '../remote/RemoteSessionManager.js'
+import { bindServedChannel } from '../services/tools/remoteToolServe.js'
 import {
   createSyntheticAssistantMessage,
   createToolStub,
@@ -194,7 +196,20 @@ export function useRemoteSession({
       `[useRemoteSession] Initializing for session ${config.sessionId}`,
     )
 
+    // gold `wAt` @206817084 — `h.servedTools===void 0||h.viewerOnly||!Yf()`.
+    const servedManager = {
+      current: null as RemoteSessionManager | null,
+    }
+    const boundServed = bindServedChannel({
+      sessionId: config.sessionId,
+      manager: () => servedManager.current ?? undefined,
+      viewerOnly: config.viewerOnly,
+      woodOn: isViolinWoodEnabledSync(),
+      servedTools: config.servedTools,
+    })
+
     const manager = new RemoteSessionManager(config, {
+      ...(boundServed?.callbacks ?? {}),
       onMessage: sdkMessage => {
         const parts = [`type=${sdkMessage.type}`]
         if ('subtype' in sdkMessage)
@@ -233,16 +248,21 @@ export function useRemoteSession({
           return
         }
         // Handle init message - extract available slash commands
-        if (
-          sdkMessage.type === 'system' &&
-          sdkMessage.subtype === 'init' &&
-          onInit
-        ) {
-          const slashCommands = sdkMessage.slash_commands as string[]
-          logForDebugging(
-            `[useRemoteSession] Init received with ${slashCommands.length} slash commands`,
-          )
-          onInit(slashCommands)
+        if (sdkMessage.type === 'system' && sdkMessage.subtype === 'init') {
+          // gold @208603826 `Ol?.requestAnnounce("worker_init",{workerEpoch})`
+          const epoch = (sdkMessage as { worker_epoch?: unknown }).worker_epoch
+          boundServed?.requestAnnounce('worker_init', {
+            ...(typeof epoch === 'number' &&
+              Number.isSafeInteger(epoch) &&
+              epoch > 0 && { workerEpoch: epoch }),
+          })
+          if (onInit) {
+            const slashCommands = sdkMessage.slash_commands as string[]
+            logForDebugging(
+              `[useRemoteSession] Init received with ${slashCommands.length} slash commands`,
+            )
+            onInit(slashCommands)
+          }
         }
 
         // Track remote subagent lifecycle for the "N in background" counter.
@@ -582,10 +602,12 @@ export function useRemoteSession({
     })
 
     managerRef.current = manager
+    servedManager.current = manager
     manager.connect()
 
     return () => {
       logForDebugging('[useRemoteSession] Cleanup - disconnecting')
+      boundServed?.close()
       // Clear any pending timeout
       if (responseTimeoutRef.current) {
         clearTimeout(responseTimeoutRef.current)

@@ -31,7 +31,20 @@
  * leftover `m_n` unique initializeWorker log tengu_remote_headless_client_worker_initialize — keep SDK `{done}` host
  * leftover `_o` @202276282 TIe/RIe wrap leftoverTulip.ts
  * leftover `gPe` default wrap leftoverHeadlessManager.ts
- * (re-exported from leftoverHookWait.ts · leftoverCloudCopy.ts · leftoverHeadlessCopy.ts · leftoverHeadlessAttach.ts · leftoverHeadlessClient.ts · leftoverTulip.ts · leftoverHeadlessManager.ts)
+ * leftover `tr`/`Qo`/`fqo`/`gqo` inbound serve wrap remoteToolServe.ts
+ * gold `Cle` @202407176 · gold `un` @206773509 · gold `tr` @206816057
+ * leftover `wAt` @206817084 bindServedChannel on useRemoteSession / createHeadlessRemoteManager
+ * gold `Ol` @208599454 servedTools===void 0 · gold `Ze` @206959784 !bound
+ * leftover `qn` @207071604 leftoverQnServedTools · leftoverServedToolsKit · leftoverRunSessionToolCall
+ * leftover `qoe` @183231639 leftoverServedToolResult · leftover `r2e` @185491704
+ * leftover `er` @206815531 leftoverServedReplyPosted · leftover `servedSessionPlumbing` @207176929
+ * leftover `Mre` @185930444 leftoverDirSyncPlumbingListed · gold ye `source==="worker"&&Lt`
+ * leftover ye `this.resumed=this.lastSequenceNum>0` @206718623 deliver extras `resumed:!0`
+ * leftover `Ze` sessionCallbacks @206960795 controlOnly&&h → reconnected
+ * leftover ye @206723981 sequence_num writeback controller.lastSequenceNum
+ * leftover `Ze` onWorkerInit @206961095 requestAnnounce worker_init · leftover `C8t` @206710130
+ * leftover `Li`/`Jo` · stampServeControlRequest
+ * (re-exported from leftoverHookWait.ts · leftoverCloudCopy.ts · leftoverHeadlessCopy.ts · leftoverHeadlessAttach.ts · leftoverHeadlessClient.ts · leftoverTulip.ts · leftoverHeadlessManager.ts · remoteToolServe.ts)
  */
 import { getOauthAccountInfo } from 'src/utils/auth.js'
 import { errorMessage } from 'src/utils/errors.js'
@@ -2051,6 +2064,7 @@ export {
   headlessControlErrorFrame,
   headlessInformationalFrame,
   logEnded,
+  leftoverWorkerEpochFromInit,
   logWorkerInit,
   markWorkerReady,
   openSession,
@@ -2126,3 +2140,50 @@ export {
   wrapRemoteSessionManager,
   wrapSendGateWithheld,
 } from './leftoverHeadlessManager.js'
+
+export {
+  bindServedChannel,
+  clipServedRequestId,
+  createServedChannelBinder,
+  createServingContext,
+  dispatchServedChannelRequest,
+  honourRemoteToolsReannounce,
+  isLeftoverServedToolsKit,
+  leftoverQnServedTools,
+  leftoverDirSyncPlumbingListed,
+  leftoverRequestAnnounce,
+  leftoverRunSessionToolCall,
+  leftoverServeSyncFiles,
+  leftoverServedInstanceToken,
+  leftoverServedReplyPosted,
+  leftoverServedRefusedResult,
+  leftoverServedSendOpts,
+  leftoverServedSessionPlumbing,
+  leftoverServedToolResult,
+  leftoverServedToolsKit,
+  LEFTOVER_SYNC_FILES,
+  mintServedInstanceId,
+  normalizeServedAttestationStatus,
+  parseLeftoverSyncFilesArgs,
+  SERVED_CHANNEL_TOOL_REPLY_TIMEOUT_MS,
+  SERVED_TOOLS_UNAVAILABLE_FLAG_OFF,
+  stampServeControlRequest,
+  serveInboundSessionFrame,
+  isRemoteServeBelowFloor,
+  isRemoteServeFirstCallLeg,
+  isRemoteToolsServedSubtype,
+  parseRemotePlumbingCallRequest,
+  parseRemoteServeEnvelope,
+  parseRemoteToolCallRequest,
+  parseRemoteToolsReannounceRequest,
+  REMOTE_SERVE_NOT_HERE,
+  REMOTE_SERVE_REQUEST_ID_CAP,
+  REMOTE_TOOLS_SERVED_SUBTYPES,
+  remoteCommandUnattestedMessage,
+  remoteServeArrivedInWindow,
+  remoteToolNotServedOn,
+  routeServedChannelRequest,
+  servedErrorResult,
+  UNSUPPORTED_CONTROL_REQUEST_SUBTYPE,
+  wrapServedResultForChannel,
+} from '../services/tools/remoteToolServe.js'

@@ -14,6 +14,8 @@
  * HeadlessCloudFrames / HeadlessCloudLiveness / HeadlessCloudFeatureHandles
  * (gold `st`/`ot`/`Ce` hosts). Default `gPe` wraps existing
  * RemoteSessionManager via leftoverHeadlessManager (orgUuid+token; else stub).
+ * leftover `qn` @207071604: leftoverQnServedTools leftoverServedToolsKit
+ * when bound+woodOn; servedTools undefined when wood off or unbound.
  * NEVER `export class tn` / `export class gPe`. Keep SDK `{done}` host
  * (`HeadlessCloudSdkHost` / `startHeadlessCloudSession`) on cloudSession.
  * No CLAUDE_CODE_NO_DEVICE_PROOF / FOCUS_IN / settings.set / tengu_violin_amati.
@@ -68,6 +70,11 @@ import {
   HeadlessCloudFrames,
   HeadlessCloudLiveness,
 } from './cloudSession.js'
+import {
+  leftoverQnServedTools,
+  leftoverServedToolsKit,
+} from '../services/tools/remoteToolServe.js'
+import { isViolinWoodEnabledSync } from './violinWood.js'
 import {
   CLOUD_MESSAGE_NOT_DELIVERED,
   groupNotApplied,
@@ -172,6 +179,7 @@ export type HeadlessClientManager = HeadlessWorkerManager & {
   ) => Promise<unknown>
   heldSendCount?: () => number
   chainedSendCount?: () => number
+  requestAnnounce?: (reason: string, opts?: { workerEpoch?: number }) => void
 }
 
 export type HeadlessClientHostRequests = {
@@ -1083,6 +1091,19 @@ export function logEnded(
  * leftover `tn.logWorkerInit` @202395409
  * CALL logHeadlessBuiltInToolNamesUnread
  */
+/**
+ * leftover gold `C8t` @206710130
+ * `typeof n==="number"&&Number.isSafeInteger(n)&&n>0?n:void 0`
+ */
+export function leftoverWorkerEpochFromInit(init: unknown): number | undefined {
+  if (init === null || typeof init !== 'object') return undefined
+  const rec = init as Record<string, unknown>
+  const n = rec.workerEpoch ?? rec.worker_epoch
+  return typeof n === 'number' && Number.isSafeInteger(n) && n > 0
+    ? n
+    : undefined
+}
+
 export function logWorkerInit(
   client: HeadlessCloudClient,
   init: {
@@ -1278,6 +1299,11 @@ export function attachHeadlessCloudClientSession(
               tools?: unknown
             },
           )
+          // gold `Ze` onWorkerInit → requestAnnounce("worker_init", {workerEpoch})
+          const workerEpoch = leftoverWorkerEpochFromInit(init)
+          client.session?.manager.requestAnnounce?.('worker_init', {
+            ...(workerEpoch !== undefined && { workerEpoch }),
+          })
         },
         onTurnInFlight: () => client.features?.noteTurnInFlight?.(),
         onTurnEnded: () => client.features?.noteTurnEnded?.(),
@@ -1589,6 +1615,13 @@ export function attachHeadlessCloudClientSession(
     onCatchUpTruncated?: () => void
     onError?: (err: { message: string }) => void
   }
+  // leftover `qn` @207071604 — woodOn=Yf(); kit is leftover E (no Oyr here).
+  const woodOn = isViolinWoodEnabledSync()
+  const bound = session.cloudSession().device.status === 'bound'
+  const qn = leftoverQnServedTools({
+    woodOn,
+    kit: bound && woodOn ? leftoverServedToolsKit() : undefined,
+  })
   const manager =
     session.createManager?.(managerOpts, featureCallbacks) ??
     seams.createManager?.(managerOpts, featureCallbacks) ??
@@ -1599,6 +1632,9 @@ export function attachHeadlessCloudClientSession(
         getAccessToken: session.getAccessToken,
         orgUuid: session.orgUuid,
         initialPromptUuid: session.initialPrompt?.uuid,
+        bound,
+        servedTools: qn.servedTools,
+        controlOnly: session.controlOnly === true,
       },
       {
         onConnected: () => managerCallbacks.onConnected?.(),

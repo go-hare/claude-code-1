@@ -43,6 +43,7 @@ const {
   emitHeadlessFrame,
   formatHeadlessWorkerInitLine,
   logEnded,
+  leftoverWorkerEpochFromInit,
   logWorkerInit,
   markWorkerReady,
   openSession,
@@ -140,7 +141,13 @@ describe('leftoverHeadlessClient 283 leftover tn remaining BODY', () => {
     expect(client).toContain('wrapHeadlessCloudLiveness')
     expect(client).toContain('wrapHeadlessCloudFeatures')
     expect(client).toContain('createHeadlessRemoteManager')
+    expect(client).toContain('controlOnly: session.controlOnly === true')
+    expect(client).toContain('leftover gold `C8t` @206710130')
+    expect(client).toContain("requestAnnounce?.('worker_init'")
     expect(client).toContain('leftoverHeadlessManager')
+    expect(client).toContain('leftoverQnServedTools')
+    expect(client).toContain('isViolinWoodEnabledSync')
+    expect(client).toContain('leftoverServedToolsKit')
     expect(client).toContain('client.session?.manager.reconnect')
     expect(client).toContain('holdLaterSendsBehindGates')
     expect(client).toContain('sendBehindGates')
@@ -370,6 +377,10 @@ describe('leftoverHeadlessClient 283 leftover tn remaining BODY', () => {
         throw new Error('no names')
       },
     })
+    expect(leftoverWorkerEpochFromInit({ worker_epoch: 3 })).toBe(3)
+    expect(leftoverWorkerEpochFromInit({ workerEpoch: 4 })).toBe(4)
+    expect(leftoverWorkerEpochFromInit({ worker_epoch: 0 })).toBeUndefined()
+    expect(leftoverWorkerEpochFromInit({})).toBeUndefined()
     logWorkerInit(unread, { tools: ['Bash'] })
     expect(
       debugLogs.some(l =>

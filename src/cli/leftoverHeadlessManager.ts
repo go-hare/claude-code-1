@@ -6,6 +6,8 @@
  *   leftover `tn.attach` @202385551 `w=e.createManager?e.createManager(v,h):new gPe(v,h)`
  *
  * Default path wraps existing `RemoteSessionManager` (gold `gPe` host).
+ * leftover `wAt` @206817084 binds inbound served-channel via `bindServedChannel`
+ * when `n.bound` and `n.servedTools` (gold `Ze` @206959784).
  * leftover `releaseHeldSends`/`flushSends`/`addSendGate`/`postControlRequest`
  * wrap onto that host + a local send-gate / held-send ledger.
  * leftover `sendBehindGates` @202102201 registers `heldSends` with gold
@@ -46,12 +48,18 @@ import { jsonParse } from '../utils/slowOperations.js'
 import { getClaudeCodeUserAgent } from '../utils/userAgent.js'
 import { RemoteSessionManager } from '../remote/RemoteSessionManager.js'
 import {
+  bindServedChannel,
+  SERVED_TOOLS_UNAVAILABLE_FLAG_OFF,
+  SERVE_INBOUND_REPLAY_GRACE_MS,
+  stampServeControlRequest,
+} from '../services/tools/remoteToolServe.js'
+import {
   getAnthropicClientPlatform,
   sendPayloadToRemoteSession,
   TRUSTED_DEVICE_TOKEN_HEADER,
   type SendRemoteEventResult,
 } from '../utils/teleport/api.js'
-import { isViolinWoodEnabled } from './violinWood.js'
+import { isViolinWoodEnabled, isViolinWoodEnabledSync } from './violinWood.js'
 import { normalizeDeviceAttestationStatus } from './leftoverTulip.js'
 import type { HeadlessWorkerManager } from './leftoverHeadlessWorker.js'
 
@@ -123,6 +131,8 @@ export type HeadlessRemoteManager = HeadlessWorkerManager & {
   ) => Promise<unknown>
   heldSendCount?: () => number
   chainedSendCount?: () => number
+  /** leftover gold `Ze` `onWorkerInit` → `requestAnnounce("worker_init")` */
+  requestAnnounce?: (reason: string, opts?: { workerEpoch?: number }) => void
 }
 
 export type HeadlessRemoteManagerConfig = {
@@ -130,6 +140,12 @@ export type HeadlessRemoteManagerConfig = {
   getAccessToken?: () => string | Promise<string>
   orgUuid?: string
   initialPromptUuid?: string
+  /** gold `Ze` `n.bound` */
+  bound?: boolean
+  /** gold `Ze` `n.servedTools` — leftover empty pack `{}` when bound */
+  servedTools?: unknown
+  /** gold `Ze` `e.controlOnly` @206960795 */
+  controlOnly?: boolean
 }
 
 export type HeadlessRemoteManagerCallbacks = {
@@ -159,6 +175,29 @@ export function createHeadlessRemoteManager(
   ) {
     return stub
   }
+  const servedHost = { current: null as RemoteSessionManager | null }
+  let streamConnected = false
+  // gold `Ze` sessionCallbacks `h` @206960795 — worker gone this connection
+  let workerGone = false
+  const woodOn = isViolinWoodEnabledSync()
+  // leftover `qn` @207071604 — gold `Wt`/`Pt` wood-off string. No En fleet.
+  if (!woodOn) {
+    logForDebugging(
+      `[servedTools] not served over the session channel: ${SERVED_TOOLS_UNAVAILABLE_FLAG_OFF}`,
+    )
+  }
+  const boundServed = bindServedChannel({
+    sessionId,
+    manager: () => servedHost.current ?? undefined,
+    woodOn,
+    bound: opts.bound,
+    servedTools: opts.servedTools,
+    // leftover gold `Ze` @206959784 sessionCallbacks requestAnnounce.
+    // Honour path only logs; do not invent En announce fleet.
+    onReannounceHonoured: () => {
+      logForDebugging('[servedChannel] worker_asked')
+    },
+  })
   const host = new RemoteSessionManager(
     {
       sessionId,
@@ -171,16 +210,64 @@ export function createHeadlessRemoteManager(
       initialPromptUuid: opts.initialPromptUuid,
     },
     {
+      ...(boundServed?.callbacks ?? {}),
       onMessage: () => {},
       onPermissionRequest: () => {},
-      onConnected: () => callbacks.onConnected?.(),
-      onDisconnected: () => callbacks.onDisconnected?.(),
+      // gold `Ze` @206959784:
+      //   onStreamConnected: if(r) requestAnnounce("reconnected"); r=true
+      //   onWorkerLive: requestAnnounce("attached")
+      // gold sessionCallbacks @206960795:
+      //   onWorkerGone: h=true
+      //   onWorkerLive: if(controlOnly&&h) requestAnnounce("reconnected"); h=false
+      //   onWorkerInit: requestAnnounce("worker_init", {workerEpoch})
+      // No En workerLive / k.workerGone.
+      onConnected: () => {
+        if (boundServed !== null) {
+          if (streamConnected) {
+            boundServed.requestAnnounce('reconnected')
+          }
+          streamConnected = true
+          servedHost.current?.markServing(true)
+        }
+        callbacks.onConnected?.()
+      },
+      onWorkerGone: () => {
+        workerGone = true
+      },
+      onWorkerLive: () => {
+        if (opts.controlOnly === true && workerGone) {
+          boundServed?.requestAnnounce('reconnected')
+        }
+        workerGone = false
+        boundServed?.requestAnnounce('attached')
+      },
+      onDisconnected: () => {
+        // leftover gold `onWorkerGone` — no requestAnnounce on gone.
+        // streamConnected stays true so a later onConnected is
+        // `reconnected`. `h` is onWorkerGone, not this stream drop.
+        callbacks.onDisconnected?.()
+      },
       onReconnecting: () => callbacks.onReconnecting?.(),
       onCatchUpTruncated: () => callbacks.onCatchUpTruncated?.(),
       onError: err => callbacks.onError?.(err),
     },
   )
-  return wrapRemoteSessionManager(host)
+  servedHost.current = host
+  // gold `wAt` `H()` once the manager exists; onConnected may fire later.
+  if (boundServed !== null) {
+    host.markServing(true)
+  }
+  const wrapped = wrapRemoteSessionManager(host)
+  if (boundServed === null) return wrapped
+  const disconnect = wrapped.disconnect.bind(wrapped)
+  return {
+    ...wrapped,
+    requestAnnounce: boundServed.requestAnnounce,
+    disconnect() {
+      boundServed.close()
+      disconnect()
+    },
+  }
 }
 
 /** leftover `tn.attach` no-engine stub — previous default when gPe host cannot start. */
@@ -280,6 +367,8 @@ export type CloudEventsStreamSeams = {
     payload: Record<string, unknown>,
     meta: Record<string, unknown>,
   ) => void
+  /** leftover `Me` clock; omit → Date.now */
+  now?: () => number
   onCatchUpTruncated?: () => void
   onToolHostEnded?: (e: { workId?: string; reason?: string }) => void
   onWorkerConnectionStatus?: (status: string) => void
@@ -297,7 +386,10 @@ export type CloudEventsStreamSeams = {
     'resetLivenessTimer' | 'handleStreamEnd'
   > &
     Partial<
-      Pick<CloudSessionStreamController, 'reconnectAttempts' | 'keepRedialling'>
+      Pick<
+        CloudSessionStreamController,
+        'reconnectAttempts' | 'keepRedialling' | 'lastSequenceNum'
+      >
     >
 }
 
@@ -312,7 +404,8 @@ export function leftoverDeliverCloudSessionFrame(
   meta: Record<string, unknown>,
 ): boolean {
   try {
-    seams.onDeliver?.(payload, meta)
+    // leftover `kt` @199845344 stamps onto control_request before RSM/handleMessage.
+    seams.onDeliver?.(stampServeControlRequest(payload, meta), meta)
     return true
   } catch (err) {
     logForDebugging(
@@ -680,6 +773,11 @@ export type CloudSessionHandleFrameState = {
   issuedRequestIds: Set<string>
   ownRequestUuids: Map<string, string>
   connectedSince: number
+  /**
+   * leftover gold `ye` `this.resumed=this.lastSequenceNum>0` @206718623.
+   * Frozen at connect — do not derive from later sequence_num.
+   */
+  resumed?: boolean
 }
 
 export type CloudSessionHandleFrameResult = {
@@ -812,17 +910,33 @@ function clipLogToken(e: unknown): string {
 }
 
 /**
- * leftover `Me` @199845154 — replayed / sentAt / ageMs. ageMs omitted (no
- * gold serviceClock host).
+ * leftover `Me` @199845154 — replayed / sentAt / ageMs. When `seams.now`
+ * or Date.now and created_at parses, `ageMs: Math.max(0, now - sentAt)`.
+ * leftover has no gold serviceClock `Kt`. replayed: r < connectedSince+Nt (2000).
  */
 function replayMeta(
   e: Record<string, unknown>,
   connectedSince: number,
+  now: number,
 ): Record<string, unknown> {
-  const r =
+  const sentAt =
     typeof e.created_at === 'string' ? Date.parse(e.created_at) : Number.NaN
-  if (Number.isNaN(r)) return { replayed: true }
-  return { sentAt: r, replayed: r < connectedSince }
+  if (Number.isNaN(sentAt)) return { replayed: true }
+  return {
+    sentAt,
+    replayed: sentAt < connectedSince + SERVE_INBOUND_REPLAY_GRACE_MS,
+    ageMs: Math.max(0, now - sentAt),
+  }
+}
+
+/**
+ * leftover gold ye deliver @206726653 `...this.resumed&&{resumed:!0}`.
+ * Flag is connect-time, not live lastSequenceNum.
+ */
+function leftoverYeResumedExtras(
+  state: CloudSessionHandleFrameState | undefined,
+): Record<string, unknown> {
+  return state?.resumed === true ? { resumed: true } : {}
 }
 
 /**
@@ -898,8 +1012,21 @@ export function handleCloudSessionFrame(
     case 'client_event': {
       const a = r as Record<string, unknown>
       const h = parseInt(id ?? String(a.sequence_num), 10)
-      if (!Number.isNaN(h) && state && h > state.lastSequenceNum) {
-        state.lastSequenceNum = h
+      // gold ye @206723981
+      // `if(!isNaN(_)&&_>this.lastSequenceNum)this.lastSequenceNum=_`
+      // leftover: same number on frameState AND controller (next connect).
+      if (!Number.isNaN(h)) {
+        if (state && h > state.lastSequenceNum) {
+          state.lastSequenceNum = h
+        }
+        const streamSeq = seams.stream?.lastSequenceNum
+        if (
+          typeof streamSeq === 'number' &&
+          h > streamSeq &&
+          seams.stream !== undefined
+        ) {
+          seams.stream.lastSequenceNum = h
+        }
       }
       if (!isTypedPayload(a.payload)) {
         logForDebugging(
@@ -967,7 +1094,12 @@ export function handleCloudSessionFrame(
             const delivered = { ...payload, response: y }
             const meta = {
               source: a.source,
-              ...replayMeta(a, state?.connectedSince ?? 0),
+              ...replayMeta(
+                a,
+                state?.connectedSince ?? 0,
+                seams.now?.() ?? Date.now(),
+              ),
+              ...leftoverYeResumedExtras(state),
             }
             leftoverDeliverCloudSessionFrame(seams, delivered, meta)
             return { kind: 'deliver', payload: delivered, meta }
@@ -1011,7 +1143,12 @@ export function handleCloudSessionFrame(
       }
       const meta = {
         source: a.source,
-        ...replayMeta(a, state?.connectedSince ?? 0),
+        ...replayMeta(
+          a,
+          state?.connectedSince ?? 0,
+          seams.now?.() ?? Date.now(),
+        ),
+        ...leftoverYeResumedExtras(state),
         ...(a.source === 'worker' ? workerAttestationMeta(a) : {}),
       }
       leftoverDeliverCloudSessionFrame(seams, payload, meta)
@@ -1448,6 +1585,8 @@ export function createCloudSessionEventsClient(
           issuedRequestIds: new Set(),
           ownRequestUuids: new Map(),
           connectedSince: Date.now(),
+          // gold ye @206718623 `this.resumed=this.lastSequenceNum>0`
+          resumed: controller.lastSequenceNum > 0,
         },
         onConnected: () => {
           controller.state = 'connected'

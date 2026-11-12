@@ -7,7 +7,19 @@ import type {
   SDKControlResponse,
 } from '../entrypoints/sdk/controlTypes.js'
 import { logEvent } from '../services/analytics/index.js'
+import {
+  clipServedRequestId,
+  isRemoteToolsServedSubtype,
+  leftoverServedSendOpts,
+  REMOTE_SERVE_REQUEST_ID_CAP,
+  type ServedChannelAnswer,
+  type ServedChannelPostOutcome,
+  type ServedChannelRequest,
+  stampServeControlRequest,
+  wrapServedResultForChannel,
+} from '../services/tools/remoteToolServe.js'
 import { logForDebugging } from '../utils/debug.js'
+import { errorMessage } from '../utils/errors.js'
 import { logError } from '../utils/log.js'
 import {
   type RemoteMessageContent,
@@ -75,6 +87,11 @@ export type RemoteSessionConfig = {
    * session title is never updated. Used by `claude assistant`.
    */
   viewerOnly?: boolean
+  /**
+   * gold `h.servedTools` — this machine is the announced tool host.
+   * Undefined → leftover `wAt` stays null.
+   */
+  servedTools?: unknown
 }
 
 export type RemoteSessionCallbacks = {
@@ -114,6 +131,25 @@ export type RemoteSessionCallbacks = {
   onCatchUpTruncated?: () => void
   /** Called on error */
   onError?: (error: Error) => void
+  /**
+   * gold `onServedChannelRequest` — inbound `Cle` subtypes on this announced
+   * machine. Absent → leave unanswered (`not serving tools here`).
+   */
+  onServedChannelRequest?: (request: ServedChannelRequest) => void
+  /** gold `onServedChannelRequestCancelled` */
+  onServedChannelRequestCancelled?: (
+    requestId: string,
+    why: 'worker' | 'disconnected',
+  ) => void
+  /**
+   * gold `onWorkerLive` — first non-replayed worker frame this connection.
+   */
+  onWorkerLive?: () => void
+  /**
+   * gold `onWorkerGone` — stream drop (leftover: `disconnect`). Skip
+   * `endWorkerStart`.
+   */
+  onWorkerGone?: () => void
 }
 
 /**
@@ -136,6 +172,22 @@ export class RemoteSessionManager {
    * pending_user_dialog_requests redelivery does not re-open them.
    */
   private seenControlResponseIds: Set<string> = new Set()
+  /**
+   * gold `pendingServedRequests` — inbound `Cle` subtypes in hand.
+   */
+  private pendingServedRequests = new Map<
+    string,
+    { abort: AbortController; subtype: string }
+  >()
+  /** gold `settledServedRequestIds` — FIFO via `x` / `Qt`=1000. */
+  private settledServedRequestIds: Set<string> = new Set()
+  /** gold `markServing` */
+  private serving = false
+  /**
+   * gold `workerSeenThisConnection` — first worker frame this stream.
+   * Reset on leftover disconnect (skip `endWorkerStart`).
+   */
+  private workerSeenThisConnection = false
 
   constructor(
     private readonly config: RemoteSessionConfig,
@@ -151,7 +203,7 @@ export class RemoteSessionManager {
     )
 
     const wsCallbacks: SessionsWebSocketCallbacks = {
-      onMessage: message => this.handleMessage(message),
+      onMessage: (message, extras) => this.handleMessage(message, extras),
       onConnected: () => {
         logForDebugging('[RemoteSessionManager] Connected')
         this.callbacks.onConnected?.()
@@ -184,21 +236,41 @@ export class RemoteSessionManager {
    * densable handleMessage — control_request / cancel / control_response
    * (answered-elsewhere + dialog redelivery) / result clear / forward SDK.
    */
+  /**
+   * gold `handleMessage(e,n={})` @206741679 — extras is ye Ne/Lt second arg.
+   */
   private handleMessage(
     message:
       | SDKMessage
       | SDKControlRequest
       | SDKControlResponse
       | SDKControlCancelRequest,
+    extras: Record<string, unknown> = {},
   ): void {
+    // gold `n.source==="worker"&&n.replayed!==!0` then noteWorkerLive
+    if (extras.source === 'worker' && extras.replayed !== true) {
+      this.noteWorkerLive()
+    }
     if (message.type === 'control_request') {
-      this.handleControlRequest(message as SDKControlRequest)
+      // gold handleControlRequest(e,n). Leftover also merges fields stamped
+      // onto the payload (SSE leftoverDeliver).
+      const bag = stampServeControlRequest(
+        { type: 'control_request' },
+        {
+          ...extras,
+          ...(message as unknown as Record<string, unknown>),
+        },
+      )
+      this.handleControlRequest(message as SDKControlRequest, bag)
       return
     }
 
     // densable: dialog cancel first, then permission; unknown → ignore
     if (message.type === 'control_cancel_request') {
       const { request_id } = message as SDKControlCancelRequest
+      if (this.retireServedRequest(request_id, 'worker')) {
+        return
+      }
       if (this.pendingDialogRequests.delete(request_id)) {
         logForDebugging(
           `[RemoteSessionManager] User dialog request cancelled: ${request_id}`,
@@ -315,8 +387,12 @@ export class RemoteSessionManager {
 
   /**
    * densable handleControlRequest — can_use_tool + request_user_dialog.
+   * gold @206748501 `(e,{ageMs,attestationStatus,modeStamp,replayed},_)`.
    */
-  private handleControlRequest(request: SDKControlRequest): void {
+  private handleControlRequest(
+    request: SDKControlRequest,
+    extras: Record<string, unknown> = {},
+  ): void {
     const requestId = request.request_id as string
     const inner = request.request
 
@@ -362,6 +438,11 @@ export class RemoteSessionManager {
       return
     }
 
+    if (isRemoteToolsServedSubtype(inner.subtype)) {
+      this.handleServedChannelRequest(request, extras)
+      return
+    }
+
     logForDebugging(
       `[RemoteSessionManager] Unsupported control request subtype: ${inner.subtype}`,
     )
@@ -374,6 +455,171 @@ export class RemoteSessionManager {
       },
     }
     this.websocket?.sendControlResponse(response)
+  }
+
+  /**
+   * gold `if(un(g))` @206751433 — inbound `Cle` subtypes. No callback →
+   * leave unanswered. Over-long id, already in hand, or already settled → skip.
+   */
+  private handleServedChannelRequest(
+    request: SDKControlRequest,
+    extras: Record<string, unknown> = {},
+  ): void {
+    const requestId = request.request_id
+    const inner = request.request as {
+      subtype: string
+      [key: string]: unknown
+    }
+    const onServed = this.callbacks.onServedChannelRequest
+    if (!onServed) {
+      logForDebugging(
+        `[RemoteSessionManager] ${inner.subtype} ${clipServedRequestId(requestId)} — not serving tools here, leaving it unanswered`,
+      )
+      return
+    }
+    if (requestId.length > REMOTE_SERVE_REQUEST_ID_CAP) {
+      logForDebugging(
+        `[RemoteSessionManager] ${inner.subtype} ${clipServedRequestId(requestId)} — an id longer than ${REMOTE_SERVE_REQUEST_ID_CAP} characters, leaving it unanswered`,
+      )
+      return
+    }
+    if (
+      this.settledServedRequestIds.has(requestId) ||
+      this.pendingServedRequests.has(requestId)
+    ) {
+      logForDebugging(
+        `[RemoteSessionManager] ${inner.subtype} ${clipServedRequestId(requestId)} already answered or in hand — skipping`,
+      )
+      return
+    }
+    const abort = new AbortController()
+    this.pendingServedRequests.set(requestId, {
+      abort,
+      subtype: inner.subtype,
+    })
+    onServed({
+      requestId,
+      subtype: inner.subtype,
+      request: inner,
+      signal: abort.signal,
+      ...(typeof extras.ageMs === 'number' && { ageMs: extras.ageMs }),
+      ...(extras.attestationStatus !== undefined && {
+        attestationStatus: extras.attestationStatus,
+      }),
+      ...(extras.modeStamp !== undefined && { modeStamp: extras.modeStamp }),
+    })
+  }
+
+  /**
+   * gold `noteWorkerLive` @206768268
+   */
+  private noteWorkerLive(): void {
+    if (this.workerSeenThisConnection) return
+    this.workerSeenThisConnection = true
+    this.callbacks.onWorkerLive?.()
+  }
+
+  /**
+   * gold `reviveStreamForUserSend` @206760063
+   * leftover SessionsWebSocket has no `reviveAfterExhaustion` — no-op.
+   */
+  private reviveStreamForUserSend(): void {
+    // gold: this.client?.reviveAfterExhaustion() then onReconnecting
+  }
+
+  /**
+   * gold `respondToServedChannelRequest` @206767294
+   * gold `sendResponse` @206760163 leftover: WS send is void (not a Promise);
+   * no undeliveredResponses / keepUndeliveredResponses fleet.
+   * gold `Be` @206773533 via leftoverServedSendOpts — leftover WS cannot take
+   * timeout, still compute probe vs tool opts.
+   */
+  respondToServedChannelRequest(
+    requestId: string,
+    answer: ServedChannelAnswer,
+    onPosted?: (posted: ServedChannelPostOutcome, replyMs: number) => void,
+  ): boolean {
+    const pending = this.pendingServedRequests.get(requestId)
+    if (!pending) {
+      logForDebugging(
+        `[RemoteSessionManager] served request ${clipServedRequestId(requestId)} is no longer pending — result not sent`,
+      )
+      return false
+    }
+    this.pendingServedRequests.delete(requestId)
+    if (!this.websocket) return false
+    this.recordSeenControlResponseId(requestId)
+    this.recordSettledServedRequestId(requestId)
+    this.reviveStreamForUserSend()
+    // gold `cn(n)` — probe success still wraps
+    const wrapped = wrapServedResultForChannel(answer)
+    const response: SDKControlResponse = {
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: requestId,
+        response: wrapped as Record<string, unknown>,
+      },
+    }
+    // gold `r.subtype==="remote_tools_probe"?null:"tool"` then Be(n)
+    // leftover sendControlResponse is void — still compute Be opts
+    void leftoverServedSendOpts(
+      pending.subtype === 'remote_tools_probe' ? null : 'tool',
+    )
+    this.websocket.sendControlResponse(response)
+    try {
+      onPosted?.({ outcome: 'accepted' }, 0)
+    } catch (err) {
+      logForDebugging(
+        `[RemoteSessionManager] An answer's post listener threw; ` +
+          `the answer's fate is unchanged: ${errorMessage(err)}`,
+        { level: 'warn' },
+      )
+    }
+    return true
+  }
+
+  /** gold `releaseServedChannelRequest` */
+  releaseServedChannelRequest(requestId: string): void {
+    this.pendingServedRequests.delete(requestId)
+  }
+
+  /**
+   * gold `retireServedRequest` — worker cancel or stream drop.
+   */
+  retireServedRequest(
+    requestId: string,
+    why: 'worker' | 'disconnected',
+  ): boolean {
+    const pending = this.pendingServedRequests.get(requestId)
+    if (!pending) return false
+    this.pendingServedRequests.delete(requestId)
+    logForDebugging(
+      `[RemoteSessionManager] served request ${clipServedRequestId(requestId)} ${
+        why === 'worker' ? 'cancelled by the worker' : 'dropped with the stream'
+      }`,
+    )
+    pending.abort.abort()
+    this.callbacks.onServedChannelRequestCancelled?.(requestId, why)
+    return true
+  }
+
+  /** gold `x(this.settledServedRequestIds, e)` — FIFO at 1000. */
+  private recordSettledServedRequestId(requestId: string): void {
+    this.settledServedRequestIds.add(requestId)
+    if (this.settledServedRequestIds.size > SEEN_CONTROL_RESPONSE_ID_CAP) {
+      const first = this.settledServedRequestIds.values().next().value
+      if (first !== undefined) this.settledServedRequestIds.delete(first)
+    }
+  }
+
+  /** gold `markServing` */
+  markServing(serving: boolean): void {
+    this.serving = serving
+  }
+
+  isServing(): boolean {
+    return this.serving
   }
 
   /**
@@ -520,6 +766,12 @@ export class RemoteSessionManager {
     this.websocket = null
     this.pendingPermissionRequests.clear()
     this.pendingDialogRequests.clear()
+    for (const requestId of [...this.pendingServedRequests.keys()]) {
+      this.retireServedRequest(requestId, 'disconnected')
+    }
+    // gold `n==="disconnected"`: skip `endWorkerStart`; still reset + gone
+    this.workerSeenThisConnection = false
+    this.callbacks.onWorkerGone?.()
   }
 
   /**

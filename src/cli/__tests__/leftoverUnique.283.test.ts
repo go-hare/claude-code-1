@@ -123,6 +123,35 @@ describe('leftover unique 283 source-lock', () => {
     expect(body).toContain('leftoverHeadlessClient.ts')
     expect(body).toContain('leftoverTulip.ts')
     expect(body).toContain('leftoverHeadlessManager.ts')
+    expect(body).toContain('leftover `tr`/`Qo`/`fqo`/`gqo` inbound serve wrap')
+    expect(body).toContain('remoteToolServe.ts')
+    expect(body).toContain('gold `Cle` @202407176')
+    expect(body).toContain('leftover `wAt` @206817084')
+    expect(body).toContain('gold `Ol` @208599454 servedTools===void 0')
+    expect(body).toContain('gold `Ze` @206959784 !bound')
+    expect(body).toContain('leftover `qn` @207071604 leftoverQnServedTools')
+    expect(body).toContain('leftoverServedToolsKit')
+    expect(body).toContain('leftoverRunSessionToolCall')
+    expect(body).toContain('leftover `qoe` @183231639 leftoverServedToolResult')
+    expect(body).toContain('leftover `r2e` @185491704')
+    expect(body).toContain('leftover `er` @206815531 leftoverServedReplyPosted')
+    expect(body).toContain('leftover `servedSessionPlumbing` @207176929')
+    expect(body).toContain(
+      'leftover `Mre` @185930444 leftoverDirSyncPlumbingListed',
+    )
+    expect(body).toContain(
+      'leftover ye `this.resumed=this.lastSequenceNum>0` @206718623',
+    )
+    expect(body).toContain(
+      'leftover `Ze` sessionCallbacks @206960795 controlOnly&&h → reconnected',
+    )
+    expect(body).toContain(
+      'leftover ye @206723981 sequence_num writeback controller.lastSequenceNum',
+    )
+    expect(body).toContain(
+      'leftover `Ze` onWorkerInit @206961095 requestAnnounce worker_init',
+    )
+    expect(body).toContain('stampServeControlRequest')
     expect(body).toContain('leftover `_o` @202276282')
     expect(body).toContain(
       'leftover `PWt`/`TXn`/`v`/`Ke`/`st`/`dt`/`tn` unique logs',

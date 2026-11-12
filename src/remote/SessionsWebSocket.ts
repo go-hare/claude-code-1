@@ -13,6 +13,7 @@ import { logError } from '../utils/log.js'
 import { getWebSocketTLSOptions } from '../utils/mtls.js'
 import { getWebSocketProxyAgent, getWebSocketProxyUrl } from '../utils/proxy.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
+import { serveInboundSessionFrame } from '../services/tools/remoteToolServe.js'
 
 const RECONNECT_DELAY_MS = 2000
 const MAX_RECONNECT_ATTEMPTS = 5
@@ -55,7 +56,11 @@ function isSessionsMessage(value: unknown): value is SessionsMessage {
 }
 
 export type SessionsWebSocketCallbacks = {
-  onMessage: (message: SessionsMessage) => void
+  /** gold `ye` `onMessage(payload, extras)` — extras is leftover Ne/Lt. */
+  onMessage: (
+    message: SessionsMessage,
+    extras?: Record<string, unknown>,
+  ) => void
   onClose?: () => void
   onError?: (error: Error) => void
   onConnected?: () => void
@@ -86,6 +91,8 @@ export class SessionsWebSocket {
   private sessionNotFoundRetries = 0
   private pingInterval: NodeJS.Timeout | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
+  /** gold `ye` connectedSince for leftover Ne replayed/ageMs */
+  private connectedSince = 0
 
   constructor(
     private readonly sessionId: string,
@@ -134,6 +141,7 @@ export class SessionsWebSocket {
         this.state = 'connected'
         this.reconnectAttempts = 0
         this.sessionNotFoundRetries = 0
+        this.connectedSince = Date.now()
         this.startPingInterval()
         this.callbacks.onConnected?.()
       })
@@ -178,6 +186,7 @@ export class SessionsWebSocket {
         this.state = 'connected'
         this.reconnectAttempts = 0
         this.sessionNotFoundRetries = 0
+        this.connectedSince = Date.now()
         this.startPingInterval()
         this.callbacks.onConnected?.()
       })
@@ -209,11 +218,15 @@ export class SessionsWebSocket {
    */
   private handleMessage(data: string): void {
     try {
-      const message: unknown = jsonParse(data)
+      const raw: unknown = jsonParse(data)
+      // gold `ye`: unwrap `{payload, created_at, source, device_attestation_status}`
+      const { message, extras } = serveInboundSessionFrame(raw, {
+        connectedSince: this.connectedSince,
+        now: Date.now(),
+      })
 
-      // Forward SDK messages to callback
       if (isSessionsMessage(message)) {
-        this.callbacks.onMessage(message)
+        this.callbacks.onMessage(message, extras)
       } else {
         logForDebugging(
           `[SessionsWebSocket] Ignoring message type: ${typeof message === 'object' && message !== null && 'type' in message ? String(message.type) : 'unknown'}`,

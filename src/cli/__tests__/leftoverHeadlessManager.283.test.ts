@@ -51,6 +51,34 @@ describe('leftoverHeadlessManager 283 leftover gPe wrap', () => {
     expect(src).toContain('createHeadlessRemoteManager')
     expect(src).toContain('wrapRemoteSessionManager')
     expect(src).toContain('RemoteSessionManager')
+    expect(src).toContain('bindServedChannel')
+    expect(src).toContain('leftover `wAt` @206817084')
+    expect(src).toContain('gold `Ze` @206959784')
+    expect(src).toContain('requestAnnounce(')
+    expect(src).toContain("'attached'")
+    expect(src).toContain("'reconnected'")
+    expect(src).toContain('markServing(true)')
+    expect(src).toContain('onWorkerLive')
+    expect(src).toContain(
+      'onStreamConnected: if(r) requestAnnounce("reconnected")',
+    )
+    expect(src).toContain('if(controlOnly&&h) requestAnnounce("reconnected")')
+    expect(src).toContain('onWorkerInit: requestAnnounce("worker_init"')
+    expect(src).toContain('requestAnnounce: boundServed.requestAnnounce')
+    expect(src).toContain('onWorkerGone')
+    expect(src).toContain('controlOnly?: boolean')
+    expect(src).toContain('leftover `Me` @199845154')
+    expect(src).toContain('stampServeControlRequest')
+    expect(src).toContain('ageMs: Math.max(0, now - sentAt)')
+    expect(src).toContain('SERVED_TOOLS_UNAVAILABLE_FLAG_OFF')
+    expect(src).toContain(
+      '`[servedTools] not served over the session channel: ${SERVED_TOOLS_UNAVAILABLE_FLAG_OFF}`',
+    )
+    expect(src).toContain('[servedChannel] worker_asked')
+    expect(src).toContain('onReannounceHonoured')
+    expect(src).toContain("from '../services/tools/remoteToolServe.js'")
+    expect(src).not.toContain("from './leftoverUnique")
+    expect(src).toContain('servedTools: opts.servedTools')
     expect(src).toContain('emptyHeadlessManager')
     expect(src).toContain('leftover `releaseHeldSends`')
     expect(src).toContain('leftover `Oe` @202086500')
@@ -81,6 +109,10 @@ describe('leftoverHeadlessManager 283 leftover gPe wrap', () => {
     expect(src).toContain('LeftoverSseFrameBuffer')
     expect(src).toContain('leftover `handleFrame` @199852425')
     expect(src).toContain('handleCloudSessionFrame')
+    expect(src).toContain('this.resumed=this.lastSequenceNum>0')
+    expect(src).toContain('...this.resumed&&{resumed:!0}')
+    expect(src).toContain('gold ye @206723981')
+    expect(src).toContain('seams.stream.lastSequenceNum = h')
     expect(src).toContain('leftover `deliver` @199856946')
     expect(src).toContain('leftoverDeliverCloudSessionFrame')
     expect(src).toContain('createCloudSessionStreamController')
@@ -451,6 +483,156 @@ describe('leftoverHeadlessManager 283 leftover gPe wrap', () => {
       { type: 'user' },
       {},
     )
+
+    const stamped: Array<{
+      payload: Record<string, unknown>
+      meta: Record<string, unknown>
+    }> = []
+    leftoverDeliverCloudSessionFrame(
+      {
+        onDeliver: (payload, meta) => {
+          stamped.push({ payload, meta })
+        },
+      },
+      { type: 'control_request', request: { subtype: 'remote_tool_call' } },
+      {
+        ageMs: 42,
+        attestationStatus: 'VERIFIED',
+        modeStamp: 'present',
+        replayed: true,
+      },
+    )
+    expect(stamped).toEqual([
+      {
+        payload: {
+          type: 'control_request',
+          request: { subtype: 'remote_tool_call' },
+          ageMs: 42,
+          attestationStatus: 'VERIFIED',
+          modeStamp: 'present',
+          replayed: true,
+        },
+        meta: {
+          ageMs: 42,
+          attestationStatus: 'VERIFIED',
+          modeStamp: 'present',
+          replayed: true,
+        },
+      },
+    ])
+
+    const sentAt = Date.parse('2026-01-01T00:00:00.000Z')
+    const now = sentAt + 2500
+    const connectedSince = sentAt + 1000
+    const replayed: Array<{
+      payload: Record<string, unknown>
+      meta: Record<string, unknown>
+    }> = []
+    const frame = handleCloudSessionFrame(
+      'client_event',
+      '1',
+      JSON.stringify({
+        payload: {
+          type: 'control_request',
+          request: { subtype: 'remote_tool_call' },
+          remote_tool_gate: 'caller_reauthored',
+        },
+        source: 'worker',
+        created_at: '2026-01-01T00:00:00.000Z',
+        device_attestation_status: 'VERIFIED',
+        sequence_num: 1,
+      }),
+      {
+        now: () => now,
+        frameState: {
+          lastSequenceNum: 0,
+          issuedRequestIds: new Set(),
+          ownRequestUuids: new Map(),
+          connectedSince,
+        },
+        onDeliver: (payload, meta) => {
+          replayed.push({ payload, meta })
+        },
+      },
+    )
+    expect(frame.kind).toBe('deliver')
+    expect(frame.meta).toMatchObject({
+      sentAt,
+      replayed: true,
+      ageMs: 2500,
+      attestationStatus: 'VERIFIED',
+      modeStamp: 'present',
+    })
+    expect(replayed[0]?.payload).toMatchObject({
+      type: 'control_request',
+      ageMs: 2500,
+      attestationStatus: 'VERIFIED',
+      modeStamp: 'present',
+      replayed: true,
+    })
+    expect(replayed[0]?.meta).toMatchObject({
+      sentAt,
+      replayed: true,
+      ageMs: 2500,
+    })
+    expect(replayed[0]?.meta.resumed).toBeUndefined()
+
+    const resumedFrames: Array<Record<string, unknown>> = []
+    const resumed = handleCloudSessionFrame(
+      'client_event',
+      '2',
+      JSON.stringify({
+        payload: {
+          type: 'control_request',
+          request: { subtype: 'remote_tool_call' },
+        },
+        source: 'worker',
+        created_at: '2026-01-01T00:00:00.000Z',
+        sequence_num: 8,
+      }),
+      {
+        now: () => now,
+        frameState: {
+          lastSequenceNum: 7,
+          issuedRequestIds: new Set(),
+          ownRequestUuids: new Map(),
+          connectedSince,
+          resumed: true,
+        },
+        onDeliver: (_payload, meta) => {
+          resumedFrames.push(meta)
+        },
+      },
+    )
+    expect(resumed.kind).toBe('deliver')
+    expect(resumed.meta).toMatchObject({ resumed: true })
+    expect(resumedFrames[0]).toMatchObject({ resumed: true })
+
+    const seqStream = createCloudSessionStreamController({
+      connect: () => {},
+    })
+    const seqState = {
+      lastSequenceNum: 0,
+      issuedRequestIds: new Set<string>(),
+      ownRequestUuids: new Map<string, string>(),
+      connectedSince: 0,
+    }
+    expect(seqStream.lastSequenceNum).toBe(0)
+    handleCloudSessionFrame(
+      'client_event',
+      '9',
+      JSON.stringify({
+        payload: {
+          type: 'control_request',
+          request: { subtype: 'remote_tool_call' },
+        },
+        source: 'worker',
+        sequence_num: 9,
+      }),
+      { frameState: seqState, stream: seqStream },
+    )
+    expect(seqState.lastSequenceNum).toBe(9)
+    expect(seqStream.lastSequenceNum).toBe(9)
 
     const connects: number[] = []
     const stream = createCloudSessionStreamController({
