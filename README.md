@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前源码 / 构建版本：**`2.7.307`**（压缩耗时计时对齐 2.1.289，修复一直显示 `0s`）。npm 安装：`npm i -g @go-hare/claude-code`。
+> 当前源码 / 构建版本：**`2.7.308`**（hooks、配置热更新与消息 UI 对齐 2.1.289）。npm 安装：`npm i -g @go-hare/claude-code`。
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -45,9 +45,11 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**源码 / 构建版本以 `package.json` 为准**（当前 **2.7.307**；二进制 `MACRO.VERSION` 与包版本一致）；npm 已发布版本以 registry 为准，与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**源码 / 构建版本以 `package.json` 为准**（当前 **2.7.308**；二进制 `MACRO.VERSION` 与包版本一致）；npm 已发布版本以 registry 为准，与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307）
+#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307 / 2.7.308）
+
+**2.7.308**：hooks、配置热更新与消息 UI 对齐 2.1.289。MCP 工具 hook / `postToolOutput` / Prompt·Agent·HTTP 执行器与 `AsyncHookRegistry`；settings 热更新 catch-up、managed drop-in、`fsWatchProbe`；`/resume` 无 uuid 不再崩溃，`<agent-message>` 信封只按行首剥离（避免用户粘贴误画成 Message from @agent），MCP 客户端优先 live、输入框按官方三门挂载、inbound 可点开。**不是** minify 1:1。
 
 **2.7.307**：压缩耗时计时对齐 2.1.289：开始时间与耗时计算统一使用 `Date.now()`，修复 `Compacting conversation…` 始终显示 `0s`；重复开始事件保留首次起点，结束时清空。新增真实组件渲染与状态生命周期回归，普通回复的暂停计时保持原有行为。同时修正 Linux x64 / ARM64 musl 包的编译目标，生成使用 musl 加载器的二进制。
 
