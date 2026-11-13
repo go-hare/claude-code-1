@@ -65,12 +65,12 @@ const PLATFORMS: Record<string, PlatformInfo> = {
     pkgDir: 'packages/@go-hare/claude-code-linux-arm64',
   },
   'linux-x64-musl': {
-    bunTarget: 'bun-linux-x64',
+    bunTarget: 'bun-linux-x64-musl',
     binaryName: 'claude',
     pkgDir: 'packages/@go-hare/claude-code-linux-x64-musl',
   },
   'linux-arm64-musl': {
-    bunTarget: 'bun-linux-arm64',
+    bunTarget: 'bun-linux-arm64-musl',
     binaryName: 'claude',
     pkgDir: 'packages/@go-hare/claude-code-linux-arm64-musl',
   },
