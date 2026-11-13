@@ -73,7 +73,7 @@ export type SpinnerAnimationRowProps = {
   columns: number;
   /** True while a compaction summary is streaming. */
   compactProgressActiveRef?: React.RefObject<boolean>;
-  /** densable compactingStartTime. Elapsed during compact is max(0, now - start). */
+  /** densable compactingStartTime — epoch milliseconds, paired with Date.now(). */
   compactingStartTime?: number | null;
 
   // Teammate-derived (computed by parent from tasks)
@@ -146,8 +146,9 @@ export function SpinnerAnimationRow({
   // width-100% column (verb + Tip) every tick.
   const [viewportRef, time] = useAnimationFrame(reducedMotion ? null : mode === 'requesting' ? 50 : 100);
 
-  // densable #18: monotonic elapsed (performance.now) matching loadingStartTimeRef
+  // Ordinary loading refs use the monotonic clock; compactingStartTime is an epoch timestamp.
   const now = performance.now();
+  const nowWall = Date.now();
   const loadingElapsedMs =
     pauseStartTimeRef.current !== null
       ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current
@@ -155,7 +156,9 @@ export function SpinnerAnimationRow({
   const isCompactingForElapsed = compactProgressActiveRef?.current === true;
   // densable Je: O && u !== null ? max(0, N - u) : loading elapsed.
   const elapsedTimeMs =
-    isCompactingForElapsed && compactingStartTime != null ? Math.max(0, now - compactingStartTime) : loadingElapsedMs;
+    isCompactingForElapsed && compactingStartTime != null
+      ? Math.max(0, nowWall - compactingStartTime)
+      : loadingElapsedMs;
 
   // Track wall-clock turn start for teammates. While a swarm is running the
   // leader's elapsedTimeMs may jump around (new API calls reset
@@ -229,7 +232,6 @@ export function SpinnerAnimationRow({
   }
 
   // densable Fe/qe/ze: wall-clock tool window + thinking burst.
-  const nowWall = Date.now();
   const toolWindowRef = useRef(emptySpinnerToolWindow());
   toolWindowRef.current = advanceSpinnerToolWindow(toolWindowRef.current, {
     now: nowWall,

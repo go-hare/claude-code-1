@@ -3,7 +3,7 @@
  * do not split fullscreen "Ran N bash commands" groups; popsOutOnError (edv)
  * ejects absorb on error tool_result.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { REPL_TOOL_NAME } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskUpdateTool/constants.js'
@@ -723,6 +723,46 @@ describe('densable Io Zc live Thought clock', () => {
     expect(leftoverIhrGet('compact-1').isCompacting).toBe(false)
     expect(ticks).toBeGreaterThan(0)
     unsub()
+  })
+
+  test('compact clock preserves the epoch start until completion or reset', async () => {
+    const { leftoverIhrBind, leftoverIhrGet, leftoverIhrEvict } = await import(
+      '../collapseReadSearch.js'
+    )
+    const session = 'compact-clock'
+    const start = 1_800_000_000_000
+    let now = start
+    const clock = spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      leftoverIhrEvict(session)
+      const spinner = leftoverIhrBind(session)
+      spinner.applyCompactProgress({ type: 'compact_start' })
+      expect(leftoverIhrGet(session).compactingStartTime).toBe(start)
+
+      now += 5000
+      spinner.applyCompactProgress({ type: 'compact_start' })
+      expect(leftoverIhrGet(session).compactingStartTime).toBe(start)
+      spinner.applyCompactProgress({
+        type: 'compact_start',
+        hintText: 'still summarizing',
+      })
+      expect(leftoverIhrGet(session).compactingStartTime).toBe(start)
+      expect(leftoverIhrGet(session).compactingHintText).toBe(
+        'still summarizing',
+      )
+
+      spinner.applyCompactProgress({ type: 'compact_end' })
+      expect(leftoverIhrGet(session).compactingStartTime).toBeNull()
+      expect(leftoverIhrGet(session).isCompacting).toBe(false)
+      spinner.applyCompactProgress({ type: 'compact_start' })
+      expect(leftoverIhrGet(session).compactingStartTime).toBe(now)
+      spinner.resetOverrides()
+      expect(leftoverIhrGet(session).compactingStartTime).toBeNull()
+      expect(leftoverIhrGet(session).isCompacting).toBe(false)
+    } finally {
+      leftoverIhrEvict(session)
+      clock.mockRestore()
+    }
   })
 
   test('Qrr slots window seed override and read gate', async () => {

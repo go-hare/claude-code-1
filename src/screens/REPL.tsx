@@ -4949,7 +4949,7 @@ export function REPL({
               setSpinnerMessage('Compacting conversation');
               compactProgressActiveRef.current = true;
               setCompactingHint(event.hintText ?? null);
-              setCompactingStartTime(performance.now());
+              setCompactingStartTime(start => start ?? Date.now());
               break;
             case 'compact_end':
               setSpinnerMessage(null);
