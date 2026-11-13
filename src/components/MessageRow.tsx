@@ -44,6 +44,7 @@ export type Props = {
   /** Whether the previous message in renderableMessages is also a user message. */
   isUserContinuation: boolean;
   isSplitUserContinuation?: boolean;
+  followsSpeakerLabel?: boolean;
   /**
    * Whether there is non-skippable content after this message in renderableMessages.
    * Only needs to be accurate for `collapsed_read_search` messages — used to decide
@@ -130,6 +131,7 @@ function MessageRowImpl({
   message: msg,
   isUserContinuation,
   isSplitUserContinuation,
+  followsSpeakerLabel = false,
   hasContentAfter,
   tools,
   commands,
@@ -149,6 +151,31 @@ function MessageRowImpl({
   const isTranscriptMode = screen === 'transcript';
   const isGrouped = msg.type === 'grouped_tool_use';
   const isCollapsed = msg.type === 'collapsed_read_search';
+  if (msg.type === 'work_segment' || msg.type === 'speaker_label' || msg.type === 'recap_fold') {
+    return (
+      <Message
+        message={msg}
+        lookups={lookups}
+        addMargin={true}
+        containerWidth={columns}
+        tools={tools}
+        commands={commands}
+        verbose={verbose}
+        inProgressToolUseIDs={inProgressToolUseIDs}
+        progressMessagesForMessage={[]}
+        shouldAnimate={false}
+        shouldShowDot={false}
+        isTranscriptMode={isTranscriptMode}
+        isStatic={true}
+        onOpenRateLimitOptions={onOpenRateLimitOptions}
+        isUserContinuation={isUserContinuation}
+        isSplitUserContinuation={isSplitUserContinuation}
+        followsSpeakerLabel={followsSpeakerLabel}
+        lastThinkingBlockId={lastThinkingBlockId ?? null}
+        latestBashOutputUUID={latestBashOutputUUID}
+      />
+    );
+  }
 
   // A collapsed group is "active" (grey dot, present tense "Reading…") when its tools
   // are still executing OR when the overall query is still running with nothing after it.
@@ -215,6 +242,7 @@ function MessageRowImpl({
       isActiveCollapsedGroup={isActiveCollapsedGroup}
       isUserContinuation={isUserContinuation}
       isSplitUserContinuation={isSplitUserContinuation}
+      followsSpeakerLabel={followsSpeakerLabel}
       hasMetadataHeader={hasMetadata}
       lastThinkingBlockId={lastThinkingBlockId ?? null}
       latestBashOutputUUID={latestBashOutputUUID}
@@ -263,6 +291,8 @@ export function isMessageStreaming(msg: RenderableMessage, streamingToolUseIDs: 
     const toolIds = getToolUseIdsFromCollapsedGroup(msg);
     return toolIds.some(id => streamingToolUseIDs.has(id));
   }
+  if (msg.type === 'work_segment') return msg.isLive === true;
+  if (msg.type === 'speaker_label' || msg.type === 'recap_fold') return false;
   const toolUseID = getToolUseID(msg);
   return !!toolUseID && streamingToolUseIDs.has(toolUseID);
 }
@@ -288,6 +318,8 @@ export function allToolsResolved(msg: RenderableMessage, resolvedToolUseIDs: Set
       return resolvedToolUseIDs.has(block.id!);
     }
   }
+  if (msg.type === 'work_segment') return msg.isLive !== true;
+  if (msg.type === 'speaker_label' || msg.type === 'recap_fold') return true;
   const toolUseID = getToolUseID(msg);
   return !toolUseID || resolvedToolUseIDs.has(toolUseID);
 }

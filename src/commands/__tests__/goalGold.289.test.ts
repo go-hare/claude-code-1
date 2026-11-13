@@ -278,15 +278,64 @@ describe('runtime tool pool', () => {
 
 describe('gold Stop eval (source)', () => {
   test('ok:false prompt hook does not preventContinuation', async () => {
-    const src = await Bun.file(
-      join(ROOT, 'src/utils/hooks/execPromptHook.ts'),
-    ).text()
-    const idx = src.indexOf('Prompt hook condition was not met')
-    expect(idx).toBeGreaterThan(0)
-    const slice = src.slice(idx, idx + 700)
-    expect(slice).toContain('stopReason: parsed.data.reason')
-    expect(slice).not.toContain('preventContinuation: true')
-  })
+    // Isolate the API spy from Bun's process-global module registry. Exercise
+    // the real executor so this regression survives changes to logging text.
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        '--eval',
+        `
+      import {expect, mock, spyOn} from 'bun:test'
+      import {debugMock} from './tests/mocks/debug.ts'
+      import {logMock} from './tests/mocks/log.ts'
+      mock.module('src/utils/debug.ts', debugMock)
+      mock.module('src/utils/log.ts', logMock)
+      mock.module('bun:bundle', () => ({feature: () => false}))
+      const api = await import('./src/services/api/claude.ts')
+      const evaluator = spyOn(api, 'queryModelWithoutStreaming').mockResolvedValue({
+        type: 'assistant',
+        message: {content: [{type: 'text', text: '{"ok":false,"reason":"goal not yet reached"}'}]},
+      })
+      const {execPromptHook} = await import('./src/utils/hooks/execPromptHook.ts')
+      const abortController = new AbortController()
+      const context = {
+        abortController,
+        options: {tools: []},
+        getAppState: () => ({toolPermissionContext: {}}),
+        setResponseLength: () => {},
+      }
+      const hook = {type: 'prompt', prompt: 'Finish the goal', model: 'claude-haiku-4-5'}
+      for (const event of ['Stop', 'SubagentStop']) {
+        const result = await execPromptHook(hook, event, event, '{}', abortController.signal, context, [])
+        expect(result.outcome).toBe('blocking')
+        expect(result.blockingError.blockingError).toContain('goal not yet reached')
+        expect(result.stopReason).toBe('goal not yet reached')
+        expect(result.preventContinuation).toBe(false)
+      }
+      // The same unmet condition does stop a non-Stop event by default.
+      const other = await execPromptHook(hook, 'PostToolUse', 'PostToolUse', '{}', abortController.signal, context, [])
+      expect(other.preventContinuation).toBe(true)
+      expect(evaluator).toHaveBeenCalledTimes(3)
+    `,
+      ],
+      {
+        cwd: ROOT,
+        env: { ...process.env, DISABLE_TELEMETRY: '1' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    )
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect({ code, stdout, stderr }).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    })
+  }, 30000)
 
   test('stopHooks yields active_goal on met and not_met', async () => {
     const src = await Bun.file(join(ROOT, 'src/query/stopHooks.ts')).text()

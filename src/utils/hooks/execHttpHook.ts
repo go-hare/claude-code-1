@@ -126,6 +126,7 @@ export async function execHttpHook(
   _hookEvent: HookEvent,
   jsonInput: string,
   signal?: AbortSignal,
+  defaultTimeoutMs = DEFAULT_HTTP_HOOK_TIMEOUT_MS,
 ): Promise<{
   ok: boolean
   statusCode?: number
@@ -145,9 +146,7 @@ export async function execHttpHook(
     }
   }
 
-  const timeoutMs = hook.timeout
-    ? hook.timeout * 1000
-    : DEFAULT_HTTP_HOOK_TIMEOUT_MS
+  const timeoutMs = hook.timeout ? hook.timeout * 1000 : defaultTimeoutMs
 
   const { signal: combinedSignal, cleanup } = createCombinedAbortSignal(
     signal,

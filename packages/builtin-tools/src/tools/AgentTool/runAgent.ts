@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import { subagentStartHookMessages } from './subagentStartHookMessages.js'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
@@ -846,6 +847,9 @@ export async function* runAgent({
     agentDefinition.agentType,
     agentAbortController.signal,
   )) {
+    initialMessages.push(
+      ...subagentStartHookMessages(hookResult, agentDefinition.agentType),
+    )
     if (
       hookResult.additionalContexts &&
       hookResult.additionalContexts.length > 0

@@ -654,6 +654,7 @@ export function filterToolProgressMessages(
 
 export type ToolResult<T> = {
   data: T
+  classifierContext?: string
   newMessages?: (
     | UserMessage
     | AssistantMessage
@@ -831,6 +832,7 @@ export type Tool<
   // Optional because TungstenTool doesn't define this. TODO: Make it required.
   // When we do that, we can also go through and make this a bit more type-safe.
   outputSchema?: z.ZodType<unknown>
+  restoreTransientForRemap?(original: Output, rewritten: Output): Output
   inputsEquivalent?(a: z.infer<Input>, b: z.infer<Input>): boolean
   /**
    * densable 2.1.235 #12 — when true for this input, hosts must omit the

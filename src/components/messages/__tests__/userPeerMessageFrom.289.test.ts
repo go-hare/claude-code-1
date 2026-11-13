@@ -4,7 +4,11 @@ import { join } from 'node:path'
 import {
   isInSessionPeerOrObserverOrigin,
   isPeerInboundExpandClickable,
+  isTeammateMessageExpandClickable,
+  isUserTextExpandClickable,
   looksLikeAgentMessageEnvelope,
+  peerMessageHasCollapsedWhitespace,
+  stripPeerOverflowFrame,
   peerOrObserverDisplayName,
   shouldPaintAgentInboundRow,
 } from '../../../utils/messages.js'
@@ -132,6 +136,17 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
       '<agent-message from="general-purpose">\n[Subagent hand-back] report\n</agent-message>'
     expect(looksLikeAgentMessageEnvelope(envelope)).toBe(true)
     expect(looksLikeAgentMessageEnvelope('hello')).toBe(false)
+    expect(
+      looksLikeAgentMessageEnvelope(
+        '先 jg 剥 <agent-message> 再折行。本地 labelled 直接：',
+      ),
+    ).toBe(false)
+    expect(
+      shouldPaintAgentInboundRow(
+        undefined,
+        '先 jg 剥 <agent-message> 再折行。本地 labelled 直接：',
+      ),
+    ).toBe(false)
     expect(shouldPaintAgentInboundRow(undefined, envelope)).toBe(true)
     expect(shouldPaintAgentInboundRow({ kind: 'peer' }, envelope)).toBe(true)
     expect(shouldPaintAgentInboundRow(undefined, 'hello')).toBe(false)
@@ -145,6 +160,52 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
       isPeerInboundExpandClickable({
         type: 'user',
         message: { content: [{ type: 'text', text: envelope }] },
+      }),
+    ).toBe(true)
+  })
+
+  test('Ydn teammate envelope is clickable when agent teams are on', () => {
+    const prev = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+    process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
+    try {
+      expect(
+        isTeammateMessageExpandClickable(
+          '<teammate-message teammate_id="a">hi</teammate-message>',
+        ),
+      ).toBe(true)
+      expect(
+        isUserTextExpandClickable(
+          '<teammate-message teammate_id="a">hi</teammate-message>',
+        ),
+      ).toBe(true)
+    } finally {
+      if (prev === undefined)
+        delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+      else process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = prev
+    }
+  })
+
+  test('hmr hostInjected uses T() before whitespace collapse', () => {
+    expect(peerMessageHasCollapsedWhitespace('hello', false)).toBe(false)
+    expect(peerMessageHasCollapsedWhitespace('hello\nworld', false)).toBe(true)
+    const wrapped =
+      '<cross-session-message from="a">\nhello\nworld\n</cross-session-message>'
+    expect(stripPeerOverflowFrame(wrapped, false)).toBe('hello\nworld')
+    expect(peerMessageHasCollapsedWhitespace(wrapped, false)).toBe(true)
+    expect(
+      isUserTextExpandClickable(wrapped, {
+        kind: 'peer',
+        hostInjected: true,
+      }),
+    ).toBe(true)
+  })
+
+  test('plain user text is not clickable; peer origin is', () => {
+    expect(isUserTextExpandClickable('hello')).toBe(false)
+    expect(
+      isUserTextExpandClickable('hello', {
+        kind: 'peer',
+        senderTaskId: 'a-1',
       }),
     ).toBe(true)
   })
@@ -197,12 +258,16 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
     expect(src).toContain('origin={att.origin}')
   })
 
-  test('jg strips envelope even with system-reminder wrap', () => {
+  test('jg only strips a leading agent-message envelope', () => {
     expect(
       stripAgentMessageEnvelope(
-        '<system-reminder>\n<agent-message from="general-purpose">\nworker done\n</agent-message>\n</system-reminder>',
+        '<agent-message from="general-purpose">\nworker done\n</agent-message>',
       ),
     ).toBe('worker done')
+    const wrapped =
+      '<system-reminder>\n<agent-message from="general-purpose">\nworker done\n</agent-message>\n</system-reminder>'
+    expect(stripAgentMessageEnvelope(wrapped)).toBe(wrapped)
+    expect(looksLikeAgentMessageEnvelope(wrapped)).toBe(false)
     expect(
       parseAgentMessageFromAttr(
         '<agent-message from="general-purpose">\nx\n</agent-message>',
@@ -246,7 +311,7 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
       join(import.meta.dir, '../../Messages.tsx'),
       'utf8',
     )
-    expect(src).toContain('isPeerInboundExpandClickable')
+    expect(src).toContain('isUserTextExpandClickable')
     expect(src).not.toContain('export function tx(')
   })
 

@@ -149,9 +149,16 @@ import {
   COMMAND_ARGS_TAG,
   COMMAND_MESSAGE_TAG,
   COMMAND_NAME_TAG,
+  CROSS_SESSION_MESSAGE_TAG,
   LOCAL_COMMAND_CAVEAT_TAG,
   LOCAL_COMMAND_STDOUT_TAG,
+  TEAMMATE_MESSAGE_TAG,
 } from '../constants/xml.js'
+import {
+  agentMessageOverflow,
+  stripAgentMessageEnvelope,
+} from './crossSessionMessage.js'
+import { sanitizeInvisibleText } from './plugins/escapeSafeText.js'
 import { DiagnosticTrackingService } from '../services/diagnosticTracking.js'
 import {
   findToolByName,
@@ -817,6 +824,7 @@ export function createUserMessage({
   toolUseResult,
   mcpMeta,
   toolEndsTurn,
+  hostClassifierContext,
   uuid,
   timestamp,
   imagePasteIds,
@@ -846,6 +854,7 @@ export function createUserMessage({
    * (and MCP claude/endTurn) ask query not to recurse.
    */
   toolEndsTurn?: boolean
+  hostClassifierContext?: string
   uuid?: UUID | string
   timestamp?: string
   imagePasteIds?: number[]
@@ -895,6 +904,11 @@ export function createUserMessage({
     toolUseResult,
     mcpMeta,
     toolEndsTurn,
+    hostClassifierContext:
+      Array.isArray(content) &&
+      content.filter(block => block.type === 'tool_result').length === 1
+        ? hostClassifierContext
+        : undefined,
     imagePasteIds,
     sourceToolAssistantUUID,
     permissionMode,
@@ -8403,16 +8417,26 @@ export function isInSessionPeerOrObserverOrigin(
   )
 }
 
+function afterPeerPreface(text: string): string {
+  const prefixes = [
+    `${PEER_ORIGIN_HEAD_MIDTURN}\n`,
+    `${PEER_ORIGIN_HEAD_TURNSTART}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_MIDTURN}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_TURNSTART}\n`,
+  ]
+  const prefix = prefixes.find(head => text.startsWith(head))
+  return prefix ? text.slice(prefix.length) : text
+}
+
 /**
- * densable fme open tag — first-frame placeholder / queued_command may land
- * before origin is stamped. Envelope is enough to paint Wr instead of a
- * user bubble (expand-then-collapse flash).
+ * densable fme open tag at the start (after Zoe preface). Mentions of the
+ * tag in a normal user paste must not paint Wr.
  */
 export function looksLikeAgentMessageEnvelope(
   text: string | undefined,
 ): boolean {
   if (!text) return false
-  return text.includes(`<${AGENT_MESSAGE_TAG}`)
+  return /^<agent-message(?:\s|>)/.test(afterPeerPreface(text))
 }
 
 /** densable Wr first paint: uM(origin) OR fme envelope. */
@@ -8462,7 +8486,8 @@ export function isPeerInboundExpandClickable(msg: {
               .map(block => block.text ?? '')
               .join('\n')
           : undefined
-    return shouldPaintAgentInboundRow(att.origin, promptText)
+    if (typeof promptText !== 'string') return false
+    return isUserTextExpandClickable(promptText, att.origin)
   }
   if (msg.type === 'user') {
     const content = msg.message?.content
@@ -8473,9 +8498,125 @@ export function isPeerInboundExpandClickable(msg: {
           ? content[0].text
           : undefined
     if (typeof text !== 'string') return false
-    return shouldPaintAgentInboundRow(msg.origin, text)
+    return isUserTextExpandClickable(text, msg.origin)
   }
   return false
+}
+
+/**
+ * densable Ydn — teammate-message envelope when agent teams (Lo) is on.
+ * Gold hTe: `<teammate-message ` or the iwe preface then the tag.
+ */
+export function isTeammateMessageExpandClickable(text: string): boolean {
+  if (!isAgentSwarmsEnabled()) return false
+  if (
+    text.startsWith(`<${TEAMMATE_MESSAGE_TAG} `) ||
+    text.startsWith(`<${TEAMMATE_MESSAGE_TAG}>`)
+  ) {
+    return true
+  }
+  return (
+    text.startsWith('Another Claude session sent a message') &&
+    text.includes(`<${TEAMMATE_MESSAGE_TAG}`)
+  )
+}
+
+/**
+ * densable T — strip Zoe prefaces and post-close tails. hostInjected also
+ * drops aWt (HOST_INJECTED_ALREADY_FRAMED_TAILS).
+ */
+export function stripPeerOverflowFrame(
+  text: string,
+  hostInjected: boolean,
+): string {
+  let o = text
+  const prefixes = [
+    `${PEER_ORIGIN_HEAD_MIDTURN}\n`,
+    `${PEER_ORIGIN_HEAD_TURNSTART}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_MIDTURN}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_TURNSTART}\n`,
+  ]
+  const prefix = prefixes.find(head => o.startsWith(head))
+  if (prefix) o = o.slice(prefix.length)
+  const close = `</${CROSS_SESSION_MESSAGE_TAG}>`
+  const end = o.lastIndexOf(close)
+  if (end !== -1) {
+    const after = o.slice(end + close.length)
+    const tails = [
+      ...PEER_ALREADY_FRAMED_TAILS,
+      ...(hostInjected ? HOST_INJECTED_ALREADY_FRAMED_TAILS : []),
+    ]
+    if (tails.includes(after)) o = o.slice(0, end + close.length)
+  }
+  return o
+    .replace(new RegExp(`^<${CROSS_SESSION_MESSAGE_TAG}[^>]*>\\n`), '')
+    .replace(new RegExp(`\\n</${CROSS_SESSION_MESSAGE_TAG}>$`), '')
+}
+
+/**
+ * densable hmr — after T(), collapsed whitespace differs from the source.
+ */
+export function peerMessageHasCollapsedWhitespace(
+  text: string,
+  hostInjected: boolean,
+): boolean {
+  const stripped = stripPeerOverflowFrame(text, hostInjected)
+  const collapsed = sanitizeInvisibleText(stripped, ' ', {
+    keepEmojiJoiners: true,
+  })
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped !== collapsed
+}
+
+/**
+ * densable Tl — ese envelope then hmr only. ua/JYt stays on the labelled path.
+ */
+export function isEnvelopeWrapOverflowClickable(
+  text: string,
+  origin: { kind?: string; hostInjected?: unknown } | undefined,
+): boolean {
+  if (
+    !looksLikeAgentMessageEnvelope(text) &&
+    !text.includes(`<${CROSS_SESSION_MESSAGE_TAG}`)
+  ) {
+    return false
+  }
+  return peerMessageHasCollapsedWhitespace(
+    text,
+    origin?.kind === 'peer' && origin.hostInjected === true,
+  )
+}
+
+/**
+ * densable tx user-text / queued_command prompt branch.
+ * Unlabelled: uM || Ydn || Tl. Labelled (follows speaker_label/inbound): uM && JYt.
+ */
+export function isUserTextExpandClickable(
+  text: string,
+  origin?: {
+    kind?: string
+    senderTaskId?: unknown
+    hostInjected?: unknown
+    handback?: unknown
+    flagged?: unknown
+  },
+  opts?: { labelled?: boolean; columns?: number },
+): boolean {
+  if (!text) return false
+  if (opts?.labelled) {
+    if (!isInSessionPeerOrObserverOrigin(origin)) return false
+    if (isPeerHandbackOrFlaggedOrigin(origin)) return false
+    const columns = Math.max(1, opts.columns ?? 80)
+    return (
+      agentMessageOverflow(stripAgentMessageEnvelope(text), columns) !== null
+    )
+  }
+  return (
+    isInSessionPeerOrObserverOrigin(origin) ||
+    isTeammateMessageExpandClickable(text) ||
+    isEnvelopeWrapOverflowClickable(text, origin)
+  )
 }
 
 /**

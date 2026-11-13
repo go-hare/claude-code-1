@@ -58,7 +58,7 @@ import {
   hasUnresolvedHooksFromLookup,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
-  isPeerInboundExpandClickable,
+  isUserTextExpandClickable,
   isNotEmptyMessage,
   normalizeMessages,
   reorderMessagesInUI,
@@ -69,6 +69,11 @@ import { plural } from '../utils/stringUtils.js';
 import { isOutputLineTruncated } from '../utils/terminal.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
 import { unescapeXmlEntities } from '../utils/xml.js';
+import {
+  findRenderableIndexByUuidPrefix,
+  messageHasUuid,
+  UUID_PREFIX_LENGTH,
+} from '../utils/plugins/uiSelectionRowHolding.js';
 import { Divider } from '@anthropic/ink';
 import type { UnseenDivider } from './FullscreenLayout.js';
 import { LogoV2 } from './LogoV2/LogoV2.js';
@@ -557,13 +562,13 @@ export type SliceAnchor = { uuid: string; idx: number } | null;
 
 /** Exported for testing. Mutates anchorRef when the window needs to advance. */
 export function computeSliceStart(
-  collapsed: ReadonlyArray<{ uuid: string }>,
+  collapsed: ReadonlyArray<{ uuid?: string }>,
   anchorRef: { current: SliceAnchor },
   cap = MAX_MESSAGES_WITHOUT_VIRTUALIZATION,
   step = MESSAGE_CAP_STEP,
 ): number {
   const anchor = anchorRef.current;
-  const anchorIdx = anchor ? collapsed.findIndex(m => m.uuid === anchor.uuid) : -1;
+  const anchorIdx = anchor ? collapsed.findIndex(m => m.uuid !== undefined && m.uuid === anchor.uuid) : -1;
   // Anchor found → use it. Anchor lost → fall back to stored index
   // (clamped) so collapse-regrouping uuid churn doesn't reset to 0.
   let start = anchorIdx >= 0 ? anchorIdx : anchor ? Math.min(anchor.idx, Math.max(0, collapsed.length - cap)) : 0;
@@ -573,7 +578,7 @@ export function computeSliceStart(
   // Refresh anchor from whatever lives at the current start — heals a
   // stale uuid after fallback and captures a new one after advancement.
   const msgAtStart = collapsed[start];
-  if (msgAtStart && (anchor?.uuid !== msgAtStart.uuid || anchor.idx !== start)) {
+  if (msgAtStart && typeof msgAtStart.uuid === 'string' && (anchor?.uuid !== msgAtStart.uuid || anchor.idx !== start)) {
     anchorRef.current = { uuid: msgAtStart.uuid, idx: start };
   } else if (!msgAtStart && anchor) {
     anchorRef.current = null;
@@ -1399,19 +1404,13 @@ const MessagesImpl = ({
     [renderableMessages, tools, streamingToolUseIDs],
   );
 
-  // Divider insertion point and selected index: combined into a single pass
-  // over renderableMessages to avoid two separate findIndex traversals.
+  // densable 2.1.289: fw(renderable, nested, y6 prefix) + dN cursor match.
+  // Never call m.uuid.slice — resumed transcripts can contain rows without uuid.
   const { dividerBeforeIndex, selectedIdx } = useMemo(() => {
     if (!unseenDivider && !cursor) return { dividerBeforeIndex: -1, selectedIdx: -1 };
-    let dIdx = -1;
-    let sIdx = -1;
-    const prefix = unseenDivider?.firstUnseenUuid.slice(0, 24);
-    for (let i = 0; i < renderableMessages.length; i++) {
-      const m = renderableMessages[i];
-      if (dIdx === -1 && prefix && m.uuid.slice(0, 24) === prefix) dIdx = i;
-      if (sIdx === -1 && cursor && m.uuid === cursor.uuid) sIdx = i;
-      if (dIdx !== -1 && sIdx !== -1) break;
-    }
+    const prefix = unseenDivider?.firstUnseenUuid.slice(0, UUID_PREFIX_LENGTH);
+    const dIdx = prefix === undefined ? -1 : findRenderableIndexByUuidPrefix(renderableMessages, true, prefix);
+    const sIdx = cursor ? renderableMessages.findIndex(m => messageHasUuid(m) && m.uuid === cursor.uuid) : -1;
     return { dividerBeforeIndex: dIdx, selectedIdx: sIdx };
   }, [unseenDivider, cursor, renderableMessages]);
 
@@ -1462,7 +1461,25 @@ const MessagesImpl = ({
       if (msg.type === 'attachment') {
         if (verbose || isTranscriptMode) return false;
         if (msg.attachment?.type === 'queued_command') {
-          return isPeerInboundExpandClickable(msg);
+          const prompt = msg.attachment.prompt;
+          const promptText =
+            typeof prompt === 'string'
+              ? prompt
+              : Array.isArray(prompt)
+                ? prompt
+                    .filter(
+                      (block): block is { type?: string; text?: string } =>
+                        typeof block === 'object' && block !== null && (block as { type?: string }).type === 'text',
+                    )
+                    .map(block => block.text ?? '')
+                    .join('\n')
+                : '';
+          const idx = renderableMessages.indexOf(msg);
+          const labelled = idx > 0 && renderableMessages[idx - 1]?.type === 'speaker_label';
+          return isUserTextExpandClickable(promptText, msg.attachment.origin as { kind?: string } | undefined, {
+            labelled,
+            columns,
+          });
         }
         if (msg.attachment?.type === 'teammate_mailbox') {
           return Array.isArray(msg.attachment.messages) && msg.attachment.messages.length > 0;
@@ -1503,9 +1520,11 @@ const MessagesImpl = ({
         }
         return isOutputLineTruncated(parsed.stdout, columns) || isOutputLineTruncated(parsed.stderr, columns);
       }
-      if (b?.type === 'text') {
+      if (b?.type === 'text' && typeof b.text === 'string') {
         if (verbose || isTranscriptMode) return false;
-        return isPeerInboundExpandClickable(msg);
+        const idx = renderableMessages.indexOf(msg);
+        const labelled = idx > 0 && renderableMessages[idx - 1]?.type === 'speaker_label';
+        return isUserTextExpandClickable(b.text, msg.origin, { labelled, columns });
       }
       if (b?.type !== 'tool_result') return false;
       if (b.is_error) {
@@ -1516,7 +1535,7 @@ const MessagesImpl = ({
       const tool = name ? findToolByName(tools, name) : undefined;
       return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
-    [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID],
+    [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID, renderableMessages],
   );
 
   const canAnimate =
@@ -1541,12 +1560,16 @@ const MessagesImpl = ({
     return () => progress(null);
   }, [progress]);
 
-  const messageKey = useCallback((msg: RenderableMessage) => `${msg.uuid}-${conversationId}`, [conversationId]);
+  const messageKey = useCallback(
+    (msg: RenderableMessage) => (messageHasUuid(msg) ? `${msg.uuid}-${conversationId}` : `no-uuid:${conversationId}`),
+    [conversationId],
+  );
 
   const renderMessageRow = useCallback(
     (msg: RenderableMessage, index: number) => {
       const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
       const isUserContinuation = msg.type === 'user' && prevType === 'user';
+      const followsSpeakerLabel = prevType === 'speaker_label';
       // Official 2.1.289: collapsed && (!!streamingText || index < lastContentIndex).
       const hasContentAfter = msg.type === 'collapsed_read_search' && (!!hasStreamingText || index < lastContentIndex);
 
@@ -1556,6 +1579,7 @@ const MessagesImpl = ({
           key={k}
           message={msg}
           isUserContinuation={isUserContinuation}
+          followsSpeakerLabel={followsSpeakerLabel}
           hasContentAfter={hasContentAfter}
           tools={tools}
           commands={commands}
@@ -1818,7 +1842,10 @@ export function filterStreamingToolUsesWithoutInProgress(
 /** Key for click-to-expand: tool_use_id where available (so tool_use + its
  *  tool_result expand together), else uuid for groups/thinking. */
 function expandKey(msg: RenderableMessage): string {
-  return (msg.type === 'assistant' || msg.type === 'user' ? getToolUseID(msg) : null) ?? msg.uuid;
+  return (
+    (msg.type === 'assistant' || msg.type === 'user' ? getToolUseID(msg) : null) ??
+    (messageHasUuid(msg) ? msg.uuid : '')
+  );
 }
 
 // Custom comparator to prevent unnecessary re-renders during streaming.

@@ -246,6 +246,8 @@ import {
 } from 'src/utils/gracefulShutdown.js'
 import { createAbortErrorReason } from 'src/utils/abortController.js'
 import { registerCleanup } from 'src/utils/cleanupRegistry.js'
+import { getBootstrapSession } from 'src/utils/sessionRoot.js'
+import { preferLiveMcpClients } from 'src/hooks/useMergedClients.js'
 import { createIdleTimeoutManager } from 'src/utils/idleTimeout.js'
 import type {
   SDKStatus,
@@ -2426,6 +2428,11 @@ function runHeadlessStreaming(
     tools: [],
     configs: {},
   }
+  const releaseMcpClientsAccessor =
+    getBootstrapSession().mcpSessionWiring.acquireClientsAccessor(() =>
+      preferLiveMcpClients(dynamicMcpState.clients, getAppState().mcp.clients),
+    )
+  registerCleanup(releaseMcpClientsAccessor)
 
   // densable 2.1.243 #11 `mS` — -p/SDK never mounted useManageMCPConnections,
   // so remote MCP onclose never reconnected or marked failed.

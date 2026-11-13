@@ -475,6 +475,7 @@ export const PreToolUseHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('PreToolUse'),
       tool_name: z.string(),
+      mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
       tool_input: z.unknown(),
       tool_use_id: z.string(),
     }),
@@ -486,6 +487,7 @@ export const PermissionRequestHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('PermissionRequest'),
       tool_name: z.string(),
+      mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
       tool_input: z.unknown(),
       permission_suggestions: z.array(PermissionUpdateSchema()).optional(),
     }),
@@ -497,8 +499,10 @@ export const PostToolUseHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('PostToolUse'),
       tool_name: z.string(),
+      mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
       tool_input: z.unknown(),
       tool_response: z.unknown(),
+      duration_ms: z.number().optional(),
       tool_use_id: z.string(),
     }),
   ),
@@ -509,10 +513,12 @@ export const PostToolUseFailureHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('PostToolUseFailure'),
       tool_name: z.string(),
+      mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
       tool_input: z.unknown(),
       tool_use_id: z.string(),
       error: z.string(),
       is_interrupt: z.boolean().optional(),
+      duration_ms: z.number().optional(),
     }),
   ),
 )
@@ -545,6 +551,7 @@ export const PermissionDeniedHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('PermissionDenied'),
       tool_name: z.string(),
+      mcp_server: z.object({ name: z.string(), source: z.string() }).optional(),
       tool_input: z.unknown(),
       tool_use_id: z.string(),
       reason: z.string(),
@@ -1083,6 +1090,8 @@ export const PostToolUseHookSpecificOutputSchema = lazySchema(() =>
   z.object({
     hookEventName: z.literal('PostToolUse'),
     additionalContext: z.string().optional(),
+    classifierContext: z.string().optional(),
+    updatedToolOutput: z.unknown().optional(),
     updatedMCPToolOutput: z.unknown().optional(),
   }),
 )

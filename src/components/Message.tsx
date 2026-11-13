@@ -21,7 +21,10 @@ import type {
   GroupedToolUseMessage as GroupedToolUseMessageType,
   NormalizedUserMessage,
   ProgressMessage,
+  RecapFoldMessage,
+  SpeakerLabelMessage,
   SystemMessage,
+  WorkSegmentMessage,
 } from '../types/message.js';
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
@@ -59,7 +62,10 @@ export type Props = {
     | AttachmentMessageType
     | SystemMessage
     | GroupedToolUseMessageType
-    | CollapsedReadSearchGroupType;
+    | CollapsedReadSearchGroupType
+    | WorkSegmentMessage
+    | SpeakerLabelMessage
+    | RecapFoldMessage;
   lookups: ReturnType<typeof buildMessageLookups>;
   // TODO: Find a way to remove this, and leave spacing to the consumer
   /** Absolute width for the container Box. When provided, eliminates a wrapper Box in the caller. */
@@ -81,6 +87,8 @@ export type Props = {
   isUserContinuation?: boolean;
   isSplitUserContinuation?: boolean;
   hasMetadataHeader?: boolean;
+  /** densable oC followsSpeakerLabel — previous renderable row is speaker_label. */
+  followsSpeakerLabel?: boolean;
   /** Last thinking block(s) (uuid:index) visible in transcript; Set = one per turn. */
   lastThinkingBlockId?: string | ReadonlySet<string> | null;
   /** UUID of the latest user bash output message (for auto-expanding) */
@@ -107,6 +115,7 @@ function MessageImpl({
   isUserContinuation = false,
   isSplitUserContinuation = false,
   hasMetadataHeader = false,
+  followsSpeakerLabel = false,
   lastThinkingBlockId,
   latestBashOutputUUID,
 }: Props): React.ReactNode {
@@ -226,6 +235,7 @@ function MessageImpl({
               isUserContinuation={isUserContinuation}
               isSplitUserContinuation={isSplitUserContinuation}
               hasMetadataHeader={hasMetadataHeader}
+              followsSpeakerLabel={followsSpeakerLabel}
               lookups={lookups}
               isTranscriptMode={isTranscriptMode}
             />
@@ -329,6 +339,11 @@ function MessageImpl({
           />
         </OffscreenFreeze>
       );
+    case 'work_segment':
+    case 'speaker_label':
+    case 'recap_fold':
+      // densable oC: cowork UI kit (`ct`). Without it official returns null.
+      return null;
   }
 }
 
@@ -344,6 +359,7 @@ function UserMessage({
   isUserContinuation,
   isSplitUserContinuation,
   hasMetadataHeader,
+  followsSpeakerLabel,
   lookups,
   isTranscriptMode,
 }: {
@@ -358,6 +374,7 @@ function UserMessage({
   isUserContinuation: boolean;
   isSplitUserContinuation: boolean;
   hasMetadataHeader: boolean;
+  followsSpeakerLabel: boolean;
   lookups: ReturnType<typeof buildMessageLookups>;
   isTranscriptMode: boolean;
 }): React.ReactNode {
@@ -386,6 +403,7 @@ function UserMessage({
           requestId={message.uuid}
           origin={origin}
           isExpanded={isTranscriptMode}
+          followsSpeakerLabel={followsSpeakerLabel}
           {...(task !== undefined && { task })}
           {...(from !== undefined && { from })}
         />

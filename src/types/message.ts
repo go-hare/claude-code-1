@@ -59,6 +59,31 @@ import type {
 import type { UUID } from 'crypto'
 import type { StopHookInfo } from '@ant/model-provider'
 
+/** densable oC work_segment — cowork kit row wrapping a burst of messages. */
+export type WorkSegmentMessage = {
+  type: 'work_segment'
+  uuid?: UUID
+  messages: unknown[]
+  isLive?: boolean
+  [key: string]: unknown
+}
+
+/** densable oC speaker_label — cowork kit speaker chip. */
+export type SpeakerLabelMessage = {
+  type: 'speaker_label'
+  uuid?: UUID
+  speaker?: { kind?: string; name?: string; [key: string]: unknown }
+  [key: string]: unknown
+}
+
+/** densable oC recap_fold — cowork kit recap notices. */
+export type RecapFoldMessage = {
+  type: 'recap_fold'
+  uuid?: UUID
+  notices: unknown[]
+  [key: string]: unknown
+}
+
 export type RenderableMessage =
   | AssistantMessage
   | UserMessage
@@ -74,6 +99,9 @@ export type RenderableMessage =
   | (import('@ant/model-provider').Message & { type: 'progress' })
   | import('@ant/model-provider').GroupedToolUseMessage
   | CollapsedReadSearchGroup
+  | WorkSegmentMessage
+  | SpeakerLabelMessage
+  | RecapFoldMessage
 
 export type CollapsedReadSearchGroup = {
   type: 'collapsed_read_search'

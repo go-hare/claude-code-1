@@ -336,6 +336,7 @@ describe('function-hooks classic pattern', () => {
           ToolUseContext['getAppState']
         >,
       abortController: new AbortController(),
+      options: { tools: [], mcpClients: [] },
     } as unknown as ToolUseContext
     const yielded: Array<{ permissionBehavior?: string }> = []
     const confined: Array<{ permissionBehavior?: string }> = []
@@ -404,6 +405,7 @@ describe('function-hooks classic pattern', () => {
           ToolUseContext['getAppState']
         >,
       abortController: new AbortController(),
+      options: { tools: [], mcpClients: [] },
     } as unknown as ToolUseContext
     try {
       for await (const _ of executePreToolHooks(

@@ -28,8 +28,10 @@ import {
   messageHasUuid,
   messageRowSpan,
   messageSelectionRequestId,
+  messageUuidPrefix,
   requestIdHoldingSelection,
   setUiSelectionRowHolding,
+  UUID_PREFIX_LENGTH,
 } from '../utils/plugins/uiSelectionRowHolding.js';
 import { setTranscriptRevealHost, type TranscriptRevealBlock } from '../utils/plugins/transcriptReveal.js';
 import {
@@ -41,8 +43,6 @@ import {
   toolCallOf,
 } from './messageActions.js';
 
-/** densable `_H` — uuid prefix fallback match length. */
-const UUID_REVEAL_PREFIX = 24;
 /** densable `U0` — settle window after first land (ms). */
 const REVEAL_SETTLE_MS = 2000;
 /** densable `B0` — give-up timeout (ms). */
@@ -576,7 +576,7 @@ export function VirtualMessageList({
       msg =>
         messageHasUuid(msg) &&
         requestId.length === msg.uuid.length &&
-        msg.uuid.slice(0, UUID_REVEAL_PREFIX) === requestId.slice(0, UUID_REVEAL_PREFIX),
+        messageUuidPrefix(msg) === requestId.slice(0, UUID_PREFIX_LENGTH),
     );
   }, []);
 

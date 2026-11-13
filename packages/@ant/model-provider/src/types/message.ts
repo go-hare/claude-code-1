@@ -133,6 +133,8 @@ export type UserMessage = Message & {
    * so query ends the turn instead of recursing (StructuredOutput + max_turns=1).
    */
   toolEndsTurn?: boolean
+  /** Host assertion for the permission classifier; live authority is never serialized. */
+  hostClassifierContext?: string
   /** MCP protocol metadata (never sent to the model). */
   mcpMeta?: {
     _meta?: Record<string, unknown>

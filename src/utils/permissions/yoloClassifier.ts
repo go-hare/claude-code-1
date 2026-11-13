@@ -1,4 +1,9 @@
 import { feature } from 'bun:bundle'
+import {
+  capHostClassifierContext,
+  isLiveHostClassifierContext,
+  HOST_CLASSIFIER_CONTEXT_GUIDANCE,
+} from './hostClassifierContext.js'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   APIConnectionError,
@@ -423,6 +428,14 @@ export const YOLO_CLASSIFIER_TOOL_NAME = 'classify_result'
 type TranscriptBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; name: string; input: unknown }
+  | {
+      type: 'host_context'
+      name: string
+      input: unknown
+      id: string
+      context: string
+      live: boolean
+    }
 
 export type TranscriptEntry = {
   role: 'user' | 'assistant'
@@ -442,7 +455,43 @@ export type TranscriptEntry = {
  */
 export function buildTranscriptEntries(messages: Message[]): TranscriptEntry[] {
   const transcript: TranscriptEntry[] = []
+  const calls = new Map<string, { name: string; input: unknown }>()
+  for (const message of messages) {
+    if (message.type !== 'assistant') continue
+    for (const block of message.message?.content ?? []) {
+      if (typeof block !== 'string' && block.type === 'tool_use') {
+        calls.set(block.id, { name: block.name, input: block.input })
+      }
+    }
+  }
   for (const msg of messages) {
+    if (
+      msg.type === 'user' &&
+      typeof msg.hostClassifierContext === 'string' &&
+      msg.hostClassifierContext.length > 0 &&
+      Array.isArray(msg.message?.content)
+    ) {
+      const results = msg.message.content.filter(
+        block => block.type === 'tool_result',
+      )
+      if (results.length === 1) {
+        const result = results[0]!
+        const call = calls.get(result.tool_use_id)
+        if (call)
+          transcript.push({
+            role: 'user',
+            content: [
+              {
+                type: 'host_context',
+                ...call,
+                id: result.tool_use_id,
+                context: capHostClassifierContext(msg.hostClassifierContext),
+                live: isLiveHostClassifierContext(msg),
+              },
+            ],
+          })
+      }
+    }
     if (
       msg.type === 'attachment' &&
       msg.attachment!.type === 'queued_command'
@@ -573,6 +622,28 @@ function toCompactBlock(
   role: TranscriptEntry['role'],
   lookup: ToolLookup,
 ): string {
+  if (block.type === 'host_context') {
+    const tool = lookup.get(block.name)
+    if (!tool) return ''
+    try {
+      if (
+        tool.toAutoClassifierInput(
+          (block.input ?? {}) as Record<string, unknown>,
+        ) === ''
+      )
+        return ''
+    } catch {
+      // Match malformed tool call projection: the raw input still has a line.
+    }
+    return (
+      jsonStringify({
+        [block.live ? 'host_context_live' : 'host_context']: block.context,
+        id: String(block.id)
+          .slice(-6)
+          .replace(/[^A-Za-z0-9_-]/g, '_'),
+      }) + '\n'
+    )
+  }
   if (block.type === 'tool_use') {
     const tool = lookup.get(block.name)
     if (!tool) return ''
@@ -721,7 +792,7 @@ export async function buildYoloSystemPrompt(
     ? autoMode.environment.map(e => `- ${e}`).join('\n')
     : undefined
 
-  return systemPrompt
+  return (systemPrompt + '\n' + HOST_CLASSIFIER_CONTEXT_GUIDANCE)
     .replace(
       /<user_allow_rules_to_replace>([\s\S]*?)<\/user_allow_rules_to_replace>/,
       (_m, defaults: string) => userAllow ?? defaults,

@@ -64,11 +64,6 @@ export async function execAgentHook(
   signal: AbortSignal,
   toolUseContext: ToolUseContext,
   toolUseID: string | undefined,
-  // Kept for signature stability with the other exec*Hook functions.
-  // Was used by hook.prompt(messages) before the .transform() was removed
-  // (CC-79) — the only consumer of that was ExitPlanModeV2Tool's
-  // programmatic construction, since refactored into VerifyPlanExecutionTool.
-  _messages: Message[],
   agentName?: string,
 ): Promise<HookResult> {
   const effectiveToolUseID = toolUseID || `hook-${randomUUID()}`
@@ -103,9 +98,12 @@ export async function execAgentHook(
       createCombinedAbortSignal(signal, { timeoutMs: hookTimeoutMs })
     const onParentTimeout = () => hookAbortController.abort()
     parentTimeoutSignal.addEventListener('abort', onParentTimeout)
+    if (parentTimeoutSignal.aborted) onParentTimeout()
 
     // Combined signal is just our controller's signal now
     const combinedSignal = hookAbortController.signal
+    const hookAgentId = asAgentId(`hook-agent-${randomUUID()}`)
+    let sessionHookRegistered = false
 
     try {
       // Create StructuredOutput tool with our schema
@@ -127,8 +125,12 @@ export async function execAgentHook(
         structuredOutputTool,
       ]
 
+      const task =
+        hookEvent === 'Stop' || hookEvent === 'SubagentStop'
+          ? 'You are verifying a stop condition in Claude Code. Your task is to verify that the agent completed the given plan.'
+          : `You are evaluating a ${hookEvent} hook in Claude Code. Your task is to evaluate the condition described in the user message.`
       const systemPrompt = asSystemPrompt([
-        `You are verifying a stop condition in Claude Code. Your task is to verify that the agent completed the given plan. The conversation transcript is available at: ${transcriptPath}\nYou can read this file to analyze the conversation history if needed.
+        `${task} The conversation transcript is available at: ${transcriptPath}\nYou can read this file to analyze the conversation history if needed.
 
 Use the available tools to inspect the codebase and verify the condition.
 Use as few steps as possible - be efficient and direct.
@@ -140,9 +142,6 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
 
       const model = hook.model ?? getSmallFastModel()
       const MAX_AGENT_TURNS = 50
-
-      // Create unique agentId for this hook agent
-      const hookAgentId = asAgentId(`hook-agent-${randomUUID()}`)
 
       // Create a modified toolUseContext for the agent
       const agentToolUseContext: ToolUseContext = {
@@ -177,12 +176,17 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
       }
 
       // Register a session-level stop hook to enforce structured output
+      sessionHookRegistered = true
       registerStructuredOutputEnforcement(
         toolUseContext.setAppState,
         hookAgentId,
       )
 
-      let structuredOutputResult: { ok: boolean; reason?: string } | null = null
+      let structuredOutputResult: {
+        ok: boolean
+        reason?: string
+        impossible?: boolean
+      } | null = null
       let turnCount = 0
       let hitMaxTurns = false
 
@@ -255,12 +259,6 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         }
       }
 
-      parentTimeoutSignal.removeEventListener('abort', onParentTimeout)
-      cleanupCombinedSignal()
-
-      // Clean up the session hook we registered for this agent
-      clearSessionHooks(toolUseContext.setAppState, hookAgentId)
-
       // Check if we got a result
       if (!structuredOutputResult) {
         // If we hit max turns, just log and return cancelled (no UI message)
@@ -331,9 +329,6 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         }),
       }
     } catch (error) {
-      parentTimeoutSignal.removeEventListener('abort', onParentTimeout)
-      cleanupCombinedSignal()
-
       if (combinedSignal.aborted) {
         return {
           hook,
@@ -341,6 +336,11 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         }
       }
       throw error
+    } finally {
+      parentTimeoutSignal.removeEventListener('abort', onParentTimeout)
+      cleanupCombinedSignal()
+      if (sessionHookRegistered)
+        clearSessionHooks(toolUseContext.setAppState, hookAgentId)
     }
   } catch (error) {
     const errorMsg = errorMessage(error)

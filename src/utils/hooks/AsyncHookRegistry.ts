@@ -3,6 +3,10 @@ import type {
   HookEvent,
   SyncHookJSONOutput,
 } from 'src/entrypoints/agentSdkTypes.js'
+import {
+  hookJSONOutputSchema,
+  isSyncHookJSONOutput,
+} from '../../types/hooks.js'
 import { logForDebugging } from '../debug.js'
 import type { ShellCommand } from '../ShellCommand.js'
 import { invalidateSessionEnvCache } from '../sessionEnvironment.js'
@@ -110,6 +114,55 @@ async function finalizeHook(
   })
 }
 
+// densable pmt: validate the full response first; on malformed responses retain
+// recognized fields so a bad additionalContext cannot hide a systemMessage.
+function parseAsyncHookResponse(
+  value: unknown,
+  hookName: string,
+): SyncHookJSONOutput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return {}
+  const parsed = hookJSONOutputSchema().safeParse(value)
+  if (parsed.success && isSyncHookJSONOutput(parsed.data)) return parsed.data
+  const input = value as Record<string, unknown>
+  const response: SyncHookJSONOutput & {
+    metrics?: Record<string, boolean | number>
+  } = {}
+  if (typeof input.systemMessage === 'string')
+    response.systemMessage = input.systemMessage
+  if (
+    typeof input.metrics === 'object' &&
+    input.metrics !== null &&
+    !Array.isArray(input.metrics)
+  ) {
+    response.metrics = Object.fromEntries(
+      Object.entries(input.metrics).filter(
+        ([, metric]) =>
+          typeof metric === 'boolean' || typeof metric === 'number',
+      ),
+    )
+  }
+  if (
+    typeof input.hookSpecificOutput === 'object' &&
+    input.hookSpecificOutput !== null &&
+    !Array.isArray(input.hookSpecificOutput)
+  ) {
+    const { additionalContext, ...rest } = input.hookSpecificOutput as Record<
+      string,
+      unknown
+    >
+    // The upstream fallback deliberately preserves event-specific fields as-is.
+    response.hookSpecificOutput = (
+      typeof additionalContext === 'string' ? input.hookSpecificOutput : rest
+    ) as SyncHookJSONOutput['hookSpecificOutput']
+  }
+  logForDebugging(
+    `Hooks: ${hookName} async hook JSON output failed schema validation; delivering recognized fields`,
+    { level: 'error' },
+  )
+  return response
+}
+
 export async function checkForAsyncHookResponses(): Promise<
   Array<{
     processId: string
@@ -143,10 +196,8 @@ export async function checkForAsyncHookResponses(): Promise<
 
   const settled = await Promise.allSettled(
     hooks.map(async hook => {
-      const stdout = (await hook.shellCommand?.taskOutput.getStdout()) ?? ''
-      const stderr = hook.shellCommand?.taskOutput.getStderr() ?? ''
       logForDebugging(
-        `Hooks: Checking hook ${hook.processId} (${hook.hookName}) - attachmentSent: ${hook.responseAttachmentSent}, stdout length: ${stdout.length}`,
+        `Hooks: Checking hook ${hook.processId} (${hook.hookName}) - attachmentSent: ${hook.responseAttachmentSent}`,
       )
 
       if (!hook.shellCommand) {
@@ -172,14 +223,16 @@ export async function checkForAsyncHookResponses(): Promise<
         return { type: 'skip' as const }
       }
 
-      if (hook.responseAttachmentSent || !stdout.trim()) {
+      if (hook.responseAttachmentSent) {
         logForDebugging(
-          `Hooks: Skipping hook ${hook.processId} - already delivered/sent or no stdout`,
+          `Hooks: Skipping hook ${hook.processId} - already delivered`,
         )
         hook.stopProgressInterval()
         return { type: 'remove' as const, processId: hook.processId }
       }
 
+      const stdout = await hook.shellCommand.taskOutput.getStdout()
+      const stderr = hook.shellCommand.taskOutput.getStderr()
       const lines = stdout.split('\n')
       logForDebugging(
         `Hooks: Processing ${lines.length} lines of stdout for ${hook.processId}`,
@@ -200,7 +253,7 @@ export async function checkForAsyncHookResponses(): Promise<
               logForDebugging(
                 `Hooks: Found sync response from ${hook.processId}: ${jsonStringify(parsed)}`,
               )
-              response = parsed
+              response = parseAsyncHookResponse(parsed, hook.hookName)
               break
             }
           } catch {
@@ -213,6 +266,17 @@ export async function checkForAsyncHookResponses(): Promise<
 
       hook.responseAttachmentSent = true
       await finalizeHook(hook, exitCode, exitCode === 0 ? 'success' : 'error')
+      if (
+        Object.keys(response).length === 0 &&
+        exitCode === 0 &&
+        !stderr.trim()
+      ) {
+        return {
+          type: 'remove' as const,
+          processId: hook.processId,
+          isSessionStart: hook.hookEvent === 'SessionStart',
+        }
+      }
 
       return {
         type: 'response' as const,
@@ -247,6 +311,8 @@ export async function checkForAsyncHookResponses(): Promise<
     const r = s.value
     if (r.type === 'remove') {
       pendingHooks.delete(r.processId)
+      if ('isSessionStart' in r && r.isSessionStart)
+        sessionStartCompleted = true
     } else if (r.type === 'response') {
       responses.push(r.payload)
       pendingHooks.delete(r.processId)

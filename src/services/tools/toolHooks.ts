@@ -40,7 +40,11 @@ import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
 
 export type PostToolUseHooksResult<Output> =
   | MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>
-  | { updatedMCPToolOutput: Output }
+  | { updatedToolOutput: Output }
+  | {
+      classifierContext: { value: string; hostPrincipal: boolean }
+      pairing: 'none' | 'pending' | 'never-applied'
+    }
 
 export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
   toolUseContext: ToolUseContext,
@@ -52,6 +56,7 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
   requestId: string | undefined,
   mcpServerType: McpServerType,
   _mcpServerBaseUrl: string | undefined,
+  durationMs?: number,
 ): AsyncGenerator<PostToolUseHooksResult<Output>> {
   // densable: settingsHooksOff skips the whole PostToolUse chain.
   // tool.call already drops module handlers; settings hooks must too.
@@ -62,7 +67,7 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
 
-    let toolOutput = toolResponse
+    const toolOutput = toolResponse
     for await (const result of executePostToolHooks(
       tool.name,
       toolUseID,
@@ -71,6 +76,8 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
       toolUseContext,
       permissionMode,
       toolUseContext.abortController.signal,
+      undefined,
+      durationMs,
     )) {
       try {
         // Check if we were aborted during hook execution
@@ -128,6 +135,28 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
           }
         }
 
+        const accountMemory = tool.mcpInfo?.accountMemory === true
+        if (
+          accountMemory &&
+          (result.updatedToolOutput !== undefined ||
+            result.updatedMCPToolOutput !== undefined)
+        ) {
+          logForDebugging(
+            `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
+            { level: 'warn' },
+          )
+        }
+        if (result.updatedToolOutput !== undefined && !accountMemory) {
+          yield { updatedToolOutput: result.updatedToolOutput as Output }
+        }
+        if (
+          result.updatedMCPToolOutput !== undefined &&
+          isMcpTool(tool) &&
+          !accountMemory
+        ) {
+          yield { updatedToolOutput: result.updatedMCPToolOutput as Output }
+        }
+
         // If hook indicated to prevent continuation, yield a stop reason message
         if (result.preventContinuation) {
           yield {
@@ -156,11 +185,16 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
           }
         }
 
-        // If hooks provided updatedMCPToolOutput, yield it if this is an MCP tool
-        if (result.updatedMCPToolOutput && isMcpTool(tool)) {
-          toolOutput = result.updatedMCPToolOutput as Output
-          yield {
-            updatedMCPToolOutput: toolOutput,
+        if (result.classifierContexts?.length) {
+          const pairing =
+            result.pairedRewrite === 'none'
+              ? 'none'
+              : result.pairedRewrite === 'direct' ||
+                  (result.pairedRewrite === 'legacy_mcp' && isMcpTool(tool))
+                ? 'pending'
+                : 'never-applied'
+          for (const classifierContext of result.classifierContexts) {
+            yield { classifierContext, pairing }
           }
         }
       } catch (error) {
@@ -215,6 +249,7 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
   requestId: string | undefined,
   mcpServerType: McpServerType,
   _mcpServerBaseUrl: string | undefined,
+  durationMs?: number,
 ): AsyncGenerator<
   MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>
 > {
@@ -233,6 +268,8 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
       isInterrupt,
       permissionMode,
       toolUseContext.abortController.signal,
+      undefined,
+      durationMs,
     )) {
       try {
         // Check if we were aborted during hook execution
@@ -621,6 +658,7 @@ export async function* runPreToolUseHooks(
   requestId: string | undefined,
   mcpServerType: McpServerType,
   _mcpServerBaseUrl: string | undefined,
+  durationMs?: number,
 ): AsyncGenerator<
   | {
       type: 'message'

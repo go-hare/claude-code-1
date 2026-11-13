@@ -1,4 +1,11 @@
 import { feature } from 'bun:bundle'
+import { remapPostToolOutput } from './postToolOutput.js'
+import {
+  capHostClassifierContext,
+  registerLiveHostClassifierContext,
+  resolveHostClassifierContext,
+  type PairedClassifierContext,
+} from '../../utils/permissions/hostClassifierContext.js'
 import type {
   ContentBlockParam,
   ToolResultBlockParam,
@@ -2385,7 +2392,7 @@ async function checkPermissionsAndCallTool(
       )) {
         if (result.retry) hookSaysRetry = true
       }
-      if (hookSaysRetry) {
+      if (hookSaysRetry && !permissionDecision.decisionReason.noVerdict) {
         resultingMessages.push({
           message: createUserMessage({
             content:
@@ -2767,6 +2774,19 @@ async function checkPermissionsAndCallTool(
     // Run PostToolUse hooks
     let toolOutput = result.data
     const hookResults = []
+    let rewriteSeq = 0
+    let rewritesReverted = false
+    const classifierContexts: PairedClassifierContext[] = []
+    if (
+      result.classifierContext !== undefined &&
+      (!tool.isMcp || mcpServerType === 'sdk')
+    ) {
+      classifierContexts.push({
+        value: capHostClassifierContext(result.classifierContext),
+        hostPrincipal: true,
+        pairedRewriteSeq: 0,
+      })
+    }
     const toolContextModifier = result.contextModifier
     const mcpMeta = result.mcpMeta
     // densable 2.1.283 `mr=oo.endsTurn` @ 184495149 → createUserMessage.toolEndsTurn
@@ -2825,18 +2845,31 @@ async function checkPermissionsAndCallTool(
         }
       }
 
+      const hostContext = resolveHostClassifierContext(
+        classifierContexts,
+        rewriteSeq,
+        rewritesReverted,
+      )
+      const resultMessage = createUserMessage({
+        content: contentBlocks,
+        hostClassifierContext: hostContext.value,
+        imagePasteIds: allowImageIds,
+        toolUseResult:
+          toolUseContext.agentId && !toolUseContext.preserveToolUseResults
+            ? undefined
+            : toolUseResult,
+        mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
+        toolEndsTurn: endsTurn,
+        sourceToolAssistantUUID: assistantMessage.uuid,
+      })
+      if (
+        hostContext.hostPrincipal &&
+        !toolUseContext.abortController.signal.aborted
+      ) {
+        registerLiveHostClassifierContext(resultMessage)
+      }
       resultingMessages.push({
-        message: createUserMessage({
-          content: contentBlocks,
-          imagePasteIds: allowImageIds,
-          toolUseResult:
-            toolUseContext.agentId && !toolUseContext.preserveToolUseResults
-              ? undefined
-              : toolUseResult,
-          mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
-          toolEndsTurn: endsTurn,
-          sourceToolAssistantUUID: assistantMessage.uuid,
-        }),
+        message: resultMessage,
         contextModifier: toolContextModifier
           ? {
               toolUseID: toolUseID,
@@ -2844,30 +2877,6 @@ async function checkPermissionsAndCallTool(
             }
           : undefined,
       })
-    }
-
-    // TOOD(hackyon): refactor so we don't have different experiences for MCP tools
-    if (!isMcpTool(tool)) {
-      await addToolResult(toolOutput, mappedToolResultBlock)
-    }
-
-    // densable: after mapToolResult, XAu(Read data) → read_truncation_notice
-    // attachment (before PostToolUse Pe / newMessages for non-MCP).
-    if (
-      tool.name === FILE_READ_TOOL_NAME &&
-      result.data &&
-      typeof result.data === 'object'
-    ) {
-      const banner = getTokenCapBanner(result.data as object)
-      if (banner !== undefined) {
-        resultingMessages.push({
-          message: createAttachmentMessage({
-            type: 'read_truncation_notice',
-            banner,
-            toolUseID,
-          }),
-        })
-      }
     }
 
     const postToolHookInfos: StopHookInfo[] = []
@@ -2882,29 +2891,23 @@ async function checkPermissionsAndCallTool(
       requestId,
       mcpServerType,
       mcpServerBaseUrl,
+      durationMs,
     )) {
-      if ('updatedMCPToolOutput' in hookResult) {
-        if (isMcpTool(tool)) {
-          toolOutput = hookResult.updatedMCPToolOutput
-        }
-      } else if (isMcpTool(tool)) {
-        hookResults.push(hookResult)
-        if (hookResult.message.type === 'attachment') {
-          const att = hookResult.message.attachment
-          if (
-            'command' in att &&
-            att.command !== undefined &&
-            'durationMs' in att &&
-            att.durationMs !== undefined
-          ) {
-            postToolHookInfos.push({
-              command: att.command as string,
-              durationMs: att.durationMs as number,
-            })
-          }
-        }
+      if ('updatedToolOutput' in hookResult) {
+        toolOutput = hookResult.updatedToolOutput
+        rewriteSeq++
+      } else if ('classifierContext' in hookResult) {
+        classifierContexts.push({
+          ...hookResult.classifierContext,
+          pairedRewriteSeq:
+            hookResult.pairing === 'none'
+              ? undefined
+              : hookResult.pairing === 'pending' && rewriteSeq > 0
+                ? rewriteSeq
+                : -1,
+        })
       } else {
-        resultingMessages.push(hookResult)
+        hookResults.push(hookResult)
         if (hookResult.message.type === 'attachment') {
           const att = hookResult.message.attachment
           if (
@@ -2931,6 +2934,57 @@ async function checkPermissionsAndCallTool(
 
     if (isMcpTool(tool)) {
       await addToolResult(toolOutput)
+    } else {
+      let mappedBlock = mappedToolResultBlock
+      if (rewriteSeq > 0) {
+        const remapped = remapPostToolOutput(
+          tool,
+          result.data,
+          toolOutput,
+          toolUseID,
+          logError,
+        )
+        toolOutput = remapped.output
+        if (remapped.error !== undefined) {
+          rewritesReverted = true
+          const discarded = classifierContexts.some(
+            context => context.pairedRewriteSeq === rewriteSeq,
+          )
+          logForDebugging(
+            `PostToolUse hook returned invalid updatedToolOutput for ${tool.name}`,
+            { level: 'error' },
+          )
+          hookResults.push({
+            message: createAttachmentMessage({
+              type: 'hook_error_during_execution',
+              content: `PostToolUse hook returned updatedToolOutput that does not match ${tool.name}'s output shape; using original output.${discarded ? ' A host-asserted classifier context attached by the same hook was discarded with the rejected rewrite.' : ''} ${remapped.error}`,
+              hookName: `PostToolUse:${tool.name}`,
+              toolUseID,
+              hookEvent: 'PostToolUse',
+            }),
+          })
+        } else {
+          mappedBlock = remapped.block!
+        }
+      }
+      await addToolResult(toolOutput, mappedBlock)
+    }
+
+    // Result first, then notices and PostToolUse diagnostics.
+    if (
+      tool.name === FILE_READ_TOOL_NAME &&
+      result.data &&
+      typeof result.data === 'object'
+    ) {
+      const banner = getTokenCapBanner(result.data as object)
+      if (banner !== undefined)
+        resultingMessages.push({
+          message: createAttachmentMessage({
+            type: 'read_truncation_notice',
+            banner,
+            toolUseID,
+          }),
+        })
     }
 
     // Show PostToolUse hook timing inline below tool result when > 500ms.
@@ -2954,6 +3008,10 @@ async function checkPermissionsAndCallTool(
       }
     }
 
+    for (const hookResult of hookResults) {
+      resultingMessages.push(hookResult)
+    }
+
     // If the tool provided new messages, add them to the list to return.
     if (result.newMessages && result.newMessages.length > 0) {
       for (const message of result.newMessages) {
@@ -2963,10 +3021,6 @@ async function checkPermissionsAndCallTool(
     // densable success path: I&&!aborted → LKr
     pushPreToolUsePreventContinuation(stopReason || 'Execution stopped by hook')
 
-    // Yield the remaining hook results after the other messages are sent
-    for (const hookResult of hookResults) {
-      resultingMessages.push(hookResult)
-    }
     if (toolCallCapture) {
       toolCallCapture.output = { value: toolOutput }
     }
@@ -3104,6 +3158,7 @@ async function checkPermissionsAndCallTool(
       requestId,
       mcpServerType,
       mcpServerBaseUrl,
+      durationMs,
     )) {
       hookMessages.push(hookResult)
     }

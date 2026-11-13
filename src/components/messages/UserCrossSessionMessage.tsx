@@ -12,7 +12,7 @@ import { Box, Text } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { toInkColor } from '../../utils/ink.js';
-import { extractTag, isPeerHandbackOrFlaggedOrigin } from '../../utils/messages.js';
+import { extractTag, isPeerHandbackOrFlaggedOrigin, stripPeerOverflowFrame } from '../../utils/messages.js';
 import {
   agentMessageOverflow,
   parseAgentMessageFromAttr,
@@ -40,7 +40,13 @@ type Props = {
   /** densable Urs hostInjected — strips host-injected peer suffix. */
   hostInjected?: boolean;
   /** densable Wr origin — irr handback/flagged. */
-  origin?: { kind?: string; handback?: unknown; flagged?: unknown; plugin?: string };
+  origin?: {
+    kind?: string;
+    handback?: unknown;
+    flagged?: unknown;
+    plugin?: string;
+    hostInjected?: unknown;
+  };
   /** densable Wr followsSpeakerLabel — speaker_label row, not analog agent inbound. */
   followsSpeakerLabel?: boolean;
   /** densable Wr messageId — TDe / PluginUserMessageSite. */
@@ -56,9 +62,11 @@ export function UserCrossSessionMessage({
   fallbackLabel = 'peer',
   origin,
   followsSpeakerLabel = false,
+  hostInjected = false,
   messageId,
 }: Props): React.ReactNode {
   const text = param.text;
+  const injected = hostInjected || (origin?.kind === 'peer' && origin.hostInjected === true);
   const extracted = extractTag(text, 'cross-session-message');
   const attrs = parseCrossSessionOpenAttrs(text);
   const isAgentFallback = fallbackLabel === 'agent';
@@ -76,9 +84,10 @@ export function UserCrossSessionMessage({
   const appVerbose = useAppStateMaybeOutsideOfProvider(s => s.verbose) === true;
   // densable jg: strip <agent-message> so expanded body is the payload.
   const stripped = extracted ?? (isAgentFallback ? stripAgentMessageEnvelope(text) : text);
+  const framed = stripPeerOverflowFrame(stripped, injected);
   // densable Jx: peel y7n frame when peer handback (Ko(KO) analog-skip).
   const body =
-    origin?.kind === 'peer' && origin.handback === true && !appVerbose ? stripHandbackReportFrame(stripped) : stripped;
+    origin?.kind === 'peer' && origin.handback === true && !appVerbose ? stripHandbackReportFrame(framed) : framed;
   const isEnvelope = extracted !== null;
   const qmExpanded = isTranscriptMode || verbose;
   const uncapped = isPeerHandbackOrFlaggedOrigin(origin);

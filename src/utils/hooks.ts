@@ -180,6 +180,8 @@ import type {
 } from '../types/message.js'
 import { execAgentHook } from './hooks/execAgentHook.js'
 import { execHttpHook } from './hooks/execHttpHook.js'
+import { execMcpToolHook } from './hooks/execMcpToolHook.js'
+import { ownerOfPluginToolServerKey } from './plugins/pluginToolRegistry.js'
 import type { ShellCommand } from './ShellCommand.js'
 import {
   getSessionHooks,
@@ -457,6 +459,10 @@ export interface HookResult {
   suppressOriginalPrompt?: boolean
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
+  updatedToolOutput?: unknown
+  classifierContext?: string
+  legacyMcpRewriteSuppressed?: boolean
+  impossible?: boolean
   permissionRequestResult?: PermissionRequestResult
   elicitationResponse?: ElicitationResponse
   watchPaths?: string[]
@@ -475,6 +481,10 @@ export type AggregatedHookResult = {
   hookPermissionDecisionReason?: string // 钩子对权限决策的补充说明，常与 permissionBehavior 一同产出
   hookSource?: string // 产生本次权限/改参结果的定义来源（如 settings 与 policy 合并后的条目来源）
   permissionBehavior?: PermissionResult['behavior'] | 'defer' // 多钩并行时按 deny > defer > ask > allow 聚合后的权限行为
+  updatedToolOutput?: unknown
+  classifierContexts?: Array<{ value: string; hostPrincipal: boolean }>
+  pairedRewrite?: 'direct' | 'legacy_mcp' | 'suppressed' | 'none'
+  impossible?: boolean
   additionalContexts?: string[] // 注入模型上下文的补充片段（如 UserPromptSubmit），可与多条钩子结果合并
   initialUserMessage?: string // 会话启动等场景预置的首条用户侧文案，供首轮上下文使用
   sessionTitle?: string // SessionStart / UserPromptSubmit 设置的会话标题
@@ -493,6 +503,97 @@ export type AggregatedHookResult = {
   hook?: HookCommand | HookCallback | FunctionHook
   /** densable ae.timedOut — prompt Stop timeout (parent abort is not a timeout). */
   timedOut?: boolean
+}
+
+function classicResultFields(key: string, event: HookEvent): string[] {
+  switch (key) {
+    case 'block':
+      return event === 'PreModelSwitch'
+        ? ['blockingError']
+        : [
+            'blockingError',
+            'permissionBehavior',
+            'hookPermissionDecisionReason',
+          ]
+    case 'additionalContext':
+      return ['additionalContexts']
+    case 'permissionDecision':
+    case 'permissionDecisionReason':
+      return ['permissionBehavior', 'hookPermissionDecisionReason']
+    case 'decision':
+      return ['permissionRequestResult', 'permissionBehavior', 'updatedInput']
+    case 'delta':
+      return ['displayContent']
+    case 'additionalContexts':
+    case 'permissionBehavior':
+    case 'hookPermissionDecisionReason':
+    case 'permissionRequestResult':
+    case 'updatedInput':
+    case 'preventContinuation':
+    case 'stopReason':
+    case 'sessionTitle':
+    case 'suppressOriginalPrompt':
+    case 'initialUserMessage':
+    case 'watchPaths':
+    case 'reloadSkills':
+    case 'updatedToolOutput':
+    case 'updatedMCPToolOutput':
+    case 'retry':
+    case 'displayContent':
+      return [key]
+    default:
+      return []
+  }
+}
+
+function projectClassicHookResults(
+  results: AggregatedHookResult[],
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {}
+  const ranks: Record<string, number> = { allow: 1, ask: 2, deny: 3 }
+  for (const result of results) {
+    if (result.blockingError)
+      projected.block = result.blockingError.blockingError
+    if (result.additionalContexts?.length) {
+      projected.additionalContext = [
+        ...((projected.additionalContext as string[] | undefined) ?? []),
+        ...result.additionalContexts,
+      ]
+    }
+    if (result.watchPaths?.length) {
+      projected.watchPaths = [
+        ...((projected.watchPaths as string[] | undefined) ?? []),
+        ...result.watchPaths,
+      ]
+    }
+    if (result.permissionBehavior && ranks[result.permissionBehavior]) {
+      const previous = projected.permissionDecision as string | undefined
+      if (
+        (ranks[result.permissionBehavior] ?? 0) >= (ranks[previous ?? ''] ?? 0)
+      ) {
+        projected.permissionDecision = result.permissionBehavior
+        projected.permissionDecisionReason = result.hookPermissionDecisionReason
+      }
+    }
+    if (result.permissionRequestResult && projected.decision === undefined) {
+      projected.decision = result.permissionRequestResult
+    }
+    for (const key of [
+      'preventContinuation',
+      'stopReason',
+      'initialUserMessage',
+      'sessionTitle',
+      'suppressOriginalPrompt',
+      'reloadSkills',
+      'updatedToolOutput',
+      'updatedMCPToolOutput',
+      'retry',
+      'displayContent',
+    ] as const) {
+      if (result[key] !== undefined) projected[key] = result[key]
+    }
+  }
+  return projected
 }
 
 /**
@@ -850,6 +951,8 @@ interface TypedSyncHookOutput {
     | {
         hookEventName: 'PostToolUse'
         additionalContext?: string
+        updatedToolOutput?: unknown
+        classifierContext?: string
         updatedMCPToolOutput?: unknown
       }
     | {
@@ -1075,11 +1178,14 @@ function processHookJSONOutput({
         break
       case 'PostToolUse':
         result.additionalContext = json.hookSpecificOutput.additionalContext
-        // Extract updatedMCPToolOutput if provided
+        result.updatedToolOutput = json.hookSpecificOutput.updatedToolOutput
         if (json.hookSpecificOutput.updatedMCPToolOutput) {
           result.updatedMCPToolOutput =
             json.hookSpecificOutput.updatedMCPToolOutput
+        } else if (json.hookSpecificOutput.updatedMCPToolOutput !== undefined) {
+          result.legacyMcpRewriteSuppressed = true
         }
+        result.classifierContext = json.hookSpecificOutput.classifierContext
         break
       case 'PostToolUseFailure':
         result.additionalContext = json.hookSpecificOutput.additionalContext
@@ -2276,6 +2382,7 @@ function getHooksConfig(
   appState: AppState | undefined,
   sessionId: string,
   hookEvent: HookEvent,
+  tiers?: { managedHooksOnly?: boolean; managedHooksExcluded?: boolean },
 ): Array<
   | HookMatcher
   | HookCallbackMatcher
@@ -2284,8 +2391,17 @@ function getHooksConfig(
   | SkillHookMatcher
   | SessionDerivedHookMatcher
 > {
-  // HookMatcher is a zod-stripped {matcher, hooks} so snapshot matchers can be
-  // pushed directly without re-wrapping.
+  const policyMatchers =
+    getSettingsForSource('policySettings')?.hooks?.[hookEvent] ?? []
+  if (tiers?.managedHooksOnly) {
+    return shouldDisableAllHooksIncludingManaged() ? [] : policyMatchers
+  }
+  const policyHooks = new Set(
+    policyMatchers.flatMap(matcher =>
+      matcher.hooks.map(hook => JSON.stringify([matcher.matcher, hook])),
+    ),
+  )
+  // Settings merging can clone source objects; compare the complete matcher/hook pair.
   const hooks: Array<
     | HookMatcher
     | HookCallbackMatcher
@@ -2293,10 +2409,20 @@ function getHooksConfig(
     | PluginHookMatcher
     | SkillHookMatcher
     | SessionDerivedHookMatcher
-  > = [...(getHooksConfigFromSnapshot()?.[hookEvent] ?? [])]
+  > = shouldDisableAllHooksIncludingManaged()
+    ? []
+    : (getHooksConfigFromSnapshot()?.[hookEvent] ?? []).map(matcher => ({
+        ...matcher,
+        hooks: tiers?.managedHooksExcluded
+          ? matcher.hooks.filter(
+              hook => !policyHooks.has(JSON.stringify([matcher.matcher, hook])),
+            )
+          : matcher.hooks,
+      }))
 
-  // Check if only managed hooks should run (used for both registered and session hooks)
-  const managedOnly = shouldAllowManagedHooksOnly()
+  // Policy filters configured sources; SDK callbacks remain host-controlled.
+  const managedOnly =
+    shouldAllowManagedHooksOnly() || shouldDisableAllHooksIncludingManaged()
 
   // Process registered hooks (SDK callbacks and plugin native hooks)
   const registeredHooks = getRegisteredHooks()?.[hookEvent]
@@ -2413,9 +2539,10 @@ export async function getMatchingHooks(
   hookEvent: HookEvent,
   hookInput: HookInput,
   tools?: Tools,
+  tiers?: { managedHooksOnly?: boolean; managedHooksExcluded?: boolean },
 ): Promise<MatchedHook[]> {
   try {
-    const hookMatchers = getHooksConfig(appState, sessionId, hookEvent)
+    const hookMatchers = getHooksConfig(appState, sessionId, hookEvent, tiers)
 
     // If you change the criteria below, then you must change
     // src/utils/hooks/hooksConfigManager.ts as well.
@@ -2533,7 +2660,7 @@ export async function getMatchingHooks(
           .map(m => [
             hookDedupKey(
               m,
-              `${m.hook.shell ?? DEFAULT_HOOK_SHELL}\0${m.hook.command}\0${getIfCondition(m.hook)}`,
+              `${m.hook.shell ?? DEFAULT_HOOK_SHELL}\0${m.hook.command}\0${JSON.stringify(m.hook.args ?? null)}\0${getIfCondition(m.hook)}`,
             ),
             m,
           ]),
@@ -2578,6 +2705,28 @@ export async function getMatchingHooks(
           ]),
       ).values(),
     )
+    const uniqueMcpToolHooks = Array.from(
+      new Map(
+        matchedHooks
+          .filter(m => m.hook.type === 'mcp_tool')
+          .map(m => {
+            const hook = m.hook as HookCommand & {
+              type: 'mcp_tool'
+              server: string
+              tool: string
+              input?: unknown
+              if?: string
+            }
+            return [
+              hookDedupKey(
+                m,
+                `mcp_tool\0${hook.server}\0${hook.tool}\0${JSON.stringify(hook.input ?? {})}\0${getIfCondition(hook)}`,
+              ),
+              m,
+            ] as const
+          }),
+      ).values(),
+    )
     const callbackHooks = matchedHooks.filter(m => m.hook.type === 'callback')
     // Function hooks don't need deduplication - each callback is unique
     const functionHooks = matchedHooks.filter(m => m.hook.type === 'function')
@@ -2586,6 +2735,7 @@ export async function getMatchingHooks(
       ...uniquePromptHooks,
       ...uniqueAgentHooks,
       ...uniqueHttpHooks,
+      ...uniqueMcpToolHooks,
       ...callbackHooks,
       ...functionHooks,
     ]
@@ -2598,7 +2748,8 @@ export async function getMatchingHooks(
         (h.hook.type === 'command' ||
           h.hook.type === 'prompt' ||
           h.hook.type === 'agent' ||
-          h.hook.type === 'http') &&
+          h.hook.type === 'http' ||
+          h.hook.type === 'mcp_tool') &&
         (h.hook as { if?: string }).if,
     )
     const ifMatcher = hasIfCondition
@@ -2609,7 +2760,8 @@ export async function getMatchingHooks(
         h.hook.type !== 'command' &&
         h.hook.type !== 'prompt' &&
         h.hook.type !== 'agent' &&
-        h.hook.type !== 'http'
+        h.hook.type !== 'http' &&
+        h.hook.type !== 'mcp_tool'
       ) {
         return true
       }
@@ -2761,7 +2913,11 @@ async function* executeHooks({
   credentials,
   skipSessionFunctionHooks,
   sessionFunctionHooksOnly,
+  managedHooksOnly,
+  managedHooksExcluded,
 }: {
+  managedHooksOnly?: boolean
+  managedHooksExcluded?: boolean
   hookInput: HookInput
   toolUseID: string
   matchQuery?: string
@@ -2798,9 +2954,6 @@ async function* executeHooks({
 }): AsyncGenerator<AggregatedHookResult> {
   const persistStorageV5 = toolUseContext?.storageV5 ?? storageV5
   const persistCredentials = toolUseContext?.credentials ?? credentials
-  if (shouldDisableAllHooksIncludingManaged()) {
-    return
-  }
 
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
     return
@@ -2819,10 +2972,46 @@ async function* executeHooks({
   // A chain member must not enter again.
   if (
     !classicChainMember &&
+    !shouldDisableAllHooksIncludingManaged() &&
     !sessionFunctionHooksOnly &&
     hasMatchingFunctionHook(hookEvent)
   ) {
     const eventRecord = hookInput as unknown as Record<string, unknown>
+    const classicYields: AggregatedHookResult[] = []
+    if (!managedHooksExcluded) {
+      for await (const result of executeHooks({
+        hookInput,
+        toolUseID,
+        matchQuery,
+        signal,
+        timeoutMs,
+        toolUseContext,
+        messages,
+        forceSyncExecution,
+        suppressPerInvocationTelemetry,
+        classicChainMember: true,
+        managedHooksOnly: true,
+        requestPrompt,
+        toolInputSummary,
+        storageV5,
+        credentials,
+        skipSessionFunctionHooks,
+        sessionFunctionHooksOnly,
+      }))
+        classicYields.push(result)
+    }
+    const managedResult = projectClassicHookResults(classicYields)
+    if (
+      managedResult.block !== undefined ||
+      managedResult.preventContinuation === true ||
+      managedResult.permissionDecision === 'deny' ||
+      (managedResult.decision as PermissionRequestResult | undefined)
+        ?.behavior === 'deny'
+    ) {
+      yield* classicYields
+      return
+    }
+    let classicResult: Record<string, unknown> = managedResult
     const chained = await runFunctionHookChain(
       hookEvent,
       eventRecord,
@@ -2839,6 +3028,7 @@ async function* executeHooks({
           forceSyncExecution,
           suppressPerInvocationTelemetry,
           classicChainMember: true,
+          managedHooksExcluded: true,
           requestPrompt,
           toolInputSummary,
           storageV5,
@@ -2848,19 +3038,74 @@ async function* executeHooks({
         })) {
           results.push(result)
         }
-        const display = results.find(
-          result => result.displayContent !== undefined,
-        )
-        if (display?.displayContent !== undefined) {
-          return { ...event, delta: display.displayContent }
-        }
-        return event
+        classicYields.push(...results)
+        classicResult = projectClassicHookResults(classicYields)
+        return { ...event, ...projectClassicHookResults(results) }
       },
+      undefined,
+      undefined,
+      { signal },
     )
-    const returned =
+    const finalEvent =
       chained && typeof chained === 'object'
         ? (chained as Record<string, unknown>)
         : eventRecord
+    for (const key of [
+      'permissionDecision',
+      'permissionDecisionReason',
+      'decision',
+    ] as const) {
+      if (managedResult[key] !== undefined) finalEvent[key] = managedResult[key]
+    }
+    for (const key of ['additionalContext', 'watchPaths'] as const) {
+      if (Array.isArray(managedResult[key])) {
+        finalEvent[key] = [
+          ...managedResult[key],
+          ...(Array.isArray(finalEvent[key]) ? finalEvent[key] : []),
+        ]
+      }
+    }
+    const baseline = { ...eventRecord, ...classicResult }
+    const changed = new Set(
+      [
+        ...new Set([...Object.keys(finalEvent), ...Object.keys(baseline)]),
+      ].filter(
+        key =>
+          JSON.stringify(finalEvent[key]) !== JSON.stringify(baseline[key]),
+      ),
+    )
+    const replaced = new Set(
+      [...changed].flatMap(key => classicResultFields(key, hookEvent)),
+    )
+    for (const prior of classicYields) {
+      const retained = Object.fromEntries(
+        Object.entries(prior).filter(([key]) => !replaced.has(key)),
+      ) as AggregatedHookResult
+      if (Object.keys(retained).length > 0) yield retained
+    }
+    const returned: Record<string, unknown> = Object.fromEntries(
+      [...changed].map(key => [key, finalEvent[key]]),
+    )
+    if (changed.has('permissionDecision')) {
+      returned.permissionBehavior = finalEvent.permissionDecision
+      returned.hookPermissionDecisionReason =
+        finalEvent.permissionDecisionReason
+    } else if (changed.has('permissionDecisionReason')) {
+      returned.permissionBehavior = finalEvent.permissionDecision
+      returned.hookPermissionDecisionReason =
+        finalEvent.permissionDecisionReason
+    }
+    if (changed.has('decision')) {
+      returned.permissionRequestResult = finalEvent.decision
+      const decision = finalEvent.decision as
+        | PermissionRequestResult
+        | undefined
+      if (decision) {
+        returned.permissionBehavior = decision.behavior
+        if (decision.behavior === 'allow')
+          returned.updatedInput = decision.updatedInput
+      }
+    }
     const originalDelta =
       typeof eventRecord.delta === 'string' ? eventRecord.delta : undefined
     // densable mXe / wSn: yield only keys the function-hook result changed.
@@ -2875,6 +3120,12 @@ async function* executeHooks({
     }
     if (typeof returned.additionalContext === 'string') {
       yield { additionalContexts: [returned.additionalContext] }
+    } else if (Array.isArray(returned.additionalContext)) {
+      yield {
+        additionalContexts: returned.additionalContext.filter(
+          (item): item is string => typeof item === 'string',
+        ),
+      }
     }
     if (Array.isArray(returned.additionalContexts)) {
       yield {
@@ -2915,7 +3166,7 @@ async function* executeHooks({
       yield { reloadSkills: true }
     }
     if (returned.updatedToolOutput !== undefined) {
-      yield { updatedMCPToolOutput: returned.updatedToolOutput }
+      yield { updatedToolOutput: returned.updatedToolOutput }
     }
     if (returned.updatedMCPToolOutput !== undefined) {
       yield { updatedMCPToolOutput: returned.updatedMCPToolOutput }
@@ -2928,10 +3179,18 @@ async function* executeHooks({
         updatedInput: returned.updatedInput as Record<string, unknown>,
       }
     }
-    if (returned.block !== undefined) {
+    const returnedBlock =
+      returned.block ??
+      (returned.permissionBehavior === 'deny'
+        ? (returned.hookPermissionDecisionReason ?? 'Blocked by hook')
+        : undefined)
+    if (returnedBlock !== undefined) {
       yield {
-        blockingError: {
-          blockingError: String(returned.block),
+        blockingError: classicYields.find(
+          result =>
+            result.blockingError?.blockingError === String(returnedBlock),
+        )?.blockingError ?? {
+          blockingError: String(returnedBlock),
           command: `classic.${hookEvent} hook`,
         },
         ...(hookEvent === 'PreModelSwitch'
@@ -2996,6 +3255,7 @@ async function* executeHooks({
     hookEvent,
     hookInput,
     toolUseContext?.options?.tools,
+    { managedHooksOnly, managedHooksExcluded },
   )
   // densable AKo Gn: ke → function only; ye → drop function.
   if (sessionFunctionHooksOnly) {
@@ -3233,6 +3493,15 @@ async function* executeHooks({
       }
       const jsonInput = jsonInputRes.value
 
+      if (
+        (hook.type === 'prompt' || hook.type === 'agent') &&
+        toolUseContext?.agentId?.startsWith('hook-agent-')
+      ) {
+        yield { outcome: 'cancelled', hook }
+        cleanup()
+        return
+      }
+
       if (hook.type === 'prompt') {
         if (!toolUseContext) {
           throw new Error(
@@ -3276,9 +3545,9 @@ async function* executeHooks({
             'ToolUseContext is required for agent hooks. This is a bug.',
           )
         }
-        if (!messages) {
+        if (hookEvent === 'PermissionRequest') {
           throw new Error(
-            'Messages are required for agent hooks. This is a bug.',
+            'Agent hooks are not supported for PermissionRequest.',
           )
         }
         const agentResult = await execAgentHook(
@@ -3289,7 +3558,6 @@ async function* executeHooks({
           abortSignal,
           toolUseContext,
           toolUseID,
-          messages,
           'agent_type' in hookInput
             ? (hookInput.agent_type as string)
             : undefined,
@@ -3310,19 +3578,60 @@ async function* executeHooks({
         return
       }
 
-      if (hook.type === 'http') {
+      if (hook.type === 'http' || hook.type === 'mcp_tool') {
         emitHookStarted(hookId, hookName, hookEvent)
 
         // execHttpHook manages its own timeout internally via hook.timeout or
         // DEFAULT_HTTP_HOOK_TIMEOUT_MS, so pass the parent signal directly
         // to avoid double-stacking timeouts with abortSignal.
-        const httpResult = await execHttpHook(
-          hook,
-          hookEvent,
-          jsonInput,
-          signal,
-        )
+        const httpResult: {
+          ok: boolean
+          body: string
+          error?: string
+          aborted?: boolean
+          withheld?: boolean
+          statusCode?: number
+        } =
+          hook.type === 'http'
+            ? await execHttpHook(hook, hookEvent, jsonInput, signal, timeoutMs)
+            : await execMcpToolHook(
+                hook,
+                hookEvent,
+                jsonInput,
+                toolUseContext?.options.mcpClients,
+                signal,
+                timeoutMs,
+              )
         cleanup?.()
+        if (
+          hook.type === 'mcp_tool' &&
+          httpResult.withheld &&
+          hookEvent === 'PreToolUse'
+        ) {
+          const reason = `a PreToolUse mcp_tool hook could not run (${httpResult.error}); refusing rather than skipping that gate`
+          emitHookResponse({
+            hookId,
+            hookName,
+            hookEvent,
+            output: reason,
+            stdout: '',
+            stderr: httpResult.error ?? reason,
+            exitCode: 2,
+            outcome: 'error',
+          })
+          yield {
+            blockingError: { blockingError: reason, command: hookCommand },
+            outcome: 'blocking',
+            hook,
+          }
+          return
+        }
+        const rawExitCode =
+          hook.type === 'mcp_tool'
+            ? httpResult.ok && !httpResult.error
+              ? 0
+              : 1
+            : httpResult.statusCode
 
         if (httpResult.aborted) {
           emitHookResponse({
@@ -3349,16 +3658,20 @@ async function* executeHooks({
         }
 
         if (httpResult.error || !httpResult.ok) {
+          const errorStdout = hook.type === 'mcp_tool' ? httpResult.body : ''
           const stderr =
-            httpResult.error || `HTTP ${httpResult.statusCode} from ${hook.url}`
+            httpResult.error ||
+            (hook.type === 'mcp_tool'
+              ? 'MCP tool returned an error'
+              : `HTTP ${httpResult.statusCode} from ${getHookDisplayText(hook)}`)
           emitHookResponse({
             hookId,
             hookName,
             hookEvent,
             output: stderr,
-            stdout: '',
+            stdout: errorStdout,
             stderr,
-            exitCode: httpResult.statusCode,
+            exitCode: rawExitCode,
             outcome: 'error',
           })
           yield {
@@ -3368,8 +3681,8 @@ async function* executeHooks({
               toolUseID,
               hookEvent,
               stderr,
-              stdout: '',
-              exitCode: httpResult.statusCode ?? 0,
+              stdout: errorStdout,
+              exitCode: rawExitCode ?? 0,
             }),
             outcome: 'non_blocking_error' as const,
             hook,
@@ -3379,7 +3692,9 @@ async function* executeHooks({
 
         // HTTP hooks must return JSON — parse and validate through Zod
         const { json: httpJson, validationError: httpValidationError } =
-          parseHttpHookOutput(httpResult.body)
+          hook.type === 'http'
+            ? parseHttpHookOutput(httpResult.body)
+            : parseHookOutput(httpResult.body)
 
         if (httpValidationError) {
           emitHookResponse({
@@ -3389,7 +3704,7 @@ async function* executeHooks({
             output: httpResult.body,
             stdout: httpResult.body,
             stderr: httpValidationError,
-            exitCode: httpResult.statusCode,
+            exitCode: hook.type === 'mcp_tool' ? 1 : rawExitCode,
             outcome: 'error',
           })
           yield {
@@ -3400,7 +3715,7 @@ async function* executeHooks({
               hookEvent,
               stderr: httpValidationError,
               stdout: httpResult.body,
-              exitCode: httpResult.statusCode ?? 0,
+              exitCode: hook.type === 'mcp_tool' ? 1 : (rawExitCode ?? 0),
             }),
             outcome: 'non_blocking_error' as const,
             hook,
@@ -3408,6 +3723,37 @@ async function* executeHooks({
           return
         }
 
+        if (
+          hook.type === 'mcp_tool' &&
+          (!httpJson || isAsyncHookJSONOutput(httpJson))
+        ) {
+          emitHookResponse({
+            hookId,
+            hookName,
+            hookEvent,
+            output: httpResult.body,
+            stdout: httpResult.body,
+            stderr: '',
+            exitCode: 0,
+            outcome: 'success',
+          })
+          yield {
+            message: createAttachmentMessage({
+              type: 'hook_success',
+              hookName,
+              toolUseID,
+              hookEvent,
+              content: `${hookName} completed`,
+              stdout: httpResult.body,
+              stderr: '',
+              command: hookCommand,
+              durationMs: Date.now() - hookStartMs,
+            }),
+            outcome: 'success',
+            hook,
+          }
+          return
+        }
         if (httpJson && isAsyncHookJSONOutput(httpJson)) {
           // Async response: treat as success (no further processing)
           emitHookResponse({
@@ -3417,7 +3763,7 @@ async function* executeHooks({
             output: httpResult.body,
             stdout: httpResult.body,
             stderr: '',
-            exitCode: httpResult.statusCode,
+            exitCode: rawExitCode,
             outcome: 'success',
           })
           yield {
@@ -3430,14 +3776,14 @@ async function* executeHooks({
         if (httpJson) {
           const processed = processHookJSONOutput({
             json: httpJson,
-            command: hook.url,
+            command: getHookDisplayText(hook),
             hookName,
             toolUseID,
             hookEvent,
             expectedHookEvent: hookEvent,
             stdout: httpResult.body,
             stderr: '',
-            exitCode: httpResult.statusCode,
+            exitCode: rawExitCode,
           })
           emitHookResponse({
             hookId,
@@ -3446,7 +3792,7 @@ async function* executeHooks({
             output: httpResult.body,
             stdout: httpResult.body,
             stderr: '',
-            exitCode: httpResult.statusCode,
+            exitCode: rawExitCode,
             outcome: 'success',
           })
           yield {
@@ -3801,13 +4147,24 @@ async function* executeHooks({
     if (result.blockingError) {
       yield {
         blockingError: result.blockingError,
+        suppressOriginalPrompt: result.suppressOriginalPrompt,
         stopReason: result.stopReason,
         hook: result.hook,
+        ...(result.hook.type === 'prompt'
+          ? { impossible: result.impossible }
+          : {}),
       }
+      permissionBehavior = 'deny'
     }
 
     if (result.message) {
-      yield { message: result.message, hook: result.hook }
+      yield {
+        message: result.message,
+        hook: result.hook,
+        ...(result.hook.type === 'prompt'
+          ? { stopReason: result.stopReason, impossible: result.impossible }
+          : {}),
+      }
     }
 
     // densable: Mo.timedOut && prompt && Stop → yield {hook, timedOut:true}
@@ -3932,13 +4289,42 @@ async function* executeHooks({
       }
     }
 
-    // Yield updatedMCPToolOutput if provided (from PostToolUse hooks)
-    if (result.updatedMCPToolOutput) {
-      logForDebugging(
-        `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) replaced MCP tool output`,
-      )
+    if (result.updatedToolOutput !== undefined) {
+      yield { updatedToolOutput: result.updatedToolOutput }
+    } else if (result.updatedMCPToolOutput !== undefined) {
+      yield { updatedMCPToolOutput: result.updatedMCPToolOutput }
+    }
+    if (result.classifierContext) {
+      let value = result.classifierContext.slice(0, 2000)
+      const last = value.charCodeAt(value.length - 1)
+      if (
+        value.length < result.classifierContext.length &&
+        last >= 0xd800 &&
+        last <= 0xdbff
+      ) {
+        value = value.slice(0, -1)
+      }
+      const matched = matchingHooks.find(entry => entry.hook === result.hook)
       yield {
-        updatedMCPToolOutput: result.updatedMCPToolOutput,
+        pairedRewrite:
+          result.updatedToolOutput !== undefined
+            ? 'direct'
+            : result.updatedMCPToolOutput !== undefined
+              ? 'legacy_mcp'
+              : result.legacyMcpRewriteSuppressed
+                ? 'suppressed'
+                : 'none',
+        classifierContexts: [
+          {
+            value,
+            hostPrincipal:
+              result.hook.type === 'callback' &&
+              matched !== undefined &&
+              matched.pluginId === undefined &&
+              matched.pluginRoot === undefined &&
+              matched.skillRoot === undefined,
+          },
+        ],
       }
     }
 
@@ -4142,12 +4528,18 @@ async function executeHooksOutsideREPL({
   timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
   storageV5,
   credentials,
+  classicChainMember,
+  managedHooksOnly,
+  managedHooksExcluded,
 }: {
+  managedHooksOnly?: boolean
+  managedHooksExcluded?: boolean
   getAppState?: () => AppState
   hookInput: HookInput
   matchQuery?: string
   signal?: AbortSignal
   timeoutMs: number
+  classicChainMember?: boolean
   /** densable Fd persist — last two kwe args (jIs / Nw). */
   storageV5?: unknown
   credentials?: unknown
@@ -4158,11 +4550,88 @@ async function executeHooksOutsideREPL({
 
   const hookEvent = hookInput.hook_event_name
   const hookName = matchQuery ? `${hookEvent}:${matchQuery}` : hookEvent
-  if (shouldDisableAllHooksIncludingManaged()) {
-    logForDebugging(
-      `Skipping hooks for ${hookName} due to 'disableAllHooks' managed setting`,
+  if (
+    !classicChainMember &&
+    !shouldDisableAllHooksIncludingManaged() &&
+    hasMatchingFunctionHook(hookEvent)
+  ) {
+    const managed = managedHooksExcluded
+      ? []
+      : await executeHooksOutsideREPL({
+          getAppState,
+          hookInput,
+          matchQuery,
+          signal,
+          timeoutMs,
+          storageV5,
+          credentials,
+          classicChainMember: true,
+          managedHooksOnly: true,
+        })
+    if (managed.some(result => result.blocked)) return managed
+    let collected: HookOutsideReplResult[] = []
+    let originalBlock: string | undefined
+    let originalPath: string | undefined
+    const returned = await runFunctionHookChain(
+      hookEvent,
+      hookInput as unknown as Record<string, unknown>,
+      async event => {
+        collected = await executeHooksOutsideREPL({
+          getAppState,
+          hookInput: event as HookInput,
+          matchQuery,
+          signal,
+          timeoutMs,
+          storageV5,
+          credentials,
+          classicChainMember: true,
+          managedHooksExcluded: true,
+        })
+        originalBlock = collected.find(result => result.blocked)?.output
+        originalPath =
+          hookEvent === 'WorktreeCreate'
+            ? [...managed, ...collected]
+                .filter(result => result.succeeded)
+                .map(result =>
+                  result.output.trim().split('\n').filter(Boolean).at(-1),
+                )
+                .find(Boolean)
+            : undefined
+        return {
+          ...event,
+          ...(originalBlock !== undefined ? { block: originalBlock } : {}),
+          ...(originalPath !== undefined ? { worktreePath: originalPath } : {}),
+        }
+      },
+      undefined,
+      undefined,
+      { signal },
     )
-    return []
+    if (!returned || typeof returned !== 'object')
+      return [...managed, ...collected]
+    const event = returned as Record<string, unknown>
+    let results = [...managed, ...collected]
+    if (event.block !== originalBlock) {
+      results = results.filter(result => !result.blocked)
+      if (event.block !== undefined)
+        results.push({
+          command: `classic.${hookEvent} hook`,
+          succeeded: false,
+          blocked: true,
+          output: String(event.block),
+        })
+    }
+    if (hookEvent === 'WorktreeCreate' && event.worktreePath !== originalPath) {
+      results = results.filter(result => !result.succeeded)
+      if (typeof event.worktreePath === 'string')
+        results.push({
+          command: `classic.${hookEvent} hook`,
+          succeeded: true,
+          blocked: false,
+          output: event.worktreePath,
+        })
+    }
+    return results
   }
 
   // SECURITY: ALL hooks require workspace trust in interactive mode
@@ -4182,6 +4651,8 @@ async function executeHooksOutsideREPL({
     sessionId,
     hookEvent,
     hookInput,
+    undefined,
+    { managedHooksOnly, managedHooksExcluded },
   )
   if (matchingHooks.length === 0) {
     return []
@@ -4328,19 +4799,39 @@ async function executeHooksOutsideREPL({
       // Handle HTTP hooks (no toolUseContext needed - just HTTP POST).
       // execHttpHook handles its own timeout internally via hook.timeout or
       // DEFAULT_HTTP_HOOK_TIMEOUT_MS, so we pass signal directly.
-      if (hook.type === 'http') {
+      if (hook.type === 'http' || hook.type === 'mcp_tool') {
         try {
-          const httpResult = await execHttpHook(
-            hook,
-            hookEvent,
-            jsonInput,
-            signal,
-          )
+          const httpResult: {
+            ok: boolean
+            body: string
+            error?: string
+            aborted?: boolean
+            withheld?: boolean
+            statusCode?: number
+          } =
+            hook.type === 'http'
+              ? await execHttpHook(
+                  hook,
+                  hookEvent,
+                  jsonInput,
+                  signal,
+                  timeoutMs,
+                )
+              : await execMcpToolHook(
+                  hook,
+                  hookEvent,
+                  jsonInput,
+                  appState?.mcp.clients,
+                  signal,
+                  timeoutMs,
+                )
 
           if (httpResult.aborted) {
-            logForDebugging(`${hookName} [${hook.url}] cancelled`)
+            logForDebugging(
+              `${hookName} [${getHookDisplayText(hook)}] cancelled`,
+            )
             return {
-              command: hook.url,
+              command: getHookDisplayText(hook),
               succeeded: false,
               output: 'Hook cancelled',
               blocked: false,
@@ -4350,12 +4841,17 @@ async function executeHooksOutsideREPL({
           if (httpResult.error || !httpResult.ok) {
             const errMsg =
               httpResult.error ||
-              `HTTP ${httpResult.statusCode} from ${hook.url}`
-            logForDebugging(`${hookName} [${hook.url}] failed: ${errMsg}`, {
-              level: 'error',
-            })
+              (hook.type === 'mcp_tool'
+                ? 'MCP tool returned an error'
+                : `HTTP ${httpResult.statusCode} from ${getHookDisplayText(hook)}`)
+            logForDebugging(
+              `${hookName} [${getHookDisplayText(hook)}] failed: ${errMsg}`,
+              {
+                level: 'error',
+              },
+            )
             return {
-              command: hook.url,
+              command: getHookDisplayText(hook),
               succeeded: false,
               output: errMsg,
               blocked: false,
@@ -4364,7 +4860,9 @@ async function executeHooksOutsideREPL({
 
           // HTTP hooks must return JSON — parse and validate through Zod
           const { json: httpJson, validationError: httpValidationError } =
-            parseHttpHookOutput(httpResult.body)
+            hook.type === 'http'
+              ? parseHttpHookOutput(httpResult.body)
+              : parseHookOutput(httpResult.body)
           if (httpValidationError) {
             throw new Error(httpValidationError)
           }
@@ -4397,7 +4895,7 @@ async function executeHooksOutsideREPL({
               : httpResult.body
 
           return {
-            command: hook.url,
+            command: getHookDisplayText(hook),
             succeeded: true,
             output,
             blocked: !!jsonBlocked,
@@ -4406,11 +4904,11 @@ async function executeHooksOutsideREPL({
           const errorMessage =
             error instanceof Error ? error.message : String(error)
           logForDebugging(
-            `${hookName} [${hook.url}] failed to run: ${errorMessage}`,
+            `${hookName} [${getHookDisplayText(hook)}] failed to run: ${errorMessage}`,
             { level: 'error' },
           )
           return {
-            command: hook.url,
+            command: getHookDisplayText(hook),
             succeeded: false,
             output: errorMessage,
             blocked: false,
@@ -4548,6 +5046,37 @@ async function executeHooksOutsideREPL({
  * @param toolUseContext Optional ToolUseContext for prompt-based hooks
  * @returns Async generator that yields progress messages and returns blocking errors
  */
+function getToolHookMcpMetadata(
+  toolName: string,
+  context: ToolUseContext,
+): {
+  mcp_server?: { name: string; source: string }
+} {
+  const info = findToolByName(context.options.tools, toolName)?.mcpInfo
+  if (!info) return {}
+  const client = context.options.mcpClients?.find(
+    entry => entry.name === info.serverName,
+  )
+  return {
+    mcp_server: {
+      name: info.serverName,
+      source:
+        info.source ??
+        (('pluginTelemetry' in info && info.pluginTelemetry !== undefined) ||
+        ((info.scope ?? 'dynamic') === 'dynamic' &&
+          ownerOfPluginToolServerKey(info.serverName) !== undefined)
+          ? 'plugin'
+          : (
+                'serverType' in info
+                  ? info.serverType === 'sdk'
+                  : client?.config.type === 'sdk'
+              )
+            ? 'sdk'
+            : (info.scope ?? 'dynamic')),
+    },
+  }
+}
+
 export async function* executePreToolHooks<ToolInput>(
   toolName: string,
   toolUseID: string,
@@ -4584,6 +5113,7 @@ export async function* executePreToolHooks<ToolInput>(
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
     hook_event_name: 'PreToolUse' as const,
     tool_name: toolName,
+    ...getToolHookMcpMetadata(toolName, toolUseContext),
     tool: toolName,
     tool_input: toolInput,
     tool_use_id: toolUseID,
@@ -4622,13 +5152,16 @@ export async function* executePostToolHooks<ToolInput, ToolResponse>(
   permissionMode?: string,
   signal?: AbortSignal,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  durationMs?: number,
 ): AsyncGenerator<AggregatedHookResult> {
   const hookInput: PostToolUseHookInput = {
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
     hook_event_name: 'PostToolUse',
     tool_name: toolName,
+    ...getToolHookMcpMetadata(toolName, toolUseContext),
     tool_input: toolInput,
     tool_response: toolResponse,
+    duration_ms: durationMs,
     tool_use_id: toolUseID,
   }
 
@@ -4665,6 +5198,7 @@ export async function* executePostToolUseFailureHooks<ToolInput>(
   permissionMode?: string,
   signal?: AbortSignal,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  durationMs?: number,
 ): AsyncGenerator<AggregatedHookResult> {
   const appState = toolUseContext.getAppState()
   const sessionId = toolUseContext.agentId ?? getSessionId()
@@ -4676,10 +5210,12 @@ export async function* executePostToolUseFailureHooks<ToolInput>(
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
     hook_event_name: 'PostToolUseFailure',
     tool_name: toolName,
+    ...getToolHookMcpMetadata(toolName, toolUseContext),
     tool_input: toolInput,
     tool_use_id: toolUseID,
     error,
     is_interrupt: isInterrupt,
+    duration_ms: durationMs,
   }
 
   yield* executeHooks({
@@ -4750,6 +5286,7 @@ export async function* executePermissionDeniedHooks<ToolInput>(
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
     hook_event_name: 'PermissionDenied',
     tool_name: toolName,
+    ...getToolHookMcpMetadata(toolName, toolUseContext),
     tool_input: toolInput,
     tool_use_id: toolUseID,
     reason,
@@ -5916,6 +6453,7 @@ export async function* executePermissionRequestHooks<ToolInput>(
     ...createBaseHookInput(permissionMode, undefined, toolUseContext),
     hook_event_name: 'PermissionRequest',
     tool_name: toolName,
+    ...getToolHookMcpMetadata(toolName, toolUseContext),
     tool_input: toolInput,
     permission_suggestions: permissionSuggestions,
   }

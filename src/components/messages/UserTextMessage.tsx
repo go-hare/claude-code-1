@@ -101,6 +101,7 @@ export function UserTextMessage({
         fallbackLabel="agent"
         origin={origin}
         followsSpeakerLabel={followsAnyLabel}
+        hostInjected={origin?.hostInjected === true}
         messageId={resolvedMessageId}
       />
     );
@@ -144,6 +145,7 @@ export function UserTextMessage({
           messageId={resolvedMessageId}
           origin={origin}
           followsSpeakerLabel={followsAnyLabel}
+          hostInjected={origin?.hostInjected === true}
         />
       );
     }

@@ -113,29 +113,35 @@ export type HookInput =
   | (HookInputBase & {
       hook_event_name: 'PreToolUse'
       tool_name: string
+      mcp_server?: { name: string; source: string }
       tool_input: unknown
       tool_use_id: string
     })
   | (HookInputBase & {
       hook_event_name: 'PermissionRequest'
       tool_name: string
+      mcp_server?: { name: string; source: string }
       tool_input: unknown
       permission_suggestions?: PermissionUpdate[]
     })
   | (HookInputBase & {
       hook_event_name: 'PostToolUse'
       tool_name: string
+      mcp_server?: { name: string; source: string }
       tool_input: unknown
       tool_response: unknown
+      duration_ms?: number
       tool_use_id: string
     })
   | (HookInputBase & {
       hook_event_name: 'PostToolUseFailure'
       tool_name: string
+      mcp_server?: { name: string; source: string }
       tool_input: unknown
       tool_use_id: string
       error: string
       is_interrupt?: boolean
+      duration_ms?: number
     })
   | (HookInputBase & {
       hook_event_name: 'PostToolBatch'
@@ -149,6 +155,7 @@ export type HookInput =
   | (HookInputBase & {
       hook_event_name: 'PermissionDenied'
       tool_name: string
+      mcp_server?: { name: string; source: string }
       tool_input: unknown
       tool_use_id: string
       reason: string
@@ -382,6 +389,8 @@ export type SyncHookJSONOutput = {
     | {
         hookEventName: 'PostToolUse'
         additionalContext?: string
+        classifierContext?: string
+        updatedToolOutput?: unknown
         updatedMCPToolOutput?: unknown
       }
     | { hookEventName: 'PostToolUseFailure'; additionalContext?: string }

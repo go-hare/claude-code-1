@@ -20,6 +20,7 @@ export const hookResponseSchema = lazySchema(() =>
       .string()
       .describe('Reason, if the condition was not met')
       .optional(),
+    impossible: z.boolean().optional(),
   }),
 )
 
@@ -41,6 +42,7 @@ export function addArgumentsToPrompt(
 export function createStructuredOutputTool(): Tool {
   return {
     ...SyntheticOutputTool,
+    alwaysLoad: true,
     inputSchema: hookResponseSchema(),
     inputJSONSchema: {
       type: 'object',

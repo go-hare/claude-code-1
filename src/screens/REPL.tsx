@@ -60,6 +60,7 @@ import {
 } from '../utils/fileStateCache.js';
 import { ToolStateSlots } from '../utils/toolState.js';
 import { refreshActivePlugins } from '../utils/plugins/refresh.js';
+import { messageUuidPrefix, UUID_PREFIX_LENGTH } from '../utils/plugins/uiSelectionRowHolding.js';
 import { retireDepartedAdditionalDirectories } from '../utils/settings/applySettingsChange.js';
 import {
   updateLastInteractionTime,
@@ -420,7 +421,7 @@ import { clearGoalOnUnrecoverableError } from '../services/goal/goalUnrecoverabl
 import { createHostEngine, type HostEngine } from '../engine/hostEngine.js';
 import { runHostEngineTurn } from '../engine/hostEngineTurn.js';
 import { Stream } from '../utils/stream.js';
-import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js';
+import { preferLiveMcpClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
 import { useMergedTools } from '../hooks/useMergedTools.js';
 import { mergeAndFilterTools } from '../utils/toolPool.js';
@@ -1419,6 +1420,12 @@ export function REPL({
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
   const store = useAppStateStore();
+  useEffect(() => {
+    const { getBootstrapSession } = require('../utils/sessionRoot.js') as typeof import('../utils/sessionRoot.js');
+    return getBootstrapSession().mcpSessionWiring.acquireClientsAccessor(() =>
+      preferLiveMcpClients(store.getState().mcp.clients, initialMcpClients),
+    );
+  }, [initialMcpClients, store]);
   // Needed by claim-loop deferred resume (t4d/wAo/BSe MCP-settle wait).
   // Refs filled after getToolUseContext/canUseTool exist — claim BSe schedule
   // closes over these for official Aye agent resume.
@@ -4784,7 +4791,7 @@ export function REPL({
         return resolveAgentTools(mainThreadAgentDefinition, merged, false, true).resolvedTools;
       };
       // densable computeMcpClients — gold refreshMcpClients:be.computeMcpClients
-      const computeMcpClients = () => mergeClients(initialMcpClients, store.getState().mcp.clients);
+      const computeMcpClients = () => preferLiveMcpClients(store.getState().mcp.clients, initialMcpClients);
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { getBootstrapSession } = require('../utils/sessionRoot.js') as typeof import('../utils/sessionRoot.js');
@@ -4829,7 +4836,7 @@ export function REPL({
           thinkingConfig: s.thinkingEnabled !== false ? thinkingConfig : { type: 'disabled' },
           // Merge fresh from store rather than closing over useMergedClients'
           // memoized output. initialMcpClients is a prop (session-constant).
-          mcpClients: mergeClients(initialMcpClients, s.mcp.clients),
+          mcpClients: preferLiveMcpClients(s.mcp.clients, initialMcpClients),
           mcpResources: s.mcp.resources,
           ideInstallationStatus: ideInstallationStatus,
           isNonInteractiveSession: false,
@@ -5619,7 +5626,7 @@ export function REPL({
       // store — useManageMCPConnections may have populated it since the
       // render that captured this closure (same pattern as computeTools).
       if (shouldQuery) {
-        const freshClients = mergeClients(initialMcpClients, store.getState().mcp.clients);
+        const freshClients = preferLiveMcpClients(store.getState().mcp.clients, initialMcpClients);
         void diagnosticTracker.handleQueryStart(freshClients);
         const ideClient = getConnectedIdeClient(freshClients);
         if (ideClient) {
@@ -7527,10 +7534,10 @@ export function REPL({
   );
 
   // Not memoized — hook stores caps via ref, reads latest closure at dispatch.
-  // 24-char prefix: deriveUUID preserves first 24, renderable uuid prefix-matches raw source.
+  // densable y6: deriveUUID preserves first 24; skip rows with no uuid.
   const findRawIndex = (uuid: string) => {
-    const prefix = uuid.slice(0, 24);
-    return messages.findIndex(m => m.uuid.slice(0, 24) === prefix);
+    const prefix = uuid.slice(0, UUID_PREFIX_LENGTH);
+    return messages.findIndex(m => messageUuidPrefix(m) === prefix);
   };
   const messageActionCaps: MessageActionCaps = {
     copy: text =>
@@ -8695,15 +8702,8 @@ export function REPL({
   const inlineGripLeftCols = Math.max(0, transcriptCols - inlineGripRightReserve);
   const pluginPaneFocused = shownPluginPane !== undefined && getPanesState().focusedId === shownPluginPane.id;
   const ultraplanChoiceShowing = focusedInputDialog === 'ultraplan-choice' && Boolean(ultraplanPendingChoice);
-  const promptInputMounted =
-    !toolJSX?.shouldHidePromptInput &&
-    !anyInputOverlay &&
-    !hidePromptForHardNms &&
-    !leftArrowToAgentsFired.current &&
-    leftArrowDeferRef.current === null &&
-    pke.kind === 'none' &&
-    !disabled &&
-    !cursor;
+  // densable Pp = !Ti && !VD && !Qo — permission dialog, toolJSX hide, disabled.
+  const promptInputMounted = !toolJSX?.shouldHidePromptInput && !hidePromptForHardNms && !disabled;
   // <AlternateScreen> at the root: everything below is inside its
   // <Box height={rows}>. Handlers/contexts are zero-height so ScrollBox's
   // flexGrow in FullscreenLayout resolves against this Box. The transcript

@@ -78,6 +78,10 @@ function buildHookSchemas() {
 
   const PromptHookSchema = z.object({
     type: z.literal('prompt').describe('LLM prompt hook type'),
+    continueOnBlock: z
+      .boolean()
+      .optional()
+      .describe('Allow the model to continue after this prompt hook blocks'),
     prompt: z
       .string()
       .describe(
@@ -174,11 +178,38 @@ function buildHookSchemas() {
       .describe('If true, hook runs once and is removed after execution'),
   })
 
+  const McpToolHookSchema = z.object({
+    type: z.literal('mcp_tool').describe('MCP tool hook type'),
+    server: z.string().describe('Name of the MCP server'),
+    tool: z.string().describe('Name of the MCP tool to call'),
+    input: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        'Tool arguments. String values may reference hook input using ${path}.',
+      ),
+    if: IfConditionSchema(),
+    timeout: z
+      .number()
+      .positive()
+      .optional()
+      .describe('Timeout in seconds for the MCP tool call'),
+    statusMessage: z
+      .string()
+      .optional()
+      .describe('Custom status message to display in spinner while hook runs'),
+    once: z
+      .boolean()
+      .optional()
+      .describe('If true, hook runs once and is removed after execution'),
+  })
+
   return {
     BashCommandHookSchema,
     PromptHookSchema,
     HttpHookSchema,
     AgentHookSchema,
+    McpToolHookSchema,
   }
 }
 
@@ -191,12 +222,14 @@ export const HookCommandSchema = lazySchema(() => {
     PromptHookSchema,
     AgentHookSchema,
     HttpHookSchema,
+    McpToolHookSchema,
   } = buildHookSchemas()
   return z.discriminatedUnion('type', [
     BashCommandHookSchema,
     PromptHookSchema,
     AgentHookSchema,
     HttpHookSchema,
+    McpToolHookSchema,
   ])
 })
 
@@ -230,5 +263,6 @@ export type BashCommandHook = Extract<HookCommand, { type: 'command' }>
 export type PromptHook = Extract<HookCommand, { type: 'prompt' }>
 export type AgentHook = Extract<HookCommand, { type: 'agent' }>
 export type HttpHook = Extract<HookCommand, { type: 'http' }>
+export type McpToolHook = Extract<HookCommand, { type: 'mcp_tool' }>
 export type HookMatcher = z.infer<ReturnType<typeof HookMatcherSchema>>
 export type HooksSettings = Partial<Record<HookEvent, HookMatcher[]>>

@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import type { SelectionState } from '@anthropic/ink'
 import {
+  findRenderableIndexByUuidPrefix,
   messageHasUuid,
   messageSelectionRequestId,
+  messageUuidPrefix,
   requestIdContainingSpan,
   requestIdHoldingSelection,
   selectionAnswer,
   selectionFullyInViewport,
   selectionRowBounds,
+  UUID_PREFIX_LENGTH,
 } from '../plugins/uiSelectionRowHolding.js'
 
 function sel(
@@ -67,6 +70,38 @@ describe('densable 2.1.289 ui.selection rowHolding helpers', () => {
     expect(messageHasUuid({ uuid: 'a' })).toBe(true)
     expect(messageHasUuid({ uuid: '' })).toBe(false)
     expect(messageHasUuid({})).toBe(false)
+  })
+
+  test('messageUuidPrefix matches densable y6', () => {
+    expect(UUID_PREFIX_LENGTH).toBe(24)
+    expect(messageUuidPrefix({})).toBeUndefined()
+    expect(messageUuidPrefix({ uuid: '' })).toBeUndefined()
+    expect(messageUuidPrefix({ uuid: 'abc' })).toBe('abc')
+    const uuid = '123456789012345678901234-rest'
+    expect(messageUuidPrefix({ uuid })).toBe('123456789012345678901234')
+  })
+
+  test('findRenderableIndexByUuidPrefix matches densable fw', () => {
+    const prefix = '123456789012345678901234'
+    const rows = [
+      { type: 'system' },
+      { type: 'user', uuid: `${prefix}-user` },
+      {
+        type: 'work_segment',
+        messages: [{ uuid: `${prefix.replace(/4$/, '5')}-inner` }],
+      },
+    ]
+    expect(findRenderableIndexByUuidPrefix(rows, false, prefix)).toBe(1)
+    expect(findRenderableIndexByUuidPrefix(rows, true, prefix)).toBe(1)
+    expect(
+      findRenderableIndexByUuidPrefix(rows, false, '123456789012345678901235'),
+    ).toBe(-1)
+    expect(
+      findRenderableIndexByUuidPrefix(rows, true, '123456789012345678901235'),
+    ).toBe(2)
+    expect(() =>
+      findRenderableIndexByUuidPrefix(rows, true, prefix),
+    ).not.toThrow()
   })
 
   test('selectionRowBounds uses virtual rows when present', () => {

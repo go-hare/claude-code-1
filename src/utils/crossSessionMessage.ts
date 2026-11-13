@@ -179,12 +179,13 @@ export function previewPeerMessageBody(body: string): string {
  */
 export function stripAgentMessageEnvelope(text: string): string {
   const inner = text.match(
-    /<agent-message\b[^>]*>\n?([\s\S]*?)\n?<\/agent-message>/,
+    /^<agent-message\b[^>]*>\n?([\s\S]*?)\n?<\/agent-message>/,
   )
   if (inner?.[1] !== undefined) return inner[1]
+  if (!/^<agent-message(?:\s|>)/.test(text)) return text
   return text
-    .replace(/^<agent-message[^>]*>\n/, '')
-    .replace(/\n<\/agent-message>$/, '')
+    .replace(/^<agent-message[^>]*>\n?/, '')
+    .replace(/\n?<\/agent-message>$/, '')
 }
 
 /** densable jg open-tag from="…" when origin.name is missing. */

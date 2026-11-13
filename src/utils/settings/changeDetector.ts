@@ -1,5 +1,6 @@
 import chokidar, { type FSWatcher } from 'chokidar'
-import { stat } from 'fs/promises'
+import { watch as watchDirectory, type FSWatcher as DirectoryWatcher } from 'fs'
+import { readdir, realpath, stat } from 'fs/promises'
 import * as platformPath from 'path'
 import { getIsRemoteMode } from '../../bootstrap/state.js'
 import { registerCleanup } from '../cleanupRegistry.js'
@@ -12,151 +13,385 @@ import {
 } from '../hooks.js'
 import { createSignal } from '../signal.js'
 import { SETTING_SOURCES, type SettingSource } from './constants.js'
+import {
+  probeNativeFileWatching,
+  type FileWatchVerdict,
+} from './fsWatchProbe.js'
 import { clearInternalWrites, consumeInternalWrite } from './internalWrites.js'
+import { getManagedSettingsDropInDir } from './managedPath.js'
+import {
+  getHkcuSettings,
+  getMdmSettings,
+  refreshMdmSettings,
+  setMdmSettingsCache,
+} from './mdm/settings.js'
 import { getSettingsFilePathForSource } from './settings.js'
 import { resetSettingsCache } from './settingsCache.js'
 
-/**
- * Time in milliseconds to wait for file writes to stabilize before processing.
- * This helps avoid processing partial writes or rapid successive changes.
- */
 const FILE_STABILITY_THRESHOLD_MS = 1000
-
-/**
- * Polling interval in milliseconds for checking file stability.
- * Used by chokidar's awaitWriteFinish option.
- * Must be lower than FILE_STABILITY_THRESHOLD_MS.
- */
 const FILE_STABILITY_POLL_INTERVAL_MS = 500
-
-/**
- * Time window in milliseconds to consider a file change as internal.
- * If a file change occurs within this window after markInternalWrite() is called,
- * it's assumed to be from Claude Code itself and won't trigger a notification.
- */
 const INTERNAL_WRITE_WINDOW_MS = 5000
-
-/**
- * Grace period in milliseconds before processing a settings file deletion.
- * Handles the common delete-and-recreate pattern during auto-updates or when
- * another session starts up. If an `add` or `change` event fires within this
- * window (file was recreated), the deletion is cancelled and treated as a change.
- *
- * Must exceed chokidar's awaitWriteFinish delay (stabilityThreshold + pollInterval)
- * so the grace window outlasts the write stability check on the recreated file.
- */
 const DELETION_GRACE_MS =
   FILE_STABILITY_THRESHOLD_MS + FILE_STABILITY_POLL_INTERVAL_MS + 200
+const WATCH_POLL_INTERVAL_MS = 2000
+const MDM_POLL_INTERVAL_MS = 30 * 60 * 1000
 
 let watcher: FSWatcher | null = null
 let initialized = false
 let disposed = false
-/** densable G6 `p` — generation so a stale getWatchTargets cannot replace a newer watch. */
+// Never reuse a generation: asynchronous callbacks may outlive dispose/reset.
 let watchGeneration = 0
+let lifecycleGeneration = 0
+let polling = false
+let probing = false
+let watchStartedAt: number | undefined
+let catchUpSince: number | undefined
+let mdmTimer: ReturnType<typeof setInterval> | undefined
+let mdmSnapshot: string | undefined
+let mdmRefreshing = false
+let resolveReady: (() => void) | undefined
 const pendingDeletions = new Map<string, ReturnType<typeof setTimeout>>()
+let pendingDirs = new Set<string>()
+const appearedDirs = new Set<string>()
+const creationWatchers = new Map<string, { close(): void }>()
+let directoryCheckTimer: ReturnType<typeof setInterval> | undefined
+let realpathToCanonical = new Map<string, string>()
+const closingWatchers = new Set<Promise<void>>()
+let unregisterCleanup: (() => void) | undefined
 
-/** densable notifyChange extra (`prevCwd` from /cd `ft`, `trustFlip` from `lr`). */
 export type SettingsChangeExtra = {
   prevCwd?: string
   trustFlip?: boolean
 }
-
 const settingsChanged =
   createSignal<[source: SettingSource, extra?: SettingsChangeExtra]>()
 
-// Test overrides for timing constants
-let testOverrides: {
+type TimingOverrides = {
   stabilityThreshold?: number
   pollInterval?: number
   deletionGrace?: number
-} | null = null
+  watchPollInterval?: number
+  mdmPollInterval?: number
+  fsWatchProbe?: () => Promise<FileWatchVerdict>
+}
+let testOverrides: TimingOverrides | null = null
 
 type WatchTargets = {
   dirs: string[]
   settingsFiles: Set<string>
+  pendingDirs: Set<string>
+  dropInDir: string | null
+  realpathToCanonical: Map<string, string>
 }
 
-/**
- * densable G6 `v` — close the previous watcher and attach dirs from a fresh
- * getWatchTargets. Generation-guards a raced rehome/initialize.
- */
+function stabilityThreshold(): number {
+  return testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS
+}
+function watchPollInterval(): number {
+  return testOverrides?.watchPollInterval ?? WATCH_POLL_INTERVAL_MS
+}
+function deletionGrace(): number {
+  const grace = testOverrides?.deletionGrace ?? DELETION_GRACE_MS
+  return polling
+    ? Math.max(grace, watchPollInterval() + stabilityThreshold() + 200)
+    : grace
+}
+function closeWatcher(previous: FSWatcher): void {
+  const closing = previous.close().catch(() => {})
+  closingWatchers.add(closing)
+  void closing.finally(() => closingWatchers.delete(closing))
+}
+function closeCreationWatchers(): void {
+  if (directoryCheckTimer) clearInterval(directoryCheckTimer)
+  directoryCheckTimer = undefined
+  for (const w of creationWatchers.values()) w.close()
+  creationWatchers.clear()
+}
+
+/** Official dVr.si — retarget, preserve directories discovered during rehome,
+ * and backfill edits made before the replacement watcher's ready event. */
 function attachWatchTargets(targets: WatchTargets, generation: number): void {
-  if (generation !== watchGeneration) return
-  const { dirs, settingsFiles } = targets
+  if (disposed || generation !== watchGeneration) return
+  const lifecycle = lifecycleGeneration
+  const { dirs, settingsFiles, dropInDir } = targets
+  realpathToCanonical = targets.realpathToCanonical
+  for (const dir of pendingDirs) {
+    if (!targets.pendingDirs.has(dir)) appearedDirs.add(dir)
+  }
+  pendingDirs = targets.pendingDirs
+  watchStartedAt ??= Date.now()
   const previous = watcher
   watcher = null
-  if (previous) previous.close().catch(() => {})
-  if (dirs.length === 0) return
-
+  if (previous) closeWatcher(previous)
+  resolveReady?.()
+  resolveReady = undefined
+  closeCreationWatchers()
+  for (const dir of pendingDirs) watchForDirectory(dir)
+  if (dirs.length === 0) {
+    void catchUp(settingsFiles, Promise.resolve(), generation, lifecycle)
+    if (!polling && pendingDirs.size > 0) probeNativeWatcher(lifecycle)
+    return
+  }
+  const usesPolling = polling
   logForDebugging(
-    `Watching for changes in setting files ${[...settingsFiles].join(', ')}...`,
+    `Watching for changes in setting files ${[...settingsFiles].join(', ')}...${dropInDir ? ` and drop-in directory ${dropInDir}` : ''}${usesPolling ? ` (polling every ${watchPollInterval()}ms)` : ''}`,
   )
-
-  watcher = chokidar.watch(dirs, {
+  const current = chokidar.watch(dirs, {
     persistent: true,
     ignoreInitial: true,
-    depth: 0, // Only watch immediate children, not subdirectories
+    depth: 0,
     awaitWriteFinish: {
-      stabilityThreshold:
-        testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS,
+      stabilityThreshold: stabilityThreshold(),
       pollInterval:
         testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS,
     },
     ignored: (path, stats) => {
-      // Ignore special file types (sockets, FIFOs, devices) - they cannot be watched
-      // and will error with EOPNOTSUPP on macOS.
       if (stats && !stats.isFile() && !stats.isDirectory()) return true
-      // Ignore .git directories
-      if (path.split(platformPath.sep).some(dir => dir === '.git')) return true
-      // Allow directories (chokidar needs them for directory-level watching)
-      // and paths without stats (chokidar's initial check before stat)
+      if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
       if (!stats || stats.isDirectory()) return false
-      // Only watch known settings files, ignore everything else in the directory
-      // Note: chokidar normalizes paths to forward slashes on Windows, so we
-      // normalize back to native format for comparison
       const normalized = platformPath.normalize(path)
       if (settingsFiles.has(normalized)) return false
+      if (
+        dropInDir &&
+        platformPath.dirname(normalized) === dropInDir &&
+        normalized.endsWith('.json')
+      )
+        return false
       return true
     },
-    // Additional options for stability
     ignorePermissionErrors: true,
-    usePolling: false, // Use native file system events
-    atomic: true, // Handle atomic writes better
+    ...(usesPolling
+      ? {
+          usePolling: true,
+          interval: watchPollInterval(),
+          binaryInterval: watchPollInterval(),
+        }
+      : { usePolling: false }),
+    atomic: true,
   })
-
-  watcher.on('change', handleChange)
-  watcher.on('unlink', handleDelete)
-  watcher.on('add', handleAdd)
-  // densable #14: unhandled chokidar 'error' can crash process during FS errors
-  watcher.on('error', (err: unknown) => {
+  watcher = current
+  const ready = new Promise<void>(resolve => {
+    resolveReady = resolve
+    current.once('ready', resolve)
+  })
+  const isCurrent = () => !disposed && generation === watchGeneration
+  current.on('change', path => {
+    if (isCurrent()) handleChange(path)
+  })
+  current.on('unlink', path => {
+    if (!isCurrent()) return
+    // FSEvents may stop observing the old inode after unlink/atomic save.
+    if (process.platform === 'darwin') current.add(platformPath.dirname(path))
+    handleDelete(path)
+  })
+  current.on('add', path => {
+    if (isCurrent()) handleAdd(path)
+  })
+  current.on('error', (err: unknown) => {
+    if (!isCurrent()) return
     logForDebugging(`[settings] watcher error: ${errorMessage(err)}`, {
       level: 'warn',
     })
+    if (!usesPolling) handleNativeWatchError(err)
   })
+  void catchUp(settingsFiles, ready, generation, lifecycle)
+  if (!usesPolling) probeNativeWatcher(lifecycle)
 }
 
-/**
- * Initialize file watching
- */
-export async function initialize(): Promise<void> {
-  if (getIsRemoteMode()) return
-  if (initialized || disposed) return
-  initialized = true
+/** Official tc/ii/Nr: a silent or refused native watcher must fall back. */
+function probeNativeWatcher(lifecycle: number): void {
+  if (probing || polling || disposed) return
+  probing = true
+  void (testOverrides?.fsWatchProbe ?? probeNativeFileWatching)()
+    .then(verdict => {
+      if (disposed || lifecycle !== lifecycleGeneration) return
+      probing = false
+      if (verdict === 'silent' || verdict === 'refused') {
+        switchToPolling(`fs_watch_${verdict}`)
+      }
+    })
+    .catch(err => {
+      if (disposed || lifecycle !== lifecycleGeneration) return
+      probing = false
+      logForDebugging(`[settings] watcher probe error: ${errorMessage(err)}`, {
+        level: 'warn',
+      })
+    })
+}
+function handleNativeWatchError(err: unknown): void {
+  if (!err || typeof err !== 'object') return
+  const { code, syscall } = err as { code?: unknown; syscall?: unknown }
+  if (
+    (code === 'EMFILE' || code === 'ENFILE' || code === 'ENOSPC') &&
+    (syscall === undefined || syscall === 'watch')
+  )
+    switchToPolling(`fs_watch_refused_late_${code.toLowerCase()}`)
+}
+function switchToPolling(reason: string): void {
+  if (polling || disposed) return
+  polling = true
+  catchUpSince = (watchStartedAt ?? Date.now()) - 2000
+  logForDebugging(
+    `[settings] native file watching is not delivering events on this host (${reason}); polling settings files every ${watchPollInterval()}ms instead`,
+    { level: 'warn' },
+  )
+  void rebuildWatchTargets()
+}
 
-  // Register cleanup to properly dispose during graceful shutdown
-  registerCleanup(dispose)
+/** Official ai/sc — wait for quiet files before replaying missed changes. */
+async function catchUp(
+  files: Set<string>,
+  ready: Promise<void>,
+  generation: number,
+  lifecycle: number,
+): Promise<void> {
+  if (appearedDirs.size === 0 && catchUpSince === undefined) return
+  await ready
+  if (
+    disposed ||
+    generation !== watchGeneration ||
+    lifecycle !== lifecycleGeneration
+  )
+    return
+  // A replacement watcher may supersede this one before ready. Only the
+  // current generation may consume pending catch-up work.
+  const appeared = new Set(appearedDirs)
+  const since = catchUpSince
+  const candidates = new Set(files)
+  const dropInDir = platformPath.normalize(getManagedSettingsDropInDir())
+  if (appeared.has(dropInDir) || since !== undefined) {
+    // Drop-ins have dynamic names. The pre-watch snapshot can be empty even
+    // though files arrive before ready and are suppressed by ignoreInitial.
+    // Enumerate again only after the replacement watcher has finished scanning.
+    try {
+      for (const name of await readdir(dropInDir)) {
+        if (name.endsWith('.json'))
+          candidates.add(platformPath.join(dropInDir, name))
+      }
+    } catch {
+      // The directory can disappear again while the watcher is starting.
+    }
+  }
+  await Promise.all(
+    [...candidates]
+      .filter(
+        path => since !== undefined || appeared.has(platformPath.dirname(path)),
+      )
+      .map(async path => {
+        try {
+          let before = await stat(path)
+          while (!disposed && generation === watchGeneration) {
+            await new Promise(resolve =>
+              setTimeout(resolve, stabilityThreshold()),
+            )
+            const after = await stat(path)
+            if (
+              disposed ||
+              generation !== watchGeneration ||
+              lifecycle !== lifecycleGeneration
+            )
+              return
+            if (
+              before.size === after.size &&
+              before.mtimeMs === after.mtimeMs
+            ) {
+              if (
+                after.isFile() &&
+                (appeared.has(platformPath.dirname(path)) ||
+                  (since !== undefined && after.mtimeMs >= since))
+              )
+                handleChange(path)
+              return
+            }
+            before = after
+          }
+        } catch {
+          // The file may disappear while waiting for stability.
+        }
+      }),
+  )
+  if (
+    !disposed &&
+    generation === watchGeneration &&
+    lifecycle === lifecycleGeneration
+  ) {
+    for (const dir of appeared) appearedDirs.delete(dir)
+    if (catchUpSince === since) catchUpSince = undefined
+  }
+}
 
+function watchForDirectory(dir: string): void {
+  // The private-file probe cannot attest delivery on every watched parent.
+  // If a creation event is missed after the immediate absence check, native
+  // mode otherwise has no way to discover this directory for the whole session.
+  // Keep one unref'd recovery timer only while directories are pending.
+  if (!directoryCheckTimer) {
+    directoryCheckTimer = setInterval(() => {
+      for (const pending of pendingDirs) void checkDirectory(pending)
+    }, watchPollInterval())
+    directoryCheckTimer.unref()
+  }
+  if (!polling) {
+    const parent = platformPath.dirname(dir)
+    if (!creationWatchers.has(parent)) {
+      try {
+        const w: DirectoryWatcher = watchDirectory(parent, (_event, name) => {
+          for (const pending of pendingDirs) {
+            if (
+              platformPath.dirname(pending) === parent &&
+              (name === null || name === platformPath.basename(pending))
+            ) {
+              void checkDirectory(pending)
+            }
+          }
+        })
+        w.on('error', err => {
+          logForDebugging(
+            `[settings] creation watcher error: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+          handleNativeWatchError(err)
+        })
+        creationWatchers.set(parent, w)
+      } catch (err) {
+        logForDebugging(
+          `[settings] cannot watch ${parent}: ${errorMessage(err)}`,
+          { level: 'warn' },
+        )
+        handleNativeWatchError(err)
+      }
+    }
+  }
+  void checkDirectory(dir)
+}
+async function checkDirectory(dir: string): Promise<void> {
+  const lifecycle = lifecycleGeneration
+  try {
+    if (!(await stat(dir)).isDirectory()) return
+  } catch {
+    return
+  }
+  if (disposed || lifecycle !== lifecycleGeneration || !pendingDirs.delete(dir))
+    return
+  appearedDirs.add(dir)
+  logForDebugging(`Settings directory ${dir} appeared; watching it`)
+  await rebuildWatchTargets()
+}
+async function rebuildWatchTargets(): Promise<void> {
   const generation = ++watchGeneration
   const targets = await getWatchTargets()
-  if (disposed) return // dispose() ran during the await
   attachWatchTargets(targets, generation)
 }
 
-/**
- * densable G6 `ge` — retarget the settings watcher after `/cd` chdir.
- * Drops pending-deletion timers for paths that are no longer a settings file
- * under the new cwd, then rebuilds the watch list.
- */
+export async function initialize(): Promise<void> {
+  if (getIsRemoteMode() || initialized || disposed) return
+  initialized = true
+  lifecycleGeneration++
+  unregisterCleanup = registerCleanup(dispose)
+  startMdmPolling()
+  await rebuildWatchTargets()
+}
+
 export async function rehome(): Promise<void> {
   if (!initialized || disposed || getIsRemoteMode()) return
   for (const [path, timer] of pendingDeletions) {
@@ -165,92 +400,119 @@ export async function rehome(): Promise<void> {
       pendingDeletions.delete(path)
     }
   }
-  const generation = ++watchGeneration
-  const targets = await getWatchTargets()
-  if (disposed) return
-  attachWatchTargets(targets, generation)
+  await rebuildWatchTargets()
 }
 
-/**
- * Clean up file watcher. Returns a promise that resolves when chokidar's
- * close() settles — callers that need the watcher fully stopped before
- * removing the watched directory (e.g. test teardown) must await this.
- * Fire-and-forget is still valid where timing doesn't matter.
- */
-export function dispose(): Promise<void> {
+export async function dispose(): Promise<void> {
   disposed = true
+  lifecycleGeneration++
+  watchGeneration++
+  unregisterCleanup?.()
+  unregisterCleanup = undefined
+  if (mdmTimer) clearInterval(mdmTimer)
+  mdmTimer = undefined
+  mdmSnapshot = undefined
   for (const timer of pendingDeletions.values()) clearTimeout(timer)
   pendingDeletions.clear()
+  closeCreationWatchers()
+  pendingDirs.clear()
+  appearedDirs.clear()
+  realpathToCanonical.clear()
+  resolveReady?.()
+  resolveReady = undefined
   clearInternalWrites()
   settingsChanged.clear()
-  const w = watcher
+  const previous = watcher
   watcher = null
-  return w ? w.close() : Promise.resolve()
+  if (previous) closeWatcher(previous)
+  await Promise.all(closingWatchers)
 }
 
-/**
- * Subscribe to settings changes
- */
 export const subscribe = settingsChanged.subscribe
 
-/**
- * Collect settings file paths and their deduplicated parent directories to watch.
- * Returns all potential settings file paths for watched directories, not just those
- * that exist at init time, so that newly-created files are also detected.
- */
-async function getWatchTargets(): Promise<{
-  dirs: string[]
-  settingsFiles: Set<string>
-}> {
-  // Map from directory to all potential settings files in that directory
-  const dirToSettingsFiles = new Map<string, Set<string>>()
-  const dirsWithExistingFiles = new Set<string>()
-
+/** Official Zi: watch existing directories even when their settings are absent;
+ * watch a missing directory's parent until it appears. */
+async function getWatchTargets(): Promise<WatchTargets> {
+  const byDir = new Map<string, Set<string>>()
+  const dirs = new Set<string>()
+  const missing = new Set<string>()
+  const aliases = new Map<string, string>()
+  const files: string[] = []
   for (const source of SETTING_SOURCES) {
-    // Skip flagSettings - they're provided via CLI and won't change during the session.
-    // Additionally, they may be temp files in $TMPDIR which can contain special files
-    // (FIFOs, sockets) that cause the file watcher to hang or error.
-    // See: https://github.com/anthropics/claude-code/issues/16469
-    if (source === 'flagSettings' || source === 'policySettings') {
-      continue
-    }
+    if (source === 'flagSettings') continue
     const path = getSettingsFilePathForSource(source)
-    if (!path) {
-      continue
-    }
-
+    if (path) files.push(platformPath.normalize(path))
+  }
+  const addFile = (dir: string, path: string) => {
+    if (!byDir.has(dir)) byDir.set(dir, new Set())
+    byDir.get(dir)!.add(path)
+  }
+  for (const path of files) {
     const dir = platformPath.dirname(path)
-
-    // Track all potential settings files in each directory
-    if (!dirToSettingsFiles.has(dir)) {
-      dirToSettingsFiles.set(dir, new Set())
+    addFile(dir, path)
+    if (!dirs.has(dir) && !missing.has(dir)) {
+      try {
+        if ((await stat(dir)).isDirectory()) dirs.add(dir)
+      } catch {
+        try {
+          if ((await stat(platformPath.dirname(dir))).isDirectory())
+            missing.add(dir)
+        } catch {
+          /* No existing parent to watch. */
+        }
+      }
     }
-    dirToSettingsFiles.get(dir)!.add(path)
-
-    // Check if file exists - only watch directories that have at least one existing file
     try {
-      const stats = await stat(path)
-      if (stats.isFile()) {
-        dirsWithExistingFiles.add(dir)
-      }
+      const target = platformPath.normalize(await realpath(path))
+      const realDir = await realpath(dir)
+      if (
+        target === path ||
+        platformPath.join(realDir, platformPath.basename(path)) === target
+      )
+        continue
+      const targetDir = platformPath.dirname(target)
+      const alias =
+        targetDir === realDir
+          ? platformPath.join(dir, platformPath.basename(target))
+          : target
+      if (files.includes(alias)) continue
+      aliases.set(alias, path)
+      addFile(platformPath.dirname(alias), alias)
+      dirs.add(platformPath.dirname(alias))
     } catch {
-      // File doesn't exist, that's fine
+      /* Missing files have no symlink target yet. */
     }
   }
-
-  // For watched directories, include ALL potential settings file paths
-  // This ensures files created after init are also detected
   const settingsFiles = new Set<string>()
-  for (const dir of dirsWithExistingFiles) {
-    const filesInDir = dirToSettingsFiles.get(dir)
-    if (filesInDir) {
-      for (const file of filesInDir) {
-        settingsFiles.add(file)
+  for (const dir of dirs) {
+    for (const file of byDir.get(dir) ?? []) settingsFiles.add(file)
+  }
+  const dropInDir = platformPath.normalize(getManagedSettingsDropInDir())
+  let watchedDropIn: string | null = null
+  try {
+    if ((await stat(dropInDir)).isDirectory()) {
+      dirs.add(dropInDir)
+      watchedDropIn = dropInDir
+      for (const name of await readdir(dropInDir)) {
+        if (name.endsWith('.json'))
+          settingsFiles.add(platformPath.join(dropInDir, name))
       }
     }
+  } catch {
+    try {
+      if ((await stat(platformPath.dirname(dropInDir))).isDirectory())
+        missing.add(dropInDir)
+    } catch {
+      /* Managed settings may not be installed on this machine. */
+    }
   }
-
-  return { dirs: [...dirsWithExistingFiles], settingsFiles }
+  return {
+    dirs: [...dirs],
+    settingsFiles,
+    pendingDirs: missing,
+    dropInDir: watchedDropIn,
+    realpathToCanonical: aliases,
+  }
 }
 
 function settingSourceToConfigChangeSource(
@@ -268,137 +530,113 @@ function settingSourceToConfigChangeSource(
       return 'policy_settings'
   }
 }
-
-function handleChange(path: string): void {
-  const source = getSourceForPath(path)
-  if (!source) return
-
-  // If a deletion was pending for this path (delete-and-recreate pattern),
-  // cancel the deletion — we'll process this as a change instead.
-  const pendingTimer = pendingDeletions.get(path)
-  if (pendingTimer) {
-    clearTimeout(pendingTimer)
-    pendingDeletions.delete(path)
-    logForDebugging(
-      `Cancelled pending deletion of ${path} — file was recreated`,
-    )
-  }
-
-  // Check if this was an internal write
-  if (consumeInternalWrite(path, INTERNAL_WRITE_WINDOW_MS)) {
-    return
-  }
-
-  logForDebugging(`Detected change to ${path}`)
-
-  // Fire ConfigChange hook first — if blocked (exit code 2 or decision: 'block'),
-  // skip applying the change to the session
-  void executeConfigChangeHooks(
-    settingSourceToConfigChangeSource(source),
-    path,
-  ).then(results => {
-    if (hasBlockingResult(results)) {
-      logForDebugging(`ConfigChange hook blocked change to ${path}`)
-      return
-    }
-    fanOut(source)
-  })
+function canonicalPath(path: string): string {
+  const normalized = platformPath.normalize(path)
+  return realpathToCanonical.get(normalized) ?? normalized
 }
-
-/**
- * Handle a file being re-added (e.g. after a delete-and-recreate). Cancels any
- * pending deletion grace timer and treats the event as a change.
- */
-function handleAdd(path: string): void {
-  const source = getSourceForPath(path)
+function handleChange(path: string): void {
+  if (disposed) return
+  const canonical = canonicalPath(path)
+  const source = getSourceForPath(canonical)
   if (!source) return
-
-  // Cancel any pending deletion — the file is back
-  const pendingTimer = pendingDeletions.get(path)
-  if (pendingTimer) {
-    clearTimeout(pendingTimer)
-    pendingDeletions.delete(path)
-    logForDebugging(`Cancelled pending deletion of ${path} — file was re-added`)
+  const pending = pendingDeletions.get(canonical)
+  if (pending) {
+    clearTimeout(pending)
+    pendingDeletions.delete(canonical)
   }
-
-  // Treat as a change (re-read settings)
+  if (consumeInternalWrite(canonical, INTERNAL_WRITE_WINDOW_MS)) return
+  logForDebugging(`Detected change to ${canonical}`)
+  applyExternalChange(source, canonical)
+}
+function handleAdd(path: string): void {
   handleChange(path)
 }
-
-/**
- * Handle a file being deleted. Uses a grace period to absorb delete-and-recreate
- * patterns (e.g. auto-updater, another session starting up). If the file is
- * recreated within the grace period (detected via 'add' or 'change' event),
- * the deletion is cancelled and treated as a normal change instead.
- */
 function handleDelete(path: string): void {
-  const source = getSourceForPath(path)
-  if (!source) return
-
-  logForDebugging(`Detected deletion of ${path}`)
-
-  // If there's already a pending deletion for this path, let it run
-  if (pendingDeletions.has(path)) return
-
-  const timer = setTimeout(
-    (p, src) => {
-      pendingDeletions.delete(p)
-
-      // Fire ConfigChange hook first — if blocked, skip applying the deletion
-      void executeConfigChangeHooks(
-        settingSourceToConfigChangeSource(src),
-        p,
-      ).then(results => {
-        if (hasBlockingResult(results)) {
-          logForDebugging(`ConfigChange hook blocked deletion of ${p}`)
-          return
-        }
-        fanOut(src)
+  if (disposed) return
+  const canonical = canonicalPath(path)
+  const source = getSourceForPath(canonical)
+  if (!source || pendingDeletions.has(canonical)) return
+  logForDebugging(`Detected deletion of ${canonical}`)
+  pendingDeletions.set(
+    canonical,
+    setTimeout(() => {
+      pendingDeletions.delete(canonical)
+      applyExternalChange(source, canonical)
+    }, deletionGrace()),
+  )
+}
+function applyExternalChange(source: SettingSource, path: string): void {
+  const lifecycle = lifecycleGeneration
+  void executeConfigChangeHooks(settingSourceToConfigChangeSource(source), path)
+    .then(results => {
+      if (disposed || lifecycle !== lifecycleGeneration) return
+      if (hasBlockingResult(results)) {
+        logForDebugging(`ConfigChange hook blocked change to ${path}`)
+        return
+      }
+      fanOut(source)
+    })
+    .catch(err => {
+      logForDebugging(`[settings] ConfigChange failed: ${errorMessage(err)}`, {
+        level: 'warn',
       })
-    },
-    testOverrides?.deletionGrace ?? DELETION_GRACE_MS,
-    path,
-    source,
-  )
-  pendingDeletions.set(path, timer)
+    })
 }
-
 function getSourceForPath(path: string): SettingSource | undefined {
-  // Normalize path because chokidar uses forward slashes on Windows
-  const normalizedPath = platformPath.normalize(path)
-
+  const normalized = platformPath.normalize(path)
+  if (
+    platformPath.dirname(normalized) ===
+      platformPath.normalize(getManagedSettingsDropInDir()) &&
+    normalized.endsWith('.json')
+  )
+    return 'policySettings'
   return SETTING_SOURCES.find(
-    source => getSettingsFilePathForSource(source) === normalizedPath,
+    source => getSettingsFilePathForSource(source) === normalized,
   )
 }
 
-/**
- * Reset the settings cache, then notify all listeners.
- *
- * The cache reset MUST happen here (single producer), not in each listener
- * (N consumers). Previously, listeners like useSettingsChange and
- * applySettingsChange reset defensively because some notification paths
- * (file-watch at :289/340) did not reset before iterating
- * listeners. That defense caused N-way thrashing when N listeners were
- * subscribed: each listener cleared the cache, re-read from disk (populating
- * it), then the next listener cleared it again — N full disk reloads per
- * notification. Profile showed 5 loadSettingsFromDisk calls in 12ms when
- * remote managed settings resolved at startup.
- *
- * With the reset centralized here, one notification = one disk reload: the
- * first listener to call getSettingsWithErrors() pays the miss and
- * repopulates; all subsequent listeners hit the cache.
- */
+/** Official fc: refresh both OS policy caches before invalidating merged state.
+ * Remote org policy remains deliberately outside this local watcher. */
+function startMdmPolling(): void {
+  mdmSnapshot = JSON.stringify({
+    mdm: getMdmSettings(),
+    hkcu: getHkcuSettings(),
+  })
+  const lifecycle = lifecycleGeneration
+  mdmTimer = setInterval(() => {
+    if (disposed || mdmRefreshing) return
+    mdmRefreshing = true
+    void refreshMdmSettings()
+      .then(({ mdm, hkcu }) => {
+        if (disposed || lifecycle !== lifecycleGeneration) return
+        setMdmSettingsCache(mdm, hkcu)
+        const snapshot = JSON.stringify({ mdm, hkcu })
+        if (snapshot !== mdmSnapshot) {
+          mdmSnapshot = snapshot
+          logForDebugging('Detected MDM settings change via poll')
+          fanOut('policySettings')
+        }
+      })
+      .catch(err => {
+        logForDebugging(`MDM poll error: ${errorMessage(err)}`)
+      })
+      .finally(() => {
+        if (lifecycle === lifecycleGeneration) mdmRefreshing = false
+      })
+  }, testOverrides?.mdmPollInterval ?? MDM_POLL_INTERVAL_MS)
+  mdmTimer.unref()
+}
+
 function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
   resetSettingsCache()
-  settingsChanged.emit(source, extra)
+  try {
+    settingsChanged.emit(source, extra)
+  } catch (err) {
+    logForDebugging(`[settings] subscriber failed: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  }
 }
-
-/**
- * Manually notify listeners of a settings change.
- * Used for programmatic settings changes that don't involve file system changes.
- * densable F(I,P) → G(I, void 0, P): extra is `prevCwd` / `trustFlip`.
- */
 export function notifyChange(
   source: SettingSource,
   extra?: SettingsChangeExtra,
@@ -407,31 +645,19 @@ export function notifyChange(
   fanOut(source, extra)
 }
 
-/**
- * Reset internal state for testing purposes only.
- * This allows re-initialization after dispose().
- * Optionally accepts timing overrides for faster test execution.
- *
- * Closes the watcher and returns the close promise so preload's afterEach
- * can await it BEFORE nuking perTestSettingsDir. Without this, chokidar's
- * pending awaitWriteFinish poll fires on the deleted dir → ENOENT (#25253).
- */
-export function resetForTesting(overrides?: {
-  stabilityThreshold?: number
-  pollInterval?: number
-  deletionGrace?: number
-}): Promise<void> {
-  for (const timer of pendingDeletions.values()) clearTimeout(timer)
-  pendingDeletions.clear()
+export async function resetForTesting(
+  overrides?: TimingOverrides,
+): Promise<void> {
+  await dispose()
   initialized = false
   disposed = false
-  watchGeneration = 0
+  polling = false
+  probing = false
+  watchStartedAt = undefined
+  catchUpSince = undefined
+  mdmRefreshing = false
   testOverrides = overrides ?? null
-  const w = watcher
-  watcher = null
-  return w ? w.close() : Promise.resolve()
 }
-
 export const settingsChangeDetector = {
   initialize,
   dispose,

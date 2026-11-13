@@ -77,7 +77,7 @@ describe('densable 2.1.222 #14 wire-up: error handlers + teardown null-first', (
       'utf8',
     )
     expect(src).toContain('[settings] watcher error:')
-    expect(src).toContain("watcher.on('error'")
+    expect(src).toMatch(/\b\w+\.on\('error',/)
   })
 
   test('keybindings has densable error log + usePolling', () => {

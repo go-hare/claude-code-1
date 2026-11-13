@@ -174,6 +174,9 @@ export function messageSelectionRequestId(message: {
   return typeof message.uuid === 'string' ? message.uuid : ''
 }
 
+/** densable `_H` — uuid prefix match length (deriveUUID keeps the first 24). */
+export const UUID_PREFIX_LENGTH = 24
+
 /** densable `dN` — message has a non-empty uuid string. */
 export function messageHasUuid(message: unknown): message is { uuid: string } {
   if (typeof message !== 'object' || message === null || !('uuid' in message)) {
@@ -181,6 +184,44 @@ export function messageHasUuid(message: unknown): message is { uuid: string } {
   }
   const uuid = (message as { uuid: unknown }).uuid
   return typeof uuid === 'string' && uuid !== ''
+}
+
+/** densable `y6` — 24-char uuid prefix, or undefined when dN fails. */
+export function messageUuidPrefix(message: unknown): string | undefined {
+  return messageHasUuid(message)
+    ? message.uuid.slice(0, UUID_PREFIX_LENGTH)
+    : undefined
+}
+
+type NestedUuidCarrier = {
+  type?: unknown
+  messages?: unknown
+  notices?: unknown
+}
+
+/**
+ * densable `fw` — find a renderable row by y6 prefix.
+ * When `searchNested` is true, also match work_segment.messages / recap_fold.notices.
+ */
+export function findRenderableIndexByUuidPrefix(
+  messages: readonly unknown[],
+  searchNested: boolean,
+  prefix: string,
+): number {
+  return messages.findIndex(message => {
+    if (messageUuidPrefix(message) === prefix) return true
+    if (!searchNested || typeof message !== 'object' || message === null) {
+      return false
+    }
+    const row = message as NestedUuidCarrier
+    if (row.type === 'work_segment' && Array.isArray(row.messages)) {
+      return row.messages.some(inner => messageUuidPrefix(inner) === prefix)
+    }
+    if (row.type === 'recap_fold' && Array.isArray(row.notices)) {
+      return row.notices.some(inner => messageUuidPrefix(inner) === prefix)
+    }
+    return false
+  })
 }
 
 export type UiSelectionRowHolding = (
