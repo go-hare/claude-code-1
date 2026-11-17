@@ -8,6 +8,7 @@ import {
   TOOL_USE_ID_TAG,
 } from '../../constants/xml.js'
 import type { AppState } from '../../state/AppState.js'
+import type { TaskRegistry } from '../taskRegistry.js'
 import {
   isTerminalTaskStatus,
   type TaskStatus,
@@ -15,6 +16,7 @@ import {
 } from '../../Task.js'
 import type { TaskState } from '../../tasks/types.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isAgentKillLoopSettled } from '../agentStopBag.js'
 import {
   enqueuePendingNotification,
   getCommandQueue,
@@ -31,6 +33,9 @@ export const STOPPED_DISPLAY_MS = 3_000
 // Grace period for terminal local_agent tasks in the coordinator panel
 // densable _re=30000 (tB empty-KA schedule + QYi non-park path)
 export const PANEL_GRACE_MS = 30_000
+
+// densable gx=30000 — mcp_task hold after endTime in gold `en`
+export const MCP_TASK_GRACE_MS = 30_000
 
 /**
  * densable bot="flag:idle-window" + CSu/okg helpers.
@@ -338,6 +343,36 @@ async function stampBgInFlightFromLiveState(
 }
 
 /**
+ * densable `en` skip holds — keepalive only when `'retain' in task`.
+ * local_workflow: future evictAfter OR live kill-loop (`!db(id)`).
+ * mcp_task: (endTime ?? 0) + gx, gx=30000.
+ */
+function shouldSkipTerminalEviction(task: TaskState, taskId: string): boolean {
+  const now = Date.now()
+  if ('retain' in task && (task.keepaliveReasons?.size ?? 0) > 0) {
+    return true
+  }
+  // Panel grace — 'retain' in task narrows to LocalAgentTaskState.
+  // evictAfter is optional; default Infinity so unset never auto-evicts.
+  if ('retain' in task && (task.evictAfter ?? Infinity) > now) {
+    return true
+  }
+  if (task.type === 'local_workflow') {
+    const evictAfter = (task as { evictAfter?: number }).evictAfter
+    if ((evictAfter ?? 0) > now || !isAgentKillLoopSettled(taskId)) {
+      return true
+    }
+  }
+  if (
+    task.type === 'mcp_task' &&
+    (task.endTime ?? 0) + MCP_TASK_GRACE_MS > now
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
  * Eagerly evict a terminal task from AppState.
  * The task must be in a terminal state (completed/failed/killed) with notified=true.
  * This allows memory to be freed without waiting for the next query loop iteration.
@@ -347,31 +382,29 @@ export function evictTerminalTask(
   taskId: string,
   setAppState: SetAppState,
 ): void {
+  // densable `en(e,n)` `r` — emit Qn().taskEvicted only after a real drop.
+  let evicted = false
   setAppState(prev => {
     const task = prev.tasks?.[taskId]
     if (!task) return prev
     if (!isTerminalTaskStatus(task.status)) return prev
     if (!task.notified) return prev
-    // Official zle/tB: non-empty keepaliveReasons block GC until detach.
-    if (
-      'keepaliveReasons' in task &&
-      (task as { keepaliveReasons?: Set<string> }).keepaliveReasons instanceof
-        Set &&
-      ((task as { keepaliveReasons?: Set<string> }).keepaliveReasons?.size ??
-        0) > 0
-    ) {
-      return prev
+    if (shouldSkipTerminalEviction(task, taskId)) return prev
+    evicted = true
+    const { [taskId]: _removed, ...remainingTasks } = prev.tasks
+    const transcripts = prev.transcripts ?? {}
+    const { [taskId]: _transcript, ...remainingTranscripts } = transcripts
+    return {
+      ...prev,
+      tasks: remainingTasks,
+      transcripts: taskId in transcripts ? remainingTranscripts : transcripts,
     }
-    // Panel grace period — blocks eviction until deadline passes.
-    // 'retain' in task narrows to LocalAgentTaskState (the only type with
-    // that field); evictAfter is optional so 'evictAfter' in task would
-    // miss tasks that haven't had it set yet.
-    if ('retain' in task && (task.evictAfter ?? Infinity) > Date.now()) {
-      return prev
-    }
-    const { [taskId]: _, ...remainingTasks } = prev.tasks
-    return { ...prev, tasks: remainingTasks }
   })
+  if (evicted) {
+    // densable Qn().taskEvicted.emit(e). require() avoids framework↔Xm cycle.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../taskRegistry.js').taskEvicted.emit(taskId)
+  }
 }
 
 /**
@@ -393,10 +426,10 @@ export function getKeepaliveReasons(task: {
 export function addKeepaliveReason(
   ownerAgentId: string | undefined | null,
   reason: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): void {
   if (!ownerAgentId || !reason) return
-  updateTaskState(ownerAgentId, setAppState, task => {
+  registry.update(ownerAgentId, task => {
     if (task.type !== 'local_agent') return task
     const current = getKeepaliveReasons(
       task as { keepaliveReasons?: Set<string> },
@@ -418,10 +451,10 @@ export function addKeepaliveReason(
 export function removeKeepaliveReason(
   ownerAgentId: string | undefined | null,
   reason: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): void {
   if (!ownerAgentId || !reason) return
-  updateTaskState(ownerAgentId, setAppState, task => {
+  registry.update(ownerAgentId, task => {
     if (task.type !== 'local_agent') return task
     const agent = task as {
       type: 'local_agent'
@@ -522,10 +555,10 @@ export function isParkedKeepaliveAgent(task: {
  */
 export function countAgentKeepaliveChildren(
   ownerAgentId: string | undefined | null,
-  getAppState: () => AppState,
+  registry: TaskRegistry,
 ): number {
   if (!ownerAgentId) return 0
-  const task = getAppState().tasks?.[ownerAgentId]
+  const task = registry.get(ownerAgentId)
   if (!task || task.type !== 'local_agent') return 0
   const reasons = getKeepaliveReasons(
     task as { keepaliveReasons?: Set<string> },
@@ -543,9 +576,9 @@ export function countAgentKeepaliveChildren(
  */
 export function hasLiveAgentKeepaliveChildren(
   ownerAgentId: string | undefined | null,
-  getAppState: () => AppState,
+  registry: TaskRegistry,
 ): boolean {
-  return countAgentKeepaliveChildren(ownerAgentId, getAppState) > 0
+  return countAgentKeepaliveChildren(ownerAgentId, registry) > 0
 }
 
 /**
@@ -556,10 +589,10 @@ export function hasLiveAgentKeepaliveChildren(
  */
 export function hasHandbackWaitKids(
   ownerAgentId: string | undefined | null,
-  getAppState: () => AppState,
+  registry: TaskRegistry,
 ): boolean {
   if (!ownerAgentId) return false
-  const task = getAppState().tasks?.[ownerAgentId]
+  const task = registry.get(ownerAgentId)
   if (!task || task.type !== 'local_agent') return false
   const reasons = getKeepaliveReasons(
     task as { keepaliveReasons?: Set<string> },
@@ -609,25 +642,16 @@ export function isJrDeadBackgroundPromote(
  */
 export function sweepStaleKeepaliveReasons(
   ownerAgentId: string | undefined | null,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): void {
   if (!ownerAgentId) return
 
-  // Snapshot owner + queue outside update so we can call removeKeepaliveReason
-  // (which itself updates) without nested setAppState races.
-  let reasons: string[] = []
-  let ownerExists = false
-  setAppState(prev => {
-    const owner = prev.tasks?.[ownerAgentId]
-    if (owner && owner.type === 'local_agent') {
-      ownerExists = true
-      reasons = [
-        ...getKeepaliveReasons(owner as { keepaliveReasons?: Set<string> }),
-      ]
-    }
-    return prev
-  })
-  if (!ownerExists || reasons.length === 0) return
+  const owner = registry.get(ownerAgentId)
+  if (!owner || owner.type !== 'local_agent') return
+  const reasons = [
+    ...getKeepaliveReasons(owner as { keepaliveReasons?: Set<string> }),
+  ]
+  if (reasons.length === 0) return
 
   const pendingChildIds = new Set<string>()
   for (const cmd of getCommandQueue()) {
@@ -641,12 +665,7 @@ export function sweepStaleKeepaliveReasons(
     }
   }
 
-  // Need a fresh tasks snapshot for child notified/missing checks.
-  let tasks: Record<string, TaskState> = {}
-  setAppState(prev => {
-    tasks = prev.tasks ?? {}
-    return prev
-  })
+  const tasks = registry.all()
 
   for (const reason of reasons) {
     let childId: string | undefined
@@ -668,7 +687,7 @@ export function sweepStaleKeepaliveReasons(
         child.notified &&
         isTerminalTaskStatus(child.status))
     if (shouldDetach) {
-      removeKeepaliveReason(ownerAgentId, reason, setAppState)
+      removeKeepaliveReason(ownerAgentId, reason, registry)
     }
   }
 }
@@ -749,9 +768,11 @@ export function applyTaskOffsetsAndEvictions(
   if (offsetIds.length === 0 && evictedTaskIds.length === 0) {
     return
   }
+  const evicted: string[] = []
   setAppState(prev => {
     let changed = false
     const newTasks = { ...prev.tasks }
+    let transcripts: typeof prev.transcripts | undefined
     for (const id of offsetIds) {
       const fresh = newTasks[id]
       // Re-check status on fresh state — task may have completed during the
@@ -768,23 +789,28 @@ export function applyTaskOffsetsAndEvictions(
       if (!fresh || !isTerminalTaskStatus(fresh.status) || !fresh.notified) {
         continue
       }
-      if (
-        'keepaliveReasons' in fresh &&
-        (fresh as { keepaliveReasons?: Set<string> })
-          .keepaliveReasons instanceof Set &&
-        ((fresh as { keepaliveReasons?: Set<string> }).keepaliveReasons?.size ??
-          0) > 0
-      ) {
-        continue
-      }
-      if ('retain' in fresh && (fresh.evictAfter ?? Infinity) > Date.now()) {
+      if (shouldSkipTerminalEviction(fresh, id)) {
         continue
       }
       delete newTasks[id]
+      if (id in prev.transcripts) {
+        transcripts ??= { ...prev.transcripts }
+        delete transcripts[id]
+      }
+      evicted.push(id)
       changed = true
     }
-    return changed ? { ...prev, tasks: newTasks } : prev
+    return changed
+      ? {
+          ...prev,
+          tasks: newTasks,
+          ...(transcripts !== undefined ? { transcripts } : {}),
+        }
+      : prev
   })
+  for (const id of evicted) {
+    require('../taskRegistry.js').taskEvicted.emit(id)
+  }
 }
 
 /**

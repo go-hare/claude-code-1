@@ -419,9 +419,14 @@ async function tailTaskOutput(
       }
       totalRead += bytesRead
     }
+    // densable `jBe`: skip UTF-8 continuation bytes at the tail window start.
+    let skip = 0
+    while (offset > 0 && skip < totalRead && (buffer[skip]! & 192) === 128) {
+      skip++
+    }
     return {
-      content: buffer.toString('utf8', 0, totalRead),
-      bytesRead: totalRead,
+      content: buffer.toString('utf8', skip, totalRead),
+      bytesRead: totalRead - skip,
       bytesTotal: size,
     }
   } finally {
@@ -755,6 +760,27 @@ export async function getTaskOutputDelta(
  * Get output for a task, reading the tail of the file.
  * Caps at maxBytes to avoid loading multi-GB files into memory.
  */
+/** densable `jBe` — tail for GetTask LF `output`. */
+export async function readTaskOutputTail(
+  taskId: string,
+  maxBytes: number,
+): Promise<{ content: string; omittedBytes: number }> {
+  try {
+    const { content, bytesTotal, bytesRead } = await tailTaskOutput(
+      getTaskOutputPath(taskId),
+      maxBytes,
+    )
+    return {
+      content,
+      omittedBytes: Math.max(0, bytesTotal - bytesRead),
+    }
+  } catch (e) {
+    const code = getErrnoCode(e)
+    if (code !== 'ENOENT') logError(e)
+    return { content: '', omittedBytes: 0 }
+  }
+}
+
 export async function getTaskOutput(
   taskId: string,
   maxBytes: number = DEFAULT_MAX_READ_BYTES,

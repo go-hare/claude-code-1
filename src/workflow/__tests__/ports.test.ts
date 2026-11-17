@@ -64,6 +64,7 @@ test('taskRegistrar.register/complete/kill routes via RunBinding (real setAppSta
       agentId: 'a-1',
       toolUseId: 'tu-1',
       setAppState,
+      getAppState: () => state,
     },
     canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
     parentMessage: {} as never,
@@ -80,6 +81,7 @@ test('taskRegistrar.register/complete/kill routes via RunBinding (real setAppSta
   )
   expect(typeof runId).toBe('string')
   expect(signal).toBeInstanceOf(AbortSignal)
+  expect(Object.values(state.tasks)[0]).toMatchObject({ agentId: 'a-1' })
 
   // complete/fail/kill do not throw (RunBinding hit)
   expect(() => ports.taskRegistrar.complete(runId, 'done')).not.toThrow()
@@ -91,6 +93,42 @@ test('taskRegistrar.register/complete/kill routes via RunBinding (real setAppSta
   // after terminal state binding is reclaimed: calling complete on the same runId again should be safe no-op (no throw, no repeated call to workflow task fn)
   ports.taskRegistrar.complete(runId)
   ports.taskRegistrar.kill(runId)
+})
+
+test('workflow owner uses the root task setter and kill aborts the registered task', () => {
+  const bus = createProgressBus()
+  const store = createProgressStoreFromBus(bus)
+  const ports = createWorkflowPorts({ bus, store })
+  let state = { tasks: {} } as unknown as AppState
+  const setAppStateForTasks: SetAppState = update => {
+    state = update(state)
+  }
+  const host = ports.hostFactory({
+    context: {
+      agentId: 'owner',
+      setAppState: () => {},
+      setAppStateForTasks,
+      getAppState: () => state,
+    },
+    canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
+    parentMessage: {} as never,
+  })
+  const { runId, signal } = ports.taskRegistrar.register(
+    { workflowName: 'child', workflowFile: 'child.ts' },
+    host.handle,
+  )
+  expect(Object.values(state.tasks)).toHaveLength(1)
+  expect(Object.values(state.tasks)[0]).toMatchObject({
+    type: 'local_workflow',
+    agentId: 'owner',
+    status: 'running',
+  })
+  ports.taskRegistrar.kill(runId)
+  expect(signal.aborted).toBe(true)
+  expect(Object.values(state.tasks)[0]).toMatchObject({
+    status: 'killed',
+    notified: true,
+  })
 })
 
 // agent-level kill bridge: register → killAgent precisely aborts; kill(runId) aborts all agents.
@@ -106,7 +144,12 @@ test('taskRegistrar agentAbortControllers: register/killAgent precise abort; kil
     Object.assign(state, f(state))
   }
   const hostCtx = ports.hostFactory({
-    context: { agentId: 'a-1', toolUseId: 'tu-1', setAppState },
+    context: {
+      agentId: 'a-1',
+      toolUseId: 'tu-1',
+      setAppState,
+      getAppState: () => state,
+    },
     canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
     parentMessage: {} as never,
   })
@@ -158,7 +201,12 @@ test('skipAgent/retryAgent abort in-flight with densable reasons; pending when i
     Object.assign(state, f(state))
   }
   const hostCtx = ports.hostFactory({
-    context: { agentId: 'a-1', toolUseId: 'tu-1', setAppState },
+    context: {
+      agentId: 'a-1',
+      toolUseId: 'tu-1',
+      setAppState,
+      getAppState: () => state,
+    },
     canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
     parentMessage: {} as never,
   })
@@ -213,7 +261,12 @@ test('unregisterAgentAbort deletes from Map (backend finally cleanup idempotent)
     Object.assign(state, f(state))
   }
   const hostCtx = ports.hostFactory({
-    context: { agentId: 'a-1', toolUseId: 'tu-1', setAppState },
+    context: {
+      agentId: 'a-1',
+      toolUseId: 'tu-1',
+      setAppState,
+      getAppState: () => state,
+    },
     canUseTool: (() => Promise.resolve({ behavior: 'allow' })) as never,
     parentMessage: {} as never,
   })

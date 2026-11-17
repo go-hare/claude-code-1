@@ -8,20 +8,40 @@
  * Transport types sse-ide / ws-ide: always off.
  */
 
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { logEvent } from '../services/analytics/index.js'
 import {
-  completeMonitorMcpTask,
-  failMonitorMcpTask,
-  registerMonitorMcpTask,
-} from '../tasks/MonitorMcpTask/MonitorMcpTask.js'
+  getIsNonInteractiveSession,
+  getMainThreadAgentId,
+} from '../bootstrap/state.js'
+import {
+  STATUS_TAG,
+  SUMMARY_TAG,
+  TASK_ID_TAG,
+  TASK_NOTIFICATION_TAG,
+} from '../constants/xml.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
+import {
+  completeMcpTask,
+  failMcpTask,
+  mcpTaskLabel,
+  registerMcpTask,
+} from '../tasks/McpTask/McpTask.js'
 import type { AppState } from '../state/AppState.js'
 import { logForDebugging } from './debug.js'
+import {
+  DETACH_RESULT_CAP,
+  escapeDetachedResultBody,
+} from './detachedToolCallNotify.js'
 import { isAbortError } from './errors.js'
+import { registerForegroundToolCall } from './foregroundToolCalls.js'
+import { leftoverM, leftoverP, leftoverY } from './leftoverOt.js'
 import { enqueuePendingNotification } from './messageQueueManager.js'
 import { isBackgroundTasksDisabled } from './residualFinalEnvGates.js'
 import { sleep } from './sleep.js'
+import { escapeXml } from './xml.js'
 
 /** densable Lcy */
 export const DEFAULT_MCP_AUTO_BACKGROUND_MS = 120_000
@@ -83,14 +103,63 @@ export function formatMcpAutoBackgroundMovedMessage(input: {
   toolLabel: string
   elapsedSeconds: number
   taskId: string
+  early?: boolean
 }): string {
+  const lead = input.early
+    ? `MCP tool "${input.toolLabel}" was moved to the background as task ${input.taskId} so that a message that arrived while it was running can reach you; it was not interrupted and keeps running`
+    : `MCP tool "${input.toolLabel}" is still running after ${input.elapsedSeconds}s. It was moved to the background as task ${input.taskId} and keeps running`
   return (
-    `MCP tool "${input.toolLabel}" is still running after ${input.elapsedSeconds}s. ` +
-    `It was moved to the background as task ${input.taskId} and keeps running; ` +
+    `${lead}; ` +
     `you'll receive a notification with the result when it completes. ` +
     `You can keep working in the meantime. To stop it, use TaskStop with task_id "${input.taskId}". ` +
     `Note: it does not survive exiting this session.`
   )
+}
+
+const MCP_STATUS_MESSAGE_CAP = 10_000
+const MCP_STATUS_CONTROL_RE =
+  /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Variation_Selector}]+/gu
+
+/** densable `h` (`boundMcpStatusMessage`) @214325100 */
+export function boundMcpStatusMessage(
+  msg: string | undefined,
+): string | undefined {
+  if (msg === undefined) return undefined
+  const cleaned = msg
+    .replace(MCP_STATUS_CONTROL_RE, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+  if (cleaned === '') return undefined
+  if (cleaned.length <= MCP_STATUS_MESSAGE_CAP) return cleaned
+  let end = MCP_STATUS_MESSAGE_CAP
+  const prev = cleaned.charCodeAt(end - 1)
+  if (prev >= 0xd800 && prev <= 0xdbff) end--
+  return `${cleaned.slice(0, end)}\u2026 [truncated]`
+}
+
+/** densable `H` (`buildMcpTaskNotification`) @214325200 */
+export function buildMcpTaskNotification(input: {
+  taskId: string
+  serverName: string
+  toolName: string
+  status: 'completed' | 'failed'
+  resultText?: string
+  statusMessage?: string
+}): string {
+  const summary = `MCP task ${input.taskId} (${mcpTaskLabel(input.serverName, input.toolName)}) ${input.status}.`
+  const detail = boundMcpStatusMessage(input.statusMessage) ?? 'no detail'
+  const body =
+    input.status === 'completed'
+      ? (input.resultText ?? '')
+      : `Task failed: ${detail}`
+  return `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(input.taskId)}</${TASK_ID_TAG}>
+<${STATUS_TAG}>${input.status}</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<result>
+${escapeDetachedResultBody(body, DETACH_RESULT_CAP)}
+</result>
+</${TASK_NOTIFICATION_TAG}>`
 }
 
 export type McpAutoBackgroundCallResult = {
@@ -120,6 +189,7 @@ export async function callMcpToolWithAutoBackground<
   autoBackgroundMs: number
   hasPendingElicitation?: () => boolean
   toolLabel?: string
+  foregroundSession?: object
 }): Promise<
   T | { content: Array<{ type: 'text'; text: string }>; autoBackgrounded: true }
 > {
@@ -129,12 +199,15 @@ export async function callMcpToolWithAutoBackground<
   }
 
   const child = new AbortController()
+  const sleepAbort = new AbortController()
   const parentSignal = input.parentAbortController.signal
   const onParentAbort = (): void => {
     child.abort()
+    sleepAbort.abort()
   }
   if (parentSignal.aborted) {
     child.abort()
+    sleepAbort.abort()
   } else {
     parentSignal.addEventListener('abort', onParentAbort, { once: true })
   }
@@ -145,16 +218,44 @@ export async function callMcpToolWithAutoBackground<
     () => 'settled' as const,
     () => 'settled' as const,
   )
+  let armable = true
+  let triggerEarly = (): void => {}
+  const earlyPromise = new Promise<'early'>(resolve => {
+    triggerEarly = () => resolve('early')
+  })
+  const unregisterForeground = input.foregroundSession
+    ? registerForegroundToolCall(input.foregroundSession, {
+        toolUseId: input.toolUseId,
+        backgroundNow: () => {
+          if (
+            !armable ||
+            parentSignal.aborted ||
+            input.hasPendingElicitation?.() === true
+          ) {
+            return false
+          }
+          armable = false
+          triggerEarly()
+          return true
+        },
+      })
+    : undefined
+  let early = false
 
   try {
     while (true) {
       const race = await Promise.race([
         settled,
-        sleep(ms, child.signal).then(() => 'timeout' as const),
+        earlyPromise,
+        sleep(ms, sleepAbort.signal).then(() => 'timeout' as const),
       ])
       if (race === 'settled' || parentSignal.aborted) {
         parentSignal.removeEventListener('abort', onParentAbort)
         return await runPromise
+      }
+      if (race === 'early') {
+        early = true
+        break
       }
       // densable: if elicitation pending, keep waiting (another full timeout window)
       if (input.hasPendingElicitation?.()) {
@@ -165,21 +266,28 @@ export async function callMcpToolWithAutoBackground<
   } catch {
     parentSignal.removeEventListener('abort', onParentAbort)
     return await runPromise
+  } finally {
+    armable = false
+    unregisterForeground?.()
+    sleepAbort.abort()
   }
 
-  // Timed out — background the call (child keeps running; parent no longer waits)
+  // Timed out or detached early — background the call (child keeps running)
   parentSignal.removeEventListener('abort', onParentAbort)
   const toolLabel = input.toolLabel ?? input.toolName
-  const taskId = registerMonitorMcpTask(input.setAppState, {
-    description: toolLabel,
+  const taskId = registerMcpTask(input.setAppState, {
     serverName: input.serverName,
-    resourceUri: `mcp-tool://${input.serverName}/${input.toolName}`,
+    toolName: input.toolName,
     toolUseId: input.toolUseId,
     abortController: child,
   })
 
   try {
-    logEvent('tengu_mcp_tool_auto_backgrounded', {})
+    logEvent('tengu_mcp_tool_auto_backgrounded', {
+      trigger: (early
+        ? 'deliver_message'
+        : 'timeout') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
   } catch {
     // analytics optional
   }
@@ -189,15 +297,68 @@ export async function callMcpToolWithAutoBackground<
     toolLabel,
     elapsedSeconds,
     taskId,
+    early,
   })
 
-  const finishBackgroundFailure = (interrupted: boolean, msg: string): void => {
-    failMonitorMcpTask(taskId, input.setAppState)
+  const enqueueMcpOutcome = (
+    status: 'completed' | 'failed',
+    opts: { resultText?: string; statusMessage?: string },
+  ): void => {
+    const agentId = getMainThreadAgentId()
     try {
-      logEvent('mcp_auto_background', {
-        completed: false,
-        interrupted,
-      })
+      enqueuePendingNotification(
+        {
+          value: buildMcpTaskNotification({
+            taskId,
+            serverName: input.serverName,
+            toolName: input.toolName,
+            status,
+            resultText: opts.resultText,
+            statusMessage: opts.statusMessage,
+          }),
+          mode: 'task-notification',
+          skipAttachments: true,
+          priority: 'next',
+          agentId,
+          taskId,
+        },
+        { turnAttribution: 'inherit' },
+      )
+    } catch {
+      try {
+        enqueuePendingNotification(
+          {
+            value: `MCP task ${taskId} ${status}; the result could not be rendered.`,
+            mode: 'task-notification',
+            skipAttachments: true,
+            priority: 'next',
+            agentId,
+            taskId,
+          },
+          { turnAttribution: 'inherit' },
+        )
+      } catch (err) {
+        logForDebugging(
+          `degraded MCP task notification enqueue failed: ${String(err)}`,
+          { level: 'error' },
+        )
+      }
+    }
+  }
+
+  const finishBackgroundFailure = (
+    interrupted: boolean,
+    msg: string,
+    kind: 'aborted' | 'tool_error' | 'call_failed' = interrupted
+      ? 'aborted'
+      : 'call_failed',
+  ): void => {
+    const bounded = boundMcpStatusMessage(msg)
+    if (!failMcpTask(taskId, input.setAppState, bounded)) return
+    try {
+      if (kind === 'tool_error') leftoverP('mcp_auto_background', 'tool_error')
+      else if (kind === 'aborted') leftoverP('mcp_auto_background', 'aborted')
+      else leftoverM('mcp_auto_background', 'call_failed')
     } catch {
       /* optional */
     }
@@ -205,12 +366,8 @@ export async function callMcpToolWithAutoBackground<
       `MCP auto-background task ${taskId} ${interrupted ? 'interrupted' : 'failed'}: ${msg}`,
       { level: interrupted ? 'info' : 'error' },
     )
-    enqueuePendingNotification({
-      value: interrupted
-        ? `MCP task ${taskId} was interrupted`
-        : `MCP task ${taskId} failed: ${msg}`,
-      mode: 'task-notification',
-      priority: 'next',
+    enqueueMcpOutcome('failed', {
+      statusMessage: interrupted ? `MCP task ${taskId} was interrupted` : msg,
     })
   }
 
@@ -223,34 +380,39 @@ export async function callMcpToolWithAutoBackground<
         result.interrupted === true ||
         input.parentAbortController.signal.aborted
       if (interrupted || result.isError === true) {
-        const summary = summarizeMcpResult(result)
+        const errText = mcpContentToNotificationText(result.content)
         finishBackgroundFailure(
           interrupted,
-          summary || (interrupted ? 'interrupted' : 'error'),
+          errText || (interrupted ? 'interrupted' : 'error'),
+          interrupted ? 'aborted' : 'tool_error',
         )
         return
       }
+      const resultText = mcpContentToNotificationText(result.content)
       const resourceLinks = collectMcpResourceLinks(result.content)
-      completeMonitorMcpTask(taskId, input.setAppState, {
-        resourceLinks: resourceLinks.length > 0 ? resourceLinks : undefined,
-      })
+      if (
+        !completeMcpTask(taskId, input.setAppState, undefined, resourceLinks)
+      ) {
+        return
+      }
       try {
-        logEvent('mcp_auto_background', { completed: true })
+        leftoverY('mcp_auto_background')
       } catch {
         /* optional */
       }
-      const summary = summarizeMcpResult(result)
-      enqueuePendingNotification({
-        value: `MCP task ${taskId} completed${summary ? `: ${summary}` : ''}`,
-        mode: 'task-notification',
-        priority: 'next',
-      })
+      enqueueMcpOutcome('completed', { resultText })
     })
     .catch((err: unknown) => {
       const interrupted =
-        isAbortError(err) || input.parentAbortController.signal.aborted
+        isAbortError(err) ||
+        input.parentAbortController.signal.aborted ||
+        child.signal.aborted
       const msg = err instanceof Error ? err.message : String(err)
-      finishBackgroundFailure(interrupted, msg)
+      finishBackgroundFailure(
+        interrupted,
+        msg,
+        interrupted ? 'aborted' : 'call_failed',
+      )
     })
 
   // densable $cy: tool result is "moved to background" — NOT a successful
@@ -262,47 +424,107 @@ export async function callMcpToolWithAutoBackground<
   }
 }
 
-/** densable 2.1.289 — collect MCP resource_link blocks for task_notification. */
-export function collectMcpResourceLinks(content: unknown, cap = 50): unknown[] {
+export type McpCollectedResourceLink = {
+  uri: string
+  name: string
+  title?: string
+  description?: string
+  mimeType?: string
+  size?: number
+  annotations?: Record<string, unknown>
+}
+
+/** densable 2.1.289 Aq — collect MCP resource_link blocks (max 50, 64 KiB serialized). */
+export function collectMcpResourceLinks(
+  content: unknown,
+  cap = 50,
+): McpCollectedResourceLink[] {
   if (!Array.isArray(content) || cap <= 0) return []
-  const out: unknown[] = []
+  const out: McpCollectedResourceLink[] = []
+  let serializedBytes = 2
   for (const block of content) {
+    if (out.length >= cap) break
+    if (typeof block !== 'object' || block === null) continue
+    const raw = block as Record<string, unknown>
     if (
-      block &&
-      typeof block === 'object' &&
-      'type' in block &&
-      (block as { type: unknown }).type === 'resource_link'
+      raw.type !== 'resource_link' ||
+      typeof raw.uri !== 'string' ||
+      typeof raw.name !== 'string'
     ) {
-      out.push(block)
-      if (out.length >= cap) break
+      continue
     }
+    const entry: McpCollectedResourceLink = {
+      uri: raw.uri,
+      name: raw.name,
+    }
+    if (typeof raw.title === 'string') entry.title = raw.title
+    if (typeof raw.description === 'string') entry.description = raw.description
+    if (typeof raw.mimeType === 'string') entry.mimeType = raw.mimeType
+    if (typeof raw.size === 'number' && Number.isFinite(raw.size)) {
+      entry.size = raw.size
+    }
+    if (
+      typeof raw.annotations === 'object' &&
+      raw.annotations !== null &&
+      !Array.isArray(raw.annotations)
+    ) {
+      entry.annotations = raw.annotations as Record<string, unknown>
+    }
+    serializedBytes +=
+      Buffer.byteLength(JSON.stringify(entry), 'utf8') +
+      (out.length > 0 ? 1 : 0)
+    if (serializedBytes > 65_536) break
+    out.push(entry)
   }
   return out
 }
 
-function summarizeMcpResult(result: McpAutoBackgroundCallResult): string {
+/**
+ * densable `mcpContentToNotificationText` / `Q` @214322600 — serialize full MCP
+ * content blocks (`text`, embedded `resource`, `resource_link`, or `[type]`)
+ * without truncating at 200 chars (`buildMcpTaskNotification` caps at 30k).
+ */
+export function mcpContentToNotificationText(content: unknown): string {
   try {
-    const c = result.content
-    if (typeof c === 'string') return c.slice(0, 200)
-    if (Array.isArray(c)) {
-      const texts = c
-        .map(block => {
-          if (
-            block &&
-            typeof block === 'object' &&
-            'type' in block &&
-            (block as { type: string }).type === 'text' &&
-            'text' in block
-          ) {
-            return String((block as { text: unknown }).text)
-          }
-          return ''
-        })
-        .filter(Boolean)
-      if (texts.length) return texts.join('\n').slice(0, 200)
+    if (typeof content === 'string') return content
+    if (!Array.isArray(content)) return ''
+    const parts: string[] = []
+    for (const block of content) {
+      if (typeof block !== 'object' || block === null) continue
+      const raw = block as Record<string, unknown>
+      if (raw.type === 'text' && typeof raw.text === 'string') {
+        parts.push(raw.text)
+        continue
+      }
+      if (
+        typeof raw.resource === 'object' &&
+        raw.resource !== null &&
+        typeof (raw.resource as Record<string, unknown>).text === 'string'
+      ) {
+        const res = raw.resource as Record<string, unknown>
+        const uri = typeof res.uri === 'string' ? res.uri : undefined
+        const text = res.text as string
+        parts.push(uri ? `[Resource at ${uri}] ${text}` : text)
+        continue
+      }
+      if (
+        raw.type === 'resource_link' &&
+        typeof raw.name === 'string' &&
+        typeof raw.uri === 'string'
+      ) {
+        const desc =
+          typeof raw.description === 'string' && raw.description
+            ? ` (${raw.description})`
+            : ''
+        parts.push(`[Resource link: ${raw.name}] ${raw.uri}${desc}`)
+        continue
+      }
+      if (typeof raw.type === 'string' && raw.type) {
+        parts.push(`[${raw.type}]`)
+      }
     }
+    return parts.join('\n')
   } catch {
-    /* ignore */
+    return ''
   }
-  return ''
 }

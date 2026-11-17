@@ -33,12 +33,12 @@ import { emitTaskTerminatedSdk } from '../sdkEventQueue.js'
 import { evictTaskOutput } from '../task/diskOutput.js'
 import {
   addKeepaliveReason,
-  evictTerminalTask,
   idleWindowKeepaliveReason,
   registerTask,
   removeKeepaliveReason,
   STOPPED_DISPLAY_MS,
 } from '../task/framework.js'
+import { createTaskRegistry, type TaskRegistry } from '../taskRegistry.js'
 import { createTeammateContext } from '../teammateContext.js'
 import {
   isPerfettoTracingEnabled,
@@ -60,16 +60,18 @@ type KillableTeammateTaskState = InProcessTeammateTaskState & {
  */
 export function holdTeammateIdleWindowKeepalive(
   ownerAgentId: string | undefined,
-  setAppState: SetAppStateFn,
+  registry: TaskRegistry | undefined,
 ): void {
-  addKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), setAppState)
+  if (!registry) return
+  addKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), registry)
 }
 
 export function releaseTeammateIdleWindowKeepalive(
   ownerAgentId: string | undefined,
-  setAppState: SetAppStateFn,
+  registry: TaskRegistry | undefined,
 ): void {
-  removeKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), setAppState)
+  if (!registry) return
+  removeKeepaliveReason(ownerAgentId, idleWindowKeepaliveReason(), registry)
 }
 
 /**
@@ -78,6 +80,7 @@ export function releaseTeammateIdleWindowKeepalive(
  */
 export type SpawnContext = {
   setAppState: SetAppStateFn
+  getAppState?: () => AppState
   toolUseId?: string
 }
 
@@ -237,9 +240,31 @@ export async function spawnInProcessTeammate(
     })
     taskState.unregisterCleanup = unregisterCleanup
 
+    // All force-kill entry points abort this controller, including Task.kill
+    // which only receives a registry. Capture the real spawning store setter
+    // here so that path also removes the live teammate from the UI.
+    abortController.signal.addEventListener(
+      'abort',
+      () => setAppState(prev => dropTeammateFromTeamContext(prev, agentId)),
+      { once: true },
+    )
+
     // Register task in AppState
     registerTask(taskState, setAppState)
-    releaseTeammateIdleWindowKeepalive(agentId, setAppState)
+    const getState: () => AppState =
+      context.getAppState ??
+      (() => {
+        let snapshot = { tasks: {} } as unknown as AppState
+        setAppState(prev => {
+          snapshot = prev
+          return prev
+        })
+        return snapshot
+      })
+    releaseTeammateIdleWindowKeepalive(
+      agentId,
+      createTaskRegistry(getState, setAppState),
+    )
 
     logForDebugging(
       `[spawnInProcessTeammate] Registered ${agentId} in AppState`,
@@ -268,45 +293,58 @@ export async function spawnInProcessTeammate(
 }
 
 /**
+ * Drop a live teammate from AppState.teamContext.teammates.
+ * Matches spawnMultiAgent.updateTeamContext / removeSpawnedTeammateFromAppState:
+ * keyed by agentId (`name@team`), rest of teamContext preserved.
+ */
+function dropTeammateFromTeamContext(
+  prev: AppState,
+  agentId: string,
+): AppState {
+  if (!prev.teamContext?.teammates?.[agentId]) {
+    return prev
+  }
+  const { [agentId]: _removed, ...teammates } = prev.teamContext.teammates
+  return {
+    ...prev,
+    teamContext: {
+      ...prev.teamContext,
+      teammates,
+    },
+  }
+}
+
+/**
  * Kills an in-process teammate by aborting its controller.
  *
  * Note: This is the implementation called by InProcessBackend.kill().
  *
  * @param taskId - Task ID of the teammate to kill
- * @param setAppState - AppState setter
+ * @param registry - densable Xm
+ * @param setAppState - same setter the registry closes over; drops UI teammates
  * @returns true if killed successfully
  */
 export function killInProcessTeammate(
   taskId: string,
-  setAppState: SetAppStateFn,
+  registry: TaskRegistry,
+  setAppState?: SetAppStateFn,
 ): boolean {
-  let killed = false
-  let teamName: string | null = null
-  let agentId: string | null = null
-  let toolUseId: string | undefined
-  let description: string | undefined
-  let pendingAutonomyRuns: Array<{ runId: string; rootDir?: string }> = []
+  const task = registry.get(taskId)
+  if (
+    !task ||
+    task.type !== 'in_process_teammate' ||
+    task.status !== 'running'
+  ) {
+    return false
+  }
 
-  setAppState((prev: AppState) => {
-    const task = prev.tasks[taskId]
-    if (!task || task.type !== 'in_process_teammate') {
-      return prev
-    }
-
-    const teammateTask = task as KillableTeammateTaskState
-
-    if (teammateTask.status !== 'running') {
-      return prev
-    }
-
-    // Capture identity for cleanup after state update
-    teamName = teammateTask.identity.teamName
-    agentId = teammateTask.identity.agentId
-    toolUseId = teammateTask.toolUseId
-    description = teammateTask.description
-
-    // Capture pending autonomy run IDs before clearing them
-    pendingAutonomyRuns = teammateTask.pendingUserMessages.flatMap(message =>
+  const teammateTask = task as KillableTeammateTaskState
+  const teamName = teammateTask.identity.teamName
+  const agentId = teammateTask.identity.agentId
+  const toolUseId = teammateTask.toolUseId
+  const description = teammateTask.description
+  const pendingAutonomyRuns = teammateTask.pendingUserMessages.flatMap(
+    message =>
       message.autonomyRunId
         ? [
             {
@@ -317,94 +355,61 @@ export function killInProcessTeammate(
             },
           ]
         : [],
-    )
+  )
 
-    // Abort the controller to stop execution
-    teammateTask.abortController?.abort()
+  teammateTask.abortController?.abort()
+  teammateTask.unregisterCleanup?.()
+  teammateTask.onIdleCallbacks?.forEach(cb => cb())
 
-    // Call cleanup handler
-    teammateTask.unregisterCleanup?.()
+  registry.update<KillableTeammateTaskState>(taskId, () => ({
+    ...teammateTask,
+    status: 'killed' as const,
+    notified: true,
+    endTime: Date.now(),
+    onIdleCallbacks: [],
+    messages: teammateTask.messages?.length
+      ? [teammateTask.messages[teammateTask.messages.length - 1]!]
+      : undefined,
+    pendingUserMessages: [],
+    inProgressToolUseIDs: undefined,
+    abortController: undefined,
+    unregisterCleanup: undefined,
+    currentWorkAbortController: undefined,
+    paneTeardown: undefined,
+    evictAfter: undefined,
+  }))
 
-    // Update task state and remove from teamContext.teammates
-    killed = true
+  // Banner/footer/inbox read teamContext.teammates, not the team file.
+  // Xm.update only patches tasks — drop the live member in the same setter.
+  if (agentId && setAppState) {
+    setAppState(prev => dropTeammateFromTeamContext(prev, agentId))
+  }
 
-    // Call pending idle callbacks to unblock any waiters (e.g., engine.waitForIdle)
-    teammateTask.onIdleCallbacks?.forEach(cb => cb())
-
-    // Remove from teamContext.teammates using the agentId
-    let updatedTeamContext = prev.teamContext
-    if (prev.teamContext && prev.teamContext.teammates && agentId) {
-      const { [agentId]: _, ...remainingTeammates } = prev.teamContext.teammates
-      updatedTeamContext = {
-        ...prev.teamContext,
-        teammates: remainingTeammates,
-      }
-    }
-
-    const updatedTask: KillableTeammateTaskState = {
-      ...teammateTask,
-      status: 'killed' as const,
-      notified: true,
-      endTime: Date.now(),
-      onIdleCallbacks: [], // Clear callbacks to prevent stale references
-      messages: teammateTask.messages?.length
-        ? [teammateTask.messages[teammateTask.messages.length - 1]!]
-        : undefined,
-      pendingUserMessages: [],
-      inProgressToolUseIDs: undefined,
-      abortController: undefined,
-      unregisterCleanup: undefined,
-      currentWorkAbortController: undefined,
-      paneTeardown: undefined,
-      evictAfter: undefined,
-    }
-
-    return {
-      ...prev,
-      teamContext: updatedTeamContext,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: updatedTask,
-      },
-    }
-  })
-
-  // Remove from team file (outside state updater to avoid file I/O in callback)
   if (teamName && agentId) {
     removeMemberByAgentId(teamName, agentId)
   }
 
-  if (killed) {
-    releaseTeammateIdleWindowKeepalive(agentId ?? taskId, setAppState)
-    for (const run of pendingAutonomyRuns) {
-      void markAutonomyRunFailed(
-        run.runId,
-        `Teammate ${agentId ?? taskId} was stopped before it could consume the queued autonomy prompt.`,
-        run.rootDir,
-      )
-    }
-    void evictTaskOutput(taskId)
-    // notified:true was pre-set so no XML notification fires; close the SDK
-    // task_started bookend directly. The in-process runner's own
-    // completion/failure emit guards on status==='running' so it won't
-    // double-emit after seeing status:killed.
-    emitTaskTerminatedSdk(taskId, 'stopped', {
-      toolUseId,
-      summary: description,
-    })
-    setTimeout(
-      evictTerminalTask.bind(null, taskId, setAppState),
-      STOPPED_DISPLAY_MS,
+  releaseTeammateIdleWindowKeepalive(agentId ?? taskId, registry)
+  for (const run of pendingAutonomyRuns) {
+    void markAutonomyRunFailed(
+      run.runId,
+      `Teammate ${agentId ?? taskId} was stopped before it could consume the queued autonomy prompt.`,
+      run.rootDir,
     )
-    logEvent('swarm_in_process_kill', {})
   }
-
-  // Release perfetto agent registry entry
+  void evictTaskOutput(taskId)
+  emitTaskTerminatedSdk(taskId, 'stopped', {
+    toolUseId,
+    summary: description,
+  })
+  setTimeout(() => {
+    registry.evictTerminal(taskId)
+  }, STOPPED_DISPLAY_MS)
+  logEvent('swarm_in_process_kill', {})
   if (agentId) {
     unregisterPerfettoAgent(agentId)
   }
-
-  return killed
+  return true
 }
 
 /**
@@ -414,27 +419,23 @@ export function killInProcessTeammate(
  */
 export function killInProcessTeammateByAgentId(
   agentIdToKill: string,
-  setAppState: SetAppStateFn,
+  registry: TaskRegistry,
+  setAppState?: SetAppStateFn,
 ): boolean {
   let taskIdToKill: string | undefined
-
-  setAppState((prev: AppState) => {
-    for (const [taskId, task] of Object.entries(prev.tasks)) {
-      if (
-        task.type === 'in_process_teammate' &&
-        task.identity.agentId === agentIdToKill &&
-        task.status === 'running'
-      ) {
-        taskIdToKill = taskId
-        break
-      }
+  for (const [taskId, task] of Object.entries(registry.all())) {
+    if (
+      task.type === 'in_process_teammate' &&
+      'identity' in task &&
+      (task as KillableTeammateTaskState).identity.agentId === agentIdToKill &&
+      task.status === 'running'
+    ) {
+      taskIdToKill = taskId
+      break
     }
-    return prev
-  })
-
+  }
   if (!taskIdToKill) {
     return false
   }
-
-  return killInProcessTeammate(taskIdToKill, setAppState)
+  return killInProcessTeammate(taskIdToKill, registry, setAppState)
 }

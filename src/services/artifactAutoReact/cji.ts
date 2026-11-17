@@ -7,7 +7,10 @@
  */
 import { getOauthConfig } from '../../constants/oauth.js'
 import { getWebSocketTLSOptions } from '../../utils/mtls.js'
-import { getWebSocketProxyAgent } from '../../utils/proxy.js'
+import {
+  getWebSocketProxyAgent,
+  getWebSocketProxyUrl,
+} from '../../utils/proxy.js'
 import type { LiveSocketHandle } from './arm.js'
 import { un } from './store.js'
 
@@ -130,11 +133,20 @@ export async function openFrameLiveSocket(
   const wsUrl = frameLiveWsUrl(input.slug)
   const protocols = [FRAME_LIVE_PROTOCOL, input.token]
   const { default: WS } = await import('ws')
-  const agent = getWebSocketProxyAgent(wsUrl)
+  const proxyUrl =
+    typeof Bun !== 'undefined' ? getWebSocketProxyUrl(wsUrl) : undefined
+  const agent =
+    typeof Bun === 'undefined' ? getWebSocketProxyAgent(wsUrl) : undefined
   const tls = getWebSocketTLSOptions()
   const socket = new WS(wsUrl, protocols, {
-    ...(agent !== undefined ? { agent } : {}),
-    ...(tls !== undefined ? { ...tls } : {}),
+    ...(typeof Bun !== 'undefined'
+      ? proxyUrl
+        ? { proxy: proxyUrl }
+        : {}
+      : agent !== undefined
+        ? { agent }
+        : {}),
+    ...(tls !== undefined ? { ...tls, tls } : {}),
     maxPayload: FRAME_LIVE_MAX_PAYLOAD,
   })
 

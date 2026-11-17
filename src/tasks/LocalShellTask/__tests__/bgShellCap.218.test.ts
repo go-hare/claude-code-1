@@ -7,6 +7,7 @@ import {
   resolveSubagentBgShellCapMs,
 } from '../LocalShellTask.js'
 import type { AgentId } from '../../../types/ids.js'
+import { getMainThreadAgentId } from '../../../bootstrap/state.js'
 
 describe('densable 2.1.218 #21 resolveSubagentBgShellCapMs (fkd)', () => {
   const prev = process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS
@@ -21,6 +22,11 @@ describe('densable 2.1.218 #21 resolveSubagentBgShellCapMs (fkd)', () => {
 
   test('main-thread (agentId undefined) → no cap', () => {
     expect(resolveSubagentBgShellCapMs(undefined)).toBeUndefined()
+  })
+
+  test('stamped main-thread owner has no subagent cap', () => {
+    process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS = '120000'
+    expect(resolveSubagentBgShellCapMs(getMainThreadAgentId())).toBeUndefined()
   })
 
   test('agent-scoped defaults to 1h (ZV_=3600000)', () => {

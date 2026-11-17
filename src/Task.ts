@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto'
 import type { AppState } from './state/AppState.js'
 import type { AgentId } from './types/ids.js'
 import { getTaskOutputPath } from './utils/task/diskOutput.js'
+import type { TaskRegistry } from './utils/taskRegistry.js'
 
 export type TaskType =
   | 'local_bash'
@@ -10,6 +11,7 @@ export type TaskType =
   | 'in_process_teammate'
   | 'local_workflow'
   | 'monitor_mcp'
+  | 'mcp_task'
   | 'monitor_ws'
   | 'dream'
   | 'auto_mode_scan'
@@ -67,23 +69,28 @@ export type LocalShellSpawnInput = {
   timeout?: number
   toolUseId?: string
   agentId?: AgentId
+  /**
+   * densable `KMt` `innerCall===!0` — nested-in-tool bash (skill prompt
+   * expansion). Stamps `caller: "inner"`.
+   */
+  innerCall?: boolean
   /** UI display variant: description-as-label, dialog title, status bar pill. */
   kind?: 'bash' | 'monitor'
+  /** densable `shell` (`jhe` @191205950) — semantic exit-code interpretation. */
+  shell?: 'bash' | 'powershell'
 }
 
-// densable LocalAgentTask.kill(e,t,r,n) → XV(e,t,n) with killedBy as 4th arg;
-// local omits the registry param and passes killedBy as optional 3rd.
+// densable LocalAgentTask.kill(e,t,r,n) → XV(e,t,n): t=registry, n=killedBy.
 export type TaskKilledBy = 'user' | 'parent' | 'system'
 
 // What getTaskByType dispatches for: kill. spawn/render were never
-// called polymorphically (removed in #22546). All six kill implementations
-// use only setAppState — getAppState/abortController were dead weight.
+// called polymorphically (removed in #22546). Gold kill 2nd arg is Xm.
 export type Task = {
   name: string
   type: TaskType
   kill(
     taskId: string,
-    setAppState: SetAppState,
+    registry: TaskRegistry,
     killedBy?: TaskKilledBy,
   ): Promise<void>
 }
@@ -96,6 +103,7 @@ const TASK_ID_PREFIXES: Record<string, string> = {
   in_process_teammate: 't',
   local_workflow: 'w',
   monitor_mcp: 'm',
+  mcp_task: 'k',
   // densable MonitorWsTask / Kam — Artifact comment monitor
   monitor_ws: 'c',
   dream: 'd',

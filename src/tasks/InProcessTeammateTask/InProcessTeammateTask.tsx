@@ -24,8 +24,8 @@ import { appendCappedMessage, isInProcessTeammateTask } from './types.js';
 export const InProcessTeammateTask: Task = {
   name: 'InProcessTeammateTask',
   type: 'in_process_teammate',
-  async kill(taskId, setAppState) {
-    killInProcessTeammate(taskId, setAppState);
+  async kill(taskId, registry) {
+    killInProcessTeammate(taskId, registry);
   },
 };
 

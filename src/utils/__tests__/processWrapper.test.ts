@@ -175,18 +175,19 @@ describe('formatProcessWrapperStatusLines / relaunch refuse', () => {
     expect(formatProcessWrapperQdoRefuseMessage(env)).toBeNull()
   })
 
-  test('Qdo refuse uses official retry / session-left-running copy', () => {
+  test('Qdo missing launcher is parse-error (not then-retry TOCTOU)', () => {
     // Official Hsg: PROCESS_WRAPPER is ignored on win32 — Qdo is a no-op there.
+    // Gold jje: parse error first; `then retry` only when parse ok and J0() false.
     if (process.platform === 'win32') return
     const missing = join(tmpdir(), 'no-such-claude-wrapper-qdo')
     const env = {
       [PROCESS_WRAPPER_ENV_KEY]: missing,
     } as NodeJS.ProcessEnv
     const msg = formatProcessWrapperQdoRefuseMessage(env)
-    expect(msg).toContain('then retry')
-    expect(msg).toContain('this session was left running')
+    expect(msg).toContain('does not exist or is not readable')
+    expect(msg).not.toContain('then retry')
     expect(() => assertProcessWrapperRunnableForRelaunch(env)).toThrow(
-      'then retry',
+      'does not exist or is not readable',
     )
   })
 })

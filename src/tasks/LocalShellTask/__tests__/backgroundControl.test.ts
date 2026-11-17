@@ -15,6 +15,7 @@ import {
 import * as realBootstrapState from '../../../bootstrap/state.js'
 import * as realDiskOutput from '../../../utils/task/diskOutput.js'
 import * as realLocalAgentTask from '../../LocalAgentTask/LocalAgentTask.js'
+import * as realMainSessionTask from '../../LocalMainSessionTask.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
@@ -22,6 +23,7 @@ import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 const bootstrapSnap = snapshotModuleExports(realBootstrapState)
 const diskOutputSnap = snapshotModuleExports(realDiskOutput)
 const localAgentSnap = snapshotModuleExports(realLocalAgentTask)
+const mainSessionSnap = snapshotModuleExports(realMainSessionTask)
 
 const sdkEvents: Array<Record<string, unknown>> = []
 const agentBgCalls: string[] = []
@@ -79,24 +81,19 @@ function localAgentTaskMock() {
       (task as { type?: string }).type === 'local_agent',
     backgroundAgentTask: (
       taskId: string,
-      getAppState: () => { tasks: Record<string, any> },
-      setAppState: (f: (prev: any) => any) => void,
+      registry: {
+        get: (id: string) => any
+        update: (id: string, f: (t: any) => any) => void
+      },
     ): boolean => {
-      const task = getAppState().tasks[taskId]
+      const task = registry.get(taskId)
       if (!task || task.type !== 'local_agent' || task.isBackgrounded) {
         return false
       }
       agentBgCalls.push(taskId)
-      setAppState((prev: any) => {
-        const t = prev.tasks[taskId]
-        if (!t || t.isBackgrounded) return prev
-        return {
-          ...prev,
-          tasks: {
-            ...prev.tasks,
-            [taskId]: { ...t, isBackgrounded: true },
-          },
-        }
+      registry.update(taskId, (t: any) => {
+        if (!t || t.isBackgrounded) return t
+        return { ...t, isBackgrounded: true }
       })
       try {
         const { emitTaskUpdatedSdk } =
@@ -209,12 +206,17 @@ type State = { tasks: Record<string, any> }
 
 function createState(tasks: Record<string, any>) {
   let state: State = { tasks }
+  const getAppState = () => state as any
+  const setAppState = (f: (prev: any) => any) => {
+    state = f(state)
+  }
+  const { createTaskRegistry } =
+    require('../../../utils/taskRegistry.js') as typeof import('../../../utils/taskRegistry.js')
   return {
-    getAppState: () => state as any,
-    setAppState: (f: (prev: any) => any) => {
-      state = f(state)
-    },
+    getAppState,
+    setAppState,
     getState: () => state,
+    registry: createTaskRegistry(getAppState, setAppState),
   }
 }
 
@@ -240,6 +242,9 @@ afterAll(() => {
   }))
   mock.module('../../LocalAgentTask/LocalAgentTask.js', () => ({
     ...localAgentSnap,
+  }))
+  mock.module('src/tasks/LocalMainSessionTask.js', () => ({
+    ...mainSessionSnap,
   }))
   mock.module('src/utils/task/diskOutput.js', () => ({ ...diskOutputSnap }))
   mock.module('../../../utils/task/diskOutput.js', () => ({
@@ -353,17 +358,56 @@ describe('backgroundTaskByToolUseId', () => {
 })
 
 describe('backgroundTask emit guard', () => {
+  test('only synchronous subagent background shells end with the final response', async () => {
+    const { backgroundShellReapedAtFinalResponse } = await import(
+      '../guards.js'
+    )
+    const sync = {
+      agentType: 'subagent',
+      agentId: 'sync',
+      isAsync: false,
+    } as const
+    expect(backgroundShellReapedAtFinalResponse('shell', sync)).toBe(true)
+    expect(
+      backgroundShellReapedAtFinalResponse(undefined, sync),
+    ).toBeUndefined()
+    expect(
+      backgroundShellReapedAtFinalResponse('shell', { ...sync, isAsync: true }),
+    ).toBeUndefined()
+    expect(
+      backgroundShellReapedAtFinalResponse('shell', {
+        ...sync,
+        isAsync: undefined,
+      }),
+    ).toBeUndefined()
+    expect(
+      backgroundShellReapedAtFinalResponse('shell', undefined),
+    ).toBeUndefined()
+  })
+
+  test('turn abort backgrounding preserves its cause independently of manual backgrounding', async () => {
+    const { isBackgroundedByTurnAbort, isBackgroundedToDeliverMessage } =
+      await import('../guards.js')
+    const { registry, getState } = createState({ sh1: makeShellTask('sh1') })
+    expect(
+      backgroundTask('sh1', registry, { backgroundedByTurnAbort: true }),
+    ).toBe(true)
+    expect(isBackgroundedByTurnAbort(getState().tasks.sh1)).toBe(true)
+    expect(isBackgroundedToDeliverMessage(getState().tasks.sh1)).toBe(false)
+    expect(isBackgroundedByTurnAbort(undefined)).toBe(false)
+  })
+
   test('emits task_updated only when state flips', () => {
     const shell = makeShellTask('sh1')
-    const { getAppState, setAppState } = createState({ sh1: shell })
+    const { registry } = createState({ sh1: shell })
 
-    expect(backgroundTask('sh1', getAppState, setAppState)).toBe(true)
+    expect(backgroundTask('sh1', registry)).toBe(true)
     const first = sdkEvents.filter(e => e.subtype === 'task_updated')
     expect(first).toHaveLength(1)
 
     sdkEvents.length = 0
     // Already backgrounded — early return, no emit
-    expect(backgroundTask('sh1', getAppState, setAppState)).toBe(false)
+    expect(backgroundTask('sh1', registry)).toBe(false)
     expect(sdkEvents.filter(e => e.subtype === 'task_updated')).toHaveLength(0)
   })
 
@@ -373,9 +417,9 @@ describe('backgroundTask emit guard', () => {
       result: neverResolvingResult(),
     }
     const shell = makeShellTask('sh1', { shellCommand })
-    const { getAppState, setAppState, getState } = createState({ sh1: shell })
+    const { registry, getState } = createState({ sh1: shell })
 
-    expect(backgroundTask('sh1', getAppState, setAppState)).toBe(false)
+    expect(backgroundTask('sh1', registry)).toBe(false)
     expect(getState().tasks.sh1.isBackgrounded).toBe(false)
     expect(sdkEvents.filter(e => e.subtype === 'task_updated')).toHaveLength(0)
   })

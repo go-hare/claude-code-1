@@ -12,32 +12,62 @@ import { registerBriefBashNotificationCount } from './focusTranscript.js'
 import { isFullscreenEnvEnabled } from './fullscreen.js'
 import { extractTag } from './messages.js'
 
-function isCompletedBackgroundBash(
+/** densable `ePn` — RemoteAgentTask completion summaries. */
+export const REMOTE_TASK_SUMMARY_PREFIX = 'Remote task "'
+
+export type TaskNotificationCollapseKind = 'bash' | 'remote'
+
+function collapseKindFromSummary(
+  summary: string | null,
+): TaskNotificationCollapseKind | null {
+  // densable Vbr: reject empty summary or nested `<` tags inside <summary>.
+  if (!summary || summary.includes('<')) return null
+  if (summary.startsWith(BACKGROUND_BASH_SUMMARY_PREFIX)) return 'bash'
+  // densable vfn: Dve bash, ePn remote. Monitor stream events have no <status>
+  // and never match; Monitor "…" stream ended uses a different prefix.
+  if (summary.startsWith(REMOTE_TASK_SUMMARY_PREFIX)) return 'remote'
+  return null
+}
+
+function extractStrictTaskNotificationEnvelope(text: string): string | null {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith(`<${TASK_NOTIFICATION_TAG}`)) return null
+  const closeTag = `</${TASK_NOTIFICATION_TAG}>`
+  const closeIdx = trimmed.indexOf(closeTag)
+  if (closeIdx === -1) return null
+  const block = trimmed.slice(0, closeIdx + closeTag.length)
+  if (trimmed.slice(block.length).trim() !== '') return null
+  return block
+}
+
+function isCompletedCollapsibleNotification(
   msg: RenderableMessage,
 ): msg is NormalizedUserMessage {
-  if (msg.type !== 'user') return false
+  return completedTaskNotificationKind(msg) !== null
+}
+
+function completedTaskNotificationKind(
+  msg: RenderableMessage,
+): TaskNotificationCollapseKind | null {
+  if (msg.type !== 'user') return null
+  if (msg.origin && msg.origin.kind !== 'task-notification') return null
   const content0 = Array.isArray(msg.message.content)
     ? msg.message.content[0]
     : undefined
-  if (!content0 || typeof content0 === 'string' || content0?.type !== 'text')
-    return false
-  if (!content0.text.includes(`<${TASK_NOTIFICATION_TAG}`)) return false
+  if (!content0 || typeof content0 === 'string' || content0?.type !== 'text') {
+    return null
+  }
+  const envelope = extractStrictTaskNotificationEnvelope(content0.text)
+  if (envelope === null) return null
   // Only collapse successful completions — failed/killed stay visible individually.
-  if (extractTag(content0.text, STATUS_TAG) !== 'completed') return false
-  // The prefix constant distinguishes bash-kind LocalShellTask completions from
-  // agent/workflow/monitor notifications. Monitor-kind completions have their
-  // own summary wording and deliberately don't collapse here.
-  return (
-    extractTag(content0.text, SUMMARY_TAG)?.startsWith(
-      BACKGROUND_BASH_SUMMARY_PREFIX,
-    ) ?? false
-  )
+  if (extractTag(envelope, STATUS_TAG) !== 'completed') return null
+  return collapseKindFromSummary(extractTag(envelope, SUMMARY_TAG))
 }
 
 /**
- * Collapses consecutive completed-background-bash task-notifications into a
- * single synthetic "N background commands completed" notification. Failed/killed
- * tasks and agent/workflow notifications are left alone. Monitor stream
+ * densable `mMr` — collapse consecutive completed-background-bash *or* remote-task
+ * task-notifications into a single synthetic count row. Failed/killed tasks
+ * and agent/workflow/monitor notifications are left alone. Monitor stream
  * events (enqueueStreamEvent) have no <status> tag and never match.
  *
  * Pass-through in verbose mode so ctrl+O shows each completion.
@@ -54,9 +84,18 @@ export function collapseBackgroundBashNotifications(
 
   while (i < messages.length) {
     const msg = messages[i]!
-    if (isCompletedBackgroundBash(msg)) {
+    if (isCompletedCollapsibleNotification(msg)) {
+      const kind = completedTaskNotificationKind(msg)
+      if (kind === null) {
+        result.push(msg)
+        i++
+        continue
+      }
       let count = 0
-      while (i < messages.length && isCompletedBackgroundBash(messages[i]!)) {
+      while (
+        i < messages.length &&
+        completedTaskNotificationKind(messages[i]!) === kind
+      ) {
         count++
         i++
       }
@@ -65,7 +104,11 @@ export function collapseBackgroundBashNotifications(
       } else {
         // Synthesize a task-notification that UserAgentNotificationMessage
         // already knows how to render — no new renderer needed.
-        // Also register multi-count so focus transcript folds N bash notifications.
+        // Bash multi-count is registered so focus transcript folds N rows.
+        const summary =
+          kind === 'bash'
+            ? `${count} background commands completed`
+            : `${count} remote tasks completed`
         const synthetic: NormalizedUserMessage = {
           ...msg,
           message: {
@@ -73,12 +116,14 @@ export function collapseBackgroundBashNotifications(
             content: [
               {
                 type: 'text' as const,
-                text: `<${TASK_NOTIFICATION_TAG}><${STATUS_TAG}>completed</${STATUS_TAG}><${SUMMARY_TAG}>${count} background commands completed</${SUMMARY_TAG}></${TASK_NOTIFICATION_TAG}>`,
+                text: `<${TASK_NOTIFICATION_TAG}><${STATUS_TAG}>completed</${STATUS_TAG}><${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}></${TASK_NOTIFICATION_TAG}>`,
               },
             ],
           },
         }
-        registerBriefBashNotificationCount(synthetic, count)
+        if (kind === 'bash') {
+          registerBriefBashNotificationCount(synthetic, count)
+        }
         result.push(synthetic)
       }
     } else {

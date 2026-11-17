@@ -43,6 +43,7 @@ import { VAULT_HTTP_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/Vau
 import { OBSERVER_REPORT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ObserverReportTool/constants.js'
 import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js'
 import { ARTIFACT_TOOL_NAME } from '@claude-code/builtin-tools/tools/ArtifactTool/prompt.js'
+import { GET_TASK_TOOL_NAME } from '../utils/bashTaskDeliveryOutcomes.js'
 
 export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
   TASK_OUTPUT_TOOL_NAME,
@@ -72,6 +73,7 @@ export const CUSTOM_AGENT_DISALLOWED_TOOLS = new Set([
  * Async Agent Tool Availability Status (Source of Truth)
  */
 export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
+  GET_TASK_TOOL_NAME,
   FILE_READ_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   TODO_WRITE_TOOL_NAME,

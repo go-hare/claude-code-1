@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { AppState } from '../../../state/AppState.js'
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
+import { createTaskRegistry } from '../../../utils/taskRegistry.js'
 import {
   clearAllIdleWindowTimersForTests,
   completeAgentTask,
@@ -20,6 +21,10 @@ function makeSetAppState(holder: { state: AppState }) {
   return (f: (prev: AppState) => AppState) => {
     holder.state = f(holder.state)
   }
+}
+
+function makeRegistry(holder: { state: AppState }) {
+  return createTaskRegistry(() => holder.state, makeSetAppState(holder))
 }
 
 function asPending(
@@ -102,15 +107,28 @@ describe('strandedAgentResume pending resume', () => {
       origin: { kind: 'human' },
     })
     const t = holder.state.tasks['a1']
-    expect(isLocalAgentTask(t) && t.pendingMessages).toEqual([
-      { text: 'm1', isMeta: false },
-      { text: 'm2', isMeta: true, origin: { kind: 'human' } },
-    ])
+    expect(isLocalAgentTask(t) && t.pendingMessages?.[0]).toEqual({
+      text: 'm1',
+      isMeta: false,
+    })
+    expect(isLocalAgentTask(t) && t.pendingMessages?.[1]).toEqual(
+      expect.objectContaining({
+        text: 'm2',
+        isMeta: true,
+        origin: { kind: 'human' },
+        shownAs: expect.any(String),
+      }),
+    )
     const drained = drainPendingMessages('a1', () => holder.state, set)
-    expect(drained).toEqual([
-      { text: 'm1', isMeta: false },
-      { text: 'm2', isMeta: true, origin: { kind: 'human' } },
-    ])
+    expect(drained[0]).toEqual({ text: 'm1', isMeta: false })
+    expect(drained[1]).toEqual(
+      expect.objectContaining({
+        text: 'm2',
+        isMeta: true,
+        origin: { kind: 'human' },
+        shownAs: expect.any(String),
+      }),
+    )
     const after = holder.state.tasks['a1']
     expect(isLocalAgentTask(after) && after.pendingMessages).toEqual([])
     expect(drainPendingMessages('a1', () => holder.state, set)).toEqual([])
@@ -131,11 +149,10 @@ describe('strandedAgentResume pending resume', () => {
 
   test('completeAgentTask emits strandedAgentResume when pendingMessages non-empty', () => {
     const holder = { state: { tasks: {} } as AppState }
-    const set = makeSetAppState(holder)
     seedRunningAgent(holder, 'a2', ['queued-mid-turn'])
     const seen: string[] = []
     const unsub = strandedAgentResume.subscribe(id => seen.push(id))
-    completeAgentTask(fakeResult('a2'), set)
+    completeAgentTask(fakeResult('a2'), makeRegistry(holder))
     unsub()
     expect(seen).toEqual(['a2'])
     const t = holder.state.tasks['a2']
@@ -148,25 +165,23 @@ describe('strandedAgentResume pending resume', () => {
 
   test('completeAgentTask does not emit when pending empty', () => {
     const holder = { state: { tasks: {} } as AppState }
-    const set = makeSetAppState(holder)
     seedRunningAgent(holder, 'a3', [])
     const seen: string[] = []
     const unsub = strandedAgentResume.subscribe(id => seen.push(id))
-    completeAgentTask(fakeResult('a3'), set)
+    completeAgentTask(fakeResult('a3'), makeRegistry(holder))
     unsub()
     expect(seen).toEqual([])
   })
 
   test('completeAgentTask does not emit when not running', () => {
     const holder = { state: { tasks: {} } as AppState }
-    const set = makeSetAppState(holder)
     seedRunningAgent(holder, 'a4', ['x'])
     // force completed first
-    completeAgentTask(fakeResult('a4'), set)
+    completeAgentTask(fakeResult('a4'), makeRegistry(holder))
     const seen: string[] = []
     const unsub = strandedAgentResume.subscribe(id => seen.push(id))
     // second complete is no-op
-    completeAgentTask(fakeResult('a4'), set)
+    completeAgentTask(fakeResult('a4'), makeRegistry(holder))
     unsub()
     // only first complete emitted once earlier — this subscription saw nothing
     expect(seen).toEqual([])
@@ -178,7 +193,7 @@ describe('strandedAgentResume pending resume', () => {
     const set = makeSetAppState(holder)
     seedRunningAgent(holder, 'a5', ['first', 'second', 'third'])
     // mark completed so status matches post-complete
-    completeAgentTask(fakeResult('a5'), set)
+    completeAgentTask(fakeResult('a5'), makeRegistry(holder))
 
     const drained = drainPendingMessages('a5', () => holder.state, set)
     expect(drained.map(e => e.text)).toEqual(['first', 'second', 'third'])

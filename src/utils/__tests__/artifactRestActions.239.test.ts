@@ -1,7 +1,7 @@
 /**
  * densable Artifact rest actions 2.1.239 — watch/status/assets/verify/delete/room_send.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   callArtifactStatus,
   callArtifactUnwatch,
@@ -19,16 +19,18 @@ import {
   isArtifactActionReadOnly,
 } from '../../../packages/builtin-tools/src/tools/ArtifactTool/permissions.js'
 
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
+
 const SLUG = '11111111-1111-1111-1111-111111111111'
 const URL = `https://claude.ai/code/artifact/${SLUG}`
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()

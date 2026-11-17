@@ -18,11 +18,8 @@ const mqmSnap = snapshotModuleExports(realMessageQueue)
 
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/debug.js', debugMock)
-// Incomplete MonitorMcp strip drops killMonitorMcp and poisons shellKeepalive co-suites.
-const realMonitorMcp = await import(
-  'src/tasks/MonitorMcpTask/MonitorMcpTask.js'
-)
-const monitorMcpSnap = snapshotModuleExports(realMonitorMcp)
+const realMcpTask = await import('src/tasks/McpTask/McpTask.js')
+const mcpTaskSnap = snapshotModuleExports(realMcpTask)
 const autoBgOutcome = {
   complete: 0,
   fail: 0,
@@ -35,19 +32,24 @@ function resetAutoBgOutcome(): void {
   autoBgOutcome.notifications = []
   autoBgOutcome.completeOpts = []
 }
-mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
-  ...monitorMcpSnap,
-  registerMonitorMcpTask: () => 'task-bg-1',
-  completeMonitorMcpTask: (
+mock.module('src/tasks/McpTask/McpTask.js', () => ({
+  ...mcpTaskSnap,
+  registerMcpTask: () => 'task-bg-1',
+  completeMcpTask: (
     _taskId: string,
     _setAppState: unknown,
-    opts?: { resourceLinks?: unknown[] },
+    _statusMessage?: string,
+    resourceLinks?: unknown[],
   ) => {
     autoBgOutcome.complete++
-    autoBgOutcome.completeOpts.push(opts)
+    autoBgOutcome.completeOpts.push(
+      resourceLinks ? { resourceLinks } : undefined,
+    )
+    return true
   },
-  failMonitorMcpTask: () => {
+  failMcpTask: () => {
     autoBgOutcome.fail++
+    return true
   },
 }))
 const realAnalytics = await import('src/services/analytics/index.js')
@@ -75,8 +77,8 @@ mock.module(
 afterAll(() => {
   // Restore real queue / monitor / analytics surface for co-suites.
   mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
-  mock.module('src/tasks/MonitorMcpTask/MonitorMcpTask.js', () => ({
-    ...monitorMcpSnap,
+  mock.module('src/tasks/McpTask/McpTask.js', () => ({
+    ...mcpTaskSnap,
   }))
   mock.module('src/services/analytics/index.js', () => ({ ...analyticsSnap }))
   mock.module('src/services/analytics/growthbook.js', () => ({
@@ -90,6 +92,7 @@ const {
   collectMcpResourceLinks,
   formatMcpAutoBackgroundMovedMessage,
   isMcpAutoBackgroundEnabled,
+  mcpContentToNotificationText,
   resolveMcpAutoBackgroundMs,
 } = await import('../mcpAutoBackground.js')
 
@@ -373,27 +376,40 @@ describe('callMcpToolWithAutoBackground autoBackgrounded stamp', () => {
     await Promise.resolve()
 
     expect(autoBgOutcome.complete).toBe(1)
-    expect(autoBgOutcome.completeOpts[0]?.resourceLinks).toEqual([
-      { type: 'resource_link', uri: 'file:///tmp/a', name: 'a' },
-      { type: 'resource_link', uri: 'file:///tmp/b', name: 'b' },
-    ])
+    expect(autoBgOutcome.completeOpts[0]).toEqual({
+      resourceLinks: [
+        { uri: 'file:///tmp/a', name: 'a' },
+        { uri: 'file:///tmp/b', name: 'b' },
+      ],
+    })
   })
 })
 
 describe('collectMcpResourceLinks', () => {
-  test('collects resource_link blocks and caps at 50', () => {
+  test('collects resource_link blocks and caps at 50 and 64 KiB serialized', () => {
     const links = Array.from({ length: 60 }, (_, i) => ({
       type: 'resource_link' as const,
       uri: `file:///tmp/${i}`,
       name: String(i),
+      _meta: { dropped: true },
     }))
     const collected = collectMcpResourceLinks([
       { type: 'text', text: 'x' },
       ...links,
     ])
     expect(collected).toHaveLength(50)
-    expect(collected[0]).toMatchObject({ uri: 'file:///tmp/0' })
-    expect(collected[49]).toMatchObject({ uri: 'file:///tmp/49' })
+    expect(collected[0]).toEqual({ uri: 'file:///tmp/0', name: '0' })
+    expect(collected[49]).toEqual({ uri: 'file:///tmp/49', name: '49' })
+
+    const huge = Array.from({ length: 10 }, (_, i) => ({
+      type: 'resource_link' as const,
+      uri: `file:///tmp/${i}`,
+      name: String(i),
+      description: 'd'.repeat(10_000),
+    }))
+    const byteCapped = collectMcpResourceLinks(huge)
+    expect(byteCapped.length).toBeLessThan(10)
+    expect(JSON.stringify(byteCapped).length).toBeLessThanOrEqual(65_536)
   })
 
   test('returns empty when content has no resource_link', () => {
@@ -401,5 +417,80 @@ describe('collectMcpResourceLinks', () => {
       [],
     )
     expect(collectMcpResourceLinks('plain')).toEqual([])
+  })
+})
+
+describe('mcpContentToNotificationText & parent abort wakeup (2.1.289)', () => {
+  test('preserves >200-char text and formats resource / resource_link blocks', async () => {
+    resetAutoBgOutcome()
+    const longText = 'x'.repeat(1500)
+    expect(
+      mcpContentToNotificationText([
+        { type: 'text', text: longText },
+        { resource: { uri: 'file:///doc.md', text: 'body' } },
+        {
+          type: 'resource_link',
+          name: 'spec',
+          uri: 'https://example.com/spec',
+          description: 'design',
+        },
+        { type: 'image', data: 'abc', mimeType: 'image/png' },
+      ]),
+    ).toBe(
+      `${longText}\n[Resource at file:///doc.md] body\n[Resource link: spec] https://example.com/spec (design)\n[image]`,
+    )
+
+    const parent = new AbortController()
+    let resolveRun!: (v: {
+      content: Array<{ type: 'text'; text: string }>
+    }) => void
+    await callMcpToolWithAutoBackground({
+      run: () =>
+        new Promise<{ content: Array<{ type: 'text'; text: string }> }>(
+          resolve => {
+            resolveRun = resolve
+          },
+        ),
+      serverName: 'srv',
+      toolName: 'long',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 15,
+    })
+    resolveRun({ content: [{ type: 'text', text: longText }] })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(autoBgOutcome.notifications[0]).toContain(longText)
+  })
+
+  test('parentAbortController.abort() wakes race immediately without waiting autoBackgroundMs', async () => {
+    const parent = new AbortController()
+    let resolveRun!: (v: {
+      content: string
+      interrupted: boolean
+      isError: boolean
+    }) => void
+    const started = Date.now()
+    const promise = callMcpToolWithAutoBackground({
+      run: () =>
+        new Promise<{
+          content: string
+          interrupted: boolean
+          isError: boolean
+        }>(resolve => {
+          resolveRun = resolve
+        }),
+      serverName: 'srv',
+      toolName: 'abortable',
+      parentAbortController: parent,
+      setAppState: () => {},
+      autoBackgroundMs: 60_000,
+    })
+    parent.abort()
+    resolveRun({ content: 'interrupted', interrupted: true, isError: true })
+    const out = await promise
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(out).not.toHaveProperty('autoBackgrounded')
   })
 })

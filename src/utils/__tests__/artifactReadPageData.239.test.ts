@@ -1,7 +1,7 @@
 /**
  * densable uto / RCm / read_page_data island extract (2.1.239).
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   deriveWorkshopState,
   findIslandIdAttributeSpans,
@@ -23,16 +23,18 @@ import {
   WORKSHOP_DECISIONS_DOC,
 } from '../../services/artifactAutoReact/index.js'
 
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
+
 const SLUG = '11111111-1111-1111-1111-111111111111'
 const URL = `https://claude.ai/code/artifact/${SLUG}`
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()

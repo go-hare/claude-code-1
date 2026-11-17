@@ -5,6 +5,14 @@ import {
   isParkedKeepaliveAgent,
 } from '../../../utils/task/framework.js'
 import type { AppState } from '../../../state/AppState.js'
+import { createTaskRegistry } from '../../../utils/taskRegistry.js'
+
+function registryOf(state: AppState) {
+  return createTaskRegistry(
+    () => state,
+    () => {},
+  )
+}
 
 /**
  * Park-on-complete pure matrix: terminal status, isParkedKeepaliveAgent,
@@ -60,7 +68,9 @@ describe('parked keepalive agent pure matrix', () => {
         },
       },
     } as unknown as AppState
-    expect(hasLiveAgentKeepaliveChildren('owner', () => withAgent)).toBe(true)
+    expect(hasLiveAgentKeepaliveChildren('owner', registryOf(withAgent))).toBe(
+      true,
+    )
 
     const onlyBash: AppState = {
       tasks: {
@@ -70,11 +80,17 @@ describe('parked keepalive agent pure matrix', () => {
         },
       },
     } as unknown as AppState
-    expect(hasLiveAgentKeepaliveChildren('owner', () => onlyBash)).toBe(false)
+    expect(hasLiveAgentKeepaliveChildren('owner', registryOf(onlyBash))).toBe(
+      false,
+    )
 
     const missing: AppState = { tasks: {} } as unknown as AppState
-    expect(hasLiveAgentKeepaliveChildren('owner', () => missing)).toBe(false)
-    expect(hasLiveAgentKeepaliveChildren(undefined, () => missing)).toBe(false)
+    expect(hasLiveAgentKeepaliveChildren('owner', registryOf(missing))).toBe(
+      false,
+    )
+    expect(hasLiveAgentKeepaliveChildren(undefined, registryOf(missing))).toBe(
+      false,
+    )
   })
 
   test('terminal non-parked refuses background (pure predicate)', () => {

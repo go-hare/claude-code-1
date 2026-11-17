@@ -10,6 +10,8 @@
 // - after kill, if target was YC: cascade descendants via Beo (parentAgentId chain)
 // - bash: suppress exit-137 notify; cross-owner XFu notify true bash owner
 
+import { getMainThreadAgentId } from '../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import type { AppState } from '../state/AppState.js'
 import type { TaskStateBase } from '../Task.js'
 import { getTaskByType } from '../tasks.js'
@@ -25,6 +27,7 @@ import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { stopObserverPairing } from '../utils/observerAgents.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 import { isParkedKeepaliveAgent } from '../utils/task/framework.js'
+import { createTaskRegistry } from '../utils/taskRegistry.js'
 import { escapeXml } from '../utils/xml.js'
 import {
   isDescendantAgentOf,
@@ -118,8 +121,39 @@ function notifyBashOwnerOfCrossStop(opts: {
   enqueuePendingNotification({
     value,
     mode: 'task-notification',
+    skipAttachments: true,
     priority: 'next',
     agentId: asAgentId(opts.ownerAgentId),
+    taskId: opts.taskId,
+  })
+}
+
+/**
+ * densable `Jvo` @194278680 — passive main-session notification when user stops
+ * a main-thread background shell (`_Te()` = `tengu_rosy_donut`, default true).
+ */
+function notifyUserStoppedMainShellTask(opts: {
+  taskId: string
+  toolUseId?: string
+  description: string
+}): void {
+  const toolUseXml = opts.toolUseId
+    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
+    : ''
+  const summary = `Task "${opts.description}" was stopped by the user`
+  const value = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}
+<${STATUS_TAG}>killed</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+</${TASK_NOTIFICATION_TAG}>`
+  enqueuePendingNotification({
+    value,
+    mode: 'task-notification',
+    skipAttachments: true,
+    priority: 'next',
+    passive: true,
+    agentId: getMainThreadAgentId(),
+    taskId: opts.taskId,
   })
 }
 
@@ -220,7 +254,11 @@ export async function stopTask(
     }
     // densable: if status!==running return XV (kill parked/terminal observer)
     if (agentTask.status !== 'running') {
-      killAsyncAgent(resolvedId, setAppState, killedBy)
+      killAsyncAgent(
+        resolvedId,
+        createTaskRegistry(getAppState, setAppState),
+        killedBy,
+      )
       return {
         taskId: resolvedId,
         taskType: task.type,
@@ -229,9 +267,19 @@ export async function stopTask(
     }
   }
 
-  // densable: status running OR zle(YC park)
+  // densable yhe @194999400: status running OR gT(YC park) OR user-stopped
+  // non-running monitor_ws OR paused workflow
   const parked = agentTask ? isParkedKeepaliveAgent(agentTask) : false
-  if (task.status !== 'running' && !parked) {
+  const stoppedMonitorWsByUser =
+    task.status !== 'running' && task.type === 'monitor_ws' && source === 'user'
+  const pausedWorkflow =
+    task.type === 'local_workflow' && task.status === 'paused'
+  if (
+    task.status !== 'running' &&
+    !parked &&
+    !stoppedMonitorWsByUser &&
+    !pausedWorkflow
+  ) {
     throw new StopTaskError(
       `Task ${displayId} is not running (status: ${task.status})`,
       'not_running',
@@ -262,7 +310,11 @@ export async function stopTask(
   // Capture YC-before-kill for cascade gate (densable p=zle(l))
   const wasParked = parked
 
-  await taskImpl.kill(resolvedId, setAppState, killedBy)
+  await taskImpl.kill(
+    resolvedId,
+    createTaskRegistry(getAppState, setAppState),
+    killedBy,
+  )
 
   // densable H1e cascade: only when target was YC parked before kill
   if (wasParked && agentTask) {
@@ -276,10 +328,20 @@ export async function stopTask(
       // densable H1e cascade does not call Fjr (gtf does); keep H1e lean:
       // Kle notify suppress + hAe + kill
       markAgentsNotified(child.id, setAppState)
+      if (child.isObserver !== true) {
+        emitTaskTerminatedSdk(child.id, 'stopped', {
+          toolUseId: child.toolUseId,
+          summary: child.description,
+        })
+      }
       if (source === 'user') {
         markAgentStoppedByUser(child.id, setAppState)
       }
-      killAsyncAgent(child.id, setAppState, killedBy)
+      killAsyncAgent(
+        child.id,
+        createTaskRegistry(getAppState, setAppState),
+        killedBy,
+      )
     }
   }
 
@@ -312,8 +374,8 @@ export async function stopTask(
       })
     }
 
-    // densable XFu: Jk(l)&&l.agentId!==void 0&&i!==l.agentId
-    // Cross-owner bash stop → notify true owner (agentId on shell task).
+    // densable Xvo / Jvo @195001530:
+    // Cross-owner bash stop → notify true owner; main-thread user stop → passive Jvo.
     const bashOwner = (task as { agentId?: string }).agentId
     if (bashOwner !== undefined && callerAgentId !== bashOwner) {
       notifyBashOwnerOfCrossStop({
@@ -322,6 +384,17 @@ export async function stopTask(
         description: task.description,
         ownerAgentId: bashOwner,
         stopperAgentId: callerAgentId,
+      })
+    }
+    if (
+      bashOwner === undefined &&
+      source === 'user' &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_rosy_donut', true)
+    ) {
+      notifyUserStoppedMainShellTask({
+        taskId: resolvedId,
+        toolUseId: task.toolUseId,
+        description: task.description,
       })
     }
   }

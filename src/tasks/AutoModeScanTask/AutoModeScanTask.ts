@@ -18,6 +18,7 @@ import {
   TASK_TYPE_TAG,
 } from '../../constants/xml.js'
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import { registerTask, updateTaskState } from '../../utils/task/framework.js'
 import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
 
@@ -115,10 +116,12 @@ export const AutoModeScanTask: Task = {
   name: 'AutoModeScanTask',
   type: 'auto_mode_scan',
 
-  async kill(taskId, setAppState) {
-    updateTaskState<AutoModeScanTaskState>(taskId, setAppState, task => {
+  async kill(taskId, registry) {
+    let killed = false
+    registry.update<AutoModeScanTaskState>(taskId, task => {
       if (task.status !== 'running') return task
       task.abortController?.abort()
+      killed = true
       return {
         ...task,
         status: 'killed',
@@ -127,5 +130,11 @@ export const AutoModeScanTask: Task = {
         abortController: undefined,
       }
     })
+    if (killed) {
+      emitTaskTerminatedSdk(taskId, 'stopped', {
+        skipTranscript: true,
+        ambient: true,
+      })
+    }
   },
 }

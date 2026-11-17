@@ -11,6 +11,7 @@
 
 import type { UUID } from 'crypto'
 import { randomBytes } from 'crypto'
+import { getMainThreadAgentId } from '../bootstrap/state.js'
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -31,6 +32,7 @@ import { asAgentId } from '../types/ids.js'
 import type { Message } from '../types/message.js'
 import { createAbortController } from '../utils/abortController.js'
 import {
+  getAgentContext,
   runWithAgentContext,
   type SubagentContext,
 } from '../utils/agentContext.js'
@@ -39,6 +41,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { logError } from '../utils/log.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
+import { escapeXml } from '../utils/xml.js'
 import {
   getAgentTranscriptPath,
   recordSidechainTranscript,
@@ -252,18 +255,28 @@ function enqueueMainSessionNotification(
       : `Background session "${description}" failed`
 
   const toolUseIdLine = toolUseId
-    ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>`
+    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>`
     : ''
 
   const outputPath = getTaskOutputPath(taskId)
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      skipAttachments: true,
+      priority: 'next',
+      agentId: getMainThreadAgentId(),
+      taskId,
+    },
+    { turnAttribution: 'inherit' },
+  )
 }
 
 /**
@@ -326,6 +339,30 @@ export function isMainSessionTask(
 }
 
 // Max recent activities to keep for display
+/** densable `bDo` @191183550 — SubagentContext for backgrounded main session. */
+export function createMainSessionAgentContext(
+  taskId: string,
+  parentContext?: ReturnType<
+    typeof import('../utils/agentContext.js').getAgentContext
+  >,
+): SubagentContext {
+  const parentAgentId =
+    parentContext && parentContext.agentType === 'subagent'
+      ? parentContext.agentId
+      : undefined
+  return {
+    agentId: taskId,
+    ...(parentAgentId !== undefined ? { parentAgentId } : {}),
+    agentType: 'subagent',
+    subagentName: 'main-session',
+    isBuiltIn: true,
+    isAsync: true,
+    isMainSession: true,
+    // Official isMainSession background path: isBackgroundAgent:!0 so $Qn
+    // does not bump mainLoopRefcount while the session runs in background.
+    isBackgroundAgent: true,
+  }
+}
 const MAX_RECENT_ACTIVITIES = 5
 
 type ToolActivity = {
@@ -369,15 +406,7 @@ export function startBackgroundSession({
   // (not null). This lets clearInvokedSkills(preservedAgentIds) selectively
   // preserve this task's skills across /clear. AsyncLocalStorage isolates
   // concurrent async chains — this wrapper doesn't affect the foreground.
-  const agentContext: SubagentContext = {
-    agentId: taskId,
-    agentType: 'subagent',
-    subagentName: 'main-session',
-    isBuiltIn: true,
-    // Official isMainSession background path: isBackgroundAgent:!0 so $Qn
-    // does not bump mainLoopRefcount while the session runs in background.
-    isBackgroundAgent: true,
-  }
+  const agentContext = createMainSessionAgentContext(taskId, getAgentContext())
 
   void runWithAgentContext(agentContext, async () => {
     try {
@@ -392,6 +421,7 @@ export function startBackgroundSession({
         ...queryParams.toolUseContext,
         isBackgroundAgent: true as const,
         agentId: asAgentId(taskId),
+        agentContext,
       }
 
       for await (const event of query({

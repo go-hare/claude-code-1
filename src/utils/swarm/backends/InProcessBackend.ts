@@ -15,6 +15,7 @@ import {
   killInProcessTeammate,
   spawnInProcessTeammate,
 } from '../spawnInProcess.js'
+import { createTaskRegistry } from '../../../utils/taskRegistry.js'
 import type {
   TeammateExecutor,
   TeammateMessage,
@@ -303,7 +304,11 @@ export class InProcessBackend implements TeammateExecutor {
     }
 
     // Kill the teammate via the existing helper function
-    const killed = killInProcessTeammate(task.id, this.context.setAppState)
+    const killed = killInProcessTeammate(
+      task.id,
+      createTaskRegistry(this.context.getAppState, this.context.setAppState),
+      this.context.setAppState,
+    )
 
     logForDebugging(
       `[InProcessBackend] kill() ${killed ? 'succeeded' : 'failed'} for ${agentId}`,

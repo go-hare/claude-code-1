@@ -151,10 +151,10 @@ export const DreamTask: Task = {
   name: 'DreamTask',
   type: 'dream',
 
-  async kill(taskId, setAppState) {
+  async kill(taskId, registry) {
     let priorMtime: number | undefined
     let killed = false
-    updateTaskState<DreamTaskState>(taskId, setAppState, task => {
+    registry.update<DreamTaskState>(taskId, task => {
       if (task.status !== 'running') return task
       task.abortController?.abort()
       priorMtime = task.priorMtime

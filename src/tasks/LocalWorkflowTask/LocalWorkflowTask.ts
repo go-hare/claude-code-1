@@ -10,6 +10,8 @@ import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
 import type { SdkWorkflowProgress } from '../../types/workflowProgress.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
+import { evictTaskOutput } from '../../utils/task/diskOutput.js'
 import {
   addKeepaliveReason,
   registerTask,
@@ -17,9 +19,15 @@ import {
   updateTaskState,
   workflowKeepaliveReason,
 } from '../../utils/task/framework.js'
+import {
+  createTaskRegistry,
+  type TaskRegistry,
+} from '../../utils/taskRegistry.js'
 
 /** densable NqK=500 — keep at most this many workflow_log entries after trim. */
 export const WORKFLOW_PROGRESS_LOG_CAP = 500
+/** densable gx=30000 — panel grace window before terminal workflow eviction. */
+export const WORKFLOW_PANEL_GRACE_MS = 30_000
 
 export type LocalWorkflowTaskState = TaskStateBase & {
   type: 'local_workflow'
@@ -57,6 +65,8 @@ export type LocalWorkflowTaskState = TaskStateBase & {
   agentId?: AgentId
   /** Abort controller for cancellation. */
   abortController?: AbortController
+  /** densable `evictAfter` (`u+gx` @195578800) — terminal panel grace deadline. */
+  evictAfter?: number
   /**
    * Pending action for a sub-agent within this workflow.
    * The workflow execution loop polls this field and acts on it.
@@ -91,6 +101,7 @@ export function registerLocalWorkflowTask(
     agentId?: AgentId
     abortController?: AbortController
     workflowRunId?: string
+    getAppState?: () => AppState
   },
 ): string {
   const id = generateTaskId('local_workflow')
@@ -118,10 +129,21 @@ export function registerLocalWorkflowTask(
     abortController: opts.abortController,
   }
   registerTask(task, setAppState)
-  // densable: if (y && !pn()) Gge(y, `workflow:${t}`, registry)
-  // y = Yeo(parent) owner; local uses agentId field as the panel owner stamp.
+  // densable: if (u && !Ce()) YP(u, `workflow:${t}`, taskRegistry)
+  // Ce = non-interactive. getAppState stays optional for non-owner register;
+  // Gge requires Xm (no silent skip when owner keepalive should attach).
   if (opts.agentId && !getIsNonInteractiveSession()) {
-    addKeepaliveReason(opts.agentId, workflowKeepaliveReason(id), setAppState)
+    const getAppState = opts.getAppState
+    if (!getAppState) {
+      throw new TypeError(
+        'getAppState is required to attach workflow keepalive',
+      )
+    }
+    addKeepaliveReason(
+      opts.agentId,
+      workflowKeepaliveReason(id),
+      createTaskRegistry(getAppState, setAppState),
+    )
   }
   return id
 }
@@ -278,50 +300,85 @@ export function consumePendingAgentAction(
 function detachWorkflowKeepalive(
   taskId: string,
   agentId: AgentId | undefined,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): void {
   if (!agentId) return
-  removeKeepaliveReason(agentId, workflowKeepaliveReason(taskId), setAppState)
+  removeKeepaliveReason(agentId, workflowKeepaliveReason(taskId), registry)
+}
+
+function registryFromAppState(
+  setAppState: SetAppState,
+  getAppState?: () => AppState,
+): TaskRegistry {
+  const readState: () => AppState =
+    getAppState ??
+    (() => {
+      let snapshot = { tasks: {} } as unknown as AppState
+      setAppState(prev => {
+        snapshot = prev
+        return prev
+      })
+      return snapshot
+    })
+  return createTaskRegistry(readState, setAppState)
 }
 
 export function completeWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
+  getAppState?: () => AppState,
 ): void {
   let agentId: AgentId | undefined
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
     agentId = task.agentId
+    const now = Date.now()
     return {
       ...task,
       status: 'completed',
-      endTime: Date.now(),
+      endTime: now,
+      evictAfter: now + WORKFLOW_PANEL_GRACE_MS,
       notified: true,
       abortController: undefined,
     }
   })
-  // densable complete path: tB(owner, workflow:id) when owner not still live/parked
-  // Local always detaches — Jeo covers agent:/workflow: on parent complete.
-  detachWorkflowKeepalive(taskId, agentId, setAppState)
+  // densable hx(owner, `workflow:${id}`, Xm).
+  if (agentId) {
+    detachWorkflowKeepalive(
+      taskId,
+      agentId,
+      registryFromAppState(setAppState, getAppState),
+    )
+  }
 }
 
 export function failWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
   error?: string,
+  getAppState?: () => AppState,
 ): void {
   let agentId: AgentId | undefined
   updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
     agentId = task.agentId
+    const now = Date.now()
     return {
       ...task,
       status: 'failed',
-      endTime: Date.now(),
+      endTime: now,
+      evictAfter: now + WORKFLOW_PANEL_GRACE_MS,
       notified: true,
       abortController: undefined,
       ...(error !== undefined ? { error } : {}),
     }
   })
-  detachWorkflowKeepalive(taskId, agentId, setAppState)
+  if (agentId) {
+    detachWorkflowKeepalive(
+      taskId,
+      agentId,
+      registryFromAppState(setAppState, getAppState),
+    )
+  }
+  void evictTaskOutput(taskId)
 }
 
 /**
@@ -336,11 +393,11 @@ export function failWorkflowTask(
  */
 export function pauseWorkflowTask(
   taskId: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): boolean {
   let paused = false
   let agentId: AgentId | undefined
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+  registry.update<LocalWorkflowTaskState>(taskId, task => {
     if (task.status !== 'running') return task
     paused = true
     agentId = task.agentId
@@ -360,7 +417,7 @@ export function pauseWorkflowTask(
   })
   // densable zit: if (r) tB(r.ownerAgentId, `workflow:${e}`)
   if (paused) {
-    detachWorkflowKeepalive(taskId, agentId, setAppState)
+    detachWorkflowKeepalive(taskId, agentId, registry)
   }
   return paused
 }
@@ -370,27 +427,35 @@ export function pauseWorkflowTask(
  * via the feature-gated `killWorkflowTask` binding.
  * densable bye: tB(owner, workflow:id) after terminal.
  */
-export function killWorkflowTask(
-  taskId: string,
-  setAppState: SetAppState,
-): void {
+export function killWorkflowTask(taskId: string, registry: TaskRegistry): void {
   let agentId: AgentId | undefined
+  let toolUseId: string | undefined
+  let description: string | undefined
   let detached = false
-  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+  registry.update<LocalWorkflowTaskState>(taskId, task => {
     if (task.status !== 'running' && task.status !== 'paused') return task
     agentId = task.agentId
+    toolUseId = task.toolUseId
+    description = task.description
     detached = true
     task.abortController?.abort()
+    const now = Date.now()
     return {
       ...task,
       status: 'killed',
-      endTime: Date.now(),
+      endTime: now,
+      evictAfter: now + WORKFLOW_PANEL_GRACE_MS,
       notified: true,
       abortController: undefined,
     }
   })
   if (detached) {
-    detachWorkflowKeepalive(taskId, agentId, setAppState)
+    detachWorkflowKeepalive(taskId, agentId, registry)
+    void evictTaskOutput(taskId)
+    emitTaskTerminatedSdk(taskId, 'stopped', {
+      toolUseId,
+      summary: description,
+    })
   }
 }
 
@@ -465,7 +530,7 @@ export function killWorkflowTasksForAgent(
       logForDebugging(
         `killWorkflowTasksForAgent: killing orphaned workflow task ${taskId} (agent ${agentId} exiting)`,
       )
-      killWorkflowTask(taskId, setAppState)
+      killWorkflowTask(taskId, createTaskRegistry(getAppState, setAppState))
     }
   }
 }
@@ -473,7 +538,7 @@ export function killWorkflowTasksForAgent(
 export const LocalWorkflowTask: Task = {
   name: 'LocalWorkflowTask',
   type: 'local_workflow',
-  async kill(taskId: string, setAppState: SetAppState) {
-    killWorkflowTask(taskId, setAppState)
+  async kill(taskId, registry) {
+    killWorkflowTask(taskId, registry)
   },
 }

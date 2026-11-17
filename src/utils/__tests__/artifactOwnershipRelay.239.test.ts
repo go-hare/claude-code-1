@@ -1,7 +1,7 @@
 /**
  * densable jwe / Fee·jnt ownership / frame relay (2.1.239).
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import {
@@ -37,18 +37,20 @@ import {
   DL,
   resolveFrameRelayFamily,
 } from '../../services/artifactAutoReact/index.js'
+import { getEmptyToolPermissionContext } from '../../Tool.js'
 import { checkArtifactActionPermissions } from '../../../packages/builtin-tools/src/tools/ArtifactTool/permissions.js'
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
 
 const SLUG = '11111111-1111-1111-1111-111111111111'
 const URL = `https://claude.ai/code/artifact/${SLUG}`
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()
@@ -71,7 +73,7 @@ function fakeContext(overrides?: { agentId?: string }) {
     abortController: new AbortController(),
     toolUseId: 'tu-own',
     getAppState: () => ({
-      toolPermissionContext: { mode: 'default' },
+      toolPermissionContext: getEmptyToolPermissionContext(),
     }),
     setAppState: () => {},
     ...overrides,
@@ -105,13 +107,29 @@ describe('Fee / jnt ownership (239)', () => {
     expect(allow.behavior).toBe('allow')
   })
 
-  test('comments Fee ask is skipped for subagent agentId', async () => {
+  test('comments Fee ask is skipped only for gold Xo delegatedObservation', async () => {
     zIe(SLUG)
-    const r = await checkArtifactActionPermissions(
+    const { runWithAgentContext } = await import('../../utils/agentContext.js')
+    // Gold Xo is `agentType==="subagent" && delegatedObservation===true`.
+    // ToolUseContext.agentId is not Xo — Fee notice still asks.
+    const withId = await checkArtifactActionPermissions(
       { action: 'comments', url: URL },
       fakeContext({ agentId: 'agent-1' }),
     )
-    expect(r.behavior).toBe('allow')
+    expect(withId.behavior).toBe('ask')
+    const delegated = await runWithAgentContext(
+      {
+        agentId: 'agent-1',
+        agentType: 'subagent',
+        delegatedObservation: true,
+      },
+      () =>
+        checkArtifactActionPermissions(
+          { action: 'comments', url: URL },
+          fakeContext(),
+        ),
+    )
+    expect(delegated.behavior).toBe('allow')
     Sqe(SLUG)
   })
 

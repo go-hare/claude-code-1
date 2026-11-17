@@ -16,9 +16,17 @@ import {
   removeKeepaliveReason,
   updateTaskState,
 } from '../../utils/task/framework.js'
+import {
+  createTaskRegistry,
+  type TaskRegistry,
+} from '../../utils/taskRegistry.js'
 
 export type MonitorMcpTaskState = TaskStateBase & {
   type: 'monitor_mcp'
+  /** densable T2t `r.server` — MCP server name. */
+  server: string
+  /** densable T2t `r.tool` — resource/tool label shown as `server · tool`. */
+  tool: string
   /** The MCP server name being monitored. */
   serverName: string
   /** The resource URI being subscribed to. */
@@ -57,6 +65,7 @@ export function registerMonitorMcpTask(
     toolUseId?: string
     agentId?: AgentId
     abortController?: AbortController
+    getAppState?: () => AppState
   },
 ): string {
   const id = generateTaskId('monitor_mcp')
@@ -64,6 +73,8 @@ export function registerMonitorMcpTask(
     ...createTaskStateBase(id, 'monitor_mcp', opts.description, opts.toolUseId),
     type: 'monitor_mcp',
     status: 'running',
+    server: opts.serverName,
+    tool: opts.resourceUri,
     serverName: opts.serverName,
     resourceUri: opts.resourceUri,
     command: opts.command,
@@ -71,9 +82,18 @@ export function registerMonitorMcpTask(
     abortController: opts.abortController,
   }
   registerTask(task, setAppState)
-  // densable: Gge(c, `monitor:${u}`, registry) after register
+  // densable YP(c, `monitor:${u}`, Xm) after register — r always present.
+  // getAppState stays optional for non-owner register; Gge requires Xm.
   if (opts.agentId) {
-    addKeepaliveReason(opts.agentId, monitorKeepaliveReason(id), setAppState)
+    const getAppState = opts.getAppState
+    if (!getAppState) {
+      throw new TypeError('getAppState is required to attach monitor keepalive')
+    }
+    addKeepaliveReason(
+      opts.agentId,
+      monitorKeepaliveReason(id),
+      createTaskRegistry(getAppState, setAppState),
+    )
   }
   return id
 }
@@ -81,10 +101,11 @@ export function registerMonitorMcpTask(
 function detachMonitorKeepalive(
   taskId: string,
   agentId: AgentId | undefined,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): void {
+  // densable hx(e,n,r): if(!e)return; r is always Xm. Skip when we never attached.
   if (!agentId) return
-  removeKeepaliveReason(agentId, monitorKeepaliveReason(taskId), setAppState)
+  removeKeepaliveReason(agentId, monitorKeepaliveReason(taskId), registry)
 }
 
 function emitMonitorTerminatedSdk(
@@ -114,13 +135,17 @@ export function completeMonitorMcpTask(
   setAppState: SetAppState,
   opts?: {
     resourceLinks?: unknown[]
+    getAppState?: () => AppState
   },
 ): void {
   let agentId: AgentId | undefined
   let toolUseId: string | undefined
   let description = 'Monitor'
+  let changed = false
   let resourceLinks = opts?.resourceLinks
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    changed = true
     agentId = task.agentId
     toolUseId = task.toolUseId
     description = task.description || description
@@ -141,8 +166,15 @@ export function completeMonitorMcpTask(
           : task.terminal,
     }
   })
-  // densable: tB(c, `monitor:${taskId}`) on finish
-  detachMonitorKeepalive(taskId, agentId, setAppState)
+  if (!changed) return
+  // densable hx(c, `monitor:${taskId}`, Xm). Skip only when Gge never attached.
+  if (agentId && opts?.getAppState) {
+    detachMonitorKeepalive(
+      taskId,
+      agentId,
+      createTaskRegistry(opts.getAppState, setAppState),
+    )
+  }
   emitMonitorTerminatedSdk(
     taskId,
     'completed',
@@ -155,11 +187,15 @@ export function completeMonitorMcpTask(
 export function failMonitorMcpTask(
   taskId: string,
   setAppState: SetAppState,
+  getAppState?: () => AppState,
 ): void {
   let agentId: AgentId | undefined
   let toolUseId: string | undefined
   let description = 'Monitor'
+  let changed = false
   updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
+    if (task.status !== 'running') return task
+    changed = true
     agentId = task.agentId
     toolUseId = task.toolUseId
     description = task.description || description
@@ -171,7 +207,14 @@ export function failMonitorMcpTask(
       abortController: undefined,
     }
   })
-  detachMonitorKeepalive(taskId, agentId, setAppState)
+  if (!changed) return
+  if (agentId && getAppState) {
+    detachMonitorKeepalive(
+      taskId,
+      agentId,
+      createTaskRegistry(getAppState, setAppState),
+    )
+  }
   emitMonitorTerminatedSdk(
     taskId,
     'failed',
@@ -180,18 +223,19 @@ export function failMonitorMcpTask(
   )
 }
 
-export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
+export function killMonitorMcp(taskId: string, registry: TaskRegistry): void {
   let agentId: AgentId | undefined
   let toolUseId: string | undefined
   let description = 'Monitor'
   let killed = false
-  updateTaskState<MonitorMcpTaskState>(taskId, setAppState, task => {
+  let abortController: AbortController | undefined
+  registry.update<MonitorMcpTaskState>(taskId, task => {
     if (task.status !== 'running') return task
     agentId = task.agentId
     toolUseId = task.toolUseId
     description = task.description || description
     killed = true
-    task.abortController?.abort()
+    abortController = task.abortController
     return {
       ...task,
       status: 'killed',
@@ -201,7 +245,8 @@ export function killMonitorMcp(taskId: string, setAppState: SetAppState): void {
     }
   })
   if (killed) {
-    detachMonitorKeepalive(taskId, agentId, setAppState)
+    abortController?.abort()
+    detachMonitorKeepalive(taskId, agentId, registry)
     emitMonitorTerminatedSdk(
       taskId,
       'stopped',
@@ -231,7 +276,7 @@ export function killMonitorMcpTasksForAgent(
       logForDebugging(
         `killMonitorMcpTasksForAgent: killing orphaned monitor task ${taskId} (agent ${agentId} exiting)`,
       )
-      killMonitorMcp(taskId, setAppState)
+      killMonitorMcp(taskId, createTaskRegistry(getAppState, setAppState))
     }
   }
 }
@@ -240,7 +285,7 @@ export const MonitorMcpTask: Task = {
   name: 'MonitorMcpTask',
   type: 'monitor_mcp',
 
-  async kill(taskId, setAppState) {
-    killMonitorMcp(taskId, setAppState)
+  async kill(taskId, registry) {
+    killMonitorMcp(taskId, registry)
   },
 }

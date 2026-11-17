@@ -281,19 +281,28 @@ function enqueueRemoteNotification(
 
   const statusText = status === 'completed' ? 'completed successfully' : status === 'failed' ? 'failed' : 'was stopped';
 
-  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
+  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
 
   const outputPath = getTaskOutputPath(taskId);
   const summary = `Remote task "${title}" ${statusText}`;
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`;
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' });
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      priority: 'next',
+      skipAttachments: true,
+      taskId,
+    },
+    { turnAttribution: 'inherit' },
+  );
 }
 
 /**
@@ -314,14 +323,14 @@ function enqueueRichRemoteNotification(
   if (!markTaskNotified(taskId, setAppState)) return;
 
   const statusText = status === 'completed' ? 'completed successfully' : status === 'failed' ? 'failed' : 'was stopped';
-  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
+  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
   const outputPath = getTaskOutputPath(taskId);
   const summary = `Remote task "${title}" ${statusText}`;
 
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
@@ -329,7 +338,16 @@ The remote agent produced the following structured outcome. Summarize the key ch
 
 ${richContent}`;
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' });
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      priority: 'next',
+      skipAttachments: true,
+      taskId,
+    },
+    { turnAttribution: 'inherit' },
+  );
 }
 
 /**
@@ -498,7 +516,7 @@ function enqueueRemoteReviewNotification(
 
   const nudge = formatRemoteReviewFindingsNudge(options?.applyFixesOnComplete, options?.reviewInstructions);
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>completed</${STATUS_TAG}>
 <${SUMMARY_TAG}>Remote review completed</${SUMMARY_TAG}>
@@ -507,7 +525,16 @@ The remote review produced the following findings:
 
 ${reviewContent}${nudge}`;
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' });
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      priority: 'next',
+      skipAttachments: true,
+      taskId,
+    },
+    { turnAttribution: 'inherit' },
+  );
 }
 
 /**
@@ -519,14 +546,23 @@ function enqueueRemoteReviewFailureNotification(taskId: string, reason: string, 
 
   const summary = `Cloud review failed: ${reason}`;
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>
 <${TASK_TYPE_TAG}>remote_agent</${TASK_TYPE_TAG}>
 <${STATUS_TAG}>failed</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 Cloud review did not produce output (${reason}). Tell the user to retry /code-review ultra, or use /review for a local review instead.`;
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' });
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      priority: 'next',
+      skipAttachments: true,
+      taskId,
+    },
+    { turnAttribution: 'inherit' },
+  );
 }
 
 /**
@@ -1074,12 +1110,12 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
 export const RemoteAgentTask: Task = {
   name: 'RemoteAgentTask',
   type: 'remote_agent',
-  async kill(taskId, setAppState) {
+  async kill(taskId, registry) {
     let toolUseId: string | undefined;
     let description: string | undefined;
     let sessionId: string | undefined;
     let killed = false;
-    updateTaskState<RemoteAgentTaskState>(taskId, setAppState, task => {
+    registry.update<RemoteAgentTaskState>(taskId, task => {
       if (task.status !== 'running') {
         return task;
       }

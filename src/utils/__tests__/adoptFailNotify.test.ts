@@ -4,6 +4,7 @@ import {
   notifyAdoptAgentFailed,
   notifyAdoptTaskFailed,
   notifyAdoptWorkflowFailed,
+  notifyTaskNotification,
 } from '../adoptFailNotify.js'
 
 afterEach(() => {
@@ -80,6 +81,21 @@ describe('notifyAdoptWorkflowFailed (AAo)', () => {
     expect(msg).toContain('could not be resumed (transcript link failed)')
     expect(msg).toContain("Workflow({scriptPath: '/tmp/spec.ts'")
     expect(msg).toContain("resumeFromRunId: 'wf_abc'")
+  })
+
+  test('Zi event body after summary, no status', () => {
+    const msg = notifyTaskNotification({
+      taskId: 'm1',
+      summary: 'Monitor event: "watch"',
+      event: 'line <ok>',
+      eventHint:
+        "\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.",
+    })
+    expect(msg).toContain('<summary>Monitor event: "watch"</summary>')
+    expect(msg).toContain('<event>line &lt;ok&gt;</event>')
+    expect(msg).toContain('send a PushNotification')
+    expect(msg).not.toContain('<status>')
+    expect(msg.indexOf('</summary>')).toBeLessThan(msg.indexOf('<event>'))
   })
 
   test('omits manual hint without scriptPath', () => {

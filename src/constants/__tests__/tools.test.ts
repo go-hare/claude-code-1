@@ -138,6 +138,10 @@ describe('CORE_TOOLS', () => {
 })
 
 describe('ASYNC_AGENT_ALLOWED_TOOLS Image 34 SendMessage', () => {
+  test('async agents can retrieve their background shell results', () => {
+    expect(ASYNC_AGENT_ALLOWED_TOOLS.has('GetTask')).toBe(true)
+  })
+
   test('background Explore/general-purpose keep SendMessage for Wr', () => {
     expect(ASYNC_AGENT_ALLOWED_TOOLS.has(SEND_MESSAGE_TOOL_NAME)).toBe(true)
   })

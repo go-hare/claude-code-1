@@ -41,6 +41,7 @@ type RunBinding = {
   runId: string
   taskId: string
   setAppState: SetAppState
+  getAppState: () => import('../state/AppState.js').AppState
   abortController: AbortController
   workflowName: string
   /** densable jrH / task_progress bookkeeping (startTime + toolUseId + description). */
@@ -118,6 +119,12 @@ export function createWorkflowPorts(opts: {
       const abortController = new AbortController()
       const description = regOpts.summary ?? regOpts.workflowName
       // Register first; patch workflowRunId after we know taskId when engine omitted runId.
+      const getAppState = bundle.toolUseContext.getAppState
+      if (typeof getAppState !== 'function') {
+        throw new TypeError(
+          'getAppState is required to register workflow tasks',
+        )
+      }
       const taskId = registerLocalWorkflowTask(setAppState, {
         description,
         workflowName: regOpts.workflowName,
@@ -126,6 +133,8 @@ export function createWorkflowPorts(opts: {
         ...(regOpts.toolUseId ? { toolUseId: regOpts.toolUseId } : {}),
         abortController,
         ...(regOpts.runId ? { workflowRunId: regOpts.runId } : {}),
+        getAppState,
+        agentId: bundle.agentId,
       })
       const resolvedRunId = regOpts.runId ?? taskId
       // Stamp workflowRunId when engine didn't pass one (task id is the run id).
@@ -144,19 +153,12 @@ export function createWorkflowPorts(opts: {
       }
       // Prefer AppState startTime if the task is already registered (registerTask
       // sets it); fall back to now so emit duration_ms stays non-zero.
-      const getAppState = bundle.toolUseContext.getAppState
-      const startTime =
-        (typeof getAppState === 'function'
-          ? (
-              getAppState()?.tasks?.[taskId] as
-                | { startTime?: number }
-                | undefined
-            )?.startTime
-          : undefined) ?? Date.now()
+      const startTime = getAppState().tasks?.[taskId]?.startTime ?? Date.now()
       bindings.set(resolvedRunId, {
         runId: resolvedRunId,
         taskId,
         setAppState,
+        getAppState,
         abortController,
         workflowName: regOpts.workflowName,
         progress: {
@@ -179,7 +181,7 @@ export function createWorkflowPorts(opts: {
       if (!b) return
       // densable flushes pending progress before terminal task_notification.
       taskProgressBridge.forceFlush(runId)
-      completeWorkflowTask(b.taskId, b.setAppState)
+      completeWorkflowTask(b.taskId, b.setAppState, b.getAppState)
       logForDebugging(`workflow ${runId} completed: ${summary ?? ''}`)
       bindings.delete(runId)
     },
@@ -187,7 +189,7 @@ export function createWorkflowPorts(opts: {
       const b = bindings.get(runId)
       if (!b) return
       taskProgressBridge.forceFlush(runId)
-      failWorkflowTask(b.taskId, b.setAppState, error)
+      failWorkflowTask(b.taskId, b.setAppState, error, b.getAppState)
       logForDebugging(`workflow ${runId} failed: ${error}`)
       bindings.delete(runId)
     },
@@ -195,7 +197,12 @@ export function createWorkflowPorts(opts: {
       const b = bindings.get(runId)
       if (!b) return
       taskProgressBridge.forceFlush(runId)
-      killWorkflowTask(b.taskId, b.setAppState) // internal abort controller
+      const { createTaskRegistry } =
+        require('../utils/taskRegistry.js') as typeof import('../utils/taskRegistry.js')
+      killWorkflowTask(
+        b.taskId,
+        createTaskRegistry(b.getAppState, b.setAppState),
+      )
       // Killing the run also aborts all in-flight agents (guards against the edge timing where the backend misses the task abort)
       for (const ac of b.agentAbortControllers.values()) {
         try {

@@ -181,6 +181,7 @@ const {
 const { IDLE_WINDOW_KEEPALIVE_REASON } = await import(
   '../../../utils/task/framework.js'
 )
+const { createTaskRegistry } = await import('../../../utils/taskRegistry.js')
 
 // ─── Helpers ───
 
@@ -190,13 +191,17 @@ type SetAppStateLike = (f: (prev: AppStateLike) => AppStateLike) => void
 function createSetAppState(initial: AppStateLike = { tasks: {} }): {
   setAppState: SetAppStateLike
   getState: () => AppStateLike
+  registry: import('../../../utils/taskRegistry.js').TaskRegistry
 } {
   let state = initial
+  const setAppState: SetAppStateLike = f => {
+    state = f(state)
+  }
+  const getState = () => state
   return {
-    setAppState: f => {
-      state = f(state)
-    },
-    getState: () => state,
+    setAppState,
+    getState,
+    registry: createTaskRegistry(() => getState() as any, setAppState as any),
   }
 }
 
@@ -346,10 +351,10 @@ describe('tryClaimAgentResume (densable Aye CAS)', () => {
     // densable XV terminal update omits resuming:!1 — only S()/Sot/complete clear.
     // Sticky resuming blocks tryClaimAgentResume dual-worker race after stop mid-resume.
     const task = makeRunningTask({ status: 'running', resuming: true })
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: { [task.id]: task },
     })
-    killAsyncAgent(task.id, setAppState as any)
+    killAsyncAgent(task.id, registry)
     expect(getState().tasks[task.id].status).toBe('killed')
     expect(getState().tasks[task.id].resuming).toBe(true)
     // Production resumeAgent always passes getAppState — dual claim blocked.
@@ -371,7 +376,7 @@ describe('tryClaimAgentResume (densable Aye CAS)', () => {
 
   test('completeAgentTask clears resuming flag', () => {
     const task = makeRunningTask({ status: 'running', resuming: true })
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { [task.id]: task },
     })
     completeAgentTask(
@@ -382,7 +387,7 @@ describe('tryClaimAgentResume (densable Aye CAS)', () => {
         totalToolUseCount: 0,
         totalDurationMs: 1,
       } as any,
-      setAppState as any,
+      registry,
     )
     expect(getState().tasks[task.id].status).toBe('completed')
     expect(getState().tasks[task.id].resuming).toBe(false)
@@ -757,7 +762,7 @@ describe('scheduleDeferredAgentProgressRebuild', () => {
 
   test('clearDeferredAgentProgressRebuild cancels timers; no-ops after complete', async () => {
     clearAllDeferredAgentProgressRebuildsForTests()
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         'test-agent-clear': makeRunningTask({
           progress: { toolUseCount: 0, tokenCount: 0 },
@@ -807,7 +812,7 @@ describe('scheduleDeferredAgentProgressRebuild', () => {
         totalTokens: 0,
         totalToolUseCount: 0,
       } as any,
-      setAppState as any,
+      registry,
     )
     await new Promise(resolve => setTimeout(resolve, 60))
     // complete clears timers; progress must not jump after status left running.
@@ -902,7 +907,7 @@ describe('completeAgentTask', () => {
   })
 
   test('transitions running task to completed', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask() },
     })
 
@@ -913,7 +918,7 @@ describe('completeAgentTask', () => {
         totalToolUseCount: 0,
         totalDurationMs: 100,
       } as any,
-      setAppState as any,
+      registry,
     )
 
     const task = getState().tasks['test-agent-001']
@@ -925,7 +930,7 @@ describe('completeAgentTask', () => {
   })
 
   test('syncs progress token count from finalized result', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: {
         'test-agent-001': makeRunningTask({
           progress: { toolUseCount: 1, tokenCount: 0 },
@@ -941,7 +946,7 @@ describe('completeAgentTask', () => {
         totalTokens: 6100,
         totalDurationMs: 100,
       } as any,
-      setAppState as any,
+      registry,
     )
 
     const task = getState().tasks['test-agent-001']
@@ -951,7 +956,7 @@ describe('completeAgentTask', () => {
   })
 
   test('no-op if task not running', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ status: 'completed' }) },
     })
 
@@ -962,7 +967,7 @@ describe('completeAgentTask', () => {
         totalToolUseCount: 0,
         totalDurationMs: 100,
       } as any,
-      setAppState as any,
+      registry,
     )
 
     const task = getState().tasks['test-agent-001']
@@ -972,11 +977,11 @@ describe('completeAgentTask', () => {
 
 describe('failAgentTask', () => {
   test('transitions running task to failed with error message', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask() },
     })
 
-    failAgentTask('test-agent-001', 'Stream idle timeout', setAppState as any)
+    failAgentTask('test-agent-001', 'Stream idle timeout', registry)
 
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('failed')
@@ -985,11 +990,11 @@ describe('failAgentTask', () => {
   })
 
   test('no-op if task not running', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ status: 'killed' }) },
     })
 
-    failAgentTask('test-agent-001', 'error', setAppState as any)
+    failAgentTask('test-agent-001', 'error', registry)
 
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('killed')
@@ -1001,7 +1006,7 @@ describe('killAsyncAgent', () => {
   test('transitions running task to killed', () => {
     const ac = new AbortController()
     const cleanup = mock(() => {})
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: {
         'test-agent-001': makeRunningTask({
           abortController: ac,
@@ -1010,7 +1015,7 @@ describe('killAsyncAgent', () => {
       },
     })
 
-    killAsyncAgent('test-agent-001', setAppState as any)
+    killAsyncAgent('test-agent-001', registry)
 
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('killed')
@@ -1020,11 +1025,11 @@ describe('killAsyncAgent', () => {
   })
 
   test('no-op if task not running', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ status: 'completed' }) },
     })
 
-    killAsyncAgent('test-agent-001', setAppState as any)
+    killAsyncAgent('test-agent-001', registry)
 
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('completed')
@@ -1032,7 +1037,7 @@ describe('killAsyncAgent', () => {
 
   test('lifecycleNotStarted still kills then lx-notifies (gold zA/lx, no GC)', () => {
     const ac = new AbortController()
-    const { setAppState, getState } = createSetAppState({
+    const { getState, registry } = createSetAppState({
       tasks: {
         'test-agent-001': makeRunningTask({
           abortController: ac,
@@ -1040,7 +1045,7 @@ describe('killAsyncAgent', () => {
         }),
       },
     })
-    killAsyncAgent('test-agent-001', setAppState as any, 'system', {
+    killAsyncAgent('test-agent-001', registry, 'system', {
       lifecycleNotStarted: true,
     })
     const task = getState().tasks['test-agent-001']
@@ -1052,15 +1057,20 @@ describe('killAsyncAgent', () => {
 
 describe('enqueueAgentNotification', () => {
   test('enqueues completed notification with correct XML format', async () => {
-    const { setAppState } = createSetAppState({
-      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    const { registry } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          notified: false,
+          status: 'completed',
+        }),
+      },
     })
 
     await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'refactor auth',
       status: 'completed',
-      setAppState: setAppState as any,
+      registry,
       finalMessage: 'Done!',
       usage: { totalTokens: 5000, toolUses: 3, durationMs: 10000 },
     })
@@ -1082,8 +1092,13 @@ describe('enqueueAgentNotification', () => {
   })
 
   test('completed + maxTurnsReached uses official partial summary', async () => {
-    const { setAppState } = createSetAppState({
-      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    const { registry } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          notified: false,
+          status: 'completed',
+        }),
+      },
     })
 
     await enqueueAgentNotification({
@@ -1091,7 +1106,7 @@ describe('enqueueAgentNotification', () => {
       description: 'refactor auth',
       status: 'completed',
       maxTurnsReached: 5,
-      setAppState: setAppState as any,
+      registry,
       finalMessage: 'halfway',
     })
 
@@ -1105,8 +1120,13 @@ describe('enqueueAgentNotification', () => {
   })
 
   test('enqueues failed notification with error', async () => {
-    const { setAppState } = createSetAppState({
-      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    const { registry } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          notified: false,
+          status: 'failed',
+        }),
+      },
     })
 
     await enqueueAgentNotification({
@@ -1114,7 +1134,7 @@ describe('enqueueAgentNotification', () => {
       description: 'test',
       status: 'failed',
       error: 'Stream idle timeout',
-      setAppState: setAppState as any,
+      registry,
     })
 
     expect(enqueuedNotifications).toHaveLength(1)
@@ -1125,15 +1145,20 @@ describe('enqueueAgentNotification', () => {
   })
 
   test('enqueues killed notification', async () => {
-    const { setAppState } = createSetAppState({
-      tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
+    const { registry } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          notified: false,
+          status: 'killed',
+        }),
+      },
     })
 
     await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'killed',
-      setAppState: setAppState as any,
+      registry,
     })
 
     expect(enqueuedNotifications).toHaveLength(1)
@@ -1141,8 +1166,8 @@ describe('enqueueAgentNotification', () => {
     expect(enqueuedNotifications[0]).toContain('Agent "test" was stopped')
   })
 
-  test('prevents duplicate notifications', async () => {
-    const { setAppState } = createSetAppState({
+  test('running first-notify claims without stamping notified (gold K3)', async () => {
+    const { registry, getState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: false }) },
     })
 
@@ -1150,22 +1175,44 @@ describe('enqueueAgentNotification', () => {
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',
-      setAppState: setAppState as any,
+      registry,
     })
 
-    // Second call — notified flag already set by first call
+    expect(enqueuedNotifications).toHaveLength(1)
+    expect(getState().tasks['test-agent-001'].notified).toBe(false)
+  })
+
+  test('prevents duplicate notifications when completed (stamps notified)', async () => {
+    const { registry, getState } = createSetAppState({
+      tasks: {
+        'test-agent-001': makeRunningTask({
+          notified: false,
+          status: 'completed',
+        }),
+      },
+    })
+
     await enqueueAgentNotification({
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',
-      setAppState: setAppState as any,
+      registry,
+    })
+
+    expect(getState().tasks['test-agent-001'].notified).toBe(true)
+
+    await enqueueAgentNotification({
+      taskId: 'test-agent-001',
+      description: 'test',
+      status: 'completed',
+      registry,
     })
 
     expect(enqueuedNotifications).toHaveLength(1)
   })
 
   test('skips if task already notified', async () => {
-    const { setAppState } = createSetAppState({
+    const { registry } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask({ notified: true }) },
     })
 
@@ -1173,7 +1220,7 @@ describe('enqueueAgentNotification', () => {
       taskId: 'test-agent-001',
       description: 'test',
       status: 'completed',
-      setAppState: setAppState as any,
+      registry,
     })
 
     expect(enqueuedNotifications).toHaveLength(0)

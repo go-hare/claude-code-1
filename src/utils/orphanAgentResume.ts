@@ -188,10 +188,10 @@ function leftoverNotifyOrphanPe(
       require('./messageQueueManager.js') as typeof import('./messageQueueManager.js')
     let targetAgentId: string | undefined
     try {
-      const { getSessionId } =
+      const { getMainThreadAgentId } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-      targetAgentId = getSessionId()
+      targetAgentId = getMainThreadAgentId()
     } catch {
       targetAgentId = undefined
     }
@@ -1487,9 +1487,9 @@ ${idLines}
   let targetAgentId: string | undefined
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getSessionId } =
+    const { getMainThreadAgentId } =
       require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-    targetAgentId = getSessionId()
+    targetAgentId = getMainThreadAgentId()
   } catch {
     targetAgentId = undefined
   }
@@ -1755,9 +1755,9 @@ ${idLines}
   let targetAgentId: string | undefined
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getSessionId } =
+    const { getMainThreadAgentId } =
       require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-    targetAgentId = getSessionId()
+    targetAgentId = getMainThreadAgentId()
   } catch {
     targetAgentId = undefined
   }

@@ -166,6 +166,7 @@ const {
   hasNonIdleWindowKeepalive,
   idleWindowKeepaliveReason,
 } = await import('../../../utils/task/framework.js')
+const { createTaskRegistry } = await import('../../../utils/taskRegistry.js')
 
 function store() {
   let state: { tasks: Record<string, any> } = { tasks: {} }
@@ -175,6 +176,10 @@ function store() {
     },
     get: () => state,
   }
+}
+
+function reg(s: ReturnType<typeof store>) {
+  return createTaskRegistry(() => s.get() as any, s.set as any)
 }
 
 function seedOwner(
@@ -216,6 +221,7 @@ function spawnChild(s: ReturnType<typeof store>, id = 'child1') {
     prompt: 'p',
     selectedAgent: { agentType: 'general-purpose' } as any,
     setAppState: s.set as any,
+    getAppState: () => s.get() as any,
     ownerAgentId: 'owner',
   })
 }
@@ -307,7 +313,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     // Official DSu: no owner tB on complete — BRt decides.
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
@@ -335,7 +341,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     s.set((p: any) => ({
       tasks: {
@@ -353,7 +359,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(
       false,
@@ -378,13 +384,13 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     await enqueueAgentNotification({
       taskId: 'child1',
       description: 'c',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
     // densable BRt: first notify + ownerBusy → skip tB (KA held)
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(true)
@@ -417,7 +423,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     // Force owner to failed (not YC) so not busy
     s.set((p: any) => ({
@@ -430,7 +436,7 @@ describe('agent keepalive Gge/tB', () => {
       taskId: 'child1',
       description: 'c',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
     // Local BRt: !ownerRunning → tB detaches
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child1')).toBe(
@@ -467,7 +473,7 @@ describe('agent keepalive Gge/tB', () => {
         content: [{ type: 'text', text: 'parent done' }],
         totalDurationMs: 99,
       } as any,
-      s.set as any,
+      reg(s),
     )
     expect(s.get().tasks.owner.status).toBe('completed')
     expect(s.get().tasks.owner.notified).toBe(false)
@@ -480,13 +486,13 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [{ type: 'text', text: 'child done' }],
       } as any,
-      s.set as any,
+      reg(s),
     )
     await enqueueAgentNotification({
       taskId: 'child1',
       description: 'c',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
 
     // Child KA detached (owner not running)
@@ -534,13 +540,13 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [{ type: 'text', text: 'child done first' }],
       } as any,
-      s.set as any,
+      reg(s),
     )
     await enqueueAgentNotification({
       taskId: 'child1',
       description: 'c',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
 
     // Parent still running → KA held, child notif on owner queue
@@ -564,7 +570,7 @@ describe('agent keepalive Gge/tB', () => {
         content: [{ type: 'text', text: 'parent done' }],
         totalDurationMs: 50,
       } as any,
-      s.set as any,
+      reg(s),
     )
     // resolveParkedOwnerAfterChildrenSettled is async void after DSu
     await Promise.resolve()
@@ -601,7 +607,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c1')).toBe(true)
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c2')).toBe(true)
@@ -613,13 +619,13 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     await enqueueAgentNotification({
       taskId: 'c1',
       description: 'c1',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
     // First child detaches but sibling still live → parent stays un-notified
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c1')).toBe(false)
@@ -633,13 +639,13 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     await enqueueAgentNotification({
       taskId: 'c2',
       description: 'c2',
       status: 'completed',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:c2')).toBe(false)
     expect(s.get().tasks.owner.notified).toBe(true)
@@ -688,7 +694,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     expect(s.get().tasks['parent-agent'].status).toBe('completed')
     expect(s.get().tasks['parent-agent'].evictAfter).toBeUndefined()
@@ -724,7 +730,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     const child = s.get().tasks['idle-child']
     expect(child.status).toBe('completed')
@@ -771,7 +777,7 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    expireIdleWindowKeepalive('idle-kid', s.set as any)
+    expireIdleWindowKeepalive('idle-kid', s.set as any, () => s.get() as any)
     // bot removed
     expect(
       s
@@ -827,7 +833,7 @@ describe('agent keepalive Gge/tB', () => {
       taskId: 'pend-kid',
       value: 'x',
     } as never)
-    expireIdleWindowKeepalive('pend-kid', s.set as any)
+    expireIdleWindowKeepalive('pend-kid', s.set as any, () => s.get() as any)
     // owner still holds agent: (pending notif blocks tB)
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:pend-kid')).toBe(
       true,
@@ -847,7 +853,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     // densable a=!1: complete does not arm bot
     expect(
@@ -866,7 +872,7 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    killAsyncAgent('timer-kid', s.set as any)
+    killAsyncAgent('timer-kid', reg(s), 'user')
     expect(s.get().tasks['timer-kid'].status).toBe('killed')
     expect(s.get().tasks['timer-kid'].keepaliveReasons?.size ?? 0).toBe(0)
     clearIdleWindowTimer('timer-kid')
@@ -877,7 +883,7 @@ describe('agent keepalive Gge/tB', () => {
     const s = store()
     seedOwner(s)
     spawnChild(s, 'child2')
-    killAsyncAgent('child2', s.set as any)
+    killAsyncAgent('child2', reg(s), 'user')
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child2')).toBe(
       false,
     )
@@ -925,7 +931,7 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    killAsyncAgent('owner', s.set as any)
+    killAsyncAgent('owner', reg(s), 'user')
     const owner = s.get().tasks.owner
     expect(owner.status).toBe('killed')
     expect(owner.keepaliveReasons?.size ?? 0).toBe(0)
@@ -1011,7 +1017,7 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    killAsyncAgent('parked-q', s.set as any)
+    killAsyncAgent('parked-q', reg(s), 'user')
     // Allow BRt async tail (hint/await) to settle
     await Promise.resolve()
     await Promise.resolve()
@@ -1063,7 +1069,7 @@ describe('agent keepalive Gge/tB', () => {
         },
       },
     }))
-    killAsyncAgent('parked-q2', s.set as any)
+    killAsyncAgent('parked-q2', reg(s), 'user')
     await Promise.resolve()
     await Promise.resolve()
     expect(s.get().tasks['parked-q2'].status).toBe('killed')
@@ -1077,7 +1083,7 @@ describe('agent keepalive Gge/tB', () => {
     const s = store()
     seedOwner(s)
     spawnChild(s, 'child3')
-    failAgentTask('child3', 'boom', s.set as any)
+    failAgentTask('child3', 'boom', reg(s))
     // Official eto: no owner tB on fail itself
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child3')).toBe(true)
     expect(s.get().tasks.child3.status).toBe('failed')
@@ -1087,7 +1093,7 @@ describe('agent keepalive Gge/tB', () => {
       description: 'c',
       status: 'failed',
       error: 'boom',
-      setAppState: s.set as any,
+      registry: reg(s),
     })
     expect(s.get().tasks.owner.keepaliveReasons?.has('agent:child3')).toBe(true)
   })
@@ -1139,7 +1145,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     expect(s.get().tasks.owner.status).toBe('completed')
     expect(
@@ -1203,7 +1209,7 @@ describe('agent keepalive Gge/tB', () => {
         totalToolUseCount: 0,
         content: [],
       } as any,
-      s.set as any,
+      reg(s),
     )
     // Still YC parked interactive (bootstrap getIsNonInteractiveSession=false)
     expect(s.get().tasks.owner.status).toBe('completed')
@@ -1252,7 +1258,7 @@ describe('agent keepalive Gge/tB', () => {
       taskId: 'kid2',
       value: 'y',
     } as never)
-    failAgentTask('owner', 'boom', s.set as any)
+    failAgentTask('owner', 'boom', reg(s))
     expect(s.get().tasks.owner.status).toBe('failed')
     expect(zeoQueueView()[0]!.agentId).toBe('s')
   })
@@ -1261,7 +1267,7 @@ describe('agent keepalive Gge/tB', () => {
     resetCommandQueue()
     const s = store()
     seedOwner(s)
-    rewireOrphanedOwnerNotifications('owner', s.set as any)
+    rewireOrphanedOwnerNotifications('owner', reg(s))
     expect(zeoQueueView().length).toBe(0)
   })
 })

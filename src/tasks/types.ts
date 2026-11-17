@@ -7,6 +7,7 @@ import type { InProcessTeammateTaskState } from './InProcessTeammateTask/types.j
 import type { LocalAgentTaskState } from './LocalAgentTask/LocalAgentTask.js'
 import type { LocalShellTaskState } from './LocalShellTask/guards.js'
 import type { LocalWorkflowTaskState } from './LocalWorkflowTask/LocalWorkflowTask.js'
+import type { McpTaskState } from './McpTask/McpTask.js'
 import type { MonitorMcpTaskState } from './MonitorMcpTask/MonitorMcpTask.js'
 import type { MonitorWsTaskState } from './MonitorWsTask/MonitorWsTask.js'
 import type { RemoteAgentTaskState } from './RemoteAgentTask/RemoteAgentTask.js'
@@ -18,6 +19,7 @@ export type TaskState =
   | InProcessTeammateTaskState
   | LocalWorkflowTaskState
   | MonitorMcpTaskState
+  | McpTaskState
   | MonitorWsTaskState
   | DreamTaskState
   | AutoModeScanTaskState
@@ -30,6 +32,7 @@ export type BackgroundTaskState =
   | InProcessTeammateTaskState
   | LocalWorkflowTaskState
   | MonitorMcpTaskState
+  | McpTaskState
   | MonitorWsTaskState
   | DreamTaskState
   | AutoModeScanTaskState

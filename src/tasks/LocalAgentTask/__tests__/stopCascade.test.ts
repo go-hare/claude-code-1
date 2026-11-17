@@ -10,6 +10,7 @@ import {
   speculationMock,
 } from '../../../../tests/mocks/taskSurface.js'
 
+const tasksSnap = snapshotModuleExports(await import('src/tasks.js'))
 const noop = () => {}
 mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/utils/log.ts', logMock)
@@ -82,6 +83,7 @@ function messageQueueMock() {
 mock.module('src/utils/messageQueueManager.js', messageQueueMock)
 mock.module('../../../utils/messageQueueManager.js', messageQueueMock)
 afterAll(() => {
+  mock.module('src/tasks.js', () => ({ ...tasksSnap }))
   mock.module('src/utils/messageQueueManager.js', () => ({ ...mqmSnap }))
   mock.module('../../../utils/messageQueueManager.js', () => ({ ...mqmSnap }))
   mock.module('src/utils/sessionStorage.js', () => ({ ...sessionStorageSnap }))
@@ -146,37 +148,39 @@ function killTaskState(
 }
 
 let killAsyncAgentRef:
-  | ((
-      taskId: string,
-      setAppState: (f: (prev: any) => any) => void,
-      killedBy?: string,
-    ) => void)
+  | ((taskId: string, registry: any, killedBy?: string) => void)
   | undefined
 
 const stubTasks = [
   {
     name: 'LocalShellTask',
     type: 'local_bash',
-    async kill(
-      taskId: string,
-      setAppState: (f: (prev: any) => any) => void,
-      killedBy?: string,
-    ) {
-      killTaskState(taskId, setAppState, killedBy)
+    async kill(taskId: string, registry: any, killedBy?: string) {
+      registry.update(taskId, (t: any) => ({
+        ...t,
+        status: 'killed',
+        endTime: Date.now(),
+        notified: true,
+        killedBy,
+        abortController: undefined,
+      }))
     },
   },
   {
     name: 'LocalAgentTask',
     type: 'local_agent',
-    async kill(
-      taskId: string,
-      setAppState: (f: (prev: any) => any) => void,
-      killedBy?: string,
-    ) {
+    async kill(taskId: string, registry: any, killedBy?: string) {
       if (killAsyncAgentRef) {
-        killAsyncAgentRef(taskId, setAppState, killedBy)
+        killAsyncAgentRef(taskId, registry, killedBy)
       } else {
-        killTaskState(taskId, setAppState, killedBy)
+        registry.update(taskId, (t: any) => ({
+          ...t,
+          status: 'killed',
+          endTime: Date.now(),
+          notified: true,
+          killedBy,
+          abortController: undefined,
+        }))
       }
     },
   },
@@ -194,7 +198,7 @@ const {
   killDescendantAgents,
   markAgentStoppedByUser,
 } = await import('../LocalAgentTask.js')
-killAsyncAgentRef = killAsyncAgent as typeof killAsyncAgentRef
+killAsyncAgentRef = killAsyncAgent as unknown as typeof killAsyncAgentRef
 
 const { isParkedKeepaliveAgent } = await import(
   '../../../utils/task/framework.js'
@@ -208,14 +212,20 @@ function createSetState(initial: AppStateLike = { tasks: {} }): {
   setAppState: (f: (prev: AppStateLike) => AppStateLike) => void
   getState: () => AppStateLike
   getAppState: () => AppStateLike
+  registry: import('../../../utils/taskRegistry.js').TaskRegistry
 } {
   let state = initial
+  const setAppState = (f: (prev: AppStateLike) => AppStateLike) => {
+    state = f(state)
+  }
+  const getState = () => state
+  const { createTaskRegistry } =
+    require('../../../utils/taskRegistry.js') as typeof import('../../../utils/taskRegistry.js')
   return {
-    setAppState: f => {
-      state = f(state)
-    },
-    getState: () => state,
-    getAppState: () => state,
+    setAppState,
+    getState,
+    getAppState: getState,
+    registry: createTaskRegistry(() => getState() as any, setAppState as any),
   }
 }
 
@@ -438,10 +448,10 @@ describe('densable Beo / gtf / H1e stop cascade pure', () => {
   })
 
   test('killAsyncAgent still kills running without cascade helper', () => {
-    const { setAppState, getState } = createSetState({
+    const { getState, registry } = createSetState({
       tasks: { a: agent('a') },
     })
-    killAsyncAgent('a', setAppState as any, 'user')
+    killAsyncAgent('a', registry, 'user')
     expect(getState().tasks.a.status).toBe('killed')
   })
 

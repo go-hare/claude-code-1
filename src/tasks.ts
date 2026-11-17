@@ -15,6 +15,7 @@ const MonitorMcpTask: Task | null = feature('MONITOR_TOOL')
   : null
 const MonitorWsTask: Task =
   require('./tasks/MonitorWsTask/MonitorWsTask.js').MonitorWsTask
+const McpTask: Task = require('./tasks/McpTask/McpTask.js').McpTask
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
@@ -30,6 +31,7 @@ export function getAllTasks(): Task[] {
     DreamTask,
     AutoModeScanTask,
     MonitorWsTask,
+    McpTask,
   ]
   if (LocalWorkflowTask) tasks.push(LocalWorkflowTask)
   if (MonitorMcpTask) tasks.push(MonitorMcpTask)

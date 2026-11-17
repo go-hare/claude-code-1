@@ -1,7 +1,15 @@
 /**
  * densable edge: Qem mint / Cji WS / watch_url MCP (2.1.239).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import {
   createFrameLiveTransform,
   extractLabeledField,
@@ -26,14 +34,15 @@ import {
   WEBHOOK_FIRE_SUFFIX,
   WEBHOOK_TRIGGERS_PATH_PREFIX,
 } from '../../services/artifactAutoReact/index.js'
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()

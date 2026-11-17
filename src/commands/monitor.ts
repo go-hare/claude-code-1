@@ -81,6 +81,7 @@ const monitor = {
               shellCommand,
               toolUseId: context.toolUseId ?? `monitor-${Date.now()}`,
               agentId: undefined,
+              innerCall: context.innerCall,
               kind: 'monitor',
             },
             {

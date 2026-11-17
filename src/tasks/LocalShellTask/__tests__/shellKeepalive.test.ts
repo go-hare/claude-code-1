@@ -70,8 +70,12 @@ const {
 const { registerLocalWorkflowTask, completeWorkflowTask, killWorkflowTask } =
   await import('../../LocalWorkflowTask/LocalWorkflowTask.js')
 
-const { registerMonitorMcpTask, completeMonitorMcpTask, killMonitorMcp } =
-  await import('../../MonitorMcpTask/MonitorMcpTask.js')
+const {
+  registerMonitorMcpTask,
+  completeMonitorMcpTask,
+  failMonitorMcpTask,
+  killMonitorMcp,
+} = await import('../../MonitorMcpTask/MonitorMcpTask.js')
 
 const { killTask } = await import('../killShellTasks.js')
 
@@ -80,13 +84,19 @@ type AppStateLike = { tasks: Record<string, any> }
 function createSetState(initial: AppStateLike = { tasks: {} }): {
   setAppState: (f: (prev: AppStateLike) => AppStateLike) => void
   getState: () => AppStateLike
+  registry: import('../../../utils/taskRegistry.js').TaskRegistry
 } {
   let state = initial
+  const setAppState = (f: (prev: AppStateLike) => AppStateLike) => {
+    state = f(state)
+  }
+  const getState = () => state
+  const { createTaskRegistry } =
+    require('../../../utils/taskRegistry.js') as typeof import('../../../utils/taskRegistry.js')
   return {
-    setAppState: f => {
-      state = f(state)
-    },
-    getState: () => state,
+    setAppState,
+    getState,
+    registry: createTaskRegistry(() => getState() as any, setAppState as any),
   }
 }
 
@@ -111,6 +121,26 @@ function seedOwner(
 }
 
 describe('densable non-agent Gge/tB prefixes', () => {
+  test('monitor stop is visible to abort listeners and cannot be overwritten by late completion', () => {
+    const { registry, getState, setAppState } = createSetState()
+    const abortController = new AbortController()
+    const id = registerMonitorMcpTask(setAppState as any, {
+      description: 'stopped monitor',
+      serverName: 'local',
+      resourceUri: 'resource',
+      abortController,
+    })
+    let statusAtAbort: string | undefined
+    abortController.signal.addEventListener('abort', () => {
+      statusAtAbort = registry.get(id)?.status
+    })
+    killMonitorMcp(id, registry)
+    completeMonitorMcpTask(id, setAppState as any)
+    failMonitorMcpTask(id, setAppState as any)
+    expect(statusAtAbort).toBe('killed')
+    expect(getState().tasks[id].status).toBe('killed')
+  })
+
   test('bash/monitor/workflow reason helpers match densable prefixes', () => {
     expect(bashKeepaliveReason('b1')).toBe('bash:b1')
     expect(monitorKeepaliveReason('m1')).toBe('monitor:m1')
@@ -118,7 +148,7 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('workflow register Gge + complete tB (interactive path)', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
     // registerLocalWorkflowTask gates Gge with !getIsNonInteractiveSession().
     // In unit tests bootstrap may be interactive-false; force-attach then complete
@@ -128,20 +158,17 @@ describe('densable non-agent Gge/tB prefixes', () => {
       workflowName: 'spec',
       workflowFile: '/tmp/wf.ts',
       agentId: 'owner-a' as any,
+      getAppState: getState as any,
     })
     // Ensure hold exists even when non-interactive gate skipped Gge
-    addKeepaliveReason(
-      'owner-a',
-      workflowKeepaliveReason(taskId),
-      setAppState as any,
-    )
+    addKeepaliveReason('owner-a', workflowKeepaliveReason(taskId), registry)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         workflowKeepaliveReason(taskId),
       ),
     ).toBe(true)
 
-    completeWorkflowTask(taskId, setAppState as any)
+    completeWorkflowTask(taskId, setAppState as any, getState as any)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         workflowKeepaliveReason(taskId),
@@ -150,25 +177,35 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('workflow kill detaches workflow: hold', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
     const taskId = registerLocalWorkflowTask(setAppState as any, {
       description: 'wf',
       workflowName: 'spec',
       workflowFile: '/tmp/wf.ts',
       agentId: 'owner-a' as any,
+      getAppState: getState as any,
     })
-    addKeepaliveReason(
-      'owner-a',
-      workflowKeepaliveReason(taskId),
-      setAppState as any,
-    )
-    killWorkflowTask(taskId, setAppState as any)
+    addKeepaliveReason('owner-a', workflowKeepaliveReason(taskId), registry)
+    killWorkflowTask(taskId, registry)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         workflowKeepaliveReason(taskId),
       ),
     ).toBe(false)
+  })
+
+  test('monitor_mcp Gge requires getAppState (gold YP always has Xm)', () => {
+    const { setAppState } = createSetState()
+    seedOwner(setAppState)
+    expect(() =>
+      registerMonitorMcpTask(setAppState as any, {
+        description: 'mon',
+        serverName: 's',
+        resourceUri: 'u',
+        agentId: 'owner-a' as any,
+      }),
+    ).toThrow(/getAppState is required to attach monitor keepalive/)
   })
 
   test('monitor_mcp register Gge + complete tB', () => {
@@ -179,13 +216,16 @@ describe('densable non-agent Gge/tB prefixes', () => {
       serverName: 's',
       resourceUri: 'u',
       agentId: 'owner-a' as any,
+      getAppState: getState as any,
     })
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         monitorKeepaliveReason(taskId),
       ),
     ).toBe(true)
-    completeMonitorMcpTask(taskId, setAppState as any)
+    completeMonitorMcpTask(taskId, setAppState as any, {
+      getAppState: getState as any,
+    })
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         monitorKeepaliveReason(taskId),
@@ -194,15 +234,16 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('monitor_mcp kill detaches monitor: hold', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
     const taskId = registerMonitorMcpTask(setAppState as any, {
       description: 'mon',
       serverName: 's',
       resourceUri: 'u',
       agentId: 'owner-a' as any,
+      getAppState: getState as any,
     })
-    killMonitorMcp(taskId, setAppState as any)
+    killMonitorMcp(taskId, registry)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         monitorKeepaliveReason(taskId),
@@ -211,7 +252,7 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('killTask detaches bash: hold on owner (jLe residual safety)', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
     const bashId = 'b-test1'
     setAppState(prev => ({
@@ -231,12 +272,8 @@ describe('densable non-agent Gge/tB prefixes', () => {
         },
       },
     }))
-    addKeepaliveReason(
-      'owner-a',
-      bashKeepaliveReason(bashId),
-      setAppState as any,
-    )
-    killTask(bashId, setAppState as any)
+    addKeepaliveReason('owner-a', bashKeepaliveReason(bashId), registry)
+    killTask(bashId, registry)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         bashKeepaliveReason(bashId),
@@ -246,7 +283,7 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('killTask detaches monitor: hold when kind=monitor', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
     const monId = 'b-mon1'
     setAppState(prev => ({
@@ -266,12 +303,8 @@ describe('densable non-agent Gge/tB prefixes', () => {
         },
       },
     }))
-    addKeepaliveReason(
-      'owner-a',
-      monitorKeepaliveReason(monId),
-      setAppState as any,
-    )
-    killTask(monId, setAppState as any)
+    addKeepaliveReason('owner-a', monitorKeepaliveReason(monId), registry)
+    killTask(monId, registry)
     expect(
       getKeepaliveReasons(getState().tasks['owner-a']).has(
         monitorKeepaliveReason(monId),
@@ -280,19 +313,11 @@ describe('densable non-agent Gge/tB prefixes', () => {
   })
 
   test('removeKeepalive is idempotent (double tB safe)', () => {
-    const { setAppState, getState } = createSetState()
+    const { setAppState, getState, registry } = createSetState()
     seedOwner(setAppState)
-    addKeepaliveReason('owner-a', bashKeepaliveReason('b9'), setAppState as any)
-    removeKeepaliveReason(
-      'owner-a',
-      bashKeepaliveReason('b9'),
-      setAppState as any,
-    )
-    removeKeepaliveReason(
-      'owner-a',
-      bashKeepaliveReason('b9'),
-      setAppState as any,
-    )
+    addKeepaliveReason('owner-a', bashKeepaliveReason('b9'), registry)
+    removeKeepaliveReason('owner-a', bashKeepaliveReason('b9'), registry)
+    removeKeepaliveReason('owner-a', bashKeepaliveReason('b9'), registry)
     expect(getKeepaliveReasons(getState().tasks['owner-a']).size).toBe(0)
   })
 })

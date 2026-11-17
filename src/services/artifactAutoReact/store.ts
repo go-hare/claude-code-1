@@ -694,7 +694,11 @@ export type ProbeCachedBoot = {
   reused?: boolean
 }
 
-export type NoticeCoalesceFamily = 'artifact-auto-react' | 'artifact-changed'
+export type NoticeCoalesceFamily =
+  | 'artifact-auto-react'
+  | 'artifact-changed'
+  | 'auto-replied'
+  | 'auto-edited'
 
 export type NoticeCoalesceEntry = {
   slug: string
@@ -707,6 +711,9 @@ export type NoticeCoalesceEntry = {
   details: string[]
   droppedDetails: number
   suppressedPrior: number
+  queue?: {
+    enqueuePendingNotification: typeof import('../../utils/messageQueueManager.js').enqueuePendingNotification
+  }
   timer?: ReturnType<typeof setTimeout>
 }
 

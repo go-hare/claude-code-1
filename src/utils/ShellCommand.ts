@@ -4,6 +4,7 @@ import { stat } from 'fs/promises'
 import type { Readable } from 'stream'
 import treeKill from 'tree-kill'
 import { generateTaskId } from '../Task.js'
+import { getAbortReasonMessage } from './abortController.js'
 import { formatDuration } from './format.js'
 import {
   MAX_TASK_OUTPUT_BYTES,
@@ -100,6 +101,14 @@ export type ExecResult = {
   outputTaskId?: string
   /** Error message when the command failed before spawning (e.g., deleted cwd). */
   preSpawnError?: string
+  /** densable bg-cap kill — YVe stopCause `deadline`. */
+  killedByBackgroundCap?: boolean
+  /** densable DVn `timedOutAfterMs`. */
+  timedOutAfterMs?: number
+  /** densable K3n / tNr. */
+  backgroundedToDeliverMessage?: boolean
+  /** densable plugin turn abort. */
+  backgroundedByTurnAbort?: boolean
 }
 
 /** densable ShellCommand.background options — capMs wall-clock kill + skipSpill */
@@ -210,6 +219,7 @@ class ShellCommandImpl implements ShellCommand {
   #sizeWatchdog: NodeJS.Timeout | null = null
   /** densable #l — wall-clock cap timer after background({capMs}) */
   #bgCapTimeout: NodeJS.Timeout | null = null
+  #killedByBackgroundCap = false
   #killedForSize = false
   #maxOutputBytes: number
   #abortSignal: AbortSignal
@@ -278,6 +288,9 @@ class ShellCommandImpl implements ShellCommand {
     }
 
     this.result = this.#createResultPromise()
+    if (abortSignal.aborted) {
+      this.#abortHandler()
+    }
   }
 
   get status(): 'running' | 'backgrounded' | 'completed' | 'killed' {
@@ -287,7 +300,8 @@ class ShellCommandImpl implements ShellCommand {
   #abortHandler(): void {
     // On 'interrupt' (user submitted a new message), don't kill — let the
     // caller background the process so the model can see partial output.
-    if (this.#abortSignal.reason === 'interrupt') {
+    const reason = getAbortReasonMessage(this.#abortSignal.reason)
+    if (reason === 'interrupt') {
       return
     }
     this.kill()
@@ -385,9 +399,11 @@ class ShellCommandImpl implements ShellCommand {
     this.#childProcess.once('exit', this.#exitHandler.bind(this))
     this.#childProcess.once('error', this.#errorHandler.bind(this))
 
+    // Clamp to max 32-bit signed int (2_147_483_647ms ≈ 24.8 days) so an
+    // oversized timeout cannot overflow Node/Bun setTimeout to 1ms.
     this.#timeoutId = setTimeout(
       ShellCommandImpl.#handleTimeout,
-      this.#timeout,
+      Math.min(this.#timeout, 0x7fffffff),
       this,
     ) as NodeJS.Timeout
 
@@ -417,6 +433,7 @@ class ShellCommandImpl implements ShellCommand {
       // densable: interrupted only when we killed AND exit is SIGKILL (137)
       interrupted: wasKilled && code === SIGKILL,
       backgroundTaskId: this.#backgroundTaskId,
+      ...(this.#killedByBackgroundCap ? { killedByBackgroundCap: true } : {}),
     }
 
     if (this.taskOutput.stdoutToFile && !this.#backgroundTaskId) {
@@ -493,10 +510,11 @@ class ShellCommandImpl implements ShellCommand {
             self.#bgCapTimeout = null
             // densable #A — kill when wall-clock cap elapses
             if (self.#status === 'backgrounded') {
+              self.#killedByBackgroundCap = true
               self.#doKill(SIGKILL)
             }
           },
-          options.capMs,
+          Math.min(options.capMs, 0x7fffffff),
           this,
         ) as NodeJS.Timeout
         this.#bgCapTimeout.unref?.()

@@ -28,6 +28,7 @@ import {
   shouldDropCircuitBreaker,
 } from '../readPerm/surfaces.js'
 import { resetArtifactAutoReactStoreForTests, un } from '../store.js'
+import { resetAutoModeClassifierTransportForTests } from '../../api/autoModeClassifierTransport.js'
 
 const ENV_KEYS = [
   'CLAUDE_CODE_ENTRYPOINT',
@@ -293,10 +294,21 @@ describe('isServerClassifierMode (Vqe)', () => {
     expect(isServerClassifierTransport('arbiterWithLocalFallback')).toBe(true)
     expect(isServerClassifierTransport('off')).toBe(false)
   })
-  test('no server classifier in this build', () => {
-    autoActive = true
-    expect(isServerClassifierMode('auto')).toBe(false)
-    expect(isServerClassifierMode('plan')).toBe(false)
+  test('explicitly disabling the server classifier leaves no server surface', () => {
+    const previous = process.env.CLAUDE_CODE_AUTO_MODE_SERVER
+    process.env.CLAUDE_CODE_AUTO_MODE_SERVER = '0'
+    resetAutoModeClassifierTransportForTests()
+    try {
+      autoActive = true
+      expect(isServerClassifierMode('auto')).toBe(false)
+      expect(isServerClassifierMode('plan')).toBe(false)
+      expect(isServerClassifierMode('default')).toBe(false)
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLAUDE_CODE_AUTO_MODE_SERVER
+      else process.env.CLAUDE_CODE_AUTO_MODE_SERVER = previous
+      resetAutoModeClassifierTransportForTests()
+    }
   })
 })
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
 import { getIsNonInteractiveSession, getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
 import {
@@ -65,12 +66,32 @@ import {
   sweepStaleKeepaliveReasons,
   updateTaskState,
 } from '../../utils/task/framework.js';
+import { createTaskRegistry, type TaskRegistry } from '../../utils/taskRegistry.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
 import { createSignal } from '../../utils/signal.js';
 import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js';
 import { validateWorkerResult } from '../../coordinator/workerResultValidator.js';
 import { escapeXml } from '../../utils/xml.js';
 import type { TaskState } from '../types.js';
+
+/**
+ * densable Xm(get, set). Synthesize a read-only peek via setAppState identity
+ * return when callers omit getAppState so cleanup / autoBackground / keepalive
+ * gates never silently no-op.
+ */
+function xm(setAppState: SetAppState, getAppState: (() => AppState) | undefined): TaskRegistry {
+  const readState: () => AppState =
+    getAppState ??
+    (() => {
+      let snapshot = { tasks: {} } as unknown as AppState;
+      setAppState(prev => {
+        snapshot = prev;
+        return prev;
+      });
+      return snapshot;
+    });
+  return createTaskRegistry(readState, setAppState);
+}
 
 /**
  * densable Weo (`vs()` signal): fire agentId when DSu completes with
@@ -91,11 +112,14 @@ export type PendingAgentMessage = {
   text: string;
   origin?: PendingAgentMessageOrigin;
   isMeta: boolean;
+  /** densable `shownAs` — bdt send-now uuid. */
+  shownAs?: string;
 };
 
 export type QueuePendingMessageOpts = {
   origin?: PendingAgentMessageOrigin;
   isMeta?: boolean;
+  shownAs?: string;
 };
 
 export type ToolActivity = {
@@ -846,7 +870,7 @@ export function killDescendantAgents(
     }
     // densable gtf: Kle then XV — mark notified to suppress noise on cascade
     markAgentsNotified(child.id, setAppState);
-    killAsyncAgent(child.id, setAppState, killedBy);
+    killAsyncAgent(child.id, createTaskRegistry(getAppState as () => AppState, setAppState), killedBy);
   }
 }
 
@@ -877,17 +901,22 @@ export function queuePendingMessage(
   setAppState: (f: (prev: AppState) => AppState) => void,
   opts?: QueuePendingMessageOpts,
 ): void {
+  const origin = typeof msg === 'string' ? opts?.origin : msg.origin;
+  const shownAs =
+    (typeof msg === 'string' ? opts?.shownAs : msg.shownAs) ?? (origin?.kind === 'human' ? randomUUID() : undefined);
   const entry: PendingAgentMessage =
     typeof msg === 'string'
       ? {
           text: msg,
-          ...(opts?.origin !== undefined ? { origin: opts.origin } : {}),
+          ...(origin !== undefined ? { origin } : {}),
           isMeta: opts?.isMeta ?? false,
+          ...(shownAs !== undefined ? { shownAs } : {}),
         }
       : {
           text: msg.text,
-          ...(msg.origin !== undefined ? { origin: msg.origin } : {}),
+          ...(origin !== undefined ? { origin } : {}),
           isMeta: msg.isMeta ?? false,
+          ...(shownAs !== undefined ? { shownAs } : {}),
         };
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => ({
     ...task,
@@ -991,13 +1020,33 @@ function getCompletionHintTaskListIds(linkedTaskListId: string | undefined): str
     : [currentTaskListId];
 }
 
+/**
+ * densable K3(n, s, r): claim a one-shot task-notification.
+ * `r.skipStampIfRunning && status==="running"` claims without stamping `notified`.
+ */
+function claimAgentNotification(
+  taskId: string,
+  registry: TaskRegistry,
+  opts?: { skipStampIfRunning?: boolean },
+): { claimed: boolean; task: LocalAgentTaskState | undefined } {
+  let claimed = false;
+  let task: LocalAgentTaskState | undefined;
+  registry.update<LocalAgentTaskState>(taskId, t => {
+    task = t;
+    if (t.notified) return t;
+    claimed = true;
+    if (opts?.skipStampIfRunning && t.status === 'running') return t;
+    return { ...t, notified: true };
+  });
+  return { claimed, task };
+}
+
 export async function enqueueAgentNotification({
   taskId,
   description,
   status,
   killedBy,
   error,
-  setAppState,
   finalMessage,
   maxTurnsReached,
   usage,
@@ -1005,6 +1054,7 @@ export async function enqueueAgentNotification({
   worktreePath,
   worktreeBranch,
   ownerAgentId,
+  registry,
 }: {
   taskId: string;
   description: string;
@@ -1017,7 +1067,6 @@ export async function enqueueAgentNotification({
    */
   killedBy?: 'user' | 'parent' | 'system';
   error?: string;
-  setAppState: SetAppState;
   finalMessage?: string;
   usage?: {
     totalTokens: number;
@@ -1032,37 +1081,26 @@ export async function enqueueAgentNotification({
    * (XV re-notify path stamps it).
    */
   ownerAgentId?: string;
+  /** densable Put `taskRegistry` — required Xm. */
+  registry: TaskRegistry;
 }): Promise<void> {
-  // BRt owner notify — INTENTIONAL fortify over densable 2.1.211 (do not "align"):
-  // densable gold: ownerBusy = YC(parked)||running → skip tB + route to owner.
-  // That permanently sticks a parent that park-on-keepalive deferred its own
-  // BRt: last child never tB's, parent never unparks, child notif sits on a
-  // dead owner queue (Zeo also skips YC interactive). Known hang class.
+  // densable K3 / Put: claim without stamping `notified` while status==="running"
+  // (skipStampIfRunning:!0). Duplicate skip is notified:true or non-running stamp.
   //
-  // Local (keep this fork; tests/automation must expect local timing):
-  //   1. atomic notified gate; capture owner
+  // BRt owner notify — INTENTIONAL fortify over densable Iut YC-as-busy
+  // (do not restore gold Iut): ownerBusy = YC(parked)||running hangs a parent
+  // that park-on-keepalive deferred BRt. Local running-only hang fork:
+  //   1. K3 claim; capture owner
   //   2. hold KA (skip tB) ONLY while owner.status==="running" (can drain)
   //   3. YC-parked / terminal / missing owner → always tB
   //   4. route to owner only when running; else main-thread
   //   5. after tB, if parked owner now has no live agent: children and never
   //      notified → fire deferred parent completion BRt + Zeo rewire
-  let shouldEnqueue = false;
-  let shouldCompletePlanVerification = false;
-  let owner: string | undefined;
-  let linkedTaskListId: string | undefined;
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
-    owner = task.ownerAgentId ?? task.notificationTargetAgentId;
-    if (task.notified) {
-      return task;
-    }
-    shouldEnqueue = true;
-    shouldCompletePlanVerification = task.agentType === VERIFICATION_AGENT_TYPE;
-    linkedTaskListId = task.activeTaskExecutionContext?.taskListId;
-    return {
-      ...task,
-      notified: true,
-    };
+  const { claimed, task: claimedTask } = claimAgentNotification(taskId, registry, {
+    skipStampIfRunning: true,
   });
+  let owner = claimedTask?.ownerAgentId ?? claimedTask?.notificationTargetAgentId;
+  const linkedTaskListId = claimedTask?.activeTaskExecutionContext?.taskListId;
   owner ??= ownerAgentId;
 
   // Hold KA only while owner is still running (can drain mid-turn notifs).
@@ -1070,49 +1108,43 @@ export async function enqueueAgentNotification({
   let ownerRunning = false;
   let ownerWasParked = false;
   if (owner) {
-    setAppState(prev => {
-      const g = prev.tasks?.[owner!];
-      if (g && g.type === 'local_agent') {
-        ownerRunning = g.status === 'running';
-        ownerWasParked = isParkedKeepaliveAgent(g) && !getIsNonInteractiveSession();
-      }
-      return prev;
-    });
+    const g = registry.get(owner);
+    if (g && g.type === 'local_agent') {
+      ownerRunning = g.status === 'running';
+      ownerWasParked = isParkedKeepaliveAgent(g) && !getIsNonInteractiveSession();
+    }
   }
   // Skip tB only on first-notify + owner still running.
   // already-notified re-entry and parked/terminal owners always detach.
-  if (!(shouldEnqueue && ownerRunning)) {
-    removeKeepaliveReason(owner, agentKeepaliveReason(taskId), setAppState);
+  if (!(claimed && ownerRunning)) {
+    removeKeepaliveReason(owner, agentKeepaliveReason(taskId), registry);
   }
 
-  if (!shouldEnqueue) {
+  if (!claimed) {
     // Re-notify / kill paths still tB above; finish park-deferred parent if ready.
     if (owner && ownerWasParked && !ownerRunning) {
-      await fireDeferredParkedOwnerCompletion(owner, setAppState);
+      await fireDeferredParkedOwnerCompletion(owner, registry);
     }
     return;
   }
 
-  // Abort any active speculation — background task state changed, so speculated
-  // results may reference stale task output. The prompt suggestion text is
-  // preserved; only the pre-computed response is discarded.
-  abortSpeculation(setAppState);
-
-  if (shouldCompletePlanVerification) {
-    setAppState(prev => {
-      const pending = prev.pendingPlanVerification;
-      if (!pending || !pending.verificationStarted || pending.verificationCompleted) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        pendingPlanVerification: {
-          ...pending,
-          verificationCompleted: true,
-        },
-      };
-    });
+  if (registry.mutateAppState) {
+    abortSpeculation(registry.mutateAppState);
+    if (claimedTask?.agentType === VERIFICATION_AGENT_TYPE) {
+      registry.mutateAppState(prev => {
+        const pending = prev.pendingPlanVerification;
+        if (!pending || !pending.verificationStarted || pending.verificationCompleted) {
+          return prev;
+        }
+        return {
+          ...prev,
+          pendingPlanVerification: {
+            ...pending,
+            verificationCompleted: true,
+          },
+        };
+      });
+    }
   }
 
   // densable BRt summary wording
@@ -1130,7 +1162,7 @@ export async function enqueueAgentNotification({
         : `Agent "${description}" ${killedSummary}`;
 
   const outputPath = getTaskOutputPath(taskId);
-  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
+  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
   const completionHint = await getLinkedTaskCompletionHint(taskId, status, linkedTaskListId);
   const resultWithHint = completionHint ? [finalMessage, completionHint].filter(Boolean).join('\n\n') : finalMessage;
   const validatedResult = validateWorkerResult(resultWithHint, status, description);
@@ -1141,14 +1173,14 @@ export async function enqueueAgentNotification({
     ? `\n<usage><subagent_tokens>${usage.totalTokens}</subagent_tokens><tool_uses>${usage.toolUses}</tool_uses><duration_ms>${usage.durationMs}</duration_ms></usage>`
     : '';
   const worktreeSection = worktreePath
-    ? `\n<${WORKTREE_TAG}><${WORKTREE_PATH_TAG}>${worktreePath}</${WORKTREE_PATH_TAG}>${worktreeBranch ? `<${WORKTREE_BRANCH_TAG}>${worktreeBranch}</${WORKTREE_BRANCH_TAG}>` : ''}</${WORKTREE_TAG}>`
+    ? `\n<${WORKTREE_TAG}><${WORKTREE_PATH_TAG}>${escapeXml(worktreePath)}</${WORKTREE_PATH_TAG}>${worktreeBranch ? `<${WORKTREE_BRANCH_TAG}>${escapeXml(worktreeBranch)}</${WORKTREE_BRANCH_TAG}>` : ''}</${WORKTREE_TAG}>`
     : '';
   const noteSection =
     '\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>';
 
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>${noteSection}${resultSection}${usageSection}${worktreeSection}
 </${TASK_NOTIFICATION_TAG}>`;
@@ -1157,16 +1189,21 @@ export async function enqueueAgentNotification({
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getMainThreadAgentId } = require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js');
   const routeAgentId = ownerRunning && owner ? asAgentId(owner) : getMainThreadAgentId();
-  enqueuePendingNotification({
-    value: message,
-    mode: 'task-notification',
-    agentId: routeAgentId,
-    priority: 'next',
-    taskId,
-    // densable vh/Fe: isMeta so shouldQuery:false skip-attachment path applies;
-    // do not stamp uuid (vh requires uuid===undefined).
-    isMeta: true,
-  });
+  enqueuePendingNotification(
+    {
+      value: message,
+      mode: 'task-notification',
+      agentId: routeAgentId,
+      priority: 'next',
+      skipAttachments: true,
+      taskId,
+      ...(usage !== undefined ? { usage } : {}),
+      // densable vh/Fe: isMeta so shouldQuery:false skip-attachment path applies;
+      // do not stamp uuid (vh requires uuid===undefined).
+      isMeta: true,
+    },
+    { turnAttribution: 'inherit' },
+  );
 
   // densable Host contract: system task_notification bookend for Jp Tasks.
   // BRt XML still feeds the model via print.ts; dual-emit SDK so Hosts that
@@ -1194,7 +1231,7 @@ export async function enqueueAgentNotification({
 
   // After child notif: last agent: child of a park-deferred parent → parent BRt.
   if (owner && ownerWasParked && !ownerRunning) {
-    await fireDeferredParkedOwnerCompletion(owner, setAppState);
+    await fireDeferredParkedOwnerCompletion(owner, registry);
   }
 }
 
@@ -1210,22 +1247,18 @@ export async function enqueueAgentNotification({
  *
  * Do not "align to gold" by restoring YC-as-busy — that reintroduces hang.
  */
-export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, setAppState: SetAppState): Promise<void> {
-  let shouldResolve = false;
-  setAppState(prev => {
-    const t = prev.tasks?.[ownerId];
-    if (t && t.type === 'local_agent' && t.status === 'completed' && t.notified !== true && isParkedKeepaliveAgent(t)) {
-      shouldResolve = true;
-    }
-    return prev;
-  });
-  if (!shouldResolve) return;
+export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, registry: TaskRegistry): Promise<void> {
+  const t = registry.get(ownerId);
+  if (
+    !(t && t.type === 'local_agent' && t.status === 'completed' && t.notified !== true && isParkedKeepaliveAgent(t))
+  ) {
+    return;
+  }
 
   // Bypass densable Zeo YC guard — parked parent will never drain these.
-  rewireOrphanedOwnerNotifications(ownerId, setAppState, { force: true });
-  // Queue holds cleared → Jeo can detach notified/missing agent: children.
-  sweepStaleKeepaliveReasons(ownerId, setAppState);
-  await fireDeferredParkedOwnerCompletion(ownerId, setAppState);
+  rewireOrphanedOwnerNotifications(ownerId, registry, { force: true });
+  sweepStaleKeepaliveReasons(ownerId, registry);
+  await fireDeferredParkedOwnerCompletion(ownerId, registry);
 }
 
 /**
@@ -1238,38 +1271,28 @@ export async function resolveParkedOwnerAfterChildrenSettled(ownerId: string, se
  * enqueueAgentNotification; remaining live agent: children keep the parent parked.
  * Keep this fork — gold YC-as-busy hangs permanently.
  */
-async function fireDeferredParkedOwnerCompletion(ownerId: string, setAppState: SetAppState): Promise<void> {
-  let description = 'agent';
-  let notified = true;
-  let status: string | undefined;
-  let result: AgentToolResult | undefined;
-  let appState: AppState | undefined;
-  setAppState(prev => {
-    appState = prev;
-    const t = prev.tasks?.[ownerId];
-    if (t && t.type === 'local_agent') {
-      const agent = t as LocalAgentTaskState;
-      description = agent.description || 'agent';
-      notified = agent.notified === true;
-      status = agent.status;
-      result = agent.result;
-    }
-    return prev;
-  });
+async function fireDeferredParkedOwnerCompletion(ownerId: string, registry: TaskRegistry): Promise<void> {
+  const t = registry.get(ownerId);
+  if (!t || t.type !== 'local_agent') return;
+  const agent = t as LocalAgentTaskState;
+  const notified = agent.notified === true;
+  const status = agent.status;
+  const result = agent.result;
+  const description = agent.description || 'agent';
 
   // Only park-deferred completion (Yqe if(Z) return without BRt).
   if (notified || status !== 'completed') {
     return;
   }
   // Still has other live agent: children → stay parked.
-  if (!appState || hasLiveAgentKeepaliveChildren(ownerId, () => appState!)) {
+  if (hasLiveAgentKeepaliveChildren(ownerId, registry)) {
     return;
   }
 
   // KA may still hold non-agent reasons (bash:/monitor:); Zeo skips only while
   // YC interactive. After last agent: tB, empty-KA parents rewire; non-empty
   // still attempt BRt (notified gate) so user sees completion.
-  rewireOrphanedOwnerNotifications(ownerId, setAppState);
+  rewireOrphanedOwnerNotifications(ownerId, registry);
 
   const finalMessage =
     result?.content
@@ -1289,7 +1312,7 @@ async function fireDeferredParkedOwnerCompletion(ownerId: string, setAppState: S
     taskId: ownerId,
     description,
     status: 'completed',
-    setAppState,
+    registry,
     finalMessage,
     usage,
   });
@@ -1305,9 +1328,9 @@ export const LocalAgentTask: Task = {
   name: 'LocalAgentTask',
   type: 'local_agent',
 
-  // densable: async kill(e,t,r,n){XV(e,t,n)} — local drops registry, 3rd=killedBy
-  async kill(taskId, setAppState, killedBy = 'user') {
-    killAsyncAgent(taskId, setAppState, killedBy);
+  // densable: async kill(e,t,r,n){XV(e,t,n)} — t=registry, n=killedBy
+  async kill(taskId, registry, killedBy = 'user') {
+    killAsyncAgent(taskId, registry, killedBy);
   },
 };
 
@@ -1329,21 +1352,15 @@ export const LocalAgentTask: Task = {
  */
 export function killAsyncAgent(
   taskId: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   killedBy: 'user' | 'parent' | 'system' = 'user',
   opts?: { lifecycleNotStarted?: boolean },
 ): void {
   // densable dSe — only arm stop-pending when this kill will actually proceed.
   // No-op (missing / already terminal non-parked) must not leave Fle blocked.
-  let willKill = false;
-  setAppState(prev => {
-    const t = prev.tasks?.[taskId];
-    if (t && t.type === 'local_agent') {
-      const parked = isParkedKeepaliveAgent(t);
-      willKill = t.status === 'running' || parked;
-    }
-    return prev;
-  });
+  const initial = registry.get(taskId);
+  const willKill =
+    !!initial && initial.type === 'local_agent' && (initial.status === 'running' || isParkedKeepaliveAgent(initial));
   if (willKill) {
     try {
       // The run registers the loop (T8e) and settles it when that run exits.
@@ -1364,36 +1381,27 @@ export function killAsyncAgent(
 
   // Official XV step 1: YC + quietlyParked → un-notify so kill can re-surface.
   // Also clear densable c7c gate so re-BRt can emit a new SDK bookend.
-  setAppState(prev => {
-    const t = prev.tasks?.[taskId];
-    if (
-      t &&
-      t.type === 'local_agent' &&
-      isParkedKeepaliveAgent(t) &&
-      (t as LocalAgentTaskState).quietlyParked === true
-    ) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { clearTaskTerminatedSdkGate } =
-          require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js');
-        clearTaskTerminatedSdkGate(taskId);
-      } catch {
-        // optional
-      }
-      return {
-        ...prev,
-        tasks: {
-          ...prev.tasks,
-          [taskId]: {
-            ...t,
-            notified: false,
-            quietlyParked: false,
-          },
-        },
-      };
+  const parkedQuiet = registry.get(taskId);
+  if (
+    parkedQuiet &&
+    parkedQuiet.type === 'local_agent' &&
+    isParkedKeepaliveAgent(parkedQuiet) &&
+    (parkedQuiet as LocalAgentTaskState).quietlyParked === true
+  ) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { clearTaskTerminatedSdkGate } =
+        require('../../utils/sdkEventQueue.js') as typeof import('../../utils/sdkEventQueue.js');
+      clearTaskTerminatedSdkGate(taskId);
+    } catch {
+      // optional
     }
-    return prev;
-  });
+    registry.update<LocalAgentTaskState>(taskId, t => ({
+      ...t,
+      notified: false,
+      quietlyParked: false,
+    }));
+  }
 
   // Re-read after un-notify for densable steps 2–3 (tB vs BRt).
   let wasParked = false;
@@ -1403,31 +1411,28 @@ export function killAsyncAgent(
   let preToolUseId: string | undefined;
   let preFinalMessage: string | undefined;
   let preUsage: { totalTokens: number; toolUses: number; durationMs: number } | undefined;
-  setAppState(prev => {
-    const t = prev.tasks?.[taskId];
-    if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t)) {
-      const agent = t as LocalAgentTaskState;
-      wasParked = true;
-      wasNotified = agent.notified === true;
-      preOwner = agent.ownerAgentId ?? agent.notificationTargetAgentId;
-      preDescription = agent.description;
-      preToolUseId = agent.toolUseId;
-      const result = agent.result;
-      if (result) {
-        preFinalMessage = result.content.map(c => c.text).join('\n');
-        preUsage = {
-          totalTokens: result.totalTokens,
-          toolUses: result.totalToolUseCount,
-          durationMs: result.totalDurationMs,
-        };
-      }
+  const afterUnnotify = registry.get(taskId);
+  if (afterUnnotify && afterUnnotify.type === 'local_agent' && isParkedKeepaliveAgent(afterUnnotify)) {
+    const agent = afterUnnotify as LocalAgentTaskState;
+    wasParked = true;
+    wasNotified = agent.notified === true;
+    preOwner = agent.ownerAgentId ?? agent.notificationTargetAgentId;
+    preDescription = agent.description;
+    preToolUseId = agent.toolUseId;
+    const result = agent.result;
+    if (result) {
+      preFinalMessage = result.content.map(c => c.text).join('\n');
+      preUsage = {
+        totalTokens: result.totalTokens,
+        toolUses: result.totalToolUseCount,
+        durationMs: result.totalDurationMs,
+      };
     }
-    return prev;
-  });
+  }
 
   // Densable: if (YC && notified) tB(owner, agent:id)
   if (wasParked && wasNotified) {
-    removeKeepaliveReason(preOwner, agentKeepaliveReason(taskId), setAppState);
+    removeKeepaliveReason(preOwner, agentKeepaliveReason(taskId), registry);
   }
   // Densable: if (YC && !notified) BRt({status:"killed", killedBy:r, ...})
   if (wasParked && !wasNotified) {
@@ -1436,7 +1441,7 @@ export function killAsyncAgent(
       description: preDescription,
       status: 'killed',
       killedBy,
-      setAppState,
+      registry,
       finalMessage: preFinalMessage,
       usage: preUsage,
       toolUseId: preToolUseId,
@@ -1446,7 +1451,7 @@ export function killAsyncAgent(
 
   let killed = false;
   let owner: string | undefined;
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+  registry.update<LocalAgentTaskState>(taskId, task => {
     const parked = isParkedKeepaliveAgent(task);
     if (task.status !== 'running' && !parked) {
       return task;
@@ -1489,10 +1494,10 @@ export function killAsyncAgent(
     // Running kill: detach owner KA (local residual; densable pre-steps only
     // cover YC). Parked paths already handled tB/BRt above — avoid double tB.
     if (!wasParked) {
-      removeKeepaliveReason(owner, agentKeepaliveReason(taskId), setAppState);
+      removeKeepaliveReason(owner, agentKeepaliveReason(taskId), registry);
     }
     // Official XV: if (i) Zeo(e,t), zS(e)
-    rewireOrphanedOwnerNotifications(taskId, setAppState);
+    rewireOrphanedOwnerNotifications(taskId, registry);
     evictAgentTaskOutputIfPersistent(taskId);
     try {
       /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1506,7 +1511,10 @@ export function killAsyncAgent(
     // densable lx after zA not_taken — notified, quietlyParked false.
     // Gold does not delete the registry row (ze is concurrency slot, not GC).
     if (opts?.lifecycleNotStarted && !wasParked) {
-      markAgentsNotified(taskId, setAppState);
+      registry.update<LocalAgentTaskState>(taskId, task => {
+        if (task.notified && task.quietlyParked !== true) return task;
+        return { ...task, notified: true, quietlyParked: false };
+      });
     }
   }
 }
@@ -1517,17 +1525,17 @@ export function killAsyncAgent(
  */
 export function killAllRunningAgentTasks(
   tasks: Record<string, TaskState>,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   killedBy: 'user' | 'parent' | 'system' = 'user',
 ): void {
   for (const [taskId, task] of Object.entries(tasks)) {
     if (task.type === 'local_agent' && isParkedKeepaliveAgent(task)) {
-      killAsyncAgent(taskId, setAppState, killedBy);
+      killAsyncAgent(taskId, registry, killedBy);
     }
   }
   for (const [taskId, task] of Object.entries(tasks)) {
     if (task.type === 'local_agent' && task.status === 'running') {
-      killAsyncAgent(taskId, setAppState, killedBy);
+      killAsyncAgent(taskId, registry, killedBy);
     }
   }
 }
@@ -1650,21 +1658,16 @@ export function updateAgentSummary(taskId: string, summary: string, setAppState:
  */
 export function rewireOrphanedOwnerNotifications(
   ownerTaskId: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   opts?: { force?: boolean },
 ): void {
   // Official: if (Wl(r)&&YC(r)&&!pn()) return
-  let skip = false;
   if (!opts?.force) {
-    setAppState(prev => {
-      const t = prev.tasks?.[ownerTaskId];
-      if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t) && !getIsNonInteractiveSession()) {
-        skip = true;
-      }
-      return prev;
-    });
+    const t = registry.get(ownerTaskId);
+    if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t) && !getIsNonInteractiveSession()) {
+      return;
+    }
   }
-  if (skip) return;
 
   // densable Zeo: re-cf with agentId:mi() for orphaned owner-routed notifs.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1673,15 +1676,14 @@ export function rewireOrphanedOwnerNotifications(
   const dequeued = dequeueAllMatching(cmd => {
     if (cmd.mode !== 'task-notification') return false;
     if (cmd.agentId !== ownerTaskId) return false;
-    let childOwner: string | undefined;
-    setAppState(prev => {
-      const child = cmd.taskId ? prev.tasks?.[cmd.taskId] : undefined;
-      if (child && child.type === 'local_agent') {
-        childOwner =
-          (child as LocalAgentTaskState).ownerAgentId ?? (child as LocalAgentTaskState).notificationTargetAgentId;
-      }
-      return prev;
-    });
+    const child = cmd.taskId ? registry.get(cmd.taskId) : undefined;
+    const childOwner =
+      child && child.type === 'local_agent'
+        ? ((child as LocalAgentTaskState).ownerAgentId ?? (child as LocalAgentTaskState).notificationTargetAgentId)
+        : child && child.type === 'local_workflow'
+          ? ((child as { ownerAgentId?: string; agentId?: string }).ownerAgentId ??
+            (child as { agentId?: string }).agentId)
+          : undefined;
     return childOwner === ownerTaskId;
   });
   for (const cmd of dequeued) {
@@ -1724,10 +1726,17 @@ export function clearIdleWindowTimer(taskId: string): void {
  * Gold DSu uses `a=!1` so complete never arms this path; helpers remain for
  * fidelity / manual armIdleWindowTimer (tests, future densable revival).
  */
-export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppState): void {
+export function expireIdleWindowKeepalive(
+  taskId: string,
+  setAppState: SetAppState,
+  getAppState?: () => AppState,
+): void {
   idleWindowTimers.delete(taskId);
   const bot = idleWindowKeepaliveReason();
-  removeKeepaliveReason(taskId, bot, setAppState);
+  const registry = xm(setAppState, getAppState);
+  if (registry) {
+    removeKeepaliveReason(taskId, bot, registry);
+  }
 
   let status: string | undefined;
   let notified = false;
@@ -1751,7 +1760,9 @@ export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppSta
   }
 
   // densable okg: zS(e), Zeo(e,t)
-  rewireOrphanedOwnerNotifications(taskId, setAppState);
+  if (registry) {
+    rewireOrphanedOwnerNotifications(taskId, registry);
+  }
 
   if (!notified) {
     return;
@@ -1769,7 +1780,10 @@ export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppSta
     }
   }
   if (!hasPendingOwnerNotif) {
-    removeKeepaliveReason(ownerId, agentKeepaliveReason(taskId), setAppState);
+    const ownerRegistry = xm(setAppState, getAppState);
+    if (ownerRegistry) {
+      removeKeepaliveReason(ownerId, agentKeepaliveReason(taskId), ownerRegistry);
+    }
   }
 }
 
@@ -1777,10 +1791,10 @@ export function expireIdleWindowKeepalive(taskId: string, setAppState: SetAppSta
  * densable DSu arm: if (o&&a) clearTimeout + setTimeout(okg, CSu).
  * Gold a=!1 → complete never calls this; exported for okg fidelity/tests.
  */
-export function armIdleWindowTimer(taskId: string, setAppState: SetAppState): void {
+export function armIdleWindowTimer(taskId: string, setAppState: SetAppState, getAppState?: () => AppState): void {
   clearIdleWindowTimer(taskId);
   const timer = setTimeout(() => {
-    expireIdleWindowKeepalive(taskId, setAppState);
+    expireIdleWindowKeepalive(taskId, setAppState, getAppState);
   }, IDLE_WINDOW_MS);
   // densable: u.unref?.()
   timer.unref?.();
@@ -1790,35 +1804,30 @@ export function armIdleWindowTimer(taskId: string, setAppState: SetAppState): vo
 /**
  * Complete an agent task with result (densable DSu body).
  *
- * densable Yqe: `Jeo → Z=JXt → Cns(suppress:Z) → DSu → if(Z) park`.
- * DSu itself has **no** Jeo. Callers that already swept (lifecycle / mid-bg)
- * pass `skipJeo: true` so park/suppress share that single pre-DSu Z.
- * Standalone callers (tests, other complete sites) leave default: Jeo here
- * once before DSu (same net as Yqe when they don't pre-sweep).
+ * Gold DSu takes Xm `taskRegistry` (not optional getAppState). densable Yqe:
+ * `Jeo → Z=JXt → Cns(suppress:Z) → DSu → if(Z) park`. DSu itself has **no** Jeo.
+ * Callers that already swept (lifecycle / mid-bg) pass `skipJeo: true` so
+ * park/suppress share that single pre-DSu Z. Standalone callers leave default:
+ * Jeo here once before DSu (same net as Yqe when they don't pre-sweep).
  *
  * densable DSu `a=!1` (2.1.211): do **not** stamp flag:idle-window / arm okg.
  * u = keepaliveReasons (unchanged); QYi(park:true); Zeo when !YC interactive.
  * No owner tB (BRt does conditional tB).
  */
-export function completeAgentTask(
-  result: AgentToolResult,
-  setAppState: SetAppState,
-  opts?: { skipJeo?: boolean },
-): void {
+export function completeAgentTask(result: AgentToolResult, registry: TaskRegistry, opts?: { skipJeo?: boolean }): void {
   const taskId = result.agentId;
   // densable Jeo before DSu — skip when caller already ran Jeo for the same Z.
   if (!opts?.skipJeo) {
-    sweepStaleKeepaliveReasons(taskId, setAppState);
+    sweepStaleKeepaliveReasons(taskId, registry);
   }
 
   let completed = false;
   let parkedInteractive = false;
   // densable DSu: a=!1 — never arm bot/okg on complete (dead branch in gold)
   const a = false;
-  let armedIdleWindow = false;
   // densable DSu: s = (d.pendingMessages?.length ?? 0) > 0 → Weo.emit after update
   let hasPendingMessages = false;
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+  registry.update<LocalAgentTaskState>(taskId, task => {
     if (task.status !== 'running') {
       return task;
     }
@@ -1839,7 +1848,6 @@ export function completeAgentTask(
     // Gold `l` (hasNonIdleWindowKeepalive) only gates dead `o&&a&&!l` telemetry.
     const prevReasons = task.keepaliveReasons ?? new Set<string>();
     const nextKeepalive = a ? new Set(prevReasons).add(IDLE_WINDOW_KEEPALIVE_REASON) : new Set(prevReasons);
-    armedIdleWindow = a;
 
     const next = {
       ...task,
@@ -1870,19 +1878,16 @@ export function completeAgentTask(
   if (completed) {
     clearDeferredAgentProgressRebuild(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
-    // Official DSu: if (o && !i) ... Zeo(n,t)
+    // Official DSu: if (o && !i) ... Zeo(n,t) — registry required, never skip.
     if (!parkedInteractive) {
-      rewireOrphanedOwnerNotifications(taskId, setAppState);
+      rewireOrphanedOwnerNotifications(taskId, registry);
     } else {
       // Local fortification (not densable): child-first hang — children that
       // notified while we were still running left agent: holds + owner-queue
       // notifs. densable defers until resume; we settle notified children now.
-      void resolveParkedOwnerAfterChildrenSettled(taskId, setAppState);
+      void resolveParkedOwnerAfterChildrenSettled(taskId, registry);
     }
-    // densable: if (o&&a) arm okg — gold a=!1 never enters
-    if (armedIdleWindow) {
-      armIdleWindowTimer(taskId, setAppState);
-    }
+    // densable: if (o&&a) arm okg — gold a=!1 never enters (dead; keep for body parity)
     // densable: if (o&&s) Weo.emit(n) — stranded pending drain/resume (luf→Aye)
     if (hasPendingMessages) {
       strandedAgentResume.emit(taskId);
@@ -1894,12 +1899,13 @@ export function completeAgentTask(
 /**
  * Fail an agent task with error.
  * densable eto: QYi(park:false); always Zeo; owner tB deferred to BRt.
+ * Gold eto takes Xm `taskRegistry` — never skip Zeo when omitted getAppState.
  */
-export function failAgentTask(taskId: string, error: string, setAppState: SetAppState): void {
+export function failAgentTask(taskId: string, error: string, registry: TaskRegistry): void {
   // densable eto: no idle-window arm; clear any prior timer defensively
   clearIdleWindowTimer(taskId);
   let failed = false;
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+  registry.update<LocalAgentTaskState>(taskId, task => {
     if (task.status !== 'running') {
       return task;
     }
@@ -1927,7 +1933,7 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
     clearDeferredAgentProgressRebuild(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official eto: always Zeo after fail (no YC park)
-    rewireOrphanedOwnerNotifications(taskId, setAppState);
+    rewireOrphanedOwnerNotifications(taskId, registry);
   }
   // Notification + densable BRt owner tB: AgentTool via enqueueAgentNotification
 }
@@ -1961,6 +1967,7 @@ export function registerAsyncAgent({
   spawnedSubagent,
   webFetchSavedFiles,
   outputFileReadable,
+  getAppState,
 }: {
   agentId: string;
   description: string;
@@ -1990,6 +1997,7 @@ export function registerAsyncAgent({
   spawnedSubagent?: SpawnedSubagentHandle;
   webFetchSavedFiles?: WebFetchSavedFiles;
   outputFileReadable?: boolean;
+  getAppState?: () => AppState;
 }): LocalAgentTaskState {
   initAgentTaskOutput(agentId);
 
@@ -2043,7 +2051,8 @@ export function registerAsyncAgent({
 
   // Register cleanup handler
   const unregisterCleanup = registerCleanup(async () => {
-    killAsyncAgent(agentId, setAppState);
+    const ka = xm(setAppState, getAppState);
+    if (ka) killAsyncAgent(agentId, ka, 'user');
   });
 
   taskState.unregisterCleanup = unregisterCleanup;
@@ -2066,7 +2075,10 @@ export function registerAsyncAgent({
   // densable nested spawn: if (!pn()) Gge(Re, `agent:${st}`, registry)
   // Resume/observer stamp owner without Gge (attachOwnerKeepalive:false).
   if (attachOwnerKeepalive && resolvedOwner && !getIsNonInteractiveSession()) {
-    addKeepaliveReason(resolvedOwner, agentKeepaliveReason(agentId), setAppState);
+    const registry = xm(setAppState, getAppState);
+    if (registry) {
+      addKeepaliveReason(resolvedOwner, agentKeepaliveReason(agentId), registry);
+    }
   }
 
   return taskState;
@@ -2098,6 +2110,7 @@ export function registerAgentForeground({
   webFetchSavedFiles,
   outputFileReadable,
   model,
+  getAppState,
 }: {
   agentId: string;
   description: string;
@@ -2120,6 +2133,7 @@ export function registerAgentForeground({
   webFetchSavedFiles?: WebFetchSavedFiles;
   outputFileReadable?: boolean;
   model?: string;
+  getAppState?: () => AppState;
 }): {
   taskId: string;
   backgroundSignal: Promise<void>;
@@ -2132,7 +2146,8 @@ export function registerAgentForeground({
   const abortController = createAbortController();
 
   const unregisterCleanup = registerCleanup(async () => {
-    killAsyncAgent(agentId, setAppState);
+    const ka = xm(setAppState, getAppState);
+    if (ka) killAsyncAgent(agentId, ka, 'user');
   });
 
   // densable OSu: ownerAgentId:t at register (no Gge until mid-bg).
@@ -2184,18 +2199,10 @@ export function registerAgentForeground({
   if (autoBackgroundMs !== undefined && autoBackgroundMs > 0) {
     const timer = setTimeout(() => {
       // densable T$e — full promote (terminal+Rde refuse), not a raw isBackgrounded flip
-      backgroundAgentTask(
-        agentId,
-        () => {
-          let snap: AppState | undefined;
-          setAppState(prev => {
-            snap = prev;
-            return prev;
-          });
-          return snap as AppState;
-        },
-        setAppState,
-      );
+      const registry = xm(setAppState, getAppState);
+      if (registry) {
+        backgroundAgentTask(agentId, registry);
+      }
     }, autoBackgroundMs);
     cancelAutoBackground = () => clearTimeout(timer);
   }
@@ -2214,45 +2221,26 @@ export function registerAgentForeground({
  * densable J5r: UE(status)&&!YC(task) → refuse (terminal non-parked).
  * @returns true if backgrounded successfully, false otherwise
  */
-export function backgroundAgentTask(taskId: string, getAppState: () => AppState, setAppState: SetAppState): boolean {
-  const state = getAppState();
-  const task = state.tasks[taskId];
+export function backgroundAgentTask(taskId: string, registry: TaskRegistry): boolean {
+  const task = registry.get(taskId);
   if (!isLocalAgentTask(task) || task.isBackgrounded) {
     return false;
   }
   // densable T$e / Rde: terminal AND no live `agent:` children cannot promote.
   // failed/killed owners that still hold agent: children CAN promote.
-  if (isTerminalTaskStatus(task.status) && !hasLiveAgentKeepaliveChildren(taskId, getAppState)) {
+  if (isTerminalTaskStatus(task.status) && !hasLiveAgentKeepaliveChildren(taskId, registry)) {
     return false;
   }
 
-  // Update state to mark as backgrounded
   let didBackground = false;
-  setAppState(prev => {
-    const prevTask = prev.tasks[taskId];
+  registry.update(taskId, prevTask => {
     if (!isLocalAgentTask(prevTask) || prevTask.isBackgrounded) {
-      return prev;
+      return prevTask;
     }
     didBackground = true;
-    return {
-      ...prev,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: { ...prevTask, isBackgrounded: true },
-      },
-    };
+    return { ...prevTask, isBackgrounded: true };
   });
-  // Official 2.1 task_updated only when state actually flipped.
-  if (didBackground) {
-    try {
-      const { emitTaskUpdatedSdk } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
-      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
-    } catch {
-      // optional
-    }
-  }
+  // densable T$e n.update → updateTaskState already emits task_updated.
 
   // Resolve the background signal only when we actually flipped (official
   // J5r refuse paths already returned false). If already bg, leave resolver.
@@ -2271,17 +2259,17 @@ export function backgroundAgentTask(taskId: string, getAppState: () => AppState,
  * Unregister a foreground agent task when the agent completes without being backgrounded.
  * densable LSu: skip remove when JXt (owner still holds `agent:` keepalive children).
  */
-export function unregisterAgentForeground(taskId: string, setAppState: SetAppState): void {
+export function unregisterAgentForeground(
+  taskId: string,
+  setAppState: SetAppState,
+  getAppState?: () => AppState,
+): void {
   // Clean up the background signal resolver
   backgroundSignalResolvers.delete(taskId);
 
   // densable JXt gate before remove
-  let rootSnap: AppState | undefined;
-  setAppState(prev => {
-    rootSnap = prev;
-    return prev;
-  });
-  if (hasLiveAgentKeepaliveChildren(taskId, () => rootSnap as AppState)) {
+  const registry = xm(setAppState, getAppState);
+  if (registry && hasLiveAgentKeepaliveChildren(taskId, registry)) {
     return;
   }
 

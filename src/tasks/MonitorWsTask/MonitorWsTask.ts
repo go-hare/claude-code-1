@@ -4,6 +4,7 @@
  */
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
+import type { TaskRegistry } from '../../utils/taskRegistry.js'
 import type { AgentId } from '../../types/ids.js'
 import {
   bindSupervisorTaskId,
@@ -12,12 +13,13 @@ import {
   registerSupervisor,
   type AutoReactWiring,
 } from '../../services/artifactAutoReact/index.js'
+import type { AppState } from '../../state/AppState.js'
 import {
   addKeepaliveReason,
   monitorKeepaliveReason,
   registerTask,
-  removeKeepaliveReason,
 } from '../../utils/task/framework.js'
+import { createTaskRegistry } from '../../utils/taskRegistry.js'
 
 function ensureAutoReactAvailability(): void {
   // densable Lge gate: availability true once MonitorWs product is used.
@@ -47,6 +49,7 @@ export type MonitorWsFrameLive = {
 export type MonitorWsTaskState = TaskStateBase & {
   type: 'monitor_ws'
   url?: string
+  timeoutId?: ReturnType<typeof setTimeout>
   ambient?: boolean
   autoReactArmed?: boolean
   autoReactSlug?: string
@@ -77,6 +80,7 @@ export type RegisterMonitorWsOpts = {
   toolUseId?: string
   agentId?: AgentId
   abortController?: AbortController
+  getAppState?: () => AppState
 }
 
 /**
@@ -112,8 +116,17 @@ export function registerMonitorWsTask(
     abortController: abort,
   }
   registerTask(task, setAppState)
+  // densable YP(k, `monitor:${i}`, y) — r always present (YP no-ops if !k)
   if (opts.agentId) {
-    addKeepaliveReason(opts.agentId, monitorKeepaliveReason(id), setAppState)
+    const getAppState = opts.getAppState
+    if (!getAppState) {
+      throw new TypeError('getAppState is required to attach monitor keepalive')
+    }
+    addKeepaliveReason(
+      opts.agentId,
+      monitorKeepaliveReason(id),
+      createTaskRegistry(getAppState, setAppState),
+    )
   }
   if (armed) {
     const wiring: AutoReactWiring =
@@ -137,62 +150,43 @@ export function registerMonitorWsTask(
   return id
 }
 
-function detachKeepalive(
-  taskId: string,
-  agentId: AgentId | undefined,
-  setAppState: SetAppState,
-): void {
-  if (!agentId) return
-  removeKeepaliveReason(agentId, monitorKeepaliveReason(taskId), setAppState)
-}
-
 export function killMonitorWs(
   taskId: string,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   source: 'user' | 'system' | 'parent' = 'user',
 ): void {
-  let agentId: AgentId | undefined
-  setAppState(prev => {
-    const t = prev.tasks[taskId]
-    if (isMonitorWsTask(t)) agentId = t.agentId
-    return prev
-  })
-  // densable Kam.kill → oF(taskId, registry, opts)
+  // densable eCo.kill → vy(taskId, registry, opts)
   oF(
     taskId,
-    {
-      all: () => {
-        let map: Record<string, MonitorWsTaskState> = {}
-        setAppState(prev => {
-          map = Object.fromEntries(
-            Object.entries(prev.tasks).filter(([, t]) => isMonitorWsTask(t)),
-          ) as Record<string, MonitorWsTaskState>
-          return prev
-        })
-        return map as unknown as Record<string, never>
-      },
-      remove: id => {
-        setAppState(prev => {
-          if (!(id in prev.tasks)) return prev
-          const { [id]: _, ...rest } = prev.tasks
-          return { ...prev, tasks: rest }
-        })
-      },
-    },
+    registry as unknown as Parameters<typeof oF>[1],
     source === 'system'
-      ? { quiet: true }
+      ? {}
       : { userStop: true, taskStop: true, modelOrigin: source === 'parent' },
   )
-  detachKeepalive(taskId, agentId, setAppState)
+}
+
+export function killMonitorWsTasksForAgent(
+  agentId: AgentId,
+  registry: TaskRegistry,
+): void {
+  for (const task of Object.values(registry.all())) {
+    if (
+      isMonitorWsTask(task) &&
+      task.agentId === agentId &&
+      task.status === 'running'
+    ) {
+      killMonitorWs(task.id, registry, 'parent')
+    }
+  }
 }
 
 export const MonitorWsTask: Task = {
   name: 'MonitorWsTask',
   type: 'monitor_ws',
-  async kill(taskId, setAppState, killedBy) {
+  async kill(taskId, registry, killedBy) {
     killMonitorWs(
       taskId,
-      setAppState,
+      registry,
       killedBy === 'system'
         ? 'system'
         : killedBy === 'parent'

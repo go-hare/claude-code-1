@@ -18,16 +18,9 @@ import {
 } from '../constants/xml.js'
 import { getTaskOutputPath } from '../utils/task/diskOutput.js'
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
+import { escapeXml } from '../utils/xml.js'
 import type { RunProgress } from './progress/store.js'
 import type { WorkflowService } from './service.js'
-
-function escapeXml(s: string): string {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-}
 
 function buildNotificationXml(opts: {
   taskId: string
@@ -139,8 +132,7 @@ function resultPreview(run: RunProgress): string | undefined {
  */
 export function installWorkflowNotifications(
   service: WorkflowService,
-  enqueue: (msg: string) => void = msg =>
-    enqueuePendingNotification({ value: msg, mode: 'task-notification' }),
+  enqueue?: (msg: string) => void,
 ): () => void {
   const prevStatus = new Map<string, RunProgress['status']>()
 
@@ -171,20 +163,37 @@ export function installWorkflowNotifications(
         totalTokens += a.tokenCount ?? 0
         toolUses += a.toolCount ?? 0
       }
-      enqueue(
-        buildNotificationXml({
-          taskId: run.runId,
-          status,
-          summary,
-          agentCount: run.agentCount,
-          totalTokens,
-          toolUses,
-          durationMs,
-          recovery: buildRecoveryHint(run),
-          resultPreview: resultPreview(run),
-          failures: run.error,
-        }),
-      )
+      const xml = buildNotificationXml({
+        taskId: run.runId,
+        status,
+        summary,
+        agentCount: run.agentCount,
+        totalTokens,
+        toolUses,
+        durationMs,
+        recovery: buildRecoveryHint(run),
+        resultPreview: resultPreview(run),
+        failures: run.error,
+      })
+      if (enqueue !== undefined) {
+        enqueue(xml)
+      } else {
+        enqueuePendingNotification(
+          {
+            value: xml,
+            mode: 'task-notification',
+            priority: 'next',
+            skipAttachments: true,
+            taskId: run.runId,
+            usage: {
+              totalTokens,
+              toolUses,
+              durationMs,
+            },
+          },
+          { turnAttribution: 'inherit' },
+        )
+      }
 
       // densable Host contract (same as Agent BRt / Shell Ovu): XML still feeds
       // the model via print.ts; dual-emit once-gated SDK task_notification so

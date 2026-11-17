@@ -152,7 +152,7 @@ function restoreEnv(): void {
 }
 
 beforeEach(() => {
-  snapEnv('CLAUDE_BG_ISOLATION', 'CLAUDE_CODE_SESSION_KIND')
+  snapEnv('CLAUDE_BG_ISOLATION', 'CLAUDE_CODE_SESSION_KIND', 'CLAUDE_JOB_DIR')
   delete process.env.CLAUDE_BG_ISOLATION
   delete process.env.CLAUDE_CODE_SESSION_KIND
   savedOriginalCwd = getOriginalCwd()

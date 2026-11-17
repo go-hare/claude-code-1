@@ -1,7 +1,7 @@
 /**
  * densable read_file / read_asset out_dir path (2.1.239).
  */
-import { describe, expect, mock, test } from 'bun:test'
+import { afterAll, describe, expect, mock, test } from 'bun:test'
 import { mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { getEmptyToolPermissionContext } from '../../Tool.js'
@@ -20,18 +20,19 @@ import {
   writeBytesExclusive,
 } from '../../services/artifactAutoReact/index.js'
 import { checkArtifactActionPermissions } from '../../../packages/builtin-tools/src/tools/ArtifactTool/permissions.js'
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
 
 const SLUG = '11111111-1111-1111-1111-111111111111'
 const URL = `https://claude.ai/code/artifact/${SLUG}`
 const ASSET_ID = 'a'.repeat(32)
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 function scratchDir(name: string): string {
   const dir = join(process.cwd(), `.tmp-${name}`)

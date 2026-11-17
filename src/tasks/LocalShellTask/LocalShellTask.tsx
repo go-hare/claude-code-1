@@ -1,7 +1,14 @@
 import { feature } from 'bun:bundle';
 import { stat } from 'fs/promises';
-import { getIsInteractive, getLastInteractionTime, getMainLoopBusy } from '../../bootstrap/state.js';
+import stripAnsi from 'strip-ansi';
 import {
+  getIsInteractive,
+  getLastInteractionTime,
+  getMainLoopBusy,
+  getMainThreadAgentId,
+} from '../../bootstrap/state.js';
+import {
+  NOTE_TAG,
   OUTPUT_FILE_TAG,
   STATUS_TAG,
   SUMMARY_TAG,
@@ -10,15 +17,32 @@ import {
   TOOL_USE_ID_TAG,
 } from '../../constants/xml.js';
 import { logEvent } from '../../services/analytics/index.js';
-import { abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js';
 import type { AppState } from '../../state/AppState.js';
 import type { LocalShellSpawnInput, SetAppState, Task, TaskContext, TaskHandle } from '../../Task.js';
 import { createTaskStateBase } from '../../Task.js';
 import type { AgentId } from '../../types/ids.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { tailFile } from '../../utils/fsOperations.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+import {
+  backgroundShellDeadlineMs,
+  buildBashTaskDeliverySnapshot,
+  isBackgroundShellDeadlineEnabled,
+  isBashTaskGetDeliveryEnabled,
+  readBashTaskSnapshotOutput,
+  STOP_CAUSE_LONG,
+  STOP_CAUSE_SHORT,
+  type BashTaskStopCause,
+} from '../../utils/bashTaskDelivery.js';
+import { leftoverM, leftoverY } from '../../utils/leftoverOt.js';
+import {
+  getBashTaskDeliveryBag,
+  rememberBashTaskSnapshot,
+  withdrawQueuedBashTaskNotification,
+} from '../../utils/bashTaskDeliveryOutcomes.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
 import {
   appendTaskOutput,
@@ -35,10 +59,11 @@ import {
   removeKeepaliveReason,
   updateTaskState,
 } from '../../utils/task/framework.js';
+import { createTaskRegistry, type TaskRegistry } from '../../utils/taskRegistry.js';
 import { escapeXml } from '../../utils/xml.js';
 import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAgentTask.js';
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
-import { type BashTaskKind, isLocalShellTask, type LocalShellTaskState } from './guards.js';
+import { type BashTaskKind, isLocalShellTask, type LocalShellFlavor, type LocalShellTaskState } from './guards.js';
 import { killTask } from './killShellTasks.js';
 import {
   hasActiveAgentishTasks,
@@ -60,8 +85,23 @@ export const DEFAULT_SUBAGENT_BG_SHELL_MAX_MS = 3_600_000;
  * - agentId undefined (main-thread FG→BG / Ctrl+B on main): no cap
  * - agent-scoped: CLAUDE_SUBAGENT_BG_SHELL_MAX_MS || 3600000
  */
+function isMainThreadShellAgent(agentId: AgentId | undefined): boolean {
+  if (agentId === undefined) return true;
+  return agentId === getMainThreadAgentId();
+}
+
+/**
+ * densable `KMt` — `innerCall===!0` → inner; `agentId===void 0` → turn; else agent.
+ * Does not treat getMainThreadAgentId() as turn (gold compares undefined).
+ */
+export function shellCallerFromContext(ctx: { innerCall?: boolean; agentId?: AgentId }): 'inner' | 'turn' | 'agent' {
+  if (ctx.innerCall === true) return 'inner';
+  if (ctx.agentId === undefined) return 'turn';
+  return 'agent';
+}
+
 export function resolveSubagentBgShellCapMs(agentId: AgentId | undefined): number | undefined {
-  if (agentId === undefined) return undefined;
+  if (isMainThreadShellAgent(agentId)) return undefined;
   const raw = process.env.CLAUDE_SUBAGENT_BG_SHELL_MAX_MS;
   if (raw !== undefined && raw !== '') {
     const parsed = Number.parseInt(raw, 10);
@@ -130,28 +170,33 @@ function startStallWatchdog(
             // overlapping tick's callback sees cancelled=true and bails.
             cancelled = true;
             clearInterval(timer);
-            const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
+            const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
             const summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" appears to be waiting for interactive input`;
+            const cleanedTail = stripAnsi(content).trimEnd();
             // No <status> tag — print.ts treats <status> as a terminal
             // signal and an unknown value falls through to 'completed',
             // falsely closing the task for SDK consumers. Statusless
             // notifications are skipped by the SDK emitter (progress ping).
             const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 Last output:
-${content.trimEnd()}
+${cleanedTail}
 
 The command is likely blocked on an interactive prompt. Stop this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
-            enqueuePendingNotification({
-              value: message,
-              mode: 'task-notification',
-              priority: 'next',
-              agentId,
-            });
-            logEvent('task_local_shell_stall_detected', {});
+            enqueuePendingNotification(
+              {
+                value: message,
+                mode: 'task-notification',
+                skipAttachments: true,
+                priority: 'next',
+                agentId: agentId ?? getMainThreadAgentId(),
+              },
+              { turnAttribution: 'inherit' },
+            );
+            leftoverY('task_local_shell_stall_detected');
           },
           () => {},
         );
@@ -177,15 +222,15 @@ function attachShellKeepalive(
   taskId: string,
   agentId: AgentId | undefined,
   kind: BashTaskKind | undefined,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
 ): () => void {
   if (!agentId) {
     return () => {};
   }
   const reason = kind === 'monitor' ? monitorKeepaliveReason(taskId) : bashKeepaliveReason(taskId);
-  addKeepaliveReason(agentId, reason, setAppState);
+  addKeepaliveReason(agentId, reason, registry);
   return () => {
-    removeKeepaliveReason(agentId, reason, setAppState);
+    removeKeepaliveReason(agentId, reason, registry);
   };
 }
 
@@ -196,8 +241,7 @@ function attachShellKeepalive(
 function installShellPressureReap(
   taskId: string,
   description: string,
-  getAppState: () => AppState,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   toolUseId?: string,
   kind?: BashTaskKind,
   agentId?: AgentId,
@@ -219,31 +263,32 @@ function installShellPressureReap(
   const proc = process as MemoryPressureProcess;
 
   const onPressure = (): void => {
-    const task = getAppState().tasks[taskId];
+    const task = registry.get(taskId);
     if (
       !shouldReapOnMemoryPressure({
         status: task?.status,
         notified: task?.notified,
         lastInteractionTime: getLastInteractionTime(),
         mainLoopBusy: getMainLoopBusy(),
-        hasActiveAgentTasks: hasActiveAgentishTasks(getAppState().tasks),
+        hasActiveAgentTasks: hasActiveAgentishTasks(registry.all()),
       })
     ) {
       return;
     }
-    logEvent('task_local_shell_pressure_reap', {});
+    leftoverY('task_local_shell_pressure_reap');
     // Official F9r then t5e — notify first, then kill.
     void enqueueShellNotification(
       taskId,
       description,
       'killed',
       undefined,
-      setAppState,
+      registry,
       toolUseId,
       kind ?? 'bash',
       agentId,
+      'memory_pressure',
     );
-    killTask(taskId, setAppState);
+    killTask(taskId, registry);
   };
 
   proc.on('memoryPressure', onPressure);
@@ -252,22 +297,164 @@ function installShellPressureReap(
   };
 }
 
+/**
+ * densable `xmn` deadline timer + `tengu_background_shell_settled`.
+ * Pressure reap and keepalive stay on their existing hosts.
+ */
+/** densable `xmn` — background deadline timer. Exported for live Cvr tests. */
+export function installBackgroundDeadline(
+  taskId: string,
+  description: string,
+  registry: TaskRegistry,
+  toolUseId: string | undefined,
+  kind: BashTaskKind | undefined,
+  agentId: AgentId | undefined,
+  requestedTimeoutMs?: number,
+): (outcome?: string) => void {
+  const startedAt = Date.now();
+  const deadlineMs = backgroundShellDeadlineMs(requestedTimeoutMs);
+  const bag: { cause?: BashTaskStopCause } = {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (deadlineMs !== undefined) {
+    timer = setTimeout(() => {
+      try {
+        // densable Cvr: re-check gUr at fire.
+        if (!isBackgroundShellDeadlineEnabled()) return;
+        const task = registry.get(taskId);
+        if (
+          !isLocalShellTask(task) ||
+          task.status !== 'running' ||
+          task.notified ||
+          task.shellCommand?.status !== 'backgrounded'
+        ) {
+          return;
+        }
+        bag.cause = 'deadline';
+        // densable Cvr → Rmn: try notify, finally kill.
+        try {
+          void enqueueShellNotification(
+            taskId,
+            description,
+            'killed',
+            undefined,
+            registry,
+            toolUseId,
+            kind ?? 'bash',
+            agentId,
+            'deadline',
+          );
+        } finally {
+          killTask(taskId, registry);
+        }
+        leftoverY('task_local_shell_background_deadline');
+        logForDebugging(`LocalShellTask ${taskId}: stopped at its ${deadlineMs}ms background deadline`);
+      } catch (err) {
+        leftoverM('task_local_shell_background_deadline', 'threw');
+        logError(err);
+      }
+    }, deadlineMs);
+    timer.unref();
+  }
+  return outcome => {
+    if (timer !== undefined) clearTimeout(timer);
+    logEvent('tengu_background_shell_settled', {
+      elapsed_ms: Date.now() - startedAt,
+      requested_timeout_ms: requestedTimeoutMs ?? 0,
+      deadline_ms: deadlineMs ?? 0,
+      outcome: (bag.cause ? 'killed' : (outcome ?? '')) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      stop_cause: (bag.cause ?? '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      subagent_owned: agentId !== undefined,
+    });
+  };
+}
+
+/** densable YVe return / Amn `terminalNotification`. */
+export type ShellTerminalNotification = {
+  taskId: string;
+  toolUseId?: string;
+  agentId?: AgentId;
+  status: 'completed' | 'failed' | 'killed';
+  summary: string;
+  outputFile: string;
+  stopCause?: BashTaskStopCause;
+  snapshot?: unknown;
+};
+
+type CommandSemanticFn = (
+  command: string,
+  exitCode: number,
+  stdout: string,
+  stderr: string,
+) => { isError: boolean; message?: string };
+
+function getShellCommandInterpreter(shell: LocalShellFlavor): CommandSemanticFn {
+  if (shell === 'powershell') {
+    // Lazy require avoids a TypeScript type-inference cycle through builtin-tools ↔ LocalShellTask.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('@claude-code/builtin-tools/tools/PowerShellTool/commandSemantics.js') as {
+      interpretCommandResult: CommandSemanticFn;
+    };
+    return mod.interpretCommandResult;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('@claude-code/builtin-tools/tools/BashTool/commandSemantics.js') as {
+    interpretCommandResult: CommandSemanticFn;
+  };
+  return mod.interpretCommandResult;
+}
+
+/** densable `Zxn(exitCode, exitNote)` @179437571. */
+function formatCompletedExitCodeSuffix(exitCode: number, exitNote?: string): string {
+  return ` (exit code ${exitCode}${exitNote ? `: ${exitNote}` : ''})`;
+}
+
+/** densable `jhe(result, task)` @191205950 — semantic exit interpretation. */
+export function interpretShellExitResult(
+  result: {
+    code: number;
+    interrupted: boolean;
+    stdout?: string;
+    stderr?: string;
+    noExitStatus?: boolean;
+    preSpawnError?: string;
+  },
+  task: Pick<LocalShellTaskState, 'shell' | 'command'> | undefined,
+): { status: 'completed' | 'failed' | 'killed'; exitNote: string | undefined } {
+  if (result.interrupted) {
+    return { status: 'killed', exitNote: undefined };
+  }
+  if (result.noExitStatus || result.preSpawnError) {
+    return { status: 'failed', exitNote: undefined };
+  }
+  if (task?.shell === undefined) {
+    return {
+      status: result.code === 0 ? 'completed' : 'failed',
+      exitNote: undefined,
+    };
+  }
+  const interpret = getShellCommandInterpreter(task.shell);
+  const { isError, message } = interpret(task.command, result.code, result.stdout ?? '', result.stderr ?? '');
+  return isError ? { status: 'failed', exitNote: undefined } : { status: 'completed', exitNote: message };
+}
+
 export async function enqueueShellNotification(
   taskId: string,
   description: string,
   status: 'completed' | 'failed' | 'killed',
   exitCode: number | undefined,
-  setAppState: SetAppState,
+  registry: TaskRegistry,
   toolUseId?: string,
   kind: BashTaskKind = 'bash',
   agentId?: AgentId,
-): Promise<void> {
+  stopCause?: BashTaskStopCause,
+  exitNote?: string,
+): Promise<ShellTerminalNotification | undefined> {
   // Atomically check and set notified flag to prevent duplicate notifications.
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
   let shouldEnqueue = false;
   let claimedTask: LocalShellTaskState | undefined;
-  updateTaskState(taskId, setAppState, task => {
+  registry.update(taskId, task => {
     if (isLocalShellTask(task)) {
       claimedTask = task;
     }
@@ -282,15 +469,27 @@ export async function enqueueShellNotification(
     return;
   }
 
+  // Read monitor output size and GetTask snapshot output BEFORE appending the
+  // exit footer (`\n[exited with code 0]\n`), matching official Amn/YVe
+  // (@191206900 / @191198850) so neither `outputBytes === 0` nor GetTask's
+  // snapshot tail is polluted by the footer.
+  let monitorOutputBytes: number | undefined;
+  if (feature('MONITOR_TOOL')) {
+    if (kind === 'monitor' && status === 'completed') {
+      monitorOutputBytes = await getTaskOutputSize(taskId);
+    }
+  }
+  const snapshotOutput =
+    kind !== 'monitor' && isBashTaskGetDeliveryEnabled() && !claimedTask?.isAdopted && status !== 'killed'
+      ? await readBashTaskSnapshotOutput(taskId)
+      : undefined;
+
   // Official ADt: if(!u?.isAdopted) RW(`[exited with code ${r??"unknown"}]`)
   if (shouldAppendLocalShellExitFooter(claimedTask)) {
     appendTaskOutput(taskId, formatLocalShellExitFooter(status, exitCode));
   }
 
-  // Abort any active speculation — background task state changed, so speculated
-  // results may reference stale task output. The prompt suggestion text is
-  // preserved; only the pre-computed response is discarded.
-  abortSpeculation(setAppState);
+  // Gold YVe has no speculation abort (K3 claimed + IPe/y/m/Di only).
 
   let summary: string;
   if (feature('MONITOR_TOOL') && kind === 'monitor') {
@@ -302,7 +501,7 @@ export async function enqueueShellNotification(
     const exitSuffix = exitCode !== undefined ? ` (exit ${exitCode})` : '';
     switch (status) {
       case 'completed': {
-        const outputBytes = await getTaskOutputSize(taskId);
+        const outputBytes = monitorOutputBytes ?? (await getTaskOutputSize(taskId));
         summary =
           outputBytes === 0
             ? `Monitor "${description}" ended without producing output${exitSuffix}`
@@ -319,34 +518,85 @@ export async function enqueueShellNotification(
   } else {
     switch (status) {
       case 'completed':
-        summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" completed${exitCode !== undefined ? ` (exit code ${exitCode})` : ''}`;
+        summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" completed${exitCode !== undefined ? formatCompletedExitCodeSuffix(exitCode, exitNote) : ''}`;
         break;
       case 'failed':
         summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" failed${exitCode !== undefined ? ` with exit code ${exitCode}` : ''}`;
         break;
       case 'killed':
-        summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" was stopped`;
+        summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" was ${stopCause ? STOP_CAUSE_SHORT[stopCause] : 'stopped'}`;
         break;
     }
   }
 
   const outputPath = getTaskOutputPath(taskId);
-  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
+  const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
+  const stopNoteLine = stopCause ? `\n<${NOTE_TAG}>${escapeXml(STOP_CAUSE_LONG[stopCause])}</${NOTE_TAG}>` : '';
   const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
+<${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>${stopNoteLine}
 </${TASK_NOTIFICATION_TAG}>`;
 
-  enqueuePendingNotification({
-    value: message,
-    mode: 'task-notification',
-    skipAttachments: true,
-    priority: feature('MONITOR_TOOL') ? 'next' : 'later',
-    agentId,
+  let snapshot: ReturnType<typeof buildBashTaskDeliverySnapshot> | undefined;
+
+  // gold Amn: if(Te&&s!=="monitor") Ui — live monitor XML is JCr'd from reportExit,
+  // whereas adopted monitor shells (`wDo` @191203400) have no MonitorTool caller
+  // and must enqueue their completion notification here.
+  let enqueueXml = true;
+  if (feature('MONITOR_TOOL')) {
+    if (kind === 'monitor' && !claimedTask?.isAdopted) enqueueXml = false;
+  }
+  if (enqueueXml) {
+    snapshot =
+      kind !== 'monitor' && isBashTaskGetDeliveryEnabled()
+        ? buildBashTaskDeliverySnapshot({
+            taskId,
+            outcome: status,
+            exitCode: claimedTask?.isAdopted ? undefined : exitCode,
+            startTime: claimedTask?.startTime ?? Date.now(),
+            endTime: Date.now(),
+            outputFile: outputPath,
+            output: snapshotOutput,
+            stopCause,
+          })
+        : undefined;
+    if (snapshot !== undefined) {
+      // densable YVe: Qn().withdrawShellNotification??=Rvr then remember.
+      const bag = getBashTaskDeliveryBag();
+      bag.withdrawShellNotification ??= withdrawQueuedBashTaskNotification;
+      rememberBashTaskSnapshot(taskId, snapshot, agentId);
+    }
+    if (status === 'completed') leftoverY('task_local_shell');
+    else if (status === 'failed') leftoverM('task_local_shell', 'task_local_shell_failed');
+    // densable YVe does not y deadline — Cvr/xmn already did.
+    // Main-thread enqueue often omits agentId; stamp mi() so withdraw match
+    // (`cmd.agentId === n??Ve()`) cannot miss. Subagent owner is preserved.
+    enqueuePendingNotification(
+      {
+        value: message,
+        mode: 'task-notification',
+        skipAttachments: true,
+        priority: feature('MONITOR_TOOL') ? 'next' : 'later',
+        agentId: agentId ?? getMainThreadAgentId(),
+        taskId,
+        ...(snapshot !== undefined && { taskDelivery: snapshot }),
+      },
+      { turnAttribution: 'inherit' },
+    );
+  }
+
+  const payload: ShellTerminalNotification = {
     taskId,
-  });
+    toolUseId,
+    agentId,
+    status,
+    summary,
+    outputFile: outputPath,
+    ...(stopCause !== undefined ? { stopCause } : {}),
+    ...(snapshot !== undefined ? { snapshot } : {}),
+  };
 
   // densable Ovu dual bookend: XML for model + once-gated SDK task_notification
   // so Host Tasks (Jp) closes without waiting for print→ask drain alone.
@@ -362,29 +612,36 @@ export async function enqueueShellNotification(
   } catch {
     // best-effort
   }
+  return payload;
 }
 
 export const LocalShellTask: Task = {
   name: 'LocalShellTask',
   type: 'local_bash',
-  async kill(taskId, setAppState) {
-    killTask(taskId, setAppState);
+  async kill(taskId, registry) {
+    killTask(taskId, registry);
   },
+};
+
+export type ShellTaskHandle = TaskHandle & {
+  /** densable gRe `settled` — Amn result including monitor terminalNotification. */
+  settled: Promise<{ terminalNotification?: ShellTerminalNotification }>;
 };
 
 export async function spawnShellTask(
   input: LocalShellSpawnInput & { shellCommand: ShellCommand },
   context: TaskContext,
-): Promise<TaskHandle> {
-  const { command, description, shellCommand, toolUseId, agentId, kind } = input;
+): Promise<ShellTaskHandle> {
+  const { command, description, shellCommand, toolUseId, agentId, kind, timeout, innerCall, shell } = input;
   const { setAppState, getAppState } = context;
+  const registry = createTaskRegistry(getAppState, setAppState);
 
   // TaskOutput owns the data — use its taskId so disk writes are consistent
   const { taskOutput } = shellCommand;
   const taskId = taskOutput.taskId;
 
   const unregisterCleanup = registerCleanup(async () => {
-    killTask(taskId, setAppState);
+    killTask(taskId, registry);
   });
 
   const taskState: LocalShellTaskState = {
@@ -392,30 +649,24 @@ export async function spawnShellTask(
     type: 'local_bash',
     status: 'running',
     command,
+    ...(shell !== undefined ? { shell } : {}),
     completionStatusSentInAttachment: false,
     shellCommand,
     unregisterCleanup,
     lastReportedTotalLines: 0,
     isBackgrounded: true,
     agentId,
+    caller: shellCallerFromContext({ innerCall, agentId }),
     kind,
   };
 
   registerTask(taskState, setAppState);
 
   // densable Ovu: Gge(agentId, bash|monitor:id) after register; dispose = tB
-  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, setAppState);
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, registry);
 
   // Official $xu — main-thread bg shells only (not monitor / not agent-scoped)
-  const disposePressureReap = installShellPressureReap(
-    taskId,
-    description,
-    getAppState,
-    setAppState,
-    toolUseId,
-    kind,
-    agentId,
-  );
+  const disposePressureReap = installShellPressureReap(taskId, description, registry, toolUseId, kind, agentId);
 
   // Data flows through TaskOutput automatically — no stream listeners needed.
   // Just transition to backgrounded state so the process keeps running.
@@ -424,23 +675,31 @@ export async function spawnShellTask(
     capMs: kind !== 'monitor' ? resolveSubagentBgShellCapMs(agentId) : undefined,
   });
 
+  // densable xmn: h9n(timeout) timer; monitor skips.
+  const disposeDeadline =
+    kind !== 'monitor'
+      ? installBackgroundDeadline(taskId, description, registry, toolUseId, kind, agentId, timeout)
+      : () => {};
+
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
 
-  void shellCommand.result.then(async result => {
+  const settled = shellCommand.result.then(async result => {
     cancelStallWatchdog();
     disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
+    let settledExit = interpretShellExitResult(result, shell !== undefined ? { shell, command } : undefined);
 
     updateTaskState<LocalShellTaskState>(taskId, setAppState, task => {
       if (task.status === 'killed') {
         wasKilled = true;
         return task;
       }
+      settledExit = interpretShellExitResult(result, task);
 
       return {
         ...task,
-        status: result.code === 0 ? 'completed' : 'failed',
+        status: settledExit.status,
         result: { code: result.code, interrupted: result.interrupted },
         shellCommand: null,
         unregisterCleanup: undefined,
@@ -448,21 +707,26 @@ export async function spawnShellTask(
       };
     });
 
-    await enqueueShellNotification(
+    const finalStatus = wasKilled ? 'killed' : settledExit.status;
+    const terminalNotification = await enqueueShellNotification(
       taskId,
       description,
-      wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed',
+      finalStatus,
       result.code,
-      setAppState,
+      registry,
       toolUseId,
       kind,
       agentId,
+      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+      wasKilled ? undefined : settledExit.exitNote,
     );
 
     // densable bXi: l?.() releaseBgCap after notify (tB bash|monitor:id)
     releaseShellKeepalive();
+    disposeDeadline(finalStatus);
 
     void evictTaskOutput(taskId);
+    return { terminalNotification };
   });
 
   return {
@@ -470,6 +734,7 @@ export async function spawnShellTask(
     cleanup: () => {
       unregisterCleanup();
     },
+    settled,
   };
 }
 
@@ -481,14 +746,16 @@ export async function spawnShellTask(
 export function registerForeground(
   input: LocalShellSpawnInput & { shellCommand: ShellCommand },
   setAppState: SetAppState,
-  toolUseId?: string,
+  toolUseId: string | undefined,
+  getAppState: () => AppState,
 ): string {
-  const { command, description, shellCommand, agentId } = input;
+  const { command, description, shellCommand, agentId, innerCall, shell } = input;
 
   const taskId = shellCommand.taskOutput.taskId;
 
   const unregisterCleanup = registerCleanup(async () => {
-    killTask(taskId, setAppState);
+    // densable zN(id, Xm) — kill always has registry. Production callers pass getAppState.
+    killTask(taskId, createTaskRegistry(getAppState, setAppState));
   });
 
   const taskState: LocalShellTaskState = {
@@ -496,12 +763,14 @@ export function registerForeground(
     type: 'local_bash',
     status: 'running',
     command,
+    ...(shell !== undefined ? { shell } : {}),
     completionStatusSentInAttachment: false,
     shellCommand,
     unregisterCleanup,
     lastReportedTotalLines: 0,
     isBackgrounded: false, // Not yet backgrounded - running in foreground
     agentId,
+    caller: shellCallerFromContext({ innerCall, agentId }),
   };
 
   registerTask(taskState, setAppState);
@@ -512,10 +781,16 @@ export function registerForeground(
  * Background a specific foreground shell task.
  * @returns true if backgrounded successfully, false otherwise
  */
-export function backgroundTask(taskId: string, getAppState: () => AppState, setAppState: SetAppState): boolean {
-  // Step 1: Get the task and shell command from current state
-  const state = getAppState();
-  const task = state.tasks[taskId];
+/** densable `_un` / `XVe(e,n,r)` — n is Xm/taskRegistry. */
+export function backgroundTask(
+  taskId: string,
+  registry: TaskRegistry,
+  extras?: {
+    backgroundedToDeliverMessage?: boolean;
+    backgroundedByTurnAbort?: boolean;
+  },
+): boolean {
+  const task = registry.get(taskId);
   if (!isLocalShellTask(task) || task.isBackgrounded || !task.shellCommand) {
     return false;
   }
@@ -535,57 +810,46 @@ export function backgroundTask(taskId: string, getAppState: () => AppState, setA
   }
 
   let didBackground = false;
-  setAppState(prev => {
-    const prevTask = prev.tasks[taskId];
+  registry.update(taskId, prevTask => {
     if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
-      return prev;
+      return prevTask;
     }
     didBackground = true;
-    return {
-      ...prev,
-      tasks: {
-        ...prev.tasks,
-        [taskId]: { ...prevTask, isBackgrounded: true },
-      },
-    };
+    return { ...prevTask, isBackgrounded: true, ...extras };
   });
-  // Official 2.1 task_updated only when state actually flipped (setAppState
-  // path bypasses updateTaskState).
-  if (didBackground) {
-    try {
-      const { emitTaskUpdatedSdk } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('src/utils/sdkEventQueue.js') as typeof import('src/utils/sdkEventQueue.js');
-      emitTaskUpdatedSdk(taskId, { is_backgrounded: true });
-    } catch {
-      // optional
-    }
-  }
+  // densable `_un` s.update → updateTaskState already emits task_updated.
 
   const cancelStallWatchdog = startStallWatchdog(taskId, description, kind, toolUseId, agentId);
 
+  // densable xmn on Ctrl+B / tNr: pressure + h9n(undefined)
+  const disposePressureReap = installShellPressureReap(taskId, description, registry, toolUseId, kind, agentId);
+  const disposeDeadline = installBackgroundDeadline(taskId, description, registry, toolUseId, kind, agentId);
+
   // densable Ovu on mid-bg: Gge only once the shell is backgrounded
-  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, setAppState);
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, kind, registry);
 
   // Set up result handler
   void shellCommand.result.then(async result => {
     cancelStallWatchdog();
+    disposePressureReap();
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
     let cleanupFn: (() => void) | undefined;
+    let settledExit = interpretShellExitResult(result, task);
 
-    updateTaskState<LocalShellTaskState>(taskId, setAppState, t => {
+    registry.update<LocalShellTaskState>(taskId, t => {
       if (t.status === 'killed') {
         wasKilled = true;
         return t;
       }
+      settledExit = interpretShellExitResult(result, t);
 
       // Capture cleanup function to call outside of updater
       cleanupFn = t.unregisterCleanup;
 
       return {
         ...t,
-        status: result.code === 0 ? 'completed' : 'failed',
+        status: settledExit.status,
         result: { code: result.code, interrupted: result.interrupted },
         shellCommand: null,
         unregisterCleanup: undefined,
@@ -596,23 +860,22 @@ export function backgroundTask(taskId: string, getAppState: () => AppState, setA
     // Call cleanup outside of the state updater (avoid side effects in updater)
     cleanupFn?.();
 
-    if (wasKilled) {
-      await enqueueShellNotification(taskId, description, 'killed', result.code, setAppState, toolUseId, kind, agentId);
-    } else {
-      const finalStatus = result.code === 0 ? 'completed' : 'failed';
-      await enqueueShellNotification(
-        taskId,
-        description,
-        finalStatus,
-        result.code,
-        setAppState,
-        toolUseId,
-        kind,
-        agentId,
-      );
-    }
+    const finalStatus = wasKilled ? 'killed' : settledExit.status;
+    await enqueueShellNotification(
+      taskId,
+      description,
+      finalStatus,
+      result.code,
+      registry,
+      toolUseId,
+      kind,
+      agentId,
+      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+      wasKilled ? undefined : settledExit.exitNote,
+    );
 
     releaseShellKeepalive();
+    disposeDeadline(finalStatus);
     void evictTaskOutput(taskId);
   });
 
@@ -644,6 +907,8 @@ export function hasForegroundTasks(state: AppState): boolean {
 }
 
 export function backgroundAll(getAppState: () => AppState, setAppState: SetAppState): void {
+  leftoverY('task_local_shell_background_all');
+  const registry = createTaskRegistry(getAppState, setAppState);
   const state = getAppState();
 
   // Background all foreground bash tasks
@@ -652,7 +917,7 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
     return isLocalShellTask(task) && !task.isBackgrounded && task.shellCommand;
   });
   for (const taskId of foregroundBashTaskIds) {
-    backgroundTask(taskId, getAppState, setAppState);
+    backgroundTask(taskId, registry);
   }
 
   // Background all foreground agent tasks (exclude main session — same
@@ -662,7 +927,7 @@ export function backgroundAll(getAppState: () => AppState, setAppState: SetAppSt
     return isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task);
   });
   for (const taskId of foregroundAgentTaskIds) {
-    backgroundAgentTask(taskId, getAppState, setAppState);
+    backgroundAgentTask(taskId, registry);
   }
 }
 
@@ -686,10 +951,10 @@ export function backgroundTaskByToolUseId(
       continue;
     }
     if (isLocalShellTask(task) && !task.isBackgrounded && task.shellCommand) {
-      return backgroundTask(taskId, getAppState, setAppState);
+      return backgroundTask(taskId, createTaskRegistry(getAppState, setAppState));
     }
     if (isLocalAgentTask(task) && !task.isBackgrounded && !isMainSessionTask(task)) {
-      return backgroundAgentTask(taskId, getAppState, setAppState);
+      return backgroundAgentTask(taskId, createTaskRegistry(getAppState, setAppState));
     }
     // Matched tool_use_id but not backgroundable (already bg / terminal / main).
     return false;
@@ -710,16 +975,15 @@ export function backgroundExistingForegroundTask(
   shellCommand: ShellCommand,
   description: string,
   setAppState: SetAppState,
-  toolUseId?: string,
-  getAppState?: () => AppState,
+  toolUseId: string | undefined,
+  getAppState: () => AppState,
 ): boolean {
   // Peek agentId before background so densable fkd cap can arm on auto-bg too.
+  // densable YP/xmn always have Xm; production callers pass getAppState.
   let agentId: AgentId | undefined;
-  if (getAppState) {
-    const peek = getAppState().tasks[taskId];
-    if (isLocalShellTask(peek)) {
-      agentId = peek.agentId;
-    }
+  const peek = getAppState().tasks[taskId];
+  if (isLocalShellTask(peek)) {
+    agentId = peek.agentId;
   }
 
   if (
@@ -761,13 +1025,20 @@ export function backgroundExistingForegroundTask(
   const cancelStallWatchdog = startStallWatchdog(taskId, description, undefined, toolUseId, agentId);
 
   // Official YJn → $xu: pressure reap on auto-backgrounded foreground tasks
-  const disposePressureReap =
-    getAppState !== undefined
-      ? installShellPressureReap(taskId, description, getAppState, setAppState, toolUseId, undefined, agentId)
-      : () => {};
+  // densable xmn/Ovu always have Xm — do not skip Gge when owner keepalive should attach.
+  const autoBgRegistry = createTaskRegistry(getAppState, setAppState);
+  const disposePressureReap = installShellPressureReap(
+    taskId,
+    description,
+    autoBgRegistry,
+    toolUseId,
+    undefined,
+    agentId,
+  );
+  const disposeDeadline = installBackgroundDeadline(taskId, description, autoBgRegistry, toolUseId, undefined, agentId);
 
-  // densable Ovu on auto-bg: Gge(agentId, bash:id) once backgrounded
-  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, undefined, setAppState);
+  // densable Ovu on auto-bg: YP(agentId, bash:id, Xm) once backgrounded
+  const releaseShellKeepalive = attachShellKeepalive(taskId, agentId, undefined, autoBgRegistry);
 
   // Set up result handler (mirrors backgroundTask's handler)
   void shellCommand.result.then(async result => {
@@ -776,16 +1047,18 @@ export function backgroundExistingForegroundTask(
     await flushAndCleanup(shellCommand);
     let wasKilled = false;
     let cleanupFn: (() => void) | undefined;
+    let settledExit = interpretShellExitResult(result, isLocalShellTask(peek) ? peek : undefined);
 
     updateTaskState<LocalShellTaskState>(taskId, setAppState, t => {
       if (t.status === 'killed') {
         wasKilled = true;
         return t;
       }
+      settledExit = interpretShellExitResult(result, t);
       cleanupFn = t.unregisterCleanup;
       return {
         ...t,
-        status: result.code === 0 ? 'completed' : 'failed',
+        status: settledExit.status,
         result: { code: result.code, interrupted: result.interrupted },
         shellCommand: null,
         unregisterCleanup: undefined,
@@ -795,19 +1068,22 @@ export function backgroundExistingForegroundTask(
 
     cleanupFn?.();
 
-    const finalStatus = wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed';
+    const finalStatus = wasKilled ? 'killed' : settledExit.status;
     await enqueueShellNotification(
       taskId,
       description,
       finalStatus,
       result.code,
-      setAppState,
+      autoBgRegistry,
       toolUseId,
       undefined,
       agentId,
+      wasKilled && result.killedByBackgroundCap ? 'deadline' : undefined,
+      wasKilled ? undefined : settledExit.exitNote,
     );
 
     releaseShellKeepalive();
+    disposeDeadline(finalStatus);
     void evictTaskOutput(taskId);
   });
 

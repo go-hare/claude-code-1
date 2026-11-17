@@ -10,7 +10,13 @@ import { dequeueAllMatching } from '../../utils/messageQueueManager.js'
 import {
   appendTaskOutput,
   evictTaskOutput,
+  getTaskOutputPath,
 } from '../../utils/task/diskOutput.js'
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
+import {
+  createTaskRegistry,
+  type TaskRegistry,
+} from '../../utils/taskRegistry.js'
 import {
   formatLocalShellExitFooter,
   shouldAppendLocalShellExitFooter,
@@ -19,21 +25,28 @@ import {
   bashKeepaliveReason,
   monitorKeepaliveReason,
   removeKeepaliveReason,
-  updateTaskState,
 } from '../../utils/task/framework.js'
-import { isLocalShellTask } from './guards.js'
+import { isLocalShellTask, type LocalShellTaskState } from './guards.js'
+import {
+  buildBashTaskDeliverySnapshot,
+  isBashTaskGetDeliveryEnabled,
+} from '../../utils/bashTaskDelivery.js'
+import { rememberBashTaskSnapshot } from '../../utils/bashTaskDeliveryOutcomes.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
-export function killTask(taskId: string, setAppState: SetAppStateFn): void {
+/** densable `zN(e,n)` — n is Xm/taskRegistry. */
+export function killTask(taskId: string, registry: TaskRegistry): void {
   // densable jLe does not tB itself — bXi releaseBgCap does on result.settle.
   // Local still detaches here so owner KA is not stuck if result never fires
   // (process already dead / kill races). removeKeepalive is idempotent.
   let ownerAgentId: string | undefined
   let kind: 'bash' | 'monitor' | undefined
+  let wasNotified = false
   let writeKilledFooter = false
-  updateTaskState(taskId, setAppState, task => {
-    if ((task as any).status !== 'running' || !isLocalShellTask(task)) {
+  let killedTask: LocalShellTaskState | undefined
+  registry.update(taskId, task => {
+    if (!isLocalShellTask(task) || task.status !== 'running') {
       return task
     }
 
@@ -50,10 +63,12 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       clearTimeout(task.cleanupTimeoutId)
     }
 
+    wasNotified = task.notified
+    killedTask = task
     ownerAgentId = task.agentId
     kind = task.kind
-    // Official eA: if(n&&!r){if(!n.isAdopted)RW(`[killed]`)}
-    writeKilledFooter = !task.notified && shouldAppendLocalShellExitFooter(task)
+    // Official zN: if(r&&!s){if(!r.isAdopted)IPe(e,`\n[killed]\n`);Di(e,"stopped",...)}
+    writeKilledFooter = !wasNotified && shouldAppendLocalShellExitFooter(task)
 
     return {
       ...task,
@@ -65,15 +80,45 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       endTime: Date.now(),
     }
   })
-  if (writeKilledFooter) {
-    appendTaskOutput(taskId, formatLocalShellExitFooter('killed', undefined))
+  if (killedTask && !wasNotified) {
+    if (writeKilledFooter) {
+      appendTaskOutput(taskId, formatLocalShellExitFooter('killed', undefined))
+    }
+    emitTaskTerminatedSdk(taskId, 'stopped', {
+      toolUseId: killedTask.toolUseId,
+      summary: killedTask.description,
+      outputFile: getTaskOutputPath(taskId),
+    })
+  }
+  // TaskStop marks notified before the result callback. Retain the terminal
+  // GetTask snapshot here only when `!wasNotified` (`zN` @191163780), so
+  // `memory_pressure` / `deadline` snapshots recorded before `killTask` keep
+  // their `stopCause`.
+  if (
+    killedTask &&
+    !wasNotified &&
+    kind !== 'monitor' &&
+    isBashTaskGetDeliveryEnabled()
+  ) {
+    rememberBashTaskSnapshot(
+      taskId,
+      buildBashTaskDeliverySnapshot({
+        taskId,
+        outcome: 'killed',
+        exitCode: undefined,
+        startTime: killedTask.startTime,
+        endTime: Date.now(),
+        outputFile: getTaskOutputPath(taskId),
+      }),
+      killedTask.agentId,
+    )
   }
   if (ownerAgentId) {
     const reason =
       kind === 'monitor'
         ? monitorKeepaliveReason(taskId)
         : bashKeepaliveReason(taskId)
-    removeKeepaliveReason(ownerAgentId, reason, setAppState)
+    removeKeepaliveReason(ownerAgentId, reason, registry)
   }
   void evictTaskOutput(taskId)
 }
@@ -88,6 +133,7 @@ export function killShellTasksForAgent(
   getAppState: () => AppState,
   setAppState: SetAppStateFn,
 ): void {
+  const registry = createTaskRegistry(getAppState, setAppState)
   const tasks = getAppState().tasks ?? {}
   for (const [taskId, task] of Object.entries(tasks)) {
     if (
@@ -98,7 +144,7 @@ export function killShellTasksForAgent(
       logForDebugging(
         `killShellTasksForAgent: killing orphaned shell task ${taskId} (agent ${agentId} exiting)`,
       )
-      killTask(taskId, setAppState)
+      killTask(taskId, registry)
     }
   }
   // Purge any queued notifications addressed to this agent — its query loop

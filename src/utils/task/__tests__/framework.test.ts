@@ -74,6 +74,7 @@ const {
   updateTaskState,
   registerTask,
   evictTerminalTask,
+  applyTaskOffsetsAndEvictions,
   addKeepaliveReason,
   removeKeepaliveReason,
   getKeepaliveReasons,
@@ -88,7 +89,12 @@ const {
   IDLE_WINDOW_MS,
   POLL_INTERVAL_MS,
   PANEL_GRACE_MS,
+  MCP_TASK_GRACE_MS,
 } = await import('../framework.js')
+const { taskEvicted } = await import('../../taskRegistry.js')
+const { registerAgentKillLoop, resetAgentStopBagForTests } = await import(
+  '../../agentStopBag.js'
+)
 
 // ─── Helpers ───
 
@@ -106,32 +112,42 @@ function makeTask(overrides: Record<string, any> = {}): any {
   }
 }
 
-type AppStateLike = { tasks: Record<string, any> }
+type AppStateLike = {
+  tasks: Record<string, any>
+  transcripts?: Record<string, any>
+}
 type SetAppStateLike = (f: (prev: AppStateLike) => AppStateLike) => void
 
 function createSetAppState(initial: AppStateLike = { tasks: {} }): {
   setAppState: SetAppStateLike
   getState: () => AppStateLike
+  registry: import('../../taskRegistry.js').TaskRegistry
 } {
   let state = initial
+  const setAppState: SetAppStateLike = f => {
+    state = f(state)
+  }
+  const getState = () => state
+  const { createTaskRegistry } =
+    require('../../taskRegistry.js') as typeof import('../../taskRegistry.js')
   return {
-    setAppState: f => {
-      state = f(state)
-    },
-    getState: () => state,
+    setAppState,
+    getState,
+    registry: createTaskRegistry(() => getState() as any, setAppState as any),
   }
 }
 
 afterEach(() => {
   sdkEvents.length = 0
   resetCommandQueue()
+  resetAgentStopBagForTests()
 })
 
 // ─── Tests ───
 
 describe('updateTaskState', () => {
   test('updates task in AppState', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: { 'task-001': makeTask({ status: 'running' }) },
     })
 
@@ -145,7 +161,7 @@ describe('updateTaskState', () => {
 
   test('returns same reference when updater returns same task (no-op)', () => {
     const task = makeTask({ status: 'running' })
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: { 'task-001': task },
     })
 
@@ -156,7 +172,7 @@ describe('updateTaskState', () => {
   })
 
   test('skips if task not found', () => {
-    const { setAppState, getState } = createSetAppState({ tasks: {} })
+    const { setAppState, getState, registry } = createSetAppState({ tasks: {} })
 
     updateTaskState('nonexistent', setAppState as any, (t: any) => ({
       ...t,
@@ -223,7 +239,7 @@ describe('updateTaskState', () => {
 
 describe('registerTask', () => {
   test('adds task to AppState.tasks', () => {
-    const { setAppState, getState } = createSetAppState()
+    const { setAppState, getState, registry } = createSetAppState()
 
     registerTask(makeTask(), setAppState as any)
 
@@ -242,7 +258,7 @@ describe('registerTask', () => {
   })
 
   test('merges retain on re-register', () => {
-    const { setAppState, getState } = createSetAppState()
+    const { setAppState, getState, registry } = createSetAppState()
 
     // First registration
     registerTask(makeTask({ retain: true }), setAppState as any)
@@ -257,7 +273,7 @@ describe('registerTask', () => {
   })
 
   test('ekg merge preserves keepaliveReasons/owner on re-register', () => {
-    const { setAppState, getState } = createSetAppState()
+    const { setAppState, getState, registry } = createSetAppState()
     const reasons = new Set(['workflow:w1', 'agent:a2'])
     registerTask(
       makeTask({
@@ -290,7 +306,7 @@ describe('registerTask', () => {
   })
 
   test('ekg merge preserves isIdle on re-register (local carry)', () => {
-    const { setAppState, getState } = createSetAppState()
+    const { setAppState, getState, registry } = createSetAppState()
     registerTask(
       makeTask({
         retain: true,
@@ -403,7 +419,7 @@ describe('QYi computePanelEvictAfter / YC isParkedKeepaliveAgent', () => {
 
 describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
   test('detaches missing child and notified agent/workflow; keeps live', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -448,7 +464,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
       },
     })
 
-    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    sweepStaleKeepaliveReasons('owner', registry)
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('agent:gone')).toBe(false)
     expect(reasons.has('agent:notified')).toBe(false)
@@ -461,7 +477,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
   })
 
   test('Yq detaches local_agent when ownerAgentId !== parent (even if live)', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -490,7 +506,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    sweepStaleKeepaliveReasons('owner', registry)
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('agent:mine')).toBe(true)
     expect(reasons.has('agent:theirs')).toBe(false)
@@ -498,7 +514,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
   })
 
   test('keeps child when task-notification still queued for owner', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -522,14 +538,14 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
       taskId: 'pending',
       value: 'x',
     } as never)
-    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    sweepStaleKeepaliveReasons('owner', registry)
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('agent:pending')).toBe(true)
     expect(reasons.has('agent:stale')).toBe(false)
   })
 
   test('243 Lfe keeps bash: when task-notification still queued', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -551,14 +567,14 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
       taskId: 'pending',
       value: 'x',
     } as never)
-    sweepStaleKeepaliveReasons('owner', setAppState as any)
+    sweepStaleKeepaliveReasons('owner', registry)
     const reasons = getState().tasks.owner.keepaliveReasons as Set<string>
     expect(reasons.has('bash:pending')).toBe(true)
     expect(reasons.has('bash:stale')).toBe(false)
   })
 
   test('no-op when owner missing or not local_agent', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         bash: {
           ...makeTask({ id: 'bash', keepaliveReasons: new Set(['agent:x']) }),
@@ -566,13 +582,13 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         },
       },
     })
-    sweepStaleKeepaliveReasons('missing', setAppState as any)
-    sweepStaleKeepaliveReasons('bash', setAppState as any)
+    sweepStaleKeepaliveReasons('missing', registry)
+    sweepStaleKeepaliveReasons('bash', registry)
     expect(getState().tasks.bash.keepaliveReasons.has('agent:x')).toBe(true)
   })
 
   test('JXt hasLiveAgentKeepaliveChildren', () => {
-    const { getState, setAppState } = createSetAppState({
+    const { getState, setAppState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -580,20 +596,14 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    expect(
-      hasLiveAgentKeepaliveChildren('owner', () => getState() as any),
-    ).toBe(false)
-    addKeepaliveReason('owner', 'agent:c1', setAppState as any)
-    expect(
-      hasLiveAgentKeepaliveChildren('owner', () => getState() as any),
-    ).toBe(true)
-    expect(
-      hasLiveAgentKeepaliveChildren(undefined, () => getState() as any),
-    ).toBe(false)
+    expect(hasLiveAgentKeepaliveChildren('owner', registry)).toBe(false)
+    addKeepaliveReason('owner', 'agent:c1', registry)
+    expect(hasLiveAgentKeepaliveChildren('owner', registry)).toBe(true)
+    expect(hasLiveAgentKeepaliveChildren(undefined, registry)).toBe(false)
   })
 
   test('d9e hasHandbackWaitKids: agent: always; workflow/bash only when backgrounded', () => {
-    const { getState, setAppState } = createSetAppState({
+    const { getState, setAppState, registry } = createSetAppState({
       tasks: {
         owner: makeTask({
           id: 'owner',
@@ -602,9 +612,9 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    expect(hasHandbackWaitKids('owner', () => getState() as any)).toBe(false)
-    addKeepaliveReason('owner', 'agent:c1', setAppState as any)
-    expect(hasHandbackWaitKids('owner', () => getState() as any)).toBe(true)
+    expect(hasHandbackWaitKids('owner', registry)).toBe(false)
+    addKeepaliveReason('owner', 'agent:c1', registry)
+    expect(hasHandbackWaitKids('owner', registry)).toBe(true)
 
     const bg = createSetAppState({
       tasks: {
@@ -615,7 +625,7 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    expect(hasHandbackWaitKids('owner', () => bg.getState() as any)).toBe(true)
+    expect(hasHandbackWaitKids('owner', bg.registry)).toBe(true)
 
     const bash = createSetAppState({
       tasks: {
@@ -626,17 +636,50 @@ describe('Jeo sweepStaleKeepaliveReasons / JXt', () => {
         }),
       },
     })
-    expect(hasHandbackWaitKids('owner', () => bash.getState() as any)).toBe(
-      true,
-    )
-    expect(hasHandbackWaitKids(undefined, () => getState() as any)).toBe(false)
-    expect(hasHandbackWaitKids('missing', () => getState() as any)).toBe(false)
+    expect(hasHandbackWaitKids('owner', bash.registry)).toBe(true)
+    expect(hasHandbackWaitKids(undefined, registry)).toBe(false)
+    expect(hasHandbackWaitKids('missing', registry)).toBe(false)
+  })
+})
+
+describe('polling eviction', () => {
+  test('removes transcripts and emits only for terminal rows actually evicted', () => {
+    const emitted: string[] = []
+    const unsubscribe = taskEvicted.subscribe(id => emitted.push(id))
+    const { setAppState, getState } = createSetAppState({
+      tasks: {
+        done: makeTask({
+          id: 'done',
+          type: 'local_bash',
+          status: 'killed',
+          notified: true,
+        }),
+        live: makeTask({ id: 'live' }),
+      },
+      transcripts: { done: { messages: [] }, live: { messages: ['keep'] } },
+    })
+    try {
+      applyTaskOffsetsAndEvictions(setAppState as any, { live: 50 }, [
+        'done',
+        'live',
+        'missing',
+      ])
+      expect(getState().tasks.done).toBeUndefined()
+      expect(getState().transcripts?.done).toBeUndefined()
+      expect(getState().transcripts?.live).toEqual({ messages: ['keep'] })
+      expect(getState().tasks.live.outputOffset).toBe(50)
+      expect(emitted).toEqual(['done'])
+      applyTaskOffsetsAndEvictions(setAppState as any, {}, ['done'])
+      expect(emitted).toEqual(['done'])
+    } finally {
+      unsubscribe()
+    }
   })
 })
 
 describe('evictTerminalTask', () => {
   test('removes terminal+notified task', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         'task-001': makeTask({
           status: 'completed',
@@ -652,7 +695,7 @@ describe('evictTerminalTask', () => {
   })
 
   test('skips if task not terminal', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: { 'task-001': makeTask({ status: 'running', notified: true }) },
     })
 
@@ -662,7 +705,7 @@ describe('evictTerminalTask', () => {
   })
 
   test('skips if task not notified', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: { 'task-001': makeTask({ status: 'completed', notified: false }) },
     })
 
@@ -672,7 +715,7 @@ describe('evictTerminalTask', () => {
   })
 
   test('skips if within evictAfter grace period', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         'task-001': makeTask({
           status: 'completed',
@@ -689,12 +732,163 @@ describe('evictTerminalTask', () => {
   })
 
   test('skips if task not found', () => {
-    const { setAppState, getState } = createSetAppState({ tasks: {} })
+    const { setAppState, getState, registry } = createSetAppState({ tasks: {} })
 
     evictTerminalTask('nonexistent', setAppState as any)
 
     // No crash
     expect(Object.keys(getState().tasks)).toHaveLength(0)
+  })
+
+  test('drops transcripts[taskId] when present and emits taskEvicted', () => {
+    const emitted: string[] = []
+    const unsub = taskEvicted.subscribe(id => {
+      emitted.push(id)
+    })
+    try {
+      const { setAppState, getState, registry } = createSetAppState({
+        tasks: {
+          'task-001': makeTask({
+            status: 'completed',
+            notified: true,
+            evictAfter: Date.now() - 1,
+          }),
+          keep: makeTask({ id: 'keep', status: 'running' }),
+        },
+        transcripts: {
+          'task-001': { messages: ['gone'], inProgressToolUseIDs: new Set() },
+          keep: { messages: ['stay'], inProgressToolUseIDs: new Set() },
+        },
+      })
+
+      evictTerminalTask('task-001', setAppState as any)
+
+      expect(getState().tasks['task-001']).toBeUndefined()
+      expect(getState().tasks.keep).toBeDefined()
+      expect(getState().transcripts?.['task-001']).toBeUndefined()
+      expect(getState().transcripts?.keep).toEqual({
+        messages: ['stay'],
+        inProgressToolUseIDs: expect.any(Set),
+      })
+      expect(emitted).toEqual(['task-001'])
+    } finally {
+      unsub()
+    }
+  })
+
+  test('does not emit taskEvicted when eviction is skipped', () => {
+    const emitted: string[] = []
+    const unsub = taskEvicted.subscribe(id => {
+      emitted.push(id)
+    })
+    try {
+      const { setAppState, getState, registry } = createSetAppState({
+        tasks: { 'task-001': makeTask({ status: 'running', notified: true }) },
+        transcripts: {
+          'task-001': { messages: ['keep'], inProgressToolUseIDs: new Set() },
+        },
+      })
+
+      evictTerminalTask('task-001', setAppState as any)
+
+      expect(getState().tasks['task-001']).toBeDefined()
+      expect(getState().transcripts?.['task-001']).toBeDefined()
+      expect(emitted).toEqual([])
+    } finally {
+      unsub()
+    }
+  })
+
+  test('skips local_workflow while evictAfter is in the future', () => {
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'local_workflow',
+          status: 'completed',
+          notified: true,
+          evictAfter: Date.now() + 60_000,
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeDefined()
+  })
+
+  test('skips local_workflow while kill loop is live', () => {
+    registerAgentKillLoop('task-001')
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'local_workflow',
+          status: 'completed',
+          notified: true,
+          evictAfter: Date.now() - 1,
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeDefined()
+  })
+
+  test('evicts local_workflow when grace expired and loop settled', () => {
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'local_workflow',
+          status: 'completed',
+          notified: true,
+          evictAfter: Date.now() - 1,
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeUndefined()
+  })
+
+  test('skips mcp_task within gx after endTime', () => {
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'mcp_task',
+          status: 'completed',
+          notified: true,
+          endTime: Date.now(),
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeDefined()
+  })
+
+  test('evicts mcp_task after gx grace', () => {
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'mcp_task',
+          status: 'completed',
+          notified: true,
+          endTime: Date.now() - MCP_TASK_GRACE_MS - 1,
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeUndefined()
+  })
+
+  test('keepaliveReasons without retain does not block eviction', () => {
+    const { setAppState, getState, registry } = createSetAppState({
+      tasks: {
+        'task-001': makeTask({
+          type: 'mcp_task',
+          status: 'completed',
+          notified: true,
+          endTime: Date.now() - MCP_TASK_GRACE_MS - 1,
+          keepaliveReasons: new Set(['mcp:hold']),
+        }),
+      },
+    })
+    evictTerminalTask('task-001', setAppState as any)
+    expect(getState().tasks['task-001']).toBeUndefined()
   })
 })
 
@@ -706,18 +900,22 @@ describe('constants', () => {
   test('PANEL_GRACE_MS is 30000', () => {
     expect(PANEL_GRACE_MS).toBe(30_000)
   })
+
+  test('MCP_TASK_GRACE_MS is 30000 (densable gx)', () => {
+    expect(MCP_TASK_GRACE_MS).toBe(30_000)
+  })
 })
 
 describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
   test('addKeepaliveReason only mutates local_agent', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         agent1: makeTask({ id: 'agent1', type: 'local_agent' }),
         bash1: makeTask({ id: 'bash1', type: 'local_bash' }),
       },
     })
-    addKeepaliveReason('agent1', 'workflow:w1', setAppState as any)
-    addKeepaliveReason('bash1', 'workflow:w1', setAppState as any)
+    addKeepaliveReason('agent1', 'workflow:w1', registry)
+    addKeepaliveReason('bash1', 'workflow:w1', registry)
     expect(
       getKeepaliveReasons(getState().tasks.agent1).has('workflow:w1'),
     ).toBe(true)
@@ -725,7 +923,7 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
   })
 
   test('removeKeepaliveReason sets evictAfter when empty+terminal+!retain', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         agent1: makeTask({
           id: 'agent1',
@@ -738,7 +936,7 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
       },
     })
     const before = Date.now()
-    removeKeepaliveReason('agent1', 'workflow:w1', setAppState as any)
+    removeKeepaliveReason('agent1', 'workflow:w1', registry)
     const t = getState().tasks.agent1
     expect(t.keepaliveReasons.size).toBe(0)
     expect(typeof t.evictAfter).toBe('number')
@@ -746,7 +944,7 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
   })
 
   test('removeKeepaliveReason does not set evictAfter when retain', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         agent1: makeTask({
           id: 'agent1',
@@ -758,12 +956,12 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
         }),
       },
     })
-    removeKeepaliveReason('agent1', 'workflow:w1', setAppState as any)
+    removeKeepaliveReason('agent1', 'workflow:w1', registry)
     expect(getState().tasks.agent1.evictAfter).toBeUndefined()
   })
 
   test('evictTerminalTask blocked while keepaliveReasons non-empty', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         agent1: makeTask({
           id: 'agent1',
@@ -779,7 +977,7 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
     evictTerminalTask('agent1', setAppState as any)
     expect(getState().tasks.agent1).toBeDefined()
     // Clear keepalive → next eviction succeeds
-    removeKeepaliveReason('agent1', 'workflow:w1', setAppState as any)
+    removeKeepaliveReason('agent1', 'workflow:w1', registry)
     // tB may have set a fresh grace; force expired
     updateTaskState('agent1', setAppState as any, (t: any) => ({
       ...t,
@@ -790,7 +988,7 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
   })
 
   test('no-op when owner missing or reason absent', () => {
-    const { setAppState, getState } = createSetAppState({
+    const { setAppState, getState, registry } = createSetAppState({
       tasks: {
         agent1: makeTask({
           id: 'agent1',
@@ -799,8 +997,8 @@ describe('addKeepaliveReason / removeKeepaliveReason (official Gge/tB)', () => {
         }),
       },
     })
-    addKeepaliveReason(undefined, 'workflow:w1', setAppState as any)
-    removeKeepaliveReason('agent1', 'workflow:missing', setAppState as any)
+    addKeepaliveReason(undefined, 'workflow:w1', registry)
+    removeKeepaliveReason('agent1', 'workflow:missing', registry)
     expect(getState().tasks.agent1.keepaliveReasons).toBeUndefined()
   })
 })

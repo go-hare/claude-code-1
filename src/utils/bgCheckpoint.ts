@@ -793,7 +793,7 @@ export type PortableCheckpointResult = {
     reason?: string
     /**
      * Official zit(workflowId, reg) — mark workflow paused after abort.
-     * Prefer `pauseWorkflowTask(id, setAppState)` (status `"paused"`).
+     * Prefer `pauseWorkflowTask(id, registry)` (status `"paused"`).
      */
     markWorkflowPaused?: (workflowTaskId: string) => void
     /**
@@ -1951,6 +1951,7 @@ export async function rehydrateAdoptedShells(
     killOrphanAgentShells?: boolean
     /** Override kill for tests. */
     killPid?: (pid: number) => void
+    getAppState?: () => import('../state/AppState.js').AppState
   },
 ): Promise<RehydrateShellsResult> {
   let adopted = 0
@@ -2084,18 +2085,23 @@ export async function rehydrateAdoptedShells(
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { asAgentId } =
             require('../types/ids.js') as typeof import('../types/ids.js')
-          await enqueueShellNotification(
-            es.taskId,
-            description,
-            status,
-            result.code,
-            setState,
-            es.toolUseId,
-            es.kind === 'monitor' ? 'monitor' : 'bash',
-            ownerLive && es.agentId !== undefined
-              ? asAgentId(es.agentId)
-              : undefined,
-          )
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { createTaskRegistry } =
+            require('./taskRegistry.js') as typeof import('./taskRegistry.js')
+          if (opts?.getAppState) {
+            await enqueueShellNotification(
+              es.taskId,
+              description,
+              status,
+              result.code,
+              createTaskRegistry(opts.getAppState, setState),
+              es.toolUseId,
+              es.kind === 'monitor' ? 'monitor' : 'bash',
+              ownerLive && es.agentId !== undefined
+                ? asAgentId(es.agentId)
+                : undefined,
+            )
+          }
           // Official Bl(n)
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const { evictTaskOutput } =
@@ -2237,12 +2243,12 @@ export function registerResumedAgentTask(
   const { registerTask } =
     require('./task/framework.js') as typeof import('./task/framework.js')
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getSessionId } =
+  const { getMainThreadAgentId } =
     require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
 
   let ownerAgentId: string | undefined
   try {
-    ownerAgentId = entry.parentAgentId ?? getSessionId()
+    ownerAgentId = entry.parentAgentId ?? getMainThreadAgentId()
   } catch {
     ownerAgentId = entry.parentAgentId
   }
@@ -2949,7 +2955,7 @@ export async function runLeftArrowPostAdoptCheckpoint(opts?: {
   markWorkflowPaused?: (workflowTaskId: string) => void
   /**
    * When set and markWorkflowPaused omitted, default zit uses
-   * pauseWorkflowTask(id, setAppState) (status `"paused"`).
+   * pauseWorkflowTask(id, registry) (status `"paused"`).
    * Left-arrow usually unmounts first so this is often unavailable.
    */
   setAppState?: (
@@ -2957,6 +2963,7 @@ export async function runLeftArrowPostAdoptCheckpoint(opts?: {
       tasks: Record<string, unknown>
     },
   ) => void
+  getAppState?: () => import('../state/AppState.js').AppState
 }): Promise<{
   ran: boolean
   abortedWorkflowIds: string[]
@@ -2984,13 +2991,22 @@ export async function runLeftArrowPostAdoptCheckpoint(opts?: {
       })
     const markWorkflowPaused =
       opts?.markWorkflowPaused ??
-      (opts?.setAppState
+      (opts?.setAppState && opts.getAppState
         ? (workflowTaskId: string) => {
             try {
               // eslint-disable-next-line @typescript-eslint/no-require-imports
               const { pauseWorkflowTask } =
                 require('../tasks/LocalWorkflowTask/LocalWorkflowTask.js') as typeof import('../tasks/LocalWorkflowTask/LocalWorkflowTask.js')
-              pauseWorkflowTask(workflowTaskId, opts.setAppState as never)
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { createTaskRegistry } =
+                require('./taskRegistry.js') as typeof import('./taskRegistry.js')
+              pauseWorkflowTask(
+                workflowTaskId,
+                createTaskRegistry(
+                  opts.getAppState!,
+                  opts.setAppState as never,
+                ),
+              )
             } catch {
               /* best-effort zit */
             }

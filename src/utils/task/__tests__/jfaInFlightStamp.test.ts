@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   buildJFaInFlightSnapshot,
   computeW6e,
@@ -24,7 +24,14 @@ import {
 import type { TaskState } from '../../../tasks/types.js'
 
 describe('jfaInFlightStamp densable JFa/VFa/W6e', () => {
+  let previousJobDir: string | undefined
+  beforeEach(() => {
+    previousJobDir = process.env.CLAUDE_JOB_DIR
+  })
   afterEach(() => {
+    if (previousJobDir === undefined) delete process.env.CLAUDE_JOB_DIR
+    else process.env.CLAUDE_JOB_DIR = previousJobDir
+    setJFaAppStateReader(null)
     _resetBgNeedsInputBridgeForTests()
     snapshotOutputTokensForTurn(null)
   })

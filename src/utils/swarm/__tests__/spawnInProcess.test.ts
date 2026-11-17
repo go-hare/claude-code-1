@@ -1,7 +1,17 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from 'bun:test'
 import { rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import * as realRunAgent from '@claude-code/builtin-tools/tools/AgentTool/runAgent.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import { getDefaultAppState } from '../../../state/AppStateStore'
 import { createTask, getTask, listTasks } from '../../tasks'
 import { readMailbox, writeToMailbox } from '../../teammateMailbox'
@@ -10,10 +20,25 @@ import {
   resolveInProcessTeammatePermissionMode,
   spawnInProcessTeammate,
 } from '../spawnInProcess'
+import { createTaskRegistry } from '../../taskRegistry.js'
 
-mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
-  async *runAgent() {},
-}))
+const runAgentSnap = snapshotModuleExports(realRunAgent)
+function runAgentMock() {
+  return {
+    ...runAgentSnap,
+    async *runAgent() {},
+  }
+}
+mock.module(
+  '@claude-code/builtin-tools/tools/AgentTool/runAgent.js',
+  runAgentMock,
+)
+
+afterAll(() => {
+  mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+    ...runAgentSnap,
+  }))
+})
 
 let tempHome: string
 let previousConfigDir: string | undefined
@@ -45,6 +70,67 @@ afterEach(() => {
 })
 
 describe('killInProcessTeammateByAgentId', () => {
+  test.each([
+    'task',
+    'backend',
+    'agent-id',
+  ] as const)('%s kill removes the spawned teammate using its actual store setter', async entry => {
+    const { InProcessTeammateTask } = await import(
+      '../../../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
+    )
+    let state = getDefaultAppState() as any
+    const setAppState = (updater: (prev: typeof state) => typeof state) => {
+      state = updater(state)
+    }
+    const result = await spawnInProcessTeammate(
+      {
+        name: 'worker',
+        teamName: 'alpha',
+        prompt: 'kill task',
+        color: 'blue',
+        planModeRequired: false,
+      },
+      {
+        setAppState,
+        getAppState: () => state,
+        toolUseId: 'toolu_generic_kill',
+      },
+    )
+    expect(result.success).toBe(true)
+    state = {
+      ...state,
+      teamContext: {
+        teamName: 'alpha',
+        teammates: {
+          'worker@alpha': { name: 'worker' },
+          'lead@alpha': { name: 'lead' },
+        },
+      },
+    }
+    const controller = state.tasks[result.taskId!].abortController
+    const registry = createTaskRegistry(() => state, setAppState)
+    if (entry === 'task') {
+      // No setter argument is available through the polymorphic Task contract.
+      await InProcessTeammateTask.kill(result.taskId!, registry, 'user')
+    } else if (entry === 'backend') {
+      const { InProcessBackend } = await import(
+        '../backends/InProcessBackend.js'
+      )
+      const backend = new InProcessBackend()
+      backend.setContext({ getAppState: () => state, setAppState } as any)
+      expect(await backend.kill('worker@alpha')).toBe(true)
+    } else {
+      expect(killInProcessTeammateByAgentId('worker@alpha', registry)).toBe(
+        true,
+      )
+    }
+    expect(controller.signal.aborted).toBe(true)
+    expect(state.tasks[result.taskId!].status).toBe('killed')
+    expect(state.teamContext.teammates).toEqual({
+      'lead@alpha': { name: 'lead' },
+    })
+  })
+
   test('registers a real in-process teammate task and mailbox', async () => {
     let state = getDefaultAppState() as any
     const result = await spawnInProcessTeammate(
@@ -96,6 +182,9 @@ describe('killInProcessTeammateByAgentId', () => {
           'worker@alpha': {
             name: 'worker',
           },
+          'lead@alpha': {
+            name: 'team-lead',
+          },
         },
       },
       tasks: {
@@ -117,15 +206,23 @@ describe('killInProcessTeammateByAgentId', () => {
         },
       },
     }
-
-    const killed = killInProcessTeammateByAgentId('worker@alpha', updater => {
+    const setAppState = (updater: (prev: typeof state) => typeof state) => {
       state = updater(state)
-    })
+    }
+
+    const killed = killInProcessTeammateByAgentId(
+      'worker@alpha',
+      createTaskRegistry(() => state, setAppState),
+      setAppState,
+    )
 
     expect(killed).toBe(true)
     expect(abortController.signal.aborted).toBe(true)
     expect(state.tasks.teammate_task_1.status).toBe('killed')
     expect(state.teamContext.teammates['worker@alpha']).toBeUndefined()
+    expect(state.teamContext.teammates['lead@alpha']).toEqual({
+      name: 'team-lead',
+    })
   })
 
   test('in-process teammate claims tasks from team task list, not parent session id', async () => {

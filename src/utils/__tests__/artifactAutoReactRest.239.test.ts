@@ -1,7 +1,7 @@
 /**
  * densable remaining edges: Z_r content-host, Ttn/nzt, X_r summon, visible_handoff, ykl storageV5.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   claimLedgerOwnership,
   claimSummonSeed,
@@ -23,13 +23,15 @@ import {
 } from '../../services/artifactAutoReact/index.js'
 import { getSessionId } from '../../bootstrap/state.js'
 
-const authMock = {
-  getClaudeAIOAuthTokens: mock(() => ({
-    accessToken: 'test-oauth',
-  })),
-}
-mock.module('../../utils/auth.js', () => authMock)
-mock.module('src/utils/auth.js', () => authMock)
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
+
+mock.module('../../utils/auth.js', authMock)
+mock.module('src/utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('../../utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()

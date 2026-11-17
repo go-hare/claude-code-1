@@ -7,7 +7,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, type KeyboardEvent, useAnimationFrame } from '@anthropic/ink';
 import type { Theme } from '@anthropic/ink';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
+import { useAppState, useAppStateStore, useSetAppState } from '../../state/AppState.js';
+import { createTaskRegistry } from '../../utils/taskRegistry.js';
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js';
 import { isLocalWorkflowTask } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js';
 import { Byline } from '../../components/design-system/Byline.js';
@@ -112,6 +113,7 @@ export function WorkflowHistoryDialog({
 }): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const setAppState = useSetAppState();
+  const store = useAppStateStore();
   const [diskRuns, setDiskRuns] = useState<RunProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<Mode>({ mode: 'list' });
@@ -189,7 +191,10 @@ export function WorkflowHistoryDialog({
       try {
         const { killWorkflowTask } =
           require('../../tasks/LocalWorkflowTask/LocalWorkflowTask.js') as typeof import('../../tasks/LocalWorkflowTask/LocalWorkflowTask.js');
-        killWorkflowTask(item.taskId, setAppState);
+        killWorkflowTask(
+          item.taskId,
+          createTaskRegistry(() => store.getState(), setAppState),
+        );
       } catch {
         /* ignore */
       }

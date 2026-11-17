@@ -1,7 +1,7 @@
 /**
  * densable Artifact reply/live-edit + qPw/aDw/lDw compose/edit helpers.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import {
   applyHtmlPatches,
   parseEditDecision,
@@ -10,6 +10,15 @@ import {
   Ttn,
   setNztRunner,
 } from '../../services/artifactAutoReact/index.js'
+import { authMock, restoreAuthMock } from '../../../tests/mocks/auth'
+
+mock.module('src/utils/auth.js', authMock)
+mock.module('../../utils/auth.js', authMock)
+
+afterAll(() => {
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('../../utils/auth.js', restoreAuthMock)
+})
 
 afterEach(() => {
   resetArtifactAutoReactStoreForTests()
@@ -105,12 +114,6 @@ describe('ArtifactTool action:reply via Ttn/nzt', () => {
 
 describe('ArtifactTool.call reply', () => {
   test('action reply posts via control plane', async () => {
-    const authMock = {
-      getClaudeAIOAuthTokens: mock(() => ({ accessToken: 'tok' })),
-    }
-    mock.module('src/utils/auth.js', () => authMock)
-    mock.module('../../utils/auth.js', () => authMock)
-
     const prevFetch = globalThis.fetch
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ id: 'cid-1', thread_id: 'th1' }), {
@@ -352,7 +355,7 @@ describe('Artifact permissions tree (hosted actions)', () => {
       },
       ctx as never,
     )
-    expect(resolveAsk.behavior).toBe('ask')
+    expect(resolveAsk.behavior).toBe('allow')
 
     const dontAskCtx = {
       abortController: new AbortController(),
@@ -368,7 +371,7 @@ describe('Artifact permissions tree (hosted actions)', () => {
       },
       dontAskCtx as never,
     )
-    expect(resolveDontAsk.behavior).toBe('ask')
+    expect(resolveDontAsk.behavior).toBe('allow')
 
     const { ArtifactTool } = await import(
       '@claude-code/builtin-tools/tools/ArtifactTool/ArtifactTool.js'

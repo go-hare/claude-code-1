@@ -9,12 +9,14 @@
  */
 
 import {
+  EVENT_TAG,
   NOTE_TAG,
   OUTPUT_FILE_TAG,
   STATUS_TAG,
   SUMMARY_TAG,
   TASK_ID_TAG,
   TASK_NOTIFICATION_TAG,
+  TASK_TYPE_TAG,
   TOOL_USE_ID_TAG,
 } from '../constants/xml.js'
 import { asAgentId } from '../types/ids.js'
@@ -27,13 +29,20 @@ import { escapeXml } from './xml.js'
  * is written. SDK terminate emit only when status is a terminal string.
  */
 export function notifyTaskNotification(opts: {
-  taskId: string
+  /** Official Zi `taskId` — omit (j6 before spawn fills taskRef.id). */
+  taskId?: string
   summary: string
   /**
    * densable Pe `r` / Zi `body` — `<note>` after `<summary>`. Sp paints
    * summary only (gold KS). Omit when there is no note.
    */
   note?: string
+  /** densable j6 `B()` — `<event>` after `<summary>`. */
+  event?: string
+  /** densable j6 hint after `</event>`, not escaped as event text. */
+  eventHint?: string
+  /** Official Zi `taskType` — placed between `<tool-use-id>` and `<output-file>`. */
+  taskType?: string
   /** Official Ebn `t` — omit for SAf (restarted, still running). */
   status?: string
   outputFile?: string
@@ -48,14 +57,30 @@ export function notifyTaskNotification(opts: {
    * SAf (no status) skips SDK terminate.
    */
   emitSdk?: boolean
+  /**
+   * densable Pe/SAo `shouldQuery:!1`. Gold j6 omits the field (model turn).
+   * Pass `'omit'` for Monitor stream events.
+   */
+  shouldQuery?: boolean | 'omit'
+  /** densable j6 `{turnAttribution:"inherit"}`. */
+  turnAttribution?: 'inherit' | 'none'
+  /** Optional GetTask delivery snapshot (`MLt` `taskDelivery`). */
+  taskDelivery?: unknown
 }): string {
   // densable Wt — text-node escape `& < >` only. Quotes stay quotes so Sp
   // KS (`unescapeXmlEntities`) never paints leftover `&quot;`.
-  const safeId = escapeXml(opts.taskId)
+  const idLine =
+    opts.taskId !== undefined && opts.taskId.length > 0
+      ? `\n<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>`
+      : ''
   const safeSummary = escapeXml(opts.summary)
   const toolUseLine =
     opts.toolUseId !== undefined && opts.toolUseId.length > 0
       ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
+      : ''
+  const taskTypeLine =
+    opts.taskType !== undefined && opts.taskType.length > 0
+      ? `\n<${TASK_TYPE_TAG}>${escapeXml(opts.taskType)}</${TASK_TYPE_TAG}>`
       : ''
   const outputLine =
     opts.outputFile !== undefined && opts.outputFile.length > 0
@@ -69,35 +94,52 @@ export function notifyTaskNotification(opts: {
     opts.note !== undefined && opts.note.length > 0
       ? `\n<${NOTE_TAG}>${escapeXml(opts.note)}</${NOTE_TAG}>`
       : ''
-  // Official Zi order: task-id, tool-use-id, output-file, status, summary, note body
-  const message = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${safeId}</${TASK_ID_TAG}>${toolUseLine}${outputLine}${statusLine}
-<${SUMMARY_TAG}>${safeSummary}</${SUMMARY_TAG}>${noteLine}
+  const eventLine =
+    opts.event !== undefined
+      ? `\n<${EVENT_TAG}>${escapeXml(opts.event)}</${EVENT_TAG}>`
+      : ''
+  const eventHint = opts.eventHint ?? ''
+  // Official Zi order: task-id, tool-use-id, task-type, output-file, status, summary, note, event body
+  const message = `<${TASK_NOTIFICATION_TAG}>${idLine}${toolUseLine}${taskTypeLine}${outputLine}${statusLine}
+<${SUMMARY_TAG}>${safeSummary}</${SUMMARY_TAG}>${noteLine}${eventLine}${eventHint}
 </${TASK_NOTIFICATION_TAG}>`
 
   let targetAgentId = opts.agentId
   if (targetAgentId === undefined) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getSessionId } =
+      const { getMainThreadAgentId } =
         require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-      targetAgentId = getSessionId()
+      targetAgentId = getMainThreadAgentId()
     } catch {
       targetAgentId = undefined
     }
   }
 
   try {
-    enqueuePendingNotification({
-      value: message,
-      mode: 'task-notification',
-      agentId:
-        targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
-      // densable Pe/es/Ut: skipAttachments:!0, priority:"next", shouldQuery:!1
-      skipAttachments: true,
-      priority: 'next',
-      shouldQuery: false,
-    })
+    enqueuePendingNotification(
+      {
+        value: message,
+        mode: 'task-notification',
+        agentId:
+          targetAgentId !== undefined ? asAgentId(targetAgentId) : undefined,
+        ...(opts.taskId !== undefined && opts.taskId.length > 0
+          ? { taskId: opts.taskId }
+          : {}),
+        // densable Pe/es/Ut: skipAttachments:!0, priority:"next", shouldQuery:!1
+        skipAttachments: true,
+        priority: 'next',
+        ...(opts.shouldQuery === 'omit'
+          ? {}
+          : { shouldQuery: opts.shouldQuery ?? false }),
+        ...(opts.taskDelivery !== undefined
+          ? { taskDelivery: opts.taskDelivery }
+          : {}),
+      },
+      opts.turnAttribution === 'inherit'
+        ? { turnAttribution: 'inherit' }
+        : undefined,
+    )
   } catch {
     // best-effort — rehydrate must not throw on notify fail
   }
@@ -107,7 +149,7 @@ export function notifyTaskNotification(opts: {
     opts.status === 'stopped' ||
     opts.status === 'completed'
   const shouldEmitSdk = opts.emitSdk !== undefined ? opts.emitSdk : terminalSdk
-  if (shouldEmitSdk && terminalSdk && opts.status) {
+  if (shouldEmitSdk && terminalSdk && opts.status && opts.taskId) {
     try {
       // Official lf — toolUseId/outputFile/summary on SDK task_notification.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -167,15 +209,11 @@ export function notifyAdoptAgentFailed(
 }
 
 /**
- * Official Ul subset used in AAo hint (escapes & < > only — not quotes).
  * Paths with `'` would break the single-quoted hint; strip them portably.
+ * XML `& < >` escaping happens once in `notifyTaskNotification` (`Wt`).
  */
 function ulLite(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/'/g, '')
+  return s.replace(/'/g, '')
 }
 
 /** Official AAo — workflow could not be resumed (+ optional manual resume hint). */
