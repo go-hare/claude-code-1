@@ -149,8 +149,6 @@ export const DEFAULT_BUILD_FEATURES = [
   'EXPERIMENTAL_SKILL_SEARCH', // 技能搜索（bounded caches 已修复 overflow，内存问题已解决）
   'EXPERIMENTAL_SEARCH_EXTRA_TOOLS', // 工具搜索预取管道（TF-IDF 索引 + inter-turn 异步预取）
   // 'SKILL_LEARNING',
-  // P3: poor mode
-  'POOR', // 穷鬼模式，跳过 extract_memories/prompt_suggestion 减少消耗
   // Team Memory — densable SEA 有完整 team memory 产品串；本地 teamMemorySync
   // 已实现（OAuth + GitHub remote 运行时门）。旧注释「邮箱无限增长」过时：
   // teammateMailbox 已有 MAX_* + compact（与 TEAMMEM 同步面独立）。
