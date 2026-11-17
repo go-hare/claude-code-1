@@ -127,6 +127,142 @@ describe('densable 2.1.289 Config submenus, search, safe-mode, and rc channel', 
 })
 
 describe('densable 2.1.289 Usage, Stats, and MCP panels', () => {
+  test('Settings Tabs uses densable Ybe stableHeight and flexShrink-0 pane column', () => {
+    expect(settingsSrc).toContain('stableHeight')
+    expect(settingsSrc).toContain('flexShrink={0}')
+  })
+
+  test('Usage scan failures retain a visible contributing section (2.1.289 ku)', () => {
+    expect(usageSrc).toContain('logError(')
+    expect(usageSrc).toContain(
+      'return { day: EMPTY_USAGE_WINDOW, week: EMPTY_USAGE_WINDOW }',
+    )
+    expect(usageSrc).not.toContain('if (!cancelled) setScan(null)')
+  })
+
+  test('Usage LimitBar and Ln shell do not shrink (densable Rt / Ln flexShrink:0)', () => {
+    expect(usageSrc).toContain('flexShrink={0}')
+    expect(usageSrc).toContain('function UsagePane')
+    expect(usageSrc).toContain('width="100%"')
+  })
+
+  test('Usage tab shell is densable Ln: Session, plugin gate, gateway vs subscriber', () => {
+    expect(usageSrc).toContain(
+      '<SessionCostSection isThinClient={isThinClient} />',
+    )
+    expect(usageSrc).toContain("'Session (remote)'")
+    expect(usageSrc).toContain("'Session'")
+    expect(usageSrc).toContain('isPluginSkillListingFootprintEnabled')
+    expect(usageSrc).toContain("getAPIProvider() === 'gateway'")
+    expect(usageSrc).toContain('isClaudeAISubscriber() && hasProfileScope()')
+    expect(usageSrc).toContain("What's contributing to your limits usage?")
+    expect(usageSrc).toContain('scanUsageTranscripts')
+    expect(usageSrc).toContain('aggregatePluginSkillListing')
+    expect(usageSrc).toContain('get_session_cost')
+    expect(usageSrc).toContain('sendControlRequest')
+    expect(usageSrc).toContain('buildModelScopedWeekBars')
+    expect(usageSrc).toContain('tengu_usage_overage_included_models')
+    expect(usageSrc).toContain('tengu_rate_limit_promo_notices')
+    expect(usageSrc).toContain('trailingLinesForBar')
+    expect(usageSrc).not.toContain(
+      '/usage is only available for subscription plans.',
+    )
+    expect(usageSrc).not.toContain('OverageCreditUpsell')
+  })
+
+  test('Usage $a remote cost RPC and ext model-scoped week bars runtime', async () => {
+    const {
+      buildModelScopedWeekBars,
+      fetchThinClientSessionCost,
+      getOverageIncludedModelsAllowlist,
+    } = await import('../Usage.js')
+    const {
+      getSurfaceCapabilities,
+      replaceSurfaceCapabilities,
+      resetSurfaceCapabilitiesForTests,
+    } = await import('../../../utils/sessionNameUniqueness.js')
+
+    resetSurfaceCapabilitiesForTests()
+    try {
+      expect(await fetchThinClientSessionCost()).toBe('Remote cost unavailable')
+      replaceSurfaceCapabilities({
+        ...getSurfaceCapabilities(),
+        workspace: 'remote',
+        remote: {
+          kind: 'ccr',
+          isRemoteMode: true,
+          async sendControlRequest(req) {
+            expect(req.subtype).toBe('get_session_cost')
+            return { text: 'Total cost: $1.23' }
+          },
+        },
+      })
+      expect(await fetchThinClientSessionCost()).toBe('Total cost: $1.23')
+
+      replaceSurfaceCapabilities({
+        ...getSurfaceCapabilities(),
+        workspace: 'remote',
+        remote: {
+          kind: 'ccr',
+          isRemoteMode: true,
+          async sendControlRequest() {
+            throw new Error('socket closed')
+          },
+        },
+      })
+      expect(await fetchThinClientSessionCost()).toBe(
+        'Remote cost unavailable (socket closed)',
+      )
+    } finally {
+      resetSurfaceCapabilitiesForTests()
+    }
+
+    const prevDisableGb = process.env.DISABLE_GROWTHBOOK
+    try {
+      process.env.DISABLE_GROWTHBOOK = '1'
+      expect(getOverageIncludedModelsAllowlist()).toEqual([
+        'Fable',
+        'Fable 5',
+        'Fable 5.1',
+      ])
+    } finally {
+      if (prevDisableGb === undefined) delete process.env.DISABLE_GROWTHBOOK
+      else process.env.DISABLE_GROWTHBOOK = prevDisableGb
+    }
+    const bars = buildModelScopedWeekBars(
+      [
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 42,
+          resets_at: '2026-11-20T00:00:00Z',
+          severity: 'warning',
+          is_active: false,
+          scope: { model: { display_name: 'Fable 5.1' } },
+        },
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 10,
+          resets_at: null,
+          severity: 'warning',
+          is_active: false,
+          scope: { model: { display_name: 'Haiku' } },
+        },
+      ],
+      ['Fable 5.1'],
+    )
+    expect(bars).toEqual([
+      {
+        bar: 'Fable 5.1',
+        title: 'Current week (Fable 5.1)',
+        displayName: 'Fable 5.1',
+        limit: { utilization: 42, resets_at: '2026-11-20T00:00:00Z' },
+        alwaysShowDateInReset: true,
+      },
+    ])
+  })
+
   test('Usage renders cinder_cove credit bar with subtextOverride', () => {
     expect(usageSrc).toContain('utilization.cinder_cove')
     expect(usageSrc).toContain('title="Claude Code and Cowork credit"')

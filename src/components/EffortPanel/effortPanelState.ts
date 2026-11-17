@@ -348,7 +348,7 @@ export function getInitialCursor(args: {
 }
 
 export type EffortUpdate = {
-  value: EffortValue | undefined
+  value?: EffortValue | undefined
   ultracode?: boolean
 }
 

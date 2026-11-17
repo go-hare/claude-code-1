@@ -37,9 +37,8 @@ describe('densable zm streaming spinner gate', () => {
       'utf8',
     ).replace(/\r\n/g, '\n')
     expect(src).toContain('!!hasStreamingText ||')
-    expect(src).toContain(
-      'hasContentAfterIndex(renderableMessages, index, tools, streamingToolUseIDs)',
-    )
+    expect(src).toContain('index < lastContentIndex')
+    expect(src).not.toContain('hasContentAfterIndex(')
     expect(src).not.toContain('!!streamingPreview')
     // legacy streamingText must not gate collapse either
     expect(src).not.toMatch(/hasContentAfter\s*=\s*[\s\S]*?!!streamingText/)

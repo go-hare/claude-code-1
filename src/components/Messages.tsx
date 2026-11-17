@@ -4,14 +4,15 @@ import { SentryErrorBoundary } from './SentryErrorBoundary.js';
 import { randomUUID, type UUID } from 'crypto';
 import type { RefObject } from 'react';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { every } from 'src/utils/set.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import type { ScrollBoxHandle } from '@anthropic/ink';
-import { useTerminalNotification } from '@anthropic/ink';
+import { TerminalWriteProvider, useTerminalNotification } from '@anthropic/ink';
 import { Box } from '@anthropic/ink';
+import { registerTerminalSequenceWriter, unregisterTerminalSequenceWriter } from '../utils/hooks/terminalSequence.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
@@ -695,6 +696,34 @@ function mapsShallowEqual<K, V>(a: ReadonlyMap<K, V> | undefined, b: ReadonlyMap
   return true;
 }
 
+/** densable `y6` (@207642450) — 36-char UUID prefix shared across split user blocks. */
+function userMessageUuidPrefix(msg: RenderableMessage | undefined): string | undefined {
+  return msg && messageHasUuid(msg) ? msg.uuid.slice(0, 36) : undefined;
+}
+
+/** densable `Bm` (@207947450) — consecutive split user blocks from one non-tool-result message. */
+function isSplitUserRow(msg: RenderableMessage | undefined, prev: RenderableMessage | undefined): boolean {
+  if (msg?.type !== 'user' || prev?.type !== 'user') return false;
+  const prefix = userMessageUuidPrefix(msg);
+  const prevFirst = Array.isArray(prev.message?.content)
+    ? (prev.message.content[0] as { type?: string } | undefined)
+    : undefined;
+  return prefix !== undefined && prefix === userMessageUuidPrefix(prev) && prevFirst?.type !== 'tool_result';
+}
+
+/** densable `Za` (@207947505) — speaker_label preceding a user turn (walking past split user blocks). */
+function precedingSpeakerLabel(
+  list: readonly RenderableMessage[],
+  index: number,
+): Extract<RenderableMessage, { type: 'speaker_label' }> | undefined {
+  let idx = index;
+  while (idx > 0 && isSplitUserRow(list[idx], list[idx - 1])) {
+    idx--;
+  }
+  const prev = idx > 0 ? list[idx - 1] : undefined;
+  return prev?.type === 'speaker_label' ? prev : undefined;
+}
+
 /** densable `Mr` (@207904100) */
 function projectMapSubset<K, V>(source: Map<K, V>, keys: Iterable<K>, emptyFallback: Map<K, V>): Map<K, V> {
   let projected: Map<K, V> | undefined;
@@ -850,6 +879,7 @@ function projectRowLookups(
       rowToolUseIDs,
       EMPTY_LOOKUPS.inProgressHookCounts,
     ),
+    resolvedHookNames: EMPTY_LOOKUPS.resolvedHookNames,
     resolvedHookCounts: projectMapSubset(lookups.resolvedHookCounts, rowToolUseIDs, EMPTY_LOOKUPS.resolvedHookCounts),
     toolResultByToolUseID: projectMapSubset(
       lookups.toolResultByToolUseID,
@@ -1475,7 +1505,10 @@ const MessagesImpl = ({
                     .join('\n')
                 : '';
           const idx = renderableMessages.indexOf(msg);
-          const labelled = idx > 0 && renderableMessages[idx - 1]?.type === 'speaker_label';
+          const labelled =
+            idx > 0 &&
+            (renderableMessages[idx - 1]?.type === 'speaker_label' ||
+              precedingSpeakerLabel(renderableMessages, idx)?.speaker?.kind === 'inbound');
           return isUserTextExpandClickable(promptText, msg.attachment.origin as { kind?: string } | undefined, {
             labelled,
             columns,
@@ -1523,7 +1556,10 @@ const MessagesImpl = ({
       if (b?.type === 'text' && typeof b.text === 'string') {
         if (verbose || isTranscriptMode) return false;
         const idx = renderableMessages.indexOf(msg);
-        const labelled = idx > 0 && renderableMessages[idx - 1]?.type === 'speaker_label';
+        const labelled =
+          idx > 0 &&
+          (renderableMessages[idx - 1]?.type === 'speaker_label' ||
+            precedingSpeakerLabel(renderableMessages, idx)?.speaker?.kind === 'inbound');
         return isUserTextExpandClickable(b.text, msg.origin, { labelled, columns });
       }
       if (b?.type !== 'tool_result') return false;
@@ -1560,26 +1596,42 @@ const MessagesImpl = ({
     return () => progress(null);
   }, [progress]);
 
+  // densable @207959580: SOr(Xr) / bOr(Xr) bind Ink stdout writeRaw to terminalSequence.
+  const writeRaw = useContext(TerminalWriteProvider as unknown as React.Context<((sequence: string) => void) | null>);
+  useEffect(() => {
+    if (!writeRaw) return;
+    registerTerminalSequenceWriter(writeRaw);
+    return () => unregisterTerminalSequenceWriter(writeRaw);
+  }, [writeRaw]);
+
   const messageKey = useCallback(
-    (msg: RenderableMessage) => (messageHasUuid(msg) ? `${msg.uuid}-${conversationId}` : `no-uuid:${conversationId}`),
+    (msg: RenderableMessage, index?: number) =>
+      messageHasUuid(msg) ? `${msg.uuid}-${conversationId}` : `no-uuid:${index ?? 0}-${conversationId}`,
     [conversationId],
   );
 
   const renderMessageRow = useCallback(
     (msg: RenderableMessage, index: number) => {
-      const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
+      const prevMsg = index > 0 ? renderableMessages[index - 1] : undefined;
+      const prevType = prevMsg?.type;
       const isUserContinuation = msg.type === 'user' && prevType === 'user';
+      const isSplitUserContinuation = isSplitUserRow(msg, prevMsg);
       const followsSpeakerLabel = prevType === 'speaker_label';
+      const followsInboundLabel =
+        precedingSpeakerLabel(renderableMessages, index)?.speaker?.kind === 'inbound' ||
+        (prevType as string | undefined) === 'inbound_label';
       // Official 2.1.289: collapsed && (!!streamingText || index < lastContentIndex).
       const hasContentAfter = msg.type === 'collapsed_read_search' && (!!hasStreamingText || index < lastContentIndex);
 
-      const k = messageKey(msg);
+      const k = messageKey(msg, index);
       const row = (
         <MessageRow
           key={k}
           message={msg}
           isUserContinuation={isUserContinuation}
+          isSplitUserContinuation={isSplitUserContinuation}
           followsSpeakerLabel={followsSpeakerLabel}
+          followsInboundLabel={followsInboundLabel}
           hasContentAfter={hasContentAfter}
           tools={tools}
           commands={commands}

@@ -622,6 +622,7 @@ describe('densable Io Zc live Thought clock', () => {
       leftoverIhrPhn,
       leftoverIhrUxe,
       leftoverIhrGet,
+      leftoverIhrPeek,
       leftoverHhr,
       leftoverIhrEvict,
       leftoverIhrSanitizeRetry,
@@ -642,6 +643,8 @@ describe('densable Io Zc live Thought clock', () => {
     expect(() => leftoverIhrRequireStore()).toThrow(/SpinnerStoreContext/)
     expect(() => leftoverIhrGet('unmounted')).toThrow(/SpinnerStoreContext/)
     expect(() => leftoverHhr('unmounted')).toThrow(/SpinnerStoreContext/)
+    // densable Ihr.get — no Xae throw
+    expect(leftoverIhrPeek('unmounted').mode).toBe('responding')
     leftoverIhrMarkStoreMounted(true)
     leftoverIhrRequireStore()
     leftoverIhrBind('verb-1').setMode('thinking')

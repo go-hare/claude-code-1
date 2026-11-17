@@ -1,5 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Link, Text, type TextProps } from '@anthropic/ink';
+import { Box, Link, Text, type DOMElement, type TextProps } from '@anthropic/ink';
 import { FilePathLink } from '../FilePathLink.js';
 import { feature } from 'bun:bundle';
 import * as React from 'react';
@@ -34,6 +34,9 @@ import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { getPillLabel } from '../../tasks/pillLabel.js';
 import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
+import { useUiRenderHost } from '../hooks/useUiRenderHost.js';
+import { PluginRenderedTree } from '../PluginRasterPanes.js';
+import { getPanesTerminalSize, subscribePanes } from '../../utils/plugins/functionHooksModules.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 
 /**
@@ -452,9 +455,21 @@ function TurnDurationMessage({
   addMargin: boolean;
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
+  const { columns, rows } = useTerminalSize();
+  const panesViewport = React.useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const viewportColumns = panesViewport?.conversationColumns ?? columns;
   // densable ig(uuid): hash-stable verb; remount must not reshuffle history.
   const uuid = typeof message.uuid === 'string' ? message.uuid : '';
   const verb = turnCompletionVerbFromUuid(uuid);
+  const rendered = useUiRenderHost({
+    component: 'TurnDuration',
+    requestId: uuid,
+    props: { word: verb, durationMs: message.durationMs },
+    viewport: { columns: viewportColumns, rows },
+  });
+  const displayVerb = typeof rendered.props.word === 'string' ? rendered.props.word : verb;
+  const displayDurationMs =
+    typeof rendered.props.durationMs === 'number' ? rendered.props.durationMs : message.durationMs;
   const liveTasks = useAppStateMaybeOutsideOfProvider(s => s.tasks);
   // densable 2.1.289 vg (@207720380): check live pending status on mount via useState initializer.
   const [mountSnapshot] = useState(() => {
@@ -487,7 +502,7 @@ function TurnDurationMessage({
     hasPendingWorkflows && typeof pending.pendingWorkflowCount === 'number' ? pending.pendingWorkflowCount : 0;
   const waitingForBg = pendingAgents > 0 || pendingWorkflows > 0;
 
-  const duration = formatDuration(message.durationMs as number);
+  const duration = formatDuration(displayDurationMs as number);
   const hasBudget = message.budgetLimit !== undefined;
   const budgetSuffix = (() => {
     if (!hasBudget) return '';
@@ -522,13 +537,28 @@ function TurnDurationMessage({
     }) ?? null;
 
   const hasCrunched = Boolean(showTurnDuration || hasBudget || briefHiddenSuffix);
-  if (!hasCrunched) {
+  if (rendered.drawPending) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        drawPending
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      />
+    );
+  }
+  if (!hasCrunched && rendered.pluginTree === undefined && rendered.minHeight === undefined) {
     return null;
   }
 
   const suppressRunningPill = Boolean(showTurnDuration && waitingForBg);
-  return (
-    <Box flexDirection="column" width="100%">
+  const engine = hasCrunched ? (
+    <Box
+      ref={rendered.pluginTree === undefined ? (rendered.hostRef as React.Ref<DOMElement>) : undefined}
+      flexDirection="column"
+      width="100%"
+      {...(rendered.pluginTree === undefined && rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+    >
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
         <Box minWidth={2}>
           <Text aria-hidden dimColor>
@@ -563,7 +593,7 @@ function TurnDurationMessage({
               </Text>
             ) : (
               <Text dimColor>
-                {showTurnDuration && `${verb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
+                {showTurnDuration && `${displayVerb} for ${duration}${doneAt ? ` \u00B7 done ${doneAt}` : ''}`}
               </Text>
             ))}
           {budgetSuffix && <Text dimColor>{budgetSuffix}</Text>}
@@ -574,7 +604,34 @@ function TurnDurationMessage({
         </Text>
       </Box>
     </Box>
-  );
+  ) : null;
+  if (rendered.pluginTree !== undefined) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      >
+        <PluginRenderedTree
+          node={rendered.pluginTree}
+          plugin={rendered.pluginName}
+          requestId={uuid}
+          component="TurnDuration"
+          engine={engine}
+        />
+      </Box>
+    );
+  }
+  if (engine === null) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      />
+    );
+  }
+  return engine;
 }
 
 function MemorySavedMessage({

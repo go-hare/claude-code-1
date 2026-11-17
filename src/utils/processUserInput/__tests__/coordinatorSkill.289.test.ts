@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { executeShellCommandsInPrompt } from '../../promptShellExecution.js'
 import { LaunchOptions } from '../../sessionHost.js'
 import { processPromptSlashCommand } from '../processSlashCommand.js'
 import type { Command } from '../../../commands.js'
@@ -73,13 +72,29 @@ describe('densable 2.1.289 Skill call / Le structure', () => {
   })
 
   test('nue strips preamble shell when readOnlySkillLoad', async () => {
-    const out = await executeShellCommandsInPrompt(
-      'hello !`echo hi` world',
-      {
-        options: { readOnlySkillLoad: true, tools: [] },
-      } as unknown as ToolUseContext,
-      '/test-skill',
+    // Command tests mock this business module process-wide. Exercise the real
+    // nue in a fresh registry so the read-only execution guarantee stays tested.
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        '--eval',
+        `
+        globalThis.MACRO = { VERSION: 'test' };
+        const { executeShellCommandsInPrompt } = await import(${JSON.stringify(
+          join(__dirname, '../../promptShellExecution.ts'),
+        )});
+        const out = await executeShellCommandsInPrompt(
+          ${JSON.stringify('hello !`echo hi` world')},
+          { options: { readOnlySkillLoad: true, tools: [] } },
+          '/test-skill',
+        );
+        process.stdout.write(JSON.stringify(out));
+      `,
+      ],
+      { cwd: join(__dirname, '../../../..') },
     )
+    expect(child.exitCode).toBe(0)
+    const out = JSON.parse(child.stdout.toString()) as string
     expect(out).toContain('[shell command execution disabled by policy]')
     expect(out).not.toContain('!`')
   })

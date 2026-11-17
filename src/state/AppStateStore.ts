@@ -28,7 +28,11 @@ import {
   type AttributionState,
   createEmptyAttributionState,
 } from '../utils/commitAttribution.js'
-import type { EffortValue } from '../utils/effort.js'
+import type {
+  EffortValue,
+  SessionEffortTag,
+  SettingsEffortTable,
+} from '../utils/effort.js'
 import type { FileHistoryState } from '../utils/fileHistory.js'
 import type { REPLHookContext } from '../utils/hooks/postSamplingHooks.js'
 import type { SessionHooksState } from '../utils/hooks/sessionHooks.js'
@@ -264,6 +268,15 @@ export type AppState = DeepImmutable<{
   // Unified task state - excluded from DeepImmutable because TaskState contains function types
   tasks: { [taskId: string]: TaskState }
   /**
+   * densable `transcripts` — Xm.getTranscript / updateTranscript (`Cft`).
+   */
+  transcripts: {
+    [taskId: string]: {
+      messages: readonly Message[]
+      inProgressToolUseIDs: Set<string>
+    }
+  }
+  /**
    * densable taskDecorations — per-task custom status content from
    * settings.subagentStatusLine command (agent panel row override).
    * Excluded from DeepImmutable (plain mutable map).
@@ -296,6 +309,10 @@ export type AppState = DeepImmutable<{
   foregroundedTaskId?: string
   // Task ID of in-process teammate whose transcript is being viewed (undefined = leader's view)
   viewingAgentTaskId?: string
+  /**
+   * densable `runningSubagents` — Xm.takeConcurrencySlot / getConcurrentSubagents.
+   */
+  runningSubagents: number
   // Latest companion reaction from buddy_react API (src/buddy/companionReact.ts)
   companionReaction?: string
   // Timestamp of last /buddy pet — CompanionSprite renders hearts while recent
@@ -644,6 +661,10 @@ export type AppState = DeepImmutable<{
   advisorModel?: string
   // Effort value
   effortValue?: EffortValue
+  /** densable AppState.sessionEffort — `{kind:"inherit"|"default"|"level"}`. */
+  sessionEffort?: SessionEffortTag
+  /** densable AppState.settingsEffortTable — `te()` per-model table. */
+  settingsEffortTable?: SettingsEffortTable
   /**
    * official AppState.proactivityLevel — leftover getProactivityLevel().
    */
@@ -700,6 +721,8 @@ export function getDefaultAppState(): AppState {
   return {
     settings: getInitialSettings(),
     tasks: {},
+    transcripts: {},
+    runningSubagents: 0,
     taskDecorations: {},
     agentNameRegistry: new Map(),
     sendMessagePins: {},
@@ -829,6 +852,12 @@ export function getDefaultAppState(): AppState {
     authVersion: 0,
     initialMessage: null,
     effortValue: undefined,
+    sessionEffort: { kind: 'inherit' },
+    settingsEffortTable: {
+      default: undefined,
+      legacyUserEffort: undefined,
+      byModel: {},
+    },
     proactivityLevel: undefined,
     ultracode: false,
     // densable default ultrareviewOverageConfirmed:!1

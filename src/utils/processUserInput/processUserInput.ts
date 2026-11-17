@@ -55,6 +55,7 @@ import {
   isUltraplanProductEnabled,
   replaceUltraplanKeyword,
 } from '../ultraplanKeyword.js'
+import { applyHookSessionTitle } from '../sessionStart.js'
 import { processTextPrompt } from './processTextPrompt.js'
 import {
   originIsTypedOrUnset,
@@ -64,8 +65,10 @@ import {
 } from './artStamps.js'
 import { isComposerEnter } from './composerEnter.js'
 import {
+  packPromptSubmitContext,
   promptScreenNeedsReplay,
   promptScreenPluginsChanged,
+  rewritePromptSubmitUserMessage,
   runPromptSubmit,
   runUserPromptSubmit,
   snapshotPromptScreen,
@@ -122,6 +125,11 @@ export type ProcessUserInputBaseResult = {
    * Ys getAttachmentMessages(null, ...) on early-return.
    */
   ambientAttachmentsOwed?: boolean
+  /**
+   * densable Art `I.expandedInput` (@195537000, @195547922) — expanded prompt
+   * payload when base processing rewrites the input before submission hooks.
+   */
+  expandedInput?: string | Array<ContentBlockParam>
 }
 
 /**
@@ -134,7 +142,6 @@ export const ENDED_BY_MODEL_ALLOWED_COMMANDS = new Set([
   'help',
   'exit',
   'feedback',
-  'bug',
 ])
 
 const ENDED_BY_MODEL_ALIAS_TO_NAME: Record<string, string> = {
@@ -188,6 +195,141 @@ export function isEndedByModelClearEscape(
   }
   const canonical = ENDED_BY_MODEL_ALIAS_TO_NAME[first] ?? first
   return ENDED_BY_MODEL_ALLOWED_COMMANDS.has(canonical)
+}
+
+const PROMPT_SUBMIT_MENTION_TYPES = new Set([
+  'file',
+  'already_read_file',
+  'at_mention_reference',
+  'pdf_reference',
+  'directory',
+  'mcp_resource',
+  'agent_mention',
+  'peer_mention',
+  'skill_mention',
+  'nested_memory',
+])
+
+const AT_MENTION_RE =
+  /(?:^|[\s。、？！])@(?:"[^"]+"|\S+?\b(?=[ \t]*\[[0-9a-fA-F]{6,12}\])|\S+\b)(?:[ \t]*\[[0-9a-fA-F]{6,12}\])?/g
+
+function atMentionsIn(text: string): string[] {
+  return [...text.matchAll(AT_MENTION_RE)].map(match =>
+    match[0].slice(match[0].indexOf('@')),
+  )
+}
+
+/** densable `Vs` — @mentions that appear in both rewritten and original text. */
+function sharedAtMentionText(rewritten: string, original: string): string {
+  const previous = atMentionsIn(original)
+  return atMentionsIn(rewritten)
+    .filter(token => previous.includes(token))
+    .join(' ')
+}
+
+/**
+ * densable Art after Unn: kcn pack proceeds.context as prompt.submit, mn
+ * rewrite the original user message, gn mention re-expand, Qut sessionTitle.
+ */
+async function applyPromptSubmitProceeds(
+  result: ProcessUserInputBaseResult,
+  proceeded: {
+    originalText: string
+    rawInputText?: string
+    text: string
+    context?: string[]
+    sessionTitle?: string
+  },
+  extras?: {
+    skipAttachments?: boolean | 'all' | 'mentions'
+    toolUseContext?: ProcessUserInputContext
+    history?: Message[]
+    querySource?: QuerySource
+    typed?: string
+    ambientTriggers?: string[]
+  },
+): Promise<void> {
+  const packed = await packPromptSubmitContext(proceeded.context)
+  if (packed) {
+    result.messages.push(packed)
+  }
+  let rewrittenUser: ReturnType<typeof rewritePromptSubmitUserMessage>
+  if (proceeded.text !== proceeded.originalText) {
+    rewrittenUser = rewritePromptSubmitUserMessage(
+      result.messages,
+      proceeded.originalText,
+      proceeded.text,
+    )
+  }
+  if (
+    rewrittenUser !== undefined &&
+    extras?.skipAttachments === undefined &&
+    extras?.toolUseContext !== undefined
+  ) {
+    const kept: ProcessUserInputBaseResult['messages'] = []
+    let hadPeerMention = false
+    for (const message of result.messages) {
+      if (
+        message.type !== 'attachment' ||
+        !PROMPT_SUBMIT_MENTION_TYPES.has(message.attachment.type)
+      ) {
+        kept.push(message)
+        continue
+      }
+      if (message.attachment.type === 'file') {
+        extras.toolUseContext.readFileState.delete(
+          String((message.attachment as { filename?: string }).filename ?? ''),
+        )
+      }
+      if (message.attachment.type === 'nested_memory') {
+        extras.toolUseContext.readFileState.delete(
+          String((message.attachment as { path?: string }).path ?? ''),
+        )
+      }
+      if (message.attachment.type === 'peer_mention') {
+        hadPeerMention = true
+      }
+    }
+    if (
+      extras.ambientTriggers &&
+      extras.toolUseContext.nestedMemoryAttachmentTriggers
+    ) {
+      for (const trigger of extras.ambientTriggers) {
+        extras.toolUseContext.nestedMemoryAttachmentTriggers.add(trigger)
+      }
+    }
+    const mentionText = sharedAtMentionText(
+      proceeded.text,
+      proceeded.rawInputText ?? proceeded.originalText,
+    )
+    const typedMentions =
+      extras.typed === undefined
+        ? undefined
+        : sharedAtMentionText(proceeded.text, extras.typed)
+    const mentions = await toArray(
+      getAttachmentMessages(
+        mentionText,
+        extras.toolUseContext,
+        null,
+        [],
+        extras.history,
+        extras.querySource,
+        {
+          inputMentionsOnly: true,
+          isHumanTypedPrompt: hadPeerMention,
+          ...(hadPeerMention && typedMentions !== undefined
+            ? { preExpansionInput: typedMentions }
+            : {}),
+        },
+      ),
+    )
+    const insertAt = kept.indexOf(rewrittenUser)
+    kept.splice(insertAt + 1, 0, ...mentions)
+    result.messages = kept
+  }
+  if (proceeded.sessionTitle) {
+    applyHookSessionTitle(proceeded.sessionTitle)
+  }
 }
 
 /** densable `Ys` @195539942 — splice ambient attachments at index 1. */
@@ -247,6 +389,7 @@ export async function processUserInput({
   entries,
   wait,
   promptSubmitted,
+  taskDelivery,
 }: {
   input: string | Array<ContentBlockParam>
   /**
@@ -334,6 +477,8 @@ export async function processUserInput({
   wait?: boolean
   /** densable Art `promptSubmitted` — REPL Enter screening reuse. */
   promptSubmitted?: PromptSubmittedStamp
+  /** densable BX `taskDelivery` — GetTask snapshot on As. */
+  taskDelivery?: unknown
 }): Promise<ProcessUserInputBaseResult> {
   // densable Art `using V=Ios(hss(k))` — wrap the whole turn so a skip-Unn
   // path still dispose-drops the plugin waiter.
@@ -383,7 +528,14 @@ export async function processUserInput({
     queryHeldForNextTurn !== true
       ? ('all' as const)
       : undefined
-  const effectiveSkipAttachments = skipFromFe ?? skipFromCaller
+  const effectiveSkipAttachments: 'all' | 'mentions' | undefined =
+    skipFromFe ??
+    skipFromCaller ??
+    (origin?.kind === 'plugin' ? 'all' : undefined)
+
+  const initialNestedMemoryTriggers = context.nestedMemoryAttachmentTriggers
+    ? [...context.nestedMemoryAttachmentTriggers]
+    : []
 
   const result = await processUserInputBase(
     input,
@@ -417,6 +569,7 @@ export async function processUserInput({
     artifactCommentTurn,
     shouldQueryInput,
     composerEnter,
+    taskDelivery,
   )
   queryCheckpoint('query_process_user_input_base_end')
 
@@ -503,17 +656,39 @@ export async function processUserInput({
   // densable Art Unn / yUn / Pos / $nn. skip jq.get() when ahead of
   // session start (orphanedPermission or uuid in pG).
   queryCheckpoint('query_hooks_start')
-  const inputMessage = getContentText(input) || ''
+  const submissionInput = result.expandedInput ?? input
+  const inputMessage = getContentText(submissionInput) || ''
+  const rawInputText = getContentText(input) || ''
+  const typedInput =
+    preExpansionInput ?? (typeof input === 'string' ? input : undefined)
+  const consumedNestedTriggers = (
+    context as { consumedNestedMemoryTriggers?: Iterable<string> }
+  ).consumedNestedMemoryTriggers
+  const ambientTriggers =
+    consumedNestedTriggers !== undefined
+      ? [...initialNestedMemoryTriggers, ...consumedNestedTriggers]
+      : initialNestedMemoryTriggers
   const isStartInput =
     aheadOfSessionStart === true || isAheadOfSessionStart(uuid)
-  const screenNow = snapshotPromptScreen(context)
+  let screenNow: ReturnType<typeof snapshotPromptScreen> | undefined
+  if (promptSubmitted !== undefined) {
+    try {
+      screenNow = snapshotPromptScreen(context)
+    } catch (err) {
+      logForDebugging(
+        `the drain could not read what screens a prompt now: ${err instanceof Error ? err.message : String(err)}`,
+        { level: 'error' },
+      )
+    }
+  }
   if (
     promptSubmitted === undefined ||
+    screenNow === undefined ||
     promptScreenPluginsChanged(promptSubmitted.under, screenNow)
   ) {
     const outcome = await runPromptSubmit({
       text: inputMessage,
-      originalInput: input,
+      originalInput: submissionInput,
       result,
       context,
       isStartInput,
@@ -525,17 +700,40 @@ export async function processUserInput({
       enter: entries
         ? () => registerPromptSubmitEntry(entries, result.messages)
         : undefined,
+      pastedContents,
+      origin,
+      bridgeOrigin,
+      mode,
+      turnId: uuid,
     })
     if (outcome.kind === 'return') {
       queryCheckpoint('query_hooks_end')
       return outcome.result
     }
+    await applyPromptSubmitProceeds(
+      result,
+      {
+        originalText: inputMessage,
+        rawInputText,
+        text: outcome.stamp.text,
+        context: outcome.stamp.context,
+        sessionTitle: outcome.stamp.sessionTitle,
+      },
+      {
+        skipAttachments: effectiveSkipAttachments,
+        toolUseContext: context,
+        history: messages,
+        querySource,
+        typed: typedInput,
+        ambientTriggers,
+      },
+    )
   } else if (promptScreenNeedsReplay(promptSubmitted.under, screenNow)) {
     const replay = await runUserPromptSubmit(
       promptSubmitted.text,
       result,
       context,
-      input,
+      submissionInput,
     )
     if (replay.kind === 'blocking') {
       queryCheckpoint('query_hooks_end')
@@ -550,16 +748,63 @@ export async function processUserInput({
       return result
     }
     if (entries) {
-      void registerPromptSubmitEntry(entries, result.messages)
+      void registerPromptSubmitEntry(entries, result.messages).catch(error => {
+        logForDebugging(
+          `prompt.submit entry ended before handoff: ${String(error)}`,
+        )
+      })
     }
+    await applyPromptSubmitProceeds(
+      result,
+      {
+        originalText: inputMessage,
+        rawInputText,
+        text: promptSubmitted.text,
+        context: promptSubmitted.context,
+        sessionTitle: replay.sessionTitle ?? promptSubmitted.sessionTitle,
+      },
+      {
+        skipAttachments: effectiveSkipAttachments,
+        toolUseContext: context,
+        history: messages,
+        querySource,
+        typed: typedInput,
+        ambientTriggers,
+      },
+    )
   } else if (promptSubmitted.stopped !== undefined) {
     result.messages.push(...(promptSubmitted.messages ?? []))
     result.shouldQuery = false
     result.resultText = promptSubmitted.stopped
     queryCheckpoint('query_hooks_end')
     return result
-  } else if (entries) {
-    void registerPromptSubmitEntry(entries, result.messages)
+  } else {
+    result.messages.push(...(promptSubmitted.messages ?? []))
+    if (entries) {
+      void registerPromptSubmitEntry(entries, result.messages).catch(error => {
+        logForDebugging(
+          `prompt.submit entry ended before handoff: ${String(error)}`,
+        )
+      })
+    }
+    await applyPromptSubmitProceeds(
+      result,
+      {
+        originalText: inputMessage,
+        rawInputText,
+        text: promptSubmitted.text,
+        context: promptSubmitted.context,
+        sessionTitle: promptSubmitted.sessionTitle,
+      },
+      {
+        skipAttachments: effectiveSkipAttachments,
+        toolUseContext: context,
+        history: messages,
+        querySource,
+        typed: typedInput,
+        ambientTriggers,
+      },
+    )
   }
   queryCheckpoint('query_hooks_end')
 
@@ -626,6 +871,7 @@ async function processUserInputBase(
   artifactCommentTurn?: unknown,
   shouldQuery?: boolean,
   composerEnter?: unknown,
+  taskDelivery?: unknown,
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -1057,6 +1303,7 @@ async function processUserInputBase(
       wakeupSource,
       hostInitiator,
       artifactCommentTurn,
+      taskDelivery,
     ),
     imageMetadataTexts,
   )

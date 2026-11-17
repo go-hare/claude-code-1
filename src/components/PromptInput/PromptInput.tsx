@@ -119,7 +119,7 @@ import {
 } from '../../utils/promptInputCursorStore.js';
 import type { PromptDraftController } from '../../utils/promptDraftController.js';
 import { mergeSpellcheckHighlights, useSpellcheckHighlights } from '../../utils/spellcheck/index.js';
-import { Cursor } from '../../utils/Cursor.js';
+import { Cursor } from '@anthropic/ink';
 import { getGlobalConfig, type PastedContent, saveGlobalConfig } from '../../utils/config.js';
 import {
   findUltraplanTriggerPositions,
@@ -765,6 +765,7 @@ function PromptInput({
   const [showBridgeDialog, setShowBridgeDialog] = useState(false);
   const [teammateFooterIndex, setTeammateFooterIndex] = useState(0);
   const [pluginSuppressesHint, setPluginSuppressesHint] = useState(false);
+  const [pluginPromptHintTail, setPluginPromptHintTail] = useState('');
   // -1 sentinel: tasks pill is selected but no specific agent row is selected yet.
   // First ↓ selects the pill, second ↓ moves to row 0. Prevents double-select
   // of pill + row when both bg tasks (pill) and forked agents (rows) are visible.
@@ -3582,12 +3583,14 @@ function PromptInput({
         historyFailedMatch={historyFailedMatch}
         onOpenTasksDialog={isFullscreenEnvEnabled() ? handleOpenTasksDialog : undefined}
         leftArrowAgain={leftArrowHintShown}
+        promptHintTail={pluginPromptHintTail}
       />
       <PluginPromptHintSite
         isDraft={input.length > 0}
         isWorking={isLoading}
         isInteractive={suggestions.length > 0 || helpOpen || isSearchingHistory || exitMessage.show || isPasting}
         onSuppressDefaultHint={setPluginSuppressesHint}
+        onTail={setPluginPromptHintTail}
       />
       {isFullscreenEnvEnabled() ? (
         // densable X1 — absolute 1-row slot in the gap above the prompt border.

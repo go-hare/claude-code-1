@@ -39,8 +39,16 @@ describe('densable 2.1.247 #2 sr Et label', () => {
       join(import.meta.dir, '../../../screens/REPL.tsx'),
       'utf8',
     )
-    expect(repl).toContain('const { storageV5 } = useSessionServices()')
-    const pick = repl.slice(repl.indexOf('const pickNewSpinnerTip'))
+    expect(repl).toMatch(
+      /const\s*\{[^}]*\bstorageV5\b[^}]*\}\s*=\s*useSessionServices\(\)/,
+    )
+    const pick = repl.slice(
+      repl.indexOf('const pickNewSpinnerTip'),
+      repl.indexOf(
+        'const resetLoadingState',
+        repl.indexOf('const pickNewSpinnerTip'),
+      ),
+    )
     expect(pick).toContain('session: { host: getReplDiffHost() }')
     expect(pick).toContain('storageV5,')
     expect(pick).not.toContain('getPinnedStorageV5()')

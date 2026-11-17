@@ -3,7 +3,7 @@ import type { UUID } from 'crypto'
 import { isAbsolute, normalize, resolve, sep } from 'path'
 import { wrapText } from '@anthropic/ink'
 import { logEvent } from '../services/analytics/index.js'
-import { getCwdState } from '../bootstrap/state.js'
+import { getCwdState, getMainThreadAgentId } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { findToolByName, type Tool, type Tools } from '../Tool.js'
 import { getPlansDirectory } from './plans.js'
@@ -1032,17 +1032,7 @@ export function leftoverIhrStartXe(): void {
   if (leftoverXeStarted) return
   leftoverXeStarted = true
   leftoverIhrXeSubscribe(event => {
-    let main = 'main'
-    try {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const { getSessionId } =
-        require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
-      /* eslint-enable @typescript-eslint/no-require-imports */
-      main = getSessionId()
-    } catch {
-      // isolation — tests
-    }
-    leftoverIhrApplyEvent(event, main)
+    leftoverIhrApplyEvent(event)
   })
 }
 
@@ -1436,9 +1426,9 @@ export function leftoverIhrApplyCompactProgress(
   }
 }
 
-/** densable `Ihr` `d` / `Ve()` main-session bind. */
-export function leftoverIhrMain(mainSessionId: string) {
-  const bind = leftoverIhrBind(mainSessionId)
+/** densable `Ihr` `d` — `a(Ve())` each method. Optional id for tests. */
+export function leftoverIhrMain(mainSessionId?: string) {
+  const bind = leftoverIhrBind(mainSessionId ?? getMainThreadAgentId())
   return {
     setMode: bind.setMode,
     setMessage: bind.setMessage,
@@ -1478,6 +1468,15 @@ export function leftoverHhr(sessionId: string): number | null {
 export function leftoverIhrGet(sessionId: string): LeftoverIhrSlice {
   leftoverIhrRequireStore()
   return leftoverIhrState[sessionId] ?? leftoverIhrDefault
+}
+
+/**
+ * densable `Ihr.get(t)` — `n.getState()[t??Ve()]??y`.
+ * vdt `N.get()` / spinnerStore.get. No Xae throw.
+ */
+export function leftoverIhrPeek(sessionId?: string): LeftoverIhrSlice {
+  const id = sessionId ?? getMainThreadAgentId()
+  return leftoverIhrState[id] ?? leftoverIhrDefault
 }
 
 /** True when Ihr has materialized this session (not freeze `y`). */
@@ -1522,7 +1521,7 @@ export type LeftoverIhrEvent =
 
 export function leftoverIhrApplyEvent(
   event: LeftoverIhrEvent,
-  mainSessionId: string,
+  mainSessionId?: string,
 ): void {
   switch (event.kind) {
     case 'agent-mode':
@@ -1546,6 +1545,19 @@ export function leftoverIhrApplyEvent(
     case 'main-colors':
       leftoverIhrMain(mainSessionId).setColors(event.color, event.shimmerColor)
   }
+}
+
+/** densable Ihr instance `Wr` — REPL `spinnerStore`. */
+export const leftoverIhr = {
+  get: leftoverIhrPeek,
+  bind: leftoverIhrBind,
+  subscribe: leftoverIhrSubscribe,
+  getSnapshot: leftoverIhrGetSnapshot,
+  evict: leftoverIhrEvict,
+  applyEvent: leftoverIhrApplyEvent,
+  get main() {
+    return leftoverIhrMain()
+  },
 }
 
 /**

@@ -66,9 +66,11 @@ describe('densable PKe submit placeholder baseline', () => {
     expect(replSrc).not.toContain(
       'open.find(d => d.kind === SANDBOX_NETWORK_ACCESS_KIND)',
     )
-    // densable y2A[FRr] = "sandbox request"
+    // densable Sye bag (uio sandbox via pendingSandboxRequest), not analog tab ternary
     expect(replSrc).toContain(
-      'pendingSandboxRequest || topDialogKind === SANDBOX_NETWORK_ACCESS_KIND',
+      'pendingSandboxRequest: Boolean(pendingSandboxRequest)',
     )
+    expect(replSrc).toContain('resolveSessionPromptStatus')
+    expect(replSrc).not.toContain("sessionStatus !== 'waiting'")
   })
 })

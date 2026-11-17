@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box } from '@anthropic/ink';
-import { getSessionId } from '../bootstrap/state.js';
+import { getMainThreadAgentId } from '../bootstrap/state.js';
 import { leftoverZxt } from '../components/Spinner/leftoverZxt.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
@@ -69,7 +69,7 @@ export { leftoverIhrSubscribe };
 /** densable `dJ` / `Mhr(v)` — retry row when store retryStatus is set. */
 export function LeftoverMhrRetryRow({ agentId }: { agentId?: string }): React.ReactNode {
   useLeftoverIhrStore();
-  const session = agentId ?? getSessionId();
+  const session = agentId ?? getMainThreadAgentId();
   const retry = useSyncExternalStore(
     leftoverIhrSubscribe,
     () => leftoverIhrGet(session).retryStatus,

@@ -168,6 +168,7 @@ export function useScheduledTasks({
         isMeta: true,
         priority: 'later',
         skipSlashCommands: true,
+        skipAttachments: true,
         modelScheduledOrigin: true,
         wakeupSource,
       })
@@ -299,6 +300,7 @@ export function useScheduledTasks({
             isMeta: true,
             priority: 'later',
             skipSlashCommands: true,
+            skipAttachments: true,
             modelScheduledOrigin: true,
             wakeupSource: wakeupSourceForCronTask(task.kind),
           })

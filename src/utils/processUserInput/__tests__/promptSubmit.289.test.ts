@@ -15,12 +15,17 @@ import {
 } from '../../handlePromptSubmit.js'
 import { extractImagesFromValue } from '../../messageQueueManager.js'
 import {
+  collectPromptSubmitAttachments,
   createArrivedLatch,
   promptScreenNeedsReplay,
   promptScreenPluginsChanged,
   raceArrived,
+  resolvePromptSubmitPayloadOrigin,
+  rewritePromptSubmitContent,
+  rewritePromptSubmitUserMessage,
   wrapQueuedSettle,
 } from '../promptSubmit.js'
+import { createUserMessage } from '../../messages.js'
 import {
   beginSessionStartLatch,
   getPromptSubmitLatch,
@@ -145,6 +150,44 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
       'utf8',
     )
     expect(unn).toContain("hasMatchingFunctionHook('prompt.submit')")
+    expect(unn).toContain('shouldSkipHookDueToTrust')
+    expect(unn).toContain('buildPromptSubmitPayload')
+    expect(unn).toContain('isMeta: true')
+    expect(processUserInput).toContain('packPromptSubmitContext')
+    expect(processUserInput).toContain('rewritePromptSubmitUserMessage')
+    expect(processUserInput).toContain('applyPromptSubmitProceeds')
+    expect(processUserInput).toContain('PROMPT_SUBMIT_MENTION_TYPES')
+    expect(processUserInput).toContain('inputMentionsOnly')
+    const attachments = readFileSync(
+      join(ROOT, 'src/utils/attachments.ts'),
+      'utf8',
+    )
+    expect(attachments).toContain('inputMentionsOnly?: boolean')
+    const deferred = readFileSync(
+      join(ROOT, 'src/hooks/useDeferredHookMessages.ts'),
+      'utf8',
+    )
+    expect(deferred).toContain('takeInitialUserMessage')
+    const assistant = readFileSync(
+      join(ROOT, 'src/components/messages/AssistantTextMessage.tsx'),
+      'utf8',
+    )
+    expect(assistant).toContain('evaluateUiRender')
+    const fillHost = readFileSync(
+      join(ROOT, 'src/utils/plugins/functionHooksModules.ts'),
+      'utf8',
+    )
+    expect(fillHost).toContain('return runPromptFill(rec ?? {}, plugin)')
+    expect(fillHost).toContain('createHeldPressStore')
+    expect(fillHost).toContain('heldPressCount')
+    expect(fillHost).toContain('holdDrawing')
+    const permissions = readFileSync(
+      join(ROOT, 'src/utils/permissions/permissions.ts'),
+      'utf8',
+    )
+    expect(permissions).toContain(
+      'hookAllowVouch: context.hookAllowVouched === true',
+    )
     const sessionStart = readFileSync(
       join(ROOT, 'src/utils/sessionStart.ts'),
       'utf8',
@@ -411,6 +454,61 @@ describe('densable 2.1.289 WZe abort lr/XLr/R1e', () => {
           filename: 'image1',
         },
       },
+    })
+  })
+})
+
+describe('densable 2.1.289 Jun / mn / oe remainder', () => {
+  test('Jun replaces string content and last text block', () => {
+    expect(rewritePromptSubmitContent('hello', 'world')).toBe('world')
+    expect(rewritePromptSubmitContent('hello', '   ')).toBe('')
+    expect(
+      rewritePromptSubmitContent(
+        [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'x' },
+          },
+          { type: 'text', text: 'hello' },
+        ],
+        'world',
+      ),
+    ).toEqual([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'x' },
+      },
+      { type: 'text', text: 'world' },
+    ])
+  })
+
+  test('mn rewrites the first non-meta user message', () => {
+    const user = createUserMessage({ content: 'typed' })
+    const found = rewritePromptSubmitUserMessage([user], 'typed', 'rewritten')
+    expect(found).toBe(user)
+    expect(user.message.content).toBe('rewritten')
+  })
+
+  test('oe attachments collect image pastes', () => {
+    expect(
+      collectPromptSubmitAttachments('hi', {
+        1: {
+          id: 1,
+          type: 'image',
+          content: 'abc',
+          mediaType: 'image/png',
+          filename: 'a.png',
+        },
+      }),
+    ).toEqual([{ type: 'image', mediaType: 'image/png', filename: 'a.png' }])
+  })
+
+  test('iOo maps sdk promptSource and wakeup', () => {
+    expect(resolvePromptSubmitPayloadOrigin({ promptSource: 'sdk' })).toEqual({
+      kind: 'sdk',
+    })
+    expect(resolvePromptSubmitPayloadOrigin({ wakeupSource: 'loop' })).toEqual({
+      kind: 'scheduled-trigger',
     })
   })
 })

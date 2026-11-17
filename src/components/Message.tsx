@@ -89,6 +89,8 @@ export type Props = {
   hasMetadataHeader?: boolean;
   /** densable oC followsSpeakerLabel — previous renderable row is speaker_label. */
   followsSpeakerLabel?: boolean;
+  /** densable oC followsInboundLabel — preceding speaker_label has speaker.kind === 'inbound'. */
+  followsInboundLabel?: boolean;
   /** Last thinking block(s) (uuid:index) visible in transcript; Set = one per turn. */
   lastThinkingBlockId?: string | ReadonlySet<string> | null;
   /** UUID of the latest user bash output message (for auto-expanding) */
@@ -116,6 +118,7 @@ function MessageImpl({
   isSplitUserContinuation = false,
   hasMetadataHeader = false,
   followsSpeakerLabel = false,
+  followsInboundLabel = false,
   lastThinkingBlockId,
   latestBashOutputUUID,
 }: Props): React.ReactNode {
@@ -138,6 +141,7 @@ function MessageImpl({
                 verbose={verbose}
                 origin={att.origin}
                 messageId={message.uuid}
+                followsSpeakerLabel={followsSpeakerLabel || followsInboundLabel}
               />
             </Box>
           );
@@ -153,12 +157,16 @@ function MessageImpl({
       );
     }
     case 'assistant': {
-      // densable SFa — prefer MessageDisplay transformed first *text* when !verbose
-      // (Tth writes displayContent onto the first text block; thinking/tool may
-      // precede it, so index===0 is wrong.)
+      // densable SFa / oC @207742127 — look up firstTextBlockUuidByMessageID so
+      // normalized single-block assistant messages only apply displayContent on
+      // the first text block of the API message, falling back to contentBlocks
+      // findIndex when lookups lacks the entry.
       const apiMessageId = (message.message as { id?: string }).id;
       const contentBlocks = message.message.content as BetaContentBlock[];
+      const firstTextUuid =
+        apiMessageId !== undefined ? lookups.firstTextBlockUuidByMessageID.get(apiMessageId) : undefined;
       const firstTextBlockIndex = contentBlocks.findIndex(b => b.type === 'text');
+      const isFirstTextForMessage = firstTextUuid === undefined || firstTextUuid === message.uuid;
       return (
         <Box flexDirection="column" width={containerWidth ?? '100%'}>
           {contentBlocks.map((_, index) => (
@@ -184,7 +192,7 @@ function MessageImpl({
               model={(message.message as { model?: string }).model}
               apiMessageId={apiMessageId}
               messageId={message.uuid}
-              isFirstTextBlock={index === firstTextBlockIndex}
+              isFirstTextBlock={isFirstTextForMessage && index === firstTextBlockIndex}
               isApiError={message.isApiErrorMessage === true}
               apiErrorKind={(message as { error?: string }).error}
             />
@@ -236,6 +244,7 @@ function MessageImpl({
               isSplitUserContinuation={isSplitUserContinuation}
               hasMetadataHeader={hasMetadataHeader}
               followsSpeakerLabel={followsSpeakerLabel}
+              followsInboundLabel={followsInboundLabel}
               lookups={lookups}
               isTranscriptMode={isTranscriptMode}
             />
@@ -286,12 +295,19 @@ function MessageImpl({
         );
       }
       if (message.subtype === 'local_command') {
+        const commandRun =
+          'commandRun' in message && message.commandRun !== null && typeof message.commandRun === 'object'
+            ? (message.commandRun as { command?: string; args?: string })
+            : undefined;
         return (
           <UserTextMessage
             addMargin={addMargin}
             param={{ type: 'text', text: String(message.content ?? '') }}
             verbose={verbose}
             isTranscriptMode={isTranscriptMode}
+            requestId={message.uuid}
+            messageId={message.uuid}
+            commandRun={commandRun}
           />
         );
       }
@@ -360,6 +376,7 @@ function UserMessage({
   isSplitUserContinuation,
   hasMetadataHeader,
   followsSpeakerLabel,
+  followsInboundLabel,
   lookups,
   isTranscriptMode,
 }: {
@@ -375,6 +392,7 @@ function UserMessage({
   isSplitUserContinuation: boolean;
   hasMetadataHeader: boolean;
   followsSpeakerLabel: boolean;
+  followsInboundLabel: boolean;
   lookups: ReturnType<typeof buildMessageLookups>;
   isTranscriptMode: boolean;
 }): React.ReactNode {
@@ -382,16 +400,12 @@ function UserMessage({
   switch (param.type) {
     case 'text': {
       const stored = message.origin;
-      // densable oC: Wr is decided in UserTextMessage via uM. Forward plugin /
-      // channel / peer / observer so BX still sees origin (bare peer = UDS).
-      const originKind = stored?.kind;
-      const origin =
-        stored !== undefined &&
-        (originKind === 'plugin' || originKind === 'channel' || originKind === 'peer' || originKind === 'observer')
-          ? stored
-          : undefined;
+      // densable oC Wr uses raw origin (uM needs peer.senderTaskId).
+      // TDe HAS origin is vzn(stored) — applied at PluginUserMessageSite.
+      const origin = stored;
       const task = 'task' in message ? message.task : undefined;
       const from = 'from' in message ? message.from : undefined;
+      const taskDelivery = 'taskDelivery' in message ? (message as { taskDelivery?: unknown }).taskDelivery : undefined;
       return (
         <UserTextMessage
           addMargin={addMargin}
@@ -402,10 +416,12 @@ function UserMessage({
           timestamp={message.timestamp as string | undefined}
           requestId={message.uuid}
           origin={origin}
-          isExpanded={isTranscriptMode}
+          isExpanded={Boolean(verbose || isTranscriptMode)}
           followsSpeakerLabel={followsSpeakerLabel}
+          followsInboundLabel={followsInboundLabel}
           {...(task !== undefined && { task })}
           {...(from !== undefined && { from })}
+          {...(taskDelivery !== undefined && { taskDelivery })}
         />
       );
     }
@@ -542,10 +558,10 @@ function AssistantMessageBlock({
         />
       );
     case 'text': {
-      // densable: if (me !== void 0 && !R) { if (!ie) return null; ... }
+      // densable ff @207752950: if (me !== void 0 && !R) { if (!ie) return null; ... }
       let textParam = param as TextBlockParam;
       if (displayedOverride !== undefined && !verbose) {
-        if (!isFirstTextBlock || displayedOverride === '') return null;
+        if (!isFirstTextBlock) return null;
         textParam = { type: 'text', text: displayedOverride };
       }
       return (
@@ -649,6 +665,8 @@ export function areMessagePropsEqual(prev: Props, next: Props): boolean {
   if (
     prev.isUserContinuation !== next.isUserContinuation ||
     prev.isSplitUserContinuation !== next.isSplitUserContinuation ||
+    prev.followsSpeakerLabel !== next.followsSpeakerLabel ||
+    prev.followsInboundLabel !== next.followsInboundLabel ||
     prev.hasMetadataHeader !== next.hasMetadataHeader ||
     prev.shouldShowDot !== next.shouldShowDot
   ) {

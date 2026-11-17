@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import figures from 'figures';
 import * as React from 'react';
-import { memo, type ReactNode, useContext, useMemo, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { getBridgeStatus } from '../../bridge/bridgeStatusUtil.js';
 import { useSetPromptOverlay } from '../../context/promptOverlayContext.js';
@@ -13,7 +13,7 @@ import { AccessibilityContext, Box, Byline, KeyboardShortcutHint, Link, Text, us
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
+import { type AppState, AppStoreContext, useAppState, useSetAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import type { Message } from '../../types/message.js';
 import type { PromptInputMode, VimMode } from '../../types/textInputTypes.js';
@@ -21,7 +21,12 @@ import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getPipeDisplayRole, isPipeControlled } from '../../utils/pipeTransport.js';
 import { isUndercover } from '../../utils/undercover.js';
+import { memoryToggledOff } from '../../bootstrap/state.js';
+import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
+import { getRenderVersion, subscribeRenderInvalidation } from '../../utils/render/invalidateAllRenders.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import { useUiRenderHost } from '../hooks/useUiRenderHost.js';
+import { PluginRenderedTree } from '../PluginRasterPanes.js';
 import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
 import { Notifications } from './Notifications.js';
 import { PromptInputFooterLeftSide } from './PromptInputFooterLeftSide.js';
@@ -78,6 +83,7 @@ type Props = {
   historyFailedMatch: boolean;
   onOpenTasksDialog?: (taskId?: string) => void;
   leftArrowAgain?: boolean;
+  promptHintTail?: string;
 };
 
 function PromptInputFooter({
@@ -119,6 +125,7 @@ function PromptInputFooter({
   historyFailedMatch,
   onOpenTasksDialog,
   leftArrowAgain,
+  promptHintTail,
 }: Props): ReactNode {
   const settings = useSettings();
   const { columns } = useTerminalSize();
@@ -199,26 +206,35 @@ function PromptInputFooter({
             <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />
           )}
           <PipeStatusInline />
-          <PromptInputFooterLeftSide
-            exitMessage={exitMessage}
-            vimMode={vimMode}
-            hideVimModeIndicator={hideVimModeIndicator}
-            mode={mode}
-            toolPermissionContext={toolPermissionContext}
-            suppressHint={suppressHint}
-            isLoading={isLoading}
-            tasksSelected={pillSelected}
-            teamsSelected={teamsSelected}
-            teammateFooterIndex={teammateFooterIndex}
-            tmuxSelected={tmuxSelected}
-            isPasting={isPasting}
-            isSearching={isSearching}
-            historyQuery={historyQuery}
-            setHistoryQuery={setHistoryQuery}
-            historyFailedMatch={historyFailedMatch}
-            onOpenTasksDialog={onOpenTasksDialog}
-            leftArrowAgain={leftArrowAgain}
-          />
+          <Box flexDirection="row">
+            <Box flexShrink={promptHintTail && !suppressHint ? 0 : 1}>
+              <PromptInputFooterLeftSide
+                exitMessage={exitMessage}
+                vimMode={vimMode}
+                hideVimModeIndicator={hideVimModeIndicator}
+                mode={mode}
+                toolPermissionContext={toolPermissionContext}
+                suppressHint={suppressHint}
+                isLoading={isLoading}
+                tasksSelected={pillSelected}
+                teamsSelected={teamsSelected}
+                teammateFooterIndex={teammateFooterIndex}
+                tmuxSelected={tmuxSelected}
+                isPasting={isPasting}
+                isSearching={isSearching}
+                historyQuery={historyQuery}
+                setHistoryQuery={setHistoryQuery}
+                historyFailedMatch={historyFailedMatch}
+                onOpenTasksDialog={onOpenTasksDialog}
+                leftArrowAgain={leftArrowAgain}
+              />
+            </Box>
+            {promptHintTail && !suppressHint ? (
+              <Box flexShrink={1}>
+                <Text dimColor wrap="truncate">{` · ${promptHintTail}`}</Text>
+              </Box>
+            ) : null}
+          </Box>
         </Box>
         <Box flexShrink={0} marginLeft="auto" flexDirection="column" alignItems="flex-end">
           {isFullscreen ? null : (
@@ -296,6 +312,55 @@ function useVisibleBridgeStatus(): BridgeStatusValue | null {
   return raw !== null && isBridgeEnabled() ? raw : null;
 }
 
+/**
+ * densable `jF` / SessionStateRow — ui.render SessionMode. Default engine is
+ * dimColor + optional ` · ` + `modes.join(" & ")`. Empty modes draw nothing.
+ */
+function SessionStateRow({ modes, separated }: { modes: string[]; separated: boolean }): React.ReactNode {
+  const { columns, rows } = useTerminalSize();
+  const rendered = useUiRenderHost({
+    component: 'SessionMode',
+    requestId: 'session-mode',
+    props: { modes },
+    viewport: { columns, rows },
+  });
+  if (rendered.drawPending) {
+    return <Box drawPending minHeight={rendered.minHeight} />;
+  }
+  const shownModes = Array.isArray(rendered.props.modes)
+    ? rendered.props.modes.filter((item): item is string => typeof item === 'string')
+    : modes;
+  if (shownModes.length === 0) {
+    return rendered.pluginTree !== undefined ? (
+      <PluginRenderedTree
+        node={rendered.pluginTree}
+        plugin={rendered.pluginName}
+        requestId="session-mode"
+        component="SessionMode"
+        engine={null}
+      />
+    ) : null;
+  }
+  const engine = (
+    <Text dimColor>
+      {separated ? ' · ' : ''}
+      {shownModes.join(' & ')}
+    </Text>
+  );
+  if (rendered.pluginTree !== undefined) {
+    return (
+      <PluginRenderedTree
+        node={rendered.pluginTree}
+        plugin={rendered.pluginName}
+        requestId="session-mode"
+        component="SessionMode"
+        engine={engine}
+      />
+    );
+  }
+  return engine;
+}
+
 function FooterRightIndicators({
   debug,
   bridgeSelected,
@@ -340,11 +405,41 @@ function FooterRightIndicators({
     items.push(<BridgeStatusIndicator key="bridge" status={bridgeStatus} bridgeSelected={bridgeSelected} />);
   }
 
-  if (items.length === 0) return null;
+  // densable Z1 (@209095150): SessionMode mounts when modeLabels are non-empty
+  // or a ui.render hook matches. Subscribe via useSyncExternalStore so memory
+  // pause and dynamic SessionMode ui.render hook changes re-render reactively.
+  const appStore = useContext(AppStoreContext);
+  const subscribeFooterSessionState = useCallback(
+    (onStoreChange: () => void) => {
+      const unsubRender = subscribeRenderInvalidation(onStoreChange);
+      const unsubStore = appStore ? appStore.subscribe(onStoreChange) : () => {};
+      return () => {
+        unsubRender();
+        unsubStore();
+      };
+    },
+    [appStore],
+  );
+  useSyncExternalStore(
+    subscribeFooterSessionState,
+    () => `${memoryToggledOff() ? '1' : '0'}:${getRenderVersion('ui.render')}`,
+    () => `${memoryToggledOff() ? '1' : '0'}:${getRenderVersion('ui.render')}`,
+  );
+  const modeLabels = memoryToggledOff() ? ['memory paused'] : [];
+  const hasSessionModeHook = hasMatchingFunctionHook('ui.render', {
+    component: 'SessionMode',
+  });
+  const sessionMode =
+    modeLabels.length > 0 || hasSessionModeHook ? (
+      <SessionStateRow key="session-mode" modes={modeLabels} separated={items.length > 0} />
+    ) : null;
+
+  if (items.length === 0 && sessionMode === null) return null;
 
   return (
     <Box flexShrink={0}>
-      <Byline>{items}</Byline>
+      {items.length > 0 ? <Byline>{items}</Byline> : null}
+      {sessionMode}
     </Box>
   );
 }

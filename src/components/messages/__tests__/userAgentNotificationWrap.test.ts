@@ -9,7 +9,15 @@ describe('UserAgentNotificationMessage wrap', () => {
       join(import.meta.dir, '../UserAgentNotificationMessage.tsx'),
       'utf8',
     )
-    expect(src).toContain('flexDirection="column"')
+    // Gold Sp/_p summary host; Li's detached tool header has its own row.
+    const summaryHost = src.slice(
+      src.indexOf('export function UserAgentNotificationMessage('),
+      src.indexOf('if (messageId === undefined || skipSite)'),
+    )
+    expect(summaryHost).toContain('flexDirection="column"')
+    expect(summaryHost).toMatch(
+      /<Text>\s*<Text aria-hidden color=\{color\}>\s*\{BLACK_CIRCLE\}\s*<\/Text>\{' '\}\s*\{shownSummary\}/,
+    )
     expect(src).toContain('aria-hidden')
     expect(src).toContain('{BLACK_CIRCLE}')
     expect(src).toContain("{' '}")
@@ -17,9 +25,9 @@ describe('UserAgentNotificationMessage wrap', () => {
     expect(src).toContain('unescapeXmlEntities')
     expect(src).toContain("extractTag(text, 'duration_ms')")
     expect(src).toContain('formatDuration')
-    expect(src).not.toMatch(/flexGrow=\{/)
-    expect(src).not.toContain('width="100%"')
-    expect(src).not.toContain('flexDirection="row"')
+    expect(summaryHost).not.toMatch(/flexGrow=\{/)
+    expect(summaryHost).not.toContain('width="100%"')
+    expect(summaryHost).not.toContain('flexDirection="row"')
   })
 
   test('orphan shell summary stays a single long paragraph for the wrap path', () => {

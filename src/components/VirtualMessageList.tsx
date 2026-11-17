@@ -83,9 +83,9 @@ function messageMatchesRevealRequestId(msg: RenderableMessage, requestId: string
  */
 export type VirtualItemKeyCache = {
   keys: string[];
-  uuids: string[];
+  uuids: (string | undefined)[];
   seen: Map<string, number>;
-  itemKey: ((msg: RenderableMessage) => string) | null;
+  itemKey: ((msg: RenderableMessage, index?: number) => string) | null;
   loggedDups: Set<string>;
 };
 
@@ -132,14 +132,14 @@ function shortMsgType(msg: RenderableMessage): string {
  */
 export function buildVirtualItemKeys(
   messages: readonly RenderableMessage[],
-  itemKey: (msg: RenderableMessage) => string,
+  itemKey: (msg: RenderableMessage, index?: number) => string,
   cache: VirtualItemKeyCache,
   typeLabel: (msg: RenderableMessage) => string = shortMsgType,
 ): string[] {
   let o = 0;
   if (cache.itemKey === itemKey && messages.length >= cache.keys.length) {
     const s = cache.keys.length;
-    while (o < s && messages[o]?.uuid === cache.uuids[o]) o++;
+    while (o < s && messages[o]?.uuid !== undefined && messages[o]?.uuid === cache.uuids[o]) o++;
   }
   if (o < cache.keys.length) {
     cache.keys = [];
@@ -152,7 +152,7 @@ export function buildVirtualItemKeys(
   let firstDupSamples: Map<string, string> | null = null;
   for (; o < messages.length; o++) {
     const msg = messages[o]!;
-    const base = itemKey(msg);
+    const base = itemKey(msg, o);
     const count = cache.seen.get(base);
     if (count === undefined) {
       cache.seen.set(base, 1);
@@ -237,7 +237,7 @@ type Props = {
   /** Invalidates heightCache on change — cached heights from a different
    *  width are wrong (text rewrap → black screen on scroll-up after widen). */
   columns: number;
-  itemKey: (msg: RenderableMessage) => string;
+  itemKey: (msg: RenderableMessage, index?: number) => string;
   renderItem: (msg: RenderableMessage, index: number) => React.ReactNode;
   /** Fires when a message Box is clicked (toggle per-message verbose). */
   onItemClick?: (msg: RenderableMessage) => void;
@@ -480,7 +480,7 @@ export function VirtualMessageList({
   useImperativeHandle(cursorNavRef, (): MessageActionsNav => {
     const select = (m: NavigableMessage) =>
       setCursor?.({
-        uuid: m.uuid,
+        uuid: m.uuid ?? '',
         msgType: m.type as import('./messageActions.js').NavigableType,
         expanded: false,
         toolName: toolCallOf(m)?.name,

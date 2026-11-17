@@ -9,6 +9,7 @@ import type {
 } from 'src/types/message.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { PermissionMode } from '../../types/permissions.js'
+import { getBashTaskDeliveryBag } from '../bashTaskDeliveryOutcomes.js'
 import { createUserMessage } from '../messages.js'
 import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js'
 import { startInteractionSpan } from '../telemetry/sessionTracing.js'
@@ -30,6 +31,7 @@ export function processTextPrompt(
   wakeupSource?: string,
   hostInitiator?: unknown,
   artifactCommentTurn?: unknown,
+  taskDelivery?: unknown,
 ): {
   messages: (UserMessage | AttachmentMessage | SystemMessage)[]
   shouldQuery: boolean
@@ -80,6 +82,17 @@ export function processTextPrompt(
     ...stampTelemetry,
   })
 
+  // densable pun @191452578: skip stamping taskDelivery when GetTask already fetched.
+  const deliveryTaskId =
+    taskDelivery && typeof taskDelivery === 'object'
+      ? (taskDelivery as { taskId?: unknown }).taskId
+      : undefined
+  const effectiveTaskDelivery =
+    typeof deliveryTaskId === 'string' &&
+    getBashTaskDeliveryBag().bashTaskSnapshots.get(deliveryTaskId)?.fetched
+      ? undefined
+      : taskDelivery
+
   // If we have pasted images, create a message with image content
   if (imageContentBlocks.length > 0) {
     // Build content: text first, then images below
@@ -96,6 +109,9 @@ export function processTextPrompt(
       permissionMode,
       isMeta: isMeta || undefined,
       origin,
+      ...(effectiveTaskDelivery !== undefined && {
+        taskDelivery: effectiveTaskDelivery,
+      }),
     })
 
     return {
@@ -110,6 +126,9 @@ export function processTextPrompt(
     permissionMode,
     isMeta: isMeta || undefined,
     origin,
+    ...(effectiveTaskDelivery !== undefined && {
+      taskDelivery: effectiveTaskDelivery,
+    }),
   })
 
   return {

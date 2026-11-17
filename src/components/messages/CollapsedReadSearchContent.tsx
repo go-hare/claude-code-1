@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useInterval } from 'usehooks-ts';
 import { TASK_NOTIFICATION_TAG } from '../../constants/xml.js';
 import { useMinDisplayTime } from '../../hooks/useMinDisplayTime.js';
-import { Ansi, Box, Text, useTheme, useTerminalSize } from '@anthropic/ink';
+import { Ansi, Box, Text, useTheme, useTerminalSize, type DOMElement } from '@anthropic/ink';
 import { filterToolProgressMessages, findToolByName, type Tools } from '../../Tool.js';
 import { getReplPrimitiveTools } from '@claude-code/builtin-tools/tools/REPLTool/primitiveTools.js';
 import type { CollapsedReadSearchGroup, NormalizedAssistantMessage, ProgressMessage } from '../../types/message.js';
@@ -24,7 +24,7 @@ import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { leftoverIhrThinkingStartedAt, useLeftoverIhrStore } from '../../state/leftoverIhrStore.js';
-import { getSessionId } from '../../bootstrap/state.js';
+import { getMainThreadAgentId } from '../../bootstrap/state.js';
 import {
   CANCEL_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
@@ -34,11 +34,14 @@ import {
   type buildMessageLookups,
 } from '../../utils/messages.js';
 import { extractSafeToolInputFields } from '../../utils/safeToolInput.js';
+import { getPanesTerminalSize, subscribePanes } from '../../utils/plugins/functionHooksModules.js';
 import type { ThemeName } from '../../utils/theme.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
 import { Markdown } from '../Markdown.js';
 import { AssistantThinkingMessage } from './AssistantThinkingMessage.js';
+import { useUiRenderHost } from '../hooks/useUiRenderHost.js';
+import { PluginRenderedTree } from '../PluginRasterPanes.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { PrBadge } from '../PrBadge.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
@@ -56,6 +59,38 @@ const teamMemCollapsed = feature('TEAMMEM')
 // (bash commands, file reads, search patterns) are actually readable instead
 // of flickering past in a single frame.
 const MIN_HINT_DISPLAY_MS = 700;
+
+/** densable `Ht` — first tool_use block per assistant / grouped_tool_use row. */
+function toolUsesFromCollapsedGroup(
+  message: CollapsedReadSearchGroup,
+): Array<{ id: string; name: string; input: unknown }> {
+  const uses: Array<{ id: string; name: string; input: unknown }> = [];
+  for (const row of message.messages) {
+    const assistants = row.type === 'assistant' ? [row] : row.type === 'grouped_tool_use' ? row.messages : [];
+    for (const assistant of assistants) {
+      const content = assistant.message?.content;
+      const first = Array.isArray(content) ? content[0] : content;
+      if (
+        first !== undefined &&
+        typeof first === 'object' &&
+        first !== null &&
+        'type' in first &&
+        first.type === 'tool_use' &&
+        'id' in first &&
+        typeof first.id === 'string' &&
+        'name' in first &&
+        typeof first.name === 'string'
+      ) {
+        uses.push({
+          id: first.id,
+          name: first.name,
+          input: 'input' in first ? first.input : undefined,
+        });
+      }
+    }
+  }
+  return uses;
+}
 
 /** densable `ES` — `+added -removed`, omitted when both are zero. */
 function LeftoverLineDiff({ added, removed }: { added: number; removed: number }): React.ReactNode {
@@ -177,7 +212,103 @@ function VerboseErroredToolResult({
   );
 }
 
-/** Render a single tool use in verbose mode */
+type VerboseToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
+
+/**
+ * densable Qc: collapsed-group verbose ToolUse HAS host.
+ * Rewrite → Xc `content` / `toolLabel` / `outputOverride:{value}`.
+ */
+function VerboseToolUseSite({
+  content: sourceContent,
+  tools,
+  lookups,
+  inProgressToolUseIDs,
+  shouldAnimate,
+  theme,
+}: {
+  content: VerboseToolUseBlock;
+  tools: Tools;
+  lookups: ReturnType<typeof buildMessageLookups>;
+  inProgressToolUseIDs: Set<string>;
+  shouldAnimate: boolean;
+  theme: ThemeName;
+}): React.ReactNode {
+  const { columns, rows } = useTerminalSize();
+  const panesViewport = useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const viewportColumns = panesViewport?.conversationColumns ?? columns;
+  const isRunning = inProgressToolUseIDs.has(sourceContent.id);
+  const isErrored = lookups.erroredToolUseIDs.has(sourceContent.id);
+  const resultMsg = lookups.toolResultByToolUseID.get(sourceContent.id);
+  const isInterrupted = interruptedCall(resultMsg);
+  const output = resultMsg?.type === 'user' ? resultMsg.toolUseResult : undefined;
+  const rendered = useUiRenderHost({
+    component: 'ToolUse',
+    requestId: sourceContent.id,
+    props: {
+      tool_use_id: sourceContent.id,
+      tool: sourceContent.name,
+      input: sourceContent.input,
+      isRunning,
+      isErrored,
+      isInterrupted,
+      output,
+    },
+    viewport: { columns: viewportColumns, rows },
+  });
+  if (rendered.drawPending) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        drawPending
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      />
+    );
+  }
+  const content: VerboseToolUseBlock =
+    rendered.props.input === sourceContent.input ? sourceContent : { ...sourceContent, input: rendered.props.input };
+  const toolLabel =
+    typeof rendered.props.tool === 'string' && rendered.props.tool !== sourceContent.name
+      ? rendered.props.tool
+      : undefined;
+  // densable Qc: `outputOverride:q.props.output===U?void 0:{value:q.props.output}`
+  const outputOverride = rendered.props.output === output ? undefined : { value: rendered.props.output };
+  const engine = (
+    <VerboseToolUse
+      content={content}
+      tools={tools}
+      lookups={lookups}
+      inProgressToolUseIDs={inProgressToolUseIDs}
+      shouldAnimate={shouldAnimate}
+      theme={theme}
+      toolLabel={toolLabel}
+      outputOverride={outputOverride}
+    />
+  );
+  const inner =
+    rendered.pluginTree === undefined ? (
+      engine
+    ) : (
+      <PluginRenderedTree
+        node={rendered.pluginTree}
+        plugin={rendered.pluginName}
+        requestId={sourceContent.id}
+        component="ToolUse"
+        engine={engine}
+      />
+    );
+  return (
+    <Box
+      ref={rendered.hostRef as React.Ref<DOMElement>}
+      flexDirection="column"
+      {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+    >
+      {inner}
+    </Box>
+  );
+}
+
+/** densable Xc: transcript tool_use row. `Ie=C!==void 0?C.value:user.toolUseResult`. */
 function VerboseToolUse({
   content,
   tools,
@@ -185,33 +316,43 @@ function VerboseToolUse({
   inProgressToolUseIDs,
   shouldAnimate,
   theme,
+  toolLabel,
+  outputOverride,
 }: {
-  content: { type: 'tool_use'; id: string; name: string; input: unknown };
+  content: VerboseToolUseBlock;
   tools: Tools;
   lookups: ReturnType<typeof buildMessageLookups>;
   inProgressToolUseIDs: Set<string>;
   shouldAnimate: boolean;
   theme: ThemeName;
+  toolLabel?: string;
+  outputOverride?: { value: unknown };
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
   // Same REPL-primitive fallback as getSearchExtraToolsOrReadInfo — REPL mode strips
   // these from the execution tools list, but virtual messages still need them
   // to render in verbose mode.
   const tool = findToolByName(tools, content.name) ?? findToolByName(getReplPrimitiveTools(), content.name);
-  if (!tool) return null;
+  // densable Xc: `if(!le||le.isTransparentWrapper?.()) return null`
+  if (!tool || tool.isTransparentWrapper?.()) return null;
 
   const isResolved = lookups.resolvedToolUseIDs.has(content.id);
   const isError = lookups.erroredToolUseIDs.has(content.id);
   const isInProgress = inProgressToolUseIDs.has(content.id);
 
   const resultMsg = lookups.toolResultByToolUseID.get(content.id);
-  const rawToolResult = resultMsg?.type === 'user' ? resultMsg.toolUseResult : undefined;
+  const rawToolResult =
+    outputOverride !== undefined
+      ? outputOverride.value
+      : resultMsg?.type === 'user'
+        ? resultMsg.toolUseResult
+        : undefined;
   const parsedOutput = tool.outputSchema?.safeParse(rawToolResult);
   const toolResult = parsedOutput?.success ? parsedOutput.data : undefined;
 
   const parsedInput = tool.inputSchema.safeParse(content.input);
   const input = parsedInput.success ? parsedInput.data : undefined;
-  const userFacingName = tool.userFacingName(input);
+  const userFacingName = toolLabel ?? tool.userFacingName(input);
   const toolUseMessage = input ? tool.renderToolUseMessage(input, { theme, verbose: true }) : null;
   const progressMessages = lookups.progressMessagesByToolUseID.get(content.id) ?? [];
   const renderToolUseTag = tool.renderToolUseTag as
@@ -224,34 +365,41 @@ function VerboseToolUse({
         },
       ) => React.ReactNode)
     | undefined;
+  const successResult =
+    isResolved && !isError && toolResult !== undefined
+      ? tool.renderToolResultMessage?.(toolResult, filterToolProgressMessages(progressMessages), {
+          verbose: true,
+          tools,
+          theme,
+          isTranscriptMode: true,
+          input: content.input,
+        })
+      : undefined;
+  const showError = isResolved && isError;
+  // densable Xc: empty name + no success result + no error row → null
+  if (userFacingName === '' && successResult == null && !(showError && resultMsg !== undefined)) {
+    return null;
+  }
 
   return (
     <Box key={content.id} flexDirection="column" marginTop={1} backgroundColor={bg}>
-      <Box flexDirection="row">
-        <ToolUseLoader shouldAnimate={shouldAnimate && isInProgress} isUnresolved={!isResolved} isError={isError} />
-        <Text>
-          <Text bold>{userFacingName}</Text>
-          {toolUseMessage && <Text>({toolUseMessage})</Text>}
-        </Text>
-        {input &&
-          renderToolUseTag?.(input, {
-            toolUseId: content.id,
-            toolUseResult: rawToolResult,
-            progressMessages: lookups.progressMessagesByToolUseID.get(content.id),
-          })}
-      </Box>
-      {isResolved && !isError && toolResult !== undefined && (
-        <Box>
-          {tool.renderToolResultMessage?.(toolResult, filterToolProgressMessages(progressMessages), {
-            verbose: true,
-            tools,
-            theme,
-            isTranscriptMode: true,
-            input: content.input,
-          })}
+      {userFacingName !== '' && (
+        <Box flexDirection="row">
+          <ToolUseLoader shouldAnimate={shouldAnimate && isInProgress} isUnresolved={!isResolved} isError={isError} />
+          <Text>
+            <Text bold>{userFacingName}</Text>
+            {toolUseMessage && <Text>({toolUseMessage})</Text>}
+          </Text>
+          {input &&
+            renderToolUseTag?.(input, {
+              toolUseId: content.id,
+              toolUseResult: rawToolResult,
+              progressMessages: lookups.progressMessagesByToolUseID.get(content.id),
+            })}
         </Box>
       )}
-      {isResolved && isError && (
+      {successResult != null && <Box>{successResult}</Box>}
+      {showError && (
         <VerboseErroredToolResult
           toolUseID={content.id}
           input={content.input}
@@ -278,7 +426,7 @@ function LeftoverThoughtClock({
   lastThinkingAtMs: number;
   live: boolean;
 }): React.ReactNode {
-  const leftoverIhrSession = getSessionId();
+  const leftoverIhrSession = getMainThreadAgentId();
   useLeftoverIhrStore();
   const leftoverHhrLive = useSyncExternalStore(
     leftoverIhrSubscribe,
@@ -312,14 +460,75 @@ export function CollapsedReadSearchContent({
   message,
   inProgressToolUseIDs,
   shouldAnimate,
-  verbose,
+  verbose: sourceVerbose,
   tools,
   lookups,
   isActiveGroup,
   addMargin = true,
 }: Props): React.ReactNode {
   const bg = useSelectedMessageBg();
-  const { columns } = useTerminalSize();
+  const { columns, rows } = useTerminalSize();
+  const panesViewport = useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const viewportColumns = panesViewport?.conversationColumns ?? columns;
+  const toolUsesForRender = toolUsesFromCollapsedGroup(message);
+  const rendered = useUiRenderHost({
+    component: 'ToolGroup',
+    requestId: message.uuid,
+    props: {
+      calls: toolUsesForRender.map(use => {
+        const result = lookups.toolResultByToolUseID.get(use.id);
+        return {
+          tool_use_id: use.id,
+          tool: use.name,
+          input: use.input,
+          isRunning: inProgressToolUseIDs.has(use.id),
+          isErrored: lookups.erroredToolUseIDs.has(use.id),
+          isInterrupted: interruptedCall(result),
+          output: result?.type === 'user' ? result.toolUseResult : undefined,
+        };
+      }),
+      isActive: isActiveGroup === true,
+      isExpanded: sourceVerbose,
+    },
+    viewport: { columns: viewportColumns, rows },
+  });
+  const wrapToolGroupHost = (engineNode: React.ReactNode): React.ReactNode => {
+    if (rendered.drawPending) {
+      return (
+        <Box
+          ref={rendered.hostRef as React.Ref<DOMElement>}
+          flexDirection="column"
+          drawPending
+          {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+        />
+      );
+    }
+    const tree =
+      rendered.pluginTree !== undefined ? (
+        <PluginRenderedTree
+          node={rendered.pluginTree}
+          plugin={rendered.pluginName}
+          requestId={message.uuid}
+          component="ToolGroup"
+          engine={engineNode}
+        />
+      ) : (
+        engineNode
+      );
+    if (tree === null && rendered.minHeight === undefined) {
+      return null;
+    }
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      >
+        {tree}
+      </Box>
+    );
+  };
+  const verbose = rendered.props.isExpanded === true;
   const {
     searchCount: rawSearchCount,
     readCount: rawReadCount,
@@ -501,9 +710,9 @@ export function CollapsedReadSearchContent({
       }
       if (content?.type !== 'tool_use' || !content.id) continue;
       verboseRows.push(
-        <VerboseToolUse
+        <VerboseToolUseSite
           key={content.id}
-          content={content as { type: 'tool_use'; id: string; name: string; input: unknown }}
+          content={content as VerboseToolUseBlock}
           tools={tools}
           lookups={lookups}
           inProgressToolUseIDs={inProgressToolUseIDs}
@@ -539,14 +748,15 @@ export function CollapsedReadSearchContent({
         </Box>
       </Box>
     ));
-    // densable always returns the verbose column (may be empty Ss list).
-    return (
+    // densable always returns the verbose column (may be empty Ss list), wrapped
+    // through ac.useRenderHook ("ToolGroup") so pluginTree / hostRef / minHeight apply.
+    return wrapToolGroupHost(
       <Box flexDirection="column">
         {taskNotificationRows}
         {verboseRows}
         {hookBlock}
         {memoryRows}
-      </Box>
+      </Box>,
     );
   }
 
@@ -556,7 +766,7 @@ export function CollapsedReadSearchContent({
   // Defensive: If all counts are 0, don't render the collapsed group
   // This shouldn't happen in normal operation, but handles edge cases
   if (!hasMemoryOps && !hasTeamMemoryOps && !hasNonMemoryOps && !hasThoughtFor && !hasAccountMemory) {
-    return null;
+    return wrapToolGroupHost(null);
   }
 
   // Find the slowest in-progress shell command in this group. BashTool yields
@@ -909,7 +1119,7 @@ export function CollapsedReadSearchContent({
     );
   }
 
-  return (
+  const engine = (
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Box flexDirection="row">
         {isActiveGroup ? <ToolUseLoader shouldAnimate isUnresolved isError={anyError} /> : <Box minWidth={2} />}
@@ -964,4 +1174,5 @@ export function CollapsedReadSearchContent({
       )}
     </Box>
   );
+  return wrapToolGroupHost(engine);
 }

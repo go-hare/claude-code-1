@@ -5,16 +5,15 @@ import { buildMergePrompt, SnapshotUpdateDialog } from '../SnapshotUpdateDialog.
 import { Select } from '../../CustomSelect/index.js';
 
 function getSnapshotDialogFromRenderedTree(rendered: React.ReactElement) {
-  const themeProvider = rendered as React.ReactElement<{
-    children: React.ReactElement;
-  }>;
-  const appStateProvider = themeProvider.props.children as React.ReactElement<{
-    children: React.ReactElement;
-  }>;
-  const keybindingSetup = appStateProvider.props.children as React.ReactElement<{
-    children: React.ReactElement;
-  }>;
-  return keybindingSetup.props.children as React.ReactElement<{
+  let element = rendered;
+  while (element.type !== SnapshotUpdateDialog) {
+    const children = (element.props as { children?: React.ReactNode }).children;
+    if (!React.isValidElement(children)) {
+      throw new Error('Snapshot update dialog was not found in the setup tree');
+    }
+    element = children;
+  }
+  return element as React.ReactElement<{
     agentType: string;
     scope: string;
     snapshotTimestamp: string;

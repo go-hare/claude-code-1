@@ -488,6 +488,14 @@ export type QueuedCommand = {
    */
   passive?: boolean
   /**
+   * densable Put / _Fn `usage` on background agent / workflow task-notification.
+   */
+  usage?: {
+    totalTokens: number
+    toolUses: number
+    durationMs: number
+  }
+  /**
    * densable 2.1.289 poll_event enqueue bag. Drain treats mode==='poll-event'
    * (not a user prompt / slash). envelope is the event string (value).
    */

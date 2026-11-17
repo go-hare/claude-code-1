@@ -5,7 +5,7 @@ import * as React from 'react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { computeGlimmerIndex, computeShimmerSegments, SHIMMER_INTERVAL_MS } from '../bridge/bridgeStatusUtil.js';
 import { feature } from 'bun:bundle';
-import { getKairosActive, getSessionId, getUserMsgOptIn } from '../bootstrap/state.js';
+import { getKairosActive, getMainThreadAgentId, getUserMsgOptIn } from '../bootstrap/state.js';
 import { leftoverIhrGet, leftoverIhrHas, leftoverIhrSubscribe } from '../utils/collapseReadSearch.js';
 import { leftoverIhrSlice, useLeftoverIhrStore } from '../state/leftoverIhrStore.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
@@ -23,13 +23,15 @@ import type { Task } from '../utils/tasks.js';
 import { useAppState } from '../state/AppState.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { getSpinnerPingPongFrames, type SpinnerMode } from './Spinner/index.js';
+import { useUiRenderHost } from './hooks/useUiRenderHost.js';
+import { PluginRenderedTree } from './PluginRasterPanes.js';
 import { SpinnerAnimationRow } from './Spinner/SpinnerAnimationRow.js';
 import { useSettings } from '../hooks/useSettings.js';
 import { isInProcessTeammateTask } from '../tasks/InProcessTeammateTask/types.js';
 import { isLocalAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { isBackgroundTask } from '../tasks/types.js';
 import { getAllInProcessTeammateTasks } from '../tasks/InProcessTeammateTask/InProcessTeammateTask.js';
-import { getEffortSuffix, resolveSpinnerEffortSource } from '../utils/effort.js';
+import { getEffortSuffix, pdSessionEffort, resolveSpinnerEffortSource } from '../utils/effort.js';
 import { getMainLoopModel } from '../utils/model/model.js';
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from '../utils/model/providers.js';
 import { getViewedTeammateTask } from '../state/selectors.js';
@@ -133,9 +135,9 @@ function truncateSpinnerVerb(verb: string, columns: number): string {
   return `${clipSpinnerVerb(verb, budget - 1)}…`;
 }
 
-/** densable Cn `vt`: default suffix is …, skipped when the verb already ends in … or .... */
-function withSpinnerEllipsis(verb: string): string {
-  return SPINNER_VERB_HAS_ELLIPSIS.test(verb) ? verb : `${verb}…`;
+/** densable Cn `vt = N === Gt && Te.test(ft) ? ft : ft + N` @203396380. */
+function withSpinnerEllipsis(verb: string, suffix = '…'): string {
+  return suffix === '…' && SPINNER_VERB_HAS_ELLIPSIS.test(verb) ? verb : `${verb}${suffix}`;
 }
 
 type Props = {
@@ -182,13 +184,24 @@ type Props = {
   outputLimitRecovery?: import('./Spinner/statusKind.js').OutputLimitRecovery | null;
   /** densable Ye/Je agentId — stall reset when the viewed agent changes. */
   agentId?: string;
+  /** densable xMn `word` / Cn `defaultVerb`. */
+  defaultVerb?: string;
+  /** densable xMn `suffix` / Cn `suffix` (`N`) — verb trailing ellipsis, NOT byline `spinnerSuffix`. */
+  verbSuffix?: string;
+  /** densable Ohr `isCompacting` (@203394850). */
+  isCompacting?: boolean;
+  /** densable Ohr `turnEffort` (@203394850 / @203396500). */
+  turnEffort?: import('../utils/effort.js').EffortValue;
+  /** densable Ohr `turnModel` (@203394850 / @203396500). */
+  turnModel?: string;
 };
 
 // Thin wrapper: branches on isBriefOnly so the two variants have independent
 // hook call chains. Without this split, toggling /brief mid-render would
 // violate Rules of Hooks (the inner variant calls ~10 more hooks).
 export function SpinnerWithVerb(props: Props): React.ReactNode {
-  const leftoverIhrSession = props.agentId ?? getSessionId();
+  const leftoverIhrSession = props.agentId ?? getMainThreadAgentId();
+  const { columns, rows } = useTerminalSize();
   useLeftoverIhrStore();
   const leftoverOhr = useSyncExternalStore(
     leftoverIhrSubscribe,
@@ -207,6 +220,50 @@ export function SpinnerWithVerb(props: Props): React.ReactNode {
     outputLimitRecovery: (leftoverOhr.outputLimitRecovery as Props['outputLimitRecovery']) ?? props.outputLimitRecovery,
     compactingHint: leftoverOhr.compactingHintText ?? props.compactingHint,
     compactingStartTime: leftoverOhr.compactingStartTime ?? props.compactingStartTime,
+    isCompacting: Boolean(leftoverOhr.isCompacting || props.isCompacting),
+    turnEffort:
+      (typeof leftoverOhr.turnEffort === 'string' || typeof leftoverOhr.turnEffort === 'number'
+        ? (leftoverOhr.turnEffort as import('../utils/effort.js').EffortValue)
+        : undefined) ?? props.turnEffort,
+    turnModel: (typeof leftoverOhr.turnModel === 'string' ? leftoverOhr.turnModel : undefined) ?? props.turnModel,
+  };
+  // densable xMn: word is Ohr defaultVerb; message is overrideMessage; Gt is U+2026.
+  const spinnerEllipsis = '…';
+  const defaultVerb = leftoverOhr.defaultVerb;
+  const rendered = useUiRenderHost({
+    component: 'Spinner',
+    requestId: leftoverProps.agentId ?? 'main',
+    props: {
+      word: defaultVerb,
+      message: leftoverProps.overrideMessage ?? null,
+      suffix: spinnerEllipsis,
+      mode: leftoverProps.mode,
+    },
+    viewport: { columns, rows },
+  });
+  leftoverProps.overrideMessage =
+    rendered.props.message === null || typeof rendered.props.message === 'string'
+      ? (rendered.props.message as string | null)
+      : leftoverProps.overrideMessage;
+  leftoverProps.defaultVerb = typeof rendered.props.word === 'string' ? rendered.props.word : defaultVerb;
+  // densable xMn → Cn: `suffix: W.props.suffix ?? Gt` feeds verb `vt`, NEVER `spinnerSuffix` (`O` inside `(...)`).
+  leftoverProps.verbSuffix = typeof rendered.props.suffix === 'string' ? rendered.props.suffix : spinnerEllipsis;
+  const wrapSpinner = (engine: React.ReactNode): React.ReactNode => {
+    if (rendered.pluginTree !== undefined) {
+      return (
+        <PluginRenderedTree
+          node={rendered.pluginTree}
+          plugin={rendered.pluginName}
+          requestId={leftoverProps.agentId ?? 'main'}
+          component="Spinner"
+          engine={engine}
+        />
+      );
+    }
+    if (rendered.drawPending) {
+      return <Box flexDirection="column" drawPending minHeight={rendered.minHeight} />;
+    }
+    return engine;
   };
   const isBriefOnly = useAppState(s => s.isBriefOnly);
   // REPL overrides isBriefOnly→false when viewing a teammate transcript
@@ -228,10 +285,10 @@ export function SpinnerWithVerb(props: Props): React.ReactNode {
     isBriefOnly &&
     !viewingAgentTaskId
   ) {
-    return <BriefSpinner mode={leftoverProps.mode} overrideMessage={leftoverProps.overrideMessage} />;
+    return wrapSpinner(<BriefSpinner mode={leftoverProps.mode} overrideMessage={leftoverProps.overrideMessage} />);
   }
 
-  return <SpinnerWithVerbInner {...leftoverProps} />;
+  return wrapSpinner(<SpinnerWithVerbInner {...leftoverProps} />);
 }
 
 function SpinnerWithVerbInner({
@@ -255,6 +312,11 @@ function SpinnerWithVerbInner({
   retryStatus = null,
   outputLimitRecovery = null,
   agentId,
+  defaultVerb: rewrittenDefaultVerb,
+  verbSuffix = '…',
+  isCompacting = false,
+  turnEffort,
+  turnModel,
 }: Props): React.ReactNode {
   const settings = useSettings();
   const reducedMotion = (settings.prefersReducedMotion ?? false) || isScreenReaderModeEnabled();
@@ -321,7 +383,7 @@ function SpinnerWithVerbInner({
   }, [mode]);
 
   // densable 2.1.289 Cn `st=y===void 0||y===Ve()` — Next:/todo chrome is main-session only.
-  const isMainSession = agentId === undefined || agentId === getSessionId();
+  const isMainSession = agentId === undefined || agentId === getMainThreadAgentId();
   // Find the current in-progress task and next pending task
   const currentTodo = isMainSession
     ? tasksV2?.find(task => task.status !== 'pending' && task.status !== 'completed')
@@ -329,15 +391,16 @@ function SpinnerWithVerbInner({
   const nextTask = isMainSession ? findNextPendingTask(tasksV2) : undefined;
 
   // densable Ohr — defaultVerb is leftoverIhr `hN(DTt())`, not a local sample.
-  const leftoverIhrSession = agentId ?? getSessionId();
+  const leftoverIhrSession = agentId ?? getMainThreadAgentId();
   const leftoverDefaultVerb = useSyncExternalStore(
     leftoverIhrSubscribe,
     () => leftoverIhrGet(leftoverIhrSession).defaultVerb,
     () => leftoverIhrGet(leftoverIhrSession).defaultVerb,
   );
+  // densable Cn `defaultVerb:W.props.word` — HAS rewrite of word.
   // densable Cn `[ct]=g(()=>hN(DTt())??"Working")`, verb `S||ct`.
   const [fallbackVerb] = useState(() => sample(getSpinnerVerbs()) ?? 'Working');
-  const randomVerb = leftoverDefaultVerb || fallbackVerb;
+  const randomVerb = rewrittenDefaultVerb || leftoverDefaultVerb || fallbackVerb;
 
   // densable pt: current todo activeForm, else subject, whitespace collapsed.
   // Ytt truncates only that todo verb. Override and the random verb are not clipped.
@@ -353,7 +416,7 @@ function SpinnerWithVerbInner({
     foregroundedTeammate && !foregroundedTeammate.isIdle
       ? (foregroundedTeammate.spinnerVerb ?? randomVerb)
       : (overrideMessage ?? truncatedTodo ?? randomVerb);
-  const message = withSpinnerEllipsis(effectiveVerb ?? 'Working');
+  const message = withSpinnerEllipsis(effectiveVerb ?? 'Working', verbSuffix);
 
   // Track CLI activity when spinner is active
   useEffect(() => {
@@ -364,17 +427,22 @@ function SpinnerWithVerbInner({
     };
   }, [mode]);
 
-  const effortValue = useAppState(s => s.effortValue);
+  const sessionModel = getMainLoopModel();
+  const resolvedModel = turnModel ?? sessionModel;
+  const effortValue = useAppState(s => turnEffort ?? pdSessionEffort(s, resolvedModel));
   const ultracode = useAppState(s => s.ultracode);
-  // densable 2.1.222 #13: But(h??Zi(), m??F) — subagent transcript view uses
-  // LocalAgentTask.effort (m) / model (h), not session effort alone.
+  // densable 2.1.289 Cn (@203396500): LWt(P ?? tt(), Ot, F ?? void 0) — turnModel/turnEffort
+  // override session model/effort, while subagent transcript view uses LocalAgentTask.effort/model.
   const spinnerEffortSource = resolveSpinnerEffortSource({
     sessionEffort: effortValue,
-    sessionModel: getMainLoopModel(),
+    sessionModel: resolvedModel,
     viewingAgentTaskId,
     tasks,
   });
   const effortSuffix = getEffortSuffix(spinnerEffortSource.model, spinnerEffortSource.effortValue, ultracode);
+  const effectiveIsCompacting = Boolean(isCompacting || compactProgressActiveRef?.current);
+  const effectiveCompactActiveRef = useRef(effectiveIsCompacting);
+  effectiveCompactActiveRef.current = effectiveIsCompacting;
 
   // Check if any running in-process teammates exist (needed for both modes)
   const runningTeammates = getAllInProcessTeammateTasks(tasks).filter(t => t.status === 'running');
@@ -504,7 +572,7 @@ function SpinnerWithVerbInner({
         spinnerSuffix={spinnerSuffix}
         verbose={verbose}
         columns={columns}
-        compactProgressActiveRef={compactProgressActiveRef}
+        compactProgressActiveRef={effectiveCompactActiveRef}
         compactingStartTime={compactingStartTime}
         hasRunningTeammates={hasRunningTeammates}
         teammateTokens={teammateTokens}
@@ -533,7 +601,7 @@ function SpinnerWithVerbInner({
             <TaskListV2 tasks={tasksV2} />
           </MessageResponse>
         </Box>
-      ) : compactingHint && compactProgressActiveRef?.current ? (
+      ) : compactingHint && effectiveIsCompacting ? (
         <Box width="100%" flexDirection="column">
           <MessageResponse>
             <Text dimColor>{compactingHint}</Text>

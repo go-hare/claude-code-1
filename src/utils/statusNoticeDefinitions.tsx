@@ -1,6 +1,10 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-import { Box, StatusIcon, type StatusIconStatus, Text } from '@anthropic/ink';
+import { Box, StatusIcon, type DOMElement, type StatusIconStatus, Text } from '@anthropic/ink';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
+import { useUiRenderHost } from '../components/hooks/useUiRenderHost.js';
+import { PluginRenderedTree } from '../components/PluginRasterPanes.js';
+import { getPanesTerminalSize, subscribePanes } from './plugins/functionHooksModules.js';
 import * as React from 'react';
 import { getAllowedChannels } from '../bootstrap/state.js';
 import { EmergencyTip, shouldShowEmergencyTip } from '../components/LogoV2/EmergencyTip.js';
@@ -94,16 +98,76 @@ function NoticeStatusRow({
   );
 }
 
+export function flattenNoticeText(node: React.ReactNode): string {
+  let out = '';
+  React.Children.forEach(node, child => {
+    if (typeof child === 'string' || typeof child === 'number') {
+      out += String(child);
+    } else if (React.isValidElement<{ children?: React.ReactNode }>(child)) {
+      out += flattenNoticeText(child.props.children);
+    }
+  });
+  return out;
+}
+
 function InfoNotice({ command, children }: { command?: string; children: React.ReactNode }): React.ReactNode {
-  const suffix = command ? ` · ${command}` : '';
-  return (
-    <Box>
+  const { columns, rows } = useTerminalSize();
+  const panesViewport = React.useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const viewportColumns = panesViewport?.conversationColumns ?? columns;
+  const text = flattenNoticeText(children);
+  const rendered = useUiRenderHost({
+    component: 'InfoNotice',
+    requestId: `notice:${text}`,
+    props: { text, command: command ?? null },
+    viewport: { columns: viewportColumns, rows },
+  });
+  if (rendered.drawPending) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        drawPending
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      />
+    );
+  }
+  const shown: React.ReactNode = rendered.props.text === text ? children : String(rendered.props.text ?? '');
+  const cmd =
+    rendered.props.command === null
+      ? undefined
+      : typeof rendered.props.command === 'string'
+        ? rendered.props.command
+        : command;
+  const suffix = cmd ? ` · ${cmd}` : '';
+  const engine = (
+    <Box
+      ref={rendered.pluginTree === undefined ? (rendered.hostRef as React.Ref<DOMElement>) : undefined}
+      {...(rendered.pluginTree === undefined && rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+    >
       <Text dimColor>
-        {children}
+        {shown}
         {suffix}
       </Text>
     </Box>
   );
+  if (rendered.pluginTree !== undefined) {
+    return (
+      <Box
+        ref={rendered.hostRef as React.Ref<DOMElement>}
+        flexDirection="column"
+        {...(rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
+      >
+        <PluginRenderedTree
+          node={rendered.pluginTree}
+          plugin={rendered.pluginName}
+          requestId={`notice:${text}`}
+          component="InfoNotice"
+          engine={engine}
+        />
+      </Box>
+    );
+  }
+  return engine;
 }
 
 // Individual notice definitions

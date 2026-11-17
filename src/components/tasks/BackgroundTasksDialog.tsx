@@ -20,14 +20,18 @@ import type { LocalShellTaskState } from 'src/tasks/LocalShellTask/guards.js';
 import { LocalShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 // Type import is erased at build time — safe even though module is ant-gated.
 import type { LocalWorkflowTaskState } from 'src/tasks/LocalWorkflowTask/LocalWorkflowTask.js';
+import type { McpTaskState } from 'src/tasks/McpTask/McpTask.js';
+import { killMcpTask } from 'src/tasks/McpTask/McpTask.js';
 import type { MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js';
 import { killMonitorWs, type MonitorWsTaskState } from 'src/tasks/MonitorWsTask/MonitorWsTask.js';
 import { RemoteAgentTask, type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { intersperse } from 'src/utils/array.js';
+import { isBashTaskGetDeliveryEnabled } from 'src/utils/bashTaskDelivery.js';
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js';
 import { IDLE_WINDOW_KEEPALIVE_REASON } from 'src/utils/task/framework.js';
+import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import { Box, Byline, Dialog, KeyboardShortcutHint, type KeyboardEvent, Text } from '@anthropic/ink';
 import type { CommandResultDisplay } from '../../commands.js';
 import { stopUltraplan } from '../../commands/ultraplan.js';
@@ -52,6 +56,7 @@ import { AutoModeScanDetailDialog } from './AutoModeScanDetailDialog.js';
 import { getBackgroundTaskItemPresentation } from './BackgroundTask.js';
 import { DreamDetailDialog } from './DreamDetailDialog.js';
 import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
+import { McpTaskDetailDialog } from './McpTaskDetailDialog.js';
 import { RemoteSessionDetailDialog } from './RemoteSessionDetailDialog.js';
 import { RemoteSessionProgress } from './RemoteSessionProgress.js';
 import { ShellDetailDialog } from './ShellDetailDialog.js';
@@ -87,11 +92,11 @@ const SYSTEM_TASKS_LABEL = 'System tasks';
 
 /**
  * densable wF — Enter / auto-open may open a detail host.
- * Official excludes mcp_task (no local type), monitor_ws (list + x only), and
- * the folded self_managed_tasks row.
+ * Official 2.1.289 opens McpTaskDetailDialog (CF !== null) for mcp_task and
+ * excludes monitor_ws (list + x only) and the folded self_managed_tasks row.
  */
 export function canOpenBackgroundTaskDetail(type: string): boolean {
-  return type !== 'mcp_task' && type !== 'monitor_ws' && type !== 'self_managed_tasks';
+  return type !== 'monitor_ws' && type !== 'self_managed_tasks';
 }
 
 /**
@@ -195,6 +200,13 @@ type ListItem =
     }
   | {
       id: string;
+      type: 'mcp_task';
+      label: string;
+      status: string;
+      task: DeepImmutable<McpTaskState>;
+    }
+  | {
+      id: string;
       type: 'monitor_mcp';
       label: string;
       status: string;
@@ -266,8 +278,9 @@ async function stopRemoteReview(
   taskId: string,
   source: 'task_list' | 'task_detail',
   setAppState: (f: (prev: AppState) => AppState) => void,
+  getAppState: () => AppState,
 ): Promise<void> {
-  await RemoteAgentTask.kill(taskId, setAppState);
+  await RemoteAgentTask.kill(taskId, createTaskRegistry(getAppState, setAppState));
   logEvent('tengu_review_remote_stopped', {
     source: source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
@@ -339,6 +352,7 @@ export function BackgroundTasksDialog({
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const setAppState = useSetAppState();
+  const registry = createTaskRegistry(toolUseContext.getAppState, setAppState);
   const { rows: termRows, columns: termColumns } = useTerminalSize();
   const screenReader = isScreenReaderModeEnabled();
   const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
@@ -394,6 +408,7 @@ export function BackgroundTasksDialog({
     teams,
     workflowTasks,
     mcpMonitors,
+    mcpTasks,
     dreamTasks,
     autoModeScanTasks,
     selfManagedTasks,
@@ -437,6 +452,7 @@ export function BackgroundTasksDialog({
     const completed = agents.filter(isCompletedAgentListItem);
     const workflows = visibleItems.filter(item => item.type === 'local_workflow');
     const monitorMcp = visibleItems.filter(item => item.type === 'monitor_mcp' || item.type === 'monitor_ws');
+    const mcp = visibleItems.filter(item => item.type === 'mcp_task');
     const dream = visibleItems.filter(item => item.type === 'dream');
     const autoModeScan = visibleItems.filter(item => item.type === 'auto_mode_scan');
 
@@ -464,6 +480,7 @@ export function BackgroundTasksDialog({
       ...teamEntries.flatMap(([, members]) => [...leaderItem, ...members]),
       ...bash,
       ...monitorMcp,
+      ...mcp,
       ...remote,
       ...agent,
       ...completed,
@@ -477,6 +494,7 @@ export function BackgroundTasksDialog({
       ...teammates,
       ...bash,
       ...monitorMcp,
+      ...mcp,
       ...remote,
       ...agent,
       ...completed,
@@ -492,6 +510,7 @@ export function BackgroundTasksDialog({
       completedAgentTasks: completed,
       workflowTasks: workflows,
       mcpMonitors: monitorMcp,
+      mcpTasks: mcp,
       dreamTasks: dream,
       autoModeScanTasks: autoModeScan,
       selfManagedTasks: selfManaged,
@@ -612,20 +631,27 @@ export function BackgroundTasksDialog({
         /* service unavailable */
       }
       if (killWorkflowTask) {
-        killWorkflowTask(currentSelection.id, setAppState);
+        killWorkflowTask(currentSelection.id, registry);
       }
+    } else if (currentSelection.type === 'mcp_task' && currentSelection.status === 'running') {
+      void killMcpTask(currentSelection.id, registry);
     } else if (currentSelection.type === 'monitor_mcp' && currentSelection.status === 'running' && killMonitorMcp) {
-      killMonitorMcp(currentSelection.id, setAppState);
+      killMonitorMcp(currentSelection.id, registry);
     } else if (currentSelection.type === 'monitor_ws' && currentSelection.status === 'running') {
       // densable xCs: oF(id, registry, {userStop, taskStop})
-      killMonitorWs(currentSelection.id, setAppState);
+      killMonitorWs(currentSelection.id, registry, 'user');
     } else if (currentSelection.type === 'dream' && currentSelection.status === 'running') {
       void killDreamTask(currentSelection.id);
     } else if (currentSelection.type === 'auto_mode_scan' && currentSelection.status === 'running') {
       void killAutoModeScanTask(currentSelection.id);
     } else if (currentSelection.type === 'remote_agent' && currentSelection.status === 'running') {
       if (currentSelection.task.isUltraplan) {
-        void stopUltraplan(currentSelection.id, currentSelection.task.sessionId, setAppState);
+        void stopUltraplan(
+          currentSelection.id,
+          currentSelection.task.sessionId,
+          setAppState,
+          toolUseContext.getAppState,
+        );
       } else if (currentSelection.task.isRemoteReview) {
         setViewState({ mode: 'confirmStopReview', itemId: currentSelection.id });
       } else {
@@ -688,7 +714,23 @@ export function BackgroundTasksDialog({
   };
 
   async function killShellTask(taskId: string): Promise<void> {
-    await LocalShellTask.kill(taskId, setAppState);
+    // densable ml (@208996450): when _Te() is on, stopTask runs pLe → Jvo
+    // (notifyUserStoppedMainShellTask); otherwise LocalShellTask.kill directly.
+    if (!isBashTaskGetDeliveryEnabled()) {
+      await LocalShellTask.kill(taskId, registry);
+      return;
+    }
+    try {
+      const { stopTask } = await import('src/tasks/stopTask.js');
+      await stopTask(taskId, {
+        getAppState: toolUseContext.getAppState,
+        setAppState,
+        source: 'user',
+        killedBy: 'user',
+      });
+    } catch {
+      /* best-effort shell stop */
+    }
   }
 
   async function killAgentTask(taskId: string): Promise<void> {
@@ -710,7 +752,7 @@ export function BackgroundTasksDialog({
     if (snapshot?.type === 'local_agent') {
       markAgentStoppedByUser(taskId, setAppState);
     }
-    await LocalAgentTask.kill(taskId, setAppState);
+    await LocalAgentTask.kill(taskId, registry, 'user');
     if (snapshot?.type === 'local_agent') {
       killDescendantAgents(
         { id: taskId, agentId: snapshot.agentId ?? taskId },
@@ -722,19 +764,19 @@ export function BackgroundTasksDialog({
   }
 
   async function killTeammateTask(taskId: string): Promise<void> {
-    await InProcessTeammateTask.kill(taskId, setAppState);
+    await InProcessTeammateTask.kill(taskId, registry);
   }
 
   async function killDreamTask(taskId: string): Promise<void> {
-    await DreamTask.kill(taskId, setAppState);
+    await DreamTask.kill(taskId, registry);
   }
 
   async function killAutoModeScanTask(taskId: string): Promise<void> {
-    await AutoModeScanTask.kill(taskId, setAppState);
+    await AutoModeScanTask.kill(taskId, registry);
   }
 
   async function killRemoteAgentTask(taskId: string): Promise<void> {
-    await RemoteAgentTask.kill(taskId, setAppState);
+    await RemoteAgentTask.kill(taskId, registry);
   }
 
   const onDoneEvent = useEffectEvent(onDone);
@@ -786,7 +828,7 @@ export function BackgroundTasksDialog({
       return (
         <ConfirmStopReviewDialog
           onStop={() => {
-            void stopRemoteReview(viewState.itemId, 'task_list', setAppState);
+            void stopRemoteReview(viewState.itemId, 'task_list', setAppState, toolUseContext.getAppState);
             setViewState({ mode: 'list' });
           }}
           onBack={() => setViewState({ mode: 'list' })}
@@ -835,9 +877,9 @@ export function BackgroundTasksDialog({
               task.status !== 'running'
                 ? undefined
                 : task.isUltraplan
-                  ? () => void stopUltraplan(task.id, task.sessionId, setAppState)
+                  ? () => void stopUltraplan(task.id, task.sessionId, setAppState, toolUseContext.getAppState)
                   : task.isRemoteReview
-                    ? () => void stopRemoteReview(task.id, 'task_detail', setAppState)
+                    ? () => void stopRemoteReview(task.id, 'task_detail', setAppState, toolUseContext.getAppState)
                     : () => void killRemoteAgentTask(task.id)
             }
             key={`session-${task.id}`}
@@ -874,7 +916,7 @@ export function BackgroundTasksDialog({
                 } catch {
                   /* service unavailable */
                 }
-                killWorkflowTask?.(task.id, setAppState);
+                killWorkflowTask?.(task.id, registry);
               }
             : undefined;
         const onSkip =
@@ -914,7 +956,7 @@ export function BackgroundTasksDialog({
         const onPause =
           task.status === 'running' && pauseWorkflowTask
             ? () => {
-                pauseWorkflowTask(task.id, setAppState);
+                pauseWorkflowTask(task.id, registry);
               }
             : undefined;
         return (
@@ -931,14 +973,26 @@ export function BackgroundTasksDialog({
           />
         );
       }
+      case 'mcp_task':
+        return (
+          <McpTaskDetailDialog
+            task={task}
+            onDone={() =>
+              onDone('Background dialog dismissed', {
+                display: 'skip',
+              })
+            }
+            onKill={task.status === 'running' ? () => void killMcpTask(task.id, registry) : undefined}
+            onBack={goBackToList}
+            key={`mcp-task-${task.id}`}
+          />
+        );
       case 'monitor_mcp':
         if (!MonitorMcpDetailDialog) return null;
         return (
           <MonitorMcpDetailDialog
             task={task}
-            onKill={
-              task.status === 'running' && killMonitorMcp ? () => killMonitorMcp(task.id, setAppState) : undefined
-            }
+            onKill={task.status === 'running' && killMonitorMcp ? () => killMonitorMcp(task.id, registry) : undefined}
             onBack={goBackToList}
             key={`monitor-mcp-${task.id}`}
           />
@@ -1032,6 +1086,7 @@ export function BackgroundTasksDialog({
             currentSelection?.type === 'local_workflow' ||
             currentSelection?.type === 'monitor_mcp' ||
             currentSelection?.type === 'monitor_ws' ||
+            currentSelection?.type === 'mcp_task' ||
             currentSelection?.type === 'dream' ||
             currentSelection?.type === 'auto_mode_scan' ||
             currentSelection?.type === 'remote_agent') &&
@@ -1103,6 +1158,15 @@ export function BackgroundTasksDialog({
           ),
         },
         {
+          key: 'mcp-tasks',
+          items: mcpTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}MCP tasks</Text> ({mcpTasks.length})
+            </Text>
+          ),
+        },
+        {
           key: 'cloud-agents',
           items: remoteSessions,
           heading: (
@@ -1158,6 +1222,7 @@ export function BackgroundTasksDialog({
       teammateTasks,
       bashTasks,
       mcpMonitors,
+      mcpTasks,
       remoteSessions,
       agentTasks,
       completedAgentTasks,
@@ -1310,6 +1375,7 @@ function canStopItem(item: ListItem): boolean {
       item.type === 'local_workflow' ||
       item.type === 'monitor_mcp' ||
       item.type === 'monitor_ws' ||
+      item.type === 'mcp_task' ||
       item.type === 'dream' ||
       item.type === 'auto_mode_scan' ||
       item.type === 'remote_agent')
@@ -1432,6 +1498,14 @@ function toListItem(task: TaskState): ListItem {
         id: task.id,
         type: 'local_workflow',
         label: task.summary ?? task.description,
+        status: task.status,
+        task,
+      };
+    case 'mcp_task':
+      return {
+        id: task.id,
+        type: 'mcp_task',
+        label: task.description,
         status: task.status,
         task,
       };

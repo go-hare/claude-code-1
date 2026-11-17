@@ -38,6 +38,7 @@ interface UltraplanChoiceDialogProps {
   memorySelector?: unknown;
   getAppState: () => AppState;
   setConversationId?: (id: UUID) => void;
+  taskRegistry?: import('../../utils/taskRegistry.js').TaskRegistry;
   resultDedupState?: unknown;
 }
 
@@ -54,6 +55,7 @@ export function UltraplanChoiceDialog({
   memorySelector: _memorySelector,
   getAppState,
   setConversationId,
+  taskRegistry,
   resultDedupState: _resultDedupState,
 }: UltraplanChoiceDialogProps): React.ReactNode {
   useRegisterOverlay('ultraplan-choice');
@@ -133,6 +135,7 @@ export function UltraplanChoiceDialog({
             getAppState,
             setAppState,
             setConversationId,
+            taskRegistry,
           });
 
           if (transcriptSaved) {

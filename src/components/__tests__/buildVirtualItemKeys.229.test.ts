@@ -82,11 +82,26 @@ describe('densable 2.1.229 #6 buildVirtualItemKeys (mfT)', () => {
 
   test('rebuild when itemKey function identity changes', () => {
     const cache = createVirtualItemKeyCache()
-    const k1 = (m: RenderableMessage) => m.uuid
-    const k2 = (m: RenderableMessage) => `id:${m.uuid}`
+    const k1 = (m: RenderableMessage) => m.uuid ?? ''
+    const k2 = (m: RenderableMessage) => `id:${m.uuid ?? ''}`
     buildVirtualItemKeys([msg('a')], k1, cache)
     const keys = buildVirtualItemKeys([msg('a'), msg('b')], k2, cache)
     expect(keys).toEqual(['id:a', 'id:b'])
+  })
+
+  test('no-uuid rows receive index in itemKey and do not skip rebuild on undefined === undefined', () => {
+    const cache = createVirtualItemKeyCache()
+    const noUuid = { type: 'speaker_label' } as unknown as RenderableMessage
+    const indexedKey = (m: RenderableMessage, idx?: number) =>
+      m.uuid ? `${m.uuid}-conv` : `no-uuid:${idx ?? 0}-conv`
+    const k1 = buildVirtualItemKeys([noUuid, noUuid], indexedKey, cache)
+    expect(k1).toEqual(['no-uuid:0-conv', 'no-uuid:1-conv'])
+    const k2 = buildVirtualItemKeys(
+      [msg('u0'), noUuid, noUuid],
+      indexedKey,
+      cache,
+    )
+    expect(k2).toEqual(['u0-conv', 'no-uuid:1-conv', 'no-uuid:2-conv'])
   })
 
   test('dup suffixes survive across append of more dups', () => {

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import stripAnsi from 'strip-ansi';
 import { StatusIcon, Text } from '@anthropic/ink';
 import type { TaskStatus } from 'src/Task.js';
 import { isArtifactCommentMonitor } from 'src/tasks/pillLabel.js';
@@ -6,7 +7,7 @@ import type { BackgroundTaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { count } from 'src/utils/array.js';
 import { EFFORT_LEVELS } from 'src/utils/effort.js';
-import { truncate } from 'src/utils/format.js';
+import { truncate, truncateToWidth } from 'src/utils/format.js';
 import { getPublicModelDisplayName } from 'src/utils/model/model.js';
 import { getAPIProvider } from 'src/utils/model/providers.js';
 import { plural } from 'src/utils/stringUtils.js';
@@ -17,6 +18,35 @@ import { ShellProgress, TaskStatusText } from './ShellProgress.js';
 import { describeTeammateActivity } from './taskStatusUtils.js';
 
 const COMMENT_AUTO_REPLY_LABEL = 'auto-replying to comments';
+const MCP_TASK_TEXT_MAX_COLS = 200;
+const MCP_TASK_TEXT_MAX_CODEPOINTS = MCP_TASK_TEXT_MAX_COLS * 4;
+const MCP_TASK_ID_MAX_CODEPOINTS = 8;
+const MCP_TASK_FORMAT_SURROGATE_RE = /[\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Variation_Selector}]+/gu;
+const MCP_TASK_ID_STRIP_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Variation_Selector}]+/gu;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: strip C0/C1 control characters from untrusted MCP task text
+const MCP_TASK_CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+
+function sliceCodePoints(input: string, maxCodePoints: number): string {
+  const cps = Array.from(input);
+  return cps.length <= maxCodePoints ? input : cps.slice(0, maxCodePoints).join('');
+}
+
+/** densable `Ru` (@207413711) — strip ANSI/bidi/controls, single-line, cap 200 cols. */
+export function sanitizeMcpTaskText(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const singleLine = stripAnsi(raw)
+    .replace(MCP_TASK_FORMAT_SURROGATE_RE, ' ')
+    .replace(MCP_TASK_CONTROL_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (singleLine === '') return undefined;
+  return truncateToWidth(sliceCodePoints(singleLine, MCP_TASK_TEXT_MAX_CODEPOINTS), MCP_TASK_TEXT_MAX_COLS);
+}
+
+/** densable `J3` (@187160492) — strip controls/bidi/variation selectors, 8-char slice. */
+export function sanitizeMcpTaskId(raw: string): string {
+  return sliceCodePoints(raw.replace(MCP_TASK_ID_STRIP_RE, ''), MCP_TASK_ID_MAX_CODEPOINTS);
+}
 
 function sanitizeModelLabel(model: string): string {
   const cleaned = model.replace(/[^A-Za-z0-9._:/@[\]-]/g, '');
@@ -138,6 +168,16 @@ export function getBackgroundTaskItemPresentation(
           }${unread}`,
         ],
       };
+    case 'mcp_task': {
+      const serverName = sanitizeMcpTaskText(task.serverName) ?? '';
+      const toolName = sanitizeMcpTaskText(task.toolName) ?? '';
+      const statusMessage = task.statusMessage ? sanitizeMcpTaskText(task.statusMessage) : undefined;
+      return {
+        label: `${serverName}/${toolName}`,
+        icon: renderBackgroundTaskStatusIcon(task.status),
+        facts: [task.mcpStatus, sanitizeMcpTaskId(task.mcpTaskId), ...(statusMessage ? [statusMessage] : [])],
+      };
+    }
     case 'monitor_mcp':
     case 'monitor_ws':
       return {
@@ -252,6 +292,21 @@ export function BackgroundTask({ task, maxActivityWidth }: Props): React.ReactNo
                   : undefined
             }
             suffix={task.status === 'completed' && !task.notified ? ', unread' : undefined}
+          />
+        </Text>
+      );
+    }
+    case 'mcp_task': {
+      const serverName = sanitizeMcpTaskText(task.serverName) ?? '';
+      const toolName = sanitizeMcpTaskText(task.toolName) ?? '';
+      const statusMessage = task.statusMessage ? sanitizeMcpTaskText(task.statusMessage) : undefined;
+      return (
+        <Text>
+          {truncate(`${serverName}/${toolName}`, activityLimit, true)}{' '}
+          <TaskStatusText
+            status={task.status}
+            label={task.mcpStatus}
+            suffix={statusMessage ? ` · ${statusMessage}` : undefined}
           />
         </Text>
       );

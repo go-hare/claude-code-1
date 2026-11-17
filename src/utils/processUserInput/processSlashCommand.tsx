@@ -62,6 +62,7 @@ import { logError } from '../log.js';
 import { enqueue, enqueuePendingNotification } from '../messageQueueManager.js';
 import {
   createCommandInputMessage,
+  type LocalCommandRun,
   createSyntheticUserCaveatMessage,
   createSystemMessage,
   createUserInterruptionMessage,
@@ -114,6 +115,10 @@ type SlashCommandResult = ProcessUserInputBaseResult & {
   command: Command;
   metaTexts?: readonly string[];
 };
+
+function slashCommandRun(command: Command, args: string): LocalCommandRun {
+  return { command: getCommandName(command), args };
+}
 
 const DEFAULT_COMMAND_PRESENTATION_COLUMNS = 80;
 
@@ -226,7 +231,11 @@ function buildShortCircuitedSlashCommandResult(
       inputMessage,
       ...(text === undefined
         ? []
-        : [createCommandInputMessage(`<local-command-stdout>${text}</local-command-stdout>`)]),
+        : [
+            createCommandInputMessage(`<local-command-stdout>${text}</local-command-stdout>`, {
+              commandRun: slashCommandRun(command, args),
+            }),
+          ]),
       ...metaContext.map(entry => createUserMessage({ content: entry, isMeta: true })),
     ],
     shouldQuery: false,
@@ -1474,8 +1483,12 @@ async function getMessagesForSlashCommand(
                   ? skipTranscript
                     ? metaMessages
                     : [
-                        createCommandInputMessage(formatCommandInput(command, breadcrumbArgs)),
-                        createCommandInputMessage(`<local-command-stdout>${result}</local-command-stdout>`),
+                        createCommandInputMessage(formatCommandInput(command, breadcrumbArgs), {
+                          commandRun: slashCommandRun(command, breadcrumbArgs),
+                        }),
+                        createCommandInputMessage(`<local-command-stdout>${result}</local-command-stdout>`, {
+                          commandRun: slashCommandRun(command, breadcrumbArgs),
+                        }),
                         ...metaMessages,
                       ]
                   : [
@@ -1630,7 +1643,9 @@ async function getMessagesForSlashCommand(
             return {
               messages: [
                 userMessage,
-                createCommandInputMessage(`<local-command-stdout>${stdout}</local-command-stdout>`),
+                createCommandInputMessage(`<local-command-stdout>${stdout}</local-command-stdout>`, {
+                  commandRun: slashCommandRun(command, argsForDispatch),
+                }),
                 ...(promptText
                   ? [
                       createUserMessage({
@@ -1647,10 +1662,13 @@ async function getMessagesForSlashCommand(
           }
 
           // Text result — use system message so it doesn't render as a user bubble
+          const outputTag = result.level === 'error' ? 'local-command-stderr' : 'local-command-stdout';
           return {
             messages: [
               userMessage,
-              createCommandInputMessage(`<local-command-stdout>${result.value}</local-command-stdout>`),
+              createCommandInputMessage(`<${outputTag}>${result.value}</${outputTag}>`, {
+                commandRun: slashCommandRun(command, argsForDispatch),
+              }),
             ],
             shouldQuery: false,
             command,
@@ -1661,7 +1679,9 @@ async function getMessagesForSlashCommand(
           return {
             messages: [
               userMessage,
-              createCommandInputMessage(`<local-command-stderr>${String(e)}</local-command-stderr>`),
+              createCommandInputMessage(`<local-command-stderr>${errorMessage(e)}</local-command-stderr>`, {
+                commandRun: slashCommandRun(command, argsForDispatch),
+              }),
             ],
             shouldQuery: false,
             command,
@@ -1854,7 +1874,7 @@ async function getMessagesForSlashCommand(
                 }),
               }),
               createUserMessage({
-                content: `<local-command-stderr>${String(e)}</local-command-stderr>`,
+                content: `<local-command-stderr>${errorMessage(e)}</local-command-stderr>`,
               }),
             ],
             shouldQuery: false,

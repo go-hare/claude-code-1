@@ -10,7 +10,7 @@ const spinnerSrc = readFileSync(
 describe('densable 2.1.289 Cn Next: line', () => {
   test('st gates Next: and todo chrome to the main session', () => {
     expect(spinnerSrc).toContain(
-      'agentId === undefined || agentId === getSessionId()',
+      'agentId === undefined || agentId === getMainThreadAgentId()',
     )
     expect(spinnerSrc).toContain('isMainSession ? findNextPendingTask(tasksV2)')
     expect(spinnerSrc).not.toContain('export function ar(')

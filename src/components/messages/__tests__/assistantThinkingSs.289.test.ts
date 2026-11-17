@@ -55,9 +55,7 @@ describe('gold thinking Ss paint', () => {
     expect(spinner).toContain('leftoverIhrSlice')
     expect(spinner).toContain('leftoverIhrHas')
     const repl = await Bun.file(join(ROOT, 'src/screens/REPL.tsx')).text()
-    expect(repl).toContain(
-      'leftoverIhrMain(getSessionId()).applyCompactProgress',
-    )
+    expect(repl).toContain('leftoverIhr.main.applyCompactProgress')
     const clock = await Bun.file(
       join(ROOT, 'src/components/messages/CollapsedReadSearchContent.tsx'),
     ).text()
@@ -164,7 +162,7 @@ describe('gold thinking Ss paint', () => {
     expect(runner).not.toContain('leftoverCompactPhn')
     const engine = await Bun.file(join(ROOT, 'src/QueryEngine.ts')).text()
     expect(engine).toContain('leftoverIhrStartXe')
-    expect(engine).toContain('leftoverIhrMain')
+    expect(engine).toContain('leftoverIhr.main')
     expect(engine).toContain('setRetryStatus: leftoverIhrSdkRetry')
     expect(engine).toContain('setStreamMode: leftoverIhrSdkMode')
     expect(engine).toContain("type === 'spinner_mode'")
@@ -190,13 +188,11 @@ describe('gold thinking Ss paint', () => {
     expect(absorb).toContain("mode: ''")
     const repl = await Bun.file(join(ROOT, 'src/screens/REPL.tsx')).text()
     expect(repl).toContain('leftoverIhrUxe.setSpinnerColors')
-    expect(repl).toContain('leftoverIhrMain(getSessionId()).setRetryStatus')
-    expect(repl).toContain('leftoverIhrMain(getSessionId()).setMode')
-    expect(repl).toContain(
-      'leftoverIhrMain(getSessionId()).applyCompactProgress',
-    )
-    expect(repl).toContain('leftoverIhrMain(getSessionId()).resetOverrides')
-    expect(repl).toContain('leftoverIhrMain(getSessionId()).setTurnEffort')
+    expect(repl).toContain('leftoverIhr.main.setRetryStatus')
+    expect(repl).toContain('leftoverIhr.main.setMode')
+    expect(repl).toContain('leftoverIhr.main.applyCompactProgress')
+    expect(repl).toContain('leftoverIhr.main.resetOverrides')
+    expect(repl).toContain('leftoverIhr.main.setTurnEffort')
     expect(repl).toContain('LeftoverMhrRetryRow')
     const bootstrap = await Bun.file(
       join(ROOT, 'src/services/api/bootstrap.ts'),

@@ -22,23 +22,29 @@ type Props = {
   awaitingModel?: boolean;
   followsSpeakerLabel?: boolean;
   followsInboundLabel?: boolean;
+  hidePluginOriginHeader?: boolean;
+  /** densable TDe draw(c.props.text) — PluginUserMessageSite rewrite. */
+  rewrittenText?: string;
 };
 
-function formatPluginPromptOriginName(name: string): string {
+export function formatPluginPromptOriginName(name: string): string {
   const short = name.split('@')[0]?.trim();
   return short ? short : 'unnamed';
 }
 
 export function UserPromptMessage({
   addMargin,
-  param: { text },
+  param,
   isTranscriptMode,
   timestamp,
   origin,
   awaitingModel,
   followsSpeakerLabel = false,
   followsInboundLabel = false,
+  hidePluginOriginHeader = false,
+  rewrittenText,
 }: Props): React.ReactNode {
+  const text = rewrittenText ?? param.text;
   // REPL.tsx passes isBriefOnly={viewedTeammateTask ? false : isBriefOnly}
   // but that prop isn't threaded this deep — replicate the override by
   // reading viewingAgentTaskId directly. Computed here (not in the child)
@@ -72,7 +78,8 @@ export function UserPromptMessage({
     return null;
   }
 
-  const pluginOriginName = origin?.kind === 'plugin' && typeof origin.name === 'string' ? origin.name : undefined;
+  const pluginOriginName =
+    !hidePluginOriginHeader && origin?.kind === 'plugin' && typeof origin.name === 'string' ? origin.name : undefined;
   const innerMargin = pluginOriginName === undefined && addMargin ? 1 : 0;
 
   const body = followsInboundLabel ? (
@@ -97,11 +104,9 @@ export function UserPromptMessage({
     </Box>
   );
 
-  if (pluginOriginName === undefined) {
-    return body;
-  }
-
-  return (
+  return pluginOriginName === undefined ? (
+    body
+  ) : (
     <Box flexDirection="column" marginTop={addMargin && !followsSpeakerLabel && !followsInboundLabel ? 1 : 0}>
       <Text dimColor>
         <Text aria-hidden>{figures.pointerSmall} </Text>

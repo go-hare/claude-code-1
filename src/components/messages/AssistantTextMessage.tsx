@@ -4,7 +4,7 @@ import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
 import { shouldShowAutoCompactOffHint } from 'src/services/compact/autoCompact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
-import { Box, Link, NoSelect, Text, useTerminalSize } from '@anthropic/ink';
+import { Box, Link, NoSelect, Text, useApp, useTerminalSize, type DOMElement } from '@anthropic/ink';
 import {
   API_ERROR_MESSAGE_PREFIX,
   API_TIMEOUT_ERROR_MESSAGE,
@@ -22,13 +22,25 @@ import {
 import { logForDebugging } from '../../utils/debug.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { isEmptyMessageText, NO_RESPONSE_REQUESTED, stripPromptXMLTags } from '../../utils/messages.js';
+import {
+  RZ,
+  isEngineFallback,
+  isG2eComponent,
+  noteHeldRows,
+  siteIsOff,
+  useHeldSiteRows,
+  useSiteMeasure,
+} from '../../utils/plugins/pluginSiteHold.js';
+import { StaticRenderContext } from '../../utils/staticRender.js';
+import { assistantUiRenderText, isEmptyMessageText, NO_RESPONSE_REQUESTED } from '../../utils/messages.js';
 import { getUpgradeMessage } from '../../utils/model/contextWindowUpgradeCheck.js';
 import { getDefaultSonnetModel, getMainLoopModel, renderModelName } from '../../utils/model/model.js';
 import {
+  evaluateUiRender,
   getLastUiRenderPlugin,
+  getPanesTerminalSize,
   hasMatchingFunctionHook,
-  runFunctionHookChain,
+  subscribePanes,
 } from '../../utils/plugins/functionHooksModules.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../../utils/render/invalidateAllRenders.js';
 import { isMacOsKeychainLocked } from '../../utils/secureStorage/macOsKeychainStorage.js';
@@ -311,53 +323,71 @@ function PromptTooLongMessage(): React.ReactNode {
 export function AssistantTextMessage(props: Props): React.ReactNode {
   const renderVer = useSyncExternalStore(subscribeRenderInvalidation, getUiRenderVersion, getUiRenderVersion);
   const { text } = props.param;
-  const strippedText = stripPromptXMLTags(text);
+  const strippedText = assistantUiRenderText(text);
   const hasHook = hasMatchingFunctionHook('ui.render', {
     component: 'AssistantMessage',
     surface: 'terminal',
     props: { text: strippedText, isFirstOfReply: props.shouldShowDot },
   });
+  // densable t7t `or(h)` (@203344700): remember if engine already drew so late
+  // hook registration keeps engine fallback instead of blanking existing rows.
+  const engineDrewRef = useRef(false);
   if (!hasHook) {
+    engineDrewRef.current = true;
     return <AssistantTextMessageBody {...props} />;
   }
-  return <AssistantTextMessageWithRenderHook {...props} renderVersion={renderVer} />;
+  return <AssistantTextMessageWithRenderHook {...props} renderVersion={renderVer} engineDrewRef={engineDrewRef} />;
 }
 
 type SettledAssistantRender = {
-  sourceText: string;
-  text: string;
-  shouldShowDot: boolean;
+  drawn: unknown;
+  rewrittenText?: string;
+  rewrittenDot?: boolean;
   pluginTree?: unknown;
   pluginName?: string;
 };
 
-function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: number }): React.ReactNode {
+function AssistantTextMessageWithRenderHook(
+  props: Props & { renderVersion: number; engineDrewRef: React.MutableRefObject<boolean> },
+): React.ReactNode {
+  const staticFrame = useContext(StaticRenderContext);
   const { columns, rows } = useTerminalSize();
-  const viewportColumns = typeof props.width === 'number' ? props.width : columns;
+  const panesViewport = useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const viewportColumns =
+    typeof props.width === 'number' ? props.width : (panesViewport?.conversationColumns ?? columns);
   const isFullscreen = isFullscreenEnvEnabled();
+  const { subscribeFrames } = useApp();
   const fallbackIdRef = useRef<string | null>(null);
   if (fallbackIdRef.current === null) {
     fallbackIdRef.current = `assistant_${++assistantMessageRenderSeq}`;
   }
   const requestId = props.messageId ?? fallbackIdRef.current;
   const { text } = props.param;
-  const strippedText = stripPromptXMLTags(text);
+  const strippedText = assistantUiRenderText(text);
+  const siteId = `AssistantMessage\0${requestId}`;
+  const measure = !staticFrame && isFullscreen && isG2eComponent('AssistantMessage');
+  const { ref: hostRef, lastRows, contentRows, onScreen } = useSiteMeasure(measure, siteId, subscribeFrames);
   const [settled, setSettled] = useState<SettledAssistantRender | undefined>(undefined);
-  const evalKey = `${requestId}\0${viewportColumns}\0${rows}\0${String(isFullscreen)}\0${props.shouldShowDot ? '1' : '0'}\0${props.renderVersion}\0${text}`;
+  const holdInputKey = `${requestId}\0${viewportColumns}\0${rows}\0${String(isFullscreen)}\0${props.shouldShowDot ? '1' : '0'}\0${text}`;
+  const evalKey = `${holdInputKey}\0${props.renderVersion}\0${JSON.stringify(onScreen)}`;
 
   useEffect(() => {
+    if (staticFrame) return;
     let cancelled = false;
+    const abort = new AbortController();
     const eventPayload: Record<string, unknown> = {
       surface: 'terminal',
       component: 'AssistantMessage',
       requestId,
       viewport: { columns: viewportColumns, rows, isFullscreen },
-      props: { text: strippedText, isFirstOfReply: props.shouldShowDot },
+      props: {
+        text: strippedText,
+        isFirstOfReply: props.shouldShowDot,
+        ...(onScreen !== undefined && { onScreen }),
+      },
     };
-    void runFunctionHookChain('ui.render', eventPayload, async ev => {
-      const nextProps = isPlainRecord(ev) && isPlainRecord(ev.props) ? ev.props : eventPayload.props;
-      return { type: 'engine', ref: 0, props: nextProps };
-    }).then(
+    // densable ac.useRenderInput + useRenderHook → evaluateUiRender (ar / OPe).
+    void evaluateUiRender(eventPayload, abort.signal).then(
       answer => {
         if (cancelled) return;
         const resolved = resolveAssistantHookAnswer(answer, strippedText, props.shouldShowDot);
@@ -365,10 +395,11 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
           extractDrawnPlugin(resolved.pluginTree, 'AssistantMessage', requestId) ??
           extractDrawnPlugin(answer, 'AssistantMessage', requestId) ??
           (getLastUiRenderPlugin() || undefined);
+        const drawn = resolved.pluginTree !== undefined ? resolved.pluginTree : RZ;
         setSettled({
-          sourceText: text,
-          text: resolved.text === strippedText ? text : resolved.text,
-          shouldShowDot: resolved.shouldShowDot,
+          drawn,
+          rewrittenText: resolved.text === strippedText ? undefined : resolved.text,
+          rewrittenDot: resolved.shouldShowDot === props.shouldShowDot ? undefined : resolved.shouldShowDot,
           pluginTree: resolved.pluginTree,
           pluginName: owner,
         });
@@ -379,22 +410,54 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
           { level: 'error' },
         );
         if (!cancelled) {
-          setSettled({
-            sourceText: text,
-            text,
-            shouldShowDot: props.shouldShowDot,
-          });
+          setSettled({ drawn: RZ });
         }
       },
     );
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [evalKey, requestId, viewportColumns, rows, isFullscreen, text, strippedText, props.shouldShowDot]);
+  }, [
+    evalKey,
+    staticFrame,
+    requestId,
+    viewportColumns,
+    rows,
+    isFullscreen,
+    text,
+    strippedText,
+    props.shouldShowDot,
+    onScreen,
+  ]);
 
-  const current = settled?.sourceText === text ? settled : undefined;
-  const effectiveText = current ? current.text : text;
-  const effectiveDot = current ? current.shouldShowDot : props.shouldShowDot;
+  const heldRows = useHeldSiteRows({
+    isOff: siteIsOff(true, {
+      props: {
+        text: strippedText,
+        isFirstOfReply: props.shouldShowDot,
+        ...(onScreen !== undefined && { onScreen }),
+      },
+    }),
+    input: holdInputKey,
+    drawn: settled?.drawn,
+    isFallback: isEngineFallback(settled?.drawn),
+    lastRows,
+    contentRows,
+  });
+  useEffect(() => {
+    if (heldRows !== undefined) {
+      noteHeldRows(siteId, onScreen, heldRows);
+    }
+  }, [heldRows, settled?.drawn, siteId, onScreen]);
+
+  if (isEngineFallback(settled?.drawn)) {
+    props.engineDrewRef.current = true;
+  }
+  const canDrawFallback = props.engineDrewRef.current || staticFrame;
+  const drawPending = settled === undefined && !canDrawFallback;
+  const effectiveText = settled?.rewrittenText ?? text;
+  const effectiveDot = settled?.rewrittenDot ?? props.shouldShowDot;
   const engineNode = (
     <AssistantTextMessageBody
       {...props}
@@ -402,18 +465,28 @@ function AssistantTextMessageWithRenderHook(props: Props & { renderVersion: numb
       shouldShowDot={effectiveDot}
     />
   );
-  if (current?.pluginTree !== undefined) {
-    return (
+  const tree =
+    settled?.pluginTree !== undefined ? (
       <PluginRenderedTree
-        node={current.pluginTree}
-        plugin={current.pluginName}
+        node={settled.pluginTree}
+        plugin={settled.pluginName}
         requestId={requestId}
         component="AssistantMessage"
         engine={engineNode}
       />
+    ) : (
+      engineNode
     );
-  }
-  return engineNode;
+  return (
+    <Box
+      ref={hostRef as React.Ref<DOMElement>}
+      flexDirection="column"
+      drawPending={drawPending || undefined}
+      {...(heldRows !== undefined && { minHeight: heldRows })}
+    >
+      {drawPending ? null : tree}
+    </Box>
+  );
 }
 
 function AssistantTextMessageBody({

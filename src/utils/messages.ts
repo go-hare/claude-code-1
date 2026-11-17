@@ -99,6 +99,12 @@ import {
   SCHEDULED_TASK_DISCLAIMER_PREFIX,
   wrapScheduledTaskDisclaimer,
 } from './scheduledTaskDisclaimer.js'
+import {
+  queuedCommandDeliveryBehindEarlierIds,
+  queuedCommandDeliveryDrainIds,
+  queuedCommandDeliveryHumanTurnIds,
+  spliceBashTaskDelivery,
+} from './bashTaskDelivery.js'
 import { jsonStringify } from './slowOperations.js'
 import { em } from './model/modelNoticeCode.js'
 
@@ -837,6 +843,7 @@ export function createUserMessage({
   replacesSpan,
   sourceToolUseID,
   promptShellHandOff,
+  taskDelivery,
 }: {
   content: string | ContentBlockParam[]
   isMeta?: true
@@ -887,6 +894,8 @@ export function createUserMessage({
     agentId: string | null
     commands: Array<{ tool: string; command: string }>
   }
+  /** densable BX `taskDelivery` — GetTask snapshot on As. */
+  taskDelivery?: unknown
 }): UserMessage {
   const m: UserMessage = {
     type: 'user',
@@ -919,6 +928,7 @@ export function createUserMessage({
     replacesSpan,
     sourceToolUseID,
     ...(promptShellHandOff !== undefined && { promptShellHandOff }),
+    ...(taskDelivery !== undefined && { taskDelivery }),
   }
   return m
 }
@@ -1742,11 +1752,14 @@ export type MessageLookups = {
   siblingToolUseIDs: Map<string, Set<string>>
   progressMessagesByToolUseID: Map<string, ProgressMessage[]>
   inProgressHookCounts: Map<string, Map<HookEvent, number>>
+  resolvedHookNames: Map<string, Map<HookEvent, Set<string>>>
   resolvedHookCounts: Map<string, Map<HookEvent, number>>
   /** Maps tool_use_id to the user message containing its tool_result */
   toolResultByToolUseID: Map<string, NormalizedMessage>
   /** Maps tool_use_id to the ToolUseBlockParam */
   toolUseByToolUseID: Map<string, ToolUseBlockParam>
+  /** Maps API message.id to the uuid of its first text block (densable Uy) */
+  firstTextBlockUuidByMessageID: Map<string, string>
   /** Total count of normalized messages (for truncation indicator text) */
   normalizedMessageCount: number
   /** Set of tool use IDs that have a corresponding tool_result */
@@ -1809,6 +1822,7 @@ export function buildMessageLookups(
   // so we deduplicate by hookName.
   const resolvedHookNames = new Map<string, Map<HookEvent, Set<string>>>()
   const toolResultByToolUseID = new Map<string, NormalizedMessage>()
+  const firstTextBlockUuidByMessageID = new Map<string, string>()
   // Track resolved/errored tool use IDs (replaces separate useMemos in Messages.tsx)
   const resolvedToolUseIDs = new Set<string>()
   const erroredToolUseIDs = new Set<string>()
@@ -1852,8 +1866,16 @@ export function buildMessageLookups(
     }
 
     if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      const apiMessageId = msg.message?.id
       for (const content of msg.message?.content ?? []) {
         if (typeof content === 'string') continue
+        if (
+          content.type === 'text' &&
+          apiMessageId &&
+          !firstTextBlockUuidByMessageID.has(apiMessageId)
+        ) {
+          firstTextBlockUuidByMessageID.set(apiMessageId, msg.uuid)
+        }
         // Track all server-side *_tool_result blocks (advisor, web_search,
         // code_execution, mcp, etc.) — any block with tool_use_id is a result.
         if (
@@ -1938,9 +1960,11 @@ export function buildMessageLookups(
     siblingToolUseIDs,
     progressMessagesByToolUseID,
     inProgressHookCounts,
+    resolvedHookNames,
     resolvedHookCounts,
     toolResultByToolUseID,
     toolUseByToolUseID,
+    firstTextBlockUuidByMessageID,
     normalizedMessageCount: normalizedMessages.length,
     resolvedToolUseIDs,
     erroredToolUseIDs,
@@ -2055,8 +2079,16 @@ export function updateMessageLookupsIncremental(
     }
 
     if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      const apiMessageId = msg.message?.id
       for (const content of msg.message?.content ?? []) {
         if (typeof content === 'string') continue
+        if (
+          content.type === 'text' &&
+          apiMessageId &&
+          !existing.firstTextBlockUuidByMessageID.has(apiMessageId)
+        ) {
+          existing.firstTextBlockUuidByMessageID.set(apiMessageId, msg.uuid)
+        }
         if (
           'tool_use_id' in content &&
           typeof (content as { tool_use_id: string }).tool_use_id === 'string'
@@ -2082,12 +2114,25 @@ export function updateMessageLookupsIncremental(
       const hookEvent = msg.attachment.hookEvent
       const hookName = (msg.attachment as HookAttachmentWithName).hookName
       if (hookName !== undefined) {
-        let byHookEvent = existing.resolvedHookCounts.get(toolUseID)
-        if (!byHookEvent) {
-          byHookEvent = new Map()
-          existing.resolvedHookCounts.set(toolUseID, byHookEvent)
+        let byHookNames = existing.resolvedHookNames.get(toolUseID)
+        if (!byHookNames) {
+          byHookNames = new Map()
+          existing.resolvedHookNames.set(toolUseID, byHookNames)
         }
-        byHookEvent.set(hookEvent, (byHookEvent.get(hookEvent) ?? 0) + 1)
+        let names = byHookNames.get(hookEvent)
+        if (!names) {
+          names = new Set()
+          byHookNames.set(hookEvent, names)
+        }
+        if (!names.has(hookName)) {
+          names.add(hookName)
+          let byHookEvent = existing.resolvedHookCounts.get(toolUseID)
+          if (!byHookEvent) {
+            byHookEvent = new Map()
+            existing.resolvedHookCounts.set(toolUseID, byHookEvent)
+          }
+          byHookEvent.set(hookEvent, names.size)
+        }
       }
     }
   }
@@ -2182,9 +2227,11 @@ export const EMPTY_LOOKUPS: MessageLookups = {
   siblingToolUseIDs: new Map(),
   progressMessagesByToolUseID: new Map(),
   inProgressHookCounts: new Map(),
+  resolvedHookNames: new Map(),
   resolvedHookCounts: new Map(),
   toolResultByToolUseID: new Map(),
   toolUseByToolUseID: new Map(),
+  firstTextBlockUuidByMessageID: new Map(),
   normalizedMessageCount: 0,
   resolvedToolUseIDs: new Set(),
   erroredToolUseIDs: new Set(),
@@ -3352,6 +3399,12 @@ export function normalizeMessagesForAPI(
     }
   }
 
+  const drainDeliveryIds = queuedCommandDeliveryDrainIds(reorderedMessages)
+  const humanTurnDeliveryIds =
+    queuedCommandDeliveryHumanTurnIds(reorderedMessages)
+  const behindEarlierIds =
+    queuedCommandDeliveryBehindEarlierIds(reorderedMessages)
+
   const result: (UserMessage | AssistantMessage | ApiSystemMessage)[] = []
   // densable 2.1.216 LN — linear same-id assistant merge (Map + cursor).
   // Replaces 215 reverse for-loop O(n) per assistant → O(n²) stalls.
@@ -3401,6 +3454,33 @@ export function normalizeMessagesForAPI(
       }),
     )
   }
+  // densable `hr` / `rr` @191342600 — deduplicate by message uuid, gate `report`
+  // on `model !== undefined`, and reset `assistantIdToIndex` on `'new_turn'`.
+  const splicedDeliveryIds = new Set<string>()
+  const trySpliceTaskDelivery = (
+    delivery: unknown,
+    uuid: string,
+    opts: {
+      startsTurn: boolean
+      inDrainPosition: boolean
+      inHumanTurn: boolean
+    },
+  ): boolean => {
+    if (splicedDeliveryIds.has(uuid)) return true
+    const spliced = spliceBashTaskDelivery(result, delivery, uuid, {
+      ...opts,
+      report: model !== undefined,
+      behindEarlierMessages: behindEarlierIds.has(uuid),
+      flushTail: flushMetaBuffer,
+    })
+    if (spliced === false) return false
+    splicedDeliveryIds.add(uuid)
+    if (spliced === 'new_turn') {
+      assistantIdToIndex.clear()
+      mapScanFrom = result.length
+    }
+    return true
+  }
   reorderedMessages
     .filter(
       (
@@ -3440,6 +3520,24 @@ export function normalizeMessagesForAPI(
           return
         }
         case 'user': {
+          // densable KRr — splice GetTask into the API list; skip the
+          // notification user row when hosted. Outcomes feed As `_p`.
+          let userRow = message
+          const delivery =
+            'taskDelivery' in userRow ? userRow.taskDelivery : undefined
+          if (delivery !== undefined) {
+            if (
+              trySpliceTaskDelivery(delivery, userRow.uuid, {
+                startsTurn: true,
+                inDrainPosition: false,
+                inHumanTurn: false,
+              })
+            ) {
+              return
+            }
+            userRow = { ...userRow, taskDelivery: undefined }
+          }
+
           // Merge consecutive user messages because Bedrock doesn't support
           // multiple user messages in a row; 1P API does and merges them
           // into a single user turn
@@ -3448,7 +3546,7 @@ export function normalizeMessagesForAPI(
           // queued_command tags (system-reminder + NCn). scheduled-trigger
           // stays $Cn only. origin cleared on the API copy (gold `origin:void 0`).
           const hardenedForTaskNotification =
-            hardenTaskNotificationForApi(message)
+            hardenTaskNotificationForApi(userRow)
 
           // When tool search is NOT enabled, strip all tool_reference blocks from
           // tool_result content, as these are only valid with the tool search beta.
@@ -3639,6 +3737,21 @@ export function normalizeMessagesForAPI(
           return
         }
         case 'attachment': {
+          // densable KRr drain — attachment.taskDelivery, startsTurn:false.
+          const att = message.attachment as Attachment & {
+            taskDelivery?: unknown
+          }
+          if (att.type === 'queued_command' && att.taskDelivery !== undefined) {
+            if (
+              trySpliceTaskDelivery(att.taskDelivery, message.uuid, {
+                startsTurn: false,
+                inDrainPosition: drainDeliveryIds.has(message.uuid),
+                inHumanTurn: humanTurnDeliveryIds.has(message.uuid),
+              })
+            ) {
+              return
+            }
+          }
           // densable: D && !o → drop batching_reminder (resume safety)
           const isBatchingReminder =
             message.attachment.type === 'batching_reminder'
@@ -4270,6 +4383,7 @@ export function normalizeContentFromAPI(
 // densable emptiness — shared leaf so streamingTextStore can use same gate
 // without circular import through this module.
 export {
+  assistantUiRenderText,
   isEmptyMessageText,
   stripPromptXMLTags,
 } from './emptyMessageText.js'
@@ -6887,8 +7001,11 @@ export function createApiMetricsMessage(metrics: {
   }
 }
 
+export type LocalCommandRun = { command: string; args?: string }
+
 export function createCommandInputMessage(
   content: string,
+  extras?: { commandRun?: LocalCommandRun },
 ): SystemLocalCommandMessage {
   return {
     type: 'system',
@@ -6898,7 +7015,8 @@ export function createCommandInputMessage(
     timestamp: new Date().toISOString(),
     uuid: randomUUID(),
     isMeta: false,
-  }
+    ...(extras?.commandRun !== undefined && { commandRun: extras.commandRun }),
+  } as SystemLocalCommandMessage
 }
 
 export function createCompactBoundaryMessage(
@@ -8569,6 +8687,20 @@ export function peerMessageHasCollapsedWhitespace(
   return stripped !== collapsed
 }
 
+/** densable `ese` — anchored `<cross-session-message` check after optional Zoe preface. */
+export function looksLikeCrossSessionMessageEnvelope(text: string): boolean {
+  let o = text
+  const prefixes = [
+    `${PEER_ORIGIN_HEAD_MIDTURN}\n`,
+    `${PEER_ORIGIN_HEAD_TURNSTART}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_MIDTURN}\n`,
+    `${ACTIVITY_OBSERVATION_HEAD_TURNSTART}\n`,
+  ]
+  const prefix = prefixes.find(head => o.startsWith(head))
+  if (prefix) o = o.slice(prefix.length)
+  return o.startsWith(`<${CROSS_SESSION_MESSAGE_TAG}`)
+}
+
 /**
  * densable Tl — ese envelope then hmr only. ua/JYt stays on the labelled path.
  */
@@ -8578,7 +8710,7 @@ export function isEnvelopeWrapOverflowClickable(
 ): boolean {
   if (
     !looksLikeAgentMessageEnvelope(text) &&
-    !text.includes(`<${CROSS_SESSION_MESSAGE_TAG}`)
+    !looksLikeCrossSessionMessageEnvelope(text)
   ) {
     return false
   }
@@ -8662,6 +8794,72 @@ export function isHumanLikeOrigin(
     origin.kind === 'human' ||
     origin.kind === 'auto-continuation'
   )
+}
+
+/** densable `cat` / `aCe` — task-notification subkinds that become origin.kind. */
+const UI_RENDER_TASK_NOTIFICATION_KIND_SUBKINDS = new Set([
+  'scheduled-trigger',
+  'peer-send-message',
+  'projects-relay',
+])
+
+export type UiRenderUserMessageOrigin = {
+  kind: string
+  name?: string
+  asUser?: boolean
+  server?: string
+}
+
+/**
+ * densable `vzn` / `YQ(e, void 0)` — UserMessage HAS origin. TDe always passes
+ * this (missing/non-object stored → `{kind:"unclassified"}`).
+ */
+export function uiRenderUserMessageOrigin(
+  stored: unknown,
+): UiRenderUserMessageOrigin {
+  if (typeof stored !== 'object' || stored === null) {
+    return { kind: 'unclassified' }
+  }
+  const origin = stored as {
+    kind?: unknown
+    name?: unknown
+    asUser?: unknown
+    server?: unknown
+    subkind?: unknown
+  }
+  switch (origin.kind) {
+    case 'human':
+      return { kind: 'composer' }
+    case 'plugin': {
+      const name = typeof origin.name === 'string' ? origin.name : undefined
+      return origin.asUser === true
+        ? { kind: 'plugin', name, asUser: true }
+        : { kind: 'plugin', name }
+    }
+    case 'channel':
+      return {
+        kind: 'channel',
+        ...(typeof origin.server === 'string' ? { server: origin.server } : {}),
+      }
+    case 'task-notification': {
+      const subkind =
+        typeof origin.subkind === 'string' ? origin.subkind : undefined
+      return subkind !== undefined &&
+        UI_RENDER_TASK_NOTIFICATION_KIND_SUBKINDS.has(subkind)
+        ? { kind: subkind }
+        : { kind: 'task-notification' }
+    }
+    case 'peer':
+    case 'coordinator':
+    case 'unclassified':
+    case 'observer':
+    case 'auto-continuation':
+    case 'observer-activity':
+    case 'slack-ping':
+      return { kind: origin.kind }
+    default:
+      return { kind: 'unclassified' }
+  }
 }
 
 /**

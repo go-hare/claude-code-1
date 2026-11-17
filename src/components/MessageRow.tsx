@@ -45,6 +45,7 @@ export type Props = {
   isUserContinuation: boolean;
   isSplitUserContinuation?: boolean;
   followsSpeakerLabel?: boolean;
+  followsInboundLabel?: boolean;
   /**
    * Whether there is non-skippable content after this message in renderableMessages.
    * Only needs to be accurate for `collapsed_read_search` messages — used to decide
@@ -132,6 +133,7 @@ function MessageRowImpl({
   isUserContinuation,
   isSplitUserContinuation,
   followsSpeakerLabel = false,
+  followsInboundLabel = false,
   hasContentAfter,
   tools,
   commands,
@@ -171,6 +173,7 @@ function MessageRowImpl({
         isUserContinuation={isUserContinuation}
         isSplitUserContinuation={isSplitUserContinuation}
         followsSpeakerLabel={followsSpeakerLabel}
+        followsInboundLabel={followsInboundLabel}
         lastThinkingBlockId={lastThinkingBlockId ?? null}
         latestBashOutputUUID={latestBashOutputUUID}
       />
@@ -243,6 +246,7 @@ function MessageRowImpl({
       isUserContinuation={isUserContinuation}
       isSplitUserContinuation={isSplitUserContinuation}
       followsSpeakerLabel={followsSpeakerLabel}
+      followsInboundLabel={followsInboundLabel}
       hasMetadataHeader={hasMetadata}
       lastThinkingBlockId={lastThinkingBlockId ?? null}
       latestBashOutputUUID={latestBashOutputUUID}
@@ -350,7 +354,9 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
 
   if (
     prev.isUserContinuation !== next.isUserContinuation ||
-    prev.isSplitUserContinuation !== next.isSplitUserContinuation
+    prev.isSplitUserContinuation !== next.isSplitUserContinuation ||
+    prev.followsSpeakerLabel !== next.followsSpeakerLabel ||
+    prev.followsInboundLabel !== next.followsInboundLabel
   ) {
     return false;
   }

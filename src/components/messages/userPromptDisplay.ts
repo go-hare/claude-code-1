@@ -46,6 +46,23 @@ export function truncateUserPromptForDisplay(
   return { head, hiddenLines, hiddenChars, tail }
 }
 
+function countCharInRange(
+  haystack: string,
+  needle: string,
+  fromIndex = 0,
+): number {
+  let count = 0
+  for (let i = fromIndex; i < haystack.length; i++) {
+    if (haystack[i] === needle) count++
+  }
+  return count
+}
+
+/** densable `Qkt` — `truncateUserPromptForDisplay` with default char counter. */
+export function truncateUserPromptText(text: string): UserPromptDisplayText {
+  return truncateUserPromptForDisplay(text, countCharInRange)
+}
+
 /**
  * densable j3i `Bto` — whether to route through Markdown `promptMode`.
  */

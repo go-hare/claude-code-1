@@ -70,7 +70,6 @@ describe('densable 2.1.289 Fg/zX Message from @agent', () => {
     expect(src).toContain('shouldPaintAgentInboundRow(att.origin, promptText)')
     expect(src).toContain('peerOrObserverDisplayName(att.origin)')
     expect(src).toContain('fallbackLabel="agent"')
-    expect(src).toContain("originKind === 'peer'")
     expect(src).not.toContain('export function uM(')
     expect(src).not.toContain('export function BCn(')
     expect(src).not.toContain('export function Wr(')

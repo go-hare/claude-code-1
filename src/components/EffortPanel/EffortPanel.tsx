@@ -23,10 +23,13 @@ import { useAppState, useSetAppState } from '../../state/AppState.js';
 import {
   type EffortLevel,
   type EffortValue,
+  explicitSessionEffort,
   getDisplayedEffortLevel,
   getEffortEnvOverride,
   isUltracodeOfferable,
   modelSupportsMaxEffort,
+  pdSessionEffort,
+  teSettingsEffortTable,
 } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
@@ -181,13 +184,19 @@ export function EffortPanel(props: Props): React.ReactNode {
 function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const ultracodeState = useAppState(s => s.ultracode);
+  const sessionEffort = useAppState(s => s.sessionEffort);
+  const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const model = useMainLoopModel();
   const { columns } = useTerminalSize();
 
+  const resolvedSessionEffort = React.useMemo(
+    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model) ?? appStateEffort,
+    [sessionEffort, appStateEffort, settingsEffortTable, model],
+  );
   const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
   const initialIdx = React.useMemo(
-    () => getInitialSliderIndex(model, appStateEffort, geometry),
-    [model, appStateEffort, geometry],
+    () => getInitialSliderIndex(model, resolvedSessionEffort, geometry),
+    [model, resolvedSessionEffort, geometry],
   );
   const [cursorIdx, setCursorIdx] = React.useState(initialIdx);
   const selectedIdx = Math.min(cursorIdx, geometry.levels.length - 1);
@@ -214,12 +223,12 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
       const shouldApplyLevel = levelChanged || !ultracodeChanged;
 
       const messages: string[] = [];
-      let nextEffort = appStateEffort;
+      let nextEffort = resolvedSessionEffort;
       let hasEffortUpdate = false;
 
       if (shouldApplyLevel) {
         const outcome = computeConfirmOutcome(selectedLevel, arg =>
-          executeEffort(arg, model, undefined, persistAsDefault, appStateEffort),
+          executeEffort(arg, model, undefined, persistAsDefault, resolvedSessionEffort),
         );
         messages.push(outcome.message);
         if (outcome.effortUpdate) {
@@ -241,7 +250,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
             ? ultraOutcome.message
             : `Ultracode ${ultracodeOn ? 'on' : 'off'}`,
         );
-        if (!shouldApplyLevel && ultraOutcome.effortUpdate) {
+        if (!shouldApplyLevel && ultraOutcome.effortUpdate && ultraOutcome.effortUpdate.ultracode === undefined) {
           nextEffort = ultraOutcome.effortUpdate.value;
           hasEffortUpdate = true;
         }
@@ -250,7 +259,13 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
       if (hasEffortUpdate || ultracodeChanged) {
         setAppState(prev => ({
           ...prev,
-          ...(hasEffortUpdate ? { effortValue: nextEffort } : {}),
+          ...(hasEffortUpdate
+            ? {
+                effortValue: nextEffort,
+                sessionEffort: explicitSessionEffort(nextEffort),
+                settingsEffortTable: teSettingsEffortTable(),
+              }
+            : {}),
           ...(ultracodeChanged ? { ultracode: ultracodeOn } : {}),
         }));
       }
@@ -258,7 +273,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
       onDone(messages.join(' · '));
     },
     [
-      appStateEffort,
+      resolvedSessionEffort,
       geometry.levels,
       initialIdx,
       initialUltracode,
@@ -453,11 +468,17 @@ function getScreenReaderLevelNote(model: string, level: EffortLevel): string {
 function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const setAppState = useSetAppState();
   const ultracodeState = useAppState(s => s.ultracode);
+  const sessionEffort = useAppState(s => s.sessionEffort);
+  const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const model = useMainLoopModel();
+  const resolvedSessionEffort = React.useMemo(
+    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model) ?? appStateEffort,
+    [sessionEffort, appStateEffort, settingsEffortTable, model],
+  );
   const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
   const initialIdx = React.useMemo(
-    () => getInitialSliderIndex(model, appStateEffort, geometry),
-    [model, appStateEffort, geometry],
+    () => getInitialSliderIndex(model, resolvedSessionEffort, geometry),
+    [model, resolvedSessionEffort, geometry],
   );
   const ultracodeOfferable = React.useMemo(() => isUltracodeOfferable(model), [model]);
   const doneRef = React.useRef(false);
@@ -487,17 +508,23 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
       doneRef.current = true;
       const arg =
         selected === ULTRACODE_SR_TOGGLE_VALUE ? (ultracodeState ? 'ultracode off' : 'ultracode on') : selected;
-      const result = executeEffort(arg, model, undefined, true, appStateEffort);
+      const result = executeEffort(arg, model, undefined, true, resolvedSessionEffort);
       if (result.effortUpdate) {
         setAppState(prev => ({
           ...prev,
-          effortValue: result.effortUpdate!.value,
+          ...(result.effortUpdate!.ultracode === undefined
+            ? {
+                effortValue: result.effortUpdate!.value,
+                sessionEffort: explicitSessionEffort(result.effortUpdate!.value),
+              }
+            : {}),
+          settingsEffortTable: teSettingsEffortTable(),
           ...(result.effortUpdate!.ultracode !== undefined ? { ultracode: result.effortUpdate!.ultracode } : {}),
         }));
       }
       onDone(result.message);
     },
-    [appStateEffort, model, onDone, setAppState, ultracodeState],
+    [resolvedSessionEffort, model, onDone, setAppState, ultracodeState],
   );
 
   const handleCancel = React.useCallback(() => {

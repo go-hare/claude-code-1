@@ -1,5 +1,12 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
+import {
+  detachedToolCallAbort,
+  getDetachedToolCallSnapshot,
+  pruneDetachedToolCalls,
+  stopRunningDetachedToolCalls,
+  subscribeDetachedToolCalls,
+} from '../utils/detachedToolCallStore.js';
 import { spawnSync } from 'child_process';
 import {
   snapshotOutputTokensForTurn,
@@ -17,7 +24,7 @@ import { tmpdir } from 'os';
 import figures from 'figures';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- / n N Esc [ v are bare letters in transcript modal context, same class as g/G/j/k in ScrollKeybindingHandler
 import { useInput } from '@anthropic/ink';
-import { useSearchInput } from '../hooks/useSearchInput.js';
+import { Input, isNativeCursorEnabled, useDeclaredCursor, useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { useSearchHighlight } from '@anthropic/ink';
 import type { JumpHandle } from '../components/VirtualMessageList.js';
@@ -33,6 +40,7 @@ import {
   stringWidth,
   useStdin,
   useTheme,
+  useClock,
   useTerminalFocus,
   useTerminalTitle,
   useTabStatus,
@@ -85,7 +93,16 @@ import {
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
 import { useSessionServices } from '../context/sessionServices.js';
-import { getReplDiffHost } from '../utils/sessionHost.js';
+import {
+  getBootstrapSession,
+  getReplDiffHost,
+  getUserPromptWaitingFor,
+  isSessionWorking,
+  setSessionWorking,
+  setUserPromptWaitingFor,
+  subscribeSessionWorking,
+  subscribeUserPromptWaiting,
+} from '../utils/sessionHost.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { truncateToWidth } from '../utils/format.js';
@@ -161,6 +178,12 @@ import {
 import { getMainThreadTurn } from '../utils/mainThreadTurn.js';
 import { ensurePluginToolRegistrarInstalled } from '../utils/plugins/pluginToolLoopbackRegistrar.js';
 import { setPluginToolSessionHost } from '../utils/plugins/pluginToolSessionHost.js';
+import {
+  awaitPluginMcpServer,
+  connectPluginMcpServer,
+  resolvePluginMcpServer,
+} from '../utils/plugins/pluginMcpConnect.js';
+import { clearServerCache } from '../services/mcp/client.js';
 import { getDenyRuleForTool } from '../utils/permissions/permissions.js';
 import {
   PluginAbovePromptSite,
@@ -239,7 +262,7 @@ import {
   useTopDialog,
   useTopDialogKind,
 } from '../dialog/index.js';
-import { resolveHostWaitingFor } from '../dialog/permissionWaiting.js';
+import { resolveHostWaitingFor, resolveSessionPromptStatus } from '../dialog/permissionWaiting.js';
 import { legacyFocusForUqc, setLegacyDialogFocus } from '../dialog/legacyDialogFocus.js';
 import {
   getPromptInputCursorState,
@@ -251,6 +274,8 @@ import { createPromptDraftController, type PromptDraftController } from '../util
 import { SandboxNetworkAccessAsker } from '../dialog/sandboxNetworkAccess.js';
 import type { PromptRequest, PromptResponse } from '../types/hooks.js';
 import PromptInput from '../components/PromptInput/PromptInput.js';
+import { viewedAgentForInput } from '../components/PromptInput/viewedAgent.js';
+import { createTaskRegistry } from '../utils/taskRegistry.js';
 import { LivePromptDraft } from '../components/PromptInput/LivePromptDraft.js';
 import { PromptInputQueuedCommands } from '../components/PromptInput/PromptInputQueuedCommands.js';
 import { useRemoteSession } from '../hooks/useRemoteSession.js';
@@ -437,7 +462,7 @@ import { maybeMarkProjectOnboardingComplete } from '../projectOnboardingState.js
 import type { MCPServerConnection } from '../services/mcp/types.js';
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js';
 import { randomUUID, type UUID } from 'crypto';
-import { processSessionStartHooks } from '../utils/sessionStart.js';
+import { processSessionStartHooks, takeInitialUserMessage } from '../utils/sessionStart.js';
 import { LeftoverMhrRetryRow } from '../state/leftoverIhrStore.js';
 import { executeSessionEndHooks, getSessionEndHookTimeoutMs, getSessionEndHooksBoundMs } from '../utils/hooks.js';
 import { type IDESelection, useIdeSelection } from '../hooks/useIdeSelection.js';
@@ -583,16 +608,27 @@ import {
   enqueue,
   type SetAppState,
   getCommandQueue,
+  getCommandQueueSnapshot,
   getCommandQueueLength,
+  isFoldInFlight,
+  isMidTurnFoldSuspended,
+  promoteToNow,
+  demoteFromNow,
   getMainThreadQueueLength,
-  promoteMainThreadQueueToNow,
   removeByFilter,
   someInFlightDrainCommand,
   isPoppableEditableCommand,
   isQueuedCommandEditable,
+  subscribeToCommandQueue,
 } from '../utils/messageQueueManager.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
-import { backgroundForegroundToolCalls, queryForegroundSession } from '../utils/foregroundToolCalls.js';
+import {
+  trySendQueuedNowKey,
+  abortOnNowPriorityCommand,
+  QueuedNowLowLatency,
+  isVelvetPandaEnabled,
+} from '../utils/foregroundToolCalls.js';
+import { leftoverIhr } from '../utils/collapseReadSearch.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
@@ -600,7 +636,7 @@ import { useSessionBackgrounding } from '../hooks/useSessionBackgrounding.js';
 import { diagnosticTracker } from '../services/diagnosticTracking.js';
 import { handleSpeculationAccept, type ActiveSpeculationState } from '../services/PromptSuggestion/speculation.js';
 import { EffortCallout, shouldShowEffortCallout } from '../components/EffortCallout.js';
-import type { EffortValue } from '../utils/effort.js';
+import { type EffortValue, explicitSessionEffort, levelSessionEffort } from '../utils/effort.js';
 import { RemoteCallout } from '../components/RemoteCallout.js';
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const AntModelSwitchCallout =
@@ -884,7 +920,7 @@ function TranscriptSearchBar({
   // nearest-ptr, same highlights). User can edit or clear.
   initialQuery: string;
 }): React.ReactNode {
-  const { query, cursorOffset } = useSearchInput({
+  const { query, cursorOffset, handleKeyDown, handlePaste } = useSearchInput({
     isActive: true,
     initialQuery,
     onExit: () => onClose(query),
@@ -935,7 +971,19 @@ function TranscriptSearchBar({
     setHighlight(query);
   }, [jumpRef, query, setHighlight, warmDone]);
   const off = cursorOffset;
-  const cursorChar = off < query.length ? query[off] : ' ';
+  const codePoint = off < query.length ? query.codePointAt(off) : undefined;
+  const cursorChar = codePoint !== undefined ? String.fromCodePoint(codePoint) : ' ';
+  const afterOffset = codePoint !== undefined ? off + cursorChar.length : off;
+  const nativeCursor = useMemo(isNativeCursorEnabled, []);
+  const fullRepaint =
+    Boolean(process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT) && process.env.CLAUDE_CODE_SESSION_KIND !== 'bg';
+  const showInverseCursor = !(nativeCursor && !fullRepaint);
+  const declaredCursor = useDeclaredCursor({
+    line: 0,
+    column: 0,
+    active: true,
+    visible: !fullRepaint,
+  });
   return (
     <Box
       borderTopDimColor
@@ -954,27 +1002,31 @@ function TranscriptSearchBar({
       // select the bar either; it's transient chrome, fine.
       noSelect
     >
-      <Text>/</Text>
-      <Text>{query.slice(0, off)}</Text>
-      <Text inverse>{cursorChar}</Text>
-      {off < query.length && <Text>{query.slice(off + 1)}</Text>}
-      <Box flexGrow={1} />
-      {indexStatus === 'building' ? (
-        <Text dimColor>indexing… </Text>
-      ) : indexStatus ? (
-        <Text dimColor>indexed in {indexStatus.ms}ms </Text>
-      ) : count === 0 && query ? (
-        <Text color="error">no matches </Text>
-      ) : count > 0 ? (
-        // Engine-counted (indexOf on extractSearchText). May drift from
-        // render-count for ghost/phantom messages — badge is a rough
-        // location hint. scanElement gives exact per-message positions
-        // but counting ALL would cost ~1-3ms × matched-messages.
-        <Text dimColor>
-          {current}/{count}
-          {'  '}
-        </Text>
-      ) : null}
+      <Input autoFocus onKeyDown={handleKeyDown} onPaste={handlePaste} flexDirection="row" flexGrow={1}>
+        <Text>/</Text>
+        <Text>{query.slice(0, off)}</Text>
+        <Box ref={declaredCursor} flexShrink={0}>
+          <Text inverse={showInverseCursor}>{cursorChar}</Text>
+        </Box>
+        {afterOffset < query.length && <Text>{query.slice(afterOffset)}</Text>}
+        <Box flexGrow={1} />
+        {indexStatus === 'building' ? (
+          <Text dimColor>indexing… </Text>
+        ) : indexStatus ? (
+          <Text dimColor>indexed in {indexStatus.ms}ms </Text>
+        ) : count === 0 && query ? (
+          <Text color="error">no matches </Text>
+        ) : count > 0 ? (
+          // Engine-counted (indexOf on extractSearchText). May drift from
+          // render-count for ghost/phantom messages — badge is a rough
+          // location hint. scanElement gives exact per-message positions
+          // but counting ALL would cost ~1-3ms × matched-messages.
+          <Text dimColor>
+            {current}/{count}
+            {'  '}
+          </Text>
+        ) : null}
+      </Input>
     </Box>
   );
 }
@@ -1381,6 +1433,26 @@ export function REPL({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const setAppState = useSetAppState();
+  // densable Qr (@209940969) — seed transcripts[Ve()] synchronously on init
+  // before effects/stream events read store.getState().transcripts[Ve()].
+  useState(() => {
+    const mainAgentId = getMainThreadAgentId();
+    setAppState(prev => {
+      const existing = prev.transcripts[mainAgentId];
+      if (existing !== undefined) return prev;
+      return {
+        ...prev,
+        transcripts: {
+          ...prev.transcripts,
+          [mainAgentId]: {
+            messages: initialMessages ?? [],
+            inProgressToolUseIDs: new Set(),
+          },
+        },
+      };
+    });
+    return null;
+  });
   // densable NDr / TZt / H$y — willow crate diff tab baseline
   const willowCrateEnabled = isDiffPanelEnabled();
   const replTab = useAppState(s => s.replTab);
@@ -1420,6 +1492,8 @@ export function REPL({
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
   const store = useAppStateStore();
+  // densable `Xm(e,o)` / REPL `Er` — one registry for getToolUseContext.
+  const taskRegistry = useMemo(() => createTaskRegistry(() => store.getState(), setAppState), [store, setAppState]);
   useEffect(() => {
     const { getBootstrapSession } = require('../utils/sessionRoot.js') as typeof import('../utils/sessionRoot.js');
     return getBootstrapSession().mcpSessionWiring.acquireClientsAccessor(() =>
@@ -1755,10 +1829,10 @@ export function REPL({
     setStreamModeState(mode);
     if (mode !== 'requesting') setOutputLimitRecovery(null);
     try {
-      const { leftoverIhrUxe, leftoverIhrMain } =
+      const { leftoverIhrUxe, leftoverIhr } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-      leftoverIhrMain(getSessionId()).setMode(mode);
+      leftoverIhr.main.setMode(mode);
       if (mode !== 'thinking') leftoverIhrUxe.setSpinnerMessage(null);
     } catch {
       // isolation — optional
@@ -1821,6 +1895,13 @@ export function REPL({
       }
     });
     return () => registerInteractiveShutdownAbort(null);
+  }, []);
+
+  // densable `_abortOnNowPriorityCommand` — `#k` promoteToNow aborts the live turn.
+  useEffect(() => {
+    return subscribeToCommandQueue(() => {
+      abortOnNowPriorityCommand(abortControllerRef.current);
+    });
   }, []);
 
   // Timestamp (ms) of the most recent local-jsx panel dismissal (e.g. ESC on
@@ -2192,6 +2273,58 @@ export function REPL({
   // is null, treat as not-showing so TextInput focus and queue processor
   // aren't deadlocked by a phantom overlay.
   const isShowingLocalJSXCommand = toolJSX?.isLocalJSXCommand === true && toolJSX?.jsx != null;
+  // densable Sye — one bag for `$en`/`K3e` and tab/PID (gold aIo Fen/iCr).
+  // be = getBootstrapSession (gold `n()`). Do not invent br().
+  const delegatedActive = Object.values(tasks).some(task => {
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'killed') {
+      return false;
+    }
+    if (task.type === 'in_process_teammate') return !(task as { isIdle?: boolean }).isIdle;
+    return (
+      task.type === 'local_agent' &&
+      (task as { agentType?: string }).agentType !== 'main-session' &&
+      !(task as { isIdle?: boolean }).isIdle
+    );
+  });
+  const hostWaiting = resolveHostWaitingFor(topDialogKind, topDialog?.payload);
+  const sessionPrompt = resolveSessionPromptStatus({
+    queuedElicitation: elicitation.queue.length > 0,
+    topDialogWaitingFor: hostWaiting,
+    pendingWorkerRequest: Boolean(pendingWorkerRequest),
+    pendingSandboxRequest: Boolean(pendingSandboxRequest),
+    isShowingLocalJSXCommand,
+    isResponseStreaming: queryGuard.isRunning,
+    isLoading,
+    isQueryActive,
+    delegatedActive,
+  });
+  // densable `$en(be, no)` + `K3e(be, Ro)`.
+  useEffect(() => {
+    const session = getBootstrapSession();
+    setUserPromptWaitingFor(session, sessionPrompt.waitingFor);
+    setSessionWorking(session, sessionPrompt.working);
+  }, [sessionPrompt.waitingFor, sessionPrompt.working]);
+  // densable unmount `$en(be, void 0)` + `K3e(be, !1)`.
+  useEffect(() => {
+    const session = getBootstrapSession();
+    return () => {
+      setUserPromptWaitingFor(session, undefined);
+      setSessionWorking(session, false);
+    };
+  }, []);
+  // densable V$n(h,N)+CEo(h,N) — aIo refreshes when Fen/iCr change.
+  const subscribeSessionWorkingBag = useCallback(
+    (onStoreChange: () => void) => subscribeSessionWorking(getBootstrapSession(), onStoreChange),
+    [],
+  );
+  const subscribeSessionWaitingBag = useCallback(
+    (onStoreChange: () => void) => subscribeUserPromptWaiting(getBootstrapSession(), onStoreChange),
+    [],
+  );
+  const getSessionWorkingSnapshot = useCallback(() => isSessionWorking(getBootstrapSession()), []);
+  const getSessionWaitingSnapshot = useCallback(() => getUserPromptWaitingFor(getBootstrapSession()) ?? null, []);
+  const sessionWorking = useSyncExternalStore(subscribeSessionWorkingBag, getSessionWorkingSnapshot);
+  const sessionWaitingFor = useSyncExternalStore(subscribeSessionWaitingBag, getSessionWaitingSnapshot);
   // densable 2.1.239 rSh n(UOo) — hold approval via requestDialog queueBehind.
   usePeerInboundUdsDrain({ requestDialog });
   const titleIsAnimating = isLoading && !isWaitingForApproval && !isShowingLocalJSXCommand;
@@ -2208,35 +2341,20 @@ export function REPL({
     }
   }, [isLoading, isWaitingForApproval, isShowingLocalJSXCommand]);
 
-  const sessionStatus: TabStatusKind =
-    isWaitingForApproval || isShowingLocalJSXCommand ? 'waiting' : isLoading ? 'busy' : 'idle';
-
-  // densable waitingFor / y2A — Host open-stack; tip Fe/Be / hook-prompt overlays.
-  const hostWaiting = resolveHostWaitingFor(topDialogKind, topDialog?.payload);
-  const waitingFor =
-    sessionStatus !== 'waiting'
-      ? undefined
-      : pendingSandboxRequest || topDialogKind === SANDBOX_NETWORK_ACCESS_KIND
-        ? 'sandbox request'
-        : pendingWorkerRequest || workerSandboxPermissions.queue[0]
-          ? 'worker request'
-          : elicitation.queue[0]
-            ? 'input needed'
-            : hostWaiting
-              ? hostWaiting
-              : promptQueue.length > 0 || isShowingLocalJSXCommand
-                ? promptQueue.length > 0
-                  ? 'input needed'
-                  : 'dialog open'
-                : 'input needed';
+  const sessionStatus: TabStatusKind = sessionPrompt.status;
+  const waitingFor = sessionPrompt.waitingFor;
 
   // Push status to the PID file for `claude ps`. Fire-and-forget; ps falls
   // back to transcript-tail derivation when this is missing/stale.
+  // gold aIo({working:Fen(h), waitingFor:iCr(h)}) — status from Sye, waitingFor from iCr.
   useEffect(() => {
     if (feature('BG_SESSIONS')) {
-      void updateSessionActivity({ status: sessionStatus, waitingFor });
+      void updateSessionActivity({
+        status: sessionStatus,
+        waitingFor: waitingFor,
+      });
     }
-  }, [sessionStatus, waitingFor]);
+  }, [sessionStatus, waitingFor, sessionWorking, sessionWaitingFor]);
 
   // densable Gm(qSn,{currentMode},{queueBehind:!0})
   useEffect(() => {
@@ -2349,7 +2467,29 @@ export function REPL({
     setFunctionHooksAppStateWriter(store.setState);
     // densable YNo + Hu session bag for $.tool.register → MCP loopback.
     ensurePluginToolRegistrarInstalled();
+    const settledMcpServer = (name: string) =>
+      awaitPluginMcpServer({ rows: () => store.getState().mcp.clients, subscribe: store.subscribe }, name);
     setPluginToolSessionHost({
+      resolveMcpServer: input => resolvePluginMcpServer({ ...input, dynamicServers: dynamicMcpConfigRef.current }),
+      settledMcpServer,
+      connectMcpServer: (name, config) =>
+        connectPluginMcpServer(
+          {
+            rows: () => store.getState().mcp.clients,
+            subscribe: store.subscribe,
+            holds: key => Object.hasOwn(dynamicMcpConfigRef.current ?? {}, key),
+            drop: key =>
+              onChangeDynamicMcpConfig(prev => {
+                const next = { ...(prev ?? {}) };
+                delete next[key];
+                return next;
+              }),
+            forget: (key, previous) => (previous ? clearServerCache(key, previous) : undefined),
+            add: (key, next) => onChangeDynamicMcpConfig(prev => ({ ...(prev ?? {}), [key]: next })),
+          },
+          name,
+          config,
+        ),
       addMcpServer: (name, config) => {
         onChangeDynamicMcpConfig(prev => ({ ...(prev ?? {}), [name]: config }));
       },
@@ -2435,6 +2575,51 @@ export function REPL({
   const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // densable REPL `lr=rn()` — Ink ClockProvider `useClock`, not IdleReturnClock.
+  const clock = useClock();
+  // densable REPL `wa` / `new Xj({turn,messageQueue,transcript,store,session,taskRegistry,spinnerStore,dialogStore,clock:lr})`.
+  const queuedNowLowLatencyHost = useMemo(
+    () =>
+      new QueuedNowLowLatency({
+        turn: {
+          guard: queryGuard,
+          get abortController() {
+            return abortControllerRef.current;
+          },
+          interruptForSubmit: () => {
+            const ac = abortControllerRef.current;
+            if (!ac || ac.signal.aborted) return false;
+            ac.abort('interrupt');
+            return true;
+          },
+          stream: {
+            get isMainResponseStreaming() {
+              return queryGuard.isRunning;
+            },
+          },
+        },
+        store,
+        session: getBootstrapSession(),
+        spinnerStore: leftoverIhr,
+        dialogStore,
+        messageQueue: {
+          getCommandQueueSnapshot,
+          getCommandQueue,
+          subscribe: subscribeToCommandQueue,
+          isFoldInFlight,
+          isMidTurnFoldSuspended,
+          promoteToNow,
+          demoteFromNow,
+        },
+        transcript: { getSnapshot: () => messagesRef.current },
+        clock,
+        taskRegistry,
+        getAppState: () => store.getState(),
+        setAppState,
+      }),
+    [store, setAppState, taskRegistry, queryGuard, dialogStore, clock],
+  );
+  useEffect(() => () => queuedNowLowLatencyHost.dispose(), [queuedNowLowLatencyHost]);
   // densable je/Wt — turn-start snapshot for idle-fork nzu(replyOnResume).
   // Marked whenever a new query AbortController is armed.
   const turnStartRef = useRef<{ length: number; uuid?: string } | null>(null);
@@ -2461,11 +2646,34 @@ export function REPL({
   // truth, React state is the render projection.  Without this, paths
   // that queue functional updaters then synchronously read the ref
   // (e.g. handleSpeculationAccept → onQuery) see stale data.
-  const setMessages = useCallback((action: React.SetStateAction<MessageType[]>) => {
-    const next = typeof action === 'function' ? action(messagesRef.current) : action;
-    messagesRef.current = next;
-    rawSetMessages(next);
-  }, []);
+  const setMessages = useCallback(
+    (action: React.SetStateAction<MessageType[]>) => {
+      const next = typeof action === 'function' ? action(messagesRef.current) : action;
+      pruneDetachedToolCalls(messagesRef.current, next);
+      messagesRef.current = next;
+      rawSetMessages(next);
+      // densable l9 (@209943150) — keep transcripts[Ve()].messages synchronized
+      // with live transcript writes, /clear, /compact, and rewinds.
+      setAppState(prev => {
+        const mainAgentId = getMainThreadAgentId();
+        const existing = prev.transcripts[mainAgentId];
+        if (existing !== undefined && existing.messages === next) {
+          return prev;
+        }
+        return {
+          ...prev,
+          transcripts: {
+            ...prev.transcripts,
+            [mainAgentId]: {
+              messages: next,
+              inProgressToolUseIDs: existing?.inProgressToolUseIDs ?? new Set(),
+            },
+          },
+        };
+      });
+    },
+    [setAppState],
+  );
 
   // densable useUiLog — $.ui.log lines become notice-level system messages.
   useEffect(() => {
@@ -2560,6 +2768,7 @@ export function REPL({
                 {
                   adoptedAgentIds,
                   skipOrphanAgentShells: true,
+                  getAppState: () => store.getState(),
                 },
               );
             } catch {
@@ -3000,7 +3209,29 @@ export function REPL({
     [setLocalCommands],
   );
 
-  const [inProgressToolUseIDs, setInProgressToolUseIDs] = useState<Set<string>>(new Set());
+  const [inProgressToolUseIDs, rawSetInProgressToolUseIDs] = useState<Set<string>>(new Set());
+  const setInProgressToolUseIDs = useCallback(
+    (updater: React.SetStateAction<Set<string>>) => {
+      rawSetInProgressToolUseIDs(prev => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        if (next === prev || (next.size === prev.size && [...next].every(id => prev.has(id)))) {
+          return prev;
+        }
+        return next;
+      });
+      taskRegistry.updateTranscript(getMainThreadAgentId(), prev => {
+        const next = typeof updater === 'function' ? updater(prev.inProgressToolUseIDs) : updater;
+        if (
+          next === prev.inProgressToolUseIDs ||
+          (next.size === prev.inProgressToolUseIDs.size && [...next].every(id => prev.inProgressToolUseIDs.has(id)))
+        ) {
+          return prev;
+        }
+        return { ...prev, inProgressToolUseIDs: next };
+      });
+    },
+    [taskRegistry],
+  );
   const hasInterruptibleToolInProgressRef = useRef(false);
 
   // Remote session hook - manages WebSocket connection and message handling for --remote mode
@@ -3319,10 +3550,10 @@ export function REPL({
   const setRetryStatus = useCallback((status: import('../utils/advisorNetworkStall.js').RetryStatus | null) => {
     setRetryStatusState(status);
     try {
-      const { leftoverIhrMain } =
+      const { leftoverIhr } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-      leftoverIhrMain(getSessionId()).setRetryStatus(status);
+      leftoverIhr.main.setRetryStatus(status);
     } catch {
       // isolation — optional
     }
@@ -3476,11 +3707,11 @@ export function REPL({
     pickNewSpinnerTip();
     endInteractionSpan();
     try {
-      const { leftoverIhrMain } =
+      const { leftoverIhr } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-      leftoverIhrMain(getSessionId()).resetOverrides();
-      leftoverIhrMain(getSessionId()).setMode('responding');
+      leftoverIhr.main.resetOverrides();
+      leftoverIhr.main.setMode('responding');
     } catch {
       // isolation — optional
     }
@@ -3763,10 +3994,20 @@ export function REPL({
           sessionId,
           agentType: mainThreadAgentDefinition?.agentType,
           model: mainLoopModel,
+          messages,
         });
 
         // Append hook messages to the conversation
         messages.push(...hookMessages);
+        // densable LMr — SessionStart initialUserMessage is a first-turn user prompt.
+        const initialUserMessage = takeInitialUserMessage();
+        if (initialUserMessage) {
+          messages.push(
+            createUserMessage({
+              content: initialUserMessage,
+            }),
+          );
+        }
         // For forks, generate a new plan slug and copy the plan content so the
         // original and forked sessions don't clobber each other's plan files.
         // For regular resumes, reuse the original session's plan slug.
@@ -4193,6 +4434,7 @@ export function REPL({
   // densable jpt — leftArrowToAgentsFired (qpe in flight / post-query latch)
   const leftArrowToAgentsFired = useRef(false);
   // densable _r — LAc confirm open (iHt/HUo). Gold syncs via useEffect on Tt.
+  // densable HUo: jpt || Ki !== null || _r
   const leftArrowConfirmOpenRef = useRef(false);
   leftArrowConfirmOpenRef.current = leftArrowConfirm != null;
   const LEFT_ARROW_DEFER_REPRESS_MS = 1000;
@@ -4487,6 +4729,12 @@ export function REPL({
     } else {
       abortController?.abort('user-cancel');
     }
+    for (const [id, entry] of getDetachedToolCallSnapshot()) {
+      if (entry.status === 'running' && !entry.stopRequested) {
+        detachedToolCallAbort(id, 'user-cancel');
+      }
+    }
+    stopRunningDetachedToolCalls();
 
     // densable esc: if salvage active and not remote, clear + keep originals
     // (tengu_rotunda_pennant_esc action kept_originals)
@@ -4545,6 +4793,21 @@ export function REPL({
     return () => setPermissionDenyQueuePop(null);
   }, [handleQueuedCommandOnCancel]);
 
+  const hasRunningDetachedToolCalls = useSyncExternalStore(
+    subscribeDetachedToolCalls,
+    () => {
+      for (const entry of getDetachedToolCallSnapshot().values()) {
+        if (entry.status === 'running' && !entry.stopRequested) return true;
+      }
+      return false;
+    },
+    () => false,
+  );
+  const idleDetachedAbortSignalRef = useRef<AbortSignal | null>(null);
+  if (idleDetachedAbortSignalRef.current === null) {
+    idleDetachedAbortSignalRef.current = new AbortController().signal;
+  }
+
   // CancelRequestHandler props - rendered inside KeybindingSetup
   const cancelRequestProps = {
     setToolUseConfirmQueue,
@@ -4552,7 +4815,9 @@ export function REPL({
     onAgentsKilled: () => setMessages(prev => [...prev, createAgentsKilledMessage()]),
     isMessageSelectorVisible: isMessageSelectorVisible || !!showBashesDialog,
     screen,
-    abortSignal: abortController?.signal,
+    abortSignal:
+      abortController?.signal ??
+      (promptEmpty && hasRunningDetachedToolCalls ? idleDetachedAbortSignalRef.current : undefined),
     popCommandFromQueue: handleQueuedCommandOnCancel,
     vimMode,
     isLocalJSXCommand: toolJSX?.isLocalJSXCommand,
@@ -4866,6 +5131,8 @@ export function REPL({
           refreshMcpClients: computeMcpClients,
         },
         getAppState: () => store.getState(),
+        taskRegistry,
+        session: getBootstrapSession(),
         getProactivityLevel: () => store.getState().proactivityLevel,
         setAppState,
         // densable y8r: main session both setters write toolPermissionContext
@@ -4933,10 +5200,10 @@ export function REPL({
         setOutputLimitRecovery,
         onCompactProgress: event => {
           try {
-            const { leftoverIhrMain } =
+            const { leftoverIhr } =
               // eslint-disable-next-line @typescript-eslint/no-require-imports
               require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-            leftoverIhrMain(getSessionId()).applyCompactProgress(event);
+            leftoverIhr.main.applyCompactProgress(event);
           } catch {
             // isolation — optional
           }
@@ -5031,6 +5298,7 @@ export function REPL({
       theme,
       allowedAgentTypes,
       store,
+      taskRegistry,
       storageV5,
       credentials,
       setAppState,
@@ -5507,22 +5775,26 @@ export function REPL({
           onInProgressToolUseIDs: op => {
             const ids = Array.isArray(op.ids) ? op.ids : [];
             const action = op.action ?? 'set';
-            setInProgressToolUseIDs(prev => {
+            // densable q4n (@185174892) — preserve Set identity on no-op clear/remove/add.
+            const apply = (prev: Set<string>): Set<string> => {
+              if (action === 'clear') {
+                return prev.size === 0 ? prev : new Set();
+              }
               if (action === 'remove') {
-                if (ids.length === 0) return prev;
+                if (ids.length === 0 || prev.size === 0) return prev;
                 const next = new Set(prev);
                 for (const id of ids) next.delete(id);
-                return next;
+                return next.size === prev.size ? prev : next;
               }
               if (action === 'add') {
                 if (ids.length === 0) return prev;
                 const next = new Set(prev);
                 for (const id of ids) next.add(id);
-                return next;
+                return next.size === prev.size ? prev : next;
               }
-              // set / default
-              return new Set(ids);
-            });
+              return ids.length === 0 && prev.size === 0 ? prev : new Set(ids);
+            };
+            setInProgressToolUseIDs(apply);
           },
           onNotification: notification => {
             if (notification && typeof notification === 'object' && 'text' in (notification as object)) {
@@ -5605,6 +5877,7 @@ export function REPL({
       setConversationId,
       setInProgressToolUseIDs,
       addNotification,
+      taskRegistry,
     ],
   );
 
@@ -5762,12 +6035,13 @@ export function REPL({
         toolUseContext.getAppState = () => ({
           ...previousGetAppState(),
           effortValue: effort,
+          sessionEffort: levelSessionEffort(effort),
         });
         try {
-          const { leftoverIhrMain } =
+          const { leftoverIhr } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-          leftoverIhrMain(getSessionId()).setTurnEffort(effort);
+          leftoverIhr.main.setTurnEffort(effort);
         } catch {
           // isolation — optional
         }
@@ -6445,6 +6719,7 @@ export function REPL({
           getAppState: () => store.getState(),
           setAppState,
           setConversationId,
+          taskRegistry,
         });
         haikuTitleAttemptedRef.current = false;
         setHaikuTitle(undefined);
@@ -6578,11 +6853,21 @@ export function REPL({
           ? { ...pastedContents, ...options.pastedContentsOverride }
           : pastedContents;
 
-      // densable YD: empty send-now still flushes the queue (no cancel of tools).
+      // densable `$Ze` / YD: empty send-now prefers cAt (no cancel). Fallback interrupt.
       if (options?.sendNow && input.trim() === '') {
-        backgroundForegroundToolCalls(queryForegroundSession);
-        abortControllerRef.current?.abort('interrupt');
-        promoteMainThreadQueueToNow();
+        trySendQueuedNowKey(() => store.getState(), setAppState, {
+          mode: 'prompt',
+          isTurnRunning: () => queryGuard.isRunning,
+          isTurnActive: () => queryGuard.isActive,
+          abortSignal: abortControllerRef.current,
+          lowLatency: queuedNowLowLatencyHost,
+          interruptForSubmit: () => {
+            const ac = abortControllerRef.current;
+            if (!ac || ac.signal.aborted) return false;
+            ac.abort('interrupt');
+            return true;
+          },
+        });
         return;
       }
 
@@ -6723,10 +7008,17 @@ export function REPL({
                 // transcript entry stays so scrollback shows what ran.
                 if (!isFullscreenEnvEnabled()) {
                   const breadcrumbArgs = doneOptions?.displayArgs ?? commandArgs;
+                  const commandRun = {
+                    command: getCommandName(matchingCommand),
+                    args: breadcrumbArgs,
+                  };
                   newMessages.push(
-                    createCommandInputMessage(formatCommandInputTags(getCommandName(matchingCommand), breadcrumbArgs)),
+                    createCommandInputMessage(formatCommandInputTags(getCommandName(matchingCommand), breadcrumbArgs), {
+                      commandRun,
+                    }),
                     createCommandInputMessage(
                       `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(result)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
+                      { commandRun },
                     ),
                   );
                 }
@@ -6892,13 +7184,8 @@ export function REPL({
       // densable 2.1.234 #20: build historyEntry at submit; flush on drain (JDr).
       // Mid-turn queue must NOT addToHistory here — otherwise ↑ shows still-queued text.
       const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
-      // densable 2.1.283 send-now: interrupt + flush queue + background running tools.
-      // Do not cancel tools (backgroundNow, not abort of tool children).
-      if (options?.sendNow) {
-        backgroundForegroundToolCalls(queryForegroundSession);
-        abortControllerRef.current?.abort('interrupt');
-        promoteMainThreadQueueToNow();
-      }
+      // densable sendQueuedNow(mode, uuid) is lowLatency after enqueue, not a
+      // pre-submit interrupt. Empty send-now is `$Ze` above.
       // Submit runs "now" (not queued) when not already loading, or when
       // accepting speculation, or in remote mode (which sends via WS and
       // returns early without calling handlePromptSubmit).
@@ -7090,6 +7377,7 @@ export function REPL({
       // Ensure SessionStart hook context is available before the first API call.
       await awaitPendingHooks();
 
+      const abortBeforeSubmit = abortControllerRef.current;
       await handlePromptSubmit({
         input,
         helpers,
@@ -7143,6 +7431,33 @@ export function REPL({
         restoreHandedBackPrompt,
         awaitSessionStartHooks: awaitPendingHooks,
       });
+      // densable p6(uO, mO) → SessionHost.sendQueuedNow(h,v):
+      // v===undefined → $Ze; else h==="prompt" && Cln() && Xj.sendQueuedNow(v).
+      const viewed = viewedAgentForInput({
+        viewingAgentTaskId: store.getState().viewingAgentTaskId,
+        tasks: store.getState().tasks,
+      });
+      const namedTaskId = viewed.type === 'named_agent' ? viewed.task.id : undefined;
+      const sameAbort = abortBeforeSubmit !== null && abortControllerRef.current === abortBeforeSubmit;
+      const leaderEmptyKey = inputMode === 'prompt' && viewed.type === 'leader' && sameAbort;
+      const namedAgentSendNow = inputMode === 'prompt' && namedTaskId !== undefined;
+      if (leaderEmptyKey) {
+        trySendQueuedNowKey(() => store.getState(), setAppState, {
+          mode: 'prompt',
+          isTurnRunning: () => queryGuard.isRunning,
+          isTurnActive: () => queryGuard.isActive,
+          abortSignal: abortControllerRef.current,
+          lowLatency: queuedNowLowLatencyHost,
+          interruptForSubmit: () => {
+            const ac = abortControllerRef.current;
+            if (!ac || ac.signal.aborted) return false;
+            ac.abort('interrupt');
+            return true;
+          },
+        });
+      } else if (namedAgentSendNow && isVelvetPandaEnabled()) {
+        queuedNowLowLatencyHost.sendQueuedNow(namedTaskId);
+      }
 
       // Restore stash that was deferred above. Two cases:
       // - Slash command: handlePromptSubmit awaited the full command execution
@@ -9278,12 +9593,13 @@ export function REPL({
                               setAppState(prev => ({
                                 ...prev,
                                 effortValue: selection,
+                                sessionEffort: explicitSessionEffort(selection),
                               }));
                               try {
-                                const { leftoverIhrMain } =
+                                const { leftoverIhr } =
                                   // eslint-disable-next-line @typescript-eslint/no-require-imports
                                   require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-                                leftoverIhrMain(getSessionId()).setTurnEffort(selection);
+                                leftoverIhr.main.setTurnEffort(selection);
                               } catch {
                                 // isolation — optional
                               }
@@ -9387,6 +9703,7 @@ export function REPL({
                           readFileState={readFileState.current}
                           getAppState={() => store.getState()}
                           setConversationId={setConversationId}
+                          taskRegistry={taskRegistry}
                         />
                       )}
 

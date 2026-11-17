@@ -7,6 +7,7 @@ import {
   Box,
   Text,
   measureElement,
+  useFocusReclaim,
   useTheme,
   useThemeSetting,
   useTerminalFocus,
@@ -94,6 +95,7 @@ import { buildConfigDisplayEntries, displayIndexForSetting, sortConfigCatalog } 
 import { parseCustomThemeRef } from '../../utils/customThemes.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { isSafeModeEnabled, safeModeDisableHint } from '../../utils/safeMode.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import TextInput from '../TextInput.js';
 import { useNotifications } from '../../context/notifications.js';
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
@@ -108,7 +110,7 @@ import {
   getCliTeammateModeOverride,
   clearCliTeammateModeOverride,
 } from '../../utils/swarm/backends/teammateModeSnapshot.js';
-import { useSearchInput } from '../../hooks/useSearchInput.js';
+import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import {
   applyFastModeOnModelSwitch,
@@ -2368,11 +2370,16 @@ export function Config({
     const h = measureElement(footerRef.current).height;
     if (h > 0 && h !== footerHeight) setFooterHeight(h);
   }, [headerFocused, isSearchMode, columns, rows, footerHeight, showSubmenu]);
+  const isScreenReader = isScreenReaderModeEnabled();
+  const containerRef = useRef<DOMElement>(null);
+  useFocusReclaim(containerRef, isScreenReader ? false : !headerFocused);
+
   const {
     query: searchQuery,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
     handleKeyDown: handleSearchKeyDown,
+    handlePaste: handleSearchPaste,
   } = useSearchInput({
     isActive: isSearchMode && showSubmenu === null && !headerFocused,
     onExit: () => setIsSearchMode(false),
@@ -3196,7 +3203,19 @@ export function Config({
   );
 
   return (
-    <Box flexDirection="column" width="100%" tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
+    <Box
+      ref={containerRef}
+      flexDirection="column"
+      width="100%"
+      {...(isScreenReader
+        ? {}
+        : {
+            tabIndex: 0,
+            autoFocus: !headerFocused,
+            onKeyDown: handleKeyDown,
+            onPaste: handleSearchPaste,
+          })}
+    >
       {showSubmenu === 'Theme' ? (
         <>
           <ThemePicker

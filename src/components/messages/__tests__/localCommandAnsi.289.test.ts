@@ -20,8 +20,9 @@ describe('densable 2.1.289 local-command-stdout ANSI replay', () => {
       'utf8',
     )
     expect(src).toContain("param.text.includes('<local-command-stdout')")
-    expect(src).toContain(
-      '<UserLocalCommandOutputMessage content={param.text} />',
-    )
+    expect(src).toContain('<UserLocalCommandOutputMessage')
+    expect(src).toContain('content={param.text}')
+    expect(src).toContain('commandRun={commandRun}')
+    expect(src).toContain('messageId={resolvedMessageId}')
   })
 })

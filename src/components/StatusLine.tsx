@@ -36,7 +36,15 @@ import { checkHasTrustDialogAccepted } from '../utils/config.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../utils/context.js';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
-import { type EffortLevel, type EffortValue, getDisplayedEffortLevel, modelSupportsEffort } from '../utils/effort.js';
+import {
+  type EffortLevel,
+  type EffortValue,
+  getDisplayedEffortLevel,
+  modelSupportsEffort,
+  pdSessionEffort,
+  type SessionEffortTag,
+  type SettingsEffortTable,
+} from '../utils/effort.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js';
 import { getLastAssistantMessage } from '../utils/messages.js';
@@ -190,9 +198,11 @@ export function buildStatusLineCommandInput(
   effortValue?: EffortValue,
   thinkingEnabled?: boolean,
   prStatus?: StatusLinePrStatus | null,
+  sessionEffort?: SessionEffortTag,
+  settingsEffortTable?: SettingsEffortTable,
 ): StatusLineCommandInput & {
   fast_mode: boolean;
-  effort?: { level: EffortLevel };
+  effort?: { level: EffortValue };
   thinking: { enabled: boolean };
   pr?: {
     number: number;
@@ -219,7 +229,8 @@ export function buildStatusLineCommandInput(
   const rawUtil = getRawUtilization();
   const rateLimits = statusLineRateLimits(rawUtil, getAPIProvider());
   const supportsEffort = modelSupportsEffort(runtimeModel);
-  const level = getDisplayedEffortLevel(runtimeModel, effortValue);
+  const pdEffort = pdSessionEffort({ sessionEffort, effortValue, settingsEffortTable }, runtimeModel);
+  const level = getDisplayedEffortLevel(runtimeModel, pdEffort);
   const enabled = thinkingEnabled !== false || modelRejectsDisabledThinking(runtimeModel);
   const number = prStatus?.number ?? 0;
   const url = prStatus?.url ?? '';
@@ -360,6 +371,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   const statusLineText = useAppState(s => s.statusLineText);
   const fastMode = useAppState(s => Boolean(s.fastMode));
   const effortValue = useAppState(s => s.effortValue);
+  const sessionEffort = useAppState(s => s.sessionEffort);
+  const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const prStatus = useAppState(s => (s as { prStatus?: StatusLinePrStatus | null }).prStatus ?? null);
   const setAppState = useSetAppState();
@@ -384,6 +397,10 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   fastModeRef.current = fastMode;
   const effortValueRef = useRef(effortValue);
   effortValueRef.current = effortValue;
+  const sessionEffortRef = useRef(sessionEffort);
+  sessionEffortRef.current = sessionEffort;
+  const settingsEffortTableRef = useRef(settingsEffortTable);
+  settingsEffortTableRef.current = settingsEffortTable;
   const thinkingEnabledRef = useRef(thinkingEnabled);
   thinkingEnabledRef.current = thinkingEnabled;
   const prStatusRef = useRef(prStatus);
@@ -398,6 +415,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     mainLoopModel: ModelName;
     fastMode: boolean;
     effortValue: EffortValue | undefined;
+    sessionEffort: SessionEffortTag | undefined;
+    settingsEffortTable: SettingsEffortTable | undefined;
     thinkingEnabled: boolean | undefined;
     prStatus: StatusLinePrStatus | null;
   }>({
@@ -408,6 +427,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     mainLoopModel,
     fastMode,
     effortValue,
+    sessionEffort,
+    settingsEffortTable,
     thinkingEnabled,
     prStatus,
   });
@@ -461,6 +482,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
         effortValueRef.current,
         thinkingEnabledRef.current,
         prStatusRef.current,
+        sessionEffortRef.current,
+        settingsEffortTableRef.current,
       );
 
       const text = await executeStatusLineCommand(statusInput, controller.signal, undefined, logResult);
@@ -507,6 +530,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       mainLoopModel !== previousStateRef.current.mainLoopModel ||
       fastMode !== previousStateRef.current.fastMode ||
       effortValue !== previousStateRef.current.effortValue ||
+      sessionEffort !== previousStateRef.current.sessionEffort ||
+      settingsEffortTable !== previousStateRef.current.settingsEffortTable ||
       thinkingEnabled !== previousStateRef.current.thinkingEnabled ||
       prStatus !== previousStateRef.current.prStatus
     ) {
@@ -517,6 +542,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       previousStateRef.current.mainLoopModel = mainLoopModel;
       previousStateRef.current.fastMode = fastMode;
       previousStateRef.current.effortValue = effortValue;
+      previousStateRef.current.sessionEffort = sessionEffort;
+      previousStateRef.current.settingsEffortTable = settingsEffortTable;
       previousStateRef.current.thinkingEnabled = thinkingEnabled;
       previousStateRef.current.prStatus = prStatus;
       scheduleUpdate();
@@ -528,6 +555,8 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     mainLoopModel,
     fastMode,
     effortValue,
+    sessionEffort,
+    settingsEffortTable,
     thinkingEnabled,
     prStatus,
     scheduleUpdate,

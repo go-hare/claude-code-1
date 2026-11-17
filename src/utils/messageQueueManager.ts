@@ -17,6 +17,7 @@ import type {
   QueuePriority,
 } from '../types/textInputTypes.js'
 import type { PastedContent } from './config.js'
+import { stripCrossSessionHopChain } from './crossSessionMessage.js'
 import { logForDebugging } from './debug.js'
 import { extractTextContent, isHumanLikeOrigin } from './messages.js'
 import { parseAddress } from './peerAddress.js'
@@ -40,6 +41,7 @@ import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPro
 import { recordQueueOperation } from './sessionStorage.js'
 import { createSignal } from './signal.js'
 import { recordHandbackDelivery } from './subagentHandback.js'
+import { getTurnAttributionKey } from './turnAttribution.js'
 
 export type SetAppState = (f: (prev: AppState) => AppState) => void
 
@@ -318,6 +320,29 @@ function isCrossSessionPeerOrigin(
   return origin?.kind === 'peer' && origin.senderTaskId === undefined
 }
 
+/** densable mtt — strip hop-chain attr from model-facing value on peer rows. */
+function stripPeerCommandHopChain(command: QueuedCommand): QueuedCommand {
+  if (
+    !isCrossSessionPeerOrigin(command.origin as PeerQueueOrigin | undefined)
+  ) {
+    return command
+  }
+  const val = command.value
+  if (typeof val === 'string') {
+    const stripped = stripCrossSessionHopChain(val)
+    return stripped === val ? command : { ...command, value: stripped }
+  }
+  let changed = false
+  const next = val.map(block => {
+    if (block.type !== 'text') return block
+    const stripped = stripCrossSessionHopChain(block.text)
+    if (stripped === block.text) return block
+    changed = true
+    return { ...block, text: stripped }
+  })
+  return changed ? { ...command, value: next } : command
+}
+
 /** densable htt — verified / known peer address → full zo.admit path. */
 function isVerifiedPeerOrigin(origin: PeerQueueOrigin): boolean {
   return origin.verifiedPeerPid !== undefined || origin.from !== 'unknown'
@@ -474,7 +499,7 @@ export function enqueueReportingAdmission(
   const admitted = admitReportingCommand(command, opts.receipt ?? 'coalesced')
   if (!admitted.admitted) return admitted
 
-  const stamped = withMainThreadAgentId(command)
+  const stamped = withMainThreadAgentId(stripPeerCommandHopChain(command))
   const queued: QueuedCommand = {
     ...stamped,
     priority: stamped.priority ?? 'next',
@@ -517,13 +542,92 @@ export function enqueue(command: QueuedCommand): void {
 }
 
 /**
- * densable promoteToNow — send-now flushes the main-thread queue to priority now.
- * Does not cancel tools; REPL abort + backgroundNow handles the running turn.
+ * densable `ve` — uuids whose mid-turn fold is in flight. `yt` refuses these.
+ */
+const foldInFlight = new Set<string>()
+/** densable `qe` — mid-turn fold suspended. `Ft` is `qe` (gold also ORs `Mr()`). */
+let midTurnFoldSuspended = false
+
+/**
+ * densable `Te` — mark queued uuids as fold-in-flight.
+ */
+export function registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
+  for (const cmd of commands) {
+    if (cmd.uuid !== undefined) foldInFlight.add(cmd.uuid)
+  }
+}
+
+/**
+ * densable `xe`.
+ */
+export function unregisterFoldInFlight(
+  commands: Array<{ uuid?: string }>,
+): void {
+  for (const cmd of commands) {
+    if (cmd.uuid !== undefined) foldInFlight.delete(cmd.uuid)
+  }
+}
+
+/** densable `Pe`. */
+export function isFoldInFlight(uuid: string): boolean {
+  return foldInFlight.has(uuid)
+}
+
+/** densable `Ze`. */
+export function suspendMidTurnFold(): void {
+  if (midTurnFoldSuspended) return
+  midTurnFoldSuspended = true
+  notifySubscribers()
+}
+
+/** densable `Ft` — `qe || Mr()`. */
+export function isMidTurnFoldSuspended(): boolean {
+  const { isShutdownCommitted } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./shutdownCommitted.js') as typeof import('./shutdownCommitted.js')
+  return midTurnFoldSuspended || isShutdownCommitted()
+}
+
+/**
+ * densable `yt` — raise one queued uuid to priority now.
+ * False when missing, already now, or fold-in-flight.
+ */
+export function promoteToNow(uuid: string): boolean {
+  const cmd = commandQueue.find(row => row.uuid === uuid)
+  if (cmd === undefined || cmd.priority === 'now' || foldInFlight.has(uuid)) {
+    return false
+  }
+  cmd.priority = 'now'
+  notifySubscribers()
+  return true
+}
+
+/**
+ * densable `Ot` — restore a now-priority uuid to `raisedFrom`.
+ */
+export function demoteFromNow(
+  uuid: string,
+  raisedFrom: QueuePriority,
+): boolean {
+  const cmd = commandQueue.find(row => row.uuid === uuid)
+  if (cmd === undefined || cmd.priority !== 'now') return false
+  cmd.priority = raisedFrom
+  notifySubscribers()
+  return true
+}
+
+/**
+ * Bulk raise of main-thread next/later → now. Gold send-now uses `yt` per uuid;
+ * REPL typed send-now still flushes the main-thread batch.
  */
 export function promoteMainThreadQueueToNow(): number {
   let n = 0
   for (const cmd of commandQueue) {
     if (!isMainThreadQueuedCommand(cmd)) continue
+    if (cmd.uuid !== undefined) {
+      if (promoteToNow(cmd.uuid)) n++
+      continue
+    }
     if (cmd.priority === 'now') continue
     cmd.priority = 'now'
     n++
@@ -541,7 +645,10 @@ export function promoteMainThreadQueueToNow(): number {
  * densable cf does not stamp agentId; local stamps sticky mi() when omitted.
  * Explicit agentId (owner / subagent) is preserved.
  */
-export function enqueuePendingNotification(command: QueuedCommand): void {
+export function enqueuePendingNotification(
+  command: QueuedCommand,
+  opts?: { turnAttribution?: 'inherit' | 'none' },
+): void {
   if (!admitReportingCommand(command).admitted) return
 
   // densable Sn: cap task-notification strings via ap(..., Q8n) before push.
@@ -560,8 +667,32 @@ export function enqueuePendingNotification(command: QueuedCommand): void {
       queued = { ...command, value: capped }
     }
   }
-  const stamped = withMainThreadAgentId(queued)
-  commandQueue.push({ ...stamped, priority: stamped.priority ?? 'later' })
+  const inherit = opts?.turnAttribution === 'inherit'
+  if (inherit && queued.mode === 'task-notification') {
+    const origin = queued.origin
+    if (origin === undefined || origin.kind === 'task-notification') {
+      queued = {
+        ...queued,
+        origin: {
+          ...(origin ?? { kind: 'task-notification' }),
+          producer: 'session-task',
+        },
+      }
+    }
+  }
+  const inheritedKey =
+    queued.inheritedTurnAttributionKey ??
+    (inherit && queued.mode === 'task-notification'
+      ? getTurnAttributionKey()
+      : undefined)
+  const stamped = withMainThreadAgentId(stripPeerCommandHopChain(queued))
+  commandQueue.push({
+    ...stamped,
+    priority: stamped.priority ?? 'later',
+    ...(inheritedKey !== undefined
+      ? { inheritedTurnAttributionKey: inheritedKey }
+      : {}),
+  })
   notifySubscribers()
   if (!(command as { unlogged?: boolean }).unlogged) {
     logOperation(
@@ -754,9 +885,15 @@ export function remove(commandsToRemove: QueuedCommand[]): void {
  * Does not settle prompt.submit as "removed"; Art already took those
  * waiters. command.run waiters fail as left-as-text.
  */
-export function consume(commandsToConsume: QueuedCommand[]): void {
+export function consume(
+  commandsToConsume: QueuedCommand[],
+  opts?: { reason?: string },
+): void {
   if (commandsToConsume.length === 0) {
     return
+  }
+  if (opts?.reason !== undefined) {
+    logForDebugging(`consume: ${opts.reason}`)
   }
 
   spliceQueuedCommands(commandsToConsume)
@@ -820,6 +957,8 @@ export function resetCommandQueue(): void {
   inFlightDrainBatch = null
   cancelPending.clear()
   cancelPendingAcked.clear()
+  foldInFlight.clear()
+  midTurnFoldSuspended = false
   resetPromptSubmitWaits()
   resetCommandRunWaits()
   resetTurnHookQueuedPrompts()

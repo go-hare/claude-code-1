@@ -10,9 +10,25 @@ import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
 const STRIPPED_TAGS_RE =
   /<(commit_analysis|context|function_analysis|pr_analysis)>.*?<\/\1>\n?/gs
 
+/** densable `Jg` `Rn` — memory tag open/close, not the emptiness trim. */
+/** densable `Jg` `Zs` — not the generic `memory` tag. */
+const ASSISTANT_MEMORY_TAG_RE =
+  /<\/?(?:cc-memory|cc_memory|ccmemory|CC-MEMORY|CC_MEMORY|CCMEMORY)(?=[\s/>])[^>]{0,1024}>/g
+
 /** densable-aligned strip of prompt XML wrappers used for emptiness checks. */
 export function stripPromptXMLTags(content: string): string {
   return content.replace(STRIPPED_TAGS_RE, '').trim()
+}
+
+/**
+ * densable `HJ` — AssistantMessage ui.render text.
+ * JRr tags, then Jg memory tags, then leading newlines only (not trim).
+ */
+export function assistantUiRenderText(content: string): string {
+  return content
+    .replace(STRIPPED_TAGS_RE, '')
+    .replace(ASSISTANT_MEMORY_TAG_RE, '')
+    .replace(/^\n+/, '')
 }
 
 /**

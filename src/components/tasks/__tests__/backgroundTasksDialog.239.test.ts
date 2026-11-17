@@ -49,11 +49,12 @@ function agent(extra: Partial<LocalAgentTaskState> = {}): LocalAgentTaskState {
 }
 
 describe('densable 2.1.239 xCs t5c / Zqg / kCs / r5c', () => {
-  test('t5c opens detail for local hosts, not monitor_ws or mcp_task', () => {
+  test('wF (2.1.289) opens detail for local hosts and mcp_task, not monitor_ws or self_managed_tasks', () => {
     expect(canOpenBackgroundTaskDetail('local_bash')).toBe(true)
     expect(canOpenBackgroundTaskDetail('monitor_mcp')).toBe(true)
+    expect(canOpenBackgroundTaskDetail('mcp_task')).toBe(true)
     expect(canOpenBackgroundTaskDetail('monitor_ws')).toBe(false)
-    expect(canOpenBackgroundTaskDetail('mcp_task')).toBe(false)
+    expect(canOpenBackgroundTaskDetail('self_managed_tasks')).toBe(false)
   })
 
   test('Zqg is completed local_agent that is not quietly parked', () => {
@@ -118,7 +119,7 @@ describe('densable 2.1.239 xCs source lock', () => {
 
   test('x stops running monitor_ws via killMonitorWs', () => {
     expect(dialog).toContain("currentSelection.type === 'monitor_ws'")
-    expect(dialog).toContain('killMonitorWs(currentSelection.id, setAppState)')
+    expect(dialog).toContain('killMonitorWs(currentSelection.id, registry')
     expect(dialog).toContain("currentSelection?.type === 'monitor_ws'")
   })
 

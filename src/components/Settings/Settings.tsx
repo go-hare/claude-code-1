@@ -5,7 +5,7 @@ import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
-import { Pane, Tab, Tabs } from '@anthropic/ink';
+import { Box, Pane, Tab, Tabs } from '@anthropic/ink';
 import { Status, buildDiagnostics } from './Status.js';
 import { Config } from './Config.js';
 import { Usage } from './Usage.js';
@@ -86,27 +86,33 @@ export function Settings({ onClose, context, defaultTab }: Props): React.ReactNo
 
   return (
     <Pane color="permission">
-      <Tabs
-        title="Settings"
-        color="permission"
-        selectedTab={selectedTab}
-        onTabChange={setSelectedTab}
-        hidden={tabsHidden}
-        // Config has interactive content — start with header unfocused so
-        // left/right/tab cycle option values instead of switching tabs.
-        initialHeaderFocused={defaultTab !== 'Config'}
-        // Inside a Modal, skip the Tabs-level cap so tall tabs (Status's
-        // MCP list) flow to their natural height for the Modal's ScrollBox
-        // to scroll. Config still gets contentHeight above — it
-        // paginate internally so this only affects Status/Usage.
-        contentHeight={
-          tabsHidden || insideModal || (selectedTab === 'Config' && configOwnsEsc)
-            ? undefined
-            : Math.max(0, Math.min(contentHeight - 1, rows - 5))
-        }
-      >
-        {tabs}
-      </Tabs>
+      {/* densable Ybe/nfe: Pane child is a flexShrink=0 column around Tabs. */}
+      <Box flexDirection="column" flexShrink={0}>
+        <Tabs
+          title="Settings"
+          color="permission"
+          selectedTab={selectedTab}
+          onTabChange={setSelectedTab}
+          hidden={tabsHidden}
+          // Config has interactive content — start with header unfocused so
+          // left/right/tab cycle option values instead of switching tabs.
+          initialHeaderFocused={defaultTab !== 'Config'}
+          // densable Ybe `stableHeight:!0` — minHeight instead of height+clip.
+          // Usage progress bars without this fight yoga and hit max update depth.
+          stableHeight
+          // Inside a Modal, skip the Tabs-level cap so tall tabs (Status's
+          // MCP list) flow to their natural height for the Modal's ScrollBox
+          // to scroll. Config still gets contentHeight above — it
+          // paginate internally so this only affects Status/Usage.
+          contentHeight={
+            tabsHidden || insideModal || (selectedTab === 'Config' && configOwnsEsc)
+              ? undefined
+              : Math.max(0, Math.min(contentHeight - 1, rows - 5))
+          }
+        >
+          {tabs}
+        </Tabs>
+      </Box>
     </Pane>
   );
 }

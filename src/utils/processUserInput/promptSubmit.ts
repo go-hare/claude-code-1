@@ -4,8 +4,9 @@
  * Plugin `prompt.submit` races managed UserPromptSubmit. Never export densable
  * ids. Do not invent a second hook engine — tail is the existing UPS loop.
  */
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
-import { getSessionId } from '../../bootstrap/state.js'
+import { getRegisteredHooks, getSessionId } from '../../bootstrap/state.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type {
   AssistantMessage,
@@ -15,19 +16,40 @@ import type {
   UserMessage,
 } from '../../types/message.js'
 import { createAttachmentMessage } from '../attachments.js'
+import type { PastedContent } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import {
   executeUserPromptSubmitHooks,
   getUserPromptSubmitHookBlockingMessage,
   hasHookForEvent,
+  shouldSkipHookDueToTrust,
 } from '../hooks.js'
-import { createSystemMessage, createUserMessage } from '../messages.js'
+import { getHooksConfigFromSnapshot } from '../hooks/hooksConfigSnapshot.js'
 import {
+  getSessionFunctionHooks,
+  getSessionHooks,
+} from '../hooks/sessionHooks.js'
+import {
+  createSystemMessage,
+  createUserMessage,
+  getContentText,
+  uiRenderUserMessageOrigin,
+  wrapPluginOriginText,
+} from '../messages.js'
+import {
+  getLoadedFunctionHooksModules,
   hasMatchingFunctionHook,
   runFunctionHookChain,
 } from '../plugins/functionHooksModules.js'
-import { applyHookSessionTitle } from '../sessionStart.js'
-import type { QueuedCommand } from '../../types/textInputTypes.js'
+import { getSettingsForSource } from '../settings/settings.js'
+import type {
+  PromptInputMode,
+  QueuedCommand,
+} from '../../types/textInputTypes.js'
+import {
+  listOfContextTexts,
+  packToolCallContext,
+} from '../hooks/toolCallContextPack.js'
 import {
   getPromptSubmitLatch,
   registerPromptSubmitEntry,
@@ -170,17 +192,102 @@ export function wrapQueuedSettle(handle?: {
   }
 }
 
+const objectTokens = new WeakMap<object, number>()
+const functionTokens = new WeakMap<Function, number>()
+let nextObjectToken = 0
+let nextFunctionToken = 0
+
+function tokenForObject(obj: object): number {
+  let token = objectTokens.get(obj)
+  if (token === undefined) {
+    nextObjectToken += 1
+    token = nextObjectToken
+    objectTokens.set(obj, token)
+  }
+  return token
+}
+
+function tokenForFunction(fn: Function): number {
+  let token = functionTokens.get(fn)
+  if (token === undefined) {
+    nextFunctionToken += 1
+    token = nextFunctionToken
+    functionTokens.set(fn, token)
+  }
+  return token
+}
+
+function snapshotUserPromptSubmitHooks(
+  appState: ReturnType<ToolUseContext['getAppState']>,
+  sessionId: string,
+): string {
+  if (!hasHookForEvent('UserPromptSubmit', appState, sessionId)) {
+    return ''
+  }
+  const policy =
+    getSettingsForSource('policySettings')?.hooks?.UserPromptSubmit ?? []
+  const snapshot = getHooksConfigFromSnapshot()?.UserPromptSubmit ?? []
+  const registered = getRegisteredHooks()?.UserPromptSubmit ?? []
+  const sessionCfg = appState
+    ? (getSessionHooks(appState, sessionId, 'UserPromptSubmit').get(
+        'UserPromptSubmit',
+      ) ?? [])
+    : []
+  const sessionFns = appState
+    ? (getSessionFunctionHooks(appState, sessionId, 'UserPromptSubmit').get(
+        'UserPromptSubmit',
+      ) ?? [])
+    : []
+  const loadedClassic = getLoadedFunctionHooksModules()
+    .filter(
+      mod =>
+        mod.status !== 'unloaded' &&
+        hasMatchingFunctionHook('UserPromptSubmit', undefined, [mod]),
+    )
+    .map(mod => [mod.name, tokenForObject(mod)])
+  if (
+    policy.length === 0 &&
+    snapshot.length === 0 &&
+    registered.length === 0 &&
+    sessionCfg.length === 0 &&
+    sessionFns.length === 0 &&
+    loadedClassic.length === 0
+  ) {
+    return ''
+  }
+  return JSON.stringify(
+    [policy, snapshot, registered, sessionCfg, sessionFns, loadedClassic],
+    (_key, value) =>
+      typeof value === 'function'
+        ? `function#${tokenForFunction(value)}`
+        : value,
+  )
+}
+
+function snapshotPromptSubmitPlugins(): string {
+  const loaded = getLoadedFunctionHooksModules()
+  const matching = loaded.filter(
+    mod =>
+      mod.status !== 'unloaded' &&
+      hasMatchingFunctionHook('prompt.submit', undefined, [mod]),
+  )
+  if (matching.length === 0) return ''
+  return JSON.stringify([
+    tokenForObject(loaded),
+    matching.map(mod => [mod.name, tokenForObject(mod)]),
+  ])
+}
+
 /** densable `RNe`. */
 export function snapshotPromptScreen(context: ToolUseContext): PromptScreen {
   const appState = context.getAppState()
   const sessionId = context.agentId ?? getSessionId()
   return {
     permissionMode: appState.toolPermissionContext.mode,
-    hooks: hasHookForEvent('UserPromptSubmit', appState, sessionId)
-      ? 'UserPromptSubmit'
-      : '',
-    plugins: hasMatchingFunctionHook('prompt.submit') ? 'prompt.submit' : '',
-    hooksSkippedByTrust: false,
+    hooks: snapshotUserPromptSubmitHooks(appState, sessionId),
+    plugins: snapshotPromptSubmitPlugins(),
+    // densable RNe `hooksSkippedByTrust: Nde()` — Nde is !mM() (trust not accepted).
+    hooksSkippedByTrust: shouldSkipHookDueToTrust(),
   }
 }
 
@@ -270,9 +377,33 @@ export function keepQueuedCommandsUntilFirstDroppedPrompt(
 }
 
 type UpsOutcome =
-  | { kind: 'ok' }
+  | { kind: 'ok'; sessionTitle?: string }
   | { kind: 'blocking'; messages: SubmitMessages; allowedTools?: string[] }
-  | { kind: 'stop' }
+  | { kind: 'stop'; sessionTitle?: string }
+
+/**
+ * densable `W` (@195141083) — frame between-turn plugin prompts with `VLr(..., { midTurn: false })`
+ * unless `origin.asUser === true`.
+ */
+export function framePluginPromptSubmitText(
+  text: string,
+  origin: unknown,
+): string {
+  if (origin && typeof origin === 'object') {
+    const rec = origin as {
+      kind?: unknown
+      asUser?: unknown
+      name?: unknown
+      plugin?: unknown
+    }
+    if (rec.kind === 'plugin' && rec.asUser !== true) {
+      return wrapPluginOriginText(text, rec.name ?? rec.plugin, {
+        midTurn: false,
+      })
+    }
+  }
+  return text
+}
 
 /**
  * densable `yUn` — settings UserPromptSubmit over `result`.
@@ -281,10 +412,11 @@ export async function runUserPromptSubmit(
   text: string,
   result: SubmitResult,
   context: ToolUseContext,
-  originalInput: string | unknown,
+  _originalInput?: string | unknown,
 ): Promise<UpsOutcome> {
   const appState = context.getAppState()
   let suppressOriginalPrompt = false
+  let sessionTitle: string | undefined
   for await (const hookResult of executeUserPromptSubmitHooks(
     text,
     appState.toolPermissionContext.mode,
@@ -295,7 +427,7 @@ export async function runUserPromptSubmit(
       continue
     }
     if (hookResult.sessionTitle) {
-      applyHookSessionTitle(hookResult.sessionTitle)
+      sessionTitle = hookResult.sessionTitle
     }
     if (hookResult.suppressOriginalPrompt) {
       suppressOriginalPrompt = true
@@ -306,25 +438,29 @@ export async function runUserPromptSubmit(
       )
       const blockText = suppressOriginalPrompt
         ? blockingMessage
-        : `${blockingMessage}\n\nOriginal prompt: ${originalInput}`
+        : `${blockingMessage}\n\nOriginal prompt: ${text}`
       return {
         kind: 'blocking',
-        messages: [createSystemMessage(blockText, 'warning')],
+        messages: [createSystemMessage(blockText, 'warning', undefined, true)],
         allowedTools: result.allowedTools,
       }
     }
     if (hookResult.preventContinuation) {
+      // densable yUn: X(f) meta user + q(f) warning system (P preventContinuation).
       const message = hookResult.stopReason
         ? `Operation stopped by hook: ${hookResult.stopReason}`
         : 'Operation stopped by hook'
       result.messages.push(
         createUserMessage({
           content: message,
+          isMeta: true,
         }),
+        createSystemMessage(message, 'warning', undefined, true),
       )
       result.shouldQuery = false
       result.resultText = message
-      return { kind: 'stop' }
+      result.allowedTools = undefined
+      return { kind: 'stop', sessionTitle }
     }
     if (
       hookResult.additionalContexts &&
@@ -347,14 +483,256 @@ export async function runUserPromptSubmit(
       }
     }
   }
-  return { kind: 'ok' }
+  return { kind: 'ok', sessionTitle }
 }
 
 function endedMessages(text: string): SubmitResult {
   return {
-    messages: [createSystemMessage(text, 'warning')],
+    messages: [createSystemMessage(text, 'warning', undefined, true)],
     shouldQuery: false,
     resultText: text,
+  }
+}
+
+/**
+ * densable `Jun` — rewrite a user-message content payload to `next`.
+ * Empty next drops text blocks; string content is replaced; last text block
+ * is updated, keeping prior text blocks when `next` still carries their prefix.
+ */
+export function rewritePromptSubmitContent(
+  content: string | ContentBlockParam[],
+  next: string,
+): string | ContentBlockParam[] {
+  if (next.trim() === '') {
+    if (typeof content === 'string') return ''
+    const kept = content.filter(block => block.type !== 'text')
+    return kept.length > 0 ? kept : ''
+  }
+  if (typeof content === 'string') return next
+  const lastText = content.findLast(block => block.type === 'text')
+  if (lastText?.type !== 'text') {
+    return [...content, { type: 'text', text: next }]
+  }
+  const prefix = content
+    .flatMap(block =>
+      block.type === 'text' && block !== lastText ? [block.text] : [],
+    )
+    .join('\n')
+  const stripPrefix =
+    prefix !== '' &&
+    next.startsWith(`${prefix}\n`) &&
+    next.slice(prefix.length + 1).trim() !== ''
+  const rewritten: ContentBlockParam[] = []
+  for (const block of content) {
+    if (block === lastText) {
+      rewritten.push({
+        ...block,
+        text: stripPrefix ? next.slice(prefix.length + 1) : next,
+      })
+    } else if (block.type !== 'text' || stripPrefix) {
+      rewritten.push(block)
+    }
+  }
+  return rewritten
+}
+
+/**
+ * densable `mn` — mutate the first non-meta user message that still carries
+ * `original`. Warns when a hook rewrote the prompt but no message matched.
+ */
+export function rewritePromptSubmitUserMessage(
+  messages: SubmitMessages,
+  original: string,
+  next: string,
+): UserMessage | undefined {
+  for (const message of messages) {
+    if (message.type !== 'user' || message.isMeta) continue
+    const { content } = message.message
+    if (content === original) {
+      message.message.content = rewritePromptSubmitContent(content, next)
+      return message
+    }
+    if (
+      typeof content !== 'string' &&
+      Array.isArray(content) &&
+      getContentText(content) === original
+    ) {
+      message.message.content = rewritePromptSubmitContent(
+        content as ContentBlockParam[],
+        next,
+      )
+      return message
+    }
+  }
+  logForDebugging(
+    'prompt.submit: a hook rewrote the prompt but no user message carried the original text; the model sees the prompt as typed',
+    { level: 'warn' },
+  )
+  return undefined
+}
+
+/**
+ * densable `Fnn` — packed prompt.submit context as a hook_additional_context
+ * attachment. Default hookName is UserPromptSubmit; Art packs as "prompt.submit".
+ */
+export function createPromptSubmitContextAttachment(
+  content: string[],
+  hookName = 'UserPromptSubmit',
+): AttachmentMessage {
+  return createAttachmentMessage({
+    type: 'hook_additional_context',
+    content: [...content],
+    hookName,
+    toolUseID: `hook-${randomUUID()}`,
+    hookEvent: 'UserPromptSubmit',
+  })
+}
+
+/** densable `kcn` then `Fnn(Me, "prompt.submit")`. */
+export async function packPromptSubmitContext(
+  context: string[] | undefined,
+): Promise<AttachmentMessage | undefined> {
+  const packed = await packToolCallContext(context ?? [], 'prompt.submit')
+  if (packed.length === 0) return undefined
+  return createPromptSubmitContextAttachment(packed, 'prompt.submit')
+}
+
+type PromptSubmitAttachment = {
+  type: 'image' | 'document'
+  mediaType?: string
+  filename?: string
+}
+
+/**
+ * densable `oe` — prompt.submit payload attachments from content blocks and
+ * pasted image slots.
+ */
+export function collectPromptSubmitAttachments(
+  input: string | unknown,
+  pastedContents?: Record<number, PastedContent>,
+): PromptSubmitAttachment[] {
+  const attachments: PromptSubmitAttachment[] = []
+  if (Array.isArray(input)) {
+    for (const block of input) {
+      if (block === null || typeof block !== 'object' || !('type' in block)) {
+        continue
+      }
+      const typed = block as ContentBlockParam
+      if (typed.type === 'image') {
+        const source =
+          typed.source !== null && typeof typed.source === 'object'
+            ? typed.source
+            : undefined
+        const mediaType =
+          source &&
+          'type' in source &&
+          source.type === 'base64' &&
+          'media_type' in source &&
+          typeof source.media_type === 'string'
+            ? source.media_type
+            : undefined
+        attachments.push({
+          type: 'image',
+          ...(mediaType !== undefined && { mediaType }),
+        })
+      } else if (typed.type === 'document') {
+        attachments.push({ type: 'document' })
+      }
+    }
+  }
+  for (const pasted of Object.values(pastedContents ?? {})) {
+    if (pasted.type === 'image') {
+      attachments.push({
+        type: pasted.type,
+        ...(pasted.mediaType !== undefined && { mediaType: pasted.mediaType }),
+        ...(pasted.filename !== undefined && { filename: pasted.filename }),
+      })
+    }
+  }
+  return attachments
+}
+
+const KNOWN_PROMPT_ORIGIN_KINDS = new Set([
+  'human',
+  'plugin',
+  'channel',
+  'peer',
+  'coordinator',
+  'observer',
+  'observer-activity',
+  'task-notification',
+  'auto-continuation',
+  'scheduled-trigger',
+  'slack-ping',
+  'bridge',
+  'sdk',
+  'unclassified',
+])
+
+/**
+ * densable `iOo` — prompt.submit payload origin from queued origin /
+ * wakeup / mode / promptSource (via `YQ` / `uiRenderUserMessageOrigin`).
+ */
+export function resolvePromptSubmitPayloadOrigin(opts: {
+  origin?: unknown
+  bridgeOrigin?: boolean
+  wakeupSource?: unknown
+  mode?: PromptInputMode
+  promptSource?: unknown
+}): Record<string, unknown> | undefined {
+  if (opts.origin !== undefined) {
+    if (opts.origin && typeof opts.origin === 'object') {
+      const rec = opts.origin as { kind?: unknown }
+      if (
+        typeof rec.kind === 'string' &&
+        KNOWN_PROMPT_ORIGIN_KINDS.has(rec.kind)
+      ) {
+        if (opts.bridgeOrigin === true && rec.kind === 'human') {
+          return { kind: 'bridge' }
+        }
+        return uiRenderUserMessageOrigin(opts.origin)
+      }
+    }
+    return undefined
+  }
+  if (opts.mode === 'task-notification') {
+    return { kind: 'task-notification' }
+  }
+  if (opts.wakeupSource) {
+    return { kind: 'scheduled-trigger' }
+  }
+  switch (opts.promptSource) {
+    case 'sdk':
+      return { kind: 'sdk' }
+    default:
+      return { kind: 'unclassified' }
+  }
+}
+
+/** densable `oe` — plugin prompt.submit event payload. */
+export function buildPromptSubmitPayload(opts: {
+  text: string
+  input?: string | unknown
+  pastedContents?: Record<number, PastedContent>
+  origin?: unknown
+  bridgeOrigin?: boolean
+  wakeupSource?: unknown
+  mode?: PromptInputMode
+  promptSource?: unknown
+  turnId?: string
+  shouldWait?: boolean
+}): Record<string, unknown> {
+  const attachments = collectPromptSubmitAttachments(
+    opts.input ?? opts.text,
+    opts.pastedContents,
+  )
+  const origin = resolvePromptSubmitPayloadOrigin(opts)
+  return {
+    text: opts.text,
+    wait: opts.shouldWait === true,
+    ...(attachments.length > 0 && { attachments }),
+    ...(origin !== undefined && { origin }),
+    ...(opts.turnId !== undefined && { turnId: opts.turnId }),
   }
 }
 
@@ -414,6 +792,11 @@ export async function runPromptSubmit({
   entries,
   queued,
   enter,
+  pastedContents,
+  origin,
+  bridgeOrigin,
+  mode,
+  turnId,
 }: {
   text: string
   originalInput: string | unknown
@@ -426,6 +809,11 @@ export async function runPromptSubmit({
   entries?: PromptSubmitEntries
   queued?: QueuedSettle
   enter?: (value: PromptSubmitEnterValue) => unknown
+  pastedContents?: Record<number, PastedContent>
+  origin?: unknown
+  bridgeOrigin?: boolean
+  mode?: PromptInputMode
+  turnId?: string
 }): Promise<PromptSubmitOutcome> {
   if (!isStartInput) {
     const latch = getPromptSubmitLatch()
@@ -434,7 +822,16 @@ export async function runPromptSubmit({
 
   const arrivedLatch = createArrivedLatch(NOT_SUBMITTED)
   const screen = snapshotPromptScreen(context)
-  let lastUps: UpsOutcome | undefined
+  const cloneResult = (base: SubmitResult): SubmitResult => ({
+    ...base,
+    messages: [...base.messages],
+    allowedTools: base.allowedTools && [...base.allowedTools],
+  })
+  const passes = new Map<
+    string,
+    { scratch: SubmitResult; outcome: UpsOutcome }
+  >()
+  let lastPass: { scratch: SubmitResult; outcome: UpsOutcome } | undefined
   let ranUps = false
   const enterFn =
     enter ??
@@ -442,27 +839,48 @@ export async function runPromptSubmit({
       ? () => registerPromptSubmitEntry(entries, result.messages)
       : undefined)
 
+  const commitScratch = (scratch: SubmitResult): void => {
+    result.messages = scratch.messages
+    result.allowedTools = scratch.allowedTools
+    result.shouldQuery = scratch.shouldQuery
+    result.resultText = scratch.resultText
+  }
+
   const tail = async (event: Record<string, unknown>) => {
     const nextText = typeof event.text === 'string' ? event.text : text
-    lastUps = await runUserPromptSubmit(
+    const scratch = cloneResult(result)
+    const upsOutcome = await runUserPromptSubmit(
       nextText,
-      result,
+      scratch,
       context,
       originalInput,
     )
+    const pass = { scratch, outcome: upsOutcome }
+    passes.set(nextText, pass)
+    lastPass = pass
     ranUps = true
-    if (lastUps.kind !== 'ok') {
-      return { drop: lastUps.kind }
+    if (upsOutcome.kind !== 'ok') {
+      return { drop: upsOutcome.kind }
     }
-    return arrivedLatch.perform({ text: nextText })
+    const eventContext = listOfContextTexts(event.context)
+    return arrivedLatch.perform({
+      text: nextText,
+      ...(eventContext !== undefined && { context: eventContext }),
+    })
   }
 
-  const payload: Record<string, unknown> = {
+  const payload = buildPromptSubmitPayload({
     text,
-    wait: shouldWait === true,
-    origin: promptSource,
-    ...(wakeupSource !== undefined && { wakeupSource }),
-  }
+    input: originalInput,
+    pastedContents,
+    origin,
+    bridgeOrigin,
+    wakeupSource,
+    mode,
+    promptSource,
+    turnId,
+    shouldWait,
+  })
 
   const answered = runFunctionHookChain('prompt.submit', payload, tail)
   const raced = await raceArrived(arrivedLatch, answered)
@@ -474,19 +892,25 @@ export async function runPromptSubmit({
         `prompt.submit: text rewritten by a hook (${text.length} -> ${arrived.text.length} chars)`,
       )
     }
+    const committed = passes.get(arrived.text) ?? lastPass
+    if (committed) {
+      commitScratch(committed.scratch)
+    }
+    const committedUps = committed?.outcome
+    const framedText = framePluginPromptSubmitText(arrived.text, origin)
     let value: PromptSubmitEnterValue
     if (!ranUps) {
       value = { ended: endedMessages(HOOKS_DID_NOT_RUN) }
-    } else if (lastUps && lastUps.kind === 'blocking') {
+    } else if (committedUps && committedUps.kind === 'blocking') {
       value = {
         ended: {
-          messages: lastUps.messages,
+          messages: committedUps.messages,
           shouldQuery: false,
-          allowedTools: lastUps.allowedTools,
+          allowedTools: committedUps.allowedTools,
         },
         text: arrived.text,
       }
-    } else if (lastUps && lastUps.kind === 'stop') {
+    } else if (committedUps && committedUps.kind === 'stop') {
       value = {
         ended: result,
         stopped: result.resultText,
@@ -495,8 +919,10 @@ export async function runPromptSubmit({
     } else {
       value = {
         proceeds: {
-          text: arrived.text,
+          text: framedText,
           context: arrived.context,
+          sessionTitle:
+            committedUps?.kind === 'ok' ? committedUps.sessionTitle : undefined,
         },
       }
     }
@@ -510,9 +936,11 @@ export async function runPromptSubmit({
       return { kind: 'return', result: value.ended, value }
     }
     const stamp: PromptSubmittedStamp = {
-      text: arrived.text,
+      text: framedText,
       under: screen,
       context: arrived.context,
+      sessionTitle:
+        committedUps?.kind === 'ok' ? committedUps.sessionTitle : undefined,
     }
     return { kind: 'proceed', stamp, value }
   }
@@ -526,11 +954,11 @@ export async function runPromptSubmit({
       : NOT_SUBMITTED
   logForDebugging(`prompt.submit: dropped (${String(drop)})`)
   queued?.settle({ drop })
-  if (lastUps?.kind === 'blocking') {
+  if (lastPass?.outcome.kind === 'blocking') {
     const ended = {
-      messages: lastUps.messages,
+      messages: lastPass.outcome.messages,
       shouldQuery: false,
-      allowedTools: lastUps.allowedTools,
+      allowedTools: lastPass.outcome.allowedTools,
     }
     return {
       kind: 'return',
@@ -538,7 +966,8 @@ export async function runPromptSubmit({
       value: { ended, text },
     }
   }
-  if (lastUps?.kind === 'stop') {
+  if (lastPass?.outcome.kind === 'stop') {
+    commitScratch(lastPass.scratch)
     return {
       kind: 'return',
       result,

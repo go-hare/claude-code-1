@@ -1,6 +1,8 @@
 import { feature } from 'bun:bundle';
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
+import figures from 'figures';
 import * as React from 'react';
+import { Box, Text } from '@anthropic/ink';
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js';
 import {
   COMMAND_MESSAGE_TAG,
@@ -11,27 +13,37 @@ import {
   TICK_TAG,
 } from '../../constants/xml.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
+import { useQueuedMessage } from '../../context/QueuedMessageContext.js';
 import {
   extractTag,
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  looksLikeCrossSessionMessageEnvelope,
   peerOrObserverDisplayName,
   shouldPaintAgentInboundRow,
+  uiRenderUserMessageOrigin,
 } from '../../utils/messages.js';
 import { InterruptedByUser } from '../InterruptedByUser.js';
 import { MessageResponse } from '../MessageResponse.js';
 import { PluginUserMessageSite } from '../PluginRasterPanes.js';
-import { UserAgentNotificationMessage } from './UserAgentNotificationMessage.js';
+import { isTranscriptV2RowsEnabled } from './TranscriptV2Row.js';
+import {
+  isDetachedToolCallNotification,
+  DetachedToolCallResultMessage,
+  UserAgentNotificationMessage,
+} from './UserAgentNotificationMessage.js';
 import { UserBashInputMessage } from './UserBashInputMessage.js';
 import { UserBashOutputMessage } from './UserBashOutputMessage.js';
 import { UserCommandMessage } from './UserCommandMessage.js';
 import { UserLocalCommandOutputMessage } from './UserLocalCommandOutputMessage.js';
 import { UserMemoryInputMessage } from './UserMemoryInputMessage.js';
 import { UserPlanMessage } from './UserPlanMessage.js';
-import { UserPromptMessage } from './UserPromptMessage.js';
+import { formatPluginPromptOriginName, UserPromptMessage } from './UserPromptMessage.js';
 import { UserResourceUpdateMessage } from './UserResourceUpdateMessage.js';
 import { UserTeammateMessage } from './UserTeammateMessage.js';
 import { UserCrossSessionMessage } from './UserCrossSessionMessage.js';
+
+const ARTIFACT_ROOM_VIEW_NOTIFICATION_PREFIX = `<${TASK_NOTIFICATION_TAG}>\n<task-type>artifact-room-view</task-type>\n`;
 
 type Props = {
   addMargin: boolean;
@@ -62,6 +74,8 @@ type Props = {
   commandRun?: { command?: string; args?: string };
   followsSpeakerLabel?: boolean;
   followsInboundLabel?: boolean;
+  /** densable BX `taskDelivery` — GetTask snapshot on As. */
+  taskDelivery?: unknown;
 };
 
 export function UserTextMessage({
@@ -80,8 +94,12 @@ export function UserTextMessage({
   commandRun,
   followsSpeakerLabel,
   followsInboundLabel,
+  taskDelivery,
 }: Props): React.ReactNode {
   const resolvedMessageId = requestId ?? messageId;
+  const isQueued = useQueuedMessage()?.isQueued === true;
+  const effectiveIsExpanded = isExpanded ?? Boolean(verbose || isTranscriptMode);
+  const systemLine = !verbose && !isTranscriptMode && !isQueued && isTranscriptV2RowsEnabled();
 
   if (typeof param.text !== 'string' || !param.text || param.text.trim() === NO_CONTENT_MESSAGE) {
     return null;
@@ -114,24 +132,44 @@ export function UserTextMessage({
 
   // Teammate messages - only check when swarms enabled
   if (isAgentSwarmsEnabled() && param.text.includes(`<${TEAMMATE_MESSAGE_TAG}`)) {
-    return <UserTeammateMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} />;
+    return (
+      <UserTeammateMessage
+        addMargin={addMargin}
+        param={param}
+        isTranscriptMode={isTranscriptMode}
+        verbose={verbose}
+        messageId={resolvedMessageId}
+        origin={origin}
+        followsSpeakerLabel={followsAnyLabel}
+      />
+    );
   }
 
-  // Inbound channel message (MCP server push).
+  // Inbound channel message (MCP server push) — densable z6n anchored check.
   if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
-    if (param.text.includes('<channel source="')) {
-      /* eslint-disable @typescript-eslint/no-require-imports */
-      const { UserChannelMessage } = require('./UserChannelMessage.js') as typeof import('./UserChannelMessage.js');
-      /* eslint-enable @typescript-eslint/no-require-imports */
-      return <UserChannelMessage addMargin={addMargin} param={param} />;
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { isInboundChannelMessageText, UserChannelMessage } =
+      require('./UserChannelMessage.js') as typeof import('./UserChannelMessage.js');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    if (isInboundChannelMessageText(param.text)) {
+      return (
+        <UserChannelMessage
+          addMargin={addMargin}
+          param={param}
+          messageId={resolvedMessageId}
+          origin={origin}
+          isExpanded={isTranscriptMode || verbose}
+          followsSpeakerLabel={followsAnyLabel}
+        />
+      );
     }
   }
 
   // Cross-session UDS message (from another Claude session's SendMessage).
-  // CROSS_SESSION_MESSAGE_TAG is inlined so the import doesn't ship in
-  // external builds where feature('UDS_INBOX') is false.
+  // Anchored via looksLikeCrossSessionMessageEnvelope (densable ese) so user
+  // prompts mentioning `<cross-session-message` mid-text are never hijacked.
   if (feature('UDS_INBOX')) {
-    if (param.text.includes('<cross-session-message')) {
+    if (looksLikeCrossSessionMessageEnvelope(param.text)) {
       /* eslint-disable @typescript-eslint/no-require-imports */
       const { UserCrossSessionMessage } =
         require('./UserCrossSessionMessage.js') as typeof import('./UserCrossSessionMessage.js');
@@ -152,29 +190,45 @@ export function UserTextMessage({
   }
 
   const renderUserPrompt = (inbound: boolean | undefined): React.ReactNode => {
+    const pluginOriginName = origin?.kind === 'plugin' && typeof origin.name === 'string' ? origin.name : undefined;
     const prompt = (
       <UserPromptMessage
-        addMargin={addMargin}
+        addMargin={pluginOriginName === undefined && addMargin}
         param={param}
         isTranscriptMode={isTranscriptMode}
         timestamp={timestamp}
         origin={origin}
         followsSpeakerLabel={followsSpeakerLabel}
         followsInboundLabel={inbound}
+        hidePluginOriginHeader
       />
     );
-    if (resolvedMessageId === undefined) return prompt;
+    const site =
+      resolvedMessageId === undefined ? (
+        prompt
+      ) : (
+        <PluginUserMessageSite
+          requestId={resolvedMessageId}
+          text={param.text}
+          origin={uiRenderUserMessageOrigin(origin)}
+          isExpanded={effectiveIsExpanded}
+          task={task}
+          from={from}
+        >
+          {prompt}
+        </PluginUserMessageSite>
+      );
+    if (pluginOriginName === undefined) {
+      return site;
+    }
     return (
-      <PluginUserMessageSite
-        requestId={resolvedMessageId}
-        text={param.text}
-        origin={origin}
-        isExpanded={isExpanded}
-        task={task}
-        from={from}
-      >
-        {prompt}
-      </PluginUserMessageSite>
+      <Box flexDirection="column" marginTop={addMargin && !followsSpeakerLabel && !inbound ? 1 : 0}>
+        <Text dimColor>
+          <Text aria-hidden>{figures.pointerSmall} </Text>
+          Prompt from the {formatPluginPromptOriginName(pluginOriginName)} plugin
+        </Text>
+        {site}
+      </Box>
     );
   };
 
@@ -198,7 +252,16 @@ export function UserTextMessage({
 
   // Show command output
   if (param.text.startsWith('<local-command-stdout') || param.text.startsWith('<local-command-stderr')) {
-    return <UserLocalCommandOutputMessage content={param.text} commandRun={commandRun} />;
+    return (
+      <UserLocalCommandOutputMessage
+        content={param.text}
+        addMargin={addMargin}
+        capProseWidth={commandRun?.command === 'recap'}
+        systemLine={systemLine}
+        commandRun={commandRun}
+        messageId={resolvedMessageId}
+      />
+    );
   }
 
   // Handle interruption messages specially
@@ -234,13 +297,18 @@ export function UserTextMessage({
   // Slash commands/
   if (param.text.includes(`<${COMMAND_MESSAGE_TAG}>`)) {
     // Resume / merge can keep command-message and local-command-stdout in one
-    // text block. Command bubble must not swallow the ANSI stdout grid.
+    // text block. Command bubble must not swallow the ANSI stdout grid; omit
+    // commandRun/messageId so merged blocks never double-mount CommandOutputSite.
     const hasLocalOutput = param.text.includes('<local-command-stdout') || param.text.includes('<local-command-stderr');
     if (hasLocalOutput) {
       return (
         <>
           <UserCommandMessage addMargin={addMargin} param={param} />
-          <UserLocalCommandOutputMessage content={param.text} />
+          <UserLocalCommandOutputMessage
+            content={param.text}
+            capProseWidth={commandRun?.command === 'recap'}
+            systemLine={systemLine}
+          />
         </>
       );
     }
@@ -253,7 +321,25 @@ export function UserTextMessage({
 
   // Task notifications (agent completions, bash completions, etc.)
   if (param.text.includes(`<${TASK_NOTIFICATION_TAG}`)) {
-    return <UserAgentNotificationMessage addMargin={addMargin} param={param} />;
+    // densable Xi (@207653560): artifact-room-view task notifications never render a transcript row.
+    if (param.text.startsWith(ARTIFACT_ROOM_VIEW_NOTIFICATION_PREFIX)) {
+      return null;
+    }
+    // densable BX `gVn` → `el` before As. Detached tool_call results are not As.
+    if (isDetachedToolCallNotification(param.text)) {
+      return <DetachedToolCallResultMessage addMargin={addMargin} text={param.text} verbose={verbose} />;
+    }
+    return (
+      <UserAgentNotificationMessage
+        addMargin={addMargin}
+        param={param}
+        messageId={resolvedMessageId}
+        origin={origin}
+        verbose={verbose || isTranscriptMode}
+        isExpanded={isTranscriptMode || verbose}
+        taskDelivery={taskDelivery}
+      />
+    );
   }
 
   // MCP resource and polling update notifications

@@ -4,8 +4,10 @@ import { KeyboardEvent, useInput } from '@anthropic/ink'
 import {
   type AppState,
   useAppState,
+  useAppStateStore,
   useSetAppState,
 } from '../state/AppState.js'
+import { createTaskRegistry } from '../utils/taskRegistry.js'
 import {
   enterTeammateView,
   exitTeammateView,
@@ -76,6 +78,7 @@ export function useBackgroundTaskNavigation(options?: {
   const selectedIPAgentIndex = useAppState(s => s.selectedIPAgentIndex)
   const pipeIpc = useAppState(s => s.pipeIpc)
   const setAppState = useSetAppState()
+  const store = useAppStateStore()
 
   // Filter to running teammates and sort alphabetically to match TeammateSpinnerTree display
   const teammateTasks = getRunningTeammatesSorted(tasks)
@@ -254,7 +257,10 @@ export function useBackgroundTaskNavigation(options?: {
       e.preventDefault()
       const selected = getSelectedTeammate()
       if (selected && selected.task.status === 'running') {
-        void InProcessTeammateTask.kill(selected.taskId, setAppState)
+        void InProcessTeammateTask.kill(
+          selected.taskId,
+          createTaskRegistry(() => store.getState(), setAppState),
+        )
       }
       return
     }

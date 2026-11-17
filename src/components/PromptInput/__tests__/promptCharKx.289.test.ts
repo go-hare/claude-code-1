@@ -13,7 +13,7 @@ import {
   resolveStatusLineRefreshIntervalMs,
   splitStatusLineOutput,
 } from '../../StatusLine.js'
-import { Cursor } from '../../../utils/Cursor.js'
+import { Cursor } from '@anthropic/ink'
 import { formatIdeSelectionLeadingPill } from '../PromptInput.js'
 import { suggestionRowHeight } from '../PromptInputFooterSuggestions.js'
 

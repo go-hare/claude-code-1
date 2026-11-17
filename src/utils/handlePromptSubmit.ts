@@ -92,6 +92,10 @@ import {
 } from './messages.js'
 import { isCommandImmediate } from './immediateCommand.js'
 import { isFullscreenEnvEnabled } from './fullscreen.js'
+import {
+  resolveSinglePromptAttributionKey,
+  runWithTurnAttribution,
+} from './turnAttribution.js'
 import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
@@ -1153,214 +1157,221 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     // context — isolated from the parent's continuation. A process-global
     // mutable slot would be clobbered at the detached closure's first
     // await by this function's synchronous return path. See state.ts.
+    const turnAttributionKey = resolveSinglePromptAttributionKey(commands)
     let turnError: unknown
     try {
-      await runWithWorkload(turnWorkload, async () => {
-        using _batch = batchPromptSubmitWaitGuard(commands)
-        for (let i = 0; i < commands.length; i++) {
-          const cmd = commands[i]!
-          const isFirst = i === 0
-          const runId = cmd.autonomy?.runId
-          using promptSubmitEntries = createPromptSubmitEntries()
-          const result = await processUserInput({
-            input: cmd.value,
-            preExpansionInput: cmd.preExpansionValue,
-            mode: cmd.mode,
-            setToolJSX,
-            context: makeContext(),
-            pastedContents: isFirst ? cmd.pastedContents : undefined,
-            messages,
-            setUserInputOnProcessing: isFirst
-              ? setUserInputOnProcessing
-              : undefined,
-            isAlreadyProcessing: !isFirst,
-            querySource,
-            canUseTool,
-            uuid: cmd.uuid,
-            ideSelection: isFirst
-              ? (cmd.ideSelection ?? ideSelection)
-              : undefined,
-            skipSlashCommands: cmd.skipSlashCommands,
-            bridgeOrigin: cmd.bridgeOrigin,
-            // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
-            modelScheduledOrigin: cmd.modelScheduledOrigin,
-            wakeupSource: cmd.wakeupSource,
-            isMeta: cmd.isMeta,
-            skipAttachments:
-              cmd.skipAttachments === true ||
-              cmd.mode === 'poll-event' ||
-              cmd.mode === 'task-notification' ||
-              !isFirst,
-            skipSubmissionHooks: cmd.skipSubmissionHooks,
-            autonomy: cmd.autonomy,
-            // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
-            origin: cmd.origin,
-            suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
-            composerEnter: cmd.composerEnter,
-            wait: cmd.wait === true,
-            promptSubmitted: cmd.promptSubmitted as
-              | PromptSubmittedStamp
-              | undefined,
-            aheadOfSessionStart: cmd.orphanedPermission !== undefined,
-            entries: promptSubmitEntries,
-          })
-          promptSubmitEntries.handedOff()
-          if (runId && result.deferAutonomyCompletion) {
-            deferredAutonomyRunIds.add(runId)
-          }
-          // densable cun after Art: skip human-like (jy); fill origin only when
-          // unset. Image metadata (Qt) must stay origin-less so IDd hides it.
-          // densable Dfr/HXd runs Fws inside HXd; we Fws !isMeta users after
-          // stamp so peer/observer prompts still get turn-start framing.
-          // Derive origin from mode for task-notifications — mirrors the origin
-          // derivation at messages.ts (case 'queued_command'); intentionally
-          // does NOT mirror its isMeta:true so idle-dequeued notifications stay
-          // visible in the transcript via UserAgentNotificationMessage.
-          const origin =
-            cmd.origin ??
-            (cmd.mode === 'task-notification'
-              ? ({ kind: 'task-notification' } as const)
-              : undefined)
-          if (origin) {
-            stampQueueOriginOnUserMessages(result.messages, origin)
-            if (!isHumanLikeOrigin(origin)) {
-              for (const m of result.messages) {
-                if (m.type === 'user' && !m.isMeta) {
-                  applyTurnStartOriginFraming(
-                    m,
-                    origin as { kind?: string; from?: string },
-                  )
+      await runWithWorkload(turnWorkload, () =>
+        runWithTurnAttribution(turnAttributionKey, async () => {
+          using _batch = batchPromptSubmitWaitGuard(commands)
+          for (let i = 0; i < commands.length; i++) {
+            const cmd = commands[i]!
+            const isFirst = i === 0
+            const runId = cmd.autonomy?.runId
+            using promptSubmitEntries = createPromptSubmitEntries()
+            const result = await processUserInput({
+              input: cmd.value,
+              preExpansionInput: cmd.preExpansionValue,
+              mode: cmd.mode,
+              setToolJSX,
+              context: makeContext(),
+              pastedContents: isFirst ? cmd.pastedContents : undefined,
+              messages,
+              setUserInputOnProcessing: isFirst
+                ? setUserInputOnProcessing
+                : undefined,
+              isAlreadyProcessing: !isFirst,
+              querySource,
+              canUseTool,
+              uuid: cmd.uuid,
+              ideSelection: isFirst
+                ? (cmd.ideSelection ?? ideSelection)
+                : undefined,
+              skipSlashCommands: cmd.skipSlashCommands,
+              bridgeOrigin: cmd.bridgeOrigin,
+              // densable 2.1.221 fire stamp: re-open model-invocable slash + /loop analytics gate
+              modelScheduledOrigin: cmd.modelScheduledOrigin,
+              wakeupSource: cmd.wakeupSource,
+              isMeta: cmd.isMeta,
+              skipAttachments:
+                cmd.skipAttachments === true ||
+                cmd.mode === 'poll-event' ||
+                cmd.mode === 'task-notification' ||
+                !isFirst,
+              skipSubmissionHooks: cmd.skipSubmissionHooks,
+              autonomy: cmd.autonomy,
+              // densable Dfr: origin + suppressWorkflowKeyword for p2y gate.
+              origin: cmd.origin,
+              suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
+              composerEnter: cmd.composerEnter,
+              wait: cmd.wait === true,
+              promptSubmitted: cmd.promptSubmitted as
+                | PromptSubmittedStamp
+                | undefined,
+              aheadOfSessionStart: cmd.orphanedPermission !== undefined,
+              entries: promptSubmitEntries,
+              taskDelivery: cmd.taskDelivery,
+            })
+            promptSubmitEntries.handedOff()
+            if (runId && result.deferAutonomyCompletion) {
+              deferredAutonomyRunIds.add(runId)
+            }
+            // densable cun after Art: skip human-like (jy); fill origin only when
+            // unset. Image metadata (Qt) must stay origin-less so IDd hides it.
+            // densable Dfr/HXd runs Fws inside HXd; we Fws !isMeta users after
+            // stamp so peer/observer prompts still get turn-start framing.
+            // Derive origin from mode for task-notifications — mirrors the origin
+            // derivation at messages.ts (case 'queued_command'); intentionally
+            // does NOT mirror its isMeta:true so idle-dequeued notifications stay
+            // visible in the transcript via UserAgentNotificationMessage.
+            const origin =
+              cmd.origin ??
+              (cmd.mode === 'task-notification'
+                ? ({ kind: 'task-notification' } as const)
+                : undefined)
+            if (origin) {
+              stampQueueOriginOnUserMessages(result.messages, origin)
+              if (!isHumanLikeOrigin(origin)) {
+                for (const m of result.messages) {
+                  if (m.type === 'user' && !m.isMeta) {
+                    applyTurnStartOriginFraming(
+                      m,
+                      origin as { kind?: string; from?: string },
+                    )
+                  }
                 }
               }
             }
-          }
-          newMessages.push(...result.messages)
-          if (isFirst) {
-            shouldQuery = result.shouldQuery
-            allowedTools = result.allowedTools
-            disallowedTools = result.disallowedTools
-            model = result.model
-            effort = result.effort
-            nextInput = result.nextInput
-            submitNextInput = result.submitNextInput
-          }
-        }
-
-        queryCheckpoint('query_process_user_input_end')
-        if (fileHistoryEnabled()) {
-          queryCheckpoint('query_file_history_snapshot_start')
-          newMessages.filter(selectableUserMessagesFilter).forEach(message => {
-            void fileHistoryMakeSnapshot(
-              (updater: (prev: FileHistoryState) => FileHistoryState) => {
-                setAppState(prev => ({
-                  ...prev,
-                  fileHistory: updater(prev.fileHistory),
-                }))
-              },
-              message.uuid,
-            )
-          })
-          queryCheckpoint('query_file_history_snapshot_end')
-        }
-
-        if (newMessages.length) {
-          // History is now added in the caller (onSubmit) for direct user submissions.
-          // This ensures queued command processing (notifications, already-queued user input)
-          // doesn't add to history, since those either shouldn't be in history or were
-          // already added when originally queued.
-          resetHistory()
-          setToolJSX({
-            jsx: null,
-            shouldHidePromptInput: false,
-            clearLocalJSX: true,
-          })
-
-          const primaryCmd = commands[0]
-          const primaryMode = primaryCmd?.mode ?? 'prompt'
-          const primaryInput =
-            primaryCmd && typeof primaryCmd.value === 'string'
-              ? primaryCmd.value
-              : undefined
-          const shouldCallBeforeQuery = primaryMode === 'prompt'
-          // Official: d=C.some(a=>a.stopHookActive)?!0:void 0,
-          // r=C.find(a=>a.clientPlatform)?.clientPlatform
-          const stopHookActive = commands.some(c => c.stopHookActive)
-            ? true
-            : undefined
-          const clientPlatform = commands.find(
-            c => c.clientPlatform,
-          )?.clientPlatform
-          // densable c8o: stamp verifiedSlackHumanTurn onto matching user msgs
-          // by queue uuid so foreign_user_input guards treat Slack human turns.
-          for (const cmd of commands) {
-            if (!cmd.verifiedSlackHumanTurn || cmd.uuid === undefined) continue
-            for (const msg of newMessages) {
-              if (msg.type === 'user' && msg.uuid === cmd.uuid) {
-                ;(
-                  msg as { verifiedSlackHumanTurn?: boolean }
-                ).verifiedSlackHumanTurn = true
-              }
+            newMessages.push(...result.messages)
+            if (isFirst) {
+              shouldQuery = result.shouldQuery
+              allowedTools = result.allowedTools
+              disallowedTools = result.disallowedTools
+              model = result.model
+              effort = result.effort
+              nextInput = result.nextInput
+              submitNextInput = result.submitNextInput
             }
           }
-          // densable W4f — claim takeover vs continuation before onQuery.
-          // Gold: z=Math.max(0,J.findIndex(Uft)); se=J[z]
-          const firstUftIndex = Math.max(
-            0,
-            commands.findIndex(isQueuedCommandEditable),
-          )
-          const claimCmd = commands[firstUftIndex]
-          const claimMode = claimCmd?.mode ?? 'prompt'
-          const humanCommands = commands.filter(isQueuedCommandEditable)
-          turnClaim = claimQuotaAutoResumeTurn({
-            turnUuids,
-            isHumanTakeover:
-              shouldQuery &&
-              (claimMode === 'prompt' || claimMode === 'bash') &&
-              claimCmd !== undefined &&
-              isQueuedCommandEditable(claimCmd),
-            humanCommandUuids: humanCommands.map(cmd => cmd.uuid),
-            willQuery: shouldQuery,
-          })
-          await onQuery(
-            newMessages,
-            abortController,
-            shouldQuery,
-            allowedTools ?? [],
-            model
-              ? resolveSkillModelOverride(model, mainLoopModel)
-              : mainLoopModel,
-            shouldCallBeforeQuery ? onBeforeQuery : undefined,
-            primaryInput,
-            effort,
-            stopHookActive,
-            clientPlatform,
-            disallowedTools ?? [],
-          )
-        } else {
-          // Local slash commands that skip messages (e.g., /model, /theme).
-          // Release the guard BEFORE clearing toolJSX to prevent spinner flash —
-          // the spinner formula checks: (!toolJSX || showSpinner) && isLoading.
-          // If we clear toolJSX while the guard is still reserved, spinner briefly
-          // shows. The finally below also calls cancelReservation (no-op if idle).
-          queryGuard.cancelReservation()
-          setToolJSX({
-            jsx: null,
-            shouldHidePromptInput: false,
-            clearLocalJSX: true,
-          })
-          resetHistory()
-          setAbortController(null)
-        }
 
-        // densable WZe: submitNextInput enqueues; else Rt(nextInput, cmd).
-        if (nextInput) {
-          if (submitNextInput) {
-            enqueue({ value: nextInput, mode: 'prompt' })
-          } else {
-            restoreHandedBack(nextInput, commands[0] ?? {})
+          queryCheckpoint('query_process_user_input_end')
+          if (fileHistoryEnabled()) {
+            queryCheckpoint('query_file_history_snapshot_start')
+            newMessages
+              .filter(selectableUserMessagesFilter)
+              .forEach(message => {
+                void fileHistoryMakeSnapshot(
+                  (updater: (prev: FileHistoryState) => FileHistoryState) => {
+                    setAppState(prev => ({
+                      ...prev,
+                      fileHistory: updater(prev.fileHistory),
+                    }))
+                  },
+                  message.uuid,
+                )
+              })
+            queryCheckpoint('query_file_history_snapshot_end')
           }
-        }
-      }) // end runWithWorkload — ALS context naturally scoped, no finally needed
+
+          if (newMessages.length) {
+            // History is now added in the caller (onSubmit) for direct user submissions.
+            // This ensures queued command processing (notifications, already-queued user input)
+            // doesn't add to history, since those either shouldn't be in history or were
+            // already added when originally queued.
+            resetHistory()
+            setToolJSX({
+              jsx: null,
+              shouldHidePromptInput: false,
+              clearLocalJSX: true,
+            })
+
+            const primaryCmd = commands[0]
+            const primaryMode = primaryCmd?.mode ?? 'prompt'
+            const primaryInput =
+              primaryCmd && typeof primaryCmd.value === 'string'
+                ? primaryCmd.value
+                : undefined
+            const shouldCallBeforeQuery = primaryMode === 'prompt'
+            // Official: d=C.some(a=>a.stopHookActive)?!0:void 0,
+            // r=C.find(a=>a.clientPlatform)?.clientPlatform
+            const stopHookActive = commands.some(c => c.stopHookActive)
+              ? true
+              : undefined
+            const clientPlatform = commands.find(
+              c => c.clientPlatform,
+            )?.clientPlatform
+            // densable c8o: stamp verifiedSlackHumanTurn onto matching user msgs
+            // by queue uuid so foreign_user_input guards treat Slack human turns.
+            for (const cmd of commands) {
+              if (!cmd.verifiedSlackHumanTurn || cmd.uuid === undefined)
+                continue
+              for (const msg of newMessages) {
+                if (msg.type === 'user' && msg.uuid === cmd.uuid) {
+                  ;(
+                    msg as { verifiedSlackHumanTurn?: boolean }
+                  ).verifiedSlackHumanTurn = true
+                }
+              }
+            }
+            // densable W4f — claim takeover vs continuation before onQuery.
+            // Gold: z=Math.max(0,J.findIndex(Uft)); se=J[z]
+            const firstUftIndex = Math.max(
+              0,
+              commands.findIndex(isQueuedCommandEditable),
+            )
+            const claimCmd = commands[firstUftIndex]
+            const claimMode = claimCmd?.mode ?? 'prompt'
+            const humanCommands = commands.filter(isQueuedCommandEditable)
+            turnClaim = claimQuotaAutoResumeTurn({
+              turnUuids,
+              isHumanTakeover:
+                shouldQuery &&
+                (claimMode === 'prompt' || claimMode === 'bash') &&
+                claimCmd !== undefined &&
+                isQueuedCommandEditable(claimCmd),
+              humanCommandUuids: humanCommands.map(cmd => cmd.uuid),
+              willQuery: shouldQuery,
+            })
+            await onQuery(
+              newMessages,
+              abortController,
+              shouldQuery,
+              allowedTools ?? [],
+              model
+                ? resolveSkillModelOverride(model, mainLoopModel)
+                : mainLoopModel,
+              shouldCallBeforeQuery ? onBeforeQuery : undefined,
+              primaryInput,
+              effort,
+              stopHookActive,
+              clientPlatform,
+              disallowedTools ?? [],
+            )
+          } else {
+            // Local slash commands that skip messages (e.g., /model, /theme).
+            // Release the guard BEFORE clearing toolJSX to prevent spinner flash —
+            // the spinner formula checks: (!toolJSX || showSpinner) && isLoading.
+            // If we clear toolJSX while the guard is still reserved, spinner briefly
+            // shows. The finally below also calls cancelReservation (no-op if idle).
+            queryGuard.cancelReservation()
+            setToolJSX({
+              jsx: null,
+              shouldHidePromptInput: false,
+              clearLocalJSX: true,
+            })
+            resetHistory()
+            setAbortController(null)
+          }
+
+          // densable WZe: submitNextInput enqueues; else Rt(nextInput, cmd).
+          if (nextInput) {
+            if (submitNextInput) {
+              enqueue({ value: nextInput, mode: 'prompt' })
+            } else {
+              restoreHandedBack(nextInput, commands[0] ?? {})
+            }
+          }
+        }),
+      ) // end runWithWorkload / runWithTurnAttribution — ALS context naturally scoped
     } catch (error) {
       turnError = error
     }

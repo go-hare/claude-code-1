@@ -67,6 +67,8 @@ import {
   getShownPluginPane,
   heldFocusEdge,
   invokePress,
+  heldPress,
+  heldByKeyOf,
   nearestScrollOffset,
   nextFocusedPaneId,
   cycleShownPaneId,
@@ -128,10 +130,12 @@ import {
   hasPluginDrawing,
   isEngineFallback,
   isG2eComponent,
+  noteHeldRows,
   siteIsOff,
   useHeldSiteRows,
   useSiteMeasure,
 } from '../utils/plugins/pluginSiteHold.js';
+import { StaticRenderContext } from '../utils/staticRender.js';
 import {
   computeWheelStep,
   initWheelAccel,
@@ -2223,7 +2227,19 @@ export function usePluginSelectSeat(
     }
     setPicked(current => new Map(current).set(key, choice.value));
     setSeat({ ...now, isOpen: false });
-    void firePressAnswer(row.plugin, row.handle, { value: choice.value }).then(reply => {
+    void firePressAnswer(
+      row.plugin,
+      row.handle,
+      { value: choice.value },
+      {
+        tag: 'Select',
+        eventName: 'ui.select',
+        element: row.element,
+        component,
+        requestId,
+        admits: held => held.options === undefined || held.options.includes(choice.value),
+      },
+    ).then(reply => {
       if (reply !== undefined && typeof reply === 'object' && reply !== null && 'value' in reply) {
         const next = (reply as { value: unknown }).value;
         if (typeof next === 'string') {
@@ -2665,15 +2681,62 @@ export function usePluginBandKeys(bag: PluginBandKeysBag, options: { isActive: b
   );
 }
 
-/** densable `n_e` → `ui.press` via local recordPress/invokePress. */
-function firePress(plugin: string, handle: unknown, event?: unknown): void {
+/** densable `n_e` / `qm` → ui.press via T3.heldPress then invokePress. DualInk omits baseButton. */
+function firePress(plugin: string, handle: unknown, event?: unknown, element?: string): void {
+  const clientHeld = typeof handle === 'number' && handle < 0;
+  if (!clientHeld && heldPress(plugin, handle, element) === undefined) {
+    logForDebugging(`ui.press: no Button of ${plugin} is held under handle ${String(handle)}; nothing ran`);
+    return;
+  }
   recordPress(plugin, handle, event);
   void invokePress(plugin, handle, event);
 }
 
-function firePressAnswer(plugin: string, handle: unknown, event: unknown): Promise<unknown> {
-  recordPress(plugin, handle, event);
-  return invokePress(plugin, handle, event);
+function firePressAnswer(
+  plugin: string,
+  handle: unknown,
+  event: unknown,
+  meta?: {
+    tag: 'Input' | 'Select';
+    eventName: 'ui.input' | 'ui.select';
+    element?: string;
+    component?: string;
+    requestId?: string;
+    surface?: string;
+    admits?: (held: NonNullable<ReturnType<typeof heldPress>>) => boolean;
+  },
+): Promise<unknown> {
+  const tag = meta?.tag ?? 'Input';
+  const eventName = meta?.eventName ?? 'ui.input';
+  const surface = meta?.surface ?? 'terminal';
+  const clientHeld = typeof handle === 'number' && handle < 0;
+  if (clientHeld) {
+    recordPress(plugin, handle, event);
+    return invokePress(plugin, handle, event);
+  }
+  const keyLookup =
+    meta?.element !== undefined && meta?.component !== undefined
+      ? {
+          tag,
+          plugin,
+          element: meta.element,
+          surface,
+          component: meta.component,
+          ...(meta.requestId !== undefined && { requestId: meta.requestId }),
+        }
+      : undefined;
+  const held =
+    heldPress(plugin, handle, meta?.element) ?? (keyLookup !== undefined ? heldByKeyOf(keyLookup) : undefined);
+  if (held?.tag !== tag) {
+    logForDebugging(`${eventName}: no ${tag} of ${plugin} is held under handle ${String(handle)}; nothing ran`);
+    return Promise.resolve(undefined);
+  }
+  if (meta?.admits !== undefined && !meta.admits(held)) {
+    logForDebugging(`${eventName}: the ${tag} ${plugin}/${held.element} does not take that value; nothing ran`);
+    return Promise.resolve(undefined);
+  }
+  recordPress(plugin, held.handle, event);
+  return invokePress(plugin, held.handle, event);
 }
 
 /** densable `BDe` — Input field Map key `plugin\0element`. */
@@ -2690,13 +2753,25 @@ export function pluginInputPressEvent(event: {
   handle: unknown;
   element?: string;
   component?: string;
+  requestId?: string;
   kind: string;
   value: string;
 }): Promise<unknown> {
-  return firePressAnswer(event.plugin, event.handle, {
-    kind: event.kind,
-    value: event.value,
-  });
+  return firePressAnswer(
+    event.plugin,
+    event.handle,
+    {
+      kind: event.kind,
+      value: event.value,
+    },
+    {
+      tag: 'Input',
+      eventName: 'ui.input',
+      element: event.element,
+      component: event.component,
+      requestId: event.requestId,
+    },
+  );
 }
 
 export type PluginInputFieldsSlice = {
@@ -2719,7 +2794,7 @@ export type PluginInputMapApi = {
 export function createPluginInputMap(
   _focusables: readonly DrawingFocusable[] | undefined,
   component: string,
-  _requestId: string,
+  requestId: string,
   host: {
     texts: Map<string, string>;
     setTexts: (updater: (current: Map<string, string>) => Map<string, string>) => void;
@@ -2734,7 +2809,7 @@ export function createPluginInputMap(
       const key = pluginInputFieldKey(plugin, element);
       live.current.set(key, value);
       setTexts(current => new Map(current).set(key, value));
-      void pluginInputPressEvent({ plugin, handle, element, component, kind: 'change', value });
+      void pluginInputPressEvent({ plugin, handle, element, component, requestId, kind: 'change', value });
     },
   };
   return {
@@ -2748,7 +2823,7 @@ export function createPluginInputMap(
       const sent = live.current.get(key) ?? texts.get(key) ?? value ?? '';
       if (submitting.current.has(key)) return;
       submitting.current.add(key);
-      void pluginInputPressEvent({ plugin, handle, element, component, kind: 'submit', value: sent }).then(
+      void pluginInputPressEvent({ plugin, handle, element, component, requestId, kind: 'submit', value: sent }).then(
         reply => {
           submitting.current.delete(key);
           if (reply !== undefined && (live.current.get(key) ?? sent) === sent) {
@@ -6916,29 +6991,31 @@ function PluginPromptHintActiveSite({
 }): ReactNode {
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
+  const panesViewport = useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const effectiveColumns = panesViewport?.conversationColumns ?? columns;
+  const effectiveRows = panesViewport?.rows ?? rows;
   const defaultHint = isDraft ? '' : isWorking ? 'esc to interrupt' : '? for shortcuts';
   const [settled, setSettled] = useState<SettledPromptHint | undefined>(undefined);
-  const evalKey = `${columns}\0${rows}\0${String(isFullscreen)}\0${isDraft ? '1' : '0'}\0${isWorking ? '1' : '0'}\0${renderVer}\0${defaultHint}`;
+  const [wasStoodIn, setWasStoodIn] = useState(false);
+  const evalKey = `${effectiveColumns}\0${effectiveRows}\0${String(isFullscreen)}\0${isDraft ? '1' : '0'}\0${isWorking ? '1' : '0'}\0${renderVer}\0${defaultHint}`;
 
   useEffect(() => {
     let cancelled = false;
+    const abort = new AbortController();
     const eventPayload: Record<string, unknown> = {
       surface: 'terminal',
       component: 'PromptHint',
       requestId: 'prompt-hint',
-      viewport: { columns, rows, isFullscreen },
+      viewport: { columns: effectiveColumns, rows: effectiveRows, isFullscreen },
       props: {
         isDraft,
         isWorking,
         hint: defaultHint,
       },
     };
-    void runFunctionHookChain('ui.render', eventPayload, async ev => {
-      const nextProps = isRecord(ev) && isRecord(ev.props) ? ev.props : eventPayload.props;
-      return { type: 'engine', ref: 0, props: nextProps };
-    }).then(
+    void evaluateUiRender(eventPayload, abort.signal).then(
       answer => {
-        if (cancelled) return;
+        if (cancelled || abort.signal.aborted) return;
         if (isRecord(answer) && answer.type === 'engine') {
           const props = isRecord(answer.props) ? answer.props : undefined;
           setSettled({
@@ -6949,7 +7026,7 @@ function PluginPromptHintActiveSite({
           });
           return;
         }
-        if (isRecord(answer) && typeof answer.type === 'string' && hasPluginDrawing(answer)) {
+        if (hasPluginDrawing(answer)) {
           const owner =
             extractDrawnPlugin(answer, 'PromptHint', 'prompt-hint') ?? (getLastUiRenderPlugin() || undefined);
           setSettled({
@@ -6978,26 +7055,39 @@ function PluginPromptHintActiveSite({
           `ui.render (PromptHint prompt-hint): site failed: ${err instanceof Error ? err.message : String(err)}`,
           { level: 'error' },
         );
-        if (!cancelled) {
+        if (!cancelled && !abort.signal.aborted) {
           setSettled({ isDraft, isWorking, hint: defaultHint, tail: '' });
         }
       },
     );
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [evalKey, columns, rows, isFullscreen, isDraft, isWorking, defaultHint]);
+  }, [evalKey, effectiveColumns, effectiveRows, isFullscreen, isDraft, isWorking, defaultHint]);
 
   const isCurrentReading = settled !== undefined && settled.isDraft === isDraft && settled.isWorking === isWorking;
-  // densable Hx (`standsIn`): tail-only does NOT suppress the default hint row.
-  const suppressesDefault =
-    !isDraft && isCurrentReading && (settled.pluginTree !== undefined || settled.hint !== defaultHint);
+  // densable IK (@209083743): `yt = pt !== void 0 && Hx(pt, v, St)`; `Kt = pt === void 0 ? Me : yt`.
+  // During holdover (`!isCurrentReading`), keep `wasStoodIn` from the prior settled reading so an
+  // unrewritten idle hint (`? for shortcuts`) never flashes as a stand-in row on draft transition.
+  const currentStandsIn = isCurrentReading && (settled.pluginTree !== undefined || settled.hint !== defaultHint);
+  const isHeldOver = settled !== undefined && !isCurrentReading;
+  const standsIn = isCurrentReading ? currentStandsIn : wasStoodIn;
+  // densable Bx (@209083350): tail-only appends inline on PromptInputFooter via onTail, never a second row.
   const tailOnly =
-    isCurrentReading && settled.pluginTree === undefined && settled.hint === defaultHint ? settled.tail : '';
+    isCurrentReading && !currentStandsIn && settled.pluginTree === undefined && settled.hint === defaultHint
+      ? settled.tail
+      : '';
+  const fallbackTailLine = defaultHint !== '' ? `${defaultHint} · ${tailOnly}` : ` · ${tailOnly}`;
+  const standaloneTailText = onTail === undefined && tailOnly !== '' ? fallbackTailLine : '';
+  const suppressesDefault = !isDraft && (standsIn || standaloneTailText !== '');
 
   useLayoutEffect(() => {
+    if (isCurrentReading) {
+      setWasStoodIn(currentStandsIn);
+    }
     onSuppressDefaultHint?.(suppressesDefault);
-  }, [onSuppressDefaultHint, suppressesDefault]);
+  }, [isCurrentReading, currentStandsIn, onSuppressDefaultHint, suppressesDefault]);
 
   useLayoutEffect(() => {
     onTail?.(tailOnly);
@@ -7010,8 +7100,8 @@ function PluginPromptHintActiveSite({
     };
   }, [onSuppressDefaultHint, onTail]);
 
-  if (settled === undefined) return null;
-  if (settled.pluginTree !== undefined && isCurrentReading) {
+  if (settled === undefined || (!standsIn && standaloneTailText === '')) return null;
+  if (settled.pluginTree !== undefined) {
     return (
       <Box paddingX={2}>
         <PluginRenderedTree
@@ -7023,24 +7113,22 @@ function PluginPromptHintActiveSite({
       </Box>
     );
   }
-  if (tailOnly !== '') {
-    return (
-      <Box paddingX={2}>
-        <Text dimColor wrap="truncate">
-          {defaultHint !== '' ? `${defaultHint} · ${tailOnly}` : ` · ${tailOnly}`}
-        </Text>
-      </Box>
-    );
-  }
-  const shownText = resolvePromptHintText({
-    isDraft,
-    isWorking,
-    defaultHint,
-    settledIsDraft: settled.isDraft,
-    settledIsWorking: settled.isWorking,
-    settledHint: settled.hint,
-    settledTail: settled.tail,
-  });
+  const shownText =
+    standaloneTailText !== ''
+      ? standaloneTailText
+      : isHeldOver
+        ? settled.tail !== '' && settled.hint !== ''
+          ? `${settled.hint} · ${settled.tail}`
+          : settled.hint
+        : resolvePromptHintText({
+            isDraft,
+            isWorking,
+            defaultHint,
+            settledIsDraft: settled.isDraft,
+            settledIsWorking: settled.isWorking,
+            settledHint: settled.hint,
+            settledTail: settled.tail,
+          });
   if (shownText === '') return null;
   return (
     <Box paddingX={2}>
@@ -7056,6 +7144,62 @@ export type PluginUserMessageOrigin = {
   name?: string;
   [key: string]: unknown;
 };
+
+function enginePropsFromDrawn(node: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = enginePropsFromDrawn(child);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (!isRecord(node)) return undefined;
+  if (node.type === 'engine') {
+    return isRecord(node.props) ? node.props : undefined;
+  }
+  if (node.children !== undefined) {
+    const hit = enginePropsFromDrawn(node.children);
+    if (hit !== undefined) return hit;
+  }
+  if (isRecord(node.props) && node.props.children !== undefined) {
+    return enginePropsFromDrawn(node.props.children);
+  }
+  return undefined;
+}
+
+function hasUiRenderHook(component: string): boolean {
+  return hasMatchingFunctionHook('ui.render', {
+    surface: 'terminal',
+    component,
+  });
+}
+
+function parsePluginChannelOwner(server: unknown): string | undefined {
+  if (typeof server !== 'string' || !server.startsWith('plugin:')) return undefined;
+  const parts = server.split(':');
+  return parts.length >= 3 && parts[1] ? parts[1] : undefined;
+}
+
+function deliveredByPlugin(origin?: PluginUserMessageOrigin): string | undefined {
+  if (origin === undefined) return undefined;
+  switch (origin.kind) {
+    case 'plugin':
+      return typeof origin.name === 'string' && origin.name !== '' ? origin.name : undefined;
+    case 'channel':
+      return parsePluginChannelOwner(origin.server);
+    default:
+      return undefined;
+  }
+}
+
+function safeInputKeyPart(value: unknown): string {
+  if (value === undefined) return '';
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return String(value);
+  }
+}
 
 /**
  * densable `URe` / `OM(xI("UserMessage"), engine)`: plugin tree or the
@@ -7080,19 +7224,33 @@ export function PluginUserMessageSite({
 }): ReactNode {
   const { addNotification } = useNotifications();
   const { subscribeFrames } = useApp();
-  const hasHook = hasMatchingFunctionHook('ui.render', { component: 'UserMessage' });
+  const staticFrame = useContext(StaticRenderContext);
+  useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
+  const terminalSize = useTerminalSize();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const panesViewport = useSyncExternalStore(subscribePanes, getPanesTerminalSize, getPanesTerminalSize);
+  const conversationColumns = panesViewport?.conversationColumns ?? terminalSize.columns;
+  const viewportRows = panesViewport?.rows ?? terminalSize.rows;
+  const viewport = useMemo(
+    () => ({
+      columns: conversationColumns,
+      rows: viewportRows,
+      isFullscreen,
+    }),
+    [conversationColumns, viewportRows, isFullscreen],
+  );
+  const hasComponentHook = hasUiRenderHook('UserMessage');
   // densable `ar`: `ii()&&g2e&&MYe` — `ii` is fullscreen (virtual scroll).
-  const measure = isFullscreenEnvEnabled() && isG2eComponent('UserMessage') && hasHook;
-  const {
-    ref: cardRef,
-    lastRows,
-    contentRows,
-    onScreen,
-  } = useSiteMeasure(measure, `UserMessage\0${requestId}`, subscribeFrames);
+  const measure = !staticFrame && isFullscreen && isG2eComponent('UserMessage') && hasComponentHook;
+  const siteId = `UserMessage\0${requestId}`;
+  const { ref: cardRef, lastRows, contentRows, onScreen } = useSiteMeasure(measure, siteId, subscribeFrames);
+  const submittedBy = deliveredByPlugin(origin);
   const userInput = {
     surface: 'terminal',
     component: 'UserMessage',
     requestId,
+    viewport,
+    ...(submittedBy !== undefined && { submittedBy }),
     props: {
       text,
       ...(origin !== undefined && { origin }),
@@ -7102,20 +7260,46 @@ export function PluginUserMessageSite({
       ...(onScreen !== undefined && { onScreen }),
     },
   };
-  const userInputKey = `${requestId}\0${text}\0${origin?.kind ?? ''}\0${String(isExpanded ?? '')}`;
-  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(userInput, userInputKey);
+  const hasHook = hasComponentHook && hasMatchingFunctionHook('ui.render', userInput);
+  const engineDrewRef = useRef(false);
+  if (!hasHook) {
+    engineDrewRef.current = true;
+  }
+  const canDrawFallback = engineDrewRef.current || staticFrame;
+  const userInputKey = [
+    requestId,
+    text,
+    safeInputKeyPart(origin),
+    String(isExpanded ?? ''),
+    safeInputKeyPart(task),
+    safeInputKeyPart(from),
+    safeInputKeyPart(onScreen),
+    String(conversationColumns),
+    String(viewportRows),
+    String(isFullscreen),
+    submittedBy ?? '',
+  ].join('\0');
+  const { drawn, drawnPlugin, markThrown } = useRenderDrawing(hasHook && !staticFrame ? userInput : null, userInputKey);
+  if (isEngineFallback(drawn)) {
+    engineDrewRef.current = true;
+  }
   const ownerPlugin = useMemo(
     () => extractDrawnPlugin(drawn, 'UserMessage', requestId) ?? drawnPlugin,
     [drawn, drawnPlugin, requestId],
   );
   const userHeldRows = useHeldSiteRows({
     isOff: siteIsOff(hasHook, userInput),
-    input: userInputKey,
+    input: hasHook ? userInputKey : undefined,
     drawn,
     isFallback: isEngineFallback(drawn),
     lastRows,
     contentRows,
   });
+  useEffect(() => {
+    if (userHeldRows !== undefined) {
+      noteHeldRows(siteId, onScreen, userHeldRows);
+    }
+  }, [userHeldRows, drawn, siteId, onScreen]);
   const [userResetKey, setUserResetKey] = useState(0);
   // densable t7t `ref:u` is stable. A fresh callback ref is a changed host prop
   // every commit → markDirty; once scrolled above the viewport the row stays
@@ -7126,14 +7310,43 @@ export function PluginUserMessageSite({
     },
     [cardRef],
   );
+  const focusables = useMemo(() => focusablesOfDrawing(drawn), [drawn]);
+  const hasInteractiveFields = focusables.some(row => row.tag === 'Input' || row.tag === 'Select');
   const pluginTree = hasHook && hasPluginDrawing(drawn);
-  const engine = children;
-  const pluginNode = (
-    <DrawingNode node={drawn} plugin={ownerPlugin} requestId={requestId} index={0} component="UserMessage" />
+  const drawPending = hasHook && drawn === undefined && !canDrawFallback;
+  const engineProps = hasHook && drawn !== undefined ? enginePropsFromDrawn(drawn) : undefined;
+  const rewrittenText = typeof engineProps?.text === 'string' ? engineProps.text : undefined;
+  const engine =
+    rewrittenText !== undefined && isValidElement(children)
+      ? cloneElement(children as ReactElement<{ rewrittenText?: string }>, {
+          rewrittenText,
+        })
+      : children;
+  const renderedDrawing = (
+    <DrawingNode
+      node={drawn}
+      plugin={ownerPlugin}
+      requestId={requestId}
+      index={0}
+      engine={engine}
+      component="UserMessage"
+    />
+  );
+  const pluginNode = hasInteractiveFields ? (
+    <PluginSiteFieldsOwned requestId={requestId} focusables={focusables}>
+      {renderedDrawing}
+    </PluginSiteFieldsOwned>
+  ) : (
+    renderedDrawing
   );
   return (
-    <Box ref={setCardRef} flexDirection="column" {...(userHeldRows !== undefined && { minHeight: userHeldRows })}>
-      {pluginTree ? (
+    <Box
+      ref={setCardRef}
+      flexDirection="column"
+      drawPending={drawPending || undefined}
+      {...(userHeldRows !== undefined && { minHeight: userHeldRows })}
+    >
+      {drawPending ? null : pluginTree ? (
         <PaneErrorBoundary
           resetKey={userResetKey}
           fallback={engine}
