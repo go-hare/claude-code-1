@@ -112,11 +112,13 @@ import {
 } from './utils/config.js';
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
 import {
+  bootstrapSessionEffort,
   emitOrgEffortExceedWarning,
   getInitialEffortSetting,
   parseCliEffortArg,
-  resolveBootstrapEffortValue,
+  pdSessionEffort,
   resolveBootstrapUltracodeFlag,
+  teSettingsEffortTable,
 } from './utils/effort.js';
 import {
   getInitialFastModeSetting,
@@ -4312,19 +4314,18 @@ async function run(): Promise<CommanderCommand> {
           // densable Ulc after QBn: org maxEffortLevel exceed warn.
           ...(() => {
             const bootstrapModel = effectiveModel ?? getMainLoopModel();
-            // densable: Kt=QBn(a.effort) then Ulc(Kt, model).
-            // QBn ≡ Qwi(cli.effort + settings), not CLI-only parse.
-            const bootstrapEffort = resolveBootstrapEffortValue({
-              cliEffort: options.effort,
-              settingsUltracode: getInitialSettings().ultracode,
-              settingsEffortLevel: getInitialEffortSetting(),
-              model: bootstrapModel,
-            });
+            // densable 2.1.289 d_t: sessionEffort + te() settingsEffortTable,
+            // then Pd(state, model) for org maxEffortLevel exceed warning.
+            const sessionEffort = bootstrapSessionEffort(options.effort, bootstrapModel);
+            const settingsEffortTable = teSettingsEffortTable();
+            const bootstrapEffort = pdSessionEffort({ sessionEffort, settingsEffortTable }, bootstrapModel);
             emitOrgEffortExceedWarning(bootstrapEffort, bootstrapModel, {
               outputFormat: outputFormat ?? 'text',
             });
             return {
               effortValue: bootstrapEffort,
+              sessionEffort,
+              settingsEffortTable,
               ultracode: resolveBootstrapUltracodeFlag({
                 cliEffort: options.effort,
                 settingsUltracode: getInitialSettings().ultracode,
@@ -4550,6 +4551,7 @@ async function run(): Promise<CommanderCommand> {
           sdkMcpConfigs,
           agentDefinitions.activeAgents,
           {
+            subscribeAppState: headlessStore.subscribe,
             continue: options.continue,
             resume: options.resume,
             verbose: verbose,
@@ -4690,6 +4692,8 @@ async function run(): Promise<CommanderCommand> {
       const initialState: AppState = {
         settings: getInitialSettings(),
         tasks: {},
+        transcripts: {},
+        runningSubagents: 0,
         // densable taskDecorations — filled by useSubagentStatusLine.
         taskDecorations: {},
         agentNameRegistry: new Map(),
@@ -4841,19 +4845,18 @@ async function run(): Promise<CommanderCommand> {
         // densable QBn/Qwi + sAi: cli effort / ultracode alias / settings.ultracode
         // densable Ulc after QBn: org maxEffortLevel exceed warn.
         ...(() => {
-          // densable: Kt=QBn(a.effort) then Ulc(Kt, model).
-          // QBn ≡ Qwi(cli.effort + settings), not CLI-only parse.
-          const bootstrapEffort = resolveBootstrapEffortValue({
-            cliEffort: options.effort,
-            settingsUltracode: getInitialSettings().ultracode,
-            settingsEffortLevel: getInitialEffortSetting(),
-            model: resolvedInitialModel,
-          });
+          // densable 2.1.289 d_t: sessionEffort + te() settingsEffortTable,
+          // then Pd(state, model) for org maxEffortLevel exceed warning.
+          const sessionEffort = bootstrapSessionEffort(options.effort, resolvedInitialModel);
+          const settingsEffortTable = teSettingsEffortTable();
+          const bootstrapEffort = pdSessionEffort({ sessionEffort, settingsEffortTable }, resolvedInitialModel);
           emitOrgEffortExceedWarning(bootstrapEffort, resolvedInitialModel, {
             outputFormat: outputFormat ?? 'text',
           });
           return {
             effortValue: bootstrapEffort,
+            sessionEffort,
+            settingsEffortTable,
             ultracode: resolveBootstrapUltracodeFlag({
               cliEffort: options.effort,
               settingsUltracode: getInitialSettings().ultracode,

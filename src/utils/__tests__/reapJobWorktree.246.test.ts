@@ -157,7 +157,9 @@ describe('#16 Slu / vjr / xMs / $jr / zr (2.1.246)', () => {
       'has files but no repository to verify them against',
     )
     expect(worktreeSrc).toContain('unremovable reparse point in the worktree')
-    expect(worktreeSrc).toContain('hasWorktreeRemoveHook()')
+    // Gold289 returns configuration state in the removal result itself.
+    expect(worktreeSrc).toContain("removal.kind === 'failed'")
+    expect(worktreeSrc).toContain("removal.kind === 'removed'")
     expect(worktreeSrc).toContain('async function deleteWorktreeBranch(')
     expect(worktreeSrc).toContain(
       "errorLabel: 'Could not delete agent worktree branch'",

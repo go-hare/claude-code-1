@@ -96,8 +96,14 @@ describe('searchRootGuard 251 #10 E2t/oht', () => {
     const root = await openSearchRoot(dir, approved)
     expect(root).not.toBeNull()
     if (root!.relativeOutput) {
-      expect(root!.spawnCwd.startsWith('/proc/self/fd/')).toBe(true)
-      expect(root!.target).toBe('.')
+      const usedProc = getPlatform() === 'linux' || getPlatform() === 'wsl'
+      if (usedProc) {
+        expect(root!.spawnCwd.startsWith('/proc/self/fd/')).toBe(true)
+        expect(root!.target).toBe('.')
+      } else {
+        expect(root!.spawnCwd.startsWith('/proc/self/fd/')).toBe(false)
+        expect(root!.target).toBe('.')
+      }
     }
     // Contract: no invented ancestor-of-fd loop — recheckByPath is path hops.
     await root!.recheckByPath()

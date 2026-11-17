@@ -43,6 +43,21 @@ function writeProfile(
 
 const saved: Record<string, string | undefined> = {}
 
+const PROFILE_WD_PIN: Record<string, undefined> = {
+  CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: undefined,
+  ANTHROPIC_UNIX_SOCKET: undefined,
+  CLAUDE_CODE_USE_OPENAI: undefined,
+  CLAUDE_CODE_USE_GEMINI: undefined,
+  CLAUDE_CODE_USE_GROK: undefined,
+  CLAUDE_CODE_USE_GATEWAY: undefined,
+  CLAUDE_CODE_USE_BEDROCK: undefined,
+  CLAUDE_CODE_USE_VERTEX: undefined,
+  CLAUDE_CODE_USE_FOUNDRY: undefined,
+  CLAUDE_CODE_USE_ANTHROPIC_AWS: undefined,
+  CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: undefined,
+  CLAUDE_CODE_USE_MANTLE: undefined,
+}
+
 function pinEnv(patch: Record<string, string | undefined>): void {
   for (const [k, v] of Object.entries(patch)) {
     if (!(k in saved)) saved[k] = process.env[k]
@@ -87,14 +102,11 @@ describe('leftover 239 profile A5 / uD / oRr / DJo', () => {
       expires_at: Date.now() / 1000 + 3600,
     })
     pinEnv({
+      ...PROFILE_WD_PIN,
       ANTHROPIC_CONFIG_DIR: dir,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_AUTH_TOKEN: undefined,
       CLAUDE_CODE_OAUTH_TOKEN: undefined,
-      CLAUDE_CODE_USE_BEDROCK: undefined,
-      CLAUDE_CODE_USE_VERTEX: undefined,
-      CLAUDE_CODE_USE_FOUNDRY: undefined,
-      CLAUDE_CODE_USE_MANTLE: undefined,
     })
     expect(isProfileAuthActive()).toBe(true)
     pinEnv({ ANTHROPIC_API_KEY: 'sk-test' })
@@ -108,12 +120,11 @@ describe('leftover 239 profile A5 / uD / oRr / DJo', () => {
       expires_at: Date.now() / 1000 + 3600,
     })
     pinEnv({
+      ...PROFILE_WD_PIN,
       ANTHROPIC_CONFIG_DIR: dir,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_AUTH_TOKEN: undefined,
       CLAUDE_CODE_OAUTH_TOKEN: undefined,
-      CLAUDE_CODE_USE_BEDROCK: undefined,
-      CLAUDE_CODE_USE_VERTEX: undefined,
     })
     expect(isProfileAuthActive({ storedClaudeAiLogin: true })).toBe(false)
     expect(isProfileAuthActive({ storedClaudeAiLogin: false })).toBe(true)

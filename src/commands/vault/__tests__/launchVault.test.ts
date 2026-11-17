@@ -17,20 +17,29 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { authMock } from '../../../../tests/mocks/auth.js'
+import { authMock, restoreAuthMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 import {
   oauthClientMock,
   oauthConfigMock,
-  teleportApiMock,
+  restoreOauthClientMock,
+  restoreOauthConfigMock,
+  TEST_WORKSPACE_API_KEY,
 } from '../../../../tests/mocks/oauthSurface.js'
+import {
+  analyticsMock,
+  restoreAnalyticsMock,
+} from '../../../../tests/mocks/analytics.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
+// Do NOT mock teleport/api (CLAUDE.md: launch* mocks axios). Live
+// prepareWorkspaceApiRequest reads ANTHROPIC_API_KEY (sk-ant-api03-*).
 mock.module('src/utils/auth.js', () => ({
   ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token' }),
@@ -41,16 +50,6 @@ mock.module('src/services/oauth/client.js', () =>
   }),
 )
 mock.module('src/constants/oauth.js', oauthConfigMock)
-mock.module('src/utils/teleport/api.js', () =>
-  teleportApiMock({
-    getOAuthHeaders: (token: string) => ({
-      Authorization: `Bearer ${token}`,
-    }),
-    prepareWorkspaceApiRequest: async () => ({
-      apiKey: 'test-workspace-key',
-    }),
-  }),
-)
 
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
@@ -82,16 +81,30 @@ beforeAll(async () => {
   callVault = mod.callVault
 })
 
+let origApiKey: string | undefined
+
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('src/services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
+  mock.module('src/services/oauth/client.js', restoreOauthClientMock)
 })
 
 beforeEach(() => {
   axiosGetMock.mockClear()
   axiosPostMock.mockClear()
+  origApiKey = process.env.ANTHROPIC_API_KEY
+  process.env.ANTHROPIC_API_KEY = TEST_WORKSPACE_API_KEY
 })
 
-afterEach(() => {})
+afterEach(() => {
+  if (origApiKey === undefined) {
+    delete process.env.ANTHROPIC_API_KEY
+  } else {
+    process.env.ANTHROPIC_API_KEY = origApiKey
+  }
+})
 
 // ── list ──────────────────────────────────────────────────────────────────
 describe('callVault list', () => {

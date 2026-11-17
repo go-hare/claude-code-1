@@ -24,7 +24,6 @@ import { logMock } from '../../../../tests/mocks/log.js'
 import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 import * as realConfig from 'src/utils/config.js'
 import * as realAuth from 'src/utils/auth.js'
-import * as realOauthConstants from 'src/constants/oauth.js'
 import * as realOauthClient from 'src/services/oauth/client.js'
 import * as realTeleportApi from 'src/utils/teleport/api.js'
 
@@ -33,7 +32,6 @@ mock.module('src/utils/debug.ts', debugMock)
 
 const configSnap = snapshotModuleExports(realConfig)
 const authSnap = snapshotModuleExports(realAuth)
-const oauthConstantsSnap = snapshotModuleExports(realOauthConstants)
 const oauthClientSnap = snapshotModuleExports(realOauthClient)
 const teleportApiSnap = snapshotModuleExports(realTeleportApi)
 
@@ -73,13 +71,6 @@ function authMock() {
   }
 }
 
-function oauthConstantsMock() {
-  return {
-    ...oauthConstantsSnap,
-    getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
-  }
-}
-
 function oauthClientMock() {
   return {
     ...oauthClientSnap,
@@ -101,7 +92,6 @@ function teleportApiMock() {
   }
 }
 
-mock.module('src/constants/oauth.js', oauthConstantsMock)
 mock.module('src/utils/auth.js', authMock)
 mock.module('src/utils/auth.ts', authMock)
 mock.module('src/services/oauth/client.js', oauthClientMock)
@@ -134,7 +124,6 @@ afterAll(() => {
   mock.module('src/utils/config.ts', () => ({ ...configSnap }))
   mock.module('src/utils/auth.js', () => ({ ...authSnap }))
   mock.module('src/utils/auth.ts', () => ({ ...authSnap }))
-  mock.module('src/constants/oauth.js', () => ({ ...oauthConstantsSnap }))
   mock.module('src/services/oauth/client.js', () => ({ ...oauthClientSnap }))
   mock.module('src/services/oauth/client.ts', () => ({ ...oauthClientSnap }))
   mock.module('src/utils/teleport/api.js', () => ({ ...teleportApiSnap }))

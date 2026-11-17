@@ -527,6 +527,7 @@ export async function* handleStopHooks(
     let hasOutput = false
     const hookErrors: string[] = []
     const hookInfos: StopHookInfo[] = []
+    const hookAdditionalContexts: string[] = []
 
     for await (const result of generator) {
       if (result.message) {
@@ -649,7 +650,7 @@ export async function* handleStopHooks(
           }
         }
       }
-      // densable ae.timedOut: ht snapshot only; skip blocking/success for this result.
+      // densable ae.timedOut: ht snapshot only; skip blocking/additionalContexts/success for this result.
       if (result.timedOut) {
         if (goalAtStop && isGoalPromptHook(result.hook, goalAtStop.condition)) {
           logEvent('tengu_feature_bad', {
@@ -660,6 +661,22 @@ export async function* handleStopHooks(
           })
         }
         continue
+      }
+      if (result.additionalContexts && result.additionalContexts.length > 0) {
+        const hookEventName = toolUseContext.agentId ? 'SubagentStop' : 'Stop'
+        const contextMessage = createAttachmentMessage({
+          type: 'hook_additional_context',
+          content: result.additionalContexts,
+          hookName: hookEventName,
+          toolUseID: stopHookToolUseID,
+          hookEvent: hookEventName,
+        })
+        if (!endTurnSource && !isBareMode()) {
+          blockingErrors.push(contextMessage)
+        }
+        yield contextMessage
+        hasOutput = true
+        hookAdditionalContexts.push(...result.additionalContexts)
       }
       if (result.blockingError || result.preventContinuation) {
         if (endTurnSource) {
@@ -761,6 +778,9 @@ export async function* handleStopHooks(
         hasOutput,
         'suggestion',
         stopHookToolUseID,
+        undefined,
+        undefined,
+        hookAdditionalContexts.length > 0 ? hookAdditionalContexts : undefined,
       )
 
       // Send notification about errors (shown in verbose/transcript mode via ctrl+o)

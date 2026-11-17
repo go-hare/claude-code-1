@@ -45,6 +45,10 @@ import type {
 } from './types/message.js'
 import { logError } from './utils/log.js'
 import {
+  updateTurnAttributionFromCommands,
+  withTurnAttributionGenerator,
+} from './utils/turnAttribution.js'
+import {
   ControlStreamClosedError,
   errorMessage,
   isAbortError,
@@ -147,7 +151,10 @@ import type { QuerySource } from './constants/querySource.js'
 import type { PromptCacheTtl } from './utils/promptCacheTtl.js'
 import type { QueuedCommand } from './types/textInputTypes.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
-import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
+import {
+  mergeToolDrainEvents,
+  StreamingToolExecutor,
+} from './services/tools/StreamingToolExecutor.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import {
@@ -157,6 +164,10 @@ import {
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks, runTurnEndReactions } from './query/stopHooks.js'
+import {
+  getModelSwitchSession,
+  takePostModelSwitchHooks,
+} from './utils/hooks/modelSwitchHooks.js'
 import { enqueueSdkEvent } from './utils/sdkEventQueue.js'
 import {
   endTurnSourceFromToolResult,
@@ -602,6 +613,11 @@ function* enforceHandbackSend(
     const getAppState = toolUseContext.getAppState
     const setAppState =
       toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
+    const { createTaskRegistry } =
+      require('./utils/taskRegistry.js') as typeof import('./utils/taskRegistry.js')
+    const registry =
+      toolUseContext.taskRegistry ??
+      createTaskRegistry(getAppState, setAppState)
     const task = getAppState().tasks[agentId]
     const delivered = lookupHandbackReport(
       isLocalAgentTask(task) ? task : undefined,
@@ -612,8 +628,8 @@ function* enforceHandbackSend(
         ? task.handbackBounces
         : 0
     // densable Yq — sweep stale keepalive holds before d9e wait-kids.
-    sweepStaleKeepaliveReasons(agentId, setAppState)
-    const waitingOnChildren = hasHandbackWaitKids(agentId, getAppState)
+    sweepStaleKeepaliveReasons(agentId, registry)
+    const waitingOnChildren = hasHandbackWaitKids(agentId, registry)
     if (
       delivered !== undefined &&
       delivered.length === 0 &&
@@ -1652,7 +1668,7 @@ async function* streamTurnStepWithHooks(params: {
   }
 }
 
-export async function* query(
+async function* queryBody(
   params: QueryParams,
 ): AsyncGenerator<
   | StreamEvent
@@ -2280,6 +2296,61 @@ async function* queryLoop(
       }
 
       let messagesForQuery = getMessagesAfterCompactBoundary(messages)
+
+      // densable VOo @195437089 — main-thread PostModelSwitch pending drain
+      const resumeActive =
+        (
+          params as {
+            resumeActive?: boolean
+            resumeIncompleteThinking?: boolean
+          }
+        ).resumeActive === true ||
+        (
+          params as {
+            resumeActive?: boolean
+            resumeIncompleteThinking?: boolean
+          }
+        ).resumeIncompleteThinking === true
+      if (
+        querySourceFamilyOf(querySource) === 'main' &&
+        !toolUseContext.agentId &&
+        !resumeActive
+      ) {
+        try {
+          const fallbackSession = getModelSwitchSession()
+          const ctxSession = toolUseContext.session
+          const switchSession =
+            ctxSession !== undefined
+              ? {
+                  id:
+                    'id' in ctxSession && typeof ctxSession.id === 'string'
+                      ? ctxSession.id
+                      : fallbackSession.id,
+                  root: ctxSession.root,
+                }
+              : fallbackSession
+          const landed = await takePostModelSwitchHooks(switchSession)
+          for (const item of landed) {
+            for (const message of item.messages) {
+              yield message
+              messagesForQuery = [...messagesForQuery, message]
+            }
+            if (item.contexts.length > 0) {
+              const ctx = createAttachmentMessage({
+                type: 'hook_additional_context',
+                content: item.contexts,
+                hookName: 'PostModelSwitch',
+                toolUseID: 'PostModelSwitch',
+                hookEvent: 'PostModelSwitch',
+              })
+              yield ctx
+              messagesForQuery = [...messagesForQuery, ctx]
+            }
+          }
+        } catch (err) {
+          logError(err)
+        }
+      }
 
       // Strip thinking-block signatures proactively when the model has changed.
       // Signatures are bound to the API key + model — replaying a protected-thinking
@@ -3157,7 +3228,39 @@ async function* queryLoop(
                     stepIndex: turnStepIndex++,
                   })
                 : deps.callModel(modelCallArgs)
-            for await (const message of modelStream) {
+            function* drainStreamingTools() {
+              if (
+                !streamingToolExecutor ||
+                toolUseContext.abortController.signal.aborted
+              )
+                return
+              for (const result of streamingToolExecutor.getCompletedResults()) {
+                if (isToolBridgeEvent(result)) {
+                  yield result
+                  continue
+                }
+                if (result.message) {
+                  yield result.message
+                  const endTurn = endTurnSourceFromToolResult(result.message)
+                  if (endTurn) toolRequestedEndTurn = endTurn
+                  accumulateToolResultForMidTurn(
+                    result.message,
+                    toolResults,
+                    toolUseContext.options.refreshTools?.() ??
+                      toolUseContext.options.tools,
+                    toolUseContext.options.mainLoopModel,
+                  )
+                }
+              }
+            }
+            for await (const message of mergeToolDrainEvents(
+              modelStream,
+              () => streamingToolExecutor ?? undefined,
+            )) {
+              if (message.type === 'tool_drain_tick') {
+                yield* drainStreamingTools()
+                continue
+              }
               yield* leftoverDrainSpinnerModes()
               // densable server_fallback consumer — retainedText/Messages + Gt seam gate
               if (
@@ -3753,33 +3856,7 @@ async function* queryLoop(
                 }
               }
 
-              if (
-                streamingToolExecutor &&
-                !toolUseContext.abortController.signal.aborted
-              ) {
-                for (const result of streamingToolExecutor.getCompletedResults()) {
-                  // densable jR @190742729: yield control events mid-stream
-                  if (isToolBridgeEvent(result)) {
-                    yield result
-                    continue
-                  }
-                  if (result.message) {
-                    yield result.message
-                    // densable 2.1.283 lr/smo — streaming tool_result can end the turn
-                    const endTurn = endTurnSourceFromToolResult(result.message)
-                    if (endTurn) toolRequestedEndTurn = endTurn
-                    // densable 2.1.228 St: keep tool attachments (e.g. skill
-                    // deferred_tools_delta) in toolResults for mid-turn scan.
-                    accumulateToolResultForMidTurn(
-                      result.message,
-                      toolResults,
-                      toolUseContext.options.refreshTools?.() ??
-                        toolUseContext.options.tools,
-                      toolUseContext.options.mainLoopModel,
-                    )
-                  }
-                }
-              }
+              yield* drainStreamingTools()
             }
             queryCheckpoint('query_api_streaming_end')
             // densable Zue() @184980379 — Xue stash, else relay-stopped strip
@@ -5537,6 +5614,7 @@ async function* queryLoop(
           }
         }
         consumeFromQueue(claimedConsumedCommands)
+        updateTurnAttributionFromCommands(claimedConsumedCommands)
         // densable 2.1.246 d9n — main-thread mid-turn human prompt resets the
         // idle check-in burst (Js=isMainThread && OY(origin)).
         if (
@@ -5744,4 +5822,20 @@ async function* queryLoop(
       // isolation — optional
     }
   }
+}
+
+/** densable `yk` / `rAn.run` — ALS turnAttributionKey for j6 inherit. */
+export async function* query(
+  params: QueryParams,
+): AsyncGenerator<
+  | StreamEvent
+  | RequestStartEvent
+  | Message
+  | TombstoneMessage
+  | ToolUseSummaryMessage
+  | ToolBridgeEvent
+  | { type: 'spinner_mode'; mode: SpinnerMode },
+  Terminal
+> {
+  return yield* withTurnAttributionGenerator(queryBody(params))
 }

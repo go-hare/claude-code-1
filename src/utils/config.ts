@@ -849,6 +849,8 @@ export type GlobalConfig = {
     updated_at: string
     data_source: string
     override_user_selection: boolean
+    default_effort_level?: string | null
+    override_user_effort?: boolean | null
     orgUuid?: string
   } | null
 

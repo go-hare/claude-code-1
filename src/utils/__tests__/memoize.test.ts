@@ -154,6 +154,28 @@ describe('memoizeWithTTLAsync', () => {
 // ─── memoizeWithLRU ────────────────────────────────────────────────────
 
 describe('memoizeWithLRU', () => {
+  test('restores preserved entries through the public cache API and keeps LRU eviction', () => {
+    let calls = 0
+    const fn = memoizeWithLRU(
+      (key: string) => {
+        calls++
+        return `${key}:${calls}`
+      },
+      key => key,
+      2,
+    )
+    const preserved = fn('local')
+    fn('remote')
+    const value = fn.cache.get('local')!
+    fn.cache.clear()
+    fn.cache.set('local', value)
+    expect(fn('local')).toBe(preserved)
+    expect(calls).toBe(2)
+    fn('new')
+    fn('another')
+    expect(fn.cache.has('local')).toBe(false)
+    expect(fn.cache.size()).toBe(2)
+  })
   test('caches results by key', () => {
     let calls = 0
     const fn = memoizeWithLRU(

@@ -1,14 +1,19 @@
-import { toJSONSchema } from 'zod/v4'
 import { SettingsSchema } from '../../utils/settings/types.js'
+import {
+  stripInternalJsonSchema,
+  toJSONSchemaClaude,
+} from '../../utils/settings/schemaOutput.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 
 /**
- * Generate JSON Schema from the settings Zod schema.
- * This keeps the skill prompt in sync with the actual types.
+ * densable `JOe(Eir(), {io:"input"})` then attribution flatten then `PRn(o,!1)`.
  */
 function generateSettingsSchema(): string {
-  const jsonSchema = toJSONSchema(SettingsSchema(), { io: 'input' }) as {
+  const jsonSchema = toJSONSchemaClaude(SettingsSchema(), {
+    io: 'input',
+    unrepresentable: 'any',
+  }) as {
     properties?: Record<string, unknown>
   }
   const attribution = jsonSchema.properties?.attribution as
@@ -32,6 +37,7 @@ function generateSettingsSchema(): string {
       ...objectVariant,
     }
   }
+  stripInternalJsonSchema(jsonSchema, false)
   return jsonStringify(jsonSchema, null, 2)
 }
 

@@ -66,8 +66,11 @@ describe('/memory densable COb no-wait', () => {
     const src = readSrc('src/commands/memory/memory.tsx')
     expect(src).toContain('openFileInExternalEditor')
     expect(src).not.toContain('editFileInEditor')
-    expect(src).toContain("Couldn't open the memory file at")
+    expect(src).toContain(
+      "Couldn't open ${getRelativeMemoryPath(memoryPath)} in an editor",
+    )
     expect(src).toContain('then run /memory again')
+    expect(src).not.toContain("Couldn't open the memory file at")
   })
 
   test('openFileInExternalEditor GUI spawn sets windowsHide + detached', () => {

@@ -12,10 +12,11 @@ import {
   type EffortLevel,
   type EffortValue,
   clampEffortForModel,
-  getDefaultEffortForModel,
   getDisplayedEffortLevel,
   getEffortEnvOverride,
   getEffortValueDescription,
+  getOrgDefaultEffort,
+  getOrgOverrideStartupEffort,
   getSupportedEffortLevels,
   getUltracodeEffortForModel,
   isEffortLevel,
@@ -23,18 +24,24 @@ import {
   isUltracodeOfferable,
   effortModelClearPatch,
   effortModelSettingsPatch,
+  explicitSessionEffort,
+  pdSessionEffort,
+  resolveAppliedEffort,
+  teSettingsEffortTable,
   toPersistableEffort,
   unpinAllEffortLaunchPins,
 } from '../../utils/effort.js';
-import { isEffortLaunchPinned } from '../../utils/model/effortCatalog.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 
 const COMMON_HELP_ARGS = ['help', '-h', '--help'];
 
+/** densable `Oit` */
+export const ULTRACODE_DESCRIPTION = 'dynamic workflows on every task';
+
 export type EffortCommandResult = {
   message: string;
   effortUpdate?: {
-    value: EffortValue | undefined;
+    value?: EffortValue | undefined;
     /** densable: session ultracode orchestration flag */
     ultracode?: boolean;
   };
@@ -44,7 +51,7 @@ function validEffortArgsForModel(model: string): string {
   const levels = getSupportedEffortLevels(model);
   const base = levels.length > 0 ? levels.join(', ') : 'low, medium, high, xhigh, max';
   const ultra = isUltracodeOfferable(model) ? ', ultracode [on|off]' : '';
-  return `${base}${ultra}, auto`;
+  return `${base}, auto${ultra}`;
 }
 
 function setEffortValue(
@@ -131,17 +138,6 @@ function setEffortValue(
     };
   }
 
-  // densable oLy: !interactive && Ave(model) → Not applied, still effortUpdate,
-  // no N9 (cme keeps pin default over AppState). After env so headless+env+pin
-  // surfaces env first (densable order).
-  if (!ultracode && !interactive && model && isEffortLaunchPinned(model)) {
-    const pinned = getDefaultEffortForModel(model) ?? effortValue;
-    return {
-      message: `Not applied: the launch-effort pin holds effort at ${pinned} this session. Run /effort ${effortValue} in an interactive terminal to release the pin.`,
-      effortUpdate: { value: effortValue },
-    };
-  }
-
   if (ultracode) {
     return {
       message: `Ultracode on (this session only): effort stays ${effortValue}`,
@@ -150,9 +146,15 @@ function setEffortValue(
   }
 
   const description = getEffortValueDescription(effortValue);
-  // densable oLy: s persistable + interactive + !remote → saved-default suffix;
-  // else session-only. We approximate: persistable write → saved; else session.
-  const suffix = persistable !== undefined ? ' (saved as your default for new sessions)' : ' (this session only)';
+  // densable 2.1.289 `V` @200201150: swn(model) org-override saved note when
+  // persistable write succeeded; else saved-default or session-only.
+  const orgStartupLevel = persistable !== undefined && model ? getOrgOverrideStartupEffort(model) : null;
+  const suffix =
+    persistable !== undefined
+      ? orgStartupLevel !== null
+        ? ` (saved, though your organization starts new sessions on ${model} at ${orgStartupLevel} effort)`
+        : ' (saved as your default for new sessions)'
+      : ' (this session only)';
   // densable oLy: i = wve(e) !== e → org exceed message (not capability clamp).
   if (opts?.orgClampedFrom !== undefined && opts.orgClampedFrom !== effortValue && typeof effortValue === 'string') {
     return {
@@ -167,15 +169,13 @@ function setEffortValue(
 }
 
 /**
- * densable 2.1.289 ultracode on: session flag only — does not force wire
- * effort to catalog top / xhigh. Effort stays whatever the session has.
- *
- * Launch-pin gate remains for interactive N9 when user confirms ultracode
- * while pin holds; non-interactive + pin still rejects (no empty flag).
+ * densable 2.1.289 D(true, ...): session flag only — does not force wire
+ * effort to catalog top / xhigh and does NOT release launch pins or touch
+ * sessionEffort (kAe leaves sessionEffort untouched when ultracode !== undefined).
  */
 export function setUltracodeEffort(
   model: string,
-  interactive: boolean = getIsInteractive(),
+  _interactive: boolean = getIsInteractive(),
   currentEffort?: EffortValue,
 ): EffortCommandResult {
   if (!isUltracodeOfferable(model)) {
@@ -190,79 +190,54 @@ export function setUltracodeEffort(
     };
   }
 
-  // densable: non-interactive cannot release launch pin (still refuse).
-  if (!interactive && isEffortLaunchPinned(model)) {
-    const pinned = getDefaultEffortForModel(model) ?? getUltracodeEffortForModel(model) ?? 'high';
-    return {
-      message: `Not applied: the launch-effort pin holds effort at ${pinned} this session. Run /effort ultracode in an interactive terminal to release the pin.`,
-    };
-  }
-
-  if (interactive) {
-    unpinAllEffortLaunchPins();
-  }
-
   logEvent('tengu_effort_command', {
     effort: 'ultracode' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
 
-  const stayed =
-    currentEffort !== undefined
-      ? currentEffort
-      : (getDefaultEffortForModel(model) ?? getUltracodeEffortForModel(model) ?? 'high');
-
   const envOverride = getEffortEnvOverride();
-  if (envOverride !== undefined && envOverride !== null && envOverride !== stayed) {
-    const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
-    return {
-      message: `CLAUDE_CODE_EFFORT_LEVEL=${envRaw} overrides effort this session — clear it and ultracode takes over`,
-      effortUpdate: { value: stayed, ultracode: true },
-    };
-  }
+  const effectiveEnv = envOverride === null ? undefined : envOverride;
+  const stayed = effectiveEnv ?? currentEffort ?? getDisplayedEffortLevel(model, currentEffort);
 
   return {
-    message: `Ultracode on (this session only): effort stays ${stayed}`,
-    effortUpdate: { value: stayed, ultracode: true },
+    message: `Ultracode on (this session only): ${ULTRACODE_DESCRIPTION}. Effort stays ${stayed}.`,
+    effortUpdate: { ultracode: true },
   };
 }
 
-/** densable 2.1.289 ultracode off — clear flag only; effort unchanged. */
-export function clearUltracodeFlag(currentEffort: EffortValue | undefined): EffortCommandResult {
+/** densable 2.1.289 D(false, ...) — clear flag only; effort and pins unchanged. */
+export function clearUltracodeFlag(currentEffort: EffortValue | undefined, model = ''): EffortCommandResult {
   logEvent('tengu_effort_command', {
     effort: 'ultracode_off' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
-  const stayed = currentEffort ?? 'auto';
+  const envOverride = getEffortEnvOverride();
+  const effectiveEnv = envOverride === null ? undefined : envOverride;
+  const stayed = effectiveEnv ?? currentEffort ?? (model ? getDisplayedEffortLevel(model, currentEffort) : 'auto');
   return {
-    message: `Ultracode off. Effort stays ${stayed}`,
-    effortUpdate: { value: currentEffort, ultracode: false },
+    message: `Ultracode off. Effort stays ${stayed}.`,
+    effortUpdate: { ultracode: false },
   };
 }
 
+/** densable 2.1.289 `hPt` — current effort + org default note + ultracode suffix. */
 export function showCurrentEffort(
   appStateEffort: EffortValue | undefined,
   model: string,
   ultracodeFlag?: boolean,
 ): EffortCommandResult {
-  if (isUltracodeModeActive(model, appStateEffort, ultracodeFlag)) {
-    const level =
-      (isEffortLaunchPinned(model) ? undefined : appStateEffort) ?? getDisplayedEffortLevel(model, appStateEffort);
-    return {
-      message: `Current effort level: ${level} · Ultracode on (this session only)`,
-    };
-  }
-
+  const ultracodeSuffix = isUltracodeModeActive(model, appStateEffort, ultracodeFlag) ? ' · Ultracode on' : '';
   const envOverride = getEffortEnvOverride();
-  // densable LJr: when launch pin is active, ignore AppState effort for display
-  // (cme also ignores session under pin — show model default / auto path).
-  const sessionEffort = isEffortLaunchPinned(model) ? undefined : appStateEffort;
-  const effectiveValue = envOverride === null ? undefined : (envOverride ?? sessionEffort);
+  const effectiveValue = envOverride === null ? undefined : (envOverride ?? appStateEffort);
   if (effectiveValue === undefined) {
-    const level = getDisplayedEffortLevel(model, sessionEffort);
-    return { message: `Effort level: auto (currently ${level})` };
+    const level = getDisplayedEffortLevel(model, appStateEffort);
+    const orgNote =
+      getOrgDefaultEffort(model) !== null && resolveAppliedEffort(model, appStateEffort) !== undefined
+        ? ', set by your organization'
+        : '';
+    return { message: `Effort level: auto (currently ${level}${orgNote})${ultracodeSuffix}` };
   }
   const description = getEffortValueDescription(effectiveValue);
   return {
-    message: `Current effort level: ${effectiveValue} (${description})`,
+    message: `Current effort level: ${effectiveValue} (${description})${ultracodeSuffix}`,
   };
 }
 
@@ -285,8 +260,9 @@ function unsetEffortLevel(interactive: boolean = getIsInteractive(), model = '')
   const envOverride = getEffortEnvOverride();
   if (envOverride !== undefined && envOverride !== null) {
     const envRaw = process.env.CLAUDE_CODE_EFFORT_LEVEL;
+    const prefix = interactive ? 'Cleared effort from settings, but' : 'Effort set to auto for this session, but';
     return {
-      message: `Cleared effort from settings, but CLAUDE_CODE_EFFORT_LEVEL=${envRaw} still controls this session`,
+      message: `${prefix} CLAUDE_CODE_EFFORT_LEVEL=${envRaw} still controls this session`,
       effortUpdate: { value: undefined },
     };
   }
@@ -296,8 +272,15 @@ function unsetEffortLevel(interactive: boolean = getIsInteractive(), model = '')
   };
 }
 
+function parseUltracodeSubcommand(normalized: string): boolean | undefined {
+  const [head, sub, ...rest] = normalized.split(/\s+/);
+  if (head !== 'ultracode' || rest.length > 0) return undefined;
+  if (sub === undefined || sub === 'on') return true;
+  return sub === 'off' ? false : undefined;
+}
+
 /**
- * densable aLy-shaped + 2.1.289 ultracode [on|off].
+ * densable T / kAe — /effort + 2.1.289 ultracode [on|off].
  * @param args command args
  * @param model current main-loop model (required for ultracode catalog clamp + pin)
  * @param interactive densable oLy/sLy `t` — default getIsInteractive()
@@ -316,11 +299,11 @@ export function executeEffort(
     return unsetEffortLevel(interactive, model);
   }
 
-  if (normalized === 'ultracode' || normalized === 'ultracode on') {
-    return setUltracodeEffort(model, interactive, currentEffort);
-  }
-  if (normalized === 'ultracode off') {
-    return clearUltracodeFlag(currentEffort);
+  const ultracodeSub = parseUltracodeSubcommand(normalized);
+  if (ultracodeSub !== undefined) {
+    return ultracodeSub
+      ? setUltracodeEffort(model, interactive, currentEffort)
+      : clearUltracodeFlag(currentEffort, model);
   }
 
   if (!isEffortLevel(normalized)) {
@@ -358,7 +341,7 @@ export function executeEffort(
 }
 
 /**
- * densable gSi — /effort help text (2.1.289 ultracode [on|off] any effort).
+ * densable lZt — /effort help text (2.1.289 ultracode [on|off] any effort).
  */
 function buildEffortHelpText(model: string): string {
   const levels = getSupportedEffortLevels(model);
@@ -367,18 +350,18 @@ function buildEffortHelpText(model: string): string {
     low: 'Quick, straightforward implementation',
     medium: 'Balanced approach with standard testing',
     high: 'Comprehensive implementation with extensive testing',
-    xhigh: 'Extended reasoning with thorough analysis',
-    max: 'Maximum capability with deepest reasoning',
+    xhigh: 'Extended reasoning with thorough analysis (on supported models)',
+    max: 'Maximum capability with deepest reasoning (on supported models)',
   };
-  const levelLines = levels.map(n => `- ${n}: ${desc[n] ?? getEffortValueDescription(n)}`).join('\n');
-  const usage = `Usage: /effort [${levels.join('|')}${ultra ? '|ultracode [on|off]' : ''}|auto]`;
+  const levelLines = levels.map(n => `- ${n}: ${desc[n] ?? getEffortValueDescription(n)}\n`).join('');
+  const usage = `Usage: /effort [${levels.join('|')}|auto${ultra ? '|ultracode [on|off]' : ''}]`;
   return (
     `${usage}\n\nEffort levels:\n` +
     levelLines +
+    '- auto: Use the default effort level for your model' +
     (ultra
-      ? '\n\nUltracode (any effort level, this session only):\n- ultracode [on|off]: dynamic workflow orchestration; does not change effort'
-      : '') +
-    '\n- auto: Use the default effort level for your model'
+      ? `\n\nUltracode (any effort level, this session only):\n- ultracode [on|off]: ${ULTRACODE_DESCRIPTION}`
+      : '')
   );
 }
 
@@ -391,9 +374,9 @@ function EffortHelpText({ onDone }: { onDone: (result: string) => void }): React
 }
 
 function ShowCurrentEffort({ onDone }: { onDone: (result: string) => void }): React.ReactNode {
-  const effortValue = useAppState(s => s.effortValue);
-  const ultracode = useAppState(s => s.ultracode);
   const model = useMainLoopModel();
+  const effortValue = useAppState(s => pdSessionEffort(s, model));
+  const ultracode = useAppState(s => s.ultracode);
   const { message } = showCurrentEffort(effortValue, model, ultracode);
   onDone(message);
   return null;
@@ -412,9 +395,16 @@ function ApplyEffortAndClose({
     if (effortUpdate) {
       setAppState(prev => ({
         ...prev,
-        // densable 2.1.289: only patch ultracode when the update names it —
-        // normal effort writes leave the flag alone.
-        effortValue: effortUpdate.value,
+        // densable 2.1.289 kAe: ultracode-only updates leave sessionEffort and
+        // effortValue untouched (preserving { kind: 'inherit' }); normal effort
+        // updates leave ultracode alone.
+        ...(effortUpdate.ultracode === undefined
+          ? {
+              effortValue: effortUpdate.value,
+              sessionEffort: explicitSessionEffort(effortUpdate.value),
+            }
+          : {}),
+        settingsEffortTable: teSettingsEffortTable(),
         ...(effortUpdate.ultracode !== undefined ? { ultracode: effortUpdate.ultracode } : {}),
       }));
     }
@@ -443,7 +433,7 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
 
 function ExecuteEffortWithModel({ args, onDone }: { args: string; onDone: (result: string) => void }): React.ReactNode {
   const model = useMainLoopModel();
-  const currentEffort = useAppState(s => s.effortValue);
+  const currentEffort = useAppState(s => pdSessionEffort(s, model));
   const result = React.useMemo(
     () => executeEffort(args, model, undefined, true, currentEffort),
     [args, model, currentEffort],
@@ -452,6 +442,7 @@ function ExecuteEffortWithModel({ args, onDone }: { args: string; onDone: (resul
 }
 
 function EffortPanelWrapper({ onDone }: { onDone: (result: string) => void }): React.ReactNode {
-  const effortValue = useAppState(s => s.effortValue);
+  const model = useMainLoopModel();
+  const effortValue = useAppState(s => pdSessionEffort(s, model));
   return <EffortPanel appStateEffort={effortValue} onDone={onDone} />;
 }

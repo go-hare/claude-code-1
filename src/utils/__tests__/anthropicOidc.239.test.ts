@@ -34,6 +34,21 @@ const { clearAnthropicProfileCaches } = await import('../anthropicProfile.js')
 
 const saved: Record<string, string | undefined> = {}
 
+const PROFILE_WD_PIN: Record<string, undefined> = {
+  CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: undefined,
+  ANTHROPIC_UNIX_SOCKET: undefined,
+  CLAUDE_CODE_USE_OPENAI: undefined,
+  CLAUDE_CODE_USE_GEMINI: undefined,
+  CLAUDE_CODE_USE_GROK: undefined,
+  CLAUDE_CODE_USE_GATEWAY: undefined,
+  CLAUDE_CODE_USE_BEDROCK: undefined,
+  CLAUDE_CODE_USE_VERTEX: undefined,
+  CLAUDE_CODE_USE_FOUNDRY: undefined,
+  CLAUDE_CODE_USE_ANTHROPIC_AWS: undefined,
+  CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: undefined,
+  CLAUDE_CODE_USE_MANTLE: undefined,
+}
+
 function pinEnv(patch: Record<string, string | undefined>): void {
   for (const [k, v] of Object.entries(patch)) {
     if (!(k in saved)) saved[k] = process.env[k]
@@ -57,6 +72,7 @@ afterEach(() => {
 describe('leftover 239 i4b / VPu / By_ OIDC jwt-bearer', () => {
   test('i4b env-quad builds oidc_federation config', async () => {
     pinEnv({
+      ...PROFILE_WD_PIN,
       ANTHROPIC_PROFILE: undefined,
       ANTHROPIC_CONFIG_DIR: join(
         tmpdir(),
@@ -70,6 +86,7 @@ describe('leftover 239 i4b / VPu / By_ OIDC jwt-bearer', () => {
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_AUTH_TOKEN: undefined,
       CLAUDE_CODE_OAUTH_TOKEN: undefined,
+      ANTHROPIC_BASE_URL: undefined,
     })
     const config = await loadOidcFederationConfig()
     expect(config).toEqual({
@@ -176,6 +193,7 @@ describe('leftover 239 i4b / VPu / By_ OIDC jwt-bearer', () => {
 
   test('getActiveProfileWire exchanges env-quad', async () => {
     pinEnv({
+      ...PROFILE_WD_PIN,
       ANTHROPIC_PROFILE: undefined,
       ANTHROPIC_CONFIG_DIR: join(
         tmpdir(),

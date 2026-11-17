@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
-import { mkdtempSync } from 'fs'
+import { mkdtempSync, realpathSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { getEmptyToolPermissionContext } from '../../../Tool.js'
@@ -98,7 +98,7 @@ describe('densable /cd trust latch after successful relocate', () => {
     ).props.onConfirm()
     expect(next).toBeNull()
     expect(isDirectoryTrusted(b)).toBe(false)
-    expect(process.cwd()).toBe(a)
+    expect(process.cwd()).toBe(realpathSync(a))
   })
 
   test('set_cwd trust_accepted + relocate rollback does not latch dest trust', async () => {
@@ -140,6 +140,6 @@ describe('densable /cd trust latch after successful relocate', () => {
       ),
     ).rejects.toThrow('transcript relocate failed')
     expect(isDirectoryTrusted(b)).toBe(false)
-    expect(process.cwd()).toBe(a)
+    expect(process.cwd()).toBe(realpathSync(a))
   })
 })

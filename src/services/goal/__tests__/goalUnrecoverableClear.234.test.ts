@@ -108,6 +108,30 @@ describe('goalUnrecoverableClear densable 2.1.234 (#42)', () => {
   })
 
   test('pXp yields active_goal clear + sentinel + warning notice', async () => {
+    // Exercise the real gate, hooks and message factories before process-global
+    // business-module mocks from unrelated suites can replace those exports.
+    if (process.env.CLAUDE_TEST_GOAL_CLEAR_CHILD !== '1') {
+      const child = Bun.spawn({
+        cmd: [
+          process.execPath,
+          'test',
+          import.meta.path,
+          '--test-name-pattern',
+          'pXp yields active_goal clear',
+        ],
+        env: { ...process.env, CLAUDE_TEST_GOAL_CLEAR_CHILD: '1' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(exit, `${stdout}\n${stderr}`).toBe(0)
+      expect(stderr).toContain('1 pass')
+      return
+    }
     const goal = {
       condition: 'ship the fix',
       setAt: Date.now() - 5000,

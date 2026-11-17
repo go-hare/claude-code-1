@@ -28,17 +28,26 @@ import {
   getCatalogDefaultEffort,
   getCombinedMaxEffortLevel,
   getOrgMaxEffortLevel,
+  getSettingsMaxEffortLevel,
   isEffortDenyListed,
   isEffortLaunchPinned,
   isMaxEffortDenyListed,
   isXhighEffortDenyListed,
+  launchPinModels,
   providerDefaultsEffortSupport,
   unpinAllEffortLaunchPins,
 } from './model/effortCatalog.js'
 
+import {
+  getOrgDefaultEffort,
+  getOrgModelDefaultCache,
+  shouldOrgDefaultOverrideUserEffort,
+} from './model/orgDefaultModel.js'
+
 export type { EffortLevel }
 export {
   areAllEffortLaunchPinsUnpinned,
+  getOrgDefaultEffort,
   isEffortLaunchPinned,
   unpinAllEffortLaunchPins,
 }
@@ -56,6 +65,354 @@ export const EFFORT_LEVELS = [
 ] as const satisfies readonly EffortLevel[]
 
 export type EffortValue = EffortLevel | number
+
+/** densable sessionEffort tagged union (`ee` inherit / `ye` default / `O8` level). */
+export type SessionEffortTag =
+  | { kind: 'inherit' }
+  | { kind: 'default' }
+  | { kind: 'level'; value: EffortValue }
+
+export type SettingsEffortTable = {
+  default?: EffortValue
+  byModel?: Record<string, EffortValue | undefined>
+  legacyUserEffort?: unknown
+}
+
+export const INHERIT_SESSION_EFFORT: SessionEffortTag = Object.freeze({
+  kind: 'inherit',
+})
+export const DEFAULT_SESSION_EFFORT: SessionEffortTag = Object.freeze({
+  kind: 'default',
+})
+
+/** densable O8 */
+export function levelSessionEffort(value: EffortValue): SessionEffortTag {
+  return { kind: 'level', value }
+}
+
+/** densable RJe — undefined → default, else level. */
+export function explicitSessionEffort(
+  value: EffortValue | undefined,
+): SessionEffortTag {
+  return value === undefined
+    ? DEFAULT_SESSION_EFFORT
+    : levelSessionEffort(value)
+}
+
+/** densable oZ — structural equality on SessionEffortTag. */
+export function sessionEffortEquals(
+  a: SessionEffortTag | undefined,
+  b: SessionEffortTag | undefined,
+): boolean {
+  if (a === b) return true
+  if (!a || !b || a.kind !== b.kind) return false
+  return a.kind !== 'level' || b.kind !== 'level' || a.value === b.value
+}
+
+/** densable ve(zQn(cliEffort)) — CLI-only (`undefined → inherit`, else `level`; `ultracode` alias maps via `c_t`). */
+export function bootstrapSessionEffort(
+  cliEffort: string | EffortValue | undefined,
+  model?: string,
+): SessionEffortTag {
+  if (
+    typeof cliEffort === 'string' &&
+    cliEffort.trim().toLowerCase() === 'ultracode'
+  ) {
+    const wire =
+      model !== undefined ? getUltracodeEffortForModel(model) : 'xhigh'
+    if (wire === undefined) {
+      return INHERIT_SESSION_EFFORT
+    }
+    unpinAllEffortLaunchPins()
+    return levelSessionEffort(wire)
+  }
+  const parsed =
+    typeof cliEffort === 'string' ? parseEffortValue(cliEffort) : cliEffort
+  if (parsed === undefined) {
+    return INHERIT_SESSION_EFFORT
+  }
+  unpinAllEffortLaunchPins()
+  return levelSessionEffort(parsed)
+}
+
+function defaultMainLoopModelFallback(): string | undefined {
+  try {
+    const { getDefaultMainLoopModel } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/model.js') as typeof import('./model/model.js')
+    return getDefaultMainLoopModel()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable Pd — session effort for rd/ck, not env/pin (those are iw/cme).
+ */
+export function pdSessionEffort(
+  state: {
+    sessionEffort?: SessionEffortTag
+    effortValue?: EffortValue
+    settingsEffortTable?: SettingsEffortTable
+    mainLoopModel?: string | null
+    mainLoopModelForSession?: string | null
+  },
+  model?: string,
+): EffortValue | undefined {
+  const tagged =
+    state.sessionEffort ??
+    (state.effortValue !== undefined
+      ? levelSessionEffort(state.effortValue)
+      : INHERIT_SESSION_EFFORT)
+  switch (tagged.kind) {
+    case 'level':
+      return tagged.value
+    case 'default':
+      return undefined
+    case 'inherit': {
+      const table = state.settingsEffortTable
+      if (table === undefined) {
+        return undefined
+      }
+      if (isEmptySettingsEffortTable(table)) {
+        return table.default
+      }
+      return lookupSettingsEffortTable(
+        table,
+        model ??
+          state.mainLoopModelForSession ??
+          state.mainLoopModel ??
+          defaultMainLoopModelFallback(),
+      )
+    }
+  }
+}
+
+/** densable Me */
+function isEmptySettingsEffortTable(table: {
+  byModel?: Record<string, EffortValue | undefined>
+  legacyUserEffort?: unknown
+}): boolean {
+  if (table.legacyUserEffort !== undefined) {
+    return false
+  }
+  for (const _key in table.byModel ?? {}) {
+    return false
+  }
+  return true
+}
+
+const LEGACY_USER_EFFORT_MODELS = new Set([
+  'claude-3-5-haiku',
+  'claude-3-5-sonnet',
+  'claude-3-7-sonnet',
+  'claude-haiku-4-5',
+  'claude-sonnet-4-0',
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-sonnet-5',
+  'claude-opus-4-0',
+  'claude-opus-4-1',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-opus-5',
+  'claude-fable-5',
+  'claude-fable-5-1',
+  'claude-mythos-5',
+  'claude-mythos-5-1',
+])
+
+const STANDARD_CLAUDE_TRAILER_RE =
+  /^(?:-fast|-latest)?(?:-v\d{1,3}@\d{8}|[-@]\d{8})?(?:-v\d{1,3}(?::\d{1,3})?)?$/
+
+/** densable PW(Hu(e)) — true when `model` is a standard untrailered Claude ID. */
+function isStandardClaudeModelWithoutTrailer(model: string): boolean {
+  let n = model.trim().toLowerCase()
+  if (n === '' || /\s/.test(n)) return false
+  n = n.replace(/\[[12]m\]$/, '')
+  const slash = n.lastIndexOf('/')
+  if (slash !== -1) n = n.slice(slash + 1)
+  const bedrock = /^(?:([a-z-]+)\.)?anthropic\.(claude-.*)$/.exec(n)
+  if (bedrock) {
+    n = bedrock[2] ?? ''
+  }
+  const modern = /^claude-([a-z]+)-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?/.exec(n)
+  const legacy =
+    modern ?? /^claude-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?-([a-z]+)/.exec(n)
+  if (!legacy) return false
+  const rest = n.slice(legacy[0].length)
+  if (rest !== '' && !/^[-@]/.test(rest)) return false
+  return STANDARD_CLAUDE_TRAILER_RE.test(rest)
+}
+
+const legacyUserEffortModelCache = new Map<string, boolean>()
+
+/** densable a3r — legacy top-level userSettings.effortLevel applies to pre-5.5 Claude models and custom/3P IDs. */
+function allowsLegacyUserEffort(canonicalKey: string): boolean {
+  if (Object.hasOwn(Object.prototype, canonicalKey)) {
+    return false
+  }
+  let cached = legacyUserEffortModelCache.get(canonicalKey)
+  if (cached === undefined) {
+    cached =
+      LEGACY_USER_EFFORT_MODELS.has(canonicalKey) ||
+      !isStandardClaudeModelWithoutTrailer(canonicalKey)
+    legacyUserEffortModelCache.set(canonicalKey, cached)
+  }
+  return cached
+}
+
+/** densable ne(Ez(model)) */
+function lookupSettingsEffortTable(
+  table: {
+    default?: EffortValue
+    byModel?: Record<string, EffortValue | undefined>
+    legacyUserEffort?: unknown
+  },
+  model?: string,
+): EffortValue | undefined {
+  if (model === undefined) {
+    return table.default
+  }
+  const key = canonicalEffortModelKey(model)
+  const byModel = table.byModel ?? {}
+  if (Object.hasOwn(byModel, key)) {
+    return byModel[key]
+  }
+  if (table.default !== undefined || table.legacyUserEffort === undefined) {
+    return table.default
+  }
+  return allowsLegacyUserEffort(key)
+    ? (table.legacyUserEffort as EffortValue | undefined)
+    : undefined
+}
+
+/** densable `swn` @183135050 — org startup effort when `override_user_effort` is active. */
+export function getOrgOverrideStartupEffort(model: string): EffortLevel | null {
+  if (!model || !shouldOrgDefaultOverrideUserEffort(model)) {
+    return null
+  }
+  const table = teSettingsEffortTable()
+  const fromTable = table ? lookupSettingsEffortTable(table, model) : undefined
+  const raw = fromTable ?? getDefaultEffortForModel(model)
+  if (raw === undefined) {
+    return null
+  }
+  const clamped = clampEffortForModel(raw, model)
+  return convertEffortValueToLevel(clamped)
+}
+
+/** densable te() — settings sources → Pd inherit table (`userSettings` → `legacyUserEffort`). */
+export function teSettingsEffortTable(
+  sourcesOverride?: Array<{ source: string; settings: EffortSettingsSlice }>,
+): SettingsEffortTable | undefined {
+  try {
+    const entries =
+      sourcesOverride ??
+      getEnabledSettingSources().flatMap(source => {
+        const settings = getSettingsForSource(source)
+        return settings
+          ? [
+              {
+                source,
+                settings: {
+                  effortLevel: settings.effortLevel,
+                  modelSettings:
+                    settings.modelSettings as EffortSettingsSlice['modelSettings'],
+                  ultracode: settings.ultracode,
+                },
+              },
+            ]
+          : []
+      })
+    const orgDefault = getOrgModelDefaultCache()
+    const orgEffortKey =
+      orgDefault !== null && shouldOrgDefaultOverrideUserEffort(orgDefault.name)
+        ? canonicalEffortModelKey(orgDefault.name)
+        : undefined
+    let legacyUserEffort: EffortLevel | undefined
+    let defaultHolder: { level: EffortLevel | undefined } | undefined
+    const ordered: Array<{
+      source: string
+      setsTopLevel: boolean
+      settings: EffortSettingsSlice
+    }> = []
+    for (const { source, settings } of entries) {
+      const hasTopLevel = settings.effortLevel !== undefined
+      if (source === 'userSettings') {
+        legacyUserEffort = normalizeStoredEffort(settings.effortLevel)
+        ordered.push({ source, setsTopLevel: false, settings })
+        continue
+      }
+      if (hasTopLevel) {
+        defaultHolder = { level: normalizeStoredEffort(settings.effortLevel) }
+      }
+      ordered.push({ source, setsTopLevel: hasTopLevel, settings })
+    }
+    ordered.reverse()
+    const maps = ordered.map(({ settings }) => {
+      const perModel = new Map<string, unknown>()
+      for (const [raw, entry] of Object.entries(settings.modelSettings ?? {})) {
+        const level = entry?.effortLevel
+        if (level === undefined) continue
+        const canonical = canonicalEffortModelKey(raw)
+        if (raw === canonical || !perModel.has(canonical)) {
+          perModel.set(canonical, level)
+        }
+      }
+      return perModel
+    })
+    const keys = new Set<string>()
+    if (orgEffortKey !== undefined) keys.add(orgEffortKey)
+    for (const map of maps) {
+      for (const key of map.keys()) keys.add(key)
+    }
+    const byModel: Record<string, EffortValue | undefined> = {}
+    for (const key of keys) {
+      if (key === orgEffortKey) byModel[key] = undefined
+      for (let i = 0; i < ordered.length; i++) {
+        if (
+          key === orgEffortKey &&
+          ordered[i]!.source !== 'policySettings' &&
+          ordered[i]!.source !== 'flagSettings'
+        ) {
+          continue
+        }
+        const perModel = maps[i]!.get(key)
+        if (perModel !== undefined) {
+          byModel[key] = normalizeStoredEffort(perModel)
+          break
+        }
+        if (ordered[i]!.setsTopLevel) {
+          byModel[key] = normalizeStoredEffort(ordered[i]!.settings.effortLevel)
+          break
+        }
+      }
+    }
+    if (defaultHolder !== undefined) {
+      legacyUserEffort = undefined
+    }
+    if (legacyUserEffort !== undefined) {
+      for (const key of launchPinModels()) {
+        if (
+          !Object.hasOwn(byModel, key) &&
+          !Object.hasOwn(Object.prototype, key)
+        ) {
+          byModel[key] = undefined
+        }
+      }
+    }
+    return {
+      default: defaultHolder?.level,
+      legacyUserEffort,
+      byModel,
+    }
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * densable Host `apply_flag_settings` pure patch for effortLevel / ultracode.
@@ -974,21 +1331,38 @@ export function getEffortEnvOverride(): EffortValue | null | undefined {
   return parseEffortValue(envOverride)
 }
 
+export type ResolveAppliedEffortOptions = {
+  turnEffort?: EffortValue
+  hookEffortValue?: EffortValue
+  carriedEffort?: EffortLevel | null
+}
+
 /**
- * densable cme(model, appStateEffort) — single resolve path for API + UI.
- *
- * ```
- * if !supports → undefined
- * env = CLAUDE_CODE_EFFORT_LEVEL (auto/unset → null)
- * if env===null && !pin → undefined
- * s = env ?? (pin ? modelDefault : undefined) ?? appState ?? modelDefault
- * clamp org + max/xhigh capability
- * ```
+ * densable sA / ck(h, Pd, Ly) for hook stdin: iw(model, Pd, {turnEffort}) ?? "high",
+ * normalized to an EffortLevel via DF; returns undefined when model denies effort.
+ */
+export function resolveHookStdinEffort(
+  model: string,
+  pd: EffortValue | undefined,
+  turnEffort?: EffortValue,
+): EffortLevel | undefined {
+  if (!modelSupportsEffort(model)) {
+    return undefined
+  }
+  const resolved = resolveAppliedEffort(model, pd, { turnEffort }) ?? 'high'
+  return convertEffortValueToLevel(resolved)
+}
+
+/**
+ * densable iw(model, sessionEffort, {turnEffort, hookEffortValue, carriedEffort}) —
+ * single resolve path for API, UI, and hook stdin.
  */
 export function resolveAppliedEffort(
   model: string,
   appStateEffortValue: EffortValue | undefined,
+  options: ResolveAppliedEffortOptions = {},
 ): EffortValue | undefined {
+  const { turnEffort, hookEffortValue, carriedEffort } = options
   const supports = modelSupportsEffort(model)
   const envOverride = getEffortEnvOverride()
 
@@ -1001,39 +1375,48 @@ export function resolveAppliedEffort(
     if (getAPIProvider() !== 'openai') {
       return undefined
     }
+    if (hookEffortValue !== undefined) {
+      return hookEffortValue
+    }
     if (envOverride === null) {
       return undefined
     }
-    const explicit = envOverride ?? appStateEffortValue
+    const explicit = envOverride ?? turnEffort ?? appStateEffortValue
     if (explicit === undefined) {
       return undefined
     }
     return explicit
   }
 
-  const pin = isEffortLaunchPinned(model)
-  const modelDefault = getDefaultEffortForModel(model)
+  const hasSettingsCap = getSettingsMaxEffortLevel(model) !== null
 
-  // densable: env auto/unset suppresses unless launch-pinned
-  if (envOverride === null && !pin) {
+  if (hookEffortValue !== undefined) {
+    const normalized =
+      typeof hookEffortValue === 'number' && hasSettingsCap
+        ? convertEffortValueToLevel(hookEffortValue)
+        : hookEffortValue
+    return clampEffortForModel(normalized, model)
+  }
+
+  // densable iw: env auto/unset suppresses unless settings/policy set maxEffortLevel
+  if (envOverride === null && !hasSettingsCap) {
     return undefined
   }
 
+  const modelDefault = getDefaultEffortForModel(model, carriedEffort)
   let selected: EffortValue | undefined =
-    envOverride === null
-      ? undefined
-      : (envOverride ??
-        (pin ? modelDefault : undefined) ??
-        appStateEffortValue ??
-        modelDefault)
-
-  // When pin and env is null, densable uses modelDefault (env null && pin continues)
-  if (envOverride === null && pin) {
-    selected = modelDefault
-  }
+    envOverride ??
+    (envOverride === null ? modelDefault : undefined) ??
+    turnEffort ??
+    appStateEffortValue ??
+    modelDefault
 
   if (selected === undefined) {
     return undefined
+  }
+
+  if (typeof selected === 'number' && hasSettingsCap) {
+    selected = convertEffortValueToLevel(selected)
   }
 
   return clampEffortForModel(selected, model)
@@ -1246,6 +1629,7 @@ export function getOpusDefaultEffortConfig(): OpusDefaultEffortConfig {
  */
 export function getDefaultEffortForModel(
   model: string,
+  carriedEffort?: EffortLevel | null,
 ): EffortValue | undefined {
   if (process.env.USER_TYPE === 'ant') {
     const config = getAntModelOverrideConfig()
@@ -1279,6 +1663,10 @@ export function getDefaultEffortForModel(
     return undefined
   }
 
-  // densable LQe: catalog.default_effort ?? "high"
-  return getCatalogDefaultEffort(model)
+  // densable awn: the organization default precedes carriedEffort and catalog fallback.
+  return (
+    getOrgDefaultEffort(model) ??
+    carriedEffort ??
+    getCatalogDefaultEffort(model)
+  )
 }

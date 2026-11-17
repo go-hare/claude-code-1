@@ -13,7 +13,10 @@ import {
 } from 'bun:test'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname } from 'path'
-import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import {
+  analyticsMock,
+  pushAnalyticsLogEvent,
+} from '../../../../tests/mocks/analytics.js'
 import { debugMock } from '../../../../tests/mocks/debug'
 import { logMock } from '../../../../tests/mocks/log'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
@@ -116,6 +119,64 @@ afterEach(() => {
   resetFeedbackNoticeStateForTests()
   axiosHandle.stubs.post = undefined
   refreshCalls.length = 0
+})
+
+describe('289 feedback submission feature metrics', () => {
+  test.each([
+    'success',
+    'timeout',
+    'network_error',
+  ] as const)('records the feature outcome for %s', async outcome => {
+    const events: Array<{
+      name: string
+      metadata?: Record<string, unknown>
+    }> = []
+    const stopCapture = pushAnalyticsLogEvent((name, metadata) => {
+      events.push({ name, metadata })
+    })
+    const draft = createFeedbackDraft({
+      type: 'bug',
+      title: 'feature metrics',
+      details: 'submission outcome',
+      trigger: 'model_judgment',
+      requestIds: [],
+      sessionId: getSessionId(),
+      cwd: '/tmp',
+      model: 'claude',
+      cliVersion: '2.1.289',
+      os: process.platform,
+    })
+    axiosHandle.stubs.post = async () => {
+      if (outcome === 'success') {
+        return { status: 200, data: { feedback_id: 'fb_metric' } }
+      }
+      throw {
+        isAxiosError: true,
+        code: outcome === 'timeout' ? 'ECONNABORTED' : 'ECONNRESET',
+      }
+    }
+    try {
+      const result = await submitQueuedFeedbackDraft({ draft })
+      expect(result.success).toBe(outcome === 'success')
+      const metrics = events.filter(event =>
+        event.name.startsWith('tengu_feature_'),
+      )
+      expect(metrics).toEqual([
+        {
+          name:
+            outcome === 'success' ? 'tengu_feature_ok' : 'tengu_feature_bad',
+          metadata: {
+            feature_name: 'feedback_draft_submit',
+            ...(outcome === 'success'
+              ? {}
+              : { error_code: outcome, from_this_session: 'true' }),
+          },
+        },
+      ])
+    } finally {
+      stopCapture()
+    }
+  })
 })
 
 describe('densable leftover ot submit', () => {

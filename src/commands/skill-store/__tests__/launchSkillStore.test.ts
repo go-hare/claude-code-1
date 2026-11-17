@@ -4,7 +4,7 @@
  * Strategy per feedback_mock_dependency_not_subject:
  * - DO NOT mock skillsApi.ts itself (would pollute api.test.ts)
  * - Mock axios (the underlying HTTP layer) to control API responses
- * - Mock fs/promises for install filesystem operations
+ * - Real fs under a temp CLAUDE_CONFIG_DIR for install
  * - Let real skillsApi functions run real code paths
  */
 
@@ -18,16 +18,24 @@ import {
   mock,
   test,
 } from 'bun:test'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 
-import { analyticsMock } from '../../../../tests/mocks/analytics.js'
-import { authMock } from '../../../../tests/mocks/auth.js'
+import {
+  analyticsMock,
+  restoreAnalyticsMock,
+} from '../../../../tests/mocks/analytics.js'
+import { authMock, restoreAuthMock } from '../../../../tests/mocks/auth.js'
 import {
   oauthClientMock,
   oauthConfigMock,
-  teleportApiMock,
+  restoreOauthClientMock,
+  restoreOauthConfigMock,
+  TEST_WORKSPACE_API_KEY,
 } from '../../../../tests/mocks/oauthSurface.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
@@ -35,6 +43,9 @@ mock.module('src/utils/debug.ts', debugMock)
 mock.module('src/services/analytics/index.js', analyticsMock)
 
 // ── Auth / OAuth mocks ──────────────────────────────────────────────────────
+// Do NOT mock teleport/api — that rebinds skillsApi's import and poisons
+// api.test.ts (CLAUDE.md: launch* mocks axios, not the source API). Live
+// prepareWorkspaceApiRequest reads ANTHROPIC_API_KEY (sk-ant-api03-*).
 mock.module('src/utils/auth.js', () => ({
   ...authMock(),
   getClaudeAIOAuthTokens: () => ({ accessToken: 'test-token' }),
@@ -45,21 +56,12 @@ mock.module('src/services/oauth/client.js', () =>
   }),
 )
 mock.module('src/constants/oauth.js', oauthConfigMock)
-mock.module('src/utils/teleport/api.js', () =>
-  teleportApiMock({
-    getOAuthHeaders: (token: string) => ({ Authorization: `Bearer ${token}` }),
-    prepareWorkspaceApiRequest: async () => ({
-      apiKey: 'test-workspace-key',
-    }),
-  }),
-)
 
 // ── envUtils config dir injection ────────────────────────────────────────────
 // Don't mock the envUtils module — that's process-level and leaks to other
 // tests' getClaudeConfigHomeDir consumers (see feedback_mock_dependency_not_subject).
 // Instead inject CLAUDE_CONFIG_DIR via process.env and clear the lodash memoize
 // cache around each test so the real getClaudeConfigHomeDir reads our value.
-const mockConfigDir = '/tmp/test-claude-config'
 
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
@@ -80,40 +82,16 @@ axiosHandle.stubs.post = axiosPostMock
 axiosHandle.stubs.delete = axiosDeleteMock
 axiosHandle.stubs.isAxiosError = axiosIsAxiosError
 
-// ── fs/promises mock ─────────────────────────────────────────────────────────
-// Bun's mock.module is global per-process and last-write-wins. Replacing
-// node:fs/promises with only mkdir + writeFile breaks every other test in
-// the same `bun test` run that imports readFile / readdir / unlink / chmod /
-// etc. (notably src/services/localVault/__tests__/store.test.ts).
-//
-// Use require() INSIDE the factory (same trick as SessionMemory/prompts.test)
-// so we get the truly-real module bypassing the mock registry. Gate our two
-// stubs behind useSkillStoreFsStubs (default off; beforeAll flips on; afterAll
-// flips off).
-const mkdirMock = mock(async (..._args: unknown[]) => undefined)
-const writeFileMock = mock(async (..._args: unknown[]) => undefined)
-let useSkillStoreFsStubs = false
-mock.module('node:fs/promises', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const real = require('node:fs/promises') as Record<string, unknown>
-  return {
-    ...real,
-    default: real,
-    mkdir: (...args: unknown[]) =>
-      useSkillStoreFsStubs
-        ? mkdirMock(...args)
-        : (real.mkdir as (...a: unknown[]) => Promise<unknown>)(...args),
-    writeFile: (...args: unknown[]) =>
-      useSkillStoreFsStubs
-        ? writeFileMock(...args)
-        : (real.writeFile as (...a: unknown[]) => Promise<unknown>)(...args),
-  }
-})
+// Real fs under a per-test temp CLAUDE_CONFIG_DIR. Mocking node:fs/promises
+// is process-global last-write-wins and makes mkdirMock.calls empty when
+// another file overwrites the factory.
 
 // ── Lazy imports ─────────────────────────────────────────────────────────────
 let callSkillStore: typeof import('../launchSkillStore.js').callSkillStore
 let getClaudeConfigHomeDir: typeof import('../../../utils/envUtils.js').getClaudeConfigHomeDir
 let origConfigDir: string | undefined
+let origApiKey: string | undefined
+let mockConfigDir = ''
 
 beforeAll(async () => {
   axiosHandle.useStubs = true
@@ -122,36 +100,42 @@ beforeAll(async () => {
   const envMod = await import('../../../utils/envUtils.js')
   getClaudeConfigHomeDir = envMod.getClaudeConfigHomeDir
   origConfigDir = process.env.CLAUDE_CONFIG_DIR
-  useSkillStoreFsStubs = true
+  origApiKey = process.env.ANTHROPIC_API_KEY
 })
 
-// Flip the stub flag off after this suite so localVault/store and other
-// fs-dependent tests in the same process see real readFile/readdir/etc.
 afterAll(() => {
   axiosHandle.useStubs = false
-  useSkillStoreFsStubs = false
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('src/services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
+  mock.module('src/services/oauth/client.js', restoreOauthClientMock)
 })
 
 beforeEach(() => {
   axiosGetMock.mockClear()
   axiosPostMock.mockClear()
   axiosDeleteMock.mockClear()
-  mkdirMock.mockClear()
-  writeFileMock.mockClear()
-  // Inject our mock config dir + bust lodash memoize so real
-  // getClaudeConfigHomeDir reads the freshly-set env var.
+  mockConfigDir = mkdtempSync(join(tmpdir(), 'skill-store-'))
   process.env.CLAUDE_CONFIG_DIR = mockConfigDir
+  process.env.ANTHROPIC_API_KEY = TEST_WORKSPACE_API_KEY
   getClaudeConfigHomeDir.cache?.clear?.()
 })
 
 afterEach(() => {
-  // Restore env so we don't leak mockConfigDir into other test files.
   if (origConfigDir === undefined) {
     delete process.env.CLAUDE_CONFIG_DIR
   } else {
     process.env.CLAUDE_CONFIG_DIR = origConfigDir
   }
+  if (origApiKey === undefined) {
+    delete process.env.ANTHROPIC_API_KEY
+  } else {
+    process.env.ANTHROPIC_API_KEY = origApiKey
+  }
   getClaudeConfigHomeDir.cache?.clear?.()
+  if (mockConfigDir) {
+    rmSync(mockConfigDir, { recursive: true, force: true })
+  }
 })
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -316,16 +300,9 @@ describe('install action', () => {
     const { onDone, calls } = makeOnDone()
     const result = await callSkillStore(onDone, {} as never, 'install sk_1')
     expect(result).not.toBeNull()
-    expect(mkdirMock).toHaveBeenCalledTimes(1)
-    expect(writeFileMock).toHaveBeenCalledTimes(1)
-    const writeCall = writeFileMock.mock.calls[0] as unknown as [
-      string,
-      string,
-      string,
-    ]
-    expect(writeCall[0]).toContain('SKILL.md')
-    expect(writeCall[0]).toContain('my-skill')
-    expect(writeCall[1]).toBe('# My Skill Content')
+    const skillPath = join(mockConfigDir, 'skills', 'my-skill', 'SKILL.md')
+    expect(existsSync(skillPath)).toBe(true)
+    expect(readFileSync(skillPath, 'utf8')).toBe('# My Skill Content')
     expect(calls[0]?.[0]).toContain('installed')
   })
 
@@ -341,13 +318,9 @@ describe('install action', () => {
     const { onDone, calls } = makeOnDone()
     const result = await callSkillStore(onDone, {} as never, 'install sk_1@v2')
     expect(result).not.toBeNull()
-    expect(writeFileMock).toHaveBeenCalledTimes(1)
-    const writeCall = writeFileMock.mock.calls[0] as unknown as [
-      string,
-      string,
-      string,
-    ]
-    expect(writeCall[1]).toBe('# v2 Content')
+    const skillPath = join(mockConfigDir, 'skills', 'sk_1', 'SKILL.md')
+    expect(existsSync(skillPath)).toBe(true)
+    expect(readFileSync(skillPath, 'utf8')).toBe('# v2 Content')
     expect(calls[0]?.[0]).toContain('installed')
   })
 
@@ -366,7 +339,7 @@ describe('install action', () => {
     const result = await callSkillStore(onDone, {} as never, 'install sk_nover')
     expect(result).not.toBeNull()
     expect(calls[0]?.[0]).toContain('no published versions')
-    expect(writeFileMock).not.toHaveBeenCalled()
+    expect(existsSync(join(mockConfigDir, 'skills'))).toBe(false)
   })
 
   test('install writes to ~/.claude/skills/<name>/SKILL.md path', async () => {
@@ -391,19 +364,11 @@ describe('install action', () => {
     const { onDone } = makeOnDone()
     await callSkillStore(onDone, {} as never, 'install sk_path')
 
-    const mkdirCall = mkdirMock.mock.calls[0] as unknown as [
-      string,
-      { recursive: boolean },
-    ]
-    expect(mkdirCall[0]).toContain('skills')
-    expect(mkdirCall[0]).toContain('path-test')
-
-    const writeCall = writeFileMock.mock.calls[0] as unknown as [
-      string,
-      string,
-      string,
-    ]
-    expect(writeCall[0]).toContain('SKILL.md')
+    const skillPath = join(mockConfigDir, 'skills', 'path-test', 'SKILL.md')
+    expect(existsSync(skillPath)).toBe(true)
+    expect(skillPath).toContain('skills')
+    expect(skillPath).toContain('path-test')
+    expect(skillPath).toContain('SKILL.md')
   })
 })
 

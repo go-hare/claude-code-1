@@ -5,18 +5,22 @@
  * densable 2.1.217: concurrent live slots ($vu/vBg=20)
  * densable 2.1.219: nest depth (Bue/_ee/qPu=3; was Evu=1 in 217)
  *
- * Local product: session-scoped module counters (single CLI process = session).
- * /clear calls reset*; WebSearchTool + AgentTool call get/increment.
+ * Concurrent slots: densable Xm instance `r` writes AppState.runningSubagents.
+ * No-arg takeConcurrencySlot keeps a test-only process counter.
+ * WebSearch: consume requires taskRegistry (Xm get/increment). Missing
+ * registry does not fall back to the process module counter.
  *
  * 2.1.216 #15: L(Me) interrupt immunity for async local spawn (see assertCanSpawnSubagent).
  * 2.1.217 #18/#19: takeConcurrencySlot + CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH.
  */
 
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import type { AppState } from 'src/state/AppState.js'
 import { getAbortReasonMessage } from 'src/utils/abortController.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
 import { type EffortValue, isUltracodeModeActive } from 'src/utils/effort.js'
 import { recordSubagentSpawnRefused } from 'src/utils/subagentSpawnLedger.js'
+import { createTaskRegistry } from 'src/utils/taskRegistry.js'
 
 /**
  * densable 2.1.212 qpg=200 default hard cap.
@@ -37,7 +41,10 @@ export const AMBER_KESTREL_FEATURE = 'tengu_amber_kestrel'
 
 let totalAgentSpawns = 0
 let webSearchCalls = 0
-/** densable AppState.runningSubagents (module counter — single process session) */
+/**
+ * Test-only process counter. Production takeConcurrencySlot writes
+ * AppState.runningSubagents via densable Xm (`createTaskRegistry`).
+ */
 let concurrentSubagents = 0
 /** densable Hts — cache GB hazel once resolved */
 let hazelTrellisCache: number | null = null
@@ -149,12 +156,52 @@ export function getConcurrentSubagents(): number {
   return concurrentSubagents
 }
 
+type ConcurrencySlotOptions = {
+  /** densable Xm instance `r` — takeConcurrencySlot writes runningSubagents. */
+  taskRegistry?: {
+    takeConcurrencySlot(): () => void
+  }
+  getAppState?: () => AppState
+  setAppState?: (updater: (prev: AppState) => AppState) => void
+}
+
+function resolveXmConcurrencyTake(
+  options?: ConcurrencySlotOptions,
+): (() => void) | undefined {
+  if (options?.taskRegistry) {
+    return options.taskRegistry.takeConcurrencySlot()
+  }
+  if (options?.getAppState && options?.setAppState) {
+    return createTaskRegistry(
+      options.getAppState,
+      options.setAppState,
+    ).takeConcurrencySlot()
+  }
+  return undefined
+}
+
 /**
- * densable takeConcurrencySlot():
+ * densable Xm.takeConcurrencySlot():
  *   runningSubagents += 1
  *   return once-safe release () => runningSubagents = max(0, n-1)
+ *
+ * Production: require `taskRegistry` or `getAppState`+`setAppState` (Xm
+ * instance). No-arg module counter is test-only.
  */
-export function takeConcurrencySlot(): () => void {
+export function takeConcurrencySlot(
+  options?: ConcurrencySlotOptions,
+): () => void {
+  const fromXm = resolveXmConcurrencyTake(options)
+  if (fromXm) return fromXm
+  // Production options without Xm: do not use the process module counter.
+  if (options !== undefined) {
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+    }
+  }
+  // No-arg: test-only module counter.
   concurrentSubagents += 1
   let released = false
   return () => {
@@ -239,14 +286,36 @@ export function assertAndTakeConcurrencySlot(options?: {
   mainLoopModel?: string
   effortValue?: EffortValue
   ultracode?: boolean
+  /** densable `e.taskRegistry` — takeConcurrencySlot / getConcurrentSubagents. */
+  taskRegistry?: {
+    getConcurrentSubagents(): number
+    takeConcurrencySlot(): () => void
+  }
+  getAppState?: () => AppState
+  setAppState?: (updater: (prev: AppState) => AppState) => void
 }): () => void {
   const max = resolveMaxConcurrentSubagents(options?.env)
-  if (getConcurrentSubagents() < max) {
-    return takeConcurrencySlot()
+  const xm =
+    options?.taskRegistry ??
+    (options?.getAppState && options?.setAppState
+      ? createTaskRegistry(options.getAppState, options.setAppState)
+      : undefined)
+  const concurrent = xm ? () => xm.getConcurrentSubagents() : () => 0
+  // Production wrap: never fall back to the no-arg module counter.
+  const take = xm
+    ? () => xm.takeConcurrencySlot()
+    : () =>
+        takeConcurrencySlot({
+          taskRegistry: options?.taskRegistry,
+          getAppState: options?.getAppState,
+          setAppState: options?.setAppState,
+        })
+  if (concurrent() < max) {
+    return take()
   }
   // densable: if(Ke("tengu_amber_kestrel",!1))return — cap disabled
   if (getFeatureValue_CACHED_MAY_BE_STALE(AMBER_KESTREL_FEATURE, false)) {
-    return takeConcurrencySlot()
+    return take()
   }
   // densable G9(model, effort, ultracode) — ultracode mode ignores concurrent cap
   const model = options?.mainLoopModel
@@ -254,7 +323,7 @@ export function assertAndTakeConcurrencySlot(options?: {
     model &&
     isUltracodeModeActive(model, options?.effortValue, options?.ultracode)
   ) {
-    return takeConcurrencySlot()
+    return take()
   }
   recordSubagentSpawnRefused('concurrency_limit')
   throw new Error(formatSubagentConcurrencyCapMessage(max))
@@ -329,12 +398,20 @@ export function formatWebSearchSessionCapMessage(
 /**
  * densable WebSearch preflight: if at cap, return soft-fail payload fields;
  * else increment and return null (caller proceeds).
+ *
+ * Gold cap is Xm instance `r` (`taskRegistry`) only — not the process
+ * module counter. Missing registry: used=0, no increment.
  */
 export function consumeWebSearchBudgetOrCapMessage(options?: {
   env?: NodeJS.ProcessEnv
+  taskRegistry?: {
+    getWebSearchCalls(): number
+    incrementWebSearchCalls(): void
+  }
 }): { capped: true; used: number; max: number; message: string } | null {
   const max = resolveMaxWebSearchesPerSession(options?.env)
-  const used = getWebSearchCalls()
+  const registry = options?.taskRegistry
+  const used = registry ? registry.getWebSearchCalls() : 0
   if (used >= max) {
     return {
       capped: true,
@@ -343,6 +420,8 @@ export function consumeWebSearchBudgetOrCapMessage(options?: {
       message: formatWebSearchSessionCapMessage(used, max),
     }
   }
-  incrementWebSearchCalls()
+  if (registry) {
+    registry.incrementWebSearchCalls()
+  }
   return null
 }

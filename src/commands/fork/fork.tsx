@@ -15,6 +15,8 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js';
+import { getMainLoopModel } from '../../utils/model/model.js';
+import { pdSessionEffort } from '../../utils/effort.js';
 import type { BackgroundSeed } from '../../cli/bg/helpers.js';
 import {
   deriveForkSessionSeed,
@@ -79,8 +81,11 @@ function readLiveForkLaunch(getAppState?: LocalJSXCommandContext['getAppState'])
         out.sessionPermissionRules = { allow: [...allow], deny: [...deny] };
       }
     }
-    if (app && typeof (app as { effortValue?: unknown }).effortValue !== 'undefined') {
-      out.effortValue = (app as { effortValue?: string | number }).effortValue;
+    if (app) {
+      const effort = pdSessionEffort(app, getMainLoopModel());
+      if (effort !== undefined) {
+        out.effortValue = effort;
+      }
     }
   } catch {
     /* optional */

@@ -57,10 +57,17 @@ describe('checkCrossProjectResume', () => {
   })
 
   test('MTs returns null when the recorded directory is gone', async () => {
+    // Gold MoA: symlink ancestor OR complete walk → still there. Darwin `/tmp`
+    // and `/var` are symlinks, so a gone path under them still emits `cd`.
+    // Probe a unique missing nested path under cwd (no symlink ancestors).
     const gone =
       getPlatform() === 'windows'
-        ? 'C:\\claude-code-gone-239\\nested'
-        : '/tmp/claude-code-gone-239/nested'
+        ? `C:\\claude-code-gone-239-${process.pid}-${Date.now()}\\nested`
+        : join(
+            getOriginalCwd(),
+            `claude-code-gone-239-${process.pid}-${Date.now()}`,
+            'nested',
+          )
     expect(await checkCrossProjectResume(logAt(gone), true, [])).toBe(null)
     expect(await pathHasSymlinkAncestor(gone)).toBe(false)
   })

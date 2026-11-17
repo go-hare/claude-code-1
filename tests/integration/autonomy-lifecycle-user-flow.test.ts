@@ -17,7 +17,7 @@ import {
   expect,
   test,
 } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -37,6 +37,7 @@ const PROJECT_ROOT = resolve(import.meta.dir, '../..')
 let tempDir = ''
 let configDir = ''
 let previousConfigDir: string | undefined
+let previousCallerCwd: string | undefined
 
 async function ensureCliBundle(): Promise<void> {
   if (existsSync(CLI_ENTRYPOINT)) return
@@ -63,22 +64,21 @@ beforeAll(async () => {
 }, 120_000)
 
 async function runAutonomyCli(args: string[]): Promise<string> {
-  // This helper asserts the child writes nothing to stderr, so drop the
-  // inherited vars that make it talk: FORCE_COLOR contradicts our NO_COLOR=1
-  // (Bun then warns "the 'NO_COLOR' env is ignored"), and the bg-session vars
-  // leak in when the suite runs from a backgrounded Claude Code session.
-  const STRIPPED_CHILD_ENV = new Set([
-    'FORCE_COLOR',
-    'CLAUDE_CODE_SESSION_KIND',
-    'CLAUDE_CODE_SESSION_NAME',
-    'CLAUDE_BG_BACKEND',
-    'CLAUDE_BG_SOURCE',
-    'CLAUDE_JOB_DIR',
-  ])
+  // Only inherit OS process-launch settings. Session/provider variables and
+  // credentials belong to the harness, not this fake user. In particular,
+  // CLAUDE_CODE_CALLER_CWD overrides spawn.cwd during bootstrap.
   const inherited: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v === undefined || STRIPPED_CHILD_ENV.has(k)) continue
-    inherited[k] = v
+  for (const key of [
+    'PATH',
+    'SystemRoot',
+    'SYSTEMROOT',
+    'WINDIR',
+    'TMPDIR',
+    'TEMP',
+    'TMP',
+  ]) {
+    const value = process.env[key]
+    if (value !== undefined) inherited[key] = value
   }
 
   const proc = Bun.spawn({
@@ -87,6 +87,11 @@ async function runAutonomyCli(args: string[]): Promise<string> {
     env: {
       ...inherited,
       CLAUDE_CONFIG_DIR: configDir,
+      HOME: tempDir,
+      USERPROFILE: tempDir,
+      PWD: tempDir,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      DISABLE_TELEMETRY: '1',
       CI: 'true',
       GITHUB_ACTIONS: 'true',
       NODE_ENV: 'development',
@@ -112,6 +117,12 @@ beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'autonomy-user-flow-'))
   configDir = join(tempDir, 'config')
   previousConfigDir = process.env.CLAUDE_CONFIG_DIR
+  previousCallerCwd = process.env.CLAUDE_CODE_CALLER_CWD
+  // Reproduce launching tests from the dev wrapper without using a real
+  // user's project. Both CLI cases must still operate on tempDir.
+  const callerCwd = join(tempDir, 'inherited-caller')
+  mkdirSync(callerCwd)
+  process.env.CLAUDE_CODE_CALLER_CWD = callerCwd
   process.env.CLAUDE_CONFIG_DIR = configDir
   resetStateForTests()
   setOriginalCwd(tempDir)
@@ -124,6 +135,11 @@ afterEach(() => {
     delete process.env.CLAUDE_CONFIG_DIR
   } else {
     process.env.CLAUDE_CONFIG_DIR = previousConfigDir
+  }
+  if (previousCallerCwd === undefined) {
+    delete process.env.CLAUDE_CODE_CALLER_CWD
+  } else {
+    process.env.CLAUDE_CODE_CALLER_CWD = previousCallerCwd
   }
   if (tempDir) {
     rmSync(tempDir, { recursive: true, force: true })

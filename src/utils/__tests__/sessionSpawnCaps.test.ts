@@ -36,6 +36,8 @@ import {
   resetSubagentSpawnLedgerForTests,
   snapshotSubagentSpawnLedger,
 } from '../subagentSpawnLedger.js'
+import type { AppState } from '../../state/AppState.js'
+import { createTaskRegistry } from '../taskRegistry.js'
 
 // Pin growthbook to defaults for this file — co-suites that leave
 // getFeatureValue_CACHED_MAY_BE_STALE always-true bypass amber_kestrel throw path.
@@ -163,20 +165,27 @@ describe('takeConcurrencySlot', () => {
   })
 
   test('assertAndTakeConcurrencySlot blocks at cap', () => {
-    const env = { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '2' }
-    const r1 = assertAndTakeConcurrencySlot({ env })
-    const r2 = assertAndTakeConcurrencySlot({ env })
-    expect(getConcurrentSubagents()).toBe(2)
-    expect(() => assertAndTakeConcurrencySlot({ env })).toThrow(
+    let state = { tasks: {}, runningSubagents: 0 } as AppState
+    const slot = {
+      env: { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '2' },
+      getAppState: () => state,
+      setAppState: (updater: (prev: AppState) => AppState) => {
+        state = updater(state)
+      },
+    }
+    const r1 = assertAndTakeConcurrencySlot(slot)
+    const r2 = assertAndTakeConcurrencySlot(slot)
+    expect(state.runningSubagents).toBe(2)
+    expect(getConcurrentSubagents()).toBe(0)
+    expect(() => assertAndTakeConcurrencySlot(slot)).toThrow(
       formatSubagentConcurrencyCapMessage(2),
     )
     expect(snapshotSubagentSpawnLedger().refused.concurrency_limit).toBe(1)
     r1()
     r2()
-    expect(getConcurrentSubagents()).toBe(0)
-    // after release can take again
-    assertAndTakeConcurrencySlot({ env })
-    expect(getConcurrentSubagents()).toBe(1)
+    expect(state.runningSubagents).toBe(0)
+    assertAndTakeConcurrencySlot(slot)
+    expect(state.runningSubagents).toBe(1)
   })
 })
 
@@ -255,10 +264,93 @@ describe('assertCanSpawnSubagent', () => {
 describe('consumeWebSearchBudgetOrCapMessage', () => {
   test('soft cap message densable copy', () => {
     const env = { CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION: '1' }
-    expect(consumeWebSearchBudgetOrCapMessage({ env })).toBeNull()
-    const cap = consumeWebSearchBudgetOrCapMessage({ env })
+    let calls = 0
+    const taskRegistry = {
+      getWebSearchCalls: () => calls,
+      incrementWebSearchCalls: () => {
+        calls += 1
+      },
+    }
+    expect(consumeWebSearchBudgetOrCapMessage({ env, taskRegistry })).toBeNull()
+    const cap = consumeWebSearchBudgetOrCapMessage({ env, taskRegistry })
     expect(cap?.capped).toBe(true)
     expect(cap?.message).toBe(formatWebSearchSessionCapMessage(1, 1))
     expect(cap?.message).toContain('CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION')
+  })
+
+  test('without taskRegistry does not use module counter', () => {
+    const env = { CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION: '1' }
+    expect(consumeWebSearchBudgetOrCapMessage({ env })).toBeNull()
+    expect(getWebSearchCalls()).toBe(0)
+    expect(consumeWebSearchBudgetOrCapMessage({ env })).toBeNull()
+    expect(getWebSearchCalls()).toBe(0)
+  })
+
+  test('uses Xm taskRegistry, not process module counter', () => {
+    const env = { CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION: '1' }
+    const registry = createTaskRegistry(
+      () => ({ tasks: {}, runningSubagents: 0 }) as AppState,
+      () => {},
+    )
+    expect(
+      consumeWebSearchBudgetOrCapMessage({ env, taskRegistry: registry }),
+    ).toBeNull()
+    expect(registry.getWebSearchCalls()).toBe(1)
+    expect(getWebSearchCalls()).toBe(0)
+    const cap = consumeWebSearchBudgetOrCapMessage({
+      env,
+      taskRegistry: registry,
+    })
+    expect(cap?.capped).toBe(true)
+    expect(cap?.used).toBe(1)
+    expect(cap?.max).toBe(1)
+    expect(cap?.message).toBe(formatWebSearchSessionCapMessage(1, 1))
+    expect(getWebSearchCalls()).toBe(0)
+  })
+})
+
+describe('takeConcurrencySlot Xm instance', () => {
+  test('getAppState/setAppState writes runningSubagents, not module counter', () => {
+    let state = { tasks: {}, runningSubagents: 0 } as AppState
+    const release = takeConcurrencySlot({
+      getAppState: () => state,
+      setAppState: updater => {
+        state = updater(state)
+      },
+    })
+    expect(state.runningSubagents).toBe(1)
+    expect(getConcurrentSubagents()).toBe(0)
+    release()
+    expect(state.runningSubagents).toBe(0)
+  })
+
+  test('assertAndTakeConcurrencySlot takes from taskRegistry', () => {
+    let state = { tasks: {}, runningSubagents: 0 } as AppState
+    const registry = createTaskRegistry(
+      () => state,
+      updater => {
+        state = updater(state)
+      },
+    )
+    const env = { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '1' }
+    const release = assertAndTakeConcurrencySlot({
+      env,
+      taskRegistry: registry,
+    })
+    expect(registry.getConcurrentSubagents()).toBe(1)
+    expect(getConcurrentSubagents()).toBe(0)
+    expect(() =>
+      assertAndTakeConcurrencySlot({ env, taskRegistry: registry }),
+    ).toThrow(formatSubagentConcurrencyCapMessage(1))
+    release()
+    expect(registry.getConcurrentSubagents()).toBe(0)
+  })
+
+  test('assertAndTakeConcurrencySlot without Xm does not use module counter', () => {
+    const env = { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '1' }
+    const release = assertAndTakeConcurrencySlot({ env })
+    expect(getConcurrentSubagents()).toBe(0)
+    release()
+    expect(getConcurrentSubagents()).toBe(0)
   })
 })

@@ -129,6 +129,13 @@ export function getMainLoopRefcount(): number {
   return mainLoopRefcount
 }
 
+/** densable `VKo` — `activeReasons.get(reason)??0 > 0`. */
+export function isSessionActivityReasonActive(
+  reason: SessionActivityReason,
+): boolean {
+  return (activeReasons.get(reason) ?? 0) > 0
+}
+
 /** Test-only — official `n.refcount` (keepalive hold, including hook_exec). */
 export function getSessionActivityRefcountForTests(): number {
   return refcount

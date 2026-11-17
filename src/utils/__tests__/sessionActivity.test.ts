@@ -4,6 +4,7 @@ import {
   resetSessionActivityForTests,
   resolveSessionActivityAgentId,
   setMainLoopRefcountListener,
+  isSessionActivityReasonActive,
   startSessionActivity,
   stopSessionActivity,
 } from '../sessionActivity.js'
@@ -11,6 +12,15 @@ import {
 describe('sessionActivity mainLoopRefcount densable', () => {
   afterEach(() => {
     resetSessionActivityForTests()
+  })
+
+  test('VKo isSessionActivityReasonActive tracks api_call', () => {
+    expect(isSessionActivityReasonActive('api_call')).toBe(false)
+    startSessionActivity('api_call')
+    expect(isSessionActivityReasonActive('api_call')).toBe(true)
+    expect(isSessionActivityReasonActive('tool_exec')).toBe(false)
+    stopSessionActivity('api_call')
+    expect(isSessionActivityReasonActive('api_call')).toBe(false)
   })
 
   test('main-thread activity bumps mainLoopRefcount', () => {

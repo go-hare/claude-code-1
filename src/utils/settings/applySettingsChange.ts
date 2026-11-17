@@ -2,10 +2,14 @@ import type { AppState } from '../../state/AppState.js'
 import type { ToolPermissionContext } from '../../Tool.js'
 import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
-import { getUltracodeEffortForModel } from '../effort.js'
+import {
+  getUltracodeEffortForModel,
+  INHERIT_SESSION_EFFORT,
+  pdSessionEffort,
+  teSettingsEffortTable,
+} from '../effort.js'
 import { updateHooksConfigSnapshot } from '../hooks/hooksConfigSnapshot.js'
 import { getMainLoopModel } from '../model/model.js'
-import { unpinAllEffortLaunchPins } from '../model/effortCatalog.js'
 import { expandPath } from '../path.js'
 import { applyPermissionUpdate } from '../permissions/PermissionUpdate.js'
 import {
@@ -215,59 +219,46 @@ export function applySettingsChange(
     newContext = transitionPlanAutoMode(newContext)
     newContext = applyManagedAutoModeExit(newContext)
 
-    // Sync effortLevel / ultracode from settings to top-level AppState when
-    // they change (e.g. via applyFlagSettings from IDE). Only propagate if
-    // the setting itself changed — otherwise unrelated settings churn
-    // (e.g. tips dismissal on startup) would clobber a --effort CLI flag
-    // value held in AppState.
-    const prevEffort = prev.settings.effortLevel
-    const newEffort = newSettings.effortLevel
-    const effortChanged = prevEffort !== newEffort
+    // densable 2.1.289: settingsEffortTable refreshes per-model/legacy settings
+    // while leaving sessionEffort untouched (`{ kind: 'inherit' }` resolves
+    // dynamically via pdSessionEffort; explicit session overrides stay intact).
+    // ultracode is orthogonal to effortLevel — never force wire effort to xhigh
+    // and never clear ultracode when effortLevel changes.
+    const nextSettingsEffortTable =
+      teSettingsEffortTable() ?? prev.settingsEffortTable
     const prevUltra = prev.settings.ultracode === true
     const newUltra = newSettings.ultracode === true
     const ultraChanged = prevUltra !== newUltra
 
-    // densable: normal effortLevel sync clears ultracode; settings.ultracode
-    // maps to catalog wire + flag (densable hardcodes xhigh).
-    // densable: if (prev.effortLevel !== next.effortLevel) N9() — any effort
-    // level change releases launch pins so AppState effortValue can win cme.
-    if (effortChanged) {
-      unpinAllEffortLaunchPins()
+    let ultracodePatch: Partial<AppState> = {}
+    if (ultraChanged) {
+      if (newUltra) {
+        const model = getMainLoopModel()
+        const wire = getUltracodeEffortForModel(model)
+        ultracodePatch = { ultracode: wire !== undefined }
+      } else {
+        ultracodePatch = { ultracode: false }
+      }
     }
 
-    let effortPatch: Partial<AppState> = {}
-    if (ultraChanged && newUltra) {
-      // Prefer getMainLoopModel() (includes apply_flag model override applied
-      // before notifyChange) over stale prev.mainLoopModel so same-packet
-      // { model, ultracode:true } resolves wire on the post-switch model.
-      const model = getMainLoopModel()
-      const wire = getUltracodeEffortForModel(model)
-      if (wire === undefined) {
-        // No catalog ultracode wire (e.g. haiku) — do not invent xhigh or
-        // raise an empty ultracode flag (matches bootstrap empty-flag guard).
-        effortPatch = { ultracode: false }
-      } else {
-        // densable sAi: enabling ultracode unpins launch defaults (N9).
-        // (May already be unpinned via effortChanged above.)
-        unpinAllEffortLaunchPins()
-        effortPatch = { effortValue: wire, ultracode: true }
-      }
-    } else if (effortChanged && newEffort !== undefined) {
-      // Only propagate a defined new value — when the disk key is absent
-      // (e.g. /effort max for non-ants writes undefined; --effort CLI flag),
-      // prev.settings.effortLevel can be stale (internal writes suppress the
-      // watcher that would resync AppState.settings), so effortChanged would
-      // be true and we'd wipe a session-scoped value held in effortValue.
-      effortPatch = { effortValue: newEffort, ultracode: false }
-    } else if (ultraChanged && !newUltra) {
-      effortPatch = { ultracode: false }
-    }
+    const sessionEffortTag = prev.sessionEffort ?? INHERIT_SESSION_EFFORT
+    const compatEffortPatch: Partial<AppState> =
+      sessionEffortTag.kind === 'inherit'
+        ? {
+            effortValue: pdSessionEffort({
+              ...prev,
+              settingsEffortTable: nextSettingsEffortTable,
+            }),
+          }
+        : {}
 
     return {
       ...prev,
       settings: newSettings,
+      settingsEffortTable: nextSettingsEffortTable,
       toolPermissionContext: newContext,
-      ...effortPatch,
+      ...compatEffortPatch,
+      ...ultracodePatch,
     }
   })
 }

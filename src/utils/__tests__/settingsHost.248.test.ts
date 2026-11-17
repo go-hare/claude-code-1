@@ -811,7 +811,7 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     owner.primer.dispose()
   })
 
-  test('seedAttestedSystemTier does not seed OS managed-settings after product-cut', async () => {
+  test('seedAttestedSystemTier seeds empty managed tier when host attests system absent', async () => {
     pinHoverRest(true)
     const owner = getSettingsOwner()
     const managedRoot = getManagedFilePath()
@@ -841,9 +841,12 @@ describe('densable 2.1.248 leftover Fe/Oe on k.host', () => {
     }
     owner.primer = new SettingsPrimer(storageV5 as never, owner)
     await owner.primer.whenIdle()
-    expect(owner.folderListings.get(dropInDir)).toBeUndefined()
-    expect(owner.parsedFiles.get(basePath)).toBeUndefined()
-    expect(owner.primedFiles.has(basePath)).toBe(false)
+    expect(owner.folderListings.get(dropInDir)).toEqual([])
+    expect(owner.parsedFiles.get(basePath)).toEqual({
+      settings: null,
+      errors: [],
+    })
+    expect(owner.primedFiles.has(basePath)).toBe(true)
     owner.primer.dispose()
   })
 })

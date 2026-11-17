@@ -10,7 +10,7 @@ import {
 } from '../../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
-import type { EffortLevel } from '../../utils/effort.js';
+import { type EffortLevel, getDisplayedEffortLevel, modelSupportsEffort, pdSessionEffort } from '../../utils/effort.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import {
   applyFastModeOnModelSwitch,
@@ -378,13 +378,17 @@ function isSonnet1mUnavailable(model: string): boolean {
 function ShowModelAndClose({ onDone }: { onDone: (result?: string) => void }): React.ReactNode {
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
-  const effortValue = useAppState(s => s.effortValue);
+  const effortLevel = useAppState(s => pdSessionEffort(s));
   const displayModel = em(renderModelLabel(mainLoopModel));
-  const effortInfo = effortValue !== undefined ? ` (effort: ${effortValue})` : '';
+  const effortInfo = effortLevel !== undefined ? ` (effort: ${effortLevel})` : '';
 
-  if (mainLoopModelForSession) {
+  if (
+    mainLoopModelForSession !== null &&
+    mainLoopModelForSession !== undefined &&
+    mainLoopModelForSession !== mainLoopModel
+  ) {
     onDone(
-      `Current model: ${em(renderModelLabel(mainLoopModelForSession))} (session override from plan mode)\nBase model: ${displayModel}${effortInfo}`,
+      `Current model: ${em(renderModelLabel(mainLoopModelForSession))} (this session only)${effortInfo}\nBase model: ${displayModel}`,
     );
   } else {
     onDone(`Current model: ${displayModel}${effortInfo}`);

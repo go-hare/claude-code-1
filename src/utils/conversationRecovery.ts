@@ -856,7 +856,7 @@ export async function loadConversationForResume(
     // densable 2.1.214 #47: I1e(r.forkSession?"fork":"resume", ...)
     const hookMessages = await processSessionStartHooks(
       opts?.forkSession ? 'fork' : 'resume',
-      { sessionId },
+      { sessionId, messages },
     )
 
     // Append hook messages to the conversation

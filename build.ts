@@ -19,7 +19,7 @@ const features = [...new Set([...DEFAULT_BUILD_FEATURES, ...envFeatures])]
 const result = await Bun.build({
   entrypoints: ['src/entrypoints/cli.tsx'],
   outdir,
-  target: 'bun',
+  target: 'node',
   splitting: true,
   sourcemap: 'linked',
   define: {

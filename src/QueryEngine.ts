@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import { pruneDetachedToolCalls } from './utils/detachedToolCallStore.js'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
 import last from 'lodash-es/last.js'
@@ -7,6 +8,7 @@ import {
   getSessionId,
   isSessionPersistenceDisabled,
 } from 'src/bootstrap/state.js'
+import { getBootstrapSession } from 'src/utils/sessionRoot.js'
 import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
@@ -95,13 +97,17 @@ import {
   stampVerifiedSlackHumanTurn,
 } from './utils/processUserInput/artStamps.js'
 import { createPromptSubmitEntries } from './utils/processUserInput/promptSubmitEntries.js'
-import { fetchSystemPromptParts } from './utils/queryContext.js'
+import {
+  createSetInProgressToolUseIDs,
+  fetchSystemPromptParts,
+} from './utils/queryContext.js'
 import {
   credentialsStoreFor,
   getPinnedCredentials,
 } from './utils/storageV5/credentialsStore.js'
 import { getPinnedStorageV5 } from './utils/storageV5/index.js'
 import { ToolStateSlots } from './utils/toolState.js'
+import { createTaskRegistry, type TaskRegistry } from './utils/taskRegistry.js'
 import { setCwd } from './utils/Shell.js'
 import {
   flushSessionStorage,
@@ -235,6 +241,8 @@ export type QueryEngineConfig = {
    * bag becomes one slot map for this engine.
    */
   toolState?: ToolStateSlots
+  /** Session registry shared by print turns and side questions. */
+  taskRegistry?: TaskRegistry
   /** Session credentials handle. Headless falls back to the pinned store. */
   credentials?: ToolUseContext['credentials']
   /**
@@ -292,10 +300,15 @@ export class QueryEngine {
   private loadedNestedMemoryPaths = new Set<string>()
   private pendingNestedMemoryTriggers = new Set<string>()
   private sessionToolState: ToolStateSlots
+  /** densable `Xm(e,o)` — caller's session registry, or engine-local fallback. */
+  private taskRegistry: TaskRegistry
 
   constructor(config: QueryEngineConfig) {
     this.config = config
     this.sessionToolState = config.toolState ?? new ToolStateSlots()
+    this.taskRegistry =
+      config.taskRegistry ??
+      createTaskRegistry(config.getAppState, config.setAppState)
     this.mutableMessages = config.initialMessages ?? []
     this.abortController = config.abortController ?? createAbortController()
     this.permissionDenials = []
@@ -350,6 +363,8 @@ export class QueryEngine {
       fileAttachments?: unknown[]
       frameTiming?: { enqueuedWallMs: number }
       clientPlatform?: string
+      /** densable BX `taskDelivery` — GetTask snapshot on As. */
+      taskDelivery?: unknown
     },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
@@ -506,10 +521,10 @@ export class QueryEngine {
     ) => {
       try {
         /* eslint-disable @typescript-eslint/no-require-imports */
-        const { leftoverIhrMain } =
+        const { leftoverIhr } =
           require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
         /* eslint-enable @typescript-eslint/no-require-imports */
-        leftoverIhrMain(getSessionId()).setRetryStatus(status)
+        leftoverIhr.main.setRetryStatus(status)
       } catch {
         // isolation — optional
       }
@@ -519,10 +534,10 @@ export class QueryEngine {
     ) => {
       try {
         /* eslint-disable @typescript-eslint/no-require-imports */
-        const { leftoverIhrMain } =
+        const { leftoverIhr } =
           require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
         /* eslint-enable @typescript-eslint/no-require-imports */
-        leftoverIhrMain(getSessionId()).setMode(mode)
+        leftoverIhr.main.setMode(mode)
       } catch {
         // isolation — optional
       }
@@ -538,7 +553,9 @@ export class QueryEngine {
       // slash-command processing) keeps the no-op — nothing else calls
       // setMessages past that point.
       setMessages: fn => {
-        this.mutableMessages = fn(this.mutableMessages)
+        const next = fn(this.mutableMessages)
+        pruneDetachedToolCalls(this.mutableMessages, next)
+        this.mutableMessages = next
       },
       onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
@@ -567,6 +584,8 @@ export class QueryEngine {
         messageClientPlatform: options?.clientPlatform,
       },
       getAppState,
+      taskRegistry: this.taskRegistry,
+      session: getBootstrapSession(),
       setAppState,
       // densable y8r(setAppState) for headless/SDK ToolUseContext
       ...createAppStatePermissionContextSetters(setAppState),
@@ -590,7 +609,7 @@ export class QueryEngine {
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
-      setInProgressToolUseIDs: () => {},
+      setInProgressToolUseIDs: createSetInProgressToolUseIDs(this.taskRegistry),
       setResponseLength: () => {},
       setRetryStatus: leftoverIhrSdkRetry,
       setStreamMode: leftoverIhrSdkMode,
@@ -618,6 +637,10 @@ export class QueryEngine {
     // Handle orphaned permission (only once per engine lifetime)
     if (orphanedPermission && !this.hasHandledOrphanedPermission) {
       this.hasHandledOrphanedPermission = true
+      const { clearTurnAttributionKey } = await import(
+        './utils/turnAttribution.js'
+      )
+      clearTurnAttributionKey()
       for await (const message of handleOrphanedPermission(
         orphanedPermission,
         tools,
@@ -634,6 +657,10 @@ export class QueryEngine {
       : configDeferredToolUse
     if (deferredToolUse) {
       this.hasHandledDeferredToolUse = true
+      const { clearTurnAttributionKey } = await import(
+        './utils/turnAttribution.js'
+      )
+      clearTurnAttributionKey()
       const resumeOutcome = yield* handleDeferredToolUse(
         deferredToolUse,
         tools,
@@ -732,6 +759,7 @@ export class QueryEngine {
       pollEventDeclared: options?.pollEventDeclared,
       aheadOfSessionStart: this.config.orphanedPermission !== undefined,
       entries: promptSubmitEntries,
+      taskDelivery: options?.taskDelivery,
     })
 
     // densable: coalesce/hold may force shouldQuery:false even when
@@ -933,6 +961,8 @@ export class QueryEngine {
         messageClientPlatform: options?.clientPlatform,
       },
       getAppState,
+      taskRegistry: this.taskRegistry,
+      session: getBootstrapSession(),
       setAppState,
       // densable y8r(setAppState) for headless/SDK ToolUseContext
       ...createAppStatePermissionContextSetters(setAppState),
@@ -956,7 +986,7 @@ export class QueryEngine {
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
-      setInProgressToolUseIDs: () => {},
+      setInProgressToolUseIDs: createSetInProgressToolUseIDs(this.taskRegistry),
       setResponseLength: () => {},
       setRetryStatus: leftoverIhrSdkRetry,
       setStreamMode: leftoverIhrSdkMode,
@@ -1950,7 +1980,9 @@ export async function* ask({
   fileAttachments,
   frameTiming,
   clientPlatform,
+  taskDelivery,
   toolState,
+  taskRegistry,
   credentials,
   cwd,
   tools,
@@ -2021,8 +2053,11 @@ export async function* ask({
   fileAttachments?: unknown[]
   frameTiming?: { enqueuedWallMs: number }
   clientPlatform?: string
+  /** densable BX `taskDelivery` — GetTask snapshot on As. */
+  taskDelivery?: unknown
   /** densable `wN` shared across print's per-command engines. */
   toolState?: ToolStateSlots
+  taskRegistry?: TaskRegistry
   credentials?: ToolUseContext['credentials']
   cwd: string
   tools: Tools
@@ -2093,6 +2128,7 @@ export async function* ask({
     orphanedPermission,
     deferredToolUse,
     toolState,
+    taskRegistry,
     credentials,
     ...(feature('HISTORY_SNIP')
       ? {
@@ -2138,6 +2174,7 @@ export async function* ask({
       fileAttachments,
       frameTiming,
       clientPlatform,
+      taskDelivery,
     })
   } finally {
     setReadFileCache(engine.getReadFileState())

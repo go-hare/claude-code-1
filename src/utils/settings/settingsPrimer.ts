@@ -30,6 +30,7 @@ import type {
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import { FLAG_SETTINGS_MAX_BYTES } from './constants.js'
 import type { SettingSource } from './constants.js'
+import { getManagedFilePath } from './managedPath.js'
 import {
   getSettingsOwner,
   resetSettingsCache,
@@ -64,6 +65,18 @@ type PrimerState =
 /** Official Fte @179442060. */
 export function emptyParsedSettings(): ParsedSettings {
   return { settings: null, errors: [] }
+}
+
+/** Official F — empty managed drop-in listing names. */
+const EMPTY_MANAGED_LISTING: string[] = []
+Object.freeze(EMPTY_MANAGED_LISTING)
+
+/**
+ * Official nyn @179416890 — densable stub always undefined.
+ * Do not invent reading CLAUDE_CODE_MANAGED_SETTINGS_PATH here.
+ */
+function explicitManagedSettingsPath(): string | undefined {
+  return undefined
 }
 
 /** Official Qve(path) @179441964. */
@@ -324,20 +337,82 @@ async function ownershipProbeAhead(
 
 /**
  * Official v @179529582 — seed attested system-absent managed tier into store.
- * Product-cut: do not seed OS managed-settings.json / drop-ins.
- * Gold: gold-248-wKn-v-seed.txt
+ * Gold: gold-248-wKn-v-seed.txt. `$Me(nx())` leftover is `[getManagedFilePath()]`
+ * only (WSL inherit not leftover).
  */
 function seedAttestedSystemTier(
-  _storageV5: StorageV5,
-  _store: SettingsOwner,
-  _epoch: number,
+  storageV5: StorageV5,
+  store: SettingsOwner,
+  epoch: number,
 ):
   | {
       listings: { dir: string; names: readonly string[] }[]
       layers: { path: string; parsed: ParsedSettings }[]
     }
   | undefined {
-  return undefined
+  if (
+    storageV5.hostFiles.serving('system') !== 'absent' ||
+    store.systemAttestationContradicted
+  ) {
+    return
+  }
+  if (explicitManagedSettingsPath() !== undefined) {
+    if (!store.systemSpaceServingLogged) {
+      store.systemSpaceServingLogged = true
+      logForDebugging(
+        "settingsPrime: the host attests no OS policy folder ('system' absent) but this process was handed a managed-settings directory explicitly (CLAUDE_CODE_MANAGED_SETTINGS_PATH); its files are read by the policy walk itself",
+      )
+    }
+    return
+  }
+  const roots = [getManagedFilePath()].map(r => ({
+    dropInDir: join(r, 'managed-settings.d'),
+    basePath: join(r, 'managed-settings.json'),
+  }))
+  if (
+    roots.some(({ basePath, dropInDir }) =>
+      store.walkReadManagedFileIn(basePath, dropInDir),
+    )
+  ) {
+    store.systemAttestationContradicted = true
+    for (const { basePath, dropInDir } of roots) {
+      store.clearFolderListing(dropInDir, epoch)
+      store.unseedParsedFile(basePath, 'policySettings', epoch)
+    }
+    logError(
+      Error(
+        "settings: a managed-settings file was read from a folder the host attested absent ('system' space); the attestation is ignored for the rest of this process and the policy walk reads the host's files itself",
+      ),
+    )
+    return
+  }
+  if (!store.systemSpaceServingLogged) {
+    store.systemSpaceServingLogged = true
+    logForDebugging(
+      "settingsPrime: the host attests this machine has no OS policy folder ('system' absent); the policy walk is served an empty managed-settings file tier without reading the host",
+    )
+  }
+  for (const { basePath, dropInDir } of roots) {
+    store.seedFolderListing(dropInDir, EMPTY_MANAGED_LISTING, epoch)
+    if (!store.walkRead(basePath)) {
+      store.seedParsedFile(
+        basePath,
+        'policySettings',
+        emptyParsedSettings(),
+        epoch,
+      )
+    }
+  }
+  return {
+    listings: roots.map(({ dropInDir }) => ({
+      dir: dropInDir,
+      names: EMPTY_MANAGED_LISTING,
+    })),
+    layers: roots.map(({ basePath }) => ({
+      path: basePath,
+      parsed: emptyParsedSettings(),
+    })),
+  }
 }
 
 /**
@@ -651,12 +726,19 @@ function clearManagedSettingsSeeds(store: SettingsOwner, epoch: number): void {
   }
 }
 
-/** Official O @179531012 — managed-settings seedLogged. Product-cut: no OS policy files. */
+/**
+ * Official O @179531012 — managed-settings seedLogged.
+ * Gold: if v() seeded the attested-absent empty tier, keep it (do not M()).
+ * vKn OS walk is not leftover this pass; M() remains the vKn-undefined path.
+ */
 async function seedManagedSettingsTier(
-  _storageV5: StorageV5,
+  storageV5: StorageV5,
   store: SettingsOwner,
   epoch: number,
 ): Promise<boolean> {
+  if (seedAttestedSystemTier(storageV5, store, epoch) !== undefined) {
+    return store.epoch === epoch
+  }
   clearManagedSettingsSeeds(store, epoch)
   return true
 }

@@ -2406,6 +2406,26 @@ describe('densable 2.1.289 print extras unique English', () => {
   })
 
   test('ultrareview_launch unique English and fallback ctx launches', async () => {
+    // Partial business-module mocks must stay in a child: Bun's mock.module
+    // replaces exports process-wide, including later review regression tests.
+    if (process.env.PRINT_ULTRAREVIEW_TEST_CHILD !== '1') {
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          'test',
+          import.meta.path,
+          '--test-name-pattern',
+          'ultrareview_launch unique English and fallback ctx launches',
+        ],
+        {
+          env: { ...process.env, PRINT_ULTRAREVIEW_TEST_CHILD: '1' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      )
+      expect(child.exitCode, child.stderr.toString()).toBe(0)
+      return
+    }
     const { ULTRAREVIEW_LAUNCH_FAILED, ULTRAREVIEW_UNAVAILABLE } = await import(
       '../printControlExtras.js'
     )

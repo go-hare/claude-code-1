@@ -18,13 +18,16 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { authMock } from '../../../../tests/mocks/auth.js'
+import { authMock, restoreAuthMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 import {
   oauthClientMock,
   oauthConfigMock,
+  restoreOauthClientMock,
+  restoreOauthConfigMock,
+  restoreTeleportApiMock,
   teleportApiMock,
 } from '../../../../tests/mocks/oauthSurface.js'
 
@@ -101,6 +104,10 @@ beforeAll(async () => {
 
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('src/utils/teleport/api.js', restoreTeleportApiMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
+  mock.module('src/services/oauth/client.js', restoreOauthClientMock)
 })
 
 beforeEach(() => {

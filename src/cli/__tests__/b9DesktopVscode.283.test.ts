@@ -128,7 +128,7 @@ describe('densable 2.1.283 B9 desktop/vscode/cowork commander', () => {
     expect(oauth).toContain('CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID')
     expect(oauth).toContain("startsWith('00000000-')")
     expect(oauth).toContain('allow_design_sync')
-    expect(oauth).toContain("getAPIProvider() === 'firstParty'")
+    expect(oauth).toContain("getAPIProvider() !== 'firstParty'")
     expect(oauth).toContain('env.isSSH()')
     expect(oauth).toContain('The Claude Design OAuth client is not configured')
     expect(oauth).toContain('user:design:read')

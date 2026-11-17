@@ -35,6 +35,9 @@ function dispatchLogEvent(
   logEventStack[logEventStack.length - 1]!(name, metadata)
 }
 
+/** Restore the pre-mock snapshot. Pass to `mock.module` in `afterAll`. */
+export const restoreAnalyticsMock = () => ({ ...analyticsSnap })
+
 export function analyticsMock(): typeof realAnalytics {
   return {
     ...analyticsSnap,

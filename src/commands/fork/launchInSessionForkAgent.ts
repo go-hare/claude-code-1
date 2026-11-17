@@ -24,10 +24,6 @@ import { getMainLoopModel } from '../../utils/model/model.js'
 import { createUserMessage } from '../../utils/messages.js'
 import { getQuerySourceForAgent } from '../../utils/promptCategory.js'
 import {
-  assertAndTakeConcurrencySlot,
-  assertCanSpawnSubagent,
-} from '../../utils/sessionSpawnCaps.js'
-import {
   recordSubagentSpawn,
   webFetchSavedFilesForAgent,
 } from '../../utils/subagentSpawnLedger.js'
@@ -36,6 +32,7 @@ import {
   addKeepaliveReason,
   agentKeepaliveReason,
 } from '../../utils/task/framework.js'
+import { createTaskRegistry } from '../../utils/taskRegistry.js'
 import { getParentSessionId } from '../../utils/teammate.js'
 import { asAgentId, type AgentId } from '../../types/ids.js'
 import { createAgentId } from '../../utils/uuid.js'
@@ -180,33 +177,9 @@ export async function launchInSessionForkAgent(
   const setAppState: SetAppState =
     context.setAppStateForTasks ?? context.setAppState
   const rootSetAppState = setAppState
-
-  try {
-    assertCanSpawnSubagent({
-      abortSignal: context.abortController.signal,
-      allowInterrupt: true,
-      maxBudgetUsd: context.options.maxBudgetUsd,
-    })
-  } catch (error) {
-    logForDebugging(`In-session fork: spawn refused (${error})`, {
-      level: 'error',
-    })
-    return null
-  }
-
-  let releaseConcurrencySlot: (() => void) | undefined
-  try {
-    releaseConcurrencySlot = assertAndTakeConcurrencySlot({
-      mainLoopModel: context.options.mainLoopModel,
-      effortValue: appState.effortValue,
-      ultracode: appState.ultracode,
-    })
-  } catch (error) {
-    logForDebugging(`In-session fork: concurrency (${error})`, {
-      level: 'error',
-    })
-    return null
-  }
+  const taskRegistry =
+    context.taskRegistry ??
+    createTaskRegistry(context.getAppState, rootSetAppState)
 
   const parentAgentId = context.agentId
   const ownerId =
@@ -241,6 +214,7 @@ export async function launchInSessionForkAgent(
     outputFileReadable: canReadOutputFile,
     model: resolvedAgentModel,
     attachOwnerKeepalive: false,
+    getAppState: context.getAppState,
   })
 
   if (name && !isReservedSpawnAgentName(name)) {
@@ -252,8 +226,10 @@ export async function launchInSessionForkAgent(
   }
 
   if (!getIsNonInteractiveSession()) {
-    addKeepaliveReason(ownerId, agentKeepaliveReason(agentId), rootSetAppState)
+    addKeepaliveReason(ownerId, agentKeepaliveReason(agentId), taskRegistry)
   }
+
+  const releaseConcurrencySlot = taskRegistry.takeConcurrencySlot()
 
   const asyncAgentContext: SubagentContext = {
     agentId,

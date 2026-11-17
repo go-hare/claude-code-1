@@ -27,11 +27,35 @@ import {
 } from '../../modelCost.js'
 import { DENSABLE_EHL_CATALOG } from '../densableEhlCatalog.219.js'
 
-describe('densable 2.1.219 full EHl catalog', () => {
-  test('SQ: schema_version 1, 19 models, 8 pricing tiers', () => {
+// Original catalog entries stay covered as the runtime bake advances to 289.
+const LEGACY_CATALOG_IDS = [
+  'claude-3-5-haiku',
+  'claude-haiku-4-5',
+  'claude-3-5-sonnet',
+  'claude-3-7-sonnet',
+  'claude-sonnet-4-0',
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-sonnet-5',
+  'claude-opus-4-0',
+  'claude-opus-4-1',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-opus-5',
+  'claude-opus-5-5',
+  'claude-fable-5',
+  'claude-fable-5-1',
+  'claude-mythos-5',
+]
+const CURRENT_CATALOG_IDS = [...LEGACY_CATALOG_IDS, 'claude-sonnet-5-5'].sort()
+
+describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () => {
+  test('SQ: schema_version 1, legacy entries plus Sonnet 5.5, 8 pricing tiers', () => {
     const sq = getDensableModelCatalog()
     expect(sq.schema_version).toBe(1)
-    expect(sq.models).toHaveLength(19)
+    expect(sq.models.map(model => model.id).sort()).toEqual(CURRENT_CATALOG_IDS)
     expect(Object.keys(sq.pricing_tiers).sort()).toEqual(
       [
         'haiku_35',
@@ -48,7 +72,7 @@ describe('densable 2.1.219 full EHl catalog', () => {
     expect(sq.latest_per_family).toEqual({
       fable: 'claude-fable-5-1',
       opus: 'claude-opus-5-5',
-      sonnet: 'claude-sonnet-5',
+      sonnet: 'claude-sonnet-5-5',
       haiku: 'claude-haiku-4-5',
     })
     expect(Object.keys(sq.aliases).sort()).toEqual([
@@ -130,7 +154,11 @@ describe('densable 2.1.219 full EHl catalog', () => {
 
   test('AHl aliases', () => {
     expect(resolveCatalogAlias('opus')).toBe('claude-opus-5-5')
-    expect(resolveCatalogAlias('sonnet')).toBe('claude-sonnet-5')
+    expect(resolveCatalogAlias('sonnet')).toBe('claude-sonnet-5-5')
+    expect(resolveCatalogAlias('sonnet', 'anthropic_aws')).toBe(
+      'claude-sonnet-4-6',
+    )
+    expect(resolveCatalogAlias('sonnet', 'gateway')).toBe('claude-sonnet-4-6')
     expect(resolveCatalogAlias('haiku')).toBe('claude-haiku-4-5')
     expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-1')
     expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
@@ -139,9 +167,14 @@ describe('densable 2.1.219 full EHl catalog', () => {
     expect(resolveCatalogAlias('nope')).toBeUndefined()
   })
 
-  test('Tig expands all 19 models', () => {
+  test('Tig expands all priced models and preserves legacy pricing', () => {
     const tig = expandTigModelCosts()
-    expect(Object.keys(tig)).toHaveLength(19)
+    const pricedIds = getDensableModelCatalog()
+      .models.filter(model => resolveCatalogModelPricing(model) !== undefined)
+      .map(model => model.id)
+      .sort()
+    expect(Object.keys(tig).sort()).toEqual(pricedIds)
+    for (const id of LEGACY_CATALOG_IDS) expect(tig[id]).toBeDefined()
     expect(tig['claude-opus-5']).toEqual(COST_TIER_5_25)
     expect(tig['claude-opus-4-0']).toEqual(COST_TIER_15_75)
     expect(tig['claude-fable-5']).toEqual(COST_TIER_10_50)
@@ -167,8 +200,22 @@ describe('densable 2.1.219 full EHl catalog', () => {
   })
 
   test('back-compat DENSABLE_CATALOG_MODELS / CAPABILITIES', () => {
-    expect(Object.keys(DENSABLE_CATALOG_MODELS)).toHaveLength(19)
-    expect(Object.keys(DENSABLE_CATALOG_CAPABILITIES)).toHaveLength(19)
+    expect(Object.keys(DENSABLE_CATALOG_MODELS).sort()).toEqual(
+      CURRENT_CATALOG_IDS,
+    )
+    expect(Object.keys(DENSABLE_CATALOG_CAPABILITIES).sort()).toEqual(
+      CURRENT_CATALOG_IDS,
+    )
+    for (const model of getDensableModelCatalog().models) {
+      expect(DENSABLE_CATALOG_MODELS[model.id]).toEqual({
+        id: model.id,
+        capabilities: model.capabilities,
+        pricing: typeof model.pricing === 'string' ? model.pricing : '',
+      })
+      expect(DENSABLE_CATALOG_CAPABILITIES[model.id]).toEqual(
+        model.capabilities,
+      )
+    }
     expect(DENSABLE_CATALOG_MODELS['claude-opus-5']!.pricing).toBe('tier_5_25')
   })
 })

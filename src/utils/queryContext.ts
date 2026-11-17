@@ -9,6 +9,8 @@
  * import from here (QueryEngine.ts, cli/print.ts).
  */
 
+import { getMainThreadAgentId } from '../bootstrap/state.js'
+import { getBootstrapSession } from './sessionRoot.js'
 import type { Command } from '../commands.js'
 import { getSystemPrompt } from '../constants/prompts.js'
 import { getSystemContext, getUserContext } from '../context.js'
@@ -25,11 +27,40 @@ import type { CacheSafeParams } from './forkedAgent.js'
 import { getMainLoopModel } from './model/model.js'
 import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
 import { createAppStatePermissionContextSetters } from './permissions/permissionContextSetters.js'
+import type { TaskRegistry } from './taskRegistry.js'
 import { asSystemPrompt } from './systemPromptType.js'
 import {
   shouldEnableThinkingByDefault,
   type ThinkingConfig,
 } from './thinking.js'
+
+function inProgressToolUseIDsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  for (const id of a) {
+    if (!b.has(id)) return false
+  }
+  return true
+}
+
+/**
+ * densable `q4n(store.transcripts, Ve(), action)` — print/SDK writes
+ * in-progress tool-use IDs onto the main-thread transcript (`Ve` leftover =
+ * `getMainThreadAgentId`). Interactive DualInk keeps its own React setter.
+ */
+export function createSetInProgressToolUseIDs(
+  taskRegistry: TaskRegistry,
+): ToolUseContext['setInProgressToolUseIDs'] {
+  return f => {
+    taskRegistry.updateTranscript(getMainThreadAgentId(), prev => {
+      const next = f(new Set(prev.inProgressToolUseIDs))
+      if (inProgressToolUseIDsEqual(next, prev.inProgressToolUseIDs)) {
+        return prev
+      }
+      return { ...prev, inProgressToolUseIDs: next }
+    })
+  }
+}
 
 /**
  * Fetch the three context pieces that form the API cache-key prefix:
@@ -96,6 +127,7 @@ export async function buildSideQuestionFallbackParams({
   messages,
   readFileState,
   toolState,
+  taskRegistry,
   credentials,
   getAppState,
   setAppState,
@@ -111,6 +143,7 @@ export async function buildSideQuestionFallbackParams({
   readFileState: FileStateCache
   /** densable awr `toolState:l` — session bag passed in. */
   toolState: ToolStateSlots
+  taskRegistry: TaskRegistry
   credentials?: ToolUseContext['credentials']
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
@@ -174,11 +207,13 @@ export async function buildSideQuestionFallbackParams({
     toolState,
     credentials: credentials ?? getPinnedCredentials(),
     getAppState,
+    taskRegistry,
+    session: getBootstrapSession(),
     setAppState,
     // densable y8r(setAppState) for side-question / cache-safe ToolUseContext
     ...createAppStatePermissionContextSetters(setAppState),
     messages: forkContextMessages,
-    setInProgressToolUseIDs: () => {},
+    setInProgressToolUseIDs: createSetInProgressToolUseIDs(taskRegistry),
     setResponseLength: () => {},
     updateFileHistoryState: () => {},
     updateAttributionState: () => {},

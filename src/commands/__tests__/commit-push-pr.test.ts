@@ -73,11 +73,10 @@ const realNormalizeGitRemoteUrl = (url: string): string | null => {
   return null
 }
 
-function withGitRootCache(
-  stub: (startPath?: string) => string,
-  real: typeof gitSnap.findGitRoot,
-): typeof gitSnap.findGitRoot {
-  const fn = ((startPath?: string) => stub(startPath)) as typeof real
+function withGitRootCache<
+  T extends typeof gitSnap.findGitRoot | typeof gitSnap.findCanonicalGitRoot,
+>(stub: (startPath?: string) => string, real: T): T {
+  const fn = ((startPath?: string) => stub(startPath)) as T
   fn.cache = real.cache
   return fn
 }

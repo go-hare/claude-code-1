@@ -21,6 +21,7 @@ import { errorMessage } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
 import { updateTaskState } from '../utils/task/framework.js';
+import { createTaskRegistry } from '../utils/taskRegistry.js';
 import { archiveRemoteSession, teleportToRemote } from '../utils/teleport.js';
 import { pollForApprovedExitPlanMode, UltraplanPollError } from '../utils/ultraplan/ccrSession.js';
 import {
@@ -215,10 +216,11 @@ export async function stopUltraplan(
   taskId: string,
   sessionId: string,
   setAppState: (f: (prev: AppState) => AppState) => void,
+  getAppState: () => AppState,
 ): Promise<void> {
   // RemoteAgentTask.kill archives the session (with .catch) — no separate
   // archive call needed here.
-  await RemoteAgentTask.kill(taskId, setAppState);
+  await RemoteAgentTask.kill(taskId, createTaskRegistry(getAppState, setAppState));
   setAppState(prev =>
     prev.ultraplanSessionUrl || prev.ultraplanPendingChoice || prev.ultraplanLaunching
       ? {

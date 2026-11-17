@@ -26,14 +26,17 @@ import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 import {
   oauthConfigMock,
+  restoreOauthConfigMock,
+  restoreTeleportApiMock,
   teleportApiMock,
+  TEST_WORKSPACE_API_KEY,
 } from '../../../../tests/mocks/oauthSurface.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // ── Workspace API key mock ──────────────────────────────────────────────────
-const mockApiKey = 'sk-ant-api03-test-vaults-key'
+const mockApiKey = TEST_WORKSPACE_API_KEY
 
 mock.module('src/constants/oauth.js', oauthConfigMock)
 
@@ -95,6 +98,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/teleport/api.js', restoreTeleportApiMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
 })
 
 beforeEach(() => {

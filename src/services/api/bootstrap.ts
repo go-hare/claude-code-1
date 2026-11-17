@@ -42,6 +42,8 @@ const bootstrapResponseSchema = lazySchema(() =>
         updated_at: z.string(),
         data_source: z.string(),
         override_user_selection: z.boolean(),
+        default_effort_level: z.string().nullish(),
+        override_user_effort: z.boolean().nullish(),
       })
       .nullish(),
     // densable model_access → modelAccessCache (S8t maxEffortLevel).

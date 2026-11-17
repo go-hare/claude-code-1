@@ -4,7 +4,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import type { HookResultMessage } from '../types/message.js'
+import type { HookResultMessage, Message } from '../types/message.js'
 import { createAttachmentMessage, resetSentSkillNames } from './attachments.js'
 import { logContextWindowEnforcementStartupNotices } from './context.js'
 import { logForDebugging } from './debug.js'
@@ -23,6 +23,7 @@ type SessionStartHooksOptions = {
   agentType?: string
   model?: string
   forceSyncExecution?: boolean
+  messages?: Message[]
 }
 
 // Set by processSessionStartHooks when a hook emits initialUserMessage;
@@ -89,6 +90,7 @@ export async function processSessionStartHooks(
     agentType,
     model,
     forceSyncExecution,
+    messages,
   }: SessionStartHooksOptions = {},
 ): Promise<HookResultMessage[]> {
   // densable ipr — Unn awaits this latch unless the uuid is ahead of
@@ -226,6 +228,7 @@ export async function processSessionStartHooks(
       undefined,
       undefined,
       forceSyncExecution,
+      messages,
     )) {
       if (hookResult.message) {
         hookMessages.push(hookResult.message)

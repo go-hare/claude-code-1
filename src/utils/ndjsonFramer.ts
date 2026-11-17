@@ -10,6 +10,11 @@ import { StringDecoder } from 'node:string_decoder'
 
 export type NdjsonFramerOptions = {
   maxFrameBytes?: number
+  /**
+   * densable UDS recv BUt — JS string `.length` after UTF-8 decode (not bytes).
+   * Gold peel idx 208212558: `c+=k` then `c.length>BUt` (BUt=1048576 chars).
+   */
+  maxFrameChars?: number
   onFrameError?: (error: Error) => void
   destroyOnFrameError?: boolean
   onInvalidFrame?: (error: Error) => void
@@ -33,21 +38,49 @@ export function attachNdjsonFramer<T = unknown>(
 ): void {
   let buffer = ''
   let bufferBytes = 0
+  let discardUntilNewline = false
   const maxFrameBytes = options.maxFrameBytes ?? Number.POSITIVE_INFINITY
+  const maxFrameChars = options.maxFrameChars ?? Number.POSITIVE_INFINITY
+  const shouldDestroyOnFrameError = options.destroyOnFrameError ?? true
   // Holds partial multibyte sequences across chunk boundaries. Decoding each
   // chunk independently would turn any UTF-8 character split by the socket into
   // replacement characters. Newline (0x0a) never appears inside a multibyte
   // sequence, so scanning for it at the byte level stays safe.
   const decoder = new StringDecoder('utf8')
 
+  const resetDecoderAndBuffer = (): void => {
+    buffer = ''
+    bufferBytes = 0
+    decoder.end()
+  }
+
   const rejectOversizedFrame = (bytes: number): void => {
     const error = new Error(
       `NDJSON frame exceeded ${maxFrameBytes} bytes (${bytes})`,
     )
     options.onFrameError?.(error)
-    if (options.destroyOnFrameError ?? true) {
+    if (shouldDestroyOnFrameError) {
       socket.destroy(error)
     }
+  }
+
+  const rejectOversizedChars = (chars: number): void => {
+    const error = new Error(
+      `NDJSON frame exceeded ${maxFrameChars} chars (${chars})`,
+    )
+    options.onFrameError?.(error)
+    if (shouldDestroyOnFrameError) {
+      socket.destroy(error)
+    }
+  }
+
+  const exceedsCharCap = (): boolean => {
+    if (!Number.isFinite(maxFrameChars) || buffer.length <= maxFrameChars) {
+      return false
+    }
+    rejectOversizedChars(buffer.length)
+    resetDecoderAndBuffer()
+    return true
   }
 
   const rejectInvalidFrame = (error: unknown): void => {
@@ -73,20 +106,39 @@ export function attachNdjsonFramer<T = unknown>(
     for (let index = 0; index < chunk.length; index++) {
       if (chunk[index] !== 0x0a) continue
 
+      if (discardUntilNewline) {
+        discardUntilNewline = false
+        resetDecoderAndBuffer()
+        start = index + 1
+        continue
+      }
+
       const segmentBytes = index - start
       if (
         Number.isFinite(maxFrameBytes) &&
         bufferBytes + segmentBytes > maxFrameBytes
       ) {
         rejectOversizedFrame(bufferBytes + segmentBytes)
-        return
+        resetDecoderAndBuffer()
+        if (shouldDestroyOnFrameError) return
+        start = index + 1
+        continue
       }
 
       buffer += decoder.write(chunk.subarray(start, index))
+      if (exceedsCharCap()) {
+        if (shouldDestroyOnFrameError) return
+        start = index + 1
+        continue
+      }
       emitLine(buffer)
       buffer = ''
       bufferBytes = 0
       start = index + 1
+    }
+
+    if (discardUntilNewline) {
+      return
     }
 
     const tailBytes = chunk.length - start
@@ -95,12 +147,18 @@ export function attachNdjsonFramer<T = unknown>(
       bufferBytes + tailBytes > maxFrameBytes
     ) {
       rejectOversizedFrame(bufferBytes + tailBytes)
+      resetDecoderAndBuffer()
+      discardUntilNewline = true
       return
     }
 
     if (tailBytes > 0) {
       buffer += decoder.write(chunk.subarray(start))
       bufferBytes += tailBytes
+      if (exceedsCharCap()) {
+        discardUntilNewline = true
+        return
+      }
     }
   })
 }

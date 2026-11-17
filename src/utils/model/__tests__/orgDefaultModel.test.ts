@@ -116,7 +116,7 @@ describe('orgDefaultModel', () => {
     expect(getOrgModelDefaultCache()).toBeNull()
   })
 
-  test('orgUuid binding: four combinations', () => {
+  test('orgUuid binding rejects only different known organizations', () => {
     const base = {
       name: 'claude-old-org-model',
       updated_at: '2026-01-01T00:00:00Z',
@@ -124,10 +124,10 @@ describe('orgDefaultModel', () => {
       override_user_selection: true,
     }
 
-    // 1) cache.orgUuid = org-old, current org = undefined → reject (no leak)
+    // 1) Bound cache with unknown current identity is accepted (gold JQe).
     mockCache = { ...base, orgUuid: 'org-old' }
     mockOrgUuid = undefined
-    expect(getOrgModelDefaultCache()).toBeNull()
+    expect(getOrgModelDefaultCache()?.name).toBe('claude-old-org-model')
 
     // 2) cache.orgUuid = org-old, current org = org-old → accept
     mockOrgUuid = 'org-old'
@@ -138,10 +138,10 @@ describe('orgDefaultModel', () => {
     mockOrgUuid = 'org-new'
     expect(getOrgModelDefaultCache()).toBeNull()
 
-    // 4) unbound legacy cache + current org set → reject
+    // 4) Legacy unbound cache remains usable after org identity is known.
     mockCache = { ...base }
     mockOrgUuid = 'org-new'
-    expect(getOrgModelDefaultCache()).toBeNull()
+    expect(getOrgModelDefaultCache()?.name).toBe('claude-old-org-model')
 
     // 5) unbound legacy cache + no current org → accept (same identity: null)
     mockOrgUuid = undefined

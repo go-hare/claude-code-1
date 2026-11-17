@@ -35,7 +35,10 @@ import type {
   SystemMessage,
   UserMessage,
 } from '../../types/message.js'
-import { getMainLoopModelFromLayers } from '../../engine/permissionLayerReaders.js'
+import {
+  getEffortValueFromLayers,
+  getMainLoopModelFromLayers,
+} from '../../engine/permissionLayerReaders.js'
 import {
   buildThinkingStripPlanFromMessages,
   carryThinkingStripFromSummarized,
@@ -126,7 +129,6 @@ import {
   roughTokenCountEstimation,
   roughTokenCountEstimationForMessages,
 } from '../tokenEstimation.js'
-import type { SDKStatus } from '../../entrypoints/agentSdkTypes.js'
 import { groupMessagesByApiRound } from './grouping.js'
 import {
   getCompactPrompt,
@@ -333,6 +335,30 @@ export const ERROR_MESSAGE_USER_ABORT = 'API Error: Request was aborted.'
 export const ERROR_MESSAGE_INCOMPLETE_RESPONSE =
   'Compaction interrupted · This may be due to network issues — please try again.'
 
+export class CompactionBlockedByHookError extends Error {}
+
+export function throwIfCompactBlockedByHook(
+  result: { blockedBy?: string },
+  context: Pick<ToolUseContext, 'addNotification'>,
+  options?: { suppressNotification?: boolean },
+): void {
+  if (!result.blockedBy) return
+  logForDebugging(
+    `Compaction blocked by PreCompact hook: ${result.blockedBy}`,
+    { level: 'warn' },
+  )
+  if (!options?.suppressNotification)
+    context.addNotification?.({
+      key: 'compaction-blocked-by-hook',
+      text: 'compaction blocked by PreCompact hook',
+      priority: 'immediate',
+      color: 'warning',
+    })
+  throw new CompactionBlockedByHookError(
+    `Compaction blocked by PreCompact hook: ${result.blockedBy}`,
+  )
+}
+
 export interface CompactionResult {
   boundaryMarker: SystemMessage
   summaryMessages: UserMessage[]
@@ -496,6 +522,7 @@ export async function compactConversation(
   isAutoCompact: boolean = false,
   recompactionInfo?: RecompactionInfo,
   stripNonEssential: boolean = false,
+  preCompactHookResult?: Awaited<ReturnType<typeof executePreCompactHooks>>,
 ): Promise<CompactionResult> {
   try {
     // densable 2.1.214: refuse compact when EndConversation ended the session
@@ -516,20 +543,28 @@ export async function compactConversation(
     const appState = context.getAppState()
     void logPermissionContextForAnts(appState.toolPermissionContext, 'summary')
 
-    context.onCompactProgress?.({
-      type: 'hooks_start',
-      hookType: 'pre_compact',
-    })
+    let hookResult = preCompactHookResult
+    if (!hookResult) {
+      context.onCompactProgress?.({
+        type: 'hooks_start',
+        hookType: 'pre_compact',
+      })
 
-    // Execute PreCompact hooks
-    context.setSDKStatus?.('compacting')
-    const hookResult = await executePreCompactHooks(
-      {
-        trigger: isAutoCompact ? 'auto' : 'manual',
-        customInstructions: customInstructions ?? null,
-      },
-      context.abortController.signal,
-    )
+      // Execute PreCompact hooks
+      context.setSDKStatus?.('compacting')
+      hookResult = await executePreCompactHooks(
+        {
+          trigger: isAutoCompact ? 'auto' : 'manual',
+          customInstructions: customInstructions ?? null,
+        },
+        context.abortController.signal,
+        undefined,
+        context,
+      )
+      throwIfCompactBlockedByHook(hookResult, context, {
+        suppressNotification: isAutoCompact,
+      })
+    }
     customInstructions = mergeHookInstructions(
       customInstructions,
       hookResult.newCustomInstructions,
@@ -856,6 +891,8 @@ export async function compactConversation(
         compactSummary: summary,
       },
       context.abortController.signal,
+      undefined,
+      context,
     )
 
     const combinedUserDisplayMessage = [
@@ -888,7 +925,7 @@ export async function compactConversation(
     context.setStreamMode?.('requesting')
     context.setResponseLength?.(() => 0)
     context.onCompactProgress?.({ type: 'compact_end' })
-    context.setSDKStatus?.('' as SDKStatus)
+    context.setSDKStatus?.(null)
   }
 }
 
@@ -1112,7 +1149,10 @@ export async function partialCompactConversation(
         customInstructions: null,
       },
       context.abortController.signal,
+      undefined,
+      context,
     )
+    throwIfCompactBlockedByHook(hookResult, context)
 
     // Merge hook instructions with user feedback
     let customInstructions: string | undefined
@@ -1370,6 +1410,8 @@ export async function partialCompactConversation(
         compactSummary: summary,
       },
       context.abortController.signal,
+      undefined,
+      context,
     )
 
     // 'from': prefix-preserving → boundary; 'up_to': suffix → last summary
@@ -1399,7 +1441,7 @@ export async function partialCompactConversation(
     context.setStreamMode?.('requesting')
     context.setResponseLength?.(() => 0)
     context.onCompactProgress?.({ type: 'compact_end' })
-    context.setSDKStatus?.('' as SDKStatus)
+    context.setSDKStatus?.(null)
   }
 }
 
@@ -1408,6 +1450,7 @@ function addErrorNotificationIfNeeded(
   context: Pick<ToolUseContext, 'addNotification'>,
 ) {
   if (
+    !(error instanceof CompactionBlockedByHookError) &&
     !hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT) &&
     !hasExactErrorMessage(error, ERROR_MESSAGE_NOT_ENOUGH_MESSAGES)
   ) {
@@ -1635,7 +1678,7 @@ async function streamCompactSummary({
           querySource: 'compact',
           agents: context.options.agentDefinitions.activeAgents,
           mcpTools: [],
-          effortValue: appState.effortValue,
+          effortValue: getEffortValueFromLayers(context),
           langfuseTrace: context.langfuseTrace,
           thinkingStripPlan,
           advisorStripPlan,

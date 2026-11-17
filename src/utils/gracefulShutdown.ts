@@ -53,6 +53,10 @@ import { closeSentry } from './sentry.js'
 import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
 import { profileReport } from './startupProfiler.js'
 import { getCurrentWorktreeSession } from './worktree.js'
+import {
+  markShutdownCommitted,
+  resetShutdownCommittedForTests,
+} from './shutdownCommitted.js'
 
 /** densable `tlr` — G0 USASCII + SI. */
 const G0_USASCII = '\x1b(B\x0f'
@@ -541,11 +545,21 @@ export function isShuttingDown(): boolean {
 /** Official qje — tb().claimShutdown() on leftover `_G`. */
 export function claimShutdown(): void {
   shutdownInProgress = true
+  if (orphanCheckInterval !== undefined) {
+    clearInterval(orphanCheckInterval)
+    orphanCheckInterval = undefined
+  }
+}
+
+/** Official tb().releaseShutdownClaim() — undo tentative claim before commit. */
+export function releaseShutdownClaim(): void {
+  shutdownInProgress = false
 }
 
 /** Reset shutdown state - only for use in tests */
 export function resetShutdownState(): void {
   shutdownInProgress = false
+  resetShutdownCommittedForTests()
   resumeHintPrinted = false
   resumeHintOmitsWorktree = false
   printModeSignalHandlersRegistered = false
@@ -589,6 +603,7 @@ export async function gracefulShutdown(
     return
   }
   shutdownInProgress = true
+  markShutdownCommitted()
 
   // densable nst/WFl: Q6e(..., "process_exit") before oc(0, "prompt_input_exit").
   // Wire cancel here so every prompt_input_exit path clears quota auto-resume

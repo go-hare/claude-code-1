@@ -23,12 +23,16 @@ import {
   stepDownBlockedDefaultModel,
 } from './modelAllowlist.js'
 import { getAPIProvider } from './providers.js'
+import { getCanonicalName, parseUserSpecifiedModel } from './model.js'
+import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export type OrgModelDefaultCache = {
   name: string
   updated_at: string
   data_source: string
   override_user_selection: boolean
+  default_effort_level?: string | null
+  override_user_effort?: boolean | null
   /** Bound at cache-write time so a different org cannot inherit the value. */
   orgUuid?: string
 }
@@ -50,7 +54,12 @@ export type ResolvedDefaultModel = {
  * Read + validate the disk cache of org_model_default (official t_i).
  */
 export function getOrgModelDefaultCache(): OrgModelDefaultCache | null {
-  const config = getGlobalConfig()
+  let config: ReturnType<typeof getGlobalConfig>
+  try {
+    config = getGlobalConfig()
+  } catch {
+    return null
+  }
   const cached = config.orgModelDefaultCache
   if (
     cached == null ||
@@ -63,11 +72,9 @@ export function getOrgModelDefaultCache(): OrgModelDefaultCache | null {
     return null
   }
   const orgUuid = config.oauthAccount?.organizationUuid
-  // Bound cache must match current org identity exactly:
-  // - org-old cache must not leak into personal/API-key sessions (no org)
-  // - unbound legacy cache must not be inherited once the user has an org
-  // - org-A cache must not apply while signed into org-B
-  if ((cached.orgUuid ?? null) !== (orgUuid ?? null)) {
+  // densable JQe rejects a different known tenant, while accepting legacy
+  // unbound caches and sessions whose organization identity is not available.
+  if (cached.orgUuid != null && orgUuid != null && cached.orgUuid !== orgUuid) {
     return null
   }
   // Strip control characters from the model name (official densable).
@@ -80,6 +87,36 @@ export function getOrgModelDefaultCache(): OrgModelDefaultCache | null {
     return { ...cached, name: cleaned }
   }
   return cached
+}
+
+/** densable bIe — valid organization effort default for the matching model. */
+export function getOrgDefaultEffort(model: string): EffortLevel | null {
+  if (getAPIProvider() !== 'firstParty') return null
+  const cached = getOrgModelDefaultCache()
+  if (cached === null) return null
+  const level = cached.default_effort_level
+  if (
+    level !== 'low' &&
+    level !== 'medium' &&
+    level !== 'high' &&
+    level !== 'xhigh' &&
+    level !== 'max'
+  ) {
+    return null
+  }
+  const identity = (name: string) =>
+    getCanonicalName(
+      parseUserSpecifiedModel(name.trim().toLowerCase()),
+    ).replace(/\[1m\]$/i, '')
+  return identity(cached.name) === identity(model) ? level : null
+}
+
+/** densable YQn — only a usable org effort default masks user settings. */
+export function shouldOrgDefaultOverrideUserEffort(model: string): boolean {
+  return (
+    getOrgModelDefaultCache()?.override_user_effort === true &&
+    getOrgDefaultEffort(model) !== null
+  )
 }
 
 /**

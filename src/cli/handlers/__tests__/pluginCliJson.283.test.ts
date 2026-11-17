@@ -37,10 +37,20 @@ describe('plugin CLI --json / --accept-command densable 2.1.283', () => {
       join(ROOT, 'src/cli/handlers/pluginEval.ts'),
       'utf8',
     )
-    expect(src).toContain('No eval cases found${gt} under')
-    expect(src).toContain('discoverEvalCaseDirs')
-    expect(src).toContain('emptyCaseFilterText')
-    expect(src).toContain('resolveEvalTarget')
+    // Gold 289 $R delegates scanning to mc; refuse only after the suite returns.
+    const suite = src.indexOf('} = await runPluginEvalSuite({')
+    const empty = src.indexOf('report.cases.length === 0', suite)
+    const message = src.indexOf('No eval cases found${gt} under', empty)
+    expect(suite).toBeGreaterThan(-1)
+    expect(empty).toBeGreaterThan(suite)
+    expect(message).toBeGreaterThan(empty)
+    expect(src.slice(empty, message)).toContain('errors.length === 0')
+    expect(src.slice(empty, message)).toContain('!report.partial')
+    expect(src.slice(empty, message)).toContain('!abort.signal.aborted')
+    expect(src.slice(empty, message)).toContain(
+      'emptyCaseFilterText(options.case, options.tag)',
+    )
+    expect(src).toContain('screenEvalTarget(root, pluginId, trust)')
   })
 
   test('plugin eval commander wires gold $R flags', () => {

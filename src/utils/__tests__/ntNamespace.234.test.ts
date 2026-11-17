@@ -92,9 +92,13 @@ describe('densable lMp shell cwd read-back (234 #6)', () => {
   })
 
   test('accepts absolute local', () => {
-    expect(isSafeShellCwdReadBack('C:\\Users\\x\\proj', 'C:\\Users\\x')).toBe(
-      true,
-    )
+    if (process.platform === 'win32') {
+      expect(isSafeShellCwdReadBack('C:\\Users\\x\\proj', 'C:\\Users\\x')).toBe(
+        true,
+      )
+    } else {
+      expect(isSafeShellCwdReadBack('/Users/x/proj', '/Users/x')).toBe(true)
+    }
   })
 })
 

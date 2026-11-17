@@ -93,7 +93,8 @@ describe('densable 2.1.243 #36 I()/V0a/K0a cachedUsageUtilization', () => {
   test('I() is GlobalConfig cachedUsageUtilization, not a process Map', () => {
     const src = readFileSync(join(import.meta.dir, '../usage.ts'), 'utf8')
     expect(src).toContain('cachedUsageUtilization')
-    expect(src).toContain('USAGE_PERSIST_WRITE_DEBOUNCE_MS = 300_000')
+    // densable 2.1.289 MXe lowered write debounce from 300_000 to 60_000
+    expect(src).toContain('USAGE_PERSIST_WRITE_DEBOUNCE_MS = 60_000')
     expect(src).toContain('USAGE_PERSIST_READ_TTL_MS = 3_600_000')
     expect(src).not.toContain('persistedUsageByAccount')
   })

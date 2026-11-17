@@ -17,18 +17,25 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { authMock } from '../../../../tests/mocks/auth.js'
+import { authMock, restoreAuthMock } from '../../../../tests/mocks/auth.js'
 import { debugMock } from '../../../../tests/mocks/debug.js'
 import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
+import * as realScheduleView from '../ScheduleView.js'
 import {
   cronMock,
   oauthClientMock,
   oauthConfigMock,
-  teleportApiMock,
+  restoreCronMock,
+  restoreOauthClientMock,
+  restoreOauthConfigMock,
 } from '../../../../tests/mocks/oauthSurface.js'
 
-import { analyticsMock } from '../../../../tests/mocks/analytics.js'
+import {
+  analyticsMock,
+  restoreAnalyticsMock,
+} from '../../../../tests/mocks/analytics.js'
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
@@ -57,6 +64,7 @@ mock.module('src/utils/cron.js', () =>
 )
 
 // ── ScheduleView mock ───────────────────────────────────────────────────────
+const scheduleViewSnap = snapshotModuleExports(realScheduleView)
 const scheduleViewMock = mock((_props: unknown) => null)
 mock.module('src/commands/schedule/ScheduleView.js', () => ({
   ScheduleView: scheduleViewMock,
@@ -73,26 +81,9 @@ mock.module('src/services/oauth/client.js', () =>
   }),
 )
 mock.module('src/constants/oauth.js', oauthConfigMock)
-mock.module('src/utils/teleport/api.js', () =>
-  teleportApiMock({
-    getOAuthHeaders: (token: string) => ({
-      Authorization: `Bearer ${token}`,
-      'anthropic-version': '2023-06-01',
-    }),
-    prepareApiRequest: async () => ({
-      accessToken: 'test-token-schedule',
-      orgUUID: 'org-uuid-schedule',
-    }),
-    prepareWorkspaceApiRequest: async () => ({
-      apiKey: 'test-workspace-key',
-    }),
-  }),
-)
-mock.module('src/services/auth/hostGuard.ts', () => ({
-  assertSubscriptionBaseUrl: () => {},
-  assertWorkspaceHost: () => {},
-  assertNoAnthropicEnvForOpenAI: () => {},
-}))
+// Do NOT mock teleport/api or hostGuard — that rebinds triggersApi's import
+// and wipes hostGuard exports for later files. Live prepareApiRequest uses
+// the auth + oauth-client mocks above.
 
 // ── Axios mock ──────────────────────────────────────────────────────────────
 const axiosGetMock = mock(async () => ({}))
@@ -124,6 +115,14 @@ beforeAll(async () => {
 
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('src/services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
+  mock.module('src/services/oauth/client.js', restoreOauthClientMock)
+  mock.module('src/utils/cron.js', restoreCronMock)
+  mock.module('src/commands/schedule/ScheduleView.js', () => ({
+    ...scheduleViewSnap,
+  }))
 })
 
 function makeOnDone() {

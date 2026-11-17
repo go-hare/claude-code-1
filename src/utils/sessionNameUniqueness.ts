@@ -11,6 +11,7 @@ import { feature } from 'bun:bundle'
 import { getSessionId, isTeleportedSessionId } from '../bootstrap/state.js'
 import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getBootstrapSession } from './sessionRoot.js'
 import {
   getRegisteredSessionName,
   listLiveSessionRecords,
@@ -976,6 +977,9 @@ export type SurfaceRemoteHandle = {
   isRemoteMode: true
   viewerOnly?: boolean
   sessionId?: string
+  sendControlRequest?: (request: {
+    subtype: string
+  }) => Promise<{ text: string }>
 }
 
 export type SurfaceCapabilities = {
@@ -1003,9 +1007,13 @@ export function getSurfaceCapabilities(): SurfaceCapabilities {
   return currentSurfaceCapabilities
 }
 
-/** densable leftover `fj` / `pt`. */
+/** densable leftover `fj` / `pt` / `br`. */
 export function getSurfaceRemoteHandle(): SurfaceRemoteHandle | null {
-  return getSurfaceCapabilities().remote
+  return (
+    getSurfaceCapabilities().remote ??
+    (getBootstrapSession().surfaceCapabilities.caps()
+      .remote as SurfaceRemoteHandle | null)
+  )
 }
 
 /** densable leftover `Kx` — `replaceCaps`. Official JS has no caller. */

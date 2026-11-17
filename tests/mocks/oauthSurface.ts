@@ -21,7 +21,6 @@ const cronSnap = snapshotModuleExports(realCron)
 export function oauthConfigMock(overrides: Record<string, unknown> = {}) {
   return {
     ...oauthConfigSnap,
-    getOauthConfig: () => ({ BASE_API_URL: 'https://api.anthropic.com' }),
     ...overrides,
   }
 }
@@ -45,4 +44,23 @@ export function cronMock(overrides: Record<string, unknown> = {}) {
     ...cronSnap,
     ...overrides,
   }
+}
+
+/** Valid workspace-key prefix so live `prepareWorkspaceApiRequest` can run. */
+export const TEST_WORKSPACE_API_KEY = 'sk-ant-api03-test-workspace-key'
+
+export function restoreOauthConfigMock() {
+  return { ...oauthConfigSnap }
+}
+
+export function restoreOauthClientMock() {
+  return { ...oauthClientSnap }
+}
+
+export function restoreTeleportApiMock() {
+  return { ...teleportApiSnap }
+}
+
+export function restoreCronMock() {
+  return { ...cronSnap }
 }

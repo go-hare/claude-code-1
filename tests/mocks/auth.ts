@@ -34,3 +34,6 @@ export const authMock = () => ({
   isMaxSubscriber: () => false,
   isTeamSubscriber: () => false,
 })
+
+/** Restore the pre-mock snapshot. Pass to `mock.module` in `afterAll`. */
+export const restoreAuthMock = () => ({ ...authSnap })

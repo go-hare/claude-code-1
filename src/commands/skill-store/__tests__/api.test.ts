@@ -28,14 +28,19 @@ import { logMock } from '../../../../tests/mocks/log.js'
 import { setupAxiosMock } from '../../../../tests/mocks/axios.js'
 import {
   oauthConfigMock,
+  restoreOauthConfigMock,
+  restoreTeleportApiMock,
   teleportApiMock,
+  TEST_WORKSPACE_API_KEY,
 } from '../../../../tests/mocks/oauthSurface.js'
 
 mock.module('src/utils/log.ts', logMock)
 mock.module('src/utils/debug.ts', debugMock)
 
 // ── Workspace API key mock ──────────────────────────────────────────────────
-const mockApiKey = 'sk-ant-api03-test-skill-store-key'
+// Must be sk-ant-api03-* so live prepareWorkspaceApiRequest still works when
+// a sibling file's mock.module last-write-wins the teleport/api binding.
+const mockApiKey = TEST_WORKSPACE_API_KEY
 
 mock.module('src/constants/oauth.js', oauthConfigMock)
 
@@ -95,6 +100,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/teleport/api.js', restoreTeleportApiMock)
+  mock.module('src/constants/oauth.js', restoreOauthConfigMock)
 })
 
 beforeEach(() => {
@@ -393,7 +400,17 @@ describe('invariant: x-api-key present, no Authorization, no x-organization-uuid
     prepareWorkspaceApiRequestMock.mockClear()
     axiosGetMock.mockResolvedValueOnce({ data: { data: [] }, status: 200 })
     await listSkills()
-    expect(prepareWorkspaceApiRequestMock).toHaveBeenCalledTimes(1)
+    const calls = axiosGetMock.mock.calls as unknown as [
+      string,
+      { headers: Record<string, string> },
+    ][]
+    const headers = calls[0]?.[1]?.headers ?? {}
+    expect(headers['x-api-key']).toBe(mockApiKey)
+    // Isolation binds this mock. Full-suite last-write-wins may leave the
+    // live function, which reads ANTHROPIC_API_KEY (same mockApiKey).
+    if (prepareWorkspaceApiRequestMock.mock.calls.length > 0) {
+      expect(prepareWorkspaceApiRequestMock).toHaveBeenCalledTimes(1)
+    }
   })
 
   test('request goes to api.anthropic.com (host guard passes for correct host)', async () => {

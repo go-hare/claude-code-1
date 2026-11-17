@@ -508,6 +508,70 @@ export class ExtensionsConfig {
   }
 }
 
+type SessionWorkingState = { working: boolean }
+type UserPromptState = { waitingFor: string | undefined }
+
+/**
+ * densable `xn.working` — `Ds({working:!1})`.
+ */
+export class SessionWorkingSlot {
+  #state: SessionWorkingState = { working: false }
+  #changed: Signal = createSignal()
+  getState(): SessionWorkingState {
+    return this.#state
+  }
+  setState(updater: (prev: SessionWorkingState) => SessionWorkingState): void {
+    const prev = this.#state
+    const next = updater(prev)
+    if (next === prev) return
+    this.#state = next
+    this.#changed.emit()
+  }
+  subscribe(listener: () => void): () => void {
+    return this.#changed.subscribe(listener)
+  }
+}
+
+/**
+ * densable `xn.userPrompt` — `Ds({waitingFor:void 0})`.
+ */
+export class UserPromptSlot {
+  #state: UserPromptState = { waitingFor: undefined }
+  #changed: Signal = createSignal()
+  getState(): UserPromptState {
+    return this.#state
+  }
+  setState(updater: (prev: UserPromptState) => UserPromptState): void {
+    const prev = this.#state
+    const next = updater(prev)
+    if (next === prev) return
+    this.#state = next
+    this.#changed.emit()
+  }
+  subscribe(listener: () => void): () => void {
+    return this.#changed.subscribe(listener)
+  }
+}
+
+/** densable `xn`. */
+class SessionPromptBag {
+  working = new SessionWorkingSlot()
+  userPrompt = new UserPromptSlot()
+}
+
+/**
+ * densable `Se` / `Ct` — WeakMap keyed by session object, not SessionHost.
+ */
+const Se = new WeakMap<object, SessionPromptBag>()
+
+function ofSession(session: object): SessionPromptBag {
+  const existing = Se.get(session)
+  if (existing) return existing
+  const created = new SessionPromptBag()
+  Se.set(session, created)
+  return created
+}
+
 export class SessionHost {
   backgroundHousekeeping: BackgroundHousekeeping
   launchOptions: LaunchOptions
@@ -551,6 +615,54 @@ export class SessionHost {
     this.accountCreditLatches = e.accountCreditLatches
     this.proactivity = e.proactivity
   }
+}
+
+/** densable `K3e`. */
+export function setSessionWorking(session: object, next: boolean): void {
+  ofSession(session).working.setState(prev =>
+    prev.working === next ? prev : { working: next },
+  )
+}
+
+/** densable `Fen`. */
+export function isSessionWorking(session: object): boolean {
+  return ofSession(session).working.getState().working
+}
+
+/** densable `V$n`. */
+export function subscribeSessionWorking(
+  session: object,
+  listener: () => void,
+): () => void {
+  return ofSession(session).working.subscribe(listener)
+}
+
+/** densable `$en`. */
+export function setUserPromptWaitingFor(
+  session: object,
+  next: string | undefined,
+): void {
+  ofSession(session).userPrompt.setState(prev =>
+    prev.waitingFor === next ? prev : { waitingFor: next },
+  )
+}
+
+/** densable `iCr`. */
+export function getUserPromptWaitingFor(session: object): string | undefined {
+  return ofSession(session).userPrompt.getState().waitingFor
+}
+
+/** densable `vEo`. */
+export function isUserPromptWaiting(session: object): boolean {
+  return getUserPromptWaitingFor(session) !== undefined
+}
+
+/** densable `CEo`. */
+export function subscribeUserPromptWaiting(
+  session: object,
+  listener: () => void,
+): () => void {
+  return ofSession(session).userPrompt.subscribe(listener)
 }
 
 /** Official sn @178548001 */

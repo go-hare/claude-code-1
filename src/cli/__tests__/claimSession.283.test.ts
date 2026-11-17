@@ -37,6 +37,32 @@ import {
   unclaimedUserRefusalMessage,
 } from '../spareClaim.js'
 import type { ToolPermissionContext } from '../../Tool.js'
+import {
+  getCwdState,
+  getOriginalCwd,
+  getProjectRoot,
+  getSessionId,
+  getSessionProjectDir,
+  setCwdState,
+  setOriginalCwd,
+  setProjectRoot,
+  switchSession,
+} from '../../bootstrap/state.js'
+
+const suiteCwd = process.cwd()
+const suiteCwdState = getCwdState()
+const suiteOriginalCwd = getOriginalCwd()
+const suiteProjectRoot = getProjectRoot()
+const suiteSessionId = getSessionId()
+const suiteSessionProjectDir = getSessionProjectDir()
+
+function restoreClaimCwd(): void {
+  process.chdir(suiteCwd)
+  setCwdState(suiteCwdState)
+  setOriginalCwd(suiteOriginalCwd)
+  setProjectRoot(suiteProjectRoot)
+  switchSession(suiteSessionId, suiteSessionProjectDir)
+}
 
 const GOLD = '/tmp/official-283/package/claude'
 const HAS_GOLD = existsSync(GOLD)
@@ -306,6 +332,7 @@ describe('densable 2.1.283 claim_session ofn / ne', () => {
       }
       expect(isSpareUnclaimed()).toBe(false)
     } finally {
+      restoreClaimCwd()
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -391,6 +418,7 @@ describe('densable 2.1.283 claim_session ofn / ne', () => {
       expect(envEmits).toBeGreaterThanOrEqual(1)
       expect(wasWarmSpareClaimed()).toBe(true)
     } finally {
+      restoreClaimCwd()
       unsub()
       if (prevOauth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
       else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevOauth

@@ -81,6 +81,7 @@ export async function clearConversation({
   getAppState,
   setAppState,
   setConversationId,
+  taskRegistry,
 }: {
   setMessages: (updater: (prev: Message[]) => Message[]) => void
   readFileState: FileStateCache
@@ -90,6 +91,7 @@ export async function clearConversation({
   getAppState?: () => AppState
   setAppState?: (f: (prev: AppState) => AppState) => void
   setConversationId?: (id: UUID) => void
+  taskRegistry?: import('../../utils/taskRegistry.js').TaskRegistry
 }): Promise<void> {
   // Execute SessionEnd + function-hook `session.end` (`reason: 'clear'`) before
   // session ID rotation (`regenerateSessionId`). Per-hook `_go` vs bound `Kfe`.
@@ -157,6 +159,11 @@ export async function clearConversation({
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
 
+  const { getBashTaskDeliveryBag } = await import(
+    '../../utils/bashTaskDeliveryOutcomes.js'
+  )
+  getBashTaskDeliveryBag().reset()
+
   // densable 2.1.212: /clear resets WebSearch + subagent session budgets
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -187,6 +194,15 @@ export async function clearConversation({
   noteArtifactConversationReset()
 
   // Clean out necessary items from App State
+  // densable 2.1.289 $Er `ie`: daemon/non-agent tasks don't hold subagent slots
+  // or WebSearch session budget across /clear.
+  const NON_AGENT_SURVIVING_TASK_TYPES = new Set([
+    'local_bash',
+    'monitor_mcp',
+    'monitor_ws',
+    'mcp_task',
+  ])
+  let survivingAgentTaskCount = 0
   if (setAppState) {
     setAppState(prev => {
       // Partition tasks using the same predicate computed above:
@@ -220,10 +236,16 @@ export async function clearConversation({
         void evictTaskOutput(taskId)
       }
 
+      survivingAgentTaskCount = Object.values(nextTasks).filter(
+        t => !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
+      ).length
+
       return {
         ...prev,
         ...clearedArtifactConversationAppState(),
         tasks: nextTasks,
+        runningSubagents:
+          survivingAgentTaskCount === 0 ? 0 : prev.runningSubagents,
         attribution: createEmptyAttributionState(),
         // densable session_start: clear clickable image path map
         storedImagePaths: new Map(),
@@ -272,6 +294,14 @@ export async function clearConversation({
         },
       }
     })
+  } else if (getAppState) {
+    survivingAgentTaskCount = Object.values(getAppState().tasks).filter(
+      t => !shouldKillTask(t) && !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
+    ).length
+  }
+
+  if (taskRegistry && survivingAgentTaskCount === 0) {
+    taskRegistry.resetWebSearchCalls()
   }
 
   // Clear plan slug cache so a new plan file is used after /clear

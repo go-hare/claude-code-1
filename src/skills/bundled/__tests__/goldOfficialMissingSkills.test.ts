@@ -37,6 +37,54 @@ const GOLD_NAMES = [
   'cowork-plugin',
 ] as const
 
+// Hub routing requires gAe's GrowthBook flag. Other suites mock GrowthBook
+// process-wide; keep this explicit flag fixture in its own module registry.
+function loadDesignHubFixture(args: string[]): {
+  type: string
+  subcommands: Record<string, string>
+  subcommandsBareOnly: boolean
+  enabled: boolean
+  texts: string[]
+} {
+  const child = Bun.spawnSync(
+    [
+      process.execPath,
+      '--eval',
+      `
+      import { mock } from 'bun:test';
+      globalThis.MACRO = { VERSION: 'test' };
+      const growthbook = await import('./src/services/analytics/growthbook.ts');
+      mock.module('src/services/analytics/growthbook.ts', () => ({
+        ...growthbook,
+        getFeatureValue_CACHED_MAY_BE_STALE: (key, fallback) =>
+          key === 'tengu_omelette_fouet' ? true : fallback,
+      }));
+      const { getBundledSkills } = await import('./src/skills/bundledSkills.ts');
+      const { registerGoldOfficialMissingSkills } = await import(
+        './src/skills/bundled/goldOfficialMissingSkills.ts'
+      );
+      registerGoldOfficialMissingSkills();
+      const skill = getBundledSkills().find(s => s.name === 'design');
+      const texts = [];
+      for (const args of ${JSON.stringify(args)}) {
+        const blocks = await skill.getPromptForCommand(args, { options: {} });
+        texts.push(blocks.map(b => b.type === 'text' ? b.text : '').join(''));
+      }
+      process.stdout.write(JSON.stringify({
+        type: skill.type,
+        subcommands: skill.subcommands,
+        subcommandsBareOnly: skill.subcommandsBareOnly,
+        enabled: skill.isEnabled(),
+        texts,
+      }));
+    `,
+    ],
+    { cwd: new URL('../../../../', import.meta.url).pathname },
+  )
+  expect(child.exitCode).toBe(0)
+  return JSON.parse(child.stdout.toString())
+}
+
 describe('gold 2.1.289 missing bundled skills', () => {
   test('registers every leftover gold name', () => {
     clearBundledSkills()
@@ -76,16 +124,11 @@ describe('gold 2.1.289 missing bundled skills', () => {
     clearBundledSkills()
   })
 
-  test('design invoke uses gold Cn hub when ClaudeDesign is on', async () => {
-    clearBundledSkills()
-    registerGoldOfficialMissingSkills()
-    const skill = getBundledSkills().find(s => s.name === 'design')
-    expect(skill?.type).toBe('prompt')
-    if (!skill || skill.type !== 'prompt') throw new Error('expected prompt')
-    const blocks = await skill.getPromptForCommand('landing page', {
-      options: {},
-    } as never)
-    const text = blocks.map(b => (b.type === 'text' ? b.text : '')).join('')
+  test('design invoke uses gold Cn hub when ClaudeDesign is on', () => {
+    const skill = loadDesignHubFixture(['landing page'])
+    expect(skill.type).toBe('prompt')
+    expect(skill.enabled).toBe(true)
+    const text = skill.texts[0]!
     expect(text).toContain('You are handling a `/design` command')
     expect(text).toContain('ClaudeDesign({operation: "list"})')
     expect(text).toContain('landing page')
@@ -196,40 +239,22 @@ describe('gold 2.1.289 missing bundled skills', () => {
     )
   })
 
-  test('design reserved first-words are not treated as a brief', async () => {
-    clearBundledSkills()
-    registerGoldOfficialMissingSkills()
-    const skill = getBundledSkills().find(s => s.name === 'design')
-    expect(skill?.type).toBe('prompt')
-    if (!skill || skill.type !== 'prompt') throw new Error('expected prompt')
-    expect(skill.subcommands?.sync).toBe('design-sync')
-    expect(skill.subcommands?.consent).toBe('design-consent')
+  test('design reserved first-words are not treated as a brief', () => {
+    const skill = loadDesignHubFixture(['consent', 'import abc', 'consent now'])
+    expect(skill.type).toBe('prompt')
+    expect(skill.subcommands.sync).toBe('design-sync')
+    expect(skill.subcommands.consent).toBe('design-consent')
     expect(skill.subcommandsBareOnly).toBe(true)
-    expect(skill.isEnabled?.()).toBe(true)
-    const consent = await skill.getPromptForCommand('consent', {
-      options: {},
-    } as never)
-    const consentText = consent
-      .map(b => (b.type === 'text' ? b.text : ''))
-      .join('')
+    expect(skill.enabled).toBe(true)
+    const consentText = skill.texts[0]!
     expect(consentText).toContain('`/design` was invoked.')
     expect(consentText).toContain('type themselves')
     expect(consentText).not.toContain('type_query: "Design"')
-    const imported = await skill.getPromptForCommand('import abc', {
-      options: {},
-    } as never)
-    const importText = imported
-      .map(b => (b.type === 'text' ? b.text : ''))
-      .join('')
+    const importText = skill.texts[1]!
     expect(importText).toContain('You are handling a `/design` command')
     expect(importText).toContain('get_project')
     // Gold Ka in En==="hub": extra args after consent still hub, not types brief.
-    const consentNow = await skill.getPromptForCommand('consent now', {
-      options: {},
-    } as never)
-    const consentNowText = consentNow
-      .map(b => (b.type === 'text' ? b.text : ''))
-      .join('')
+    const consentNowText = skill.texts[2]!
     expect(consentNowText).toContain('You are handling a `/design` command')
     expect(consentNowText).not.toContain('type_query: "Design"')
     clearBundledSkills()

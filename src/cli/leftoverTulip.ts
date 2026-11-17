@@ -1720,7 +1720,7 @@ function leftoverPwt(
 /**
  * densable dp(e,n,i,r). Never export minify `dp`.
  */
-function leftoverPolicyLimitsDp(
+export function leftoverPolicyLimitsDp(
   e: string,
   n?: unknown,
   i?: unknown,

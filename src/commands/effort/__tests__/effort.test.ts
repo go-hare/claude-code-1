@@ -68,39 +68,38 @@ const {
   unpinAllEffortLaunchPins,
 } = await import('src/utils/model/effortCatalog.js')
 
-describe('setUltracodeEffort densable sLy pin gate', () => {
+describe('setUltracodeEffort densable 2.1.289 D/kAe behavior', () => {
   beforeEach(() => {
     delete process.env.CLAUDE_CODE_EFFORT_LEVEL
     resetEffortLaunchPinsForTests()
   })
 
-  test('non-interactive + launch pin → reject, no effortUpdate, pin remains', () => {
+  test('non-interactive + launch pin → flag on, no value override, pin remains', () => {
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
     const result = setUltracodeEffort('claude-opus-4-7', false)
-    expect(result.effortUpdate).toBeUndefined()
-    expect(result.message).toContain('launch-effort pin')
-    expect(result.message).toContain('interactive')
+    expect(result.effortUpdate).toEqual({ ultracode: true })
+    expect(result.message).toContain('Ultracode on')
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
   })
 
-  test('interactive + launch pin → flag on, effort stays, unpin', () => {
+  test('interactive + launch pin → flag on, effort stays, pin remains untouched', () => {
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
     const result = setUltracodeEffort('claude-opus-4-7', true, 'medium')
-    expect(result.effortUpdate).toEqual({ value: 'medium', ultracode: true })
+    expect(result.effortUpdate).toEqual({ ultracode: true })
     expect(result.message).toContain('Ultracode on')
-    expect(result.message).toContain('effort stays medium')
-    expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(false)
+    expect(result.message).toContain('Effort stays medium.')
+    expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
   })
 
   test('non-interactive after unpin → flag on without pin block', () => {
     unpinAllEffortLaunchPins()
     const result = setUltracodeEffort('claude-opus-4-7', false, 'high')
-    expect(result.effortUpdate).toEqual({ value: 'high', ultracode: true })
+    expect(result.effortUpdate).toEqual({ ultracode: true })
   })
 
-  test('executeEffort(ultracode) / ultracode off are orthogonal', () => {
+  test('executeEffort(ultracode) / ultracode off are orthogonal and omit value', () => {
     const on = executeEffort('ultracode', 'claude-opus-4-7', true, true, 'low')
-    expect(on.effortUpdate).toEqual({ value: 'low', ultracode: true })
+    expect(on.effortUpdate).toEqual({ ultracode: true })
     const off = executeEffort(
       'ultracode off',
       'claude-opus-4-7',
@@ -108,14 +107,18 @@ describe('setUltracodeEffort densable sLy pin gate', () => {
       true,
       'low',
     )
-    expect(off.effortUpdate).toEqual({ value: 'low', ultracode: false })
+    expect(off.effortUpdate).toEqual({ ultracode: false })
     expect(off.message).toContain('Ultracode off')
+    expect(off.message).toContain('Effort stays low')
   })
 
-  test('non-interactive /effort low + pin: densable oLy — no unpin, effortUpdate still set', () => {
+  test('non-interactive /effort low + pin: 2.1.289 V — session-only apply, no unpin, honest message', () => {
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)
     const result = executeEffort('low', 'claude-opus-4-7', false)
-    expect(result.message).toContain('launch-effort pin')
+    expect(result.message).toContain(
+      'Set effort level to low (this session only)',
+    )
+    expect(result.message).not.toContain('Not applied')
     // densable 2.1.289: normal effort does not clear ultracode
     expect(result.effortUpdate).toEqual({ value: 'low' })
     expect(isEffortLaunchPinned('claude-opus-4-7')).toBe(true)

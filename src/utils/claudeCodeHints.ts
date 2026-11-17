@@ -51,6 +51,10 @@ const SUPPORTED_TYPES = new Set<string>(['plugin'])
  * tolerated since some SDKs pad stderr.
  */
 const HINT_TAG_RE = /^[ \t]*<claude-code-hint\s+([^>]*?)\s*\/>[ \t]*$/gm
+/** densable `Rxn` — whole-line hint, no `g` (L0r / monitor QCr skip). */
+const HINT_LINE_RE = /^[ \t]*<claude-code-hint[ \t][^>\r\n]*\/>[ \t]*$/
+/** densable `Xet` — over-long hint lines are not skipped as hints. */
+const HINT_LINE_MAX = 1024
 
 /**
  * Attribute matcher. Accepts `key="value"` and `key=value` (terminated by
@@ -69,6 +73,17 @@ const ATTR_RE = /(\w+)=(?:"([^"]*)"|([^\s/>]+))/g
  * @param command - The command that produced the output; its first
  *   whitespace-separated token is recorded as `sourceCommand`.
  */
+/**
+ * densable `L0r` — true when this single line is a self-closing
+ * `<claude-code-hint …/>` (Monitor stream debounce skips these).
+ */
+export function isClaudeCodeHintLine(line: string): boolean {
+  if (line.length > HINT_LINE_MAX || !line.includes('<claude-code-hint')) {
+    return false
+  }
+  return HINT_LINE_RE.test(line)
+}
+
 export function extractClaudeCodeHints(
   output: string,
   command: string,

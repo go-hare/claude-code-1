@@ -740,28 +740,85 @@ describe('densable effort catalog matrix', () => {
     expect(resolveAppliedEffort('claude-opus-4-7', 'low')).toBe('low')
   })
 
-  test('resolveAppliedEffort: launch pin forces model default over session', () => {
-    // pin is active by default for opus-4-7 until unpin
+  test('resolveAppliedEffort: explicit session value wins even when launch-pinned (2.1.289 iw)', () => {
+    // In 2.1.289, launch pin lives in teSettingsEffortTable() masking legacy
+    // userSettings.effortLevel; iw honors explicit policy/project/session effort.
     resetEffortLaunchPinsForTests()
-    expect(resolveAppliedEffort('claude-opus-4-7', 'low')).toBe('xhigh')
-  })
-
-  test('resolveAppliedEffort: after unpin, session low sticks', () => {
-    resetEffortLaunchPinsForTests()
-    unpinAllEffortLaunchPins()
     expect(resolveAppliedEffort('claude-opus-4-7', 'low')).toBe('low')
   })
 
-  test('resolveAppliedEffort: env auto suppresses unless pinned', () => {
+  test('teSettingsEffortTable + pdSessionEffort: launch pin masks legacy userSettings but honors policySettings and a3r excludes 5-5', async () => {
+    const { teSettingsEffortTable, pdSessionEffort } = await import(
+      'src/utils/effort.js'
+    )
+    resetEffortLaunchPinsForTests()
+    const legacyTable = teSettingsEffortTable([
+      { source: 'userSettings', settings: { effortLevel: 'low' } },
+    ])
+    expect(
+      resolveAppliedEffort(
+        'claude-opus-4-7',
+        pdSessionEffort(
+          { settingsEffortTable: legacyTable },
+          'claude-opus-4-7',
+        ),
+      ),
+    ).toBe('xhigh')
+    // claude-opus-5-5 and claude-sonnet-5-5 are excluded from legacyUserEffort by a3r
+    expect(
+      pdSessionEffort({ settingsEffortTable: legacyTable }, 'claude-opus-5-5'),
+    ).toBeUndefined()
+    expect(
+      pdSessionEffort(
+        { settingsEffortTable: legacyTable },
+        'claude-sonnet-5-5',
+      ),
+    ).toBeUndefined()
+    // policySettings effortLevel applies even on launch-pinned opus-4-7
+    const policyTable = teSettingsEffortTable([
+      { source: 'userSettings', settings: { effortLevel: 'low' } },
+      { source: 'policySettings', settings: { effortLevel: 'medium' } },
+    ])
+    expect(
+      resolveAppliedEffort(
+        'claude-opus-4-7',
+        pdSessionEffort(
+          { settingsEffortTable: policyTable },
+          'claude-opus-4-7',
+        ),
+      ),
+    ).toBe('medium')
+  })
+
+  test('resolveAppliedEffort: env auto suppresses unless settings maxEffortLevel cap is set (2.1.289 X)', () => {
     process.env.CLAUDE_CODE_EFFORT_LEVEL = 'auto'
     unpinAllEffortLaunchPins()
     expect(resolveAppliedEffort('claude-sonnet-4-6', 'high')).toBeUndefined()
-  })
-
-  test('resolveAppliedEffort: env auto + pin uses model default', () => {
-    process.env.CLAUDE_CODE_EFFORT_LEVEL = 'auto'
     resetEffortLaunchPinsForTests()
-    expect(resolveAppliedEffort('claude-opus-4-7', 'low')).toBe('xhigh')
+    expect(resolveAppliedEffort('claude-opus-4-7', 'low')).toBeUndefined()
+
+    mock.module(
+      'src/utils/settings/settings.js',
+      createSettingsMock(settingsSnap, {
+        getInitialSettings: () => ({ maxEffortLevel: 'medium' }),
+        getSettingsForSource: () => ({ maxEffortLevel: 'medium' }),
+      }),
+    )
+    try {
+      expect(resolveAppliedEffort('claude-sonnet-4-6', 'high')).toBe('medium')
+      process.env.CLAUDE_CODE_EFFORT_LEVEL = '100'
+      expect(resolveAppliedEffort('claude-sonnet-4-6', undefined)).toBe(
+        'medium',
+      )
+    } finally {
+      mock.module(
+        'src/utils/settings/settings.js',
+        createSettingsMock(settingsSnap, {
+          getInitialSettings: () => ({}),
+          getSettingsForSource: () => ({}),
+        }),
+      )
+    }
   })
 
   test('resolveAppliedEffort: clamps unsupported xhigh on sonnet-4-6', () => {

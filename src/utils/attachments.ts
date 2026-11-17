@@ -650,6 +650,8 @@ export type Attachment =
       origin?: MessageOrigin
       /** Carried from QueuedCommand.isMeta — distinguishes human-typed from system-injected */
       isMeta?: boolean
+      /** densable KRr drain — GetTask snapshot on mid-turn queued_command. */
+      taskDelivery?: unknown
     }
   | {
       type: 'output_style'
@@ -962,6 +964,11 @@ export type GetAttachmentsOptions = {
    */
   skipAtMentions?: boolean
   /**
+   * densable gn `inputMentionsOnly` — only expand @-mentions (file / MCP /
+   * agent / peer). Used after prompt.submit rewrites the user text.
+   */
+  inputMentionsOnly?: boolean
+  /**
    * densable isRegularUserPrompt — non-meta prompt turns (ultra_effort path).
    * densable only ran f2y on this gate; we still run ultra_effort more broadly
    * but keyword p2y requires isHumanTypedPrompt.
@@ -1001,6 +1008,10 @@ export async function getAttachments(
     // residual helpers optional
   }
   if (attachmentsDisabled || isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    // densable gn Are: inputMentionsOnly + attachments off → [].
+    if (options?.inputMentionsOnly === true) {
+      return []
+    }
     // query.ts:removeFromQueue dequeues these unconditionally after
     // getAttachmentMessages runs — returning [] here silently drops them.
     // Coworker runs with --bare and depends on task-notification for
@@ -1020,6 +1031,7 @@ export async function getAttachments(
   // Attachments which are added in response to on user input
   // densable 2.1.228 #12 xTt: hardened skill bodies must not expand @ mentions.
   const skipAtMentions = options?.skipAtMentions === true
+  const mentionsOnly = options?.inputMentionsOnly === true
   const userInputAttachments = input
     ? [
         ...(skipAtMentions
@@ -1052,44 +1064,52 @@ export async function getAttachments(
         // but that content is NOT user intent and must not trigger discovery.
         // Without this gate, a 110KB SKILL.md fires ~3.3s of chunked AKI
         // queries on every skill invocation (session 13a9afae).
-        ...(feature('EXPERIMENTAL_SKILL_SEARCH') &&
-        skillSearchModules &&
-        !options?.skipSkillDiscovery
-          ? [
-              maybe('skill_discovery', async () => {
-                if (suppressNextDiscovery) {
-                  suppressNextDiscovery = false
-                  return []
-                }
-                const result =
-                  await skillSearchModules.prefetch.getTurnZeroSkillDiscovery(
-                    input,
-                    messages ?? [],
-                    context,
-                  )
-                return result ? [result] : []
-              }),
-            ]
-          : []),
+        ...(mentionsOnly
+          ? []
+          : (
+                feature('EXPERIMENTAL_SKILL_SEARCH')
+                  ? skillSearchModules && !options?.skipSkillDiscovery
+                  : false
+              )
+            ? [
+                maybe('skill_discovery', async () => {
+                  if (suppressNextDiscovery) {
+                    suppressNextDiscovery = false
+                    return []
+                  }
+                  const result =
+                    await skillSearchModules?.prefetch.getTurnZeroSkillDiscovery(
+                      input,
+                      messages ?? [],
+                      context,
+                    )
+                  return result ? [result] : []
+                }),
+              ]
+            : []),
         // Tool discovery on turn 0. Inter-turn discovery runs via
         // startSearchExtraToolsPrefetch in query.ts.
-        ...(feature('EXPERIMENTAL_SEARCH_EXTRA_TOOLS') &&
-        searchExtraToolsModules &&
-        !options?.skipSkillDiscovery
-          ? [
-              maybe('tool_discovery', async () => {
-                if (suppressNextDiscovery) {
-                  return []
-                }
-                const result =
-                  await searchExtraToolsModules.prefetch.getTurnZeroSearchExtraToolsPrefetch(
-                    input,
-                    context.options.tools ?? [],
-                  )
-                return result ? [result] : []
-              }),
-            ]
-          : []),
+        ...(mentionsOnly
+          ? []
+          : (
+                feature('EXPERIMENTAL_SEARCH_EXTRA_TOOLS')
+                  ? searchExtraToolsModules && !options?.skipSkillDiscovery
+                  : false
+              )
+            ? [
+                maybe('tool_discovery', async () => {
+                  if (suppressNextDiscovery) {
+                    return []
+                  }
+                  const result =
+                    await searchExtraToolsModules?.prefetch.getTurnZeroSearchExtraToolsPrefetch(
+                      input,
+                      context.options.tools ?? [],
+                    )
+                  return result ? [result] : []
+                }),
+              ]
+            : []),
       ]
     : []
 
@@ -1133,6 +1153,16 @@ export async function getAttachments(
         // peer mention optional
       }
     }
+  }
+
+  if (mentionsOnly) {
+    const nested = await maybe('nested_memory', () =>
+      getNestedMemoryAttachments(context),
+    )
+    clearTimeout(timeoutId)
+    return (
+      [...userAttachmentResults.flat(), ...nested] as Attachment[]
+    ).filter(a => a !== undefined && a !== null)
   }
 
   // Thread-safe attachments available in sub-agents
@@ -1496,6 +1526,7 @@ export async function getQueuedCommandAttachments(
         commandMode: _.mode,
         origin: _.origin,
         isMeta: _.isMeta,
+        ...(_.taskDelivery !== undefined && { taskDelivery: _.taskDelivery }),
       }
     }),
   )
@@ -3508,11 +3539,10 @@ export async function getSkillListingAttachments(
   // MCP are small and intent-signaled; user/project/plugin skills go through
   // discovery. feature() first for DCE — the property-access string leaks
   // otherwise even with ?. on null.
-  if (
-    feature('EXPERIMENTAL_SKILL_SEARCH') &&
-    skillSearchModules?.featureCheck.isSkillSearchEnabled()
-  ) {
-    allCommands = filterToBundledAndMcp(allCommands)
+  if (feature('EXPERIMENTAL_SKILL_SEARCH')) {
+    if (skillSearchModules?.featureCheck.isSkillSearchEnabled()) {
+      allCommands = filterToBundledAndMcp(allCommands)
+    }
   }
 
   const agentKey = toolUseContext.agentId ?? ''

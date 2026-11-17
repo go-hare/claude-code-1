@@ -109,6 +109,8 @@ export type UsagePlanLimit = {
   group: string
   percent: number
   resets_at: string | null
+  severity: string
+  is_active: boolean
   scope?: {
     model?: { display_name: string } | null
     surface?: { display_name: string } | null
@@ -139,12 +141,12 @@ type PersistedUsageSeed = {
   fetchedAtMs: number
 }
 
-/** Official `UNo` — skip rewrite when same-account snapshot is newer. */
-export const USAGE_PERSIST_WRITE_DEBOUNCE_MS = 300_000
+/** Official `MXe` (2.1.289) — skip rewrite when same-account snapshot is newer than 1m. */
+export const USAGE_PERSIST_WRITE_DEBOUNCE_MS = 60_000
 /** Official `FNo` — drop last-known snapshot older than this. */
 export const USAGE_PERSIST_READ_TTL_MS = 3_600_000
 
-/** Official `q` — persist only when the live body has at least one of these. */
+/** Official `gle` — persist only when the live body has at least one of these. */
 const USAGE_PERSIST_BODY_FIELDS = [
   'five_hour',
   'seven_day',
@@ -163,7 +165,7 @@ const usageWindowSchema = z
   })
   .passthrough()
 
-/** Official `zNo` — cachedUsageUtilization on global config. */
+/** Official `wvn` — cachedUsageUtilization on global config. */
 const cachedUsageUtilizationSchema = z.object({
   fetchedAtMs: z.number(),
   accountUuid: z.string().optional(),
@@ -194,6 +196,8 @@ const cachedUsageUtilizationSchema = z.object({
               group: z.string(),
               percent: z.number(),
               resets_at: z.string().nullable(),
+              severity: z.string(),
+              is_active: z.boolean(),
               scope: z
                 .object({
                   model: z

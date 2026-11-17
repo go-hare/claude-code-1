@@ -1,11 +1,9 @@
 /**
  * Tests for issue/index.ts
  *
- * NOTE: issue/index.ts calls execFileSync at module-function level (not top-level).
- * The child_process functions are imported by reference and cannot be reliably
- * mocked after module load with Bun's mock.module. Tests here cover what's
- * testable without child_process control: parseIssueArgs, metadata, and
- * environment-agnostic paths.
+ * Command execution uses the shared child-process harness. Default to an
+ * unavailable git/gh installation so fallback tests stay deterministic and
+ * never contact GitHub; individual command-path tests override that slot.
  */
 import {
   afterAll,
@@ -112,6 +110,12 @@ let popFeature: (() => void) | undefined
 beforeAll(() => {
   useIssueDynamicState = true
   popFeature = pushFeatureOverride(() => true)
+  setChildProcessStubs('issue-fallback', {
+    execFile: (_cmd, _args, _opts, cb) => cb(new Error('ENOENT'), '', ''),
+    execFileSync: () => {
+      throw new Error('ENOENT')
+    },
+  })
 })
 
 beforeEach(() => {
@@ -148,6 +152,7 @@ afterEach(() => {
 
 // Restore real bootstrap/envUtils/analytics — do not leave gated setCwd mocks.
 afterAll(() => {
+  clearChildProcessStubs('issue-fallback')
   useIssueDynamicState = false
   popFeature?.()
   mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))

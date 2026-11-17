@@ -19,8 +19,10 @@ import type { QueuedCommand } from 'src/types/textInputTypes.js'
 import { isPolicyLimitsAllowed } from './leftoverTulip.js'
 import {
   acceptRemoteMachineAnnounce,
+  refreshRemoteToolHosts,
   remoteToolsWorkerEpoch,
 } from 'src/services/tools/remoteToolHost.js'
+import type { ToolStateSlots } from 'src/utils/toolState.js'
 import { checkGate_CACHED_OR_BLOCKING } from 'src/services/analytics/growthbook.js'
 
 export const NOT_AVAILABLE_ON_CONNECTION = (subtype: string): string =>
@@ -2822,20 +2824,33 @@ export function dispatchPrintControlExtra(
         deps.sendError(parsed.error)
         return
       }
-      const accepted = acceptRemoteMachineAnnounce({
-        instanceId: parsed.instanceId,
-        name: parsed.name,
-        tools: parsed.tools.map(tool => ({
-          name: tool.name,
-          refusedInputFields: [],
-          protocolVersions: tool.protocolVersions,
-        })),
-        ignoredTools: parsed.ignoredTools,
-        passthrough: parsed.passthrough,
-        plumbing: parsed.plumbing,
-        protocolVersions: parsed.protocolVersions,
-        homeDir: parsed.homeDir,
-      })
+      const ctx = deps.getToolUseContext?.()
+      const toolState =
+        ctx !== null &&
+        typeof ctx === 'object' &&
+        'toolState' in ctx &&
+        (ctx as { toolState?: ToolStateSlots }).toolState
+      const accepted = acceptRemoteMachineAnnounce(
+        {
+          instanceId: parsed.instanceId,
+          name: parsed.name,
+          tools: parsed.tools.map(tool => ({
+            name: tool.name,
+            refusedInputFields: [],
+            protocolVersions: tool.protocolVersions,
+          })),
+          ignoredTools: parsed.ignoredTools,
+          passthrough: parsed.passthrough,
+          plumbing: parsed.plumbing,
+          protocolVersions: parsed.protocolVersions,
+          homeDir: parsed.homeDir,
+        },
+        toolState || undefined,
+      )
+      if (toolState) {
+        // densable Wit(jit(ctx), rF, "resolve") once ZO.accept lands.
+        await refreshRemoteToolHosts(toolState, 'resolve', deps.getMcpClients())
+      }
       logEvent('tengu_remote_tools_announce', {
         outcome:
           accepted.status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

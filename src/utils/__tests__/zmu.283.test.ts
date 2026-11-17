@@ -276,8 +276,12 @@ describe('densable 2.1.283 Obe mouse host', () => {
     expect(panel).toContain('ref={stripRef}')
     expect(panel).toContain('scrollToFile')
     expect(sidebar).toContain('minCol={Math.max(0, columns - width)}')
-    expect(layout).toContain('height="100%"')
-    expect(layout).toContain('alignSelf="stretch"')
+    expect(layout).toContain(
+      '<Box flexDirection="column" flexGrow={1} overflow="hidden" width="100%">',
+    )
+    expect(layout).toContain(
+      '<Box flexDirection="row" flexGrow={1} overflow="hidden" width="100%">',
+    )
     expect(layout).toContain('alignItems="stretch"')
     expect(layout).not.toContain('onWheel={onReplDiffShellWheel}')
     expect(layout).toContain('sidebarWidth > 0')

@@ -803,7 +803,7 @@ export async function acceptSpeculation(
 
 export function abortSpeculation(setAppState: SetAppState): void {
   setAppState(prev => {
-    if (prev.speculation.status !== 'active') return prev
+    if (prev.speculation?.status !== 'active') return prev
 
     const {
       id,

@@ -7,6 +7,10 @@ import { getSessionId } from '../../bootstrap/state.js'
 import { checkAndRefreshOAuthTokenIfNeeded } from '../auth.js'
 import { getAuthHeaders, getUserAgent } from '../http.js'
 import { logForDebugging } from '../debug.js'
+import {
+  leftoverM as recordFeatureFailure,
+  leftoverY as recordFeatureSuccess,
+} from '../leftoverOt.js'
 import { jsonStringify } from '../slowOperations.js'
 import {
   FEEDBACK_TRANSCRIPT_SUBMIT_TAIL_BYTES,
@@ -85,22 +89,6 @@ function isZdrRetentionError(data: unknown): boolean {
     record.type === 'permission_error' &&
     typeof record.message === 'string' &&
     record.message.includes('Custom data retention settings')
-  )
-}
-
-/** densable leftover ie — success increment; body leftover-wired (unpeeled). */
-function leftoverIe(op: string): void {
-  logForDebugging(op)
-}
-
-/** densable leftover ae — failure increment; body leftover-wired (unpeeled). */
-function leftoverAe(
-  op: string,
-  reason: string,
-  extra: { from_this_session: string },
-): void {
-  logForDebugging(
-    `${op} ${reason} from_this_session=${extra.from_this_session}`,
   )
 }
 
@@ -331,12 +319,16 @@ export async function submitQueuedFeedbackDraft({
       last_request_id: (latestAssistantMessageId ??
         '') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    leftoverIe('feedback_draft_submit')
+    recordFeatureSuccess('feedback_draft_submit')
     return { success: true, feedbackId: posted.feedbackId }
   }
-  leftoverAe('feedback_draft_submit', posted.failureReason ?? 'network_error', {
-    from_this_session: fromThisSession ? 'true' : 'false',
-  })
+  recordFeatureFailure(
+    'feedback_draft_submit',
+    posted.failureReason ?? 'network_error',
+    {
+      from_this_session: fromThisSession ? 'true' : 'false',
+    },
+  )
   return leftoverSubmitError(posted)
 }
 

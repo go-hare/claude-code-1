@@ -23,9 +23,24 @@ const pkg = JSON.parse(
 )
 const PKG_DEPS = new Set(Object.keys(pkg.dependencies ?? {}))
 
-// ─── Node.js 内置模块白名单 ────────────────────────────────────────
+// ─── Node.js 内置模块白名单（显式固定列表；勿使用 Bun 运行时的 node:module builtinModules，因为 Bun 会混入 ws / undici） ──
 const NODE_BUILTINS = new Set([
+  '_http_agent',
+  '_http_client',
+  '_http_common',
+  '_http_incoming',
+  '_http_outgoing',
+  '_http_server',
+  '_stream_duplex',
+  '_stream_passthrough',
+  '_stream_readable',
+  '_stream_transform',
+  '_stream_wrap',
+  '_stream_writable',
+  '_tls_common',
+  '_tls_wrap',
   'assert',
+  'assert/strict',
   'async_hooks',
   'buffer',
   'child_process',
@@ -36,6 +51,7 @@ const NODE_BUILTINS = new Set([
   'dgram',
   'diagnostics_channel',
   'dns',
+  'dns/promises',
   'domain',
   'events',
   'fs',
@@ -44,36 +60,65 @@ const NODE_BUILTINS = new Set([
   'http2',
   'https',
   'inspector',
+  'inspector/promises',
   'module',
   'net',
   'os',
   'path',
+  'path/posix',
+  'path/win32',
   'perf_hooks',
   'process',
   'punycode',
   'querystring',
   'readline',
+  'readline/promises',
   'repl',
   'stream',
+  'stream/consumers',
+  'stream/promises',
+  'stream/web',
   'string_decoder',
   'sys',
   'timers',
+  'timers/promises',
   'tls',
+  'trace_events',
   'tty',
   'url',
   'util',
+  'util/types',
   'v8',
   'vm',
+  'wasi',
   'worker_threads',
   'zlib',
+  'node:sea',
+  'node:sqlite',
   'node:test',
 ])
 
-// Node 18+ 内置但不在传统列表中的模块
-const NODE_18_PLUS_BUILTINS = new Set(['undici'])
+function isNodeBuiltin(mod: string): boolean {
+  if (NODE_BUILTINS.has(mod)) return true
+  if (mod.startsWith('node:')) {
+    return NODE_BUILTINS.has(mod.slice(5))
+  }
+  return false
+}
 
 // Bun 专用模块（仅在 Bun 运行时可用，Node.js 环境会失败）
-const BUN_MODULES = new Set(['bun', 'bun:ffi', 'bun:test', 'bun:sqlite'])
+const BUN_MODULES = new Set([
+  'bun',
+  'bun:ffi',
+  'bun:jsc',
+  'bun:sqlite',
+  'bun:test',
+  'bun:wrap',
+])
+
+function isBunOnlyModule(mod: string): boolean {
+  return BUN_MODULES.has(mod) || mod.startsWith('bun:')
+}
 
 // macOS JXA / native 框架（通过 ObjC.import，非真正的 require）
 const NATIVE_FRAMEWORKS = new Set([
@@ -90,15 +135,41 @@ const STATIC_IMPORT_RE = /(?:from\s+|import\s+)"(\.\/[^"]+\.js)"/g
 const REQUIRE_RE = /__require\("([^"]+)"\)/g
 // 匹配动态 import("xxx")，排除 ./chunk-xxx.js 的内部引用
 const DYNAMIC_IMPORT_RE = /import\("([^"]+)"\)/g
-// 匹配 nodeRequire("xxx")（createRequire 创建的 require 别名）
-const NODE_REQUIRE_RE = /nodeRequire\("([^"]+)"\)/g
+// 匹配 createRequire(...) 绑定的别名（如 var require2 = createRequire(import.meta.url)、req = createRequire(...)、nodeRequire = createRequire(...)）
+const CREATE_REQUIRE_ALIAS_DEF_RE =
+  /\b([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\.)?createRequire\s*\(/g
+
+function buildNodeRequireRe(content: string): RegExp {
+  const aliases = new Set<string>(['nodeRequire'])
+  for (const m of content.matchAll(CREATE_REQUIRE_ALIAS_DEF_RE)) {
+    if (m[1]) aliases.add(m[1])
+  }
+  const escaped = [...aliases].map(a =>
+    a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  )
+  return new RegExp(
+    `\\b(?:${escaped.join('|')})\\(\\s*["']([^"']+)["']\\s*\\)`,
+    'g',
+  )
+}
+
+function findImportLine(lines: string[], mod: string): number {
+  const escaped = mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`(?:from\\s+|import\\s+)["']${escaped}["']`)
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (re.test(lines[idx]!)) return idx + 1
+  }
+  return 1
+}
 
 interface Finding {
   type:
     | 'broken-chunk-ref'
     | 'third-party-require'
     | 'third-party-import'
+    | 'third-party-static-import'
     | 'third-party-node-require'
+    | 'optional-native-import'
     | 'bun-runtime-only'
   severity: 'error' | 'warning'
   file: string
@@ -127,11 +198,31 @@ async function main() {
 
   const findings: Finding[] = []
 
+  const transpiler = new Bun.Transpiler({ loader: 'js' })
   // 2. 逐文件扫描
   for (const file of files) {
     const filePath = join(distDir, file)
     const content = await readFile(filePath, 'utf-8')
     const lines = content.split('\n')
+    const nodeRequireRe = buildNodeRequireRe(content)
+    for (const dependency of transpiler.scanImports(
+      content.replace(/^#![^\r\n]*/, ''),
+    )) {
+      if (dependency.kind !== 'import-statement') continue
+      const mod = dependency.path
+      if (mod.startsWith('.') || isNodeBuiltin(mod) || PKG_DEPS.has(mod)) {
+        continue
+      }
+      const bunOnly = isBunOnlyModule(mod)
+      findings.push({
+        type: bunOnly ? 'bun-runtime-only' : 'third-party-static-import',
+        severity: bunOnly ? 'warning' : 'error',
+        file,
+        line: findImportLine(lines, mod),
+        module: mod,
+        snippet: mod,
+      })
+    }
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
@@ -161,14 +252,8 @@ async function main() {
         const mod = m[1]
         // 跳过 ObjC.import（JXA 语法，不是真正的 require）
         if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
+        if (isNodeBuiltin(mod) || PKG_DEPS.has(mod)) continue
+        if (isBunOnlyModule(mod)) {
           findings.push({
             type: 'bun-runtime-only',
             severity: 'warning',
@@ -198,17 +283,23 @@ async function main() {
         if (mod.startsWith('./') || mod.startsWith('../')) continue
         // 跳过 ObjC.import
         if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
+        if (isNodeBuiltin(mod) || PKG_DEPS.has(mod)) continue
+        if (isBunOnlyModule(mod)) {
           // bun:test 等只在 Bun 运行时可用，Node.js 运行时会失败
           findings.push({
             type: 'bun-runtime-only',
+            severity: 'warning',
+            file,
+            line: lineNum,
+            module: mod,
+            snippet: line.trim().slice(0, 120),
+          })
+          continue
+        }
+        // keychain.ts catches this optional addon and uses encrypted file storage.
+        if (mod === '@napi-rs/keyring') {
+          findings.push({
+            type: 'optional-native-import',
             severity: 'warning',
             file,
             line: lineNum,
@@ -228,19 +319,13 @@ async function main() {
         })
       }
 
-      // 2d. 检查 nodeRequire("xxx") 中的第三方模块（createRequire 别名）
-      const nodeRequireMatches = line.matchAll(NODE_REQUIRE_RE)
+      // 2d. 检查 createRequire 绑定的别名（如 nodeRequire / require2 / req）中的第三方模块
+      const nodeRequireMatches = line.matchAll(nodeRequireRe)
       for (const m of nodeRequireMatches) {
         const mod = m[1]
         if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
+        if (isNodeBuiltin(mod) || PKG_DEPS.has(mod)) continue
+        if (isBunOnlyModule(mod)) {
           findings.push({
             type: 'bun-runtime-only',
             severity: 'warning',
@@ -299,6 +384,14 @@ async function main() {
     console.log()
   }
 
+  for (const finding of errors.filter(
+    f => f.type === 'third-party-static-import',
+  )) {
+    console.log(
+      `Unbundled static import "${finding.module}" (${finding.file}:${finding.line}).`,
+    )
+  }
+
   if (thirdPartyImports.length > 0) {
     console.log('❌ 通过 import() 动态引用的第三方模块（生产环境会找不到）:')
     const grouped = groupByModule(thirdPartyImports)
@@ -334,6 +427,14 @@ async function main() {
       console.log(`   "${mod}" — 出现 ${items.length} 次`)
     }
     console.log()
+  }
+
+  for (const finding of warnings.filter(
+    f => f.type === 'optional-native-import',
+  )) {
+    console.log(
+      `Optional native dependency "${finding.module}" is not bundled; the vault falls back to encrypted file storage (${finding.file}:${finding.line}).`,
+    )
   }
 
   // 4. 总结
