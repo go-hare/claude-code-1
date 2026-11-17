@@ -54,6 +54,7 @@ beforeAll(() => {
 })
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('../bridgeConfig.js', () => ({ ...bridgeConfigSnap }))
 })
 afterEach(() => {
   axiosGet.mockClear()

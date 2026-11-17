@@ -301,9 +301,17 @@ export async function listBridgePeers(): Promise<BridgePeerSession[]> {
  * @param message - Plain text message content (structured messages are rejected upstream)
  * @returns { ok: true } on success, { ok: false, error } on failure. Never throws.
  */
+export type PostInterClaudeMessageOptions = {
+  fromName?: string
+  fromMode?: 'bypass' | 'prompting'
+  inboundHopChain?: readonly string[]
+  fromPlugin?: string
+}
+
 export async function postInterClaudeMessage(
   target: string,
   message: string,
+  opts?: PostInterClaudeMessageOptions,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const handle = getReplBridgeHandle()
@@ -329,30 +337,36 @@ export async function postInterClaudeMessage(
 
     // densable 2.1.228 #13 — fbr(bridge:from, Soa()??name, body): wrap content so
     // other-machine receivers show RC session name (selfTitle) as sender.
-    let fromName: string | undefined
-    try {
-      const { getSessionId } = await import('../bootstrap/state.js')
-      const { getCurrentSessionTitle } = await import(
-        '../utils/sessionStorage.js'
-      )
-      fromName = getCurrentSessionTitle(getSessionId())
-    } catch {
-      // optional
+    let fromName: string | undefined = opts?.fromName
+    if (fromName === undefined) {
+      try {
+        const { getSessionId } = await import('../bootstrap/state.js')
+        const { getCurrentSessionTitle } = await import(
+          '../utils/sessionStorage.js'
+        )
+        fromName = getCurrentSessionTitle(getSessionId())
+      } catch {
+        // optional
+      }
     }
-    const { wrapCrossSessionMessage, parseCrossSessionHopChain } = await import(
-      '../utils/crossSessionMessage.js'
-    )
-    const { appendHopChain, hashAddressToHopToken } = await import(
+    const { formatCanonicalCrossSessionMessage, parseCrossSessionHopChain } =
+      await import('../utils/crossSessionMessage.js')
+    const { advancePeerHopChain, hashAddressToHopToken } = await import(
       '../utils/peerAdmission.js'
     )
     // Gold Tkn(U, m?cBe(xEe(m)):void 0) — HMAC of bridge:session, not UDS token.
-    const hopChain = appendHopChain(
-      parseCrossSessionHopChain(message),
+    const priorHopChain =
+      opts?.inboundHopChain !== undefined
+        ? opts.inboundHopChain
+        : parseCrossSessionHopChain(message)
+    const hopChain = advancePeerHopChain(
+      priorHopChain,
       hashAddressToHopToken(`bridge:${from}`),
     )
-    const content = wrapCrossSessionMessage(message, {
+    const content = formatCanonicalCrossSessionMessage(message, {
       from: `bridge:${from}`,
       ...(fromName !== undefined ? { fromName } : {}),
+      ...(opts?.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
       ...(hopChain !== undefined ? { hopChain } : {}),
     })
 
@@ -364,6 +378,9 @@ export async function postInterClaudeMessage(
         type: 'peer_message',
         from,
         content,
+        ...(opts?.fromPlugin !== undefined
+          ? { from_plugin: opts.fromPlugin }
+          : {}),
       },
       {
         headers: {

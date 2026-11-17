@@ -38,6 +38,10 @@ import { truncate } from 'src/utils/format.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { enqueuePendingNotification } from 'src/utils/messageQueueManager.js'
+import {
+  escapeAgentMessageBody,
+  wrapAgentMessageEnvelope,
+} from 'src/utils/crossSessionMessage.js'
 import { parseAddress } from 'src/utils/peerAddress.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
@@ -963,9 +967,6 @@ async function maybeSubscribePeerIdle(opts: {
   }
 }
 
-/** Peer body envelope tag. */
-const AGENT_MESSAGE_TAG = 'agent-message'
-
 /**
  * Refuse delivery when recipient is a background observer (or its observer
  * status cannot be verified from sidecar).
@@ -999,17 +1000,6 @@ async function refuseIfObserverRecipient(
     return OBSERVER_RECIPIENT_REFUSE
   }
   return null
-}
-
-/**
- * Escape raw `<agent-message` openers inside body so nested envelopes
- * cannot break the outer tag.
- */
-function escapeAgentMessageBody(text: string): string {
-  return text.replace(
-    new RegExp(`<(?=/?${AGENT_MESSAGE_TAG}(?:[>\\s/]|$))`, 'gi'),
-    '<\\',
-  )
 }
 
 /**
@@ -1061,14 +1051,6 @@ export function resolveSenderDisplayName(
     from: senderAgentId,
     displayName: isLocalAgentTask(task) ? task.agentType : senderAgentId,
   }
-}
-
-/**
- * Wrap plain text in <agent-message from="…"> when peer-sent.
- */
-function wrapAgentMessageEnvelope(from: string, message: string): string {
-  const safeFrom = from.replace(/"/g, '')
-  return `<${AGENT_MESSAGE_TAG} from="${safeFrom}">\n${escapeAgentMessageBody(message)}\n</${AGENT_MESSAGE_TAG}>`
 }
 
 /**
@@ -2453,10 +2435,30 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           /* eslint-disable @typescript-eslint/no-require-imports */
           const { postInterClaudeMessage } =
             require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
+          const { permissionModeClassOf, shouldHonorPeerFromMode } =
+            require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
+          const { extractInboundPeerHopChain } =
+            require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
+          const perm = context.getAppState().toolPermissionContext
+          const fromMode = shouldHonorPeerFromMode()
+            ? permissionModeClassOf({
+                mode: perm.mode,
+                isBypassPermissionsModeAvailable:
+                  perm.isBypassPermissionsModeAvailable,
+              })
+            : undefined
+          const inboundHopChain = extractInboundPeerHopChain(context.messages)
           const result = (await postInterClaudeMessage(
             addr.target,
             input.message,
+            {
+              ...(fromMode !== undefined ? { fromMode } : {}),
+              ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
+              ...(context.hookCaller !== undefined
+                ? { fromPlugin: context.hookCaller }
+                : {}),
+            },
           )) as { ok: boolean; error?: string }
           const preview = input.summary || truncate(input.message, 50)
           // densable NKp only fires on bare-name / name [ref] resolve success
@@ -2520,6 +2522,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
+          const { extractInboundPeerHopChain } =
+            require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
             // densable Wei: stamp fromMode only when harbor_kite_mode_emit is on.
@@ -2531,8 +2535,13 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                     perm.isBypassPermissionsModeAvailable,
                 })
               : undefined
+            const inboundHopChain = extractInboundPeerHopChain(context.messages)
             await sendToUdsSocket(addr.target, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
+              ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
+              ...(context.hookCaller !== undefined
+                ? { fromPlugin: context.hookCaller }
+                : {}),
             })
             const preview = input.summary || truncate(input.message, 50)
             // densable: no NKp on explicit uds: scheme (see bridge branch above).
@@ -2884,9 +2893,29 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 },
               }
             }
+            const { permissionModeClassOf, shouldHonorPeerFromMode } =
+              require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
+            const { extractInboundPeerHopChain } =
+              require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
+            const perm = context.getAppState().toolPermissionContext
+            const fromMode = shouldHonorPeerFromMode()
+              ? permissionModeClassOf({
+                  mode: perm.mode,
+                  isBypassPermissionsModeAvailable:
+                    perm.isBypassPermissionsModeAvailable,
+                })
+              : undefined
+            const inboundHopChain = extractInboundPeerHopChain(context.messages)
             const result = (await bridgePeers.postInterClaudeMessage(
               cand.id,
               input.message,
+              {
+                ...(fromMode !== undefined ? { fromMode } : {}),
+                ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
+                ...(context.hookCaller !== undefined
+                  ? { fromPlugin: context.hookCaller }
+                  : {}),
+              },
             )) as { ok: boolean; error?: string }
             if (!result.ok) {
               return {
@@ -2956,6 +2985,8 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             if (gated !== undefined) return gated
           }
           try {
+            const { extractInboundPeerHopChain } =
+              require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
             const perm = context.getAppState().toolPermissionContext
             const fromMode = shouldHonorPeerFromMode()
               ? permissionModeClassOf({
@@ -2964,8 +2995,13 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                     perm.isBypassPermissionsModeAvailable,
                 })
               : undefined
+            const inboundHopChain = extractInboundPeerHopChain(context.messages)
             await udsClient.sendToUdsSocket(cand.id, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
+              ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
+              ...(context.hookCaller !== undefined
+                ? { fromPlugin: context.hookCaller }
+                : {}),
             })
             setSendMessagePinOnAppState(
               context.setAppState as unknown as Parameters<

@@ -1615,13 +1615,16 @@ async function startUdsMessagingBody(
           },
           text => jsonParse(text) as UdsMessage,
           {
-            // densable X1r — same 1MiB line cap as send refuse (oFd/tFd),
-            // measured in the framer's bytes rather than the sender's chars.
+            // densable X1r / BUt — gold recv counts JS string `.length` after
+            // utf8 (chars, not bytes). Byte budget stays a UTF-8 backstop.
+            // Do not socket.setEncoding('utf8') — framer expects Buffer.
             maxFrameBytes: MAX_UDS_LINE_BYTES,
+            maxFrameChars: MAX_UDS_LINE_CHARS,
             onFrameError: () => {
               // densable recv drop: log + destroy (no silent tool success).
               logForDebugging(
-                `[uds-messaging] Line exceeded ${MAX_UDS_LINE_BYTES} bytes; dropping connection`,
+                `[uds-messaging] Line exceeded ${MAX_UDS_LINE_CHARS} chars; dropping connection`,
+                { level: 'warn' },
               )
               if (!socket.destroyed) socket.destroy()
             },

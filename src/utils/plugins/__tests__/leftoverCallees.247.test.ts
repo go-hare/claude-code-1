@@ -294,8 +294,10 @@ describe('densable 2.1.247 leftover callee 接', () => {
     expect(submitDraft).toContain(
       'Feedback collection is not available for organizations with custom data retention policies.',
     )
-    expect(submitDraft).toContain("leftoverIe('feedback_draft_submit')")
-    expect(submitDraft).toContain('leftoverAe(')
+    expect(submitDraft).toContain(
+      "recordFeatureSuccess('feedback_draft_submit')",
+    )
+    expect(submitDraft).toContain('recordFeatureFailure(')
     expect(submitDraft).toContain("posted.failureReason ?? 'network_error'")
     expect(card).toContain('submitQueuedFeedbackDraft')
     expect(card).toContain("via: 'card_send_as_is'")

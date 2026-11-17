@@ -501,6 +501,15 @@ export type SendToUdsSocketOptions = {
    * When omitted, falls back to current session title.
    */
   fromName?: string
+  /**
+   * densable `TWe(r.messages())` @211734519 — inbound peer hop-chain from the
+   * triggering user message (`undefined` on human-initiated turns).
+   */
+  inboundHopChain?: readonly string[]
+  /** densable `fromPlugin: r.hookCaller` @186571774. */
+  fromPlugin?: string
+  /** densable `h = Orr()` @186571947 — optional `from-session` override. */
+  fromSession?: string
 }
 
 /**
@@ -565,35 +574,45 @@ export async function sendToUdsSocket(
       // title optional
     }
   }
-  const { wrapCrossSessionMessage, parseCrossSessionHopChain } = await import(
-    './crossSessionMessage.js'
-  )
+  const { formatCanonicalCrossSessionMessage, parseCrossSessionHopChain } =
+    await import('./crossSessionMessage.js')
   const fromAddr = ownSocket ? `uds:${ownSocket}` : undefined
-  // densable Tkn(m, b?cBe(b):void 0) — append own hop token, cap zVt.
-  const { appendHopChain, getOwnUdsHopToken } = await import(
-    './peerAdmission.js'
-  )
-  const hopChain = appendHopChain(
-    parseCrossSessionHopChain(rawBody),
-    getOwnUdsHopToken(),
-  )
-  const data = wrapCrossSessionMessage(rawBody, {
+  // densable Tkn(m, b?cBe(b):void 0) — append own hop token when relaying a peer turn, cap zVt.
+  const {
+    advancePeerHopChain,
+    getOwnUdsHopToken,
+    hashAddressToHopToken,
+    resolveHostSessionIdForCrossSession,
+  } = await import('./peerAdmission.js')
+  const priorHopChain =
+    opts.inboundHopChain !== undefined
+      ? opts.inboundHopChain
+      : parseCrossSessionHopChain(rawBody)
+  const ownHopToken =
+    getOwnUdsHopToken() ??
+    (fromAddr !== undefined ? hashAddressToHopToken(fromAddr) : undefined)
+  const hopChain = advancePeerHopChain(priorHopChain, ownHopToken)
+  const fromSession = opts.fromSession ?? resolveHostSessionIdForCrossSession()
+  const data = formatCanonicalCrossSessionMessage(rawBody, {
     ...(fromAddr !== undefined ? { from: fromAddr } : {}),
     ...(fromName !== undefined ? { fromName } : {}),
+    ...(fromSession !== undefined ? { fromSession } : {}),
     ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
     ...(hopChain !== undefined ? { hopChain } : {}),
   })
 
   const msgId = randomUUID()
-  const udsMsg: UdsMessage = {
+  const udsMsg: UdsMessage & { from_plugin?: string } = {
     type: 'text',
     data,
     ts: new Date().toISOString(),
     from: ownSocket,
     msg_id: msgId,
+    ...(opts.fromPlugin !== undefined ? { from_plugin: opts.fromPlugin } : {}),
     meta: {
       msg_id: msgId,
       ...(opts.fromMode !== undefined ? { fromMode: opts.fromMode } : {}),
+      ...(opts.fromPlugin !== undefined ? { fromPlugin: opts.fromPlugin } : {}),
       ...(opts.selfSent === true ? { selfSent: true } : {}),
     },
   }

@@ -5,6 +5,7 @@ import { join } from 'path'
 import type { AppState } from '../../../state/AppStateStore.js'
 import type { Tool } from '../../../Tool.js'
 import {
+  applyHeadlessMcpSettlement,
   attachHeadlessRemoteMcpReconnect,
   chainMcpClientOnclose,
   HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS,
@@ -14,6 +15,7 @@ import {
   type HeadlessDynamicMcpState,
   type HeadlessMcpReconnectDeps,
 } from '../headlessMcpReconnect.js'
+import { getMcpIdentityEpoch } from '../mcpIdentity.js'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
@@ -213,6 +215,144 @@ describe('headless MCP reconnect 243', () => {
     expect((getClients()[0] as { error?: string }).error).toBe(
       'Connection closed again while reconnecting',
     )
+    expect(reconnected).toEqual([])
+  })
+
+  test('289: already closed clients reconnect asynchronously once across repeated mounts', async () => {
+    const closed = fakeConnected('http')
+    Object.defineProperty(closed.client, 'transport', { value: undefined })
+    const { deps, getClients } = makeDeps([closed])
+    let calls = 0
+    deps.mcpClient = {
+      reconnectMcpServerImpl: async (name, config) => {
+        calls++
+        return {
+          client: { name, config, type: 'failed', error: 'down' },
+          tools: [],
+          commands: [],
+        }
+      },
+      peekSettledConnection: async () => undefined,
+      detachAndCloseConnection: async () => {},
+      dropDiscoveryEntry: async () => {},
+      seedMcpIdentityCheck: () => {},
+      getMcpIdentityEpoch,
+      mcpIdentityChangedSinceLastCheck: () => false,
+      cleanupConnectedMcpClients: async () => {},
+    }
+    const attach = attachHeadlessRemoteMcpReconnect(deps)
+    attach([closed])
+    attach([closed])
+    expect(calls).toBe(0)
+    expect(getClients()[0]).toBe(closed)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(calls).toBe(HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS)
+    expect(getClients()[0]?.type).toBe('failed')
+    closed.client.onclose?.()
+    closed.client.onclose?.()
+    await Promise.resolve()
+    expect(calls).toBe(HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS)
+  })
+
+  test('289: an onclose before the scheduled closed-client check does not duplicate the dial', async () => {
+    const closed = fakeConnected('http')
+    Object.defineProperty(closed.client, 'transport', { value: undefined })
+    const next = fakeConnected('http')
+    const { deps, getClients } = makeDeps([closed])
+    let calls = 0
+    deps.mcpClient = {
+      reconnectMcpServerImpl: async () => {
+        calls++
+        return { client: next, tools: [], commands: [] }
+      },
+      peekSettledConnection: async () => next,
+      detachAndCloseConnection: async () => {},
+      dropDiscoveryEntry: async () => {},
+      seedMcpIdentityCheck: () => {},
+      getMcpIdentityEpoch,
+      mcpIdentityChangedSinceLastCheck: () => false,
+      cleanupConnectedMcpClients: async () => {},
+    }
+    attachHeadlessRemoteMcpReconnect(deps)([closed])
+    closed.client.onclose?.()
+    closed.client.onclose?.()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(calls).toBe(1)
+    expect(getClients()[0]).toBe(next)
+  })
+
+  test('289: stale account settlements close their client without replacing either store', async () => {
+    const previous = fakeConnected('http')
+    const incoming = fakeConnected('http')
+    const { deps, getClients } = makeDeps([previous])
+    const dynamic = { clients: [previous], tools: [] }
+    deps.setDynamicMcpState(dynamic)
+    let detached = 0
+    deps.mcpClient = {
+      reconnectMcpServerImpl: async () => ({
+        client: incoming,
+        tools: [],
+        commands: [],
+      }),
+      peekSettledConnection: async () => incoming,
+      detachAndCloseConnection: async () => {
+        detached++
+      },
+      dropDiscoveryEntry: async () => {},
+      seedMcpIdentityCheck: () => {},
+      getMcpIdentityEpoch,
+      mcpIdentityChangedSinceLastCheck: () => false,
+      cleanupConnectedMcpClients: async () => {},
+    }
+    applyHeadlessMcpSettlement(deps, 'http', {
+      client: incoming,
+      tools: [],
+      attemptEpoch: getMcpIdentityEpoch() - 1,
+    })
+    await Promise.resolve()
+    expect(detached).toBe(1)
+    expect(getClients()[0]).toBe(previous)
+    expect(deps.getDynamicMcpState()).toBe(dynamic)
+    applyHeadlessMcpSettlement(deps, 'http', {
+      client: incoming,
+      tools: [],
+      attemptEpoch: getMcpIdentityEpoch(),
+    })
+    expect(getClients()[0]).toBe(incoming)
+    expect(deps.getDynamicMcpState().clients[0]).toBe(incoming)
+  })
+
+  test('289: a successful dial discarded after disable closes even if its memo is still settled', async () => {
+    const closed = fakeConnected('http')
+    const incoming = fakeConnected('http')
+    const { deps, getClients, reconnected } = makeDeps([closed])
+    let detached = 0
+    deps.mcpClient = {
+      reconnectMcpServerImpl: async () => {
+        deps.setAppState(prev => ({
+          ...prev,
+          mcp: {
+            ...prev.mcp,
+            clients: [
+              { name: closed.name, type: 'disabled', config: closed.config },
+            ],
+          },
+        }))
+        return { client: incoming, tools: [], commands: [] }
+      },
+      peekSettledConnection: async () => incoming,
+      detachAndCloseConnection: async () => {
+        detached++
+      },
+      dropDiscoveryEntry: async () => {},
+      seedMcpIdentityCheck: () => {},
+      getMcpIdentityEpoch,
+      mcpIdentityChangedSinceLastCheck: () => false,
+      cleanupConnectedMcpClients: async () => {},
+    }
+    await reconnectHeadlessRemoteMcpAfterClose(deps, closed)
+    expect(detached).toBe(1)
+    expect(getClients()[0]?.type).toBe('disabled')
     expect(reconnected).toEqual([])
   })
 

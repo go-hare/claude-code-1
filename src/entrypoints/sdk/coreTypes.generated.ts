@@ -102,6 +102,9 @@ export type HookInputBase = {
   session_id: string // 会话 ID
   transcript_path: string // 转录文件路径
   cwd: string // 当前工作目录
+  scratchpad_dir?: string
+  prompt_id?: string
+  effort?: { level: string }
   permission_mode?: string // 权限模式（可选）
   /** 仅在从子代理触发的钩子中存在 */
   agent_id?: string
@@ -166,7 +169,18 @@ export type HookInput =
       title?: string
       notification_type: string
     })
-  | (HookInputBase & { hook_event_name: 'UserPromptSubmit'; prompt: string })
+  | (HookInputBase & {
+      hook_event_name: 'UserPromptSubmit'
+      prompt: string
+      source?:
+        | 'user'
+        | 'sdk'
+        | 'system'
+        | 'loop_wakeup'
+        | 'schedule_wakeup'
+        | 'poll_event'
+      session_title?: string
+    })
   | (HookInputBase & {
       hook_event_name: 'UserPromptExpansion'
       expansion_type: 'slash_command' | 'mcp_prompt'
@@ -206,6 +220,23 @@ export type HookInput =
       hook_event_name: 'Stop'
       stop_hook_active: boolean
       last_assistant_message?: string
+      background_tasks?: Array<{
+        id: string
+        type: string
+        status: string
+        description: string
+        command?: string
+        agent_type?: string
+        server?: string
+        tool?: string
+        name?: string
+      }>
+      session_crons?: Array<{
+        id: string
+        schedule: string
+        recurring: boolean
+        prompt: string
+      }>
     })
   | (HookInputBase & {
       hook_event_name: 'StopFailure'
@@ -225,6 +256,23 @@ export type HookInput =
       agent_transcript_path: string
       agent_type: string
       last_assistant_message?: string
+      background_tasks?: Array<{
+        id: string
+        type: string
+        status: string
+        description: string
+        command?: string
+        agent_type?: string
+        server?: string
+        tool?: string
+        name?: string
+      }>
+      session_crons?: Array<{
+        id: string
+        schedule: string
+        recurring: boolean
+        prompt: string
+      }>
     })
   | (HookInputBase & {
       hook_event_name: 'PreCompact'
@@ -241,7 +289,7 @@ export type HookInput =
       from_model: string
       to_model: string
       requested_model: string | null
-      source: string
+      source: 'command' | 'picker' | 'sdk' | (string & {})
       context_tokens: number
       prompt_cache_warm: boolean
       cache_ttl: '5m' | '1h'
@@ -253,7 +301,7 @@ export type HookInput =
       from_model: string
       to_model: string
       requested_model: string | null
-      source: string
+      source: 'command' | 'picker' | 'sdk' | 'auto' | 'resume' | (string & {})
       context_tokens: number
       prompt_cache_warm: boolean
       cache_ttl: '5m' | '1h'
@@ -363,6 +411,7 @@ export type SyncHookJSONOutput = {
   stopReason?: string
   decision?: 'approve' | 'block'
   systemMessage?: string
+  terminalSequence?: string
   reason?: string
   hookSpecificOutput?:
     | {
@@ -372,7 +421,12 @@ export type SyncHookJSONOutput = {
         updatedInput?: Record<string, unknown>
         additionalContext?: string
       }
-    | { hookEventName: 'UserPromptSubmit'; additionalContext?: string }
+    | {
+        hookEventName: 'UserPromptSubmit'
+        additionalContext?: string
+        sessionTitle?: string
+        suppressOriginalPrompt?: boolean
+      }
     | {
         hookEventName: 'UserPromptExpansion'
         additionalContext?: string
@@ -382,9 +436,17 @@ export type SyncHookJSONOutput = {
         hookEventName: 'SessionStart'
         additionalContext?: string
         initialUserMessage?: string
+        sessionTitle?: string
         watchPaths?: string[]
+        reloadSkills?: boolean
       }
     | { hookEventName: 'Setup'; additionalContext?: string }
+    | {
+        hookEventName: 'PreModelSwitch'
+        permissionDecision?: 'allow' | 'deny' | 'ask'
+        permissionDecisionReason?: string
+      }
+    | { hookEventName: 'PostModelSwitch'; additionalContext?: string }
     | { hookEventName: 'SubagentStart'; additionalContext?: string }
     | {
         hookEventName: 'PostToolUse'
@@ -395,6 +457,8 @@ export type SyncHookJSONOutput = {
       }
     | { hookEventName: 'PostToolUseFailure'; additionalContext?: string }
     | { hookEventName: 'PostToolBatch'; additionalContext?: string }
+    | { hookEventName: 'Stop'; additionalContext?: string }
+    | { hookEventName: 'SubagentStop'; additionalContext?: string }
     | { hookEventName: 'PermissionDenied'; retry?: boolean }
     | { hookEventName: 'Notification'; additionalContext?: string }
     | {
@@ -441,7 +505,10 @@ export type PostToolBatchHookInput = Extract<
 export type PermissionRequestHookInput = HookInput & { tool_name: string }
 export type PermissionDeniedHookInput = HookInput
 export type NotificationHookInput = HookInput & { message: string }
-export type UserPromptSubmitHookInput = HookInput & { prompt: string }
+export type UserPromptSubmitHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'UserPromptSubmit' }
+>
 /** densable 2.1.289 QH — slash / MCP prompt expansion */
 export type UserPromptExpansionHookInput = Extract<
   HookInput,
@@ -462,10 +529,13 @@ export type PostModelSwitchHookInput = Extract<
 >
 export type SessionEndHookInput = HookInput & { exit_reason: string }
 export type SetupHookInput = HookInput
-export type StopHookInput = HookInput
+export type StopHookInput = Extract<HookInput, { hook_event_name: 'Stop' }>
 export type StopFailureHookInput = HookInput
 export type SubagentStartHookInput = HookInput
-export type SubagentStopHookInput = HookInput
+export type SubagentStopHookInput = Extract<
+  HookInput,
+  { hook_event_name: 'SubagentStop' }
+>
 export type PreCompactHookInput = HookInput
 export type PostCompactHookInput = HookInput
 export type TeammateIdleHookInput = HookInput
@@ -604,7 +674,14 @@ export type SDKPermissionDenial = {
   [key: string]: unknown
 }
 export type SDKRateLimitInfo = { type: 'rate_limit'; [key: string]: unknown }
-export type SDKStatus = 'active' | 'idle' | 'error' | string
+export type SDKStatus =
+  | 'compacting'
+  | 'requesting'
+  | 'active'
+  | 'idle'
+  | 'error'
+  | string
+  | null
 
 export type SDKSessionInfo = {
   sessionId: string

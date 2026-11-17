@@ -600,6 +600,7 @@ export function useManageMCPConnections(
                   isMeta: true,
                   origin: { kind: 'channel', server: client.name },
                   skipSlashCommands: true,
+                  skipAttachments: true,
                 })
               },
             )

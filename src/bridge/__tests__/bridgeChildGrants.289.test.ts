@@ -1,7 +1,13 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
 import type { ToolPermissionContext } from '../../Tool.js'
+import * as realBootstrap from '../../bootstrap/state.js'
+import * as realChangeDetector from '../../utils/settings/changeDetector.js'
 import * as realPermissionSetup from '../../utils/permissions/permissionSetup.js'
 import * as realSettings from '../../utils/settings/settings.js'
+import {
+  analyticsMock,
+  restoreAnalyticsMock,
+} from '../../../tests/mocks/analytics.js'
 import { growthbookMock } from '../../../tests/mocks/growthbook.js'
 import {
   createSettingsMock,
@@ -13,76 +19,106 @@ const settingsListeners = new Set<(source?: string, extra?: unknown) => void>()
 
 let flagInline: Record<string, unknown> | null = null
 
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const changeSnap = snapshotModuleExports(realChangeDetector)
 const settingsSnap = snapshotModuleExports(realSettings)
 const permissionSetupSnap = snapshotModuleExports(realPermissionSetup)
 
-mock.module('../../services/analytics/growthbook.js', () => ({
-  ...growthbookMock(),
-  getFeatureValue_CACHED_MAY_BE_STALE: (_gate: string, fallback: unknown) =>
-    fallback,
-  onGrowthBookRefresh: (listener: () => void) => {
-    growthbookRefreshListeners.add(listener)
-    return () => {
-      growthbookRefreshListeners.delete(listener)
-    }
-  },
-}))
+function subscribeSettingsChange(
+  listener: (source?: string, extra?: unknown) => void,
+) {
+  settingsListeners.add(listener)
+  return () => {
+    settingsListeners.delete(listener)
+  }
+}
 
-mock.module('../../services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+function notifySettingsChange(source: string, extra?: unknown) {
+  for (const listener of [...settingsListeners]) listener(source, extra)
+}
 
-mock.module('../../utils/settings/changeDetector.js', () => ({
-  settingsChangeDetector: {
-    subscribe: (listener: (source?: string, extra?: unknown) => void) => {
-      settingsListeners.add(listener)
+function growthbookFactory() {
+  return {
+    ...growthbookMock(),
+    getFeatureValue_CACHED_MAY_BE_STALE: (_gate: string, fallback: unknown) =>
+      fallback,
+    onGrowthBookRefresh: (listener: () => void) => {
+      growthbookRefreshListeners.add(listener)
       return () => {
-        settingsListeners.delete(listener)
+        growthbookRefreshListeners.delete(listener)
       }
     },
-    notifyChange: (source: string, extra?: unknown) => {
-      for (const listener of [...settingsListeners]) listener(source, extra)
+  }
+}
+
+function changeDetectorMock() {
+  return {
+    ...changeSnap,
+    subscribe: subscribeSettingsChange,
+    notifyChange: notifySettingsChange,
+    settingsChangeDetector: {
+      ...changeSnap.settingsChangeDetector,
+      subscribe: subscribeSettingsChange,
+      notifyChange: notifySettingsChange,
     },
-  },
-}))
+  }
+}
 
-mock.module('../../bootstrap/state.js', () => ({
-  getFlagSettingsInline: () => flagInline,
-  setFlagSettingsInline: (next: Record<string, unknown> | null) => {
-    flagInline = next
-  },
-}))
+function bootstrapMock() {
+  return {
+    ...bootstrapSnap,
+    getFlagSettingsInline: () => flagInline,
+    setFlagSettingsInline: (next: Record<string, unknown> | null) => {
+      flagInline = next
+    },
+  }
+}
 
-mock.module(
-  '../../utils/settings/settings.js',
-  createSettingsMock(settingsSnap, {
-    getSettingsForSource: ((source: string) => {
-      if (source === 'flagSettings') return flagInline ?? undefined
-      return undefined
-    }) as typeof realSettings.getSettingsForSource,
-    // densable Yo merge for compact gates: flagSettings inline is live.
-    getInitialSettings: (() =>
-      (flagInline ?? {}) as ReturnType<
-        typeof realSettings.getInitialSettings
-      >) as typeof realSettings.getInitialSettings,
-  }),
-)
+const settingsFactory = createSettingsMock(settingsSnap, {
+  getSettingsForSource: ((source: string) => {
+    if (source === 'flagSettings') return flagInline ?? undefined
+    return undefined
+  }) as typeof realSettings.getSettingsForSource,
+  // densable Yo merge for compact gates: flagSettings inline is live.
+  getInitialSettings: (() =>
+    (flagInline ?? {}) as ReturnType<
+      typeof realSettings.getInitialSettings
+    >) as typeof realSettings.getInitialSettings,
+})
+
+const permissionSetupFactory = createSettingsMock(permissionSetupSnap, {
+  setPermissionModeWithGuards: (
+    mode: ToolPermissionContext['mode'],
+    _ctx: ToolPermissionContext,
+    apply: (
+      updater: (ctx: ToolPermissionContext) => ToolPermissionContext,
+    ) => void,
+  ) => {
+    apply(ctx => ({ ...ctx, mode }))
+    return { ok: true, mode }
+  },
+} as Partial<typeof permissionSetupSnap>)
+
+mock.module('../../services/analytics/growthbook.js', growthbookFactory)
+mock.module('src/services/analytics/growthbook.js', growthbookFactory)
+
+mock.module('../../services/analytics/index.js', analyticsMock)
+mock.module('src/services/analytics/index.js', analyticsMock)
+
+mock.module('../../utils/settings/changeDetector.js', changeDetectorMock)
+mock.module('src/utils/settings/changeDetector.js', changeDetectorMock)
+
+mock.module('../../bootstrap/state.js', bootstrapMock)
+mock.module('src/bootstrap/state.js', bootstrapMock)
+
+mock.module('../../utils/settings/settings.js', settingsFactory)
+mock.module('src/utils/settings/settings.js', settingsFactory)
 
 mock.module(
   '../../utils/permissions/permissionSetup.js',
-  createSettingsMock(permissionSetupSnap, {
-    setPermissionModeWithGuards: (
-      mode: ToolPermissionContext['mode'],
-      _ctx: ToolPermissionContext,
-      apply: (
-        updater: (ctx: ToolPermissionContext) => ToolPermissionContext,
-      ) => void,
-    ) => {
-      apply(ctx => ({ ...ctx, mode }))
-      return { ok: true, mode }
-    },
-  } as Partial<typeof permissionSetupSnap>),
+  permissionSetupFactory,
 )
+mock.module('src/utils/permissions/permissionSetup.js', permissionSetupFactory)
 
 const {
   attachBridgeChildGrants,
@@ -107,15 +143,34 @@ afterEach(() => {
 
 afterAll(() => {
   // Bun mock.module is process-global — restore shared hosts so co-run suites
-  // (e.g. serverConfigSession.289 needing parseToolListFromCLI) do not see
-  // incomplete growthbook/settings/permissionSetup.
+  // (HWT sink, getCwd/getSessionId, changeDetector initialize) do not see
+  // incomplete analytics/bootstrap/changeDetector/settings.
   mock.module('../../services/analytics/growthbook.js', growthbookMock)
+  mock.module('src/services/analytics/growthbook.js', growthbookMock)
+  mock.module('../../services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('src/services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('../../utils/settings/changeDetector.js', () => ({
+    ...changeSnap,
+  }))
+  mock.module('src/utils/settings/changeDetector.js', () => ({
+    ...changeSnap,
+  }))
+  mock.module('../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
   mock.module(
     '../../utils/settings/settings.js',
     createSettingsMock(settingsSnap),
   )
   mock.module(
+    'src/utils/settings/settings.js',
+    createSettingsMock(settingsSnap),
+  )
+  mock.module(
     '../../utils/permissions/permissionSetup.js',
+    createSettingsMock(permissionSetupSnap),
+  )
+  mock.module(
+    'src/utils/permissions/permissionSetup.js',
     createSettingsMock(permissionSetupSnap),
   )
 })

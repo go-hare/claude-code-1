@@ -98,6 +98,7 @@ export function usePeerInboundUdsDrain(
               typeof cmd.uuid === 'string' ? (cmd.uuid as never) : randomUUID(),
             origin: (cmd.origin as never) ?? { kind: 'peer' },
             skipSlashCommands: true,
+            skipAttachments: true,
             isMeta: true,
           })
         }
@@ -306,6 +307,7 @@ export function usePeerInboundUdsDrain(
                 : {}),
           },
           skipSlashCommands: true,
+          skipAttachments: true,
           isMeta: true,
         }
 
@@ -355,8 +357,10 @@ export function usePeerInboundUdsDrain(
           mode: 'prompt',
           value: text,
           uuid: randomUUID(),
+          priority: 'later',
           origin: { kind: 'peer', from: 'peer_idle_notice' },
           skipSlashCommands: true,
+          skipAttachments: true,
           isMeta: true,
         })
       })

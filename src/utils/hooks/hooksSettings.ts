@@ -73,18 +73,53 @@ export function isHookEqual(
   }
 }
 
+/** Gold Sp/i6: make invisible controls visible without breaking emoji clusters. */
+export function formatHookProgressText(text: string): string {
+  const unsafe = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/gu
+  if (!unsafe.test(text))
+    return text.replaceAll('\n', '␤').replaceAll('\t', '␉')
+  let output = ''
+  for (const { segment } of new Intl.Segmenter(undefined, {
+    granularity: 'grapheme',
+  }).segment(text)) {
+    const pictographic =
+      /\p{Extended_Pictographic}|\p{Regional_Indicator}|^[#*0-9]️?⃣$/u.test(
+        segment,
+      )
+    const taggedFlag =
+      /^\u{1F3F4}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,6}\u{E007F}$/u.test(
+        segment,
+      )
+    unsafe.lastIndex = 0
+    output += segment.replace(unsafe, (character: string, offset: number) => {
+      if (character === '\n' || character === '\t') return character
+      const code = character.codePointAt(0) ?? 0
+      if (
+        pictographic &&
+        (character === '️' ||
+          character === '︎' ||
+          character === '⃣' ||
+          (character === '‍' && offset + character.length < segment.length) ||
+          (taggedFlag && code >= 917536 && code <= 917631))
+      )
+        return character
+      if (code === 27) return '␛'
+      if (code < 32) return String.fromCodePoint(9216 + code)
+      if (code === 127) return '␡'
+      return `\\u{${code.toString(16).toUpperCase()}}`
+    })
+  }
+  return output.replaceAll('\n', '␤').replaceAll('\t', '␉')
+}
+
 /** Get the display text for a hook */
 export function getHookDisplayText(
   hook: HookCommand | { type: 'callback' | 'function'; statusMessage?: string },
 ): string {
-  // Return custom status message if provided
-  if ('statusMessage' in hook && hook.statusMessage) {
-    return hook.statusMessage
-  }
-
+  // Gold TH is command identity, independent of the spinner status message.
   switch (hook.type) {
     case 'command':
-      return hook.command
+      return hook.args ? [hook.command, ...hook.args].join(' ') : hook.command
     case 'prompt':
       return hook.prompt
     case 'agent':

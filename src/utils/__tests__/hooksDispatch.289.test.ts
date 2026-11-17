@@ -1,11 +1,28 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
+import { constants as bufferConstants } from 'node:buffer'
+import stripAnsi from 'strip-ansi'
+import {
+  getHookStdioError,
+  selectCompleteHookOutput,
+  stdioFailClosedEvents,
+} from '../hooks/hookStdIO.js'
 
 // Evaluate the real executor with inert boundaries: no settings, subprocesses,
 // API calls, or process-global mock.module registrations are involved.
 const source = readFileSync(new URL('../hooks.ts', import.meta.url), 'utf8')
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
+const hookSettingsSource = readFileSync(
+  new URL('../hooks/hooksSettings.ts', import.meta.url),
+  'utf8',
+)
+const progressDisplayHelper = hookSettingsSource
+  .slice(
+    hookSettingsSource.indexOf('export function formatHookProgressText('),
+    hookSettingsSource.indexOf('/** Get the display text for a hook */'),
+  )
+  .replace('export function', 'function')
 const helpers = source.slice(
   source.indexOf('function classicResultFields('),
   source.indexOf('/**\n * densable 2.1.248 Eve'),
@@ -35,6 +52,11 @@ function harness(
   let httpTimeout: unknown
   let mcpArguments: unknown[] = []
   const globals = {
+    bufferConstants,
+    getFeatureValueWithSource: () => ({ value: false, source: 'fallback' }),
+    getHookStdioError,
+    selectCompleteHookOutput,
+    stdioFailClosedEvents,
     TOOL_HOOK_EXECUTION_TIMEOUT_MS: 600000,
     shouldDisableAllHooksIncludingManaged: () => false,
     isEnvTruthy: () => false,
@@ -173,6 +195,65 @@ function harness(
 }
 
 describe('densable 289 hook dispatch', () => {
+  test('outside remote activity hold respects event gates, timeout units and releases once', () => {
+    const body = source.slice(
+      source.indexOf('function holdOutsideHookActivity('),
+      source.indexOf('function getHookWorktreePath('),
+    )
+    let enabled = true
+    let starts = 0
+    let stops = 0
+    let duration = 0
+    let expire = () => {}
+    const hold = runInNewContext(
+      transpiler.transformSync(body) + '\nholdOutsideHookActivity',
+      {
+        process: { env: { CLAUDE_CODE_REMOTE_SEND_KEEPALIVES: '1' } },
+        getFeatureValue_CACHED_MAY_BE_STALE: () => enabled,
+        startSessionActivity: () => {
+          starts++
+        },
+        stopSessionActivity: () => {
+          stops++
+        },
+        logForDiagnosticsNoPII: () => {},
+        logError: () => {},
+        setTimeout: (callback: () => void, ms: number) => {
+          expire = callback
+          duration = ms
+          return { unref: () => {} }
+        },
+        clearTimeout: () => {},
+      },
+    )
+    const release = hold(
+      'PreCompact',
+      [
+        { hook: { type: 'command', timeout: 2 } },
+        { hook: { type: 'function', timeout: 3000 } },
+      ],
+      1000,
+    )
+    expect(duration).toBe(63000)
+    expect(starts).toBe(1)
+    expire()
+    release()
+    expect(stops).toBe(1)
+    for (const event of [
+      'MessageDisplay',
+      'SessionEnd',
+      'PermissionRequest',
+      'Notification',
+    ])
+      hold(event, [], 1000)()
+    enabled = false
+    hold('PreCompact', [], 1000)()
+    expect(starts).toBe(1)
+    enabled = true
+    hold('PreCompact', [{ hook: { type: 'command', timeout: 3600 } }], 1000)()
+    expect(duration).toBe(1200000)
+    expect(stops).toBe(2)
+  })
   test('HTTP gets the caller timeout and MCP helper receives execution context', async () => {
     const http = harness({ type: 'http' })
     await http.collect()
@@ -267,7 +348,7 @@ describe('densable 289 hook dispatch', () => {
     )
     const body = settings.slice(
       settings.indexOf('export function isHookEqual('),
-      settings.indexOf('/** Get the display text'),
+      settings.indexOf('/** Gold Sp/i6'),
     )
     const equal = runInNewContext(
       transpiler.transformSync(body).replace('export ', '') + '\nisHookEqual',
@@ -356,6 +437,7 @@ describe('densable 289 hook dispatch', () => {
         createBaseHookInput: () => ({}),
         getSessionId: () => 'main',
         hasHookForEvent: () => true,
+        matchToolCallManagedPass: () => undefined,
         logForDebugging: () => {},
         executeHooks: async function* ({
           hookInput,
@@ -443,8 +525,34 @@ describe('densable 289 hook dispatch', () => {
       body: 'outside MCP response',
     }
     const outside = runInNewContext(
-      transpiler.transformSync(body) + '\nexecuteHooksOutsideREPL',
+      transpiler.transformSync(
+        progressDisplayHelper +
+          source.slice(
+            source.indexOf('function hookTelemetryFeatureName('),
+            source.indexOf(
+              '\n/**',
+              source.indexOf('function hookTelemetryFeatureName('),
+            ),
+          ) +
+          source.slice(
+            source.indexOf('function shouldFailClosedHookInput('),
+            source.indexOf('export type HookOutsideReplResult'),
+          ) +
+          source.slice(
+            source.indexOf('function holdOutsideHookActivity('),
+            source.indexOf('export function hasBlockingResult'),
+          ) +
+          body,
+      ) + '\nexecuteHooksOutsideREPL',
       {
+        bufferConstants,
+        stripAnsi,
+        trackHookExecution: () => ({
+          settle: () => {},
+          [Symbol.dispose]: () => {},
+        }),
+        incrementPluginUsage: () => {},
+        getFeatureValueWithSource: () => ({ value: false, source: 'fallback' }),
         TOOL_HOOK_EXECUTION_TIMEOUT_MS: 600000,
         isEnvTruthy: () => false,
         process: { env: {} },
@@ -481,6 +589,8 @@ describe('densable 289 hook dispatch', () => {
         succeeded: true,
         output: 'outside MCP response',
         blocked: false,
+        watchPaths: undefined,
+        systemMessage: undefined,
       },
     ])
     raw = { ok: false, body: '', error: 'No MCP context available' }
@@ -506,9 +616,41 @@ describe('densable 289 hook dispatch', () => {
     )
     // The tail is empty in this fixture; classic must still run for classic-only events.
     let calls = 0
+    let repeat = false
+    let tailHooks: unknown[] = []
+    let managedHooks: unknown[] = []
+    let expectedTailFields: Record<string, unknown> = {}
+    let middlewareBlock: string | undefined = 'middleware block'
+    let chainEntered = false
     const outside = runInNewContext(
-      transpiler.transformSync(body) + '\nexecuteHooksOutsideREPL',
+      transpiler.transformSync(
+        progressDisplayHelper +
+          source.slice(
+            source.indexOf('function hookTelemetryFeatureName('),
+            source.indexOf(
+              '\n/**',
+              source.indexOf('function hookTelemetryFeatureName('),
+            ),
+          ) +
+          source.slice(
+            source.indexOf('function shouldFailClosedHookInput('),
+            source.indexOf('export type HookOutsideReplResult'),
+          ) +
+          source.slice(
+            source.indexOf('function holdOutsideHookActivity('),
+            source.indexOf('export function hasBlockingResult'),
+          ) +
+          body,
+      ) + '\nexecuteHooksOutsideREPL',
       {
+        bufferConstants,
+        stripAnsi,
+        trackHookExecution: () => ({
+          settle: () => {},
+          [Symbol.dispose]: () => {},
+        }),
+        incrementPluginUsage: () => {},
+        getFeatureValueWithSource: () => ({ value: false, source: 'fallback' }),
         TOOL_HOOK_EXECUTION_TIMEOUT_MS: 600000,
         isEnvTruthy: () => false,
         process: { env: {} },
@@ -518,13 +660,58 @@ describe('densable 289 hook dispatch', () => {
           _name: string,
           event: unknown,
           next: (input: unknown) => Promise<object>,
+          _only: unknown,
+          _environments: unknown,
+          options?: {
+            handlersBefore?: readonly {
+              run: (
+                input: unknown,
+                next: (input: unknown) => Promise<object>,
+              ) => unknown
+            }[]
+          },
         ) => {
-          calls++
-          return { ...(await next(event)), block: 'middleware block' }
+          chainEntered = true
+          let chain = async (input: unknown): Promise<object> => {
+            calls++
+            const first = await next(input)
+            expect(first).toEqual(expectedTailFields)
+            if (repeat) await next(input)
+            return {
+              ...first,
+              ...(middlewareBlock !== undefined && { block: middlewareBlock }),
+            }
+          }
+          for (const handler of [
+            ...(options?.handlersBefore ?? []),
+          ].reverse()) {
+            const downstream = chain
+            chain = async input =>
+              (await handler.run(input, downstream)) as object
+          }
+          return chain(event)
         },
         shouldSkipHookDueToTrust: () => false,
         getSessionId: () => 'main',
-        getMatchingHooks: async () => [],
+        getMatchingHooks: async (
+          _a: unknown,
+          _b: unknown,
+          _c: unknown,
+          _d: unknown,
+          _e: unknown,
+          tiers: { managedHooksOnly?: boolean },
+        ) => (tiers.managedHooksOnly ? managedHooks : tailHooks),
+        isInternalHook: () => true,
+        jsonStringify: JSON.stringify,
+        createCombinedAbortSignal: () => ({
+          signal: new AbortController().signal,
+          cleanup: () => {},
+        }),
+        randomUUID: () => 'id',
+        isAsyncHookJSONOutput: () => false,
+        isSyncHookJSONOutput: () => true,
+        logForDebugging: () => {},
+        logEvent: () => {},
       },
     )
     const results = await outside({
@@ -540,6 +727,90 @@ describe('densable 289 hook dispatch', () => {
         output: 'middleware block',
       },
     ])
+    repeat = true
+    let index = 0
+    tailHooks = [
+      {
+        hook: {
+          type: 'callback',
+          callback: async () => ({ systemMessage: `tail-${++index}` }),
+        },
+      },
+    ]
+    const repeated = await outside({
+      hookInput: { hook_event_name: 'SessionEnd' },
+      timeoutMs: 100,
+    })
+    expect(repeated.map((result: { output: string }) => result.output)).toEqual(
+      ['tail-1', 'tail-2', 'middleware block'],
+    )
+    repeat = false
+    middlewareBlock = undefined
+    chainEntered = false
+    managedHooks = [
+      {
+        hook: {
+          type: 'callback',
+          callback: async () => {
+            expect(chainEntered).toBe(true)
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'WorktreeCreate',
+                worktreePath: '/managed',
+              },
+            }
+          },
+        },
+      },
+    ]
+    tailHooks = []
+    const preserved = await outside({
+      hookInput: { hook_event_name: 'WorktreeCreate' },
+      timeoutMs: 100,
+    })
+    expect(
+      preserved.map((result: { output: string }) => result.output),
+    ).toEqual(['/managed'])
+    tailHooks = [
+      {
+        hook: {
+          type: 'callback',
+          callback: async () => ({
+            hookSpecificOutput: {
+              hookEventName: 'WorktreeCreate',
+              worktreePath: '/downstream',
+            },
+          }),
+        },
+      },
+    ]
+    expectedTailFields = { worktreePath: '/downstream' }
+    const overridden = await outside({
+      hookInput: { hook_event_name: 'WorktreeCreate' },
+      timeoutMs: 100,
+    })
+    expect(
+      overridden.map((result: { output: string }) => result.output),
+    ).toEqual(['/downstream'])
+    calls = 0
+    chainEntered = false
+    managedHooks = [
+      {
+        hook: {
+          type: 'callback',
+          callback: async () => {
+            expect(chainEntered).toBe(true)
+            return { decision: 'block', systemMessage: 'managed denied' }
+          },
+        },
+      },
+    ]
+    const denied = await outside({
+      hookInput: { hook_event_name: 'SessionEnd' },
+      timeoutMs: 100,
+    })
+    expect(calls).toBe(0)
+    expect(denied).toMatchObject([{ blocked: true, output: 'managed denied' }])
   })
   test('classic next preserves the actual settings blocking result', async () => {
     const plain = await harness().collect()

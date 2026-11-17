@@ -66,6 +66,12 @@ export const syncHookResponseSchema = lazySchema(() =>
       .string()
       .describe('Warning message shown to the user')
       .optional(),
+    terminalSequence: z
+      .string()
+      .describe(
+        'A terminal escape sequence (e.g. OSC 9 / OSC 777 desktop-notification) for Claude Code to emit on your behalf. Only notification/title OSCs (0, 1, 2, 9, 99, 777) and BEL are permitted; anything else is dropped.',
+      )
+      .optional(),
     hookSpecificOutput: z
       .union([
         z.object({
@@ -125,6 +131,15 @@ export const syncHookResponseSchema = lazySchema(() =>
           additionalContext: z.string().optional(),
         }),
         z.object({
+          hookEventName: z.literal('PreModelSwitch'),
+          permissionDecision: z.enum(['allow', 'deny', 'ask']).optional(),
+          permissionDecisionReason: z.string().optional(),
+        }),
+        z.object({
+          hookEventName: z.literal('PostModelSwitch'),
+          additionalContext: z.string().optional(),
+        }),
+        z.object({
           hookEventName: z.literal('SubagentStart'),
           additionalContext: z.string().optional(),
         }),
@@ -145,6 +160,24 @@ export const syncHookResponseSchema = lazySchema(() =>
         z.object({
           hookEventName: z.literal('PostToolBatch'),
           additionalContext: z.string().optional(),
+        }),
+        z.object({
+          hookEventName: z.literal('Stop'),
+          additionalContext: z
+            .string()
+            .optional()
+            .describe(
+              'Feedback for the model; the conversation continues so the model can act on it',
+            ),
+        }),
+        z.object({
+          hookEventName: z.literal('SubagentStop'),
+          additionalContext: z
+            .string()
+            .optional()
+            .describe(
+              'Feedback for the model; the conversation continues so the model can act on it',
+            ),
         }),
         z.object({
           hookEventName: z.literal('PermissionDenied'),
@@ -196,6 +229,15 @@ export const syncHookResponseSchema = lazySchema(() =>
         z.object({
           hookEventName: z.literal('WorktreeCreate'),
           worktreePath: z.string(),
+        }),
+        z.object({
+          hookEventName: z.literal('MessageDisplay'),
+          displayContent: z
+            .string()
+            .optional()
+            .describe(
+              'Text displayed in place of the delta. Omit (or return the delta unchanged) to display the original.',
+            ),
         }),
       ])
       .optional(),

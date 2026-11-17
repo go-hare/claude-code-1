@@ -65,6 +65,21 @@ answer={ok:true,reason:'done'};expect((await run('Stop')).stopReason).toBe('done
   )
 }, 30000)
 
+test('prompt evaluator strips gold FW fences then parses', async () => {
+  await isolated(
+    promptSetup +
+      `
+evaluator=async()=>({type:'assistant',message:{content:[{type:'text',text:'\`\`\`json\\n{"ok":true,"reason":"fenced"}\\n\`\`\`'}]}});
+const result=await run('Stop');
+expect(result.outcome).toBe('success');expect(result.stopReason).toBe('fenced');
+evaluator=async()=>({type:'assistant',message:{content:[{type:'text',text:'not-json'}]}});
+const bad=await run('Stop');
+expect(bad.outcome).toBe('non_blocking_error');
+expect(bad.message.attachment.stderr).toBe('JSON validation failed');
+`,
+  )
+}, 30000)
+
 test('prompt history trimming retains whole rounds and retries prompt-too-long once', async () => {
   await isolated(
     promptSetup +

@@ -21,6 +21,11 @@ import { z } from 'zod/v4'
 import { type ChannelEntry, getAllowedChannels } from '../../bootstrap/state.js'
 import { CHANNEL_TAG } from '../../constants/xml.js'
 import { getSubscriptionType } from '../../utils/auth.js'
+import {
+  escapeConfusableCloseTags,
+  scrubRelayEnvelopeBody,
+} from '../../utils/confusableTagScrub.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
@@ -148,16 +153,32 @@ export const ChannelPermissionRequestNotificationSchema: () => AnyObjectSchema =
  */
 const SAFE_META_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
+/** densable `UWe(vO, eet(i))` @200393864 */
+function sanitizeChannelBody(content: string): string {
+  return escapeConfusableCloseTags(CHANNEL_TAG, scrubRelayEnvelopeBody(content))
+}
+
 export function wrapChannelMessage(
   serverName: string,
   content: string,
   meta?: Record<string, string>,
 ): string {
-  const attrs = Object.entries(meta ?? {})
-    .filter(([k]) => SAFE_META_KEY.test(k))
-    .map(([k, v]) => ` ${k}="${escapeXmlAttr(v)}"`)
-    .join('')
-  return `<${CHANNEL_TAG} source="${escapeXmlAttr(serverName)}"${attrs}>\n${content}\n</${CHANNEL_TAG}>`
+  const entries = Object.entries(meta ?? {})
+  const valid: Array<[string, string]> = []
+  const dropped: Array<[string, string]> = []
+  for (const entry of entries) {
+    if (SAFE_META_KEY.test(entry[0])) valid.push(entry)
+    else dropped.push(entry)
+  }
+  if (dropped.length > 0) {
+    logForDebugging(
+      `[channel] ${serverName}: dropped ${dropped.length} meta key(s) that don't match ${SAFE_META_KEY.source}: ${dropped.map(([k]) => k).join(', ')}`,
+      { level: 'warn' },
+    )
+  }
+  const attrs = valid.map(([k, v]) => ` ${k}="${escapeXmlAttr(v)}"`).join('')
+  const safeBody = sanitizeChannelBody(content)
+  return `<${CHANNEL_TAG} source="${escapeXmlAttr(serverName)}"${attrs}>\n${safeBody}\n</${CHANNEL_TAG}>`
 }
 
 /**

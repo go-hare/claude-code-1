@@ -14,6 +14,11 @@ import {
   AGENT_MESSAGE_TAG,
   CROSS_SESSION_MESSAGE_TAG,
 } from '../constants/xml.js'
+import {
+  escapeConfusableCloseTags,
+  scrubRelayEnvelopeBody,
+} from './confusableTagScrub.js'
+import { escapeXmlAttr } from './xml.js'
 
 /** densable Tte — display-safe truncation (64 codepoints + …). */
 export function sanitizeCrossSessionDisplayName(raw: string): string {
@@ -32,11 +37,13 @@ export function sanitizeCrossSessionDisplayName(raw: string): string {
 export function prettyCrossSessionFromAddress(from: string): string {
   if (from.startsWith('uds:')) {
     const t = from.slice(4)
-    return t.slice(t.lastIndexOf('/') + 1).replace(/\.sock$/, '')
+    const slash = Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\'))
+    return t.slice(slash + 1).replace(/\.sock$/, '')
   }
   if (from.startsWith('bridge:')) return '(untitled)'
-  if (from.startsWith('/')) {
-    return from.slice(from.lastIndexOf('/') + 1).replace(/\.sock$/, '')
+  if (from.startsWith('/') || /^[\\/]{2}[.?][\\/]pipe[\\/]/i.test(from)) {
+    const slash = Math.max(from.lastIndexOf('/'), from.lastIndexOf('\\'))
+    return from.slice(slash + 1).replace(/\.sock$/, '')
   }
   return from
 }
@@ -70,23 +77,42 @@ export type CrossSessionMessageAttrs = {
   fromSession?: string
   hopChain?: readonly string[]
   fromMode?: string
+  fromPlugin?: string
 }
 
-/** Gold `A`/`X`/`C` — hop tokens are 24 hex, 1–32 comma-separated. */
+/** Gold `f` / `j` / `h` / `A` / `X` / `C` / `x` @180507900. */
+const SAFE_FROM_CHARS = 'A-Za-z0-9%:_/.\\\\-'
+const SAFE_FROM_RE = new RegExp(`^[${SAFE_FROM_CHARS}]{1,300}$`)
+const SAFE_SESSION_BODY = '[A-Za-z0-9_-]{1,80}'
+const SAFE_SESSION_RE = new RegExp(`^${SAFE_SESSION_BODY}$`)
+const SAFE_MODE_VALUES = ['prompting', 'bypass'] as const
+const SAFE_MODE_RE = /^(?:prompting|bypass)$/
 const HOP_TOKEN_RE = '[0-9a-f]{24}'
-const HOP_CHAIN_ATTR_RE = new RegExp(
-  `^(${HOP_TOKEN_RE})(?:,${HOP_TOKEN_RE}){0,31}$`,
+const HOP_CHAIN_BODY = `${HOP_TOKEN_RE}(?:,${HOP_TOKEN_RE}){0,31}`
+const HOP_CHAIN_ATTR_RE = new RegExp(`^${HOP_CHAIN_BODY}$`)
+
+const CANONICAL_CROSS_SESSION_RE = new RegExp(
+  `^<${CROSS_SESSION_MESSAGE_TAG}` +
+    `(?: from="([${SAFE_FROM_CHARS}]+)")?` +
+    `(?: from-session="(${SAFE_SESSION_BODY})")?` +
+    `(?: hop-chain="(${HOP_CHAIN_BODY})")?` +
+    `(?: from-name="([^"<>\\n\\r]+)")?` +
+    `(?: from-mode="(${SAFE_MODE_VALUES.join('|')})")?` +
+    `(?: from-plugin="([^"<>\\n\\r]+)")?` +
+    `>\\n([\\s\\S]*)\\n<\\/${CROSS_SESSION_MESSAGE_TAG}>$`,
 )
 
 /**
- * densable I6y — attribute string (leading space when non-empty).
+ * densable `V` / `I6y` @180508200 — attribute string (leading space when non-empty).
  */
 export function buildCrossSessionMessageAttrs(
   attrs: CrossSessionMessageAttrs,
 ): string {
   const parts: string[] = []
-  if (attrs.from) parts.push(`from="${attrs.from}"`)
-  if (attrs.fromSession) {
+  if (attrs.from && SAFE_FROM_RE.test(attrs.from)) {
+    parts.push(`from="${attrs.from}"`)
+  }
+  if (attrs.fromSession && SAFE_SESSION_RE.test(attrs.fromSession)) {
     parts.push(`from-session="${attrs.fromSession}"`)
   }
   if (attrs.hopChain !== undefined && attrs.hopChain.length > 0) {
@@ -101,35 +127,84 @@ export function buildCrossSessionMessageAttrs(
       ? undefined
       : sanitizeCrossSessionDisplayName(attrs.fromName.replace(/["<>]/g, ''))
   if (fromName) parts.push(`from-name="${fromName}"`)
-  if (attrs.fromMode) parts.push(`from-mode="${attrs.fromMode}"`)
+  if (attrs.fromMode && SAFE_MODE_RE.test(attrs.fromMode)) {
+    parts.push(`from-mode="${attrs.fromMode}"`)
+  }
+  const fromPlugin =
+    attrs.fromPlugin === undefined
+      ? undefined
+      : sanitizeCrossSessionDisplayName(attrs.fromPlugin.replace(/["<>]/g, ''))
+  if (fromPlugin) parts.push(`from-plugin="${fromPlugin}"`)
   return parts.length > 0 ? ` ${parts.join(' ')}` : ''
 }
 
 /**
- * densable fbr — wrap body in cross-session-message envelope.
- * If body is already a full envelope, return as-is (idempotent for re-sends).
+ * densable `cet` @180509150 — unconditionally wrap body in canonical
+ * `<cross-session-message>` envelope and neutralize inner closers (`UWe`).
+ */
+export function formatCanonicalCrossSessionMessage(
+  body: string,
+  attrs: CrossSessionMessageAttrs,
+): string {
+  const attrStr = buildCrossSessionMessageAttrs(attrs)
+  const safeBody = escapeConfusableCloseTags(CROSS_SESSION_MESSAGE_TAG, body)
+  return `<${CROSS_SESSION_MESSAGE_TAG}${attrStr}>\n${safeBody}\n</${CROSS_SESSION_MESSAGE_TAG}>`
+}
+
+export type ParsedCrossSessionMessage = CrossSessionMessageAttrs & {
+  body: string
+}
+
+/**
+ * densable `_` @180509200 — parse only when `text` is a single canonical
+ * `<cross-session-message>` envelope whose round-trip through `cet(...)`
+ * matches `text` byte-for-byte (rejects multi-envelope breakouts and
+ * unescaped confusable closers).
+ */
+export function parseCanonicalCrossSessionMessage(
+  text: unknown,
+): ParsedCrossSessionMessage | undefined {
+  if (typeof text !== 'string') return undefined
+  const match = CANONICAL_CROSS_SESSION_RE.exec(text)
+  if (!match) return undefined
+  const hopChain = match[3] !== undefined ? match[3].split(',') : undefined
+  const body = match[7] ?? ''
+  const attrs: CrossSessionMessageAttrs = {
+    ...(match[1] !== undefined ? { from: match[1] } : {}),
+    ...(match[2] !== undefined ? { fromSession: match[2] } : {}),
+    ...(hopChain !== undefined ? { hopChain } : {}),
+    ...(match[4] !== undefined ? { fromName: match[4] } : {}),
+    ...(match[5] !== undefined ? { fromMode: match[5] } : {}),
+    ...(match[6] !== undefined ? { fromPlugin: match[6] } : {}),
+  }
+  if (formatCanonicalCrossSessionMessage(body, attrs) !== text) {
+    return undefined
+  }
+  return { ...attrs, body }
+}
+
+/**
+ * densable fbr / cet — wrap body in cross-session-message envelope.
+ * Preserves canonical idempotency only when `body` passes `_` round-trip
+ * verification (`parseCanonicalCrossSessionMessage`), preventing multi-envelope
+ * or confusable-tag breakouts.
  */
 export function wrapCrossSessionMessage(
   body: string,
   attrs: CrossSessionMessageAttrs,
 ): string {
-  const open = `<${CROSS_SESSION_MESSAGE_TAG}`
-  if (
-    body.startsWith(open) ||
-    body.includes(`\n${open}`) ||
-    /^[\s\S]*?<cross-session-message\b/.test(body.slice(0, 200))
-  ) {
-    // densable DLu re-canonicalizes; for send path skip double-wrap when already tagged
-    if (
-      /^<cross-session-message\b[^>]*>\n[\s\S]*\n<\/cross-session-message>$/.test(
-        body.trim(),
-      )
-    ) {
-      return body
-    }
+  if (parseCanonicalCrossSessionMessage(body) !== undefined) {
+    return body
   }
-  const attrStr = buildCrossSessionMessageAttrs(attrs)
-  return `<${CROSS_SESSION_MESSAGE_TAG}${attrStr}>\n${body}\n</${CROSS_SESSION_MESSAGE_TAG}>`
+  return formatCanonicalCrossSessionMessage(body, attrs)
+}
+
+/** densable `xkn` @180509657 — strip `hop-chain="..."` from model-facing text. */
+export function stripCrossSessionHopChain(text: string): string {
+  const parsed = parseCanonicalCrossSessionMessage(text)
+  if (!parsed || parsed.hopChain === undefined) return text
+  const { body, hopChain: _hopChain, ...rest } = parsed
+  return formatCanonicalCrossSessionMessage(body, rest)
 }
 
 /** densable `_` hop-chain split — only when the attr matches gold `C`. */
@@ -194,21 +269,17 @@ export function parseAgentMessageFromAttr(text: string): string | undefined {
   return from || undefined
 }
 
-/** densable tet — nested `<agent-message` cannot break the outer tag. */
+/** densable tet → eet @181579600 — scrub nested/confusable relay envelopes. */
 export function escapeAgentMessageBody(text: string): string {
-  return text.replace(
-    new RegExp(`<(?=/?${AGENT_MESSAGE_TAG}(?:[>\\s/]|$))`, 'gi'),
-    '<\\',
-  )
+  return scrubRelayEnvelopeBody(text)
 }
 
-/** densable fme — wrap peer/handback payload. */
+/** densable fme @181579680 — wrap peer/handback payload. */
 export function wrapAgentMessageEnvelope(
   from: string,
   message: string,
 ): string {
-  const safeFrom = from.replace(/"/g, '')
-  return `<${AGENT_MESSAGE_TAG} from="${safeFrom}">\n${escapeAgentMessageBody(message)}\n</${AGENT_MESSAGE_TAG}>`
+  return `<${AGENT_MESSAGE_TAG} from="${escapeXmlAttr(from)}">\n${escapeAgentMessageBody(message)}\n</${AGENT_MESSAGE_TAG}>`
 }
 
 /** densable Qx — ua overflow budget (wrapped lines). */

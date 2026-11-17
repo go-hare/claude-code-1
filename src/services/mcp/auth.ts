@@ -1640,23 +1640,54 @@ export async function performMCPOAuthFlow(
  * With this flag set, tokens() omits refresh_token so the SDK falls through
  * to the PKCE flow. See github.com/anthropics/claude-code/issues/28258.
  */
+/**
+ * densable `yye` — Bearer WWW-Authenticate fields (`error`, `scope`).
+ */
+export function parseWwwAuthenticateBearer(response: {
+  headers: { get(name: string): string | null }
+}): { error?: string; scope?: string } {
+  const header = response.headers.get('WWW-Authenticate')
+  if (!header) return {}
+  // gold CZe: includes() on the full header — do not split on a single SP
+  // (`Bearer  error=...` must still parse).
+  if (!/\bbearer\b/i.test(header)) return {}
+  const field = (name: string): string | undefined => {
+    const match = header.match(new RegExp(`${name}=(?:"([^"]+)"|([^\\s,]+))`))
+    return match?.[1] ?? match?.[2] ?? undefined
+  }
+  return { error: field('error'), scope: field('scope') }
+}
+
+/**
+ * densable `Trn(e,t)` — stamp `sawAuthChallenge` on 401/403, then step-up.
+ */
 export function wrapFetchWithStepUpDetection(
   baseFetch: FetchLike,
   provider: ClaudeAuthProvider,
 ): FetchLike {
   return async (url, init) => {
     const response = await baseFetch(url, init)
-    if (response.status === 403) {
-      const wwwAuth = response.headers.get('WWW-Authenticate')
-      if (wwwAuth?.includes('insufficient_scope')) {
-        // Match both quoted and unquoted values (RFC 6750 §3 allows either).
-        // Same pattern as the SDK's extractFieldFromWwwAuth.
-        const match = wwwAuth.match(/scope=(?:"([^"]+)"|([^\s,]+))/)
-        const scope = match?.[1] ?? match?.[2]
-        if (scope) {
-          provider.markStepUpPending(scope)
-        }
-      }
+    if (response.status === 401 || response.status === 403) {
+      provider.sawAuthChallenge = true
+    }
+    const parsed = parseWwwAuthenticateBearer(response)
+    provider.noteServerAnswer(
+      url,
+      response.status === 401 ||
+        (response.status === 403 && parsed.error === 'insufficient_scope'),
+    )
+    if (!new Headers(init?.headers).has('authorization')) {
+      return response
+    }
+    // densable Trn / ysn: 403 + insufficient_scope + scope= → markStepUpPending; 401 → clearStepUpPending.
+    if (
+      response.status === 403 &&
+      parsed.error === 'insufficient_scope' &&
+      parsed.scope
+    ) {
+      provider.markStepUpPending(parsed.scope)
+    } else if (response.status === 401) {
+      provider.clearStepUpPending()
     }
     return response
   }
@@ -1676,8 +1707,13 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   >
   private _refreshInProgress?: Promise<OAuthTokens | undefined>
   private _pendingStepUpScope?: string
+  private _lastServedAccessToken?: string
   private onAuthorizationUrlCallback?: (url: string) => void
   private skipBrowserOpen: boolean
+  /** densable `lOt.sawAuthChallenge` — Trn stamps 401/403. */
+  sawAuthChallenge = false
+  /** densable `lOt.authChallengeOpen`. */
+  authChallengeOpen = false
 
   constructor(
     serverName: string,
@@ -1757,6 +1793,26 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   markStepUpPending(scope: string): void {
     this._pendingStepUpScope = scope
     logMCPDebug(this.serverName, `Marked step-up pending: ${scope}`)
+  }
+
+  clearStepUpPending(): void {
+    this._pendingStepUpScope = undefined
+  }
+
+  /** densable `clearStepUpPendingOnCredentialGone`. */
+  clearStepUpPendingOnCredentialGone(): void {
+    if (!this.handleRedirection) this.clearStepUpPending()
+  }
+
+  /** densable `lOt.noteServerAnswer`. */
+  noteServerAnswer(url: unknown, challenged: boolean): void {
+    const configured = this.serverConfig.url
+    const canon = URL.canParse(configured)
+      ? new URL(configured).href
+      : configured
+    if (String(url) === canon) {
+      this.authChallengeOpen = challenged
+    }
   }
 
   async state(): Promise<string> {
@@ -1907,8 +1963,17 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 
     if (!tokenData) {
       logMCPDebug(this.serverName, `No token data found`)
+      this.clearStepUpPendingOnCredentialGone()
       return undefined
     }
+
+    if (!tokenData.accessToken) {
+      logMCPDebug(this.serverName, `No access token in storage`)
+      this.clearStepUpPendingOnCredentialGone()
+      return undefined
+    }
+
+    this._lastServedAccessToken = tokenData.accessToken
 
     // Check if token is expired
     const expiresIn = (tokenData.expiresAt - Date.now()) / 1000
@@ -1930,6 +1995,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     // If token is expired and we don't have a refresh token, return undefined
     if (expiresIn <= 0 && !tokenData.refreshToken) {
       logMCPDebug(this.serverName, `Token expired without refresh token`)
+      this.clearStepUpPendingOnCredentialGone()
       return undefined
     }
 
@@ -1961,6 +2027,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
         const refreshed = await this._refreshInProgress
         if (refreshed) {
           logMCPDebug(this.serverName, `Token refreshed successfully`)
+          this._lastServedAccessToken = refreshed.access_token
           return refreshed
         }
         logMCPDebug(
@@ -1993,7 +2060,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async saveTokens(tokens: OAuthTokens): Promise<void> {
-    this._pendingStepUpScope = undefined
+    if (
+      tokens.access_token !== this._lastServedAccessToken &&
+      this.handleRedirection
+    ) {
+      this._pendingStepUpScope = undefined
+    }
     const storage = getSecureStorage()
     const existingData = storage.read() || {}
     const serverKey = getServerKey(this.serverName, this.serverConfig)

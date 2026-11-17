@@ -34,6 +34,11 @@ import { setClassifierApproval } from '../../utils/classifierApprovals.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { executePermissionRequestHooks } from '../../utils/hooks.js'
 import {
+  accountMemoryHookRewriteDenied,
+  didAccountMemoryHookRewriteInput,
+} from '../../utils/hooks/toolCallManagedPass.js'
+import { detachedToolCallWasLetGo } from '../../utils/detachedToolCallStore.js'
+import {
   REJECT_MESSAGE,
   REJECT_MESSAGE_WITH_REASON_PREFIX,
   SUBAGENT_REJECT_MESSAGE,
@@ -45,6 +50,7 @@ import type {
   PermissionDecision,
 } from '../../utils/permissions/PermissionResult.js'
 import {
+  detachedLetGoPermissionDeny,
   hasPermissionsToUseTool,
   stripWholeToolGrantsForAsk,
 } from '../../utils/permissions/permissions.js'
@@ -199,6 +205,11 @@ function createPermissionContext(
       return updates.some(update => supportsPersistence(update.destination))
     },
     resolveIfAborted(resolve: (decision: PermissionDecision) => void) {
+      const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
+      if (letGoDeny) {
+        resolve(letGoDeny)
+        return true
+      }
       if (!toolUseContext.abortController.signal.aborted) return false
       this.logCancelled()
       resolve(this.cancelAndAbort(undefined, true))
@@ -238,6 +249,8 @@ function createPermissionContext(
               toolUseContext.abortController.signal,
               toolUseContext.options.isNonInteractiveSession,
             )
+            const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
+            if (letGoDeny) return letGoDeny
             if (!classifierDecision) {
               return null
             }
@@ -290,13 +303,49 @@ function createPermissionContext(
         if (hookResult.permissionRequestResult) {
           const decision = hookResult.permissionRequestResult
           if (decision.behavior === 'allow') {
-            const finalInput = decision.updatedInput ?? updatedInput ?? input
+            const nonEmptyUpdatedInput =
+              decision.updatedInput !== undefined &&
+              Object.keys(decision.updatedInput).length > 0
+                ? decision.updatedInput
+                : undefined
+            const finalInput = nonEmptyUpdatedInput ?? updatedInput ?? input
             // densable: bare allow without updatedInput cannot satisfy
             // requiresUserInteraction tools — leave the dialog racing.
-            if (!decision.updatedInput && tool.requiresUserInteraction?.()) {
+            if (!nonEmptyUpdatedInput && tool.requiresUserInteraction?.()) {
               return null
             }
-            if (decision.updatedInput) {
+            if (
+              decision.updatedInput !== undefined &&
+              didAccountMemoryHookRewriteInput(
+                tool,
+                input,
+                decision.updatedInput,
+                true,
+              )
+            ) {
+              const denial = accountMemoryHookRewriteDenied(
+                tool,
+                'PermissionRequest',
+              )
+              this.logDecision(
+                { decision: 'reject', source: 'config' },
+                { input, permissionPromptStartTimeMs },
+              )
+              const denyDecision: PermissionDenyDecision & {
+                decideLocation: 'ask-path'
+              } = {
+                behavior: 'deny',
+                message: denial.message,
+                decisionReason: {
+                  type: 'hook',
+                  hookName: 'PermissionRequest',
+                  reason: denial.message,
+                },
+                decideLocation: 'ask-path',
+              }
+              return denyDecision
+            }
+            if (nonEmptyUpdatedInput) {
               const recheck = await hasPermissionsToUseTool(
                 tool,
                 finalInput,
@@ -312,7 +361,10 @@ function createPermissionContext(
                     permissionPromptStartTimeMs,
                   },
                 )
-                return recheck
+                const denyRecheck: PermissionDenyDecision & {
+                  decideLocation: 'ask-path'
+                } = { ...recheck, decideLocation: 'ask-path' }
+                return denyRecheck
               }
               if (recheck.behavior === 'ask') {
                 return {
@@ -361,7 +413,9 @@ function createPermissionContext(
         acceptFeedback?: string
         contentBlocks?: ContentBlockParam[]
       },
-    ): PermissionAllowDecision {
+    ): PermissionAllowDecision | PermissionDenyDecision {
+      const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
+      if (letGoDeny) return letGoDeny
       return {
         behavior: 'allow' as const,
         updatedInput,
@@ -378,7 +432,15 @@ function createPermissionContext(
       message: string,
       decisionReason: PermissionDecisionReason,
     ): PermissionDenyDecision {
-      return { behavior: 'deny' as const, message, decisionReason }
+      const decision: PermissionDenyDecision & {
+        decideLocation: 'ask-path'
+      } = {
+        behavior: 'deny',
+        message,
+        decisionReason,
+        decideLocation: 'ask-path',
+      }
+      return decision
     },
     async handleUserAllow(
       updatedInput: Record<string, unknown>,
@@ -388,7 +450,18 @@ function createPermissionContext(
       contentBlocks?: ContentBlockParam[],
       decisionReason?: PermissionDecisionReason,
       opts?: { askSuppressesAlwaysAllowRule?: boolean },
-    ): Promise<PermissionAllowDecision> {
+    ): Promise<PermissionAllowDecision | PermissionDenyDecision> {
+      // densable UPt.wasLetGo — send-now took the call; later Allow refuses.
+      if (detachedToolCallWasLetGo(toolUseID)) {
+        this.logDecision(
+          { decision: 'reject', source: 'config' },
+          { input: updatedInput, permissionPromptStartTimeMs },
+        )
+        return this.buildDeny(REJECT_MESSAGE, {
+          type: 'other',
+          reason: 'detached tool call was let go',
+        })
+      }
       // densable 2.1.235 #12 accept-path: strip bare whole-tool allows when
       // the ask or tool marks suppressAlwaysAllowRule.
       const shouldStrip =
@@ -426,7 +499,18 @@ function createPermissionContext(
       permissionUpdates: PermissionUpdate[],
       permissionPromptStartTimeMs?: number,
       opts?: { askSuppressesAlwaysAllowRule?: boolean },
-    ): Promise<PermissionAllowDecision> {
+    ): Promise<PermissionAllowDecision | PermissionDenyDecision> {
+      // densable UPt.wasLetGo — send-now took the call; later Allow refuses.
+      if (detachedToolCallWasLetGo(toolUseID)) {
+        this.logDecision(
+          { decision: 'reject', source: 'config' },
+          { input: finalInput, permissionPromptStartTimeMs },
+        )
+        return this.buildDeny(REJECT_MESSAGE, {
+          type: 'other',
+          reason: 'detached tool call was let go',
+        })
+      }
       // densable 2.1.235 #12 accept-path strip (same OR as handleUserAllow / jze).
       const shouldStrip =
         tool.suppressesAlwaysAllowRule?.(finalInput) === true ||

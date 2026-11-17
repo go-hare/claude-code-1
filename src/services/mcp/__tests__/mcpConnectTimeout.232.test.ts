@@ -2,6 +2,8 @@
  * densable 2.1.232 #16 — y0 / Obf / IiS / oMf / k5a timeout surface.
  */
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   classifyMcpAutoProbeFallback,
   createMcpConnectionTimeoutError,
@@ -314,5 +316,22 @@ describe('densable 2.1.232 #16 MCP connect timeout helpers', () => {
     ).toBe(
       'pinned-legacy retry after the probe timeout failed typed (typed boom); preserving the timeout classification so the connect stays ladder-retryable',
     )
+  })
+})
+
+describe('densable Es handshake abort on connect deadline', () => {
+  test('gold Re timeout close()s transport; no handshakeAborts Map', () => {
+    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    expect(src).not.toContain('handshakeAborts')
+    expect(src).not.toContain('withHandshakeSignal')
+    expect(src).toContain('t.close().catch')
+    expect(src).toContain('invokeToolRaw')
+  })
+
+  test('per-call timeout does not abandon the shared handshake memo', () => {
+    const src = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+    expect(src).toContain('deadline reached before the request could be sent')
+    expect(src).toContain('do not abandon the shared handshake')
+    expect(src).not.toContain('connectToServerMemo.cache.delete')
   })
 })

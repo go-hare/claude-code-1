@@ -8,6 +8,12 @@
  * `_anthropicProbeTimedOut` stamp required).
  */
 
+import {
+  parseJSONRPCMessage,
+  SdkHttpError,
+  SseError,
+  UnauthorizedError,
+} from '@modelcontextprotocol/client'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
@@ -285,6 +291,133 @@ export function wrapLegacyHttpSseGet401Guard(
     return res
   }
   return wrapped
+}
+
+const POST_ENDPOINT_ERROR_PREFIX = 'Error POSTing to endpoint: '
+
+/**
+ * densable `Sn` — POST body after `Error POSTing to endpoint: ` is a JSON-RPC
+ * message (`data:` SSE line → parse; `id:null` rewritten to `id:undefined`).
+ */
+function isLegacySseJsonRpcPayload(text: string): boolean {
+  const line = text.split(/\r?\n/).find(s => s.startsWith('data:'))
+  const raw = (line === undefined ? text : line.slice(5)).trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return false
+  }
+  const message =
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    'id' in parsed &&
+    (parsed as { id: unknown }).id === null
+      ? { ...(parsed as Record<string, unknown>), id: undefined }
+      : parsed
+  try {
+    parseJSONRPCMessage(message)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * densable `_n` / gold `L7`: initialize POST is an SDK Streamable HTTP error
+ * with HTTP 4xx (not 401/403/429) whose body is not JSON-RPC.
+ * v2 `SdkHttpError.status` is gold `L7.code` (numeric HTTP).
+ */
+export function isLegacySseFallbackEligible(err: unknown): boolean {
+  if (!(err instanceof SdkHttpError)) return false
+  const code = err.status ?? 0
+  if (
+    !(code >= 400 && code < 500) ||
+    code === 401 ||
+    code === 403 ||
+    code === 429
+  ) {
+    return false
+  }
+  const at = err.message.indexOf(POST_ENDPOINT_ERROR_PREFIX)
+  if (at === -1) return true
+  return !isLegacySseJsonRpcPayload(
+    err.message.slice(at + POST_ENDPOINT_ERROR_PREFIX.length),
+  )
+}
+
+/**
+ * densable `gR` in `Bo` — Zod discovery-schema error. Gold `instanceof gR`
+ * only counts when a new auth challenge started during the fallback (`Te`).
+ */
+function isLegacySseZodDiscoveryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const rec = error as { name?: unknown; issues?: unknown }
+  return rec.name === 'ZodError' && Array.isArray(rec.issues)
+}
+
+/**
+ * densable `Bo(ke, ke instanceof ut ? ke.code : void 0, Te)`:
+ * UnauthorizedError, or ZodError+new-challenge, or SSE HTTP 401/403.
+ */
+export function isLegacySseAuthChallenge(
+  error: unknown,
+  sseStatus: number | undefined,
+  newAuthChallenge: boolean,
+): boolean {
+  if (error instanceof UnauthorizedError) return true
+  if (isLegacySseZodDiscoveryError(error) && newAuthChallenge) return true
+  return sseStatus === 401 || sseStatus === 403
+}
+
+/** densable `ut` SSE HTTP status (`SseError.code`). */
+export function getLegacySseErrorStatus(error: unknown): number | undefined {
+  return error instanceof SseError ? error.code : undefined
+}
+
+type LegacySseFetch = (
+  url: string | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
+/**
+ * densable `Te` — until dialConnected, merge dialSignal via AbortSignal.any.
+ */
+export function mergeLegacySseDialSignal(
+  init: RequestInit | undefined,
+  dialSignal: AbortSignal,
+  dialConnected: () => boolean,
+): RequestInit | undefined {
+  if (dialConnected()) return init
+  const parent = init?.signal
+  const signal =
+    parent && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([parent, dialSignal])
+      : (parent ?? dialSignal)
+  return { ...init, signal }
+}
+
+/**
+ * densable `ce` / `W` fetch pair for the HTTP→legacy SSE rescue.
+ * EventSource GET uses the 401 guard; token POSTs skip dialSignal.
+ */
+export function createLegacyHttpSseFallbackFetches(opts: {
+  baseFetch: LegacySseFetch
+  postMethodNotAllowed: boolean
+  dialSignal: AbortSignal
+  dialConnected: () => boolean
+}): { fetch: LegacySseFetch; eventSourceFetch: LegacySseFetch } {
+  const withDial = (init?: RequestInit): RequestInit | undefined =>
+    mergeLegacySseDialSignal(init, opts.dialSignal, opts.dialConnected)
+  const eventSourceFetch = wrapLegacyHttpSseGet401Guard(async (url, init) => {
+    return opts.baseFetch(url, withDial(init))
+  }, !opts.postMethodNotAllowed)
+  const fetchImpl: LegacySseFetch = async (url, init) => {
+    const body = init?.body
+    const skipDial = body instanceof URLSearchParams && body.has('grant_type')
+    return opts.baseFetch(url, skipDial ? init : withDial(init))
+  }
+  return { fetch: fetchImpl, eventSourceFetch }
 }
 
 /**

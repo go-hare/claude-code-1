@@ -86,6 +86,17 @@ export function isSdkAccountMemoryTool(
 }
 
 /**
+ * densable `wno` @179527629 — `(entrypoint === 'local-agent' || 'local_agent') && !childSession`.
+ */
+export function isLocalAgentAccountMemoryEntrypoint(): boolean {
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    (entrypoint === 'local-agent' || entrypoint === 'local_agent') &&
+    !process.env.CLAUDE_CODE_CHILD_SESSION
+  )
+}
+
+/**
  * densable `X2e(e,n)` — stamp `mcpInfo.accountMemory`.
  * `$zt(e) || bE(e,n) || (e?.name===di && nf(e.config))`
  */
@@ -96,6 +107,24 @@ export function isAccountMemoryTool(
   return (
     isCcrAccountMemoryHttpServer(server) ||
     isSdkAccountMemoryTool(server, toolName) ||
+    (server.name === ACCOUNT_MEMORY_SERVER_NAME &&
+      isCliOwnedConfig(server.config))
+  )
+}
+
+/**
+ * densable `SZe(e,n)` @182203335 — `$zt(e) || _E(e,n) || (e?.name===di && nf(e.config))`
+ * where `_E(e,n) = bE(e,n) && wno()`. Used to stamp `mcpInfo.accountMemoryServer`
+ * (`oe`) across all tools of the account memory server (`@214518400`).
+ */
+export function isAccountMemoryServerTool(
+  server: AccountMemoryServer,
+  toolName: string,
+): boolean {
+  return (
+    isCcrAccountMemoryHttpServer(server) ||
+    (isSdkAccountMemoryTool(server, toolName) &&
+      isLocalAgentAccountMemoryEntrypoint()) ||
     (server.name === ACCOUNT_MEMORY_SERVER_NAME &&
       isCliOwnedConfig(server.config))
   )

@@ -62,7 +62,7 @@ describe('densable 2.1.243 #18 inbox sockets path / userns', () => {
   test('Unix default path is under the runtime root + cc-socks leaf', async () => {
     if (process.platform === 'win32') return
     await stopUdsMessaging()
-    const root = await mkdtemp(join(tmpdir(), 'uds-xdg-243-'))
+    const root = await mkdtemp('/tmp/uds243-')
     process.env.XDG_RUNTIME_DIR = root
     delete process.env.CLAUDE_CODE_TMPDIR
     const path = getDefaultUdsSocketPath()

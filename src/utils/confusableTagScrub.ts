@@ -345,7 +345,7 @@ function buildTagOpenPattern({
   )
 }
 
-/** Official `t_a`. */
+/** Official `t_a` / `O(u, d)` @180457848. */
 function tagOpenPattern(tag: string, closeOnly: boolean): RegExp {
   const key = `${closeOnly ? '/' : ''}${tag}`
   const cached = TAG_PATTERN_CACHE.get(key)
@@ -354,7 +354,7 @@ function tagOpenPattern(tag: string, closeOnly: boolean): RegExp {
     tags: [tag],
     closeOnly,
     fillerClass: bracketClasses().filler,
-    spell: ch => ch,
+    spell: ch => (ch === '-' || ch === '_' ? CONNECTOR_SPELL : ch),
     tail: undefined,
   })
   if (TAG_PATTERN_CACHE.size >= TAG_PATTERN_CACHE_CAP) TAG_PATTERN_CACHE.clear()
@@ -362,8 +362,13 @@ function tagOpenPattern(tag: string, closeOnly: boolean): RegExp {
   return pattern
 }
 
-/** Official `Tve`. */
-function escapeConfusableOpenTags(tag: string, body: string): string {
+/** Official `UWe` @180457848 — neutralize confusable `</tag>` closers (`<` → `<\`). */
+export function escapeConfusableCloseTags(tag: string, body: string): string {
+  return body.replace(tagOpenPattern(tag, true), '<\\')
+}
+
+/** Official `Tve` / `mqt`. */
+export function escapeConfusableOpenTags(tag: string, body: string): string {
   return body.replace(tagOpenPattern(tag, false), '<\\')
 }
 
@@ -1138,4 +1143,173 @@ export function scrubPublishedFileText(
     out = out.replace(pattern, match => `${match}\\`)
   }
   return out
+}
+
+/**
+ * densable 2.1.289 `eet` / `ZZe` / `Mor` / `me` @181578000 — scrub relay
+ * envelope tags (`cross-session-message`, `teammate-message`, `agent-message`)
+ * in both plain text (`<` / lookalike → `<\`) and JSON values (`\u003c` inside
+ * JSON string literals → `\u003c\\`, lookalike → `<\\`).
+ */
+const RELAY_BODY_SCRUB_TAGS = [
+  'cross-session-message',
+  'teammate-message',
+  'agent-message',
+] as const
+
+const relayBodyPattern = once((): RegExp => cmPattern(RELAY_BODY_SCRUB_TAGS))
+const openBracketProbe = once(
+  (): RegExp => new RegExp(`[${bracketClasses().open}]`, 'u'),
+)
+
+function hasRelayOpenCandidate(text: string): boolean {
+  return openBracketProbe().test(text) || text.includes('\\u')
+}
+
+function relayOpenerOffsets(text: string): number[] {
+  if (!openBracketProbe().test(text)) return []
+  const pattern = relayBodyPattern()
+  pattern.lastIndex = 0
+  const offsets = new Set<number>()
+  for (const match of text.matchAll(pattern)) {
+    if (match.index !== undefined) offsets.add(match.index)
+  }
+  return [...offsets].sort((a, b) => a - b)
+}
+
+function neutralizePlainRelayBody(text: string): string {
+  let out = ''
+  let cursor = 0
+  for (const offset of relayOpenerOffsets(text)) {
+    out += `${text.slice(cursor, offset)}<\\`
+    cursor = offset + 1
+  }
+  return out + text.slice(cursor)
+}
+
+const JSON_CONTAINER_HEAD_RE =
+  /^\s*(?:\{\s*["}]|\[\s*(?:["{[\]\d-]|true\b|false\b|null\b))/
+
+const JSON_SIMPLE_ESCAPES = new Map<string, string>([
+  ['"', '"'],
+  ['\\', '\\'],
+  ['/', '/'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['r', '\r'],
+  ['t', '\t'],
+])
+
+function findJsonClosingQuote(text: string, openQuoteAt: number): number {
+  let pos = openQuoteAt
+  let backslashes = 1
+  while (backslashes % 2 === 1) {
+    pos = text.indexOf('"', pos + 1)
+    if (pos === -1) return -1
+    backslashes = 0
+    while (text.charCodeAt(pos - backslashes - 1) === 92) backslashes++
+  }
+  return pos
+}
+
+function collectJsonStringSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  let openAt = text.indexOf('"')
+  while (openAt !== -1) {
+    const closeAt = findJsonClosingQuote(text, openAt)
+    if (closeAt === -1) {
+      spans.push([openAt + 1, text.length])
+      break
+    }
+    spans.push([openAt + 1, closeAt])
+    openAt = text.indexOf('"', closeAt + 1)
+  }
+  return spans
+}
+
+function isJsonValuePayload(text: string): boolean {
+  if (JSON_CONTAINER_HEAD_RE.test(text)) return true
+  const firstNonWs = text.search(/\S/)
+  const closeAt =
+    firstNonWs !== -1 && text[firstNonWs] === '"'
+      ? findJsonClosingQuote(text, firstNonWs)
+      : -1
+  return closeAt !== -1 && text.slice(closeAt + 1).trim() === ''
+}
+
+function decodeJsonStringSpan(
+  text: string,
+  start: number,
+  end: number,
+): { value: string; starts: number[]; ends: number[] } {
+  let value = ''
+  const starts: number[] = []
+  const ends: number[] = []
+  for (let i = start; i < end; ) {
+    let ch = text[i]!
+    let width = 1
+    if (ch === '\\' && i + 1 < end) {
+      const escaped = JSON_SIMPLE_ESCAPES.get(text[i + 1]!)
+      const hex = text.slice(i + 2, i + 6)
+      if (escaped !== undefined) {
+        ch = escaped
+        width = 2
+      } else if (
+        text[i + 1] === 'u' &&
+        i + 6 <= end &&
+        /^[0-9a-fA-F]{4}$/.test(hex)
+      ) {
+        ch = String.fromCharCode(Number.parseInt(hex, 16))
+        width = 6
+      }
+    }
+    value += ch
+    starts.push(i)
+    ends.push(i + width)
+    i += width
+  }
+  return { value, starts, ends }
+}
+
+function neutralizeJsonRelayBody(text: string): string {
+  const edits = new Map<number, { end: number; keepsOpener: boolean }>()
+  for (const offset of relayOpenerOffsets(text)) {
+    edits.set(offset, { end: offset + 1, keepsOpener: text[offset] === '<' })
+  }
+  for (const [spanStart, spanEnd] of collectJsonStringSpans(text)) {
+    if (!hasRelayOpenCandidate(text.slice(spanStart, spanEnd))) continue
+    const { value, starts, ends } = decodeJsonStringSpan(
+      text,
+      spanStart,
+      spanEnd,
+    )
+    for (const decodedIdx of relayOpenerOffsets(value)) {
+      const rawStart = starts[decodedIdx]
+      const rawEnd = ends[decodedIdx]
+      if (rawStart !== undefined && rawEnd !== undefined) {
+        edits.set(rawStart, {
+          end: rawEnd,
+          keepsOpener: value[decodedIdx] === '<',
+        })
+      }
+    }
+  }
+  let out = ''
+  let cursor = 0
+  for (const rawStart of [...edits.keys()].sort((a, b) => a - b)) {
+    const edit = edits.get(rawStart)!
+    out +=
+      text.slice(cursor, edit.keepsOpener ? edit.end : rawStart) +
+      (edit.keepsOpener ? '\\\\' : '<\\\\')
+    cursor = edit.end
+  }
+  return out + text.slice(cursor)
+}
+
+export function scrubRelayEnvelopeBody(text: string): string {
+  if (!hasRelayOpenCandidate(text)) return text
+  return isJsonValuePayload(text)
+    ? neutralizeJsonRelayBody(text)
+    : neutralizePlainRelayBody(text)
 }

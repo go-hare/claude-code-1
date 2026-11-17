@@ -19,7 +19,11 @@ import { MessageChannel, Worker, type MessagePort } from 'worker_threads'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
 import { isProxy } from 'node:util/types'
-import { SourceTextModule, SyntheticModule, createContext } from 'vm'
+import vm, {
+  createContext,
+  type SourceTextModule,
+  type SyntheticModule,
+} from 'vm'
 import { HOOK_EVENTS } from '../../entrypoints/sdk/coreSchemas.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { EffortValue } from '../effort.js'
@@ -101,6 +105,7 @@ import {
   formatDrawnPlainLinks,
   rewriteDrawnLinksToPlainText,
 } from './pluginLinkHref.js'
+import { isG2eComponent } from './pluginSiteHold.js'
 import {
   EMPTY_HOP_FLOORS,
   floorsAfterNextTo,
@@ -250,6 +255,13 @@ export type FunctionHookHandler = (
   },
 ) => unknown
 
+export type FunctionHookHostHandler = {
+  name: string
+  isManaged?: boolean
+  isCore?: boolean
+  run: (input: Record<string, unknown>, next: FunctionHookNext) => unknown
+}
+
 export type LoadedFunctionHook = {
   pattern: string
   matcher?: unknown
@@ -382,6 +394,10 @@ export function setLoadedFunctionHooksModules(
   // Pending-removal set skips densable r_o until remount.
   const removedKeys = forgetAllPluginRegisteredTools()
   void awaitPluginToolSessionUnmount(removedKeys)
+  for (const name of pluginOwnedMcpServers.keys()) {
+    forgetPluginOwnedMcpServers(name)
+  }
+  pluginMcpConnections.clear()
   pluginStore.clear()
   skipFirstLog.clear()
   skipPersistOnce.clear()
@@ -914,6 +930,8 @@ export async function runFunctionHookChain(
     budgetMs?: number
     /** densable `$Ot` `withoutModuleHandlers` — skip plugin hooks, keep core. */
     withoutModuleHandlers?: boolean
+    /** Engine-owned handlers in the same hop chain, ahead of plugin handlers. */
+    handlersBefore?: readonly FunctionHookHostHandler[]
   },
 ): Promise<unknown> {
   if (hookDispatch.getStore() === undefined) {
@@ -959,7 +977,25 @@ export async function runFunctionHookChain(
   const outerHookOrigin =
     callOptions?.hookOrigin ?? activeHookOriginAls.getStore() ?? []
   const initialFloors = callOptions?.floors ?? EMPTY_HOP_FLOORS
-  const rawMatched = loadedModules.flatMap(mod => {
+  const hostHandlers = new Map<LoadedFunctionHook, FunctionHookHostHandler>()
+  const hostSteps = (callOptions?.handlersBefore ?? []).map(handler => {
+    const hook: LoadedFunctionHook = {
+      pattern: needle,
+      hook: () => undefined,
+      isManaged: handler.isManaged,
+      isCore: handler.isCore,
+    }
+    hostHandlers.set(hook, handler)
+    const mod: LoadedFunctionHooksModule = {
+      name: handler.name,
+      patterns: [needle],
+      native: true,
+      isManaged: handler.isManaged,
+      isCore: handler.isCore,
+    }
+    return { mod, hook, registration: -1 }
+  })
+  const moduleSteps = loadedModules.flatMap(mod => {
     // densable u8e: g.name !== (n ?? g.name)
     if (only !== undefined && mod.name !== only) return []
     if (environments !== undefined && !environments.includes(mod.name))
@@ -993,6 +1029,7 @@ export async function runFunctionHookChain(
       })
       .map(({ hook, registration }) => ({ mod, hook, registration }))
   })
+  const rawMatched = [...hostSteps, ...moduleSteps]
   // Coalesce consecutive hooks belonging to the same worker module so mixing
   // native + worker modules dispatches once per worker module instead of k^2.
   const collapseWorkerSteps = Boolean(workerOwnsDispatch && functionHooksWorker)
@@ -1136,9 +1173,11 @@ export async function runFunctionHookChain(
       runNode.beneath = childNode
       return callAt(index + 1, value, floors, childNode)
     }
-    enterModule(step.mod.name)
+    const hostHandler = hostHandlers.get(step.hook)
+    if (!hostHandler) enterModule(step.mod.name)
+    const stepBudgetMs = hostHandler ? 0 : budgetMs
     const stepStarted = performance.now()
-    const stepDeadline = Date.now() + budgetMs
+    const stepDeadline = Date.now() + stepBudgetMs
     const callOrigin = callOptions?.origin ?? ENGINE_HOOK_ORIGIN
     let nextCalled = false
     let inFlightDownstream: Promise<unknown> | undefined
@@ -1238,7 +1277,7 @@ export async function runFunctionHookChain(
       enumerable: true,
     })
     Object.defineProperty(next, 'budget', {
-      get: () => makeStepBudget(budgetMs, stepDeadline),
+      get: () => makeStepBudget(stepBudgetMs, stepDeadline),
       enumerable: true,
     })
     if (
@@ -1262,6 +1301,12 @@ export async function runFunctionHookChain(
           },
         )
         .then(reply => {
+          if (callOptions?.site?.check !== undefined) {
+            const problem = callOptions.site.check(reply.returned)
+            if (problem !== undefined) {
+              throw new Error(`${step.mod.name}: returned ${problem}`)
+            }
+          }
           runNode.entry = Object.freeze({
             index,
             plugin: step.mod.name,
@@ -1295,14 +1340,24 @@ export async function runFunctionHookChain(
       ...outerHookOrigin,
       { plugin: step.mod.name, registration: step.registration },
     ]
-    const running = Promise.resolve().then(() =>
-      activeHookOriginAls.run(stepHookOrigin, () =>
+    const running = Promise.resolve().then(() => {
+      if (hostHandler) {
+        callOptions?.signal?.throwIfAborted()
+        return hostHandler.run(value, next as FunctionHookNext)
+      }
+      return activeHookOriginAls.run(stepHookOrigin, () =>
         step.hook.hook(engine, value, next),
-      ),
-    )
-    watchHookBudget(running, step.mod.name, event)
+      )
+    })
+    if (!hostHandler) watchHookBudget(running, step.mod.name, event)
     return running
       .then(returned => {
+        if (!hostHandler && callOptions?.site?.check !== undefined) {
+          const problem = callOptions.site.check(returned)
+          if (problem !== undefined) {
+            throw new Error(`${step.mod.name}: returned ${problem}`)
+          }
+        }
         const outcome =
           hasDownstreamResult && Object.is(returned, lastDownstreamResult)
             ? 'passed'
@@ -1421,7 +1476,9 @@ export async function runFunctionHookChain(
             return returned
           })
       })
-      .finally(() => leaveModule(step.mod.name))
+      .finally(() => {
+        if (!hostHandler) leaveModule(step.mod.name)
+      })
   }
   const rootTraceNode: HookTraceNode = {}
   // densable `gSt`: nested evaluateUiRender from a hook skips sBo cache.
@@ -1461,6 +1518,7 @@ export type FunctionHookHopSite = {
     passed: Record<string, unknown>,
     original: Record<string, unknown>,
   ) => Record<string, unknown>
+  check?: (returned: unknown) => string | undefined
 }
 
 function hopHandlerOf(
@@ -1713,6 +1771,12 @@ export async function runFunctionHookHop(
           },
         )
         .then(reply => {
+          if (step.isCore !== true && site?.check !== undefined) {
+            const problem = site.check(reply.returned)
+            if (problem !== undefined) {
+              throw new Error(`${step.name}: returned ${problem}`)
+            }
+          }
           runNode.entry = Object.freeze({
             index,
             plugin: step.name,
@@ -1743,6 +1807,12 @@ export async function runFunctionHookHop(
     watchHookBudget(running, step.name, event)
     return running
       .then(returned => {
+        if (step.isCore !== true && site?.check !== undefined) {
+          const problem = site.check(returned)
+          if (problem !== undefined) {
+            throw new Error(`${step.name}: returned ${problem}`)
+          }
+        }
         const outcome =
           hasDownstreamResult && Object.is(returned, lastDownstreamResult)
             ? 'passed'
@@ -4777,26 +4847,28 @@ export async function handleHostOp(
     return { text, cursor: Math.min(Math.max(0, cursor), text.length) }
   }
   if (op === 'prompt.fill') {
-    // densable Iss.write: sU("ui_prompt_fill") else local composer.
-    const client = attachedClientAnswering('ui_prompt_fill')
-    // densable Iss.write: no client → {isFilled:false, refusal:"no_composer"}.
-    // Text longer than 1e6 is not filled.
-    if (!client) return { isFilled: false, refusal: 'no_composer' }
+    // densable Qit: OFr()?.write ?? no_composer. Iss.write is the remote
+    // ui_prompt_fill client; unbound TUI (promptBoxBound) is OFr null.
     const text = typeof rec?.text === 'string' ? rec.text : ''
     if (text.length > UI_HOST_TEXT_MAX) return { isFilled: false }
-    const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
-    const mode =
-      rec?.mode === 'append' || rec?.mode === 'insert' ? rec.mode : 'replace'
-    const filled = await getCurrentStructuredIO()?.requestUiPromptFill({
-      surface: client.surface,
-      clientId: client.clientId,
-      text,
-      mode,
-      decorations: Array.isArray(rec?.decorations)
-        ? rec.decorations
-        : undefined,
-    })
-    return { isFilled: filled === true }
+    const client = attachedClientAnswering('ui_prompt_fill')
+    if (client) {
+      const { getCurrentStructuredIO } = await import('src/cli/structuredIO.js')
+      const mode =
+        rec?.mode === 'append' || rec?.mode === 'insert' ? rec.mode : 'replace'
+      const filled = await getCurrentStructuredIO()?.requestUiPromptFill({
+        surface: client.surface,
+        clientId: client.clientId,
+        text,
+        mode,
+        decorations: Array.isArray(rec?.decorations)
+          ? rec.decorations
+          : undefined,
+      })
+      return { isFilled: filled === true }
+    }
+    if (!promptBoxBound) return { isFilled: false, refusal: 'no_composer' }
+    return runPromptFill(rec ?? {}, plugin)
   }
   if (op === 'prompt.suggest') {
     // densable Iss.propose: {isShown} only. No client or over 1e6 → false.
@@ -5834,41 +5906,22 @@ async function runMcpCall(
     hostCheck('mcp.call', 'takes { server, tool, args? }', plugin)
   }
   const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
-  const app = functionHooksAppStateReader?.()
-  const mcpTools = (app?.mcp?.tools ?? []) as McpListedTool[]
-  const sessionListed = sessionTools() as McpListedTool[]
-  const byName = new Map<string, McpListedTool>()
-  for (const item of [...mcpTools, ...sessionListed]) {
-    if (typeof item?.name === 'string' && item.name !== '') {
-      byName.set(item.name, item)
-    }
+  const host = getPluginToolSessionHost()
+  if (!host) {
+    throw new Error(
+      `${prefix}$.mcp.call is not available in this mode: no session is bound in this process (the REPL has not mounted and no headless session is built); catch it and carry on`,
+    )
   }
+  const listed = host.tools()
   const names = await mcpCallNameSet(server, tool)
-  let found: McpListedTool | undefined
-  for (const name of names) {
-    const hit = byName.get(name)
-    if (hit) {
-      found = hit
-      break
-    }
-  }
+  // densable 2.1.289 ZOt: session order wins, not alias-set order. Tools
+  // absent from this host cannot be called through an app-state MCP side door.
+  const found = listed.find(item => names.has(item.name))
   if (!found) {
-    // also accept mcpInfo match on the raw tool / server (tests + un-qualified)
-    found = mcpTools.find(item => {
-      if (item.mcpInfo) {
-        return (
-          item.mcpInfo.serverName === server &&
-          (item.mcpInfo.toolName === tool || item.name === tool)
-        )
-      }
-      return item.name === tool
-    })
-  }
-  if (!found) {
-    const availableNames = [...byName.keys()]
+    const availableNames = listed.map(item => item.name)
     const serversLabel = mcpServersWithToolsLabel(availableNames)
     // densable: t(`$.mcp.call (${plugin}): … servers with tools: ${a_t}`) BEFORE throw
-    console.warn(
+    logForDebugging(
       `$.mcp.call (${plugin ?? ''}): no tool "${tool}" on a server named "${server}"; servers with tools: ${serversLabel}`,
     )
     throw new Error(
@@ -5876,56 +5929,39 @@ async function runMcpCall(
     )
   }
   const argsBag = isEventRecord(callArgs) ? callArgs : {}
-  // densable XL(CNo(w.name, r), s)
-  if (toolCallHandler || functionHooksToolUseContext) {
-    const xl = await runHostToolCallXL(cnoToolCallInput(found.name, argsBag), {
+  // densable eU always executes the shared tool host; a listed MCP client
+  // alone is not an execution context and must never bypass permissions/hooks.
+  const context = functionHooksToolUseContext?.getToolUseContext()
+  if (
+    !toolCallHandler &&
+    !(
+      Array.isArray(context?.options?.tools) && context.options.tools.length > 0
+    )
+  ) {
+    throw new Error(`${prefix}$.tool.call(${found.name}) produced no result`)
+  }
+  const result = await runHostToolCallXL(
+    cnoToolCallInput(found.name, argsBag),
+    {
       plugin,
-    })
-    if ('deny' in xl) {
-      throw new Error(
-        `${prefix}$.mcp.call(${server}, ${tool}) refused: ${xl.deny}`,
-      )
-    }
-    const content = Array.isArray(xl.result)
-      ? xl.result
-      : [{ type: 'text', text: xl.text ?? '' }]
-    return { content, isError: xl.isError === true }
-  }
-  const clients = app?.mcp?.clients ?? []
-  const client = clients.find(item => item.name === server)
-  if (!client || client.type !== 'connected') {
-    throw new Error(
-      `${prefix}$.mcp.call: no connected MCP tool "${tool}" on a server named "${server}"`,
-    )
-  }
-  const { callMCPToolWithUrlElicitationRetry } = await import(
-    '../../services/mcp/client.js'
-  )
-  const { createAbortController } = await import('../abortController.js')
-  const result = await callMCPToolWithUrlElicitationRetry({
-    client,
-    clientConnection: client,
-    tool: found.mcpInfo?.toolName ?? tool,
-    args: argsBag,
-    signal: createAbortController().signal,
-    setAppState: updater => {
-      const current = functionHooksAppStateReader?.()
-      if (current) updater(current)
     },
-  })
-  const mcpRec = result as unknown
-  if (isEventRecord(mcpRec) && mcpRec.deny !== undefined) {
+  )
+  if ('deny' in result) {
     throw new Error(
-      `${prefix}$.mcp.call(${server}, ${tool}) refused: ${String(mcpRec.deny)}`,
+      `${prefix}$.mcp.call(${server}, ${tool}) refused: ${result.deny}`,
     )
   }
-  const content = Array.isArray(result.content)
-    ? result.content
-    : [{ type: 'text', text: String(result.content ?? '') }]
+  const content = Array.isArray(result.result)
+    ? result.result
+    : [{ type: 'text', text: result.text ?? '' }]
   return { content, isError: result.isError === true }
 }
 
 const pluginOwnedMcpServers = new Map<string, Set<string>>()
+const pluginMcpConnections = new Map<
+  string,
+  Promise<import('./pluginToolSessionHost.js').PluginMcpConnection>
+>()
 
 function forgetPluginOwnedMcpServers(pluginName: string): void {
   const owned = pluginOwnedMcpServers.get(pluginName)
@@ -5959,62 +5995,83 @@ async function runMcpConnect(
     )
   }
   try {
-    const pluginId = resolvePluginStorageId(prefix)
-    const [{ loadAllPluginsCacheOnly }, { getPluginMcpServers }] =
-      await Promise.all([
-        import('./pluginLoader.js'),
-        import('./mcpPluginIntegration.js'),
-      ])
-    const { externalBuiltinNamespaceName, getBuiltinPluginDefinition } =
-      await import('../../plugins/builtinPlugins.js')
-    const { enabled } = await loadAllPluginsCacheOnly()
-    const loadedPlugin = enabled.find(entry => entry.source === pluginId)
-    if (!loadedPlugin) {
+    if (
+      !host.resolveMcpServer ||
+      !host.connectMcpServer ||
+      !host.settledMcpServer
+    ) {
+      throw new Error('the session has no MCP connection host')
+    }
+    const resolved = await host.resolveMcpServer({
+      pluginId: resolvePluginStorageId(prefix),
+      key,
+    })
+    if (!resolved.isListed) {
       return {
         isConnected: false,
-        reason: 'unlisted',
-        message: `This plugin's manifest lists no MCP server named "${key}".`,
+        reason: resolved.refused,
+        message: resolved.message,
       }
     }
-    const candidate = loadedPlugin.isBuiltin
-      ? {
-          ...loadedPlugin,
-          mcpServers: getBuiltinPluginDefinition(loadedPlugin.name)?.mcpServers,
-        }
-      : loadedPlugin
-    if (loadedPlugin.isBuiltin && candidate.mcpServers === undefined) {
+    const { name } = resolved
+    if (resolved.isTwin) {
+      const result = await host.settledMcpServer(name)
+      return result.isConnected
+        ? { isConnected: true, server: name }
+        : {
+            isConnected: false,
+            reason: result.refused,
+            message: result.message,
+          }
+    }
+    const ownedByAnyPlugin = [...pluginOwnedMcpServers.values()].some(set =>
+      set.has(name),
+    )
+    const preExistingInSession =
+      !ownedByAnyPlugin && Boolean(host.mcpServers?.().includes(name))
+    if (!preExistingInSession) {
+      let owned = pluginOwnedMcpServers.get(prefix)
+      if (!owned) {
+        owned = new Set()
+        pluginOwnedMcpServers.set(prefix, owned)
+      }
+      owned.add(name)
+    }
+    let connection = pluginMcpConnections.get(name)
+    if (!connection) {
+      connection = Promise.resolve().then(() =>
+        host.connectMcpServer!(name, resolved.config),
+      )
+      pluginMcpConnections.set(name, connection)
+    }
+    let result: import('./pluginToolSessionHost.js').PluginMcpConnection
+    try {
+      result = await connection
+    } finally {
+      if (pluginMcpConnections.get(name) === connection) {
+        pluginMcpConnections.delete(name)
+      }
+    }
+    if (!result.isConnected) {
       return {
         isConnected: false,
-        reason: 'unlisted',
-        message: `This plugin's manifest lists no MCP server named "${key}".`,
+        reason: result.refused,
+        message: result.message,
       }
     }
-    const scopedName = `plugin:${externalBuiltinNamespaceName(loadedPlugin.name, loadedPlugin.source)}:${key}`
-    const resolved = await getPluginMcpServers(candidate, [])
-    const config = resolved?.[scopedName]
-    if (!config) {
+    if (
+      !loadedModules.some(
+        mod => mod.name === prefix && mod.status !== 'unloaded',
+      )
+    ) {
+      await host.removeMcpServer?.(name)
       return {
         isConnected: false,
-        reason: 'unlisted',
-        message: `This plugin's manifest lists no MCP server named "${key}".`,
+        reason: 'failed',
+        message: `The MCP server "${name}" was taken out: its plugin unloaded while it connected.`,
       }
     }
-    if (isBareMode()) {
-      return {
-        isConnected: false,
-        reason: 'policy',
-        message:
-          'This session runs with --bare, which connects no plugin servers.',
-      }
-    }
-    let owned = pluginOwnedMcpServers.get(prefix)
-    if (!owned) {
-      owned = new Set()
-      pluginOwnedMcpServers.set(prefix, owned)
-    }
-    owned.add(scopedName)
-    await Promise.resolve(host.addMcpServer(scopedName, config))
-    return { isConnected: true, server: scopedName }
+    return { isConnected: true, server: name }
   } catch (err) {
     return {
       isConnected: false,
@@ -8255,12 +8312,20 @@ function rememberUiRenderDrawing(
         !(drawing.component === component && drawing.requestId === requestId),
     ),
   )
+  const site = { component, requestId, surface: 'terminal' }
   if (
     isEngineDrawing(tree) ||
     tree === undefined ||
     tree === null ||
     typeof tree === 'string'
   ) {
+    // densable bo(e): release held presses when site reverts to engine/empty.
+    for (const name of heldPressStore.holdersOf(site)) {
+      const { released } = heldPressStore.holdDrawing(name, site, [])
+      if (released.length > 0) {
+        releasePresses(name, released, { component, requestId })
+      }
+    }
     bumpRasterFrames()
     return
   }
@@ -8270,6 +8335,21 @@ function rememberUiRenderDrawing(
     component,
     tree,
   })
+  const grouped = collectHeldPressButtons(tree)
+  const plugins = new Set([
+    ...heldPressStore.holdersOf(site),
+    ...grouped.keys(),
+  ])
+  for (const name of plugins) {
+    const { released } = heldPressStore.holdDrawing(
+      name,
+      site,
+      grouped.get(name) ?? [],
+    )
+    if (released.length > 0) {
+      releasePresses(name, released, { component, requestId })
+    }
+  }
   walkUiMounts(tree, plugin, requestId)
   bumpRasterFrames()
 }
@@ -8279,6 +8359,27 @@ function rememberUiRenderDrawing(
  * Raster/Image (`Te`), keep the tree for the matching `nWt(xI(component))`
  * site. Engine fallback is `{type:"engine",ref:0}` (`sMe` / `Fhe`).
  */
+function cloneUiRenderBaselineValue(
+  value: unknown,
+  seen = new WeakMap<object, unknown>(),
+): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (seen.has(value)) return seen.get(value)
+  if (Array.isArray(value)) {
+    const out: unknown[] = []
+    seen.set(value, out)
+    for (const item of value) out.push(cloneUiRenderBaselineValue(item, seen))
+    return out
+  }
+  if (!isEventRecord(value)) return value
+  const out: Record<string, unknown> = {}
+  seen.set(value, out)
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = cloneUiRenderBaselineValue(entry, seen)
+  }
+  return out
+}
+
 export async function evaluateUiRender(
   input: Record<string, unknown>,
   signal?: AbortSignal,
@@ -8288,6 +8389,9 @@ export async function evaluateUiRender(
   const component = String(input.component)
   const requestId = typeof input.requestId === 'string' ? input.requestId : ''
   const surface = typeof input.surface === 'string' ? input.surface : 'terminal'
+  const originalEngineProps = isEventRecord(input.props)
+    ? (cloneUiRenderBaselineValue(input.props) as Record<string, unknown>)
+    : {}
   // densable `gSt()`: already inside a hook-chain eval → skip sBo, dispatch FBr.
   const skipCache = isInsideHookEval()
   const drawingSite: ClientFaultSite = { surface, component, requestId }
@@ -8380,6 +8484,25 @@ export async function evaluateUiRender(
   if (hoverReason !== undefined) {
     logUiRenderRefused(component, hoverReason)
     throw new Error(hoverReason)
+  }
+  if (
+    isEventRecord(tree) &&
+    tree.type === 'engine' &&
+    tree !== UI_RENDER_ENGINE_FALLBACK
+  ) {
+    if (!isEventRecord(tree.props)) {
+      const missingPropsReason = 'no { props } (an object)'
+      logUiRenderRefused(component, missingPropsReason)
+      throw new Error(missingPropsReason)
+    }
+    const propsReason = uiRenderEnginePropsCheck(tree.props, {
+      component,
+      props: originalEngineProps,
+    })
+    if (propsReason !== undefined) {
+      logUiRenderRefused(component, propsReason)
+      throw new Error(propsReason)
+    }
   }
   const accepted = stripUnknownBoxBorderStyles(
     acceptAskUserQuestionRewrite(tree, input, component),
@@ -10974,6 +11097,258 @@ function fillWithheldUiResolveTable(
     })
   }
   return Object.freeze(next)
+}
+
+/** densable `xZ` — rewrite may not grow a prop past this many characters. */
+const UI_RENDER_REWRITE_CHAR_CAP = 100_000
+
+const USER_MESSAGE_PINNED_PROPS = [
+  'origin',
+  'isExpanded',
+  'task',
+  'from',
+] as const
+
+function uiRenderSame(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (left === null || right === null) return left === right
+  if (typeof left !== typeof right) return false
+  if (typeof left !== 'object') return false
+  try {
+    return JSON.stringify(left) === JSON.stringify(right)
+  } catch {
+    return false
+  }
+}
+
+function uiRenderStringChars(value: unknown): number {
+  return uiRenderWalkTokens(value).reduce((sum, part) => sum + part.length, 0)
+}
+
+/** densable `Lz` — Hr class-count grow. */
+const UI_RENDER_ESCAPE_CLASS = new RegExp(
+  `[${String.raw`\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f`}]`,
+  'u',
+)
+const UI_RENDER_PLACEHOLDER_CLASS = new RegExp(
+  `[${String.raw`\u{10eeee}`}]`,
+  'u',
+)
+const UI_RENDER_LONE_SURROGATE_CLASS = new RegExp(
+  `[${String.raw`\ud800-\udfff`}]`,
+  'u',
+)
+
+/** densable `Ve` — strings and object keys. */
+function uiRenderWalkTokens(value: unknown): string[] {
+  switch (typeof value) {
+    case 'string':
+      return [value]
+    case 'object': {
+      if (value === null) return []
+      if (Array.isArray(value)) {
+        return value.flatMap(uiRenderWalkTokens)
+      }
+      if (!isEventRecord(value)) return []
+      return Object.entries(value).flatMap(([key, entry]) => [
+        key,
+        ...uiRenderWalkTokens(entry),
+      ])
+    }
+    default:
+      return []
+  }
+}
+
+/** densable `ttr` — code points matching a class. */
+function uiRenderClassHits(value: unknown, classify: RegExp): number {
+  let hits = 0
+  for (const part of uiRenderWalkTokens(value)) {
+    for (const point of Array.from(part)) {
+      if (classify.test(point)) hits += 1
+    }
+  }
+  return hits
+}
+
+/** densable `_t` — rewrite grew a class vs the engine. */
+function uiRenderClassGrew(
+  rewritten: unknown,
+  engine: unknown,
+  classify: RegExp,
+): boolean {
+  return (
+    uiRenderClassHits(rewritten, classify) > uiRenderClassHits(engine, classify)
+  )
+}
+
+function uiRenderToolUseIds(calls: unknown): (string | null)[] | undefined {
+  if (!Array.isArray(calls)) return undefined
+  return calls.map(entry => {
+    if (typeof entry === 'string') return entry
+    if (isEventRecord(entry) && typeof entry.tool_use_id === 'string') {
+      return entry.tool_use_id
+    }
+    return null
+  })
+}
+
+function uiRenderPropKind(value: unknown): string {
+  if (value === undefined) return 'missing'
+  if (value === null) return 'null'
+  if (typeof value === 'string') return 'a string'
+  if (typeof value === 'number') return 'a number'
+  if (typeof value === 'boolean') return 'a boolean'
+  if (Array.isArray(value)) return 'an array'
+  if (typeof value === 'object') return 'an object'
+  return `a ${typeof value}`
+}
+
+const UI_RENDER_ON_SCREEN_KIND = ['an object', 'null', 'missing'] as const
+const UI_RENDER_ANY_KIND = '*' as const
+/** densable `Mr`. `*` = gold `We` (any type). */
+const UI_RENDER_PROP_SCHEMA: Record<
+  string,
+  Record<string, readonly string[] | typeof UI_RENDER_ANY_KIND>
+> = {
+  AskUserQuestion: { metadataSource: ['a string', 'missing'] },
+  UserMessage: { onScreen: UI_RENDER_ON_SCREEN_KIND },
+  AssistantMessage: { onScreen: UI_RENDER_ON_SCREEN_KIND },
+  ToolUse: {
+    input: UI_RENDER_ANY_KIND,
+    output: UI_RENDER_ANY_KIND,
+    onScreen: UI_RENDER_ON_SCREEN_KIND,
+  },
+  ToolResult: {
+    output: UI_RENDER_ANY_KIND,
+    onScreen: UI_RENDER_ON_SCREEN_KIND,
+  },
+  ToolGroup: { onScreen: UI_RENDER_ON_SCREEN_KIND },
+  CommandOutput: { onScreen: UI_RENDER_ON_SCREEN_KIND },
+  Spinner: {
+    message: ['a string', 'null'],
+    suffix: ['a string', 'missing'],
+  },
+  TurnDuration: { onScreen: UI_RENDER_ON_SCREEN_KIND },
+  InfoNotice: {
+    command: ['a string', 'null'],
+    onScreen: UI_RENDER_ON_SCREEN_KIND,
+  },
+  PromptHint: { tail: ['a string', 'missing'] },
+}
+
+/**
+ * densable `nn` / `Yr`/`Jr`/`qr`/`Qr`/`en`/`tn`/`on`/`rn`/`Hr`/`Fr` —
+ * engine-owned props a rewrite may not change.
+ */
+export function uiRenderEnginePropsCheck(
+  rewritten: Record<string, unknown>,
+  original: { component: string; props: Record<string, unknown> },
+): string | undefined {
+  const engine = original.props
+  const component = original.component
+  const schema = UI_RENDER_PROP_SCHEMA[component] ?? {}
+  for (const [name, allowed] of Object.entries(schema)) {
+    if (allowed === UI_RENDER_ANY_KIND) continue
+    const kind = uiRenderPropKind(rewritten[name])
+    if (!allowed.includes(kind)) {
+      return `a props.${name} that is ${kind}, not ${allowed.join(' or ')}`
+    }
+  }
+  for (const [name, orig] of Object.entries(engine)) {
+    if (orig === undefined || Object.hasOwn(schema, name)) continue
+    const nextKind = uiRenderPropKind(rewritten[name])
+    const origKind = uiRenderPropKind(orig)
+    if (nextKind !== origKind) {
+      return `a props.${name} that is ${nextKind}, not ${origKind}`
+    }
+  }
+  const grownControl = Object.keys(rewritten).find(name => {
+    if (uiRenderSame(rewritten[name], engine[name])) return false
+    return (
+      uiRenderClassGrew(
+        rewritten[name],
+        engine[name],
+        UI_RENDER_ESCAPE_CLASS,
+      ) ||
+      uiRenderClassGrew(
+        rewritten[name],
+        engine[name],
+        UI_RENDER_PLACEHOLDER_CLASS,
+      ) ||
+      uiRenderClassGrew(
+        rewritten[name],
+        engine[name],
+        UI_RENDER_LONE_SURROGATE_CLASS,
+      )
+    )
+  })
+  if (grownControl !== undefined) {
+    return `a props.${grownControl} with a control character (an escape sequence the terminal would honour, an image placeholder, or an unpaired surrogate half out of reach); a rewrite the engine draws adds none`
+  }
+  const grown = Object.keys(rewritten).find(name => {
+    if (uiRenderSame(rewritten[name], engine[name])) return false
+    const next = uiRenderStringChars(rewritten[name])
+    const prev = uiRenderStringChars(engine[name])
+    return next > UI_RENDER_REWRITE_CHAR_CAP && next > prev
+  })
+  if (grown !== undefined) {
+    return `a props.${grown} of more than ${UI_RENDER_REWRITE_CHAR_CAP} characters of text, more than the engine drew`
+  }
+  if (component === 'UserMessage') {
+    const pinned = USER_MESSAGE_PINNED_PROPS.find(
+      key => !uiRenderSame(rewritten[key], engine[key]),
+    )
+    if (pinned !== undefined) {
+      return `a props.${pinned} other than the engine drew (the row names its message's origin, sender and task and how the view draws it; a rewrite changes the text alone)`
+    }
+  }
+  if (
+    (component === 'ToolUse' ||
+      component === 'ToolResult' ||
+      component === 'ToolProgress') &&
+    rewritten.tool_use_id !== engine.tool_use_id
+  ) {
+    return 'a props.tool_use_id other than the engine drew (the id names the call; a rewrite changes the row alone)'
+  }
+  if (component === 'ToolProgress' && rewritten.kind !== engine.kind) {
+    return 'a props.kind other than the engine drew (the kind names the row; a rewrite changes its text alone)'
+  }
+  if (
+    component === 'ToolGroup' &&
+    (engine.calls !== undefined || rewritten.calls !== undefined)
+  ) {
+    const originalIds = uiRenderToolUseIds(engine.calls) ?? []
+    const rewrittenIds = uiRenderToolUseIds(rewritten.calls)
+    if (
+      rewrittenIds === undefined ||
+      rewrittenIds.length !== originalIds.length ||
+      rewrittenIds.some((id, index) => id === null || id !== originalIds[index])
+    ) {
+      return "props.calls whose tool_use_ids are not the ones the engine drew (each call keeps the id tool.call carried; the group's calls are its own)"
+    }
+  }
+  if (component === 'CommandOutput' && rewritten.command !== engine.command) {
+    return 'a props.command other than the engine drew (the name is the command that printed the row; a rewrite changes the row alone)'
+  }
+  if (component === 'Pane' && rewritten.placement !== engine.placement) {
+    return 'a props.placement other than the surface drew (the surface places the pane; a rewrite changes the drawing alone)'
+  }
+  if (
+    (component === 'Pane' || component === 'AbovePrompt') &&
+    !uiRenderSame(rewritten.view, engine.view)
+  ) {
+    return 'a props.view other than the surface drew (the person chooses the transcript in view; a rewrite changes the drawing alone)'
+  }
+  if (isG2eComponent(component)) {
+    const rewrittenOnScreen = Object.hasOwn(engine, 'onScreen')
+      ? engine.onScreen
+      : undefined
+    if (!uiRenderSame(rewritten.onScreen, rewrittenOnScreen)) {
+      return 'a props.onScreen other than the surface reported (the surface says what its viewport shows; a rewrite changes the drawing alone)'
+    }
+  }
+  return undefined
 }
 
 /** densable `di` — ui.render / $.ui.resolve argument. */
@@ -13910,6 +14285,199 @@ const recordedPresses: Array<{
 /** densable worker `x` — handle → press callback. */
 const pressHandlers = new Map<string, (event: unknown) => unknown>()
 let nextClientPressHandle = 0
+
+type HeldPressSite = {
+  component: string
+  requestId: string
+  surface: string
+}
+
+export type HeldPressRecord = {
+  tag: string
+  plugin: string
+  handle: unknown
+  element: string
+  pressableLinks?: string[]
+  options?: string[]
+} & HeldPressSite
+
+/** densable `OP` — hosted DualInk press id bound. */
+const HELD_PRESS_ID_BOUND = 1_073_741_824
+
+/**
+ * densable `IP` / `T3` — DualInk held-press metadata. Lookup is by hosted id
+ * (gold `e.get(h)`) or original handle. DualInk press does not invent baseButton.
+ */
+function createHeldPressStore(): {
+  heldPress: (
+    plugin: string,
+    handle: unknown,
+    element?: string,
+  ) => HeldPressRecord | undefined
+  holdDrawing: (
+    plugin: string,
+    site: HeldPressSite,
+    buttons: Array<{
+      tag: string
+      handle: unknown
+      element: string
+      pressableLinks?: string[]
+      options?: string[]
+    }>,
+  ) => { hosted: Map<unknown, number>; released: unknown[] }
+  holdersOf: (site: HeldPressSite) => string[]
+  forgetPresses: (plugin: string) => void
+  heldByKeyOf: (key: {
+    tag: string
+    plugin: string
+    element: string
+    surface: string
+    component: string
+    requestId?: string
+  }) => HeldPressRecord | undefined
+  hostedButtonsOf: (
+    plugin: string,
+    element: string,
+  ) => Array<{ hosted: number; button: HeldPressRecord }>
+  heldPressCount: () => number
+} {
+  const byHosted = new Map<number, HeldPressRecord>()
+  const byDrawing = new Map<string, Map<unknown, number>>()
+  let next = Math.floor(Math.random() * HELD_PRESS_ID_BOUND)
+  const drawingKey = (plugin: string, site: HeldPressSite): string =>
+    `${plugin}\0${site.component}\0${site.requestId}\0${site.surface}`
+  const hostedOfHandle = (
+    plugin: string,
+    except: string,
+    handle: unknown,
+  ): number | undefined => {
+    for (const [key, map] of byDrawing) {
+      if (key === except || !key.startsWith(`${plugin}\0`)) continue
+      const hosted = map.get(handle)
+      if (hosted !== undefined) return hosted
+    }
+    return undefined
+  }
+  return {
+    heldPress(plugin, handle, element) {
+      if (typeof handle === 'number') {
+        const hosted = byHosted.get(handle)
+        if (
+          hosted?.plugin === plugin &&
+          (element === undefined ||
+            element === '' ||
+            hosted.element === element)
+        ) {
+          return hosted
+        }
+      }
+      for (const rec of byHosted.values()) {
+        if (
+          rec.plugin === plugin &&
+          rec.handle === handle &&
+          (element === undefined || element === '' || rec.element === element)
+        ) {
+          return rec
+        }
+      }
+      return undefined
+    },
+    holdDrawing(plugin, site, buttons) {
+      const key = drawingKey(plugin, site)
+      const previous = byDrawing.get(key) ?? new Map<unknown, number>()
+      const hosted = new Map<unknown, number>()
+      for (const button of buttons) {
+        const id =
+          previous.get(button.handle) ??
+          hostedOfHandle(plugin, key, button.handle) ??
+          ++next
+        hosted.set(button.handle, id)
+        byHosted.set(id, { ...button, plugin, ...site })
+      }
+      const released: unknown[] = []
+      for (const [handle, id] of previous) {
+        if (
+          !hosted.has(handle) &&
+          hostedOfHandle(plugin, key, handle) === undefined
+        ) {
+          byHosted.delete(id)
+          released.push(handle)
+        }
+      }
+      if (hosted.size === 0) byDrawing.delete(key)
+      else byDrawing.set(key, hosted)
+      return { hosted, released }
+    },
+    holdersOf(site) {
+      const suffix = `\0${site.component}\0${site.requestId}\0${site.surface}`
+      const names: string[] = []
+      for (const key of byDrawing.keys()) {
+        if (key.endsWith(suffix)) {
+          names.push(key.slice(0, key.indexOf('\0')))
+        }
+      }
+      return names
+    },
+    forgetPresses(plugin) {
+      for (const [id, rec] of byHosted) {
+        if (rec.plugin === plugin) byHosted.delete(id)
+      }
+      for (const key of [...byDrawing.keys()]) {
+        if (key.startsWith(`${plugin}\0`)) byDrawing.delete(key)
+      }
+    },
+    heldByKeyOf(key) {
+      const matches = [...byHosted.values()].filter(
+        rec =>
+          rec.tag === key.tag &&
+          rec.plugin === key.plugin &&
+          rec.element === key.element &&
+          rec.surface === key.surface &&
+          rec.component === key.component &&
+          (key.requestId === undefined || rec.requestId === key.requestId),
+      )
+      return matches.length === 1 ? matches[0] : undefined
+    },
+    hostedButtonsOf(plugin, element) {
+      return [...byHosted]
+        .filter(([, rec]) => rec.plugin === plugin && rec.element === element)
+        .map(([hosted, button]) => ({ hosted, button }))
+    },
+    heldPressCount: () => byHosted.size,
+  }
+}
+
+const heldPressStore = createHeldPressStore()
+
+export function heldPress(
+  plugin: string,
+  handle: unknown,
+  element?: string,
+): HeldPressRecord | undefined {
+  return heldPressStore.heldPress(plugin, handle, element)
+}
+
+export function hostedButtonsOf(
+  plugin: string,
+  element: string,
+): Array<{ hosted: number; button: HeldPressRecord }> {
+  return heldPressStore.hostedButtonsOf(plugin, element)
+}
+
+export function heldPressCount(): number {
+  return heldPressStore.heldPressCount()
+}
+
+export function heldByKeyOf(key: {
+  tag: string
+  plugin: string
+  element: string
+  surface: string
+  component: string
+  requestId?: string
+}): HeldPressRecord | undefined {
+  return heldPressStore.heldByKeyOf(key)
+}
 const clientPressHandlesByPlugin = new Map<string, Set<number>>()
 
 function pressSlot(environmentId: string, handle: unknown): string {
@@ -14019,6 +14587,99 @@ export function releasePresses(
   if (mod.native !== true && workerOwnsDispatch && functionHooksWorker) {
     functionHooksWorker.releasePresses(environmentId, hookHandles)
   }
+}
+
+/** densable `ae` @182867306 — extract `{ value: string }[]` (or `string[]`) from `<Select options>`. */
+function extractHeldSelectOptionValues(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  if (raw.every(item => typeof item === 'string')) {
+    return raw
+  }
+  const values = raw.map(item =>
+    typeof item === 'object' && item !== null && 'value' in item
+      ? (item as { value?: unknown }).value
+      : undefined,
+  )
+  return values.every((v): v is string => typeof v === 'string')
+    ? values
+    : undefined
+}
+
+function collectHeldPressButtons(tree: unknown): Map<
+  string,
+  Array<{
+    tag: string
+    handle: unknown
+    element: string
+    pressableLinks?: string[]
+    options?: string[]
+  }>
+> {
+  const byPlugin = new Map<
+    string,
+    Array<{
+      tag: string
+      handle: unknown
+      element: string
+      pressableLinks?: string[]
+      options?: string[]
+    }>
+  >()
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child)
+      return
+    }
+    if (!isEventRecord(node)) return
+    const props = isEventRecord(node.props) ? node.props : undefined
+    if (
+      node.type === 'Button' ||
+      node.type === 'Select' ||
+      node.type === 'Input' ||
+      node.type === 'Markdown'
+    ) {
+      const press = isEventRecord(node.press) ? node.press : undefined
+      const plugin = typeof press?.plugin === 'string' ? press.plugin : ''
+      const element =
+        typeof props?.key === 'string'
+          ? props.key
+          : typeof press?.element === 'string'
+            ? press.element
+            : typeof node.key === 'string'
+              ? node.key
+              : undefined
+      if (
+        plugin !== '' &&
+        press?.handle !== undefined &&
+        typeof element === 'string'
+      ) {
+        const held = byPlugin.get(plugin) ?? []
+        const rawLinks = props?.pressableLinks ?? node.pressableLinks
+        const links =
+          Array.isArray(rawLinks) &&
+          rawLinks.every((link): link is string => typeof link === 'string')
+            ? rawLinks
+            : undefined
+        const options =
+          node.type === 'Select'
+            ? extractHeldSelectOptionValues(props?.options ?? node.options)
+            : undefined
+        held.push({
+          tag: String(node.type),
+          handle: press.handle,
+          element,
+          ...(links !== undefined ? { pressableLinks: links } : {}),
+          ...(options !== undefined ? { options } : {}),
+        })
+        byPlugin.set(plugin, held)
+      }
+      return
+    }
+    if (node.children !== undefined) walk(node.children)
+    if (props?.children !== undefined) walk(props.children)
+  }
+  walk(tree)
+  return byPlugin
 }
 
 function collectButtonHandles(tree: unknown): Map<string, unknown[]> {
@@ -14394,7 +15055,7 @@ async function peekState(
 }
 
 function claudeCodeModule(context: object): SyntheticModule {
-  const module = new SyntheticModule(
+  const module = new vm.SyntheticModule(
     [...CLAUDE_CODE_EXPORTS],
     function () {
       const atom = (
@@ -15219,6 +15880,7 @@ function leaveModule(name: string): void {
 }
 
 function unloadModule(name: string): void {
+  forgetPluginOwnedMcpServers(name)
   loadedModules = loadedModules.map(mod =>
     mod.name === name
       ? { ...mod, status: 'unloaded', hooks: [], patterns: [] }
@@ -16674,7 +17336,7 @@ async function loadRegisterNamespace(
     const cached = modules.get(file)
     if (cached) return cached
     const source = readFileSync(file, 'utf8')
-    const created = new SourceTextModule(source, {
+    const created = new vm.SourceTextModule(source, {
       identifier: file,
       context,
       initializeImportMeta(meta) {

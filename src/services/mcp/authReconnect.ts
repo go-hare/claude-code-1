@@ -106,8 +106,12 @@ export function getAuthReconnectInFlightKeysForTests(): string[] {
   return [...authReconnectInFlight.keys()]
 }
 
-export function clearAuthReconnectInFlightForTests(): void {
+export function clearAuthReconnectInFlight(): void {
   authReconnectInFlight.clear()
+}
+
+export function clearAuthReconnectInFlightForTests(): void {
+  clearAuthReconnectInFlight()
 }
 
 export function hasAuthReconnectInFlight(cacheKey: string): boolean {

@@ -74,6 +74,7 @@ import {
   getPluginFaultRenderStateSize,
   createPromptEditComposer,
 } from '../plugins/functionHooksModules.js'
+import { setPluginToolSessionHost } from '../plugins/pluginToolSessionHost.js'
 import * as debug from '../debug.js'
 import { executePreToolHooks } from '../hooks.js'
 import type { ToolUseContext } from '../../Tool.js'
@@ -105,6 +106,7 @@ afterEach(async () => {
   setFunctionHooksTurnReader(undefined)
   setToolCallHandler(undefined)
   setFunctionHooksToolUseContext(undefined)
+  setPluginToolSessionHost(undefined)
   resetCommandQueue()
   await stopFunctionHooksWorker()
 })
@@ -582,7 +584,7 @@ describe('function-hooks classic pattern', () => {
         'nope',
         'tool',
       ]),
-    ).rejects.toThrow('no connected MCP tool')
+    ).rejects.toThrow('no session is bound')
     recordPress('demo', { id: 1 }, { key: 'return' })
     expect(getRecordedPresses().at(-1)).toEqual({
       environmentId: 'demo',
@@ -1127,18 +1129,21 @@ describe('function-hooks classic pattern', () => {
     const debugLog = spyOn(debug, 'logForDebugging').mockImplementation(
       () => {},
     )
-    expect(
-      await handleHostOp('ui.log', [{ text: 'secret', to: 'debug' }], 'demo'),
-    ).toBeUndefined()
-    expect(debugLog).toHaveBeenCalled()
-    expect(
-      debugLog.mock.calls.some(
-        call =>
-          typeof call[0] === 'string' &&
-          call[0].includes('$.ui.log (to debug): secret'),
-      ),
-    ).toBe(true)
-    debugLog.mockRestore()
+    try {
+      expect(
+        await handleHostOp('ui.log', [{ text: 'secret', to: 'debug' }], 'demo'),
+      ).toBeUndefined()
+      expect(debugLog).toHaveBeenCalled()
+      expect(
+        debugLog.mock.calls.some(
+          call =>
+            typeof call[0] === 'string' &&
+            call[0].includes('$.ui.log (to debug): secret'),
+        ),
+      ).toBe(true)
+    } finally {
+      debugLog.mockRestore()
+    }
     const shown: Array<{ plugin: string; text: string; timeoutMs?: number }> =
       []
     setUiToastShowHandler(toast => {
@@ -1338,7 +1343,7 @@ describe('function-hooks classic pattern', () => {
             tools: [
               {
                 name: 'mcp__demo_server__ping',
-                mcpInfo: { serverName: 'demo-server', toolName: 'ping' },
+                mcpInfo: { serverName: 'demo.server', toolName: 'ping' },
               },
             ],
             commands: [],
@@ -1348,15 +1353,20 @@ describe('function-hooks classic pattern', () => {
           tools: [{ name: 'mcp__demo_server__ping' }],
         }) as unknown as AppState,
     )
+    setPluginToolSessionHost({
+      tools: () => [{ name: 'mcp__demo_server__ping' }],
+      mcpServers: () => ['demo.server'],
+      addMcpServer() {},
+    })
     setToolCallHandler(async () => ({ deny: 'blocked by policy' }))
     await expect(
       handleHostOp(
         'mcp.call',
-        [{ server: 'demo-server', tool: 'ping', args: {} }],
+        [{ server: 'demo.server', tool: 'ping', args: {} }],
         'demo',
       ),
     ).rejects.toThrow(
-      '$.mcp.call(demo-server, ping) refused: blocked by policy',
+      '$.mcp.call(demo.server, ping) refused: blocked by policy',
     )
     setToolCallHandler(async () => ({
       content: [{ type: 'text', text: 'pong' }],
@@ -1365,7 +1375,7 @@ describe('function-hooks classic pattern', () => {
     expect(
       await handleHostOp(
         'mcp.call',
-        [{ server: 'demo-server', tool: 'ping' }],
+        [{ server: 'demo.server', tool: 'ping' }],
         'demo',
       ),
     ).toEqual({

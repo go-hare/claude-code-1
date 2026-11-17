@@ -32,6 +32,7 @@ import {
   startUdsMessaging,
   stopUdsMessaging,
   UDS_AUTH_TIMEOUT_MS,
+  UDS_SOCKETS_PATH_NOT_A_DIRECTORY,
 } from '../udsMessaging.js'
 
 let previousConfigDir: string | undefined
@@ -787,7 +788,7 @@ describe('UDS inbox retention', () => {
           startUdsMessaging(join(parentFile, 'messaging.sock'), {
             isExplicit: true,
           }),
-        ).rejects.toThrow('socket parent is not a directory')
+        ).rejects.toThrow(UDS_SOCKETS_PATH_NOT_A_DIRECTORY)
       } finally {
         await rm(parentFile, { force: true })
       }

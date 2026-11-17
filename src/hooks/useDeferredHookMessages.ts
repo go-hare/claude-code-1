@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { HookResultMessage, Message } from '../types/message.js'
+import { enqueueReportingAdmission } from '../utils/messageQueueManager.js'
+import { takeInitialUserMessage } from '../utils/sessionStart.js'
 
 /**
  * Manages deferred SessionStart hook messages so the REPL can render
@@ -27,6 +29,15 @@ export function useDeferredHookMessages(
       if (msgs.length > 0) {
         setMessages(prev => [...msgs, ...prev])
       }
+      // densable LMr @206434438 — prepend SessionStart initialUserMessage onto
+      // the command queue so the REPL executes a real first-turn user prompt.
+      const initial = takeInitialUserMessage()
+      if (initial) {
+        enqueueReportingAdmission(
+          { mode: 'prompt', value: initial, priority: 'now' },
+          { ahead: true },
+        )
+      }
     })
     return () => {
       cancelled = true
@@ -41,6 +52,13 @@ export function useDeferredHookMessages(
     pendingRef.current = null
     if (msgs.length > 0) {
       setMessages(prev => [...msgs, ...prev])
+    }
+    const initial = takeInitialUserMessage()
+    if (initial) {
+      enqueueReportingAdmission(
+        { mode: 'prompt', value: initial, priority: 'now' },
+        { ahead: true },
+      )
     }
   }, [setMessages])
 }

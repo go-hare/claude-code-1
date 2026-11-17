@@ -3,7 +3,8 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
-import type z from 'zod/v4'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { z } from 'zod/v4'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { AnyObject, Tool, ToolUseContext } from '../../Tool.js'
 import type { HookProgress } from '../../types/hooks.js'
@@ -32,9 +33,18 @@ import {
   evaluatePermissionWithToolCheck,
   hasEvaluatedToolCheckForCall,
 } from '../../utils/permissions/permissions.js'
+import {
+  accountMemoryHookRewriteDenied,
+  didAccountMemoryHookRewriteInput,
+  shouldPreserveManagedToolHookPass,
+} from '../../utils/hooks/toolCallManagedPass.js'
+import { getEffectivePermissionMode } from '../../utils/permissions/mcpPermissionMode.js'
 import { stripEvalConfinedHookAllow } from '../../utils/permissions/evalConfined.js'
 import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js'
-import { formatError } from '../../utils/toolErrors.js'
+import {
+  formatError,
+  formatZodValidationError,
+} from '../../utils/toolErrors.js'
 import { isMcpTool } from '../mcp/utils.js'
 import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
 
@@ -61,7 +71,9 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
   // densable: settingsHooksOff skips the whole PostToolUse chain.
   // tool.call already drops module handlers; settings hooks must too.
   // disableAllHooks is checked inside executeHooks.
+  // densable vVn Nx: settingsHooksOff | bareFork | EndConversation (latter inside executePostToolHooks)
   if (toolUseContext.options.settingsHooksOff === true) return
+  if (toolUseContext.options.bareFork === true) return
   const postToolStartTime = Date.now()
   try {
     const appState = toolUseContext.getAppState()
@@ -78,6 +90,13 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
       toolUseContext.abortController.signal,
       undefined,
       durationMs,
+      {
+        // densable vVn: managedHooksExcluded: s.managedPass?.toolUseId===n && I$(s,e)
+        managedHooksExcluded:
+          toolUseContext.managedPass?.toolUseId === toolUseID &&
+          (shouldPreserveManagedToolHookPass(toolUseContext, tool) ||
+            tool.preserveToolUseResultInSubagents === true),
+      },
     )) {
       try {
         // Check if we were aborted during hook execution
@@ -254,6 +273,7 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
   MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>
 > {
   if (toolUseContext.options.settingsHooksOff === true) return
+  if (toolUseContext.options.bareFork === true) return
   const postToolStartTime = Date.now()
   try {
     const appState = toolUseContext.getAppState()
@@ -372,6 +392,106 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
   } catch (outerError) {
     logError(outerError)
   }
+}
+
+/** densable kce — managed-only PostToolUse after the tool.call chain. */
+export async function collectManagedOnlyPostToolUse<
+  Input extends AnyObject,
+  Output,
+>(opts: {
+  tool: Tool<Input, Output>
+  toolUseID: string
+  toolInput: Record<string, unknown>
+  output: Output
+  toolUseContext: ToolUseContext
+  durationMs?: number
+}): Promise<{
+  output: Output
+  rewritten: boolean
+  messages: MessageUpdateLazy[]
+}> {
+  const { tool, toolUseID, toolInput, toolUseContext, durationMs } = opts
+  if (toolUseContext.options.settingsHooksOff === true) {
+    return { output: opts.output, rewritten: false, messages: [] }
+  }
+  if (toolUseContext.options.bareFork === true) {
+    return { output: opts.output, rewritten: false, messages: [] }
+  }
+  const hookName = `PostToolUse:${tool.name}`
+  let output = opts.output
+  let rewritten = false
+  const messages: MessageUpdateLazy[] = []
+  const permissionMode = toolUseContext.getAppState().toolPermissionContext.mode
+  for await (const result of executePostToolHooks(
+    tool.name,
+    toolUseID,
+    toolInput,
+    output,
+    toolUseContext,
+    permissionMode,
+    toolUseContext.abortController.signal,
+    undefined,
+    durationMs,
+    { managedHooksOnly: true },
+  )) {
+    if (result.updatedToolOutput !== undefined) {
+      if (tool.mcpInfo?.accountMemory === true) {
+        logForDebugging(
+          `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
+          { level: 'warn' },
+        )
+      } else {
+        output = result.updatedToolOutput as Output
+        rewritten = true
+      }
+    }
+    if (result.updatedMCPToolOutput !== undefined && isMcpTool(tool)) {
+      if (tool.mcpInfo?.accountMemory === true) {
+        logForDebugging(
+          `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
+          { level: 'warn' },
+        )
+      } else {
+        output = result.updatedMCPToolOutput as Output
+        rewritten = true
+      }
+    }
+    if (result.blockingError) {
+      messages.push({
+        message: createAttachmentMessage({
+          type: 'hook_blocking_error',
+          blockingError: result.blockingError,
+          hookName,
+          toolUseID,
+          hookEvent: 'PostToolUse',
+        }),
+      })
+    }
+    if (result.preventContinuation) {
+      messages.push({
+        message: createAttachmentMessage({
+          type: 'hook_stopped_continuation',
+          message: result.stopReason || 'Execution stopped by PostToolUse hook',
+          hookName,
+          toolUseID,
+          hookEvent: 'PostToolUse',
+        }),
+      })
+      break
+    }
+    if (result.additionalContexts && result.additionalContexts.length > 0) {
+      messages.push({
+        message: createAttachmentMessage({
+          type: 'hook_additional_context',
+          content: result.additionalContexts,
+          hookName,
+          toolUseID,
+          hookEvent: 'PostToolUse',
+        }),
+      })
+    }
+  }
+  return { output, rewritten, messages }
 }
 
 /**
@@ -527,6 +647,65 @@ export async function resolveHookPermissionDecision(
       toolUseContext,
     )
     if (ruleCheck === null) {
+      const effectiveMode = getEffectivePermissionMode(
+        tool,
+        toolUseContext.getAppState().toolPermissionContext,
+      )
+      // densable gyo @188786514: auto mode + tengu_virtual_knuth funnels hook allow through classifier.
+      if (
+        !requiresInteraction &&
+        effectiveMode === 'auto' &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_virtual_knuth', false)
+      ) {
+        const rawHookSource =
+          hookPermissionResult.decisionReason?.type === 'hook'
+            ? hookPermissionResult.decisionReason.hookSource
+            : undefined
+        const hookSource =
+          rawHookSource === undefined
+            ? undefined
+            : rawHookSource === 'settings'
+              ? 'settings'
+              : rawHookSource === 'plugin' ||
+                  rawHookSource.startsWith('plugin:')
+                ? 'plugin'
+                : rawHookSource === 'skill' ||
+                    rawHookSource.startsWith('skill:')
+                  ? 'skill'
+                  : 'other'
+        logEvent('tengu_auto_mode_hook_allow_funneled', {
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+          isMcp: tool.isMcp ?? false,
+          ...(hookSource !== undefined
+            ? {
+                hookSource:
+                  hookSource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              }
+            : {}),
+          agentMsgId: assistantMessage.message
+            .id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolUseId:
+            toolUseID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        logForDebugging(
+          `Hook approved tool use for ${tool.name}, but auto mode requires classifier adjudication`,
+        )
+        const vouchedContext = {
+          ...toolUseContext,
+          hookAllowVouched: true,
+        } as ToolUseContext
+        return {
+          decision: await runCanUseToolWithToolCheckFallback(
+            tool,
+            hookInput,
+            vouchedContext,
+            canUseTool,
+            assistantMessage,
+            toolUseID,
+          ),
+          input: hookInput,
+        }
+      }
       logForDebugging(
         interactionSatisfied
           ? `Hook satisfied user interaction for ${tool.name} via updatedInput`
@@ -679,6 +858,7 @@ export async function* runPreToolUseHooks(
   | { type: 'stop'; stopReason?: string }
 > {
   if (toolUseContext.options.settingsHooksOff === true) return
+  if (toolUseContext.options.bareFork === true) return
   const hookStartTime = Date.now()
   // Official `u` — deny only. Allow/ask do not suppress a latched defer.
   let deniedPermissionResult: PermissionResult | undefined
@@ -731,6 +911,67 @@ export async function* runPreToolUseHooks(
             hookPermissionResult: permissionResult,
           }
         }
+        // densable kVn @188788636: validate updatedInput against tool.inputSchema (ignore unrecognized_keys)
+        if (result.updatedInput !== undefined) {
+          const parsed = tool.inputSchema.safeParse(result.updatedInput)
+          const remainingIssues = parsed.success
+            ? []
+            : parsed.error.issues.filter(
+                issue => issue.code !== 'unrecognized_keys',
+              )
+          if (!parsed.success && remainingIssues.length > 0) {
+            const validationMessage = `PreToolUse hook for ${tool.name} returned updatedInput that failed schema validation: ${formatZodValidationError(tool.name, new z.ZodError(remainingIssues))}`
+            logForDebugging(validationMessage, { level: 'warn' })
+            const permissionResult: PermissionResult = {
+              behavior: 'deny',
+              message: validationMessage,
+              decisionReason: {
+                type: 'hook',
+                hookName: `PreToolUse:${tool.name}`,
+                hookSource: result.hookSource,
+                reason: validationMessage,
+              },
+            }
+            deniedPermissionResult = permissionResult
+            yield {
+              type: 'hookPermissionResult',
+              hookPermissionResult: permissionResult,
+            }
+            continue
+          }
+        }
+        // densable kVn: block Account Memory MCP input rewrite via ere/tre
+        const accountMemoryBlocked =
+          result.permissionBehavior !== 'deny' &&
+          didAccountMemoryHookRewriteInput(
+            tool,
+            processedInput,
+            result.updatedInput,
+          )
+        if (accountMemoryBlocked) {
+          const denial = accountMemoryHookRewriteDenied(
+            tool,
+            'PreToolUse',
+            result.hookSource,
+          )
+          const permissionResult: PermissionResult = {
+            behavior: 'deny',
+            message: denial.message,
+            decisionReason: {
+              type: 'hook',
+              hookName: `PreToolUse:${tool.name}`,
+              ...(result.hookSource !== undefined
+                ? { hookSource: result.hookSource }
+                : {}),
+              reason: denial.message,
+            },
+          }
+          deniedPermissionResult = permissionResult
+          yield {
+            type: 'hookPermissionResult',
+            hookPermissionResult: permissionResult,
+          }
+        }
         // Check if hook wants to prevent continuation
         if (result.preventContinuation) {
           yield {
@@ -741,6 +982,9 @@ export async function* runPreToolUseHooks(
             lastStopReason = result.stopReason
             yield { type: 'stopReason', stopReason: result.stopReason }
           }
+        }
+        if (accountMemoryBlocked) {
+          continue
         }
         // densable QLn — confined child ignores PreToolUse allow grants
         stripEvalConfinedHookAllow(result, `PreToolUse:${tool.name}`)

@@ -11,7 +11,7 @@ import { catalogDeclaresNative1mWindow, has1mContext } from '../context.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import type { HookResult } from '../hooks.js'
-import { safeParseJSON } from '../json.js'
+import { safeParseJSON, stripMarkdownJsonFence } from '../json.js'
 import {
   createUserMessage,
   extractTextContent,
@@ -215,10 +215,13 @@ Condition: ${hook.prompt}`
       if (response.isApiErrorMessage)
         return failure(`Hook evaluator API error: ${content}`)
       toolUseContext.setResponseLength(length => length + content.length)
-      const json = safeParseJSON(
-        content.replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/, '$1'),
-      )
-      if (!json) return failure('JSON validation failed', content)
+      // densable `t("Hooks: Model response:")` then `mt(FW(Qe), !1)`.
+      logForDebugging(`Hooks: Model response: ${content}`)
+      const json = safeParseJSON(stripMarkdownJsonFence(content), false)
+      if (!json) {
+        logForDebugging(`Hooks: error parsing response as JSON: ${content}`)
+        return failure('JSON validation failed', content)
+      }
       const parsed = hookResponseSchema().safeParse(json)
       if (!parsed.success)
         return failure(

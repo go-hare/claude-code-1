@@ -97,6 +97,59 @@ export const Kle = new Ln(() => ({ registry: undefined as unknown }))
 /** densable yEt */
 export const yEt = new Ln(() => new ModelSwitchPostStore())
 
+/** densable HKt — PostModelSwitch drain wait budget (5s). */
+export const HKt = 5_000
+
+/** densable VOo — drain PostModelSwitch pending for the current session. */
+export async function takePostModelSwitchHooks(
+  session: { id: string; root: object },
+  timeoutMs = HKt,
+): Promise<PostModelSwitchPending[]> {
+  const store = yEt.of(session)
+  if (store.inFlight.size > 0 && store.landedOn?.sessionId === session.id) {
+    await Promise.race([
+      Promise.all([...store.inFlight]),
+      new Promise<void>(resolve => {
+        setTimeout(resolve, timeoutMs).unref()
+      }),
+    ])
+  }
+  const pending = store.pending
+  store.pending = []
+  const landedModel =
+    store.landedOn?.sessionId === session.id
+      ? store.landedOn.toModel
+      : undefined
+  const seen = new Set<string>()
+  return pending.filter(item => {
+    if (item.sessionId !== session.id) {
+      return false
+    }
+    if (item.toModel !== landedModel) {
+      return false
+    }
+    const key = JSON.stringify([
+      item.contexts,
+      item.messages.map(message => {
+        if (message.type !== 'attachment' || !message.attachment) {
+          return message.type
+        }
+        const attachment = message.attachment
+        return [
+          attachment.type,
+          'content' in attachment ? attachment.content : '',
+          'stderr' in attachment ? attachment.stderr : '',
+        ]
+      }),
+    ])
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
 /** densable Osn */
 export function Osn(): Promise<unknown> | undefined {
   return getPluginHookRegistration().hookRegistrationInFlight?.catch(() => {})

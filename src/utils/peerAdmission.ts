@@ -213,6 +213,72 @@ export function appendHopChain(
 }
 
 /**
+ * densable `Tkn` @180508768 — `if (e === void 0) return;` else append own
+ * hop token and cap at `HOP_CHAIN_CAP`.
+ */
+export function advancePeerHopChain(
+  inboundHopChain: readonly string[] | undefined,
+  ownToken: string | undefined,
+): string[] | undefined {
+  if (inboundHopChain === undefined) return undefined
+  return appendHopChain(inboundHopChain, ownToken)
+}
+
+/**
+ * densable `TWe` @180509950 — walk messages backwards for the latest
+ * non-tool-result, non-compact-summary user message; if its origin is `peer`,
+ * return `origin.hopChain ?? []`, otherwise `undefined`.
+ */
+export function extractInboundPeerHopChain(
+  messages:
+    | ReadonlyArray<{
+        type?: string
+        toolUseResult?: unknown
+        isCompactSummary?: boolean
+        origin?: { kind?: string; hopChain?: readonly string[] }
+      }>
+    | undefined,
+): readonly string[] | undefined {
+  if (!messages) return undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (
+      !msg ||
+      msg.type !== 'user' ||
+      msg.toolUseResult ||
+      msg.isCompactSummary
+    ) {
+      continue
+    }
+    return msg.origin?.kind === 'peer' ? (msg.origin.hopChain ?? []) : undefined
+  }
+  return undefined
+}
+
+const HOST_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/
+
+/**
+ * densable `Orr` @182140060 — hostSessionId stamped as `from-session` on UDS
+ * envelopes when running non-interactively outside nested child/CLAUDECODE.
+ */
+export function resolveHostSessionIdForCrossSession(): string | undefined {
+  if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
+    return undefined
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getIsNonInteractiveSession } =
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    if (!getIsNonInteractiveSession()) return undefined
+  } catch {
+    return undefined
+  }
+  const raw = process.env.CLAUDE_CODE_HOST_SESSION_ID
+  if (typeof raw !== 'string' || !HOST_SESSION_ID_RE.test(raw)) return undefined
+  return raw
+}
+
+/**
  * densable `q2r` / `jUt` / `spe` / `K2r`.
  * Test provider still replaces the whole set (hop-loop unit tests).
  */

@@ -9,7 +9,12 @@
 import { existsSync, lstatSync, realpathSync, readFileSync } from 'fs'
 import { isAbsolute, join, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
-import { SourceTextModule, createContext, runInContext, type Context } from 'vm'
+import vm, {
+  createContext,
+  runInContext,
+  type Context,
+  type SourceTextModule,
+} from 'vm'
 import {
   SURFACE_LIMITS,
   installSurfaceRuntime,
@@ -1190,7 +1195,7 @@ async function loadSurfaceFile(
 ): Promise<Record<string, unknown>> {
   const modules = new Map<string, SourceTextModule>()
   const sources = new Map<string, string>([[modulePath, source]])
-  const kit = new SourceTextModule(SURFACE_KIT_SOURCE, {
+  const kit = new vm.SourceTextModule(SURFACE_KIT_SOURCE, {
     identifier: SURFACE_KIT,
     context,
   })
@@ -1225,7 +1230,7 @@ async function loadSurfaceFile(
       file,
       root,
     )
-    const created = new SourceTextModule(text, {
+    const created = new vm.SourceTextModule(text, {
       identifier: file,
       context,
       initializeImportMeta(meta) {

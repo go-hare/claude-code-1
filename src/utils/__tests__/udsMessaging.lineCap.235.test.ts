@@ -110,8 +110,9 @@ describe('densable 2.1.235 #17 UDS line cap (X1r/tFd/yZt)', () => {
       'utf8',
     )
     expect(src).toContain(
-      '`[uds-messaging] Line exceeded ${MAX_UDS_LINE_BYTES} bytes; dropping connection`',
+      '`[uds-messaging] Line exceeded ${MAX_UDS_LINE_CHARS} chars; dropping connection`',
     )
+    expect(src).toContain('maxFrameChars: MAX_UDS_LINE_CHARS')
     expect(src).toContain('maxFrameBytes: MAX_UDS_LINE_BYTES')
   })
 

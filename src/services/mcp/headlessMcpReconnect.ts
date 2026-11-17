@@ -4,6 +4,7 @@
  * MCP onclose is wired here instead.
  */
 
+import { logEvent } from '../analytics/index.js'
 import type { Command } from '../../commands.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import type { Tool, Tools } from '../../Tool.js'
@@ -51,9 +52,20 @@ export type McpSettlement = {
   commands?: Command[]
   resources?: ServerResource[]
   resourceTemplates?: ServerResourceTemplate[]
+  attemptEpoch?: number
 }
 
-export type HeadlessMcpClientModule = ReturnType<typeof mcpClientModule>
+export type HeadlessMcpClientModule = Pick<
+  ReturnType<typeof mcpClientModule>,
+  | 'reconnectMcpServerImpl'
+  | 'peekSettledConnection'
+  | 'detachAndCloseConnection'
+  | 'dropDiscoveryEntry'
+  | 'seedMcpIdentityCheck'
+  | 'getMcpIdentityEpoch'
+  | 'mcpIdentityChangedSinceLastCheck'
+  | 'cleanupConnectedMcpClients'
+>
 
 export type HeadlessMcpReconnectDeps = {
   getAppState: () => AppState
@@ -231,6 +243,16 @@ export function applyHeadlessMcpSettlement(
     detachIfConnected()
     return
   }
+  if (
+    settlement.attemptEpoch !== getMcpIdentityEpoch() &&
+    mcpConfigDependsOnAccountIdentity(settlement.client.config)
+  ) {
+    logForDebugging(
+      `[MCP] ${name}: settlement superseded by an account switch — closed, not installed (the identity boundary owns the row)`,
+    )
+    detachIfConnected()
+    return
+  }
   let next = settlement
   if (settlement.client.type !== 'disabled') {
     const override = applyHeadlessMcpPolicyOverride(name, settlement.client)
@@ -241,7 +263,13 @@ export function applyHeadlessMcpSettlement(
           .dropDiscoveryEntry(name, settlement.client.config)
           .catch(() => {})
       }
-      next = { client: override, tools: [], commands: [], resources: [] }
+      next = {
+        client: override,
+        tools: [],
+        commands: [],
+        resources: [],
+        attemptEpoch: settlement.attemptEpoch,
+      }
     }
   }
   deps.setAppState(prev => {
@@ -283,6 +311,7 @@ export function applyHeadlessMcpSettlement(
 export async function reconnectHeadlessRemoteMcpAfterClose(
   deps: HeadlessMcpReconnectDeps,
   closed: ConnectedMCPServer,
+  foundClosed = false,
 ): Promise<void> {
   const { name, config } = closed
   const max = HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS
@@ -305,6 +334,7 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     }
     if (shouldAbort() || !stillExpected()) return
 
+    const attemptEpoch = getMcpIdentityEpoch()
     const prefix = getMcpPrefix(name)
     const mcp = deps.getAppState().mcp
     const pending: MCPServerConnection = {
@@ -320,6 +350,7 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
       commands: mcp.commands.filter(c => commandBelongsToServer(c, name)),
       resources: mcp.resources[name],
       resourceTemplates: mcp.resourceTemplates[name],
+      attemptEpoch,
     })
     expected = pending
     if (!stillExpected() || deps.isControlReconnectInFlight(name)) return
@@ -327,7 +358,7 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     logMCPDebug(
       name,
       attempt === 1
-        ? `${config.type} transport closed — reconnecting (attempt 1/${max})`
+        ? `${config.type} transport ${foundClosed ? 'had already closed when wired' : 'closed'} — reconnecting (attempt 1/${max})`
         : `Reconnect attempt ${attempt}/${max}`,
     )
 
@@ -355,6 +386,7 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
         current?.type === 'connected' && current.client === connected.client
       const sameSlot =
         current !== undefined &&
+        current.type !== 'disabled' &&
         mcpSlotSignature(name, current.config) ===
           mcpSlotSignature(name, config)
       if (!sameLiveClient && (!stillSettled || !sameSlot)) {
@@ -372,9 +404,14 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     }
 
     if (connected && stillSettled) {
-      apply(result)
+      apply({ ...result, attemptEpoch })
       if (findClient(deps, name) === connected) {
         logMCPDebug(name, `Reconnected (attempt ${attempt})`)
+        logEvent('tengu_feature_ok', {
+          feature_name: 'mcp_auto_reconnect',
+          attempts: attempt,
+          found_closed: foundClosed,
+        })
         deps.onReconnected(connected)
       }
       return
@@ -401,7 +438,22 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
             ? needsAuthReconnectTools(name, config)
             : [],
         commands: [],
+        attemptEpoch,
       })
+      if (findClient(deps, name) === failed) {
+        logEvent(
+          failed.type === 'needs-auth'
+            ? 'tengu_feature_sad'
+            : 'tengu_feature_bad',
+          {
+            feature_name: 'mcp_auto_reconnect',
+            error_code:
+              failed.type === 'needs-auth' ? 'needs_auth' : 'exhausted',
+            attempts: attempt,
+            found_closed: foundClosed,
+          },
+        )
+      }
       return
     }
     logMCPDebug(
@@ -424,17 +476,24 @@ export function attachHeadlessRemoteMcpReconnect(
       if (wired.has(connection.client)) continue
       if (!isHeadlessReconnectingTransport(connection.config)) continue
       wired.add(connection.client)
-      chainMcpClientOnclose(connection, () => {
+      const reconnect = (foundClosed: boolean): void => {
         if (isShuttingDown() || deps.isRunEnding()) return
-        void reconnectHeadlessRemoteMcpAfterClose(deps, connection).catch(
-          err => {
-            logForDebugging(
-              `MCP reconnect after close failed for ${connection.name}: ${errorMessage(err)}`,
-              { level: 'warn' },
-            )
-          },
-        )
-      })
+        void reconnectHeadlessRemoteMcpAfterClose(
+          deps,
+          connection,
+          foundClosed,
+        ).catch(err => {
+          logForDebugging(
+            `MCP reconnect after close failed for ${connection.name}: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
+      }
+      chainMcpClientOnclose(connection, () => reconnect(false))
+      const client = connection.client
+      if ('transport' in client && client.transport === undefined) {
+        setImmediate(reconnect, true)
+      }
     }
   }
 }

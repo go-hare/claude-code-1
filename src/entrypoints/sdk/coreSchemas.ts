@@ -448,6 +448,13 @@ export const BaseHookInputSchema = lazySchema(() =>
     session_id: z.string(),
     transcript_path: z.string(),
     cwd: z.string(),
+    scratchpad_dir: z.string().optional(),
+    prompt_id: z.string().optional(),
+    effort: z
+      .object({
+        level: z.string(),
+      })
+      .optional(),
     permission_mode: z.string().optional(),
     agent_id: z
       .string()
@@ -575,6 +582,17 @@ export const UserPromptSubmitHookInputSchema = lazySchema(() =>
     z.object({
       hook_event_name: z.literal('UserPromptSubmit'),
       prompt: z.string(),
+      source: z
+        .enum([
+          'user',
+          'sdk',
+          'system',
+          'loop_wakeup',
+          'schedule_wakeup',
+          'poll_event',
+        ])
+        .optional(),
+      session_title: z.string().optional(),
     }),
   ),
 )
@@ -640,6 +658,29 @@ export const SetupHookInputSchema = lazySchema(() =>
   ),
 )
 
+const HookBackgroundTaskSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    type: z.string(),
+    status: z.string(),
+    description: z.string(),
+    command: z.string().optional(),
+    agent_type: z.string().optional(),
+    server: z.string().optional(),
+    tool: z.string().optional(),
+    name: z.string().optional(),
+  }),
+)
+
+const HookSessionCronSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    schedule: z.string(),
+    recurring: z.boolean(),
+    prompt: z.string(),
+  }),
+)
+
 export const StopHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
@@ -652,6 +693,8 @@ export const StopHookInputSchema = lazySchema(() =>
           'Text content of the last assistant message before stopping. ' +
             'Avoids the need to read and parse the transcript file.',
         ),
+      background_tasks: z.array(HookBackgroundTaskSchema()).optional(),
+      session_crons: z.array(HookSessionCronSchema()).optional(),
     }),
   ),
 )
@@ -692,6 +735,8 @@ export const SubagentStopHookInputSchema = lazySchema(() =>
           'Text content of the last assistant message before stopping. ' +
             'Avoids the need to read and parse the transcript file.',
         ),
+      background_tasks: z.array(HookBackgroundTaskSchema()).optional(),
+      session_crons: z.array(HookSessionCronSchema()).optional(),
     }),
   ),
 )
@@ -719,11 +764,13 @@ export const PostCompactHookInputSchema = lazySchema(() =>
 )
 
 /**
- * densable 2.1.251 `jw` — shared PreModelSwitch / PostModelSwitch input.
- * `source` is `z.enum(e)` where `e` and the `kQ` descriptions are arguments
- * to `jw`, not present in the locked body, so this field stays a string.
+ * densable 2.1.289 `mw` — shared PreModelSwitch / PostModelSwitch input.
+ * PreModelSwitch `source`: `["command", "picker", "sdk"]` (`iK` @180717135).
+ * PostModelSwitch `source`: `["command", "picker", "sdk", "auto", "resume"]` (`lK` @180717135).
  */
-function modelSwitchHookFields() {
+function modelSwitchHookFields<const T extends readonly [string, ...string[]]>(
+  sources: T,
+) {
   return {
     from_model: z
       .string()
@@ -737,7 +784,7 @@ function modelSwitchHookFields() {
       .describe(
         'What was asked for (alias such as "opus", a full id, or null for "default")',
       ),
-    source: z.string(),
+    source: z.enum(sources),
     context_tokens: z
       .number()
       .describe(
@@ -766,7 +813,7 @@ export const PreModelSwitchHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
       hook_event_name: z.literal('PreModelSwitch'),
-      ...modelSwitchHookFields(),
+      ...modelSwitchHookFields(['command', 'picker', 'sdk']),
     }),
   ),
 )
@@ -775,7 +822,7 @@ export const PostModelSwitchHookInputSchema = lazySchema(() =>
   BaseHookInputSchema().and(
     z.object({
       hook_event_name: z.literal('PostModelSwitch'),
-      ...modelSwitchHookFields(),
+      ...modelSwitchHookFields(['command', 'picker', 'sdk', 'auto', 'resume']),
     }),
   ),
 )
@@ -1046,6 +1093,13 @@ export const UserPromptSubmitHookSpecificOutputSchema = lazySchema(() =>
   z.object({
     hookEventName: z.literal('UserPromptSubmit'),
     additionalContext: z.string().optional(),
+    sessionTitle: z.string().optional().describe('Set the session title'),
+    suppressOriginalPrompt: z
+      .boolean()
+      .optional()
+      .describe(
+        'When decision is "block", omit the original prompt from the block message',
+      ),
   }),
 )
 
@@ -1068,13 +1122,49 @@ export const SessionStartHookSpecificOutputSchema = lazySchema(() =>
     hookEventName: z.literal('SessionStart'),
     additionalContext: z.string().optional(),
     initialUserMessage: z.string().optional(),
+    sessionTitle: z.string().optional().describe('Set the session title'),
     watchPaths: z.array(z.string()).optional(),
+    reloadSkills: z
+      .boolean()
+      .optional()
+      .describe(
+        'Re-scan skill and command directories after SessionStart hooks complete, so skills installed by the hook are available in the same session',
+      ),
   }),
 )
 
 export const SetupHookSpecificOutputSchema = lazySchema(() =>
   z.object({
     hookEventName: z.literal('Setup'),
+    additionalContext: z.string().optional(),
+  }),
+)
+
+export const PreModelSwitchHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('PreModelSwitch'),
+    permissionDecision: z.enum(['allow', 'deny', 'ask']).optional(),
+    permissionDecisionReason: z.string().optional(),
+  }),
+)
+
+export const PostModelSwitchHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('PostModelSwitch'),
+    additionalContext: z.string().optional(),
+  }),
+)
+
+export const StopHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('Stop'),
+    additionalContext: z.string().optional(),
+  }),
+)
+
+export const SubagentStopHookSpecificOutputSchema = lazySchema(() =>
+  z.object({
+    hookEventName: z.literal('SubagentStop'),
     additionalContext: z.string().optional(),
   }),
 )
@@ -1172,6 +1262,12 @@ export const SyncHookJSONOutputSchema = lazySchema(() =>
     stopReason: z.string().optional(),
     decision: z.enum(['approve', 'block']).optional(),
     systemMessage: z.string().optional(),
+    terminalSequence: z
+      .string()
+      .optional()
+      .describe(
+        'A terminal escape sequence (e.g. OSC 9 / OSC 777 desktop-notification) for Claude Code to emit on your behalf. Only notification/title OSCs (0, 1, 2, 9, 99, 777) and BEL are permitted; anything else is dropped.',
+      ),
     reason: z.string().optional(),
     hookSpecificOutput: z
       .union([
@@ -1180,10 +1276,14 @@ export const SyncHookJSONOutputSchema = lazySchema(() =>
         UserPromptExpansionHookSpecificOutputSchema(),
         SessionStartHookSpecificOutputSchema(),
         SetupHookSpecificOutputSchema(),
+        PreModelSwitchHookSpecificOutputSchema(),
+        PostModelSwitchHookSpecificOutputSchema(),
         SubagentStartHookSpecificOutputSchema(),
         PostToolUseHookSpecificOutputSchema(),
         PostToolUseFailureHookSpecificOutputSchema(),
         PostToolBatchHookSpecificOutputSchema(),
+        StopHookSpecificOutputSchema(),
+        SubagentStopHookSpecificOutputSchema(),
         PermissionDeniedHookSpecificOutputSchema(),
         NotificationHookSpecificOutputSchema(),
         PermissionRequestHookSpecificOutputSchema(),

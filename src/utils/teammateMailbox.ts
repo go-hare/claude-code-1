@@ -27,6 +27,7 @@ import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { BackendType } from './swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from './swarm/constants.js'
 import { sanitizePathComponent } from './tasks.js'
+import { scrubRelayEnvelopeBody } from './confusableTagScrub.js'
 import { escapeXmlAttr } from './xml.js'
 import { getAgentName, getTeammateColor, getTeamName } from './teammate.js'
 
@@ -703,31 +704,466 @@ export async function clearMailbox(
   }
 }
 
+const ALLOWED_TEAMMATE_COLORS = new Set([
+  'red',
+  'blue',
+  'green',
+  'yellow',
+  'purple',
+  'orange',
+  'pink',
+  'cyan',
+])
+
+const MAILBOX_UNSAFE_CHARS_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional C0/C1 strip
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029]|(?!(?:\u200C|\u200D|[\uFE00-\uFE0F]|[\u{E0100}-\u{E01EF}]))[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
+const MAILBOX_COMBINING_JOINERS_RE =
+  /(?:\u200C|\u200D|[\uFE00-\uFE0F]|[\u{E0100}-\u{E01EF}])/gu
+const MAILBOX_ANSI_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ANSI CSI/OSC strip
+  /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g
+
+const MAILBOX_SUMMARY_CAP = 200
+const MAILBOX_LINE_CAP = MAILBOX_SUMMARY_CAP * 2 + 16
+const MAILBOX_ID_CAP = 256
+const MAILBOX_KEY_CAP = 256
+const MAILBOX_BODY_CAP = 4_000
+const MAILBOX_PLAN_CAP = 40_000
+const MAILBOX_DRAIN_IDLE_BUDGET = 16_000
+const MAILBOX_EXTRA_JSON_CAP = 2_048
+const MAILBOX_GENERIC_OBJ_CAP = 1_024
+const UNKNOWN_MAILBOX_SENDER = '[unknown sender]'
+const INVALID_MAILBOX_ID = '[invalid id]'
+const INVALID_MAILBOX_TS = '[invalid timestamp]'
+const ISO_TIMESTAMP_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/
+const PERM_REQUEST_ID_RE = /^perm-[0-9]{1,20}-[0-9a-z]{1,12}$/
+const PROTOCOL_REQUEST_ID_RE =
+  /^(?:shutdown|plan_approval)-[0-9]{1,20}@[^@\n]{1,300}(?:@[^@\n]{1,300})?$/u
+const PANE_ID_RE =
+  /^(%[0-9]{1,10}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$/
+const ALLOWED_BACKEND_TYPES: Record<string, true> = {
+  tmux: true,
+  iterm2: true,
+  'in-process': true,
+}
+
+function sliceSurrogateSafe(value: string, maxUnits: number): string {
+  if (maxUnits <= 0) return ''
+  if (value.length <= maxUnits) return value
+  const code = value.charCodeAt(maxUnits - 1)
+  const end = code >= 0xd800 && code <= 0xdbff ? maxUnits - 1 : maxUnits
+  return value.slice(0, end)
+}
+
+/** densable `Kt` + `UH` @186789800 — strip unsafe controls/Cf and bound joiner/VS runs. */
+function scrubMailboxControls(value: string): string {
+  const withoutControls = value.replace(MAILBOX_UNSAFE_CHARS_RE, '')
+  const joinerMatches =
+    withoutControls.match(MAILBOX_COMBINING_JOINERS_RE)?.length ?? 0
+  if (joinerMatches === 0) return withoutControls
+  const visibleCount = [...withoutControls].length - joinerMatches
+  let totalBudget = Math.max(16, Math.ceil(visibleCount / 4))
+  return withoutControls
+    .split('\n')
+    .map(line => {
+      const lineJoiners = line.match(MAILBOX_COMBINING_JOINERS_RE)?.length ?? 0
+      if (lineJoiners === 0) return line
+      const lineBudget = Math.max(
+        8,
+        Math.ceil(([...line].length - lineJoiners) / 7),
+      )
+      let used = 0
+      return line.replace(MAILBOX_COMBINING_JOINERS_RE, ch =>
+        used++ < lineBudget && totalBudget-- > 0 ? ch : '',
+      )
+    })
+    .join('\n')
+}
+
+function boundMailboxString(value: string, maxUnits: number): string {
+  const cleaned = scrubMailboxControls(value)
+  const sliced = sliceSurrogateSafe(cleaned, maxUnits)
+  return sliced.length >= cleaned.length ? sliced : scrubMailboxControls(sliced)
+}
+
+/** densable `fm` @186789800 */
+function sanitizeMailboxLine(value: string, maxUnits: number): string {
+  return boundMailboxString(value, maxUnits).replace(/\s+/g, ' ').trim()
+}
+
+/** densable `EQ` @186780900 */
+function sanitizeMailboxSummary(summary: string | undefined): string {
+  if (!summary) return ''
+  const singleLine = summary
+    .replace(MAILBOX_ANSI_RE, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+  return boundMailboxString(singleLine, MAILBOX_SUMMARY_CAP)
+}
+
+function isAllowedTeammateColor(color: string | undefined): color is string {
+  return typeof color === 'string' && ALLOWED_TEAMMATE_COLORS.has(color)
+}
+
+function sanitizeMailboxBody(value: string, maxUnits: number): string {
+  const cleaned = scrubMailboxControls(value)
+  const sliced = sliceSurrogateSafe(cleaned, maxUnits)
+  if (sliced.length >= cleaned.length) return cleaned
+  return `${scrubMailboxControls(sliced)}\n[truncated]`
+}
+
+function sanitizeGenericJsonValue(value: unknown, depth: number): unknown {
+  if (typeof value === 'string')
+    return boundMailboxString(value, MAILBOX_KEY_CAP)
+  if (value === null || typeof value !== 'object') return value
+  if (depth <= 0) return null
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeGenericJsonValue(item, depth - 1))
+  }
+  const entries: Array<[string, unknown]> = []
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    entries.push([
+      boundMailboxString(k, MAILBOX_KEY_CAP),
+      sanitizeGenericJsonValue(v, depth - 1),
+    ])
+  }
+  return Object.fromEntries(entries)
+}
+
+type MailboxFieldSpec =
+  | { kind: 'envelope-pinned-id' }
+  | { kind: 'id' }
+  | { kind: 'request-id' }
+  | { kind: 'pane-id' }
+  | { kind: 'backend-type' }
+  | { kind: 'timestamp' }
+  | { kind: 'line' }
+  | { kind: 'body'; bound: number }
+  | { kind: 'generic' }
+
+const MAILBOX_PROTOCOL_SCHEMAS = new Map<
+  string,
+  Record<string, MailboxFieldSpec>
+>([
+  [
+    'plan_approval_request',
+    {
+      from: { kind: 'envelope-pinned-id' },
+      timestamp: { kind: 'timestamp' },
+      planFilePath: { kind: 'id' },
+      planContent: { kind: 'body', bound: MAILBOX_PLAN_CAP },
+      requestId: { kind: 'request-id' },
+    },
+  ],
+  [
+    'plan_approval_response',
+    {
+      requestId: { kind: 'request-id' },
+      approved: { kind: 'generic' },
+      feedback: { kind: 'body', bound: MAILBOX_BODY_CAP },
+      timestamp: { kind: 'timestamp' },
+      permissionMode: { kind: 'generic' },
+    },
+  ],
+  [
+    'shutdown_request',
+    {
+      requestId: { kind: 'request-id' },
+      from: { kind: 'envelope-pinned-id' },
+      reason: { kind: 'body', bound: MAILBOX_LINE_CAP },
+      timestamp: { kind: 'timestamp' },
+    },
+  ],
+  [
+    'shutdown_approved',
+    {
+      requestId: { kind: 'request-id' },
+      from: { kind: 'envelope-pinned-id' },
+      timestamp: { kind: 'timestamp' },
+      paneId: { kind: 'pane-id' },
+      backendType: { kind: 'backend-type' },
+    },
+  ],
+  [
+    'shutdown_rejected',
+    {
+      requestId: { kind: 'request-id' },
+      from: { kind: 'envelope-pinned-id' },
+      reason: { kind: 'body', bound: MAILBOX_LINE_CAP },
+      timestamp: { kind: 'timestamp' },
+    },
+  ],
+  [
+    'task_assignment',
+    {
+      taskId: { kind: 'id' },
+      subject: { kind: 'line' },
+      description: { kind: 'body', bound: MAILBOX_BODY_CAP },
+      assignedBy: { kind: 'envelope-pinned-id' },
+      timestamp: { kind: 'timestamp' },
+    },
+  ],
+  [
+    'task_completed',
+    {
+      from: { kind: 'envelope-pinned-id' },
+      taskId: { kind: 'id' },
+      taskSubject: { kind: 'line' },
+      timestamp: { kind: 'timestamp' },
+    },
+  ],
+  [
+    'teammate_terminated',
+    {
+      message: { kind: 'body', bound: MAILBOX_BODY_CAP },
+    },
+  ],
+  [
+    'idle_notification',
+    {
+      from: { kind: 'envelope-pinned-id' },
+      timestamp: { kind: 'timestamp' },
+      idleReason: { kind: 'generic' },
+      summary: { kind: 'line' },
+      completedTaskId: { kind: 'id' },
+      completedStatus: { kind: 'generic' },
+      failureReason: { kind: 'body', bound: MAILBOX_SUMMARY_CAP },
+      result: { kind: 'body', bound: MAILBOX_BODY_CAP },
+    },
+  ],
+])
+
+function sanitizeMailboxField(
+  spec: MailboxFieldSpec,
+  value: unknown,
+  envelopeFrom: string | undefined,
+): unknown {
+  if (spec.kind === 'generic') {
+    const out =
+      typeof value === 'string'
+        ? boundMailboxString(value, MAILBOX_KEY_CAP)
+        : sanitizeGenericJsonValue(value, 4)
+    if (
+      out !== null &&
+      typeof out === 'object' &&
+      jsonStringify(out).length > MAILBOX_GENERIC_OBJ_CAP
+    ) {
+      return null
+    }
+    return out
+  }
+  if (typeof value !== 'string') {
+    switch (spec.kind) {
+      case 'envelope-pinned-id':
+        return (
+          (typeof envelopeFrom === 'string'
+            ? sanitizeMailboxLine(envelopeFrom, MAILBOX_ID_CAP) ||
+              UNKNOWN_MAILBOX_SENDER
+            : undefined) ?? INVALID_MAILBOX_ID
+        )
+      case 'id':
+      case 'request-id':
+      case 'pane-id':
+      case 'backend-type':
+        return INVALID_MAILBOX_ID
+      case 'timestamp':
+        return INVALID_MAILBOX_TS
+      case 'line':
+      case 'body':
+        return ''
+    }
+  }
+  switch (spec.kind) {
+    case 'id':
+      return sanitizeMailboxLine(value, MAILBOX_ID_CAP)
+    case 'request-id':
+      return !value.includes('\n') &&
+        !value.includes('\r') &&
+        scrubMailboxControls(value) === value &&
+        [...value].length <= 320 &&
+        (PERM_REQUEST_ID_RE.test(value) || PROTOCOL_REQUEST_ID_RE.test(value))
+        ? value
+        : INVALID_MAILBOX_ID
+    case 'pane-id':
+      return PANE_ID_RE.test(value) ? value : INVALID_MAILBOX_ID
+    case 'backend-type':
+      return Object.hasOwn(ALLOWED_BACKEND_TYPES, value)
+        ? value
+        : INVALID_MAILBOX_ID
+    case 'envelope-pinned-id': {
+      const id = sanitizeMailboxLine(value, MAILBOX_ID_CAP)
+      const pinned =
+        typeof envelopeFrom === 'string'
+          ? sanitizeMailboxLine(envelopeFrom, MAILBOX_ID_CAP) ||
+            UNKNOWN_MAILBOX_SENDER
+          : undefined
+      return pinned !== undefined && id !== pinned ? pinned : id
+    }
+    case 'timestamp':
+      return ISO_TIMESTAMP_RE.test(value) ? value : INVALID_MAILBOX_TS
+    case 'line':
+      return sanitizeMailboxLine(value, MAILBOX_LINE_CAP)
+    case 'body':
+      return sanitizeMailboxBody(value, spec.bound)
+  }
+}
+
+/** densable `Zhn` / `B3` @186785000–@186790250 — canonicalize structured protocol frames & pin `from`. */
+function canonicalizeMailboxProtocolFrame(
+  text: string,
+  envelopeFrom: string | undefined,
+): string | null {
+  if (!/^\s*\{/.test(text)) return null
+  let parsed: unknown
+  try {
+    parsed = jsonParse(text)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const frameType = record.type
+  const schema =
+    typeof frameType === 'string'
+      ? MAILBOX_PROTOCOL_SCHEMAS.get(frameType)
+      : undefined
+  if (!schema) return null
+  const knownKeys = new Set(Object.keys(schema))
+  const entries: Array<[string, unknown]> = []
+  let extraBudget = 0
+  for (const [key, rawVal] of Object.entries(record)) {
+    if (key === 'type') {
+      entries.push([key, frameType])
+      continue
+    }
+    if (knownKeys.has(key)) {
+      entries.push([
+        key,
+        sanitizeMailboxField(schema[key]!, rawVal, envelopeFrom),
+      ])
+      continue
+    }
+    const cleanKey = boundMailboxString(key, MAILBOX_KEY_CAP)
+    if (cleanKey === 'type' || knownKeys.has(cleanKey)) continue
+    const cleanVal = sanitizeGenericJsonValue(rawVal, 4)
+    const cost = jsonStringify(cleanVal).length + cleanKey.length
+    if (extraBudget + cost > MAILBOX_EXTRA_JSON_CAP) continue
+    extraBudget += cost
+    entries.push([cleanKey, cleanVal])
+  }
+  const serialized = jsonStringify(Object.fromEntries(entries))
+  return serialized === text ? null : serialized
+}
+
+function canonicalizeMailboxBatch<
+  T extends { from: string; text: string; provenance?: string },
+>(messages: readonly T[]): T[] {
+  const out = messages.slice()
+  const idleEntries: Array<{
+    index: number
+    recency: number
+    parsed: Record<string, unknown>
+  }> = []
+  const now = Date.now()
+  for (let i = 0; i < out.length; i++) {
+    const entry = out[i]!
+    const rewritten = canonicalizeMailboxProtocolFrame(entry.text, entry.from)
+    const nextText = rewritten ?? entry.text
+    if (nextText !== entry.text) {
+      out[i] = { ...entry, text: nextText }
+    }
+    if (/^\s*\{/.test(nextText)) {
+      try {
+        const parsed = jsonParse(nextText)
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed) &&
+          (parsed as Record<string, unknown>).type === 'idle_notification' &&
+          typeof (parsed as Record<string, unknown>).result === 'string' &&
+          Boolean((parsed as Record<string, unknown>).result)
+        ) {
+          const ts = Date.parse(
+            String((parsed as Record<string, unknown>).timestamp ?? ''),
+          )
+          idleEntries.push({
+            index: i,
+            recency: Number.isNaN(ts)
+              ? Number.NEGATIVE_INFINITY
+              : Math.min(ts, now),
+            parsed: parsed as Record<string, unknown>,
+          })
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  idleEntries.sort((a, b) => b.recency - a.recency || b.index - a.index)
+  let budget = MAILBOX_DRAIN_IDLE_BUDGET
+  for (const { index, parsed } of idleEntries) {
+    const current = out[index]!
+    if (current.text.length <= budget) {
+      budget -= current.text.length
+      continue
+    }
+    const base = { ...parsed, result: '[result truncated]' }
+    const truncated = jsonStringify(base)
+    if (truncated.length < current.text.length) {
+      budget = Math.max(0, budget - truncated.length)
+      out[index] = { ...current, text: truncated }
+    } else {
+      budget = Math.max(0, budget - current.text.length)
+    }
+  }
+  return out
+}
+
 /**
- * densable cZt: single teammate-message envelope (Ll attrs + I6e body).
+ * densable iBt / cZt @186780699 — single teammate-message envelope (`eet` body
+ * scrub + up to 4 rounds of `B3` protocol-frame re-canonicalization).
  */
 export function formatTeammateMessage(entry: {
   from: string
   text: string
   color?: string
   summary?: string
+  isVerified?: boolean
+  provenance?: string
 }): string {
-  const colorAttr = entry.color ? ` color="${escapeXmlAttr(entry.color)}"` : ''
-  const summaryAttr = entry.summary
-    ? ` summary="${escapeXmlAttr(entry.summary)}"`
+  const colorAttr = isAllowedTeammateColor(entry.color)
+    ? ` color="${entry.color}"`
     : ''
-  // densable I6e(d9, text) — break out of teammate-message tag
-  const text = entry.text.replace(
-    new RegExp(`<(?=/?${TEAMMATE_MESSAGE_TAG}(?:[>\\s/]|$))`, 'gi'),
-    '<\\',
-  )
-  return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${escapeXmlAttr(entry.from)}"${colorAttr}${summaryAttr}>\n${text}\n</${TEAMMATE_MESSAGE_TAG}>`
+  const cleanSummary = sanitizeMailboxSummary(entry.summary)
+  const summaryAttr = cleanSummary
+    ? ` summary="${escapeXmlAttr(cleanSummary)}"`
+    : ''
+  const senderId =
+    sanitizeMailboxLine(entry.from, MAILBOX_ID_CAP) || UNKNOWN_MAILBOX_SENDER
+  const verifiedAttr =
+    entry.isVerified === false || entry.provenance === 'forged'
+      ? ' verified="false"'
+      : ''
+  let text = scrubRelayEnvelopeBody(entry.text)
+  if (text !== entry.text) {
+    for (let round = 0; round < 4; round++) {
+      const recanon = canonicalizeMailboxProtocolFrame(text, entry.from) ?? text
+      const next = scrubRelayEnvelopeBody(recanon)
+      if (next === text) break
+      text = next
+    }
+  }
+  return `<${TEAMMATE_MESSAGE_TAG} teammate_id="${escapeXmlAttr(senderId)}"${colorAttr}${summaryAttr}${verifiedAttr}>\n${text}\n</${TEAMMATE_MESSAGE_TAG}>`
 }
 
 /**
- * densable cZt + jot — format teammate messages as XML; when recipient is the
- * team lead (recipientIsLead), wrap with peer midTurn:false laundering note
- * (fjr) so the model does not treat mailbox content as user input.
+ * densable Gxe / cZt + jot @186780852 — canonicalize protocol frames (`Xis`),
+ * format teammate messages as XML, and when recipient is the team lead
+ * (`recipientIsLead`), wrap with peer `midTurn:false` laundering note.
  */
 export function formatTeammateMessages(
   messages: Array<{
@@ -736,10 +1172,13 @@ export function formatTeammateMessages(
     timestamp: string
     color?: string
     summary?: string
+    isVerified?: boolean
+    provenance?: string
   }>,
   opts?: { recipientIsLead?: boolean },
 ): string {
-  const body = messages.map(formatTeammateMessage).join('\n\n')
+  const canonicalized = canonicalizeMailboxBatch(messages)
+  const body = canonicalized.map(formatTeammateMessage).join('\n\n')
   if (!opts?.recipientIsLead || !body) {
     return body
   }
