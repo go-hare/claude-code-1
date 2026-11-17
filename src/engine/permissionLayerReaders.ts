@@ -17,6 +17,7 @@
 
 import type { ToolPermissionContext, ToolUseContext } from '../Tool.js'
 import type { AppState } from '../state/AppState.js'
+import { pdSessionEffort } from '../utils/effort.js'
 import type { PermissionMode } from '../types/permissions.js'
 import type { ThinkingConfig } from '../utils/thinking.js'
 import { isBypassPermissionsModeDisabled } from '../utils/permissions/permissionSetup.js'
@@ -161,11 +162,15 @@ export function getToolPermissionContextFromLayers(
   return t
 }
 
-/** densable bb / getEffortValue — last effort layer wins */
+/** Resolve session/settings effort for the effective model, then last effort layer wins. */
 export function getEffortValueFromLayers(
-  toolUseContext: Pick<ToolUseContext, 'getAppState' | 'permissionLayers'>,
+  toolUseContext: Pick<
+    ToolUseContext,
+    'getAppState' | 'permissionLayers' | 'options'
+  >,
 ): AppState['effortValue'] {
-  let effort = toolUseContext.getAppState().effortValue
+  const model = getMainLoopModelFromLayers(toolUseContext)
+  let effort = pdSessionEffort(toolUseContext.getAppState(), model)
   const layers = toolUseContext.permissionLayers
   if (!layers) return effort
   for (const layer of layers) {

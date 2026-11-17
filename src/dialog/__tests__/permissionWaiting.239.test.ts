@@ -11,6 +11,7 @@ import {
 import {
   GOLD_Y2A_WAITING,
   resolveHostWaitingFor,
+  resolveSessionPromptStatus,
 } from '../permissionWaiting.js'
 import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
 import { PERMISSION_ASK_USER_QUESTION_KIND } from '../specs/permissionKinds.js'
@@ -118,6 +119,17 @@ describe('REPL Host waitingFor wiring', () => {
     expect(replSrc).not.toContain('toolUseConfirmQueue.length > 0')
   })
 
+  test('tab/PID waitingFor is Sye (Fen/iCr), not analog ternary', () => {
+    expect(replSrc).toContain('resolveSessionPromptStatus')
+    expect(replSrc).toContain(
+      'const sessionStatus: TabStatusKind = sessionPrompt.status',
+    )
+    expect(replSrc).toContain('const waitingFor = sessionPrompt.waitingFor')
+    expect(replSrc).toContain('updateTranscript(getMainThreadAgentId()')
+    expect(replSrc).toContain('subscribeSessionWorking')
+    expect(replSrc).not.toContain("sessionStatus !== 'waiting'")
+  })
+
   test('Messages has no toolUseConfirmQueue prop', () => {
     expect(messagesSrc).not.toContain('toolUseConfirmQueue')
     expect(replSrc).toContain('suppressMessageAnimation={')
@@ -135,5 +147,68 @@ describe('REPL Host waitingFor wiring', () => {
     expect(replSrc).toContain(
       'densable P1u permission needs emit lives on DialogHost',
     )
+  })
+})
+
+describe('densable Sye session prompt status', () => {
+  const base = {
+    queuedElicitation: false,
+    topDialogWaitingFor: undefined as string | undefined,
+    pendingWorkerRequest: false,
+    pendingSandboxRequest: false,
+    isShowingLocalJSXCommand: false,
+    isResponseStreaming: false,
+    isLoading: false,
+    isQueryActive: false,
+    delegatedActive: false,
+  }
+
+  test('uio order: elicitation, dialog, worker, sandbox, jsx', () => {
+    expect(
+      resolveSessionPromptStatus({ ...base, queuedElicitation: true })
+        .waitingFor,
+    ).toBe('input needed')
+    expect(
+      resolveSessionPromptStatus({
+        ...base,
+        topDialogWaitingFor: 'approve Bash',
+      }).waitingFor,
+    ).toBe('approve Bash')
+    expect(
+      resolveSessionPromptStatus({ ...base, pendingWorkerRequest: true })
+        .waitingFor,
+    ).toBe('worker request')
+    expect(
+      resolveSessionPromptStatus({ ...base, pendingSandboxRequest: true })
+        .waitingFor,
+    ).toBe('sandbox request')
+    expect(
+      resolveSessionPromptStatus({
+        ...base,
+        isShowingLocalJSXCommand: true,
+      }).waitingFor,
+    ).toBe('dialog open')
+    expect(
+      resolveSessionPromptStatus({
+        ...base,
+        isShowingLocalJSXCommand: true,
+        isResponseStreaming: true,
+      }).waitingFor,
+    ).toBeUndefined()
+  })
+
+  test('busy/idle/working when not waiting', () => {
+    expect(resolveSessionPromptStatus({ ...base, isLoading: true })).toEqual({
+      status: 'busy',
+      waitingFor: undefined,
+      working: false,
+    })
+    expect(
+      resolveSessionPromptStatus({ ...base, isQueryActive: true }),
+    ).toEqual({
+      status: 'idle',
+      waitingFor: undefined,
+      working: true,
+    })
   })
 })

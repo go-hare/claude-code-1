@@ -59,6 +59,9 @@ import {
 } from 'src/utils/skills/skillExecutionContext.js'
 import { elideByteIdenticalSkillReinvocation } from 'src/utils/skills/skillReinvocation.js'
 import { errorMessage } from 'src/utils/errors.js'
+import { levelSessionEffort } from 'src/utils/effort.js'
+import type { HostPermissionLayer } from 'src/engine/hostPermissionLayers.js'
+import { applyContextLayers } from 'src/engine/permissionLayerReaders.js'
 import {
   extractResultText,
   prepareForkedCommandContext,
@@ -997,9 +1000,11 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
         newMessages,
         contextModifier(ctx) {
           let modifiedContext = ctx
+          const inlineLayers: HostPermissionLayer[] = []
 
           // Update allowed tools if specified
           if (allowedTools.length > 0) {
+            inlineLayers.push({ kind: 'allowed_tools', allowedTools })
             // Capture the current getAppState to chain modifications properly
             const previousGetAppState = modifiedContext.getAppState
             modifiedContext = {
@@ -1031,20 +1036,23 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
           // Carry [1m] suffix over — otherwise a skill with `model: opus` on an
           // opus[1m] session drops the effective window to 200K and trips autocompact.
           if (model) {
+            const resolvedModel = resolveSkillModelOverride(
+              model,
+              ctx.options.mainLoopModel,
+            )
+            inlineLayers.push({ kind: 'model', mainLoopModel: resolvedModel })
             modifiedContext = {
               ...modifiedContext,
               options: {
                 ...modifiedContext.options,
-                mainLoopModel: resolveSkillModelOverride(
-                  model,
-                  ctx.options.mainLoopModel,
-                ),
+                mainLoopModel: resolvedModel,
               },
             }
           }
 
-          // Override effort level if skill specifies one
+          // Override effort level if skill specifies one (densable 289: contextLayers + sessionEffort)
           if (effort !== undefined) {
+            inlineLayers.push({ kind: 'effort', effort })
             const previousGetAppState = modifiedContext.getAppState
             modifiedContext = {
               ...modifiedContext,
@@ -1053,9 +1061,14 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
                 return {
                   ...appState,
                   effortValue: effort,
+                  sessionEffort: levelSessionEffort(effort),
                 }
               },
             }
+          }
+
+          if (inlineLayers.length > 0) {
+            modifiedContext = applyContextLayers(modifiedContext, inlineLayers)
           }
 
           return modifiedContext
@@ -1077,7 +1090,18 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       return {
         type: 'tool_result' as const,
         tool_use_id: toolUseID,
-        content: `Skill "${result.commandName}" completed (forked execution).\n\nResult:\n${result.result}`,
+        content:
+          'background' in result && result.background
+            ? `Skill "${result.commandName}" launched (forked execution, running in the background).\n\n${result.result}`
+            : `Skill "${result.commandName}" completed (forked execution).\n\nResult:\n${result.result}`,
+      }
+    }
+
+    if ('readOnly' in result && result.readOnly) {
+      return {
+        type: 'tool_result' as const,
+        tool_use_id: toolUseID,
+        content: `Loaded skill instructions (read-only): ${result.commandName}. Nothing was executed; delegate execution to a worker.`,
       }
     }
 

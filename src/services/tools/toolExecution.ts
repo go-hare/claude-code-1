@@ -28,13 +28,48 @@ import {
 import {
   addToToolDuration,
   getCodeEditToolDecisionCounter,
+  getMainThreadAgentHooks,
+  getRegisteredHooks,
+  getSessionId,
   getStatsStore,
+  isSingleShotPrintSession,
 } from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { getPermissionConfirm } from '../../dialog/permissionConfirmRegistry.js'
+import { createAbortController } from '../../utils/abortController.js'
+import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
+import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
+import { isUserPromptWaiting } from '../../utils/sessionHost.js'
+import { plural } from '../../utils/stringUtils.js'
+import { escapeXml } from '../../utils/xml.js'
+import {
+  getHooksConfigFromSnapshot,
+  shouldDisableAllHooksIncludingManaged,
+} from '../../utils/hooks/hooksConfigSnapshot.js'
+import { isDeepStrictEqual } from 'util'
+import { z } from 'zod/v4'
+import {
+  detachedToolCallEnded,
+  detachedToolCallLetGo,
+  detachedToolCallResultQueued,
+  detachedToolCallSetText,
+  detachedToolCallSettled,
+  detachedToolCallStarted,
+  getDetachedToolCallSnapshot,
+  isDetachBackgrounding,
+} from '../../utils/detachedToolCallStore.js'
+import {
+  DETACH_RESULT_CAP,
+  enqueueDetachedToolCallResult,
+  stillRunningDetachText,
+} from '../../utils/detachedToolCallNotify.js'
+import { TASK_STOP_TOOL_NAME } from '@claude-code/builtin-tools/tools/TaskStopTool/prompt.js'
 import {
   buildCodeEditToolAttributes,
   isCodeEditingTool,
 } from '../../hooks/toolPermission/permissionLogging.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
+import { detachedLetGoPermissionDeny } from '../../utils/permissions/permissions.js'
 import {
   findToolByName,
   type Tool,
@@ -77,7 +112,26 @@ import {
   ShellError,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../utils/errors.js'
-import { executePermissionDeniedHooks } from '../../utils/hooks.js'
+import {
+  executePermissionDeniedHooks,
+  executePreToolHooks,
+  getPreToolHookBlockingMessage,
+} from '../../utils/hooks.js'
+import {
+  listOfContextTexts,
+  packToolCallContext,
+  pinHookAttachment,
+  rewrittenToolCallContext,
+} from '../../utils/hooks/toolCallContextPack.js'
+import { END_CONVERSATION_TOOL_NAME } from '@claude-code/builtin-tools/tools/EndConversationTool/prompt.js'
+import {
+  accountMemoryHookRewriteDenied,
+  didAccountMemoryHookRewriteInput,
+  matchToolCallManagedPass,
+  shouldPreserveManagedToolHookPass,
+  type ManagedHookPass,
+  type ToolCallManagedPass,
+} from '../../utils/hooks/toolCallManagedPass.js'
 import { logError } from '../../utils/log.js'
 import {
   announceWaitAlreadyExpired,
@@ -91,6 +145,17 @@ import {
   remoteHostGaveUpEarlierMessage,
   remoteHostGaveUpMessage,
   remoteHostNotAvailableMessage,
+  remoteHostOfflineMessage,
+  remoteHostIncompatibleMessage,
+  remoteHostUnreadableToolMessage,
+  remoteHostServesNothingMessage,
+  remoteHostToolNotServedMessage,
+  remoteHostApprovalUnverifiedMessage,
+  remoteHostRefusedByMessage,
+  remoteHostRefusedUnrunMessage,
+  syncBridgeRemoteHosts,
+  syncSessionRemoteHosts,
+  type DeviceBridgeMcpClient,
   REMOTE_HOST_INTERRUPTED,
   remoteHostAnsweredErrorMessage,
   remoteHostDisconnectedMessage,
@@ -136,9 +201,14 @@ import {
   createStopHookSummaryMessage,
   createToolResultStopMessage,
   createUserMessage,
+  REJECT_MESSAGE_WITH_REASON_PREFIX,
+  SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
   withMemoryCorrectionHint,
 } from '../../utils/messages.js'
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import type {
+  PermissionDecision,
+  PermissionResult,
+} from '../../utils/permissions/PermissionResult.js'
 import { decisionReasonToOTelSource } from '../../utils/permissions/permissionDecisionReasons.js'
 import { getAgentContext } from '../../utils/agentContext.js'
 import {
@@ -171,6 +241,7 @@ import {
   formatZodValidationError,
 } from '../../utils/toolErrors.js'
 import {
+  persistToolResult,
   processPreMappedToolResultBlock,
   processToolResultBlock,
 } from '../../utils/toolResultStorage.js'
@@ -192,6 +263,7 @@ import {
   isMcpTool,
 } from '../mcp/utils.js'
 import {
+  collectManagedOnlyPostToolUse,
   resolveHookPermissionDecision,
   runPostToolUseFailureHooks,
   runPostToolUseHooks,
@@ -208,6 +280,562 @@ import {
   pinValue,
   restorePinnedKeys,
 } from '../../utils/plugins/functionHooksHop.js'
+import {
+  RemoteBackgroundShells,
+  RemoteToolHosts,
+  ToolPermissionPromptsUp,
+  type RemoteToolRoutedHost,
+} from '../../utils/toolState.js'
+
+export const RUN_TOOL_USE_HANDLES_DETACH: unique symbol = Symbol.for(
+  'claude.runToolUseHandlesDetach',
+)
+
+const DETACH_CEILING_MS = 300_000
+
+/** densable remote `_r` KLe.started when bash returns backgroundTaskId. */
+function rememberRemoteBackgroundShell(
+  context: ToolUseContext | undefined,
+  input: Record<string, unknown>,
+  response: unknown,
+  hostName: string,
+  callId: string,
+): void {
+  if (input.run_in_background !== true) return
+  const id = extractRemoteBackgroundTaskId(response)
+  if (!id || !context?.toolState) return
+  context.toolState.get(RemoteBackgroundShells).started(id, {
+    hostName,
+    callId,
+    agentId: context.agentId ?? getAgentContext()?.agentId,
+  })
+}
+
+/** densable `_r` @213391300 — remote TaskStop must own the started shell ID. */
+function checkRemoteTaskStopOwnership(
+  toolName: string,
+  inputRecord: Record<string, unknown>,
+  hostName: string,
+  source: 'session' | 'bridge',
+  toolUseContext: ToolUseContext,
+): string | undefined {
+  if (toolName !== TASK_STOP_TOOL_NAME) return undefined
+  const callerAgentId = toolUseContext.agentId ?? getAgentContext()?.agentId
+  if (callerAgentId === undefined) return undefined
+  const taskId = String(inputRecord.task_id ?? inputRecord.shell_id ?? '')
+  if (
+    toolUseContext.toolState
+      ?.get(RemoteBackgroundShells)
+      .find(taskId, callerAgentId)?.hostName === hostName
+  ) {
+    return undefined
+  }
+  const message = `No background command with that ID was started on ${hostName} by this agent.`
+  return source === 'session'
+    ? remoteHostRefusedByMessage(hostName, message)
+    : remoteHostRefusedUnrunMessage(hostName, message)
+}
+
+function detachHookMatcherHitsTool(
+  matcherPattern: string | undefined,
+  tool: Tool,
+): boolean {
+  if (!matcherPattern || matcherPattern === '*') return true
+  const names = [tool.name, ...(tool.aliases ?? [])]
+  if (names.some(name => name === matcherPattern)) return true
+  try {
+    const regex = new RegExp(`^(${matcherPattern})$`)
+    return names.some(name => regex.test(name))
+  } catch {
+    return false
+  }
+}
+
+function hasBlockingHookForDetach(
+  tool: Tool,
+  toolUseContext: ToolUseContext,
+): boolean {
+  if (shouldDisableAllHooksIncludingManaged()) return false
+  if (
+    hasMatchingFunctionHook('PostToolUse', { tool_name: tool.name }) ||
+    hasMatchingFunctionHook('PostToolUseFailure', { tool_name: tool.name }) ||
+    hasMatchingFunctionHook('PostToolBatch') ||
+    hasMatchingFunctionHook('tool.call', { tool: tool.name })
+  ) {
+    return true
+  }
+  if (toolUseContext.options.settingsHooksOff === true) return false
+  let sessionHooksForId:
+    | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+    | undefined
+  try {
+    const appState = toolUseContext.getAppState?.()
+    const sessionObj = toolUseContext.session as { id?: string } | undefined
+    const sid = toolUseContext.agentId ?? sessionObj?.id ?? getSessionId()
+    sessionHooksForId = appState?.sessionHooks?.get(sid)?.hooks as
+      | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+      | undefined
+  } catch {
+    sessionHooksForId = undefined
+  }
+  const sources = [
+    getHooksConfigFromSnapshot() as
+      | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+      | null
+      | undefined,
+    getRegisteredHooks() as
+      | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+      | null
+      | undefined,
+    getMainThreadAgentHooks() as
+      | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+      | null
+      | undefined,
+    sessionHooksForId,
+  ]
+  for (const event of ['PostToolUse', 'PostToolUseFailure'] as const) {
+    for (const src of sources) {
+      const matchers = src?.[event]
+      if (!Array.isArray(matchers)) continue
+      for (const m of matchers) {
+        if (m.hooks.length > 0 && detachHookMatcherHitsTool(m.matcher, tool)) {
+          return true
+        }
+      }
+    }
+  }
+  for (const src of sources) {
+    const matchers = src?.PostToolBatch
+    if (Array.isArray(matchers) && matchers.some(m => m.hooks.length > 0)) {
+      return true
+    }
+  }
+  return false
+}
+
+/** densable `FDe` @188766400 — gate whether a tool call may detach. */
+export function canDetachToolCall(
+  tool: Tool,
+  _input: unknown,
+  toolUseContext: ToolUseContext,
+): boolean {
+  try {
+    if (
+      !isDetachBackgrounding(tool) ||
+      toolUseContext.session === undefined ||
+      toolUseContext.agentId !== undefined ||
+      toolUseContext.innerCall === true ||
+      (toolUseContext as { remoteCall?: unknown }).remoteCall !== undefined
+    ) {
+      return false
+    }
+    if (toolUseContext.options.isNonInteractiveSession) {
+      const nonInteractiveDetachAllowed =
+        !isSingleShotPrintSession() &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_panda', true) ===
+          true &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_bubbly_meteor', true) ===
+          true
+      if (!nonInteractiveDetachAllowed) return false
+    }
+    if (
+      areBackgroundTasksDisabled() ||
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_tool_detach', true) !== true
+    ) {
+      return false
+    }
+    return !hasBlockingHookForDetach(tool, toolUseContext)
+  } catch (err) {
+    logForDebugging(
+      `[detach] ${tool.name}: the gate threw, so the call runs inline (${errorMessage(err)})`,
+      { level: 'error' },
+    )
+    return false
+  }
+}
+
+export function isDetachPermissionDialogOpen(
+  toolUseContext: ToolUseContext,
+  toolUseID: string,
+): boolean {
+  if ((toolUseContext.toolState?.get(ToolPermissionPromptsUp).count ?? 0) > 0) {
+    return true
+  }
+  if (getPermissionConfirm(toolUseID) !== undefined) {
+    return true
+  }
+  if (toolUseContext.session !== undefined) {
+    try {
+      if (isUserPromptWaiting(toolUseContext.session)) return true
+    } catch {
+      // Synthetic session objects without SessionHost slots are treated as non-waiting.
+    }
+  }
+  try {
+    const queue = (
+      toolUseContext.getAppState?.() as
+        | { toolUseConfirmQueue?: unknown[] }
+        | undefined
+    )?.toolUseConfirmQueue
+    if (Array.isArray(queue) && queue.length > 0) return true
+  } catch {
+    // Ignore partial test appState objects.
+  }
+  return false
+}
+
+function formatDetachedMappedContent(content: unknown): string {
+  if (content === undefined) return ''
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return String(content)
+  const parts: string[] = []
+  let nonText = 0
+  for (const s of content) {
+    if (
+      s &&
+      typeof s === 'object' &&
+      (s as { type?: string }).type === 'text' &&
+      typeof (s as { text?: unknown }).text === 'string'
+    ) {
+      parts.push((s as { text: string }).text)
+    } else {
+      nonText++
+    }
+  }
+  if (nonText > 0) {
+    parts.push(
+      `[${nonText} non-text ${plural(nonText, 'block')} of the result could not be carried in a notification]`,
+    )
+  }
+  return parts.join('\n')
+}
+
+/**
+ * densable `dOt` + `Zho` (@188766700–@188769600) — wraps post-permission
+ * `tool.call` execution so permission prompts never race with send-now detach.
+ */
+async function runWithDetachSupport<T extends { data: unknown }>(opts: {
+  tool: Tool
+  input: unknown
+  toolUseID: string
+  toolUseContext: ToolUseContext
+  canUseTool: CanUseToolFn
+  onProgress: (
+    progress:
+      | ToolProgress<ToolProgressData>
+      | ProgressMessage<HookProgress>
+      | ToolBridgeEvent,
+  ) => void
+  run: (
+    ctx: ToolUseContext,
+    wrappedCanUseTool: CanUseToolFn,
+    onProgress: (
+      progress:
+        | ToolProgress<ToolProgressData>
+        | ProgressMessage<HookProgress>
+        | ToolBridgeEvent,
+    ) => void,
+  ) => Promise<T>
+}): Promise<{ detached: false; result: T } | { detached: true; text: string }> {
+  const {
+    tool,
+    input,
+    toolUseID,
+    toolUseContext,
+    canUseTool,
+    onProgress,
+    run,
+  } = opts
+  if (!canDetachToolCall(tool, input, toolUseContext)) {
+    return {
+      detached: false,
+      result: await run(toolUseContext, canUseTool, onProgress),
+    }
+  }
+
+  const session = toolUseContext.session!
+  const detachAbortController = createAbortController()
+  let inForeground = true
+  let localPromptsUp = 0
+
+  const onParentAbort = () => {
+    if (inForeground && !detachAbortController.signal.aborted) {
+      detachAbortController.abort(toolUseContext.abortController.signal.reason)
+    }
+  }
+  if (toolUseContext.abortController.signal.aborted) {
+    onParentAbort()
+  } else {
+    toolUseContext.abortController.signal.addEventListener(
+      'abort',
+      onParentAbort,
+      { once: true },
+    )
+  }
+  detachAbortController.signal.addEventListener(
+    'abort',
+    () => {
+      if (inForeground && !toolUseContext.abortController.signal.aborted) {
+        toolUseContext.abortController.abort(
+          detachAbortController.signal.reason,
+        )
+      }
+    },
+    { once: true },
+  )
+
+  const wrappedCanUseTool: CanUseToolFn = async (
+    targetTool,
+    targetInput,
+    targetCtx,
+    parentMsg,
+    targetId,
+    forceDecision,
+  ) => {
+    localPromptsUp++
+    const slot = toolUseContext.toolState?.get(ToolPermissionPromptsUp)
+    if (slot) slot.count++
+    try {
+      return await canUseTool(
+        targetTool,
+        targetInput,
+        targetCtx,
+        parentMsg,
+        targetId,
+        forceDecision,
+      )
+    } finally {
+      localPromptsUp--
+      if (slot) slot.count = Math.max(0, slot.count - 1)
+    }
+  }
+
+  let signalDetachEarly: (() => void) | undefined
+  const detachEarly = new Promise<'detach'>(resolve => {
+    signalDetachEarly = () => resolve('detach')
+  })
+
+  const unregisterForeground = registerForegroundToolCall(session, {
+    toolUseId: toolUseID,
+    backgroundNow: () => {
+      if (
+        !inForeground ||
+        localPromptsUp > 0 ||
+        detachAbortController.signal.aborted ||
+        toolUseContext.abortController.signal.aborted ||
+        areBackgroundTasksDisabled() ||
+        isDetachPermissionDialogOpen(toolUseContext, toolUseID)
+      ) {
+        return false
+      }
+      inForeground = false
+      detachedToolCallLetGo(toolUseID, session)
+      signalDetachEarly?.()
+      return true
+    },
+  })
+
+  const callPromise = run(
+    { ...toolUseContext, abortController: detachAbortController },
+    wrappedCanUseTool,
+    progress => {
+      if (inForeground) onProgress(progress)
+    },
+  ).finally(() => {
+    toolUseContext.abortController.signal.removeEventListener(
+      'abort',
+      onParentAbort,
+    )
+    unregisterForeground()
+  })
+
+  let race: 'settled' | 'detach'
+  try {
+    race = await Promise.race([
+      callPromise.then(
+        () => 'settled' as const,
+        () => 'settled' as const,
+      ),
+      detachEarly,
+    ])
+  } finally {
+    unregisterForeground()
+  }
+
+  if (race === 'settled' || toolUseContext.abortController.signal.aborted) {
+    try {
+      return { detached: false, result: await callPromise }
+    } finally {
+      detachedToolCallEnded(toolUseID, session)
+    }
+  }
+
+  const isOnScreen = toolUseContext.options.isNonInteractiveSession !== true
+  logEvent('tengu_tool_call_detached', {
+    toolName: sanitizeToolNameForAnalytics(tool.name),
+  })
+  logForDebugging(
+    `[detach] ${tool.name} ${toolUseID} moved to the background to deliver a message`,
+  )
+  detachedToolCallStarted(
+    toolUseID,
+    {
+      tool,
+      input,
+      detachedAt: Date.now(),
+    },
+    reason => detachAbortController.abort(reason),
+    session,
+  )
+
+  let ceilingHit = false
+  const ceiling = setTimeout(() => {
+    ceilingHit = true
+    detachAbortController.abort('detached-ceiling')
+  }, DETACH_CEILING_MS)
+  ceiling.unref?.()
+
+  const stillHeard = () => getDetachedToolCallSnapshot(session).has(toolUseID)
+
+  void callPromise
+    .finally(() => clearTimeout(ceiling))
+    .then(res => {
+      // densable dOt @188768350: any abort reason routes into the failure arm.
+      if (detachAbortController.signal.aborted) {
+        throw new AbortError()
+      }
+      return res
+    })
+    .then(
+      async res => {
+        // densable Zho: settle completed data into store BEFORE persistence so
+        // in-place UI rendering retains `data` even if disk persistence fails.
+        if (
+          !detachedToolCallSettled(
+            toolUseID,
+            { status: 'completed', data: res.data },
+            session,
+          )
+        ) {
+          return
+        }
+
+        let text = ''
+        let notifyStatus: 'completed' | 'failed' = 'completed'
+        try {
+          const mapped = tool.mapToolResultToToolResultBlockParam(
+            res.data as never,
+            toolUseID,
+          )
+          const block = await processPreMappedToolResultBlock(
+            mapped,
+            tool.name,
+            tool.maxResultSizeChars ?? Number.POSITIVE_INFINITY,
+          )
+          if (!stillHeard()) return
+          text = formatDetachedMappedContent(block?.content)
+          if (block?.is_error === true) {
+            notifyStatus = 'failed'
+            if (
+              !detachedToolCallSettled(
+                toolUseID,
+                { status: 'failed', text, data: res.data },
+                session,
+              )
+            ) {
+              return
+            }
+          } else if (escapeXml(text).length > DETACH_RESULT_CAP) {
+            const saved = await persistToolResult(text, toolUseID)
+            if (!stillHeard()) return
+            if ('error' in saved) {
+              notifyStatus = 'failed'
+              text =
+                'The call completed, but its result is too large to carry in a notification and could not be saved to a file.'
+            } else {
+              text = `The result is ${saved.originalSize} characters, too large to carry in a notification, so none of it is quoted here. ${saved.truncatedAtBytes === undefined ? 'All of it' : `Its first ${saved.truncatedAtBytes} bytes`} was saved to ${saved.filepath}. Read that file to see it.`
+              detachedToolCallSetText(toolUseID, text, session)
+            }
+          } else {
+            detachedToolCallSetText(toolUseID, text, session)
+          }
+        } catch {
+          if (!stillHeard()) return
+          notifyStatus = 'failed'
+          text = 'The call completed but its result could not be rendered.'
+        }
+
+        if (!stillHeard()) return
+        enqueueDetachedToolCallResult({
+          toolName: tool.name,
+          toolUseId: toolUseID,
+          status: notifyStatus,
+          text,
+          isOnScreen,
+        })
+        detachedToolCallResultQueued(toolUseID, session)
+      },
+      (err: unknown) => {
+        const ceilingAbort =
+          ceilingHit ||
+          detachAbortController.signal.reason === 'detached-ceiling'
+        const userCancel =
+          !ceilingAbort && detachAbortController.signal.reason === 'user-cancel'
+        const text = ceilingAbort
+          ? `The call did not finish within ${DETACH_CEILING_MS / 60000} minutes and was stopped.`
+          : userCancel
+            ? 'The user stopped this call before it finished.'
+            : errorMessage(err)
+        const status = userCancel ? 'stopped' : 'failed'
+        if (!detachedToolCallSettled(toolUseID, { status, text }, session)) {
+          return
+        }
+        enqueueDetachedToolCallResult({
+          toolName: tool.name,
+          toolUseId: toolUseID,
+          status,
+          text,
+          isOnScreen,
+          passive: userCancel,
+        })
+        detachedToolCallResultQueued(toolUseID, session)
+      },
+    )
+    .finally(() => {
+      detachedToolCallEnded(toolUseID, session)
+    })
+
+  return {
+    detached: true,
+    text: stillRunningDetachText(tool.name, isOnScreen),
+  }
+}
+
+export function extractRemoteBackgroundTaskId(
+  response: unknown,
+): string | undefined {
+  if (response === null || typeof response !== 'object') return undefined
+  const rec = response as Record<string, unknown>
+  if (typeof rec.backgroundTaskId === 'string') return rec.backgroundTaskId
+  const envelope = rec.envelope
+  if (envelope !== null && typeof envelope === 'object') {
+    const output = (envelope as Record<string, unknown>).output
+    if (output !== null && typeof output === 'object') {
+      const id = (output as Record<string, unknown>).backgroundTaskId
+      if (typeof id === 'string') return id
+    }
+  }
+  const data = rec.data
+  if (data !== null && typeof data === 'object') {
+    const id = (data as { backgroundTaskId?: unknown }).backgroundTaskId
+    if (typeof id === 'string') return id
+  }
+  const result = rec.result
+  if (result !== null && typeof result === 'object') {
+    const id = (result as { backgroundTaskId?: unknown }).backgroundTaskId
+    if (typeof id === 'string') return id
+  }
+}
 
 // Cached import promise for the skill-learning wrapper — paid once, not per call.
 let _skillLearningWrapperCache:
@@ -479,6 +1107,236 @@ export type MessageUpdateLazy<M extends Message = Message> = {
     toolUseID: string
     modifyContext: (context: ToolUseContext) => ToolUseContext
   }
+  toolDuration?: {
+    toolName: string
+    durationMs: number
+  }
+}
+
+/** densable Ta @213400800 — persist oversized remote tool results & gate subagent toolUseResult. */
+async function buildRemoteSuccessUserMessage(opts: {
+  tool: Tool
+  toolUseId: string
+  rendered: ReturnType<typeof remoteResultText>
+  assistantMessage: AssistantMessage
+  toolUseContext: ToolUseContext
+}): Promise<UserMessage> {
+  const preMapped: ToolResultBlockParam = {
+    type: 'tool_result',
+    content: opts.rendered.content as ToolResultBlockParam['content'],
+    is_error: opts.rendered.isError,
+    tool_use_id: opts.toolUseId,
+  }
+  const processedBlock = opts.rendered.isError
+    ? preMapped
+    : await processPreMappedToolResultBlock(
+        preMapped,
+        opts.tool.name,
+        opts.tool.maxResultSizeChars,
+      )
+  return createUserMessage({
+    content: [processedBlock],
+    toolUseResult: shouldPreserveManagedToolHookPass(
+      opts.toolUseContext,
+      opts.tool,
+    )
+      ? (opts.rendered.output ?? opts.rendered.content)
+      : undefined,
+    sourceToolAssistantUUID: opts.assistantMessage.uuid,
+  })
+}
+
+function formatTerminalPeriod(words: string): string {
+  const trimmed = words.trimEnd()
+  return /[.!?\u2026]$/.test(trimmed) ? trimmed : `${trimmed}.`
+}
+
+/** densable `_r` / `la` / `ua` @213391380 — subagent requireCanUseTool gate before remote dispatch. */
+async function checkRemoteSubagentCallerGate(opts: {
+  tool: Tool
+  rawInput: Record<string, unknown>
+  hostName: string
+  source: 'session' | 'bridge'
+  toolUseContext: ToolUseContext
+  canUseTool: CanUseToolFn
+  assistantMessage: AssistantMessage
+  toolUseId: string
+}): Promise<string | undefined> {
+  if (
+    opts.toolUseContext.requireCanUseTool !== true ||
+    opts.toolUseContext.agentId === undefined
+  ) {
+    return undefined
+  }
+  const defaultDenial = `Permission to use ${opts.tool.name} has been denied`
+  let words: string | undefined
+  try {
+    const decision = await opts.canUseTool(
+      opts.tool,
+      opts.rawInput,
+      opts.toolUseContext,
+      opts.assistantMessage,
+      opts.toolUseId,
+    )
+    if (decision.behavior === 'allow') {
+      if (
+        decision.updatedInput === undefined ||
+        decision.updatedInput === opts.rawInput ||
+        isDeepStrictEqual(decision.updatedInput, opts.rawInput)
+      ) {
+        return undefined
+      }
+      words = `The permission check for ${opts.tool.name} modified its input, which this background agent cannot apply`
+    } else {
+      words = decision.message || defaultDenial
+    }
+  } catch (err) {
+    if (
+      err instanceof AbortError ||
+      opts.toolUseContext.abortController.signal.aborted
+    ) {
+      throw err
+    }
+    logError(err)
+    words = `The permission check for this ${opts.tool.name} call failed with an error, so the call was refused`
+  }
+  const formatted = formatTerminalPeriod(words)
+  return opts.source === 'session'
+    ? remoteHostRefusedByMessage(opts.hostName, formatted)
+    : remoteHostRefusedUnrunMessage(opts.hostName, formatted)
+}
+
+function extractRemoteRejectionFeedback(
+  decision: PermissionDecision,
+): string | undefined {
+  if (decision.behavior === 'allow') return undefined
+  const raw = decision.message?.trim() ?? ''
+  for (const prefix of [
+    REJECT_MESSAGE_WITH_REASON_PREFIX,
+    SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
+  ]) {
+    const trimmedPrefix = prefix.trim()
+    if (raw.startsWith(trimmedPrefix)) {
+      const rest = raw.slice(trimmedPrefix.length).trim()
+      return rest === '' ? undefined : rest
+    }
+  }
+  if (
+    decision.behavior === 'deny' &&
+    decision.decisionReason?.type === 'permissionPromptTool' &&
+    raw !== '' &&
+    raw !== 'User denied permission'
+  ) {
+    return raw
+  }
+  return undefined
+}
+
+/** densable `pa` @213394100 — force interactive approval for remote needs_approval. */
+async function approveRemoteToolCall(opts: {
+  tool: Tool
+  hostName: string
+  cleanInput: Record<string, unknown>
+  askMessage: unknown
+  toolUseContext: ToolUseContext
+  canUseTool: CanUseToolFn
+  assistantMessage: AssistantMessage
+  toolUseId: string
+}): Promise<
+  | { kind: 'refused'; detail: string }
+  | {
+      kind: 'approved'
+      effectiveInput: Record<string, unknown>
+      updatedInput?: Record<string, unknown>
+      feedback?: string
+    }
+  | { kind: 'denied'; feedback?: string }
+> {
+  const { getToolPermissionContextFromLayers } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../engine/permissionLayerReaders.js') as typeof import('../../engine/permissionLayerReaders.js')
+  const permissionCtx = getToolPermissionContextFromLayers(opts.toolUseContext)
+  if (
+    permissionCtx.mode === 'dontAsk' ||
+    permissionCtx.shouldAvoidPermissionPrompts
+  ) {
+    const detail =
+      permissionCtx.mode === 'dontAsk'
+        ? `Permission to use ${opts.tool.name} has been denied because permission mode is dontAsk.`
+        : `${opts.hostName} asked for approval, and this context cannot show a permission prompt; the call did not run.`
+    return { kind: 'refused', detail }
+  }
+  const dialogInput: Record<string, unknown> =
+    opts.tool.isMcp === true
+      ? { ...opts.cleanInput }
+      : { ...opts.cleanInput, [REMOTE_TOOL_HOST_FIELD]: opts.hostName }
+  const askBody =
+    typeof opts.askMessage === 'string' && opts.askMessage.trim() !== ''
+      ? opts.askMessage.trim()
+      : `Allow ${opts.tool.name}`
+  const promptMessage = `(runs on ${opts.hostName}) ${askBody}`
+  const forceDecision: PermissionDecision = {
+    behavior: 'ask',
+    message: promptMessage,
+    decisionReason: { type: 'other', reason: promptMessage },
+    suppressAlwaysAllowRule: true,
+  }
+  const promptTool =
+    opts.tool.isMcp === true
+      ? ({
+          ...opts.tool,
+          suppressesAlwaysAllowRule: () => true,
+        } as Tool)
+      : opts.tool
+  const resolvedDecision = await opts.canUseTool(
+    promptTool,
+    dialogInput,
+    opts.toolUseContext,
+    opts.assistantMessage,
+    opts.toolUseId,
+    forceDecision,
+  )
+  const decision =
+    detachedLetGoPermissionDeny(opts.toolUseId) ?? resolvedDecision
+  if (decision.behavior === 'allow') {
+    const edited = decision.updatedInput ?? {}
+    const hostChanged =
+      opts.tool.isMcp !== true &&
+      REMOTE_TOOL_HOST_FIELD in edited &&
+      requestedRemoteHost(edited) !== opts.hostName
+    const newlyDisabledSandbox =
+      edited.dangerouslyDisableSandbox === true &&
+      opts.cleanInput.dangerouslyDisableSandbox !== true
+    if (hostChanged || newlyDisabledSandbox) {
+      return {
+        kind: 'refused',
+        detail: `The approval given in this session edited the ${opts.tool.name} call in a way ${opts.hostName} cannot honour (it named a different machine, or newly set a privileged field this session does not pass on in an edit); nothing ran.`,
+      }
+    }
+    const { [REMOTE_TOOL_HOST_FIELD]: _dropHost, ...cleanEdited } = edited
+    const hasEditedFields =
+      Object.keys(cleanEdited).length > 0 &&
+      !isDeepStrictEqual(cleanEdited, opts.cleanInput)
+    const feedback =
+      'acceptFeedback' in decision ? decision.acceptFeedback : undefined
+    return {
+      kind: 'approved',
+      effectiveInput: hasEditedFields ? cleanEdited : opts.cleanInput,
+      ...(hasEditedFields && { updatedInput: cleanEdited }),
+      ...(feedback !== undefined && { feedback }),
+    }
+  }
+  if (
+    decision.behavior === 'deny' &&
+    decision.decisionReason?.type === 'hook'
+  ) {
+    return { kind: 'refused', detail: decision.message }
+  }
+  const feedback = extractRemoteRejectionFeedback(decision)
+  return {
+    kind: 'denied',
+    ...(feedback !== undefined && { feedback }),
+  }
 }
 
 /**
@@ -602,7 +1460,7 @@ export async function* runToolUse(
   if (!tool) {
     // densable `zi` when `!KJ()`: a machine serves it and this session has
     // no copy. Forwarding on is `KJ`; off is `auo`.
-    const servedBy = machineServingTool(toolName)
+    const servedBy = machineServingTool(toolName, toolUseContext.toolState)
     if (servedBy && !isRemoteToolsForwardEnabled()) {
       const detail = remoteHostNotAvailableMessage(servedBy.name, toolName)
       yield {
@@ -667,61 +1525,442 @@ export async function* runToolUse(
   // densable `dr` / `lr`: forwarding off, or no machine name, stays local.
   // A resolved online machine that serves the tool is `W`. Anything else
   // is the route's own error (`sOn`, `zAt`, `cuo`).
+  if (
+    toolUseContext.toolState &&
+    (tool.remoteExecution?.supported === true || tool.isMcp === true)
+  ) {
+    syncSessionRemoteHosts(toolUseContext.toolState, 'resolve')
+    if (
+      toolUseContext.options.mcpClients.some(
+        client => client.name === 'remote-devices',
+      )
+    ) {
+      await syncBridgeRemoteHosts(
+        toolUseContext.toolState,
+        'resolve',
+        toolUseContext.options.mcpClients as unknown as DeviceBridgeMcpClient[],
+      )
+    }
+  }
+
+  const remoteHostsSlot = toolUseContext.toolState?.get(RemoteToolHosts)
+  const resolveRoutedHostForTool = (
+    host: RemoteToolRoutedHost,
+    wireToolName: string,
+    isPassthrough: boolean,
+  ):
+    | { kind: 'routed_host'; host: RemoteToolRoutedHost; wireToolName: string }
+    | { kind: 'error'; message: string } => {
+    if (host.status === 'offline' && host.source !== 'session') {
+      return { kind: 'error', message: remoteHostOfflineMessage(host.name) }
+    }
+    if (host.protocol?.kind === 'incompatible') {
+      return {
+        kind: 'error',
+        message: remoteHostIncompatibleMessage(
+          host.name,
+          host.protocol.announced,
+          tool.name,
+          isPassthrough,
+          toolUseContext.toolState,
+        ),
+      }
+    }
+    if (host.rejectedPassthroughTools?.has(wireToolName) === true) {
+      return {
+        kind: 'error',
+        message: remoteHostUnreadableToolMessage(host.name, tool.name),
+      }
+    }
+    if (
+      !isPassthrough &&
+      host.servedTools !== undefined &&
+      !host.servedTools.has(tool.name)
+    ) {
+      return {
+        kind: 'error',
+        message:
+          host.servedTools.size === 0
+            ? remoteHostServesNothingMessage(host.name)
+            : remoteHostToolNotServedMessage(host.name, tool.name, [
+                ...host.servedTools,
+              ]),
+      }
+    }
+    return { kind: 'routed_host', host, wireToolName }
+  }
+
   let hostRoute:
     | ReturnType<typeof remoteHostRoute>
-    | { kind: 'remote'; machine: AnnouncedRemoteMachine } = { kind: 'local' }
+    | { kind: 'remote'; machine: AnnouncedRemoteMachine }
+    | {
+        kind: 'routed_host'
+        host: RemoteToolRoutedHost
+        wireToolName: string
+      } = { kind: 'local' }
+  const requestedHostName = requestedRemoteHost(toolUse.input)
   const adopting =
-    tool.isMcp === true ? machineAdoptingMcpTool(tool.name) : undefined
-  if (adopting && requestedRemoteHost(toolUse.input) === undefined) {
+    tool.isMcp === true
+      ? machineAdoptingMcpTool(tool.name, toolUseContext.toolState)
+      : undefined
+  if (adopting && requestedHostName === undefined) {
     hostRoute = { kind: 'remote', machine: adopting }
+  } else if (
+    tool.isMcp === true &&
+    requestedHostName === undefined &&
+    remoteHostsSlot &&
+    isRemoteToolsForwardEnabled()
+  ) {
+    const mcpRawName = tool.mcpInfo?.toolName ?? tool.name
+    const passEntry = remoteHostsSlot.passthroughHost(mcpRawName)
+      ? { host: remoteHostsSlot.passthroughHost(mcpRawName)!, wire: mcpRawName }
+      : remoteHostsSlot.passthroughHost(tool.name)
+        ? {
+            host: remoteHostsSlot.passthroughHost(tool.name)!,
+            wire: tool.name,
+          }
+        : undefined
+    if (passEntry) {
+      hostRoute = resolveRoutedHostForTool(passEntry.host, passEntry.wire, true)
+    }
   } else if (tool.remoteExecution?.supported === true) {
-    const requested = requestedRemoteHost(toolUse.input)
-    const unknown =
+    const requested = requestedHostName
+    const routedCandidate =
       requested !== undefined &&
       isRemoteToolsForwardEnabled() &&
-      resolveAnnouncedMachine(requested).kind === 'unknown'
-    if (unknown && requested !== undefined) {
-      const already = announceWaitAlreadyExpired()
-      if (already !== undefined) {
-        hostRoute = {
-          kind: 'error',
-          message: remoteHostGaveUpEarlierMessage(requested, already),
+      remoteHostsSlot !== undefined
+        ? remoteHostsSlot.resolve(requested)
+        : undefined
+    if (
+      routedCandidate?.kind === 'remote' &&
+      routedCandidate.host.source !== 'session'
+    ) {
+      hostRoute = resolveRoutedHostForTool(
+        routedCandidate.host,
+        tool.name,
+        false,
+      )
+    } else {
+      const unknown =
+        requested !== undefined &&
+        isRemoteToolsForwardEnabled() &&
+        resolveAnnouncedMachine(requested, toolUseContext.toolState).kind ===
+          'unknown'
+      if (unknown && requested !== undefined) {
+        const already = announceWaitAlreadyExpired(toolUseContext.toolState)
+        if (already !== undefined) {
+          hostRoute = {
+            kind: 'error',
+            message: remoteHostGaveUpEarlierMessage(requested, already),
+          }
+        } else {
+          // densable `Gbo` — only an unknown name waits.
+          askRemoteToolsReannounce(
+            request => {
+              void getCurrentStructuredIO()?.requestRemoteToolsReannounce(
+                request,
+              )
+            },
+            REMOTE_ANNOUNCE_WAIT_MS,
+            toolUseContext.toolState,
+          )
+          const waited = await waitForAnnouncedMachine(
+            requested,
+            toolUseContext.abortController.signal,
+            REMOTE_ANNOUNCE_WAIT_MS,
+            toolUseContext.toolState,
+          )
+          hostRoute =
+            waited === 'gave_up'
+              ? {
+                  kind: 'error',
+                  message: remoteHostGaveUpMessage(
+                    requested,
+                    announceWaitAlreadyExpired(toolUseContext.toolState) ?? 0,
+                  ),
+                }
+              : remoteHostRoute(
+                  toolUse.input,
+                  tool.name,
+                  getCurrentStructuredIO() !== undefined,
+                  toolUseContext.toolState,
+                )
         }
       } else {
-        // densable `Gbo` — only an unknown name waits.
-        askRemoteToolsReannounce(request => {
-          void getCurrentStructuredIO()?.requestRemoteToolsReannounce(request)
-        }, REMOTE_ANNOUNCE_WAIT_MS)
-        const waited = await waitForAnnouncedMachine(
-          requested,
-          toolUseContext.abortController.signal,
+        hostRoute = remoteHostRoute(
+          toolUse.input,
+          tool.name,
+          getCurrentStructuredIO() !== undefined,
+          toolUseContext.toolState,
         )
-        hostRoute =
-          waited === 'gave_up'
-            ? {
-                kind: 'error',
-                message: remoteHostGaveUpMessage(
-                  requested,
-                  announceWaitAlreadyExpired() ?? 0,
-                ),
-              }
-            : remoteHostRoute(
-                toolUse.input,
-                tool.name,
-                getCurrentStructuredIO() !== undefined,
-              )
       }
-    } else {
-      hostRoute = remoteHostRoute(
-        toolUse.input,
-        tool.name,
-        getCurrentStructuredIO() !== undefined,
-      )
     }
   }
   if (hostRoute.kind === 'error') {
     const detail = hostRoute.message
     logForDebugging(`remote tool ${toolName}: ${detail}`)
+    yield {
+      message: createUserMessage({
+        content: [
+          {
+            type: 'tool_result',
+            content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+            is_error: true,
+            tool_use_id: toolUse.id,
+          },
+        ],
+        toolUseResult: detail,
+        sourceToolAssistantUUID: assistantMessage.uuid,
+      }),
+    }
+    return
+  }
+
+  if (hostRoute.kind === 'routed_host') {
+    const { host, wireToolName } = hostRoute
+    const hostSource: 'session' | 'bridge' =
+      host.source === 'session' ? 'session' : 'bridge'
+    const hostMeta = { name: host.name, source: hostSource }
+    const rawInputRecord =
+      toolUse.input !== null && typeof toolUse.input === 'object'
+        ? (toolUse.input as Record<string, unknown>)
+        : {}
+    const { [REMOTE_TOOL_HOST_FIELD]: _stripHost, ...cleanInput } =
+      rawInputRecord
+    const ownershipRefusal = checkRemoteTaskStopOwnership(
+      tool.name,
+      cleanInput,
+      host.name,
+      hostSource,
+      toolUseContext,
+    )
+    if (ownershipRefusal !== undefined) {
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${ownershipRefusal}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: ownershipRefusal,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    const deadlineMs =
+      host.transport.limits?.defaultDeadlineMs ?? REMOTE_TOOL_DEADLINE_MS
+    if (REMOTE_PLUMBING_TOOLS.has(tool.name) && host.transport.callPlumbing) {
+      const plumbing = await host.transport.callPlumbing(
+        wireToolName,
+        cleanInput,
+        {
+          signal: toolUseContext.abortController.signal,
+          deadlineMs,
+        },
+      )
+      if (plumbing?.kind === 'result') {
+        const rendered = remoteResultText(
+          {
+            envelope: plumbing.envelope,
+            content: plumbing.content,
+            text: plumbing.text,
+            is_error: plumbing.isError,
+          },
+          hostMeta,
+        )
+        yield {
+          message: await buildRemoteSuccessUserMessage({
+            tool,
+            toolUseId: toolUse.id,
+            rendered,
+            assistantMessage,
+            toolUseContext,
+          }),
+        }
+        return
+      }
+      const detail =
+        plumbing?.kind === 'cancelled'
+          ? REMOTE_HOST_INTERRUPTED
+          : remoteToolOutcomeMessage(
+              plumbing ?? { kind: 'unreachable' },
+              hostMeta,
+            )
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${detail}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+
+    const callerRefusal = await checkRemoteSubagentCallerGate({
+      tool,
+      rawInput: rawInputRecord,
+      hostName: host.name,
+      source: hostSource,
+      toolUseContext,
+      canUseTool,
+      assistantMessage,
+      toolUseId: toolUse.id,
+    })
+    if (callerRefusal !== undefined) {
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${callerRefusal}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: callerRefusal,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+
+    let effectiveInput = cleanInput
+    let sent = await host.transport.call(
+      wireToolName,
+      effectiveInput,
+      { op: 'call', call_id: toolUse.id },
+      {
+        signal: toolUseContext.abortController.signal,
+        deadlineMs,
+        toolUseId: toolUse.id,
+      },
+    )
+    let effectiveCallId = toolUse.id
+    if (
+      sent?.kind === 'result' &&
+      sent.envelope &&
+      typeof sent.envelope === 'object' &&
+      sent.envelope.outcome === 'needs_approval'
+    ) {
+      const envRec = sent.envelope as Record<string, unknown>
+      effectiveCallId =
+        typeof envRec.call_id === 'string' ? envRec.call_id : toolUse.id
+      const askObj =
+        envRec.ask !== null && typeof envRec.ask === 'object'
+          ? (envRec.ask as { message?: unknown })
+          : undefined
+      const approvalResult = await approveRemoteToolCall({
+        tool,
+        hostName: host.name,
+        cleanInput,
+        askMessage: askObj?.message ?? envRec.message,
+        toolUseContext,
+        canUseTool,
+        assistantMessage,
+        toolUseId: toolUse.id,
+      })
+      if (approvalResult.kind === 'refused') {
+        yield {
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: `<tool_use_error>Error: ${approvalResult.detail}</tool_use_error>`,
+                is_error: true,
+                tool_use_id: toolUse.id,
+              },
+            ],
+            toolUseResult: approvalResult.detail,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        }
+        return
+      }
+      const approved = approvalResult.kind === 'approved'
+      if (approved) {
+        effectiveInput = approvalResult.effectiveInput
+      }
+      sent = await host.transport.call(
+        wireToolName,
+        effectiveInput,
+        {
+          op: 'outcome_of',
+          call_id: effectiveCallId,
+          decision: approved ? 'allow' : 'deny',
+          approval: approved
+            ? {
+                decision: 'allow',
+                ...(approvalResult.updatedInput !== undefined && {
+                  updated_input: approvalResult.updatedInput,
+                }),
+                ...(approvalResult.feedback !== undefined && {
+                  feedback: approvalResult.feedback,
+                }),
+              }
+            : {
+                decision: 'deny',
+                ...(approvalResult.feedback !== undefined && {
+                  feedback: approvalResult.feedback,
+                }),
+              },
+          ...(approved &&
+            approvalResult.updatedInput !== undefined && {
+              updatedInput: approvalResult.updatedInput,
+            }),
+          ...(approvalResult.feedback !== undefined && {
+            feedback: approvalResult.feedback,
+          }),
+        },
+        {
+          signal: toolUseContext.abortController.signal,
+          deadlineMs,
+          toolUseId: toolUse.id,
+        },
+      )
+    }
+    if (sent?.kind === 'result') {
+      const responsePayload = {
+        envelope: sent.envelope,
+        content: sent.content,
+        text: sent.text,
+        is_error: sent.isError,
+      }
+      rememberRemoteBackgroundShell(
+        toolUseContext,
+        effectiveInput,
+        responsePayload,
+        host.name,
+        effectiveCallId,
+      )
+      const rendered = remoteResultText(responsePayload, hostMeta)
+      yield {
+        message: await buildRemoteSuccessUserMessage({
+          tool,
+          toolUseId: toolUse.id,
+          rendered,
+          assistantMessage,
+          toolUseContext,
+        }),
+      }
+      return
+    }
+    const detail =
+      sent?.kind === 'cancelled'
+        ? REMOTE_HOST_INTERRUPTED
+        : sent?.kind === 'approval_unverified'
+          ? remoteHostApprovalUnverifiedMessage(host.name)
+          : remoteToolOutcomeMessage(sent ?? { kind: 'unreachable' }, hostMeta)
     yield {
       message: createUserMessage({
         content: [
@@ -745,6 +1984,30 @@ export async function* runToolUse(
       toolUse.input !== null && typeof toolUse.input === 'object'
         ? (toolUse.input as Record<string, unknown>)
         : {}
+    const ownershipRefusal = checkRemoteTaskStopOwnership(
+      tool.name,
+      inputRecord,
+      machine.name,
+      machine.source,
+      toolUseContext,
+    )
+    if (ownershipRefusal !== undefined) {
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${ownershipRefusal}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: ownershipRefusal,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
     if (REMOTE_PLUMBING_TOOLS.has(tool.name)) {
       const plumbing = await callRemotePlumbing({
         host: {
@@ -763,17 +2026,12 @@ export async function* runToolUse(
       if (plumbing.kind === 'result') {
         const rendered = remoteResultText(plumbing.response, machine)
         yield {
-          message: createUserMessage({
-            content: [
-              {
-                type: 'tool_result',
-                content: rendered.content as ToolResultBlockParam['content'],
-                is_error: rendered.isError,
-                tool_use_id: toolUse.id,
-              },
-            ],
-            toolUseResult: rendered.output ?? rendered.content,
-            sourceToolAssistantUUID: assistantMessage.uuid,
+          message: await buildRemoteSuccessUserMessage({
+            tool,
+            toolUseId: toolUse.id,
+            rendered,
+            assistantMessage,
+            toolUseContext,
           }),
         }
         return
@@ -790,6 +2048,33 @@ export async function* runToolUse(
             },
           ],
           toolUseResult: detail,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      }
+      return
+    }
+    const callerRefusal = await checkRemoteSubagentCallerGate({
+      tool,
+      rawInput: inputRecord,
+      hostName: machine.name,
+      source: machine.source,
+      toolUseContext,
+      canUseTool,
+      assistantMessage,
+      toolUseId: toolUse.id,
+    })
+    if (callerRefusal !== undefined) {
+      yield {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>Error: ${callerRefusal}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUse.id,
+            },
+          ],
+          toolUseResult: callerRefusal,
           sourceToolAssistantUUID: assistantMessage.uuid,
         }),
       }
@@ -835,13 +2120,24 @@ export async function* runToolUse(
             typeof (result as { epoch?: unknown }).epoch === 'string'
               ? (result as { epoch: string }).epoch
               : undefined
-          noteRemoteMachineHeard(machine.name, epoch)
+          noteRemoteMachineHeard(
+            machine.name,
+            epoch,
+            toolUseContext.toolState,
+            machine.instanceId,
+          )
         }
         return probe
       },
-      onProbeMissed: () => markRemoteMachineAway(machine.name, 'probe_missed'),
+      onProbeMissed: () =>
+        markRemoteMachineAway(
+          machine.name,
+          'probe_missed',
+          toolUseContext.toolState,
+          machine.instanceId,
+        ),
       rebind: () => {
-        const current = announcedRemoteMachines().find(
+        const current = announcedRemoteMachines(toolUseContext.toolState).find(
           item => item.name === machine.name,
         )
         if (!current || current.instanceId === machine.instanceId) {
@@ -856,7 +2152,12 @@ export async function* runToolUse(
       },
     })
     if (sent.kind === 'unreachable' || sent.kind === 'host_gone') {
-      markRemoteMachineAway(machine.name)
+      markRemoteMachineAway(
+        machine.name,
+        undefined,
+        toolUseContext.toolState,
+        machine.instanceId,
+      )
     }
     if (sent.kind === 'timed_out') {
       noteHeldRemoteTool(sent, toolName, true)
@@ -893,17 +2194,12 @@ export async function* runToolUse(
         if (checked.kind === 'result') {
           const rendered = remoteResultText(checked.response, machine)
           yield {
-            message: createUserMessage({
-              content: [
-                {
-                  type: 'tool_result',
-                  content: rendered.content as ToolResultBlockParam['content'],
-                  is_error: rendered.isError,
-                  tool_use_id: toolUse.id,
-                },
-              ],
-              toolUseResult: rendered.output ?? rendered.content,
-              sourceToolAssistantUUID: assistantMessage.uuid,
+            message: await buildRemoteSuccessUserMessage({
+              tool,
+              toolUseId: toolUse.id,
+              rendered,
+              assistantMessage,
+              toolUseContext,
             }),
           }
           return
@@ -932,20 +2228,46 @@ export async function* runToolUse(
         typeof sent.response?.envelope === 'object'
           ? (sent.response.envelope as {
               ask?: { message?: unknown }
+              message?: unknown
               call_id?: unknown
             })
           : undefined
-      const ask = envelope?.ask?.message
+      const ask = envelope?.ask?.message ?? envelope?.message
       const callId =
         typeof envelope?.call_id === 'string' ? envelope.call_id : toolUse.id
-      const decision = await canUseTool(
+      const { [REMOTE_TOOL_HOST_FIELD]: _dropHostField, ...cleanRemoteInput } =
+        inputRecord
+      const approvalResult = await approveRemoteToolCall({
         tool,
-        inputRecord as { [key: string]: string },
+        hostName: machine.name,
+        cleanInput: cleanRemoteInput,
+        askMessage: ask,
         toolUseContext,
+        canUseTool,
         assistantMessage,
-        toolUse.id,
-      )
-      const approved = decision.behavior === 'allow'
+        toolUseId: toolUse.id,
+      })
+      if (approvalResult.kind === 'refused') {
+        yield {
+          message: createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: `<tool_use_error>Error: ${approvalResult.detail}</tool_use_error>`,
+                is_error: true,
+                tool_use_id: toolUse.id,
+              },
+            ],
+            toolUseResult: approvalResult.detail,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        }
+        return
+      }
+      const approved = approvalResult.kind === 'approved'
+      const effectiveRemoteInput = approved
+        ? approvalResult.effectiveInput
+        : cleanRemoteInput
       const again = await callRemoteTool({
         host: {
           instanceId: machine.instanceId,
@@ -954,12 +2276,34 @@ export async function* runToolUse(
           live: { status: 'online', lastHeardAt: Date.now() },
         },
         name: tool.name,
-        input: inputRecord,
+        input: effectiveRemoteInput,
         envelope: {
           op: 'outcome_of',
           call_id: callId,
           decision: approved ? 'allow' : 'deny',
-          ...(!approved && { approval: { decision: 'deny' } }),
+          approval: approved
+            ? {
+                decision: 'allow',
+                ...(approvalResult.updatedInput !== undefined && {
+                  updated_input: approvalResult.updatedInput,
+                }),
+                ...(approvalResult.feedback !== undefined && {
+                  feedback: approvalResult.feedback,
+                }),
+              }
+            : {
+                decision: 'deny',
+                ...(approvalResult.feedback !== undefined && {
+                  feedback: approvalResult.feedback,
+                }),
+              },
+          ...(approved &&
+            approvalResult.updatedInput !== undefined && {
+              updatedInput: approvalResult.updatedInput,
+            }),
+          ...(approvalResult.feedback !== undefined && {
+            feedback: approvalResult.feedback,
+          }),
         },
         toolUseId: toolUse.id,
         signal: toolUseContext.abortController.signal,
@@ -969,20 +2313,21 @@ export async function* runToolUse(
       })
       if (again.kind === 'timed_out') noteHeldRemoteTool(again, toolName, false)
       if (again.kind === 'result') {
+        rememberRemoteBackgroundShell(
+          toolUseContext,
+          effectiveRemoteInput,
+          again.response,
+          machine.name,
+          callId,
+        )
         const rendered = remoteResultText(again.response, machine)
-        const text = rendered.content
         yield {
-          message: createUserMessage({
-            content: [
-              {
-                type: 'tool_result',
-                content: text as ToolResultBlockParam['content'],
-                is_error: rendered.isError,
-                tool_use_id: toolUse.id,
-              },
-            ],
-            toolUseResult: rendered.output ?? text,
-            sourceToolAssistantUUID: assistantMessage.uuid,
+          message: await buildRemoteSuccessUserMessage({
+            tool,
+            toolUseId: toolUse.id,
+            rendered,
+            assistantMessage,
+            toolUseContext,
           }),
         }
         return
@@ -1005,20 +2350,21 @@ export async function* runToolUse(
       return
     }
     if (sent.kind === 'result') {
+      rememberRemoteBackgroundShell(
+        toolUseContext,
+        inputRecord,
+        sent.response,
+        machine.name,
+        toolUse.id,
+      )
       const rendered = remoteResultText(sent.response, machine)
-      const text = rendered.content
       yield {
-        message: createUserMessage({
-          content: [
-            {
-              type: 'tool_result',
-              content: text as ToolResultBlockParam['content'],
-              is_error: rendered.isError,
-              tool_use_id: toolUse.id,
-            },
-          ],
-          toolUseResult: rendered.output ?? text,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+        message: await buildRemoteSuccessUserMessage({
+          tool,
+          toolUseId: toolUse.id,
+          rendered,
+          assistantMessage,
+          toolUseContext,
         }),
       }
       return
@@ -1168,8 +2514,73 @@ const toolCallSite: FunctionHookHopSite = {
 
 type ToolCallCoreCapture = {
   output?: { value: unknown }
+  synthesizedOutput?: { value: unknown }
+  hookSynthesized?: {
+    rawResult: unknown
+    rawText: string | undefined
+    priorRun: { messages: MessageUpdateLazy[] } | undefined
+    undelivered: MessageUpdateLazy[]
+  }
+  lastCoreInput?: Record<string, unknown>
+  detached?: boolean
+  durationMs?: number
   isReadOnly?: boolean
+  /** densable DVt `e.deny` — tool.call wrap deny, not permission Error:. */
+  deny?: string
+  /** densable Iyo `rL(e.context)` */
+  context?: string[]
 }
+
+function isEmptyRecord(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 0
+  )
+}
+
+/** densable Gyo @188820550 / kVn @188788636 — validate updatedInput ignoring unrecognized_keys. */
+function validateUpdatedInputAgainstSchema(
+  tool: Tool,
+  updatedInput: Record<string, unknown>,
+):
+  | { ok: true; strippedInput: Record<string, unknown> }
+  | { ok: false; formatted: string; issueCodes: string[] } {
+  const parsed = tool.inputSchema.safeParse(updatedInput)
+  if (parsed.success) {
+    return { ok: true, strippedInput: updatedInput }
+  }
+  const remainingIssues = parsed.error.issues.filter(
+    issue => issue.code !== 'unrecognized_keys',
+  )
+  if (remainingIssues.length === 0) {
+    const cleaned = { ...updatedInput }
+    for (const issue of parsed.error.issues) {
+      if (issue.code === 'unrecognized_keys' && 'keys' in issue) {
+        for (const key of issue.keys) {
+          delete cleaned[key]
+        }
+      }
+    }
+    return { ok: true, strippedInput: cleaned }
+  }
+  const issueCodes = Array.from(
+    new Set(remainingIssues.map(issue => String(issue.code))),
+  )
+  return {
+    ok: false,
+    formatted: formatZodValidationError(
+      tool.name,
+      new z.ZodError(remainingIssues),
+    ),
+    issueCodes,
+  }
+}
+
+;(runToolUse as unknown as Record<symbol, unknown>)[
+  RUN_TOOL_USE_HANDLES_DETACH
+] = true
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -1278,6 +2689,28 @@ function extractToolUseResultFromMessages(
   return undefined
 }
 
+/** Skip is_error tool_result so permission deny `Error:` is not kce'd (gold DVt). */
+function extractSuccessfulToolUseResult(
+  updates: readonly MessageUpdateLazy[],
+): unknown {
+  for (const { message } of updates) {
+    if (message.type !== 'user') continue
+    const content = message.message?.content
+    if (
+      Array.isArray(content) &&
+      content.some(
+        block => block.type === 'tool_result' && block.is_error === true,
+      )
+    ) {
+      continue
+    }
+    if (message.toolUseResult !== undefined) {
+      return message.toolUseResult
+    }
+  }
+  return undefined
+}
+
 function buildToolCallDenyMessages(
   toolUseID: string,
   reason: string,
@@ -1358,7 +2791,131 @@ function rebuildMessagesWithReplacedToolResult(
   return [replacedEntry, ...remaining]
 }
 
-async function dispatchCheckPermissionsAndCallTool(
+const MANAGED_PRE_TOOL_RANK = { none: 0, allow: 1, ask: 2, deny: 3 } as const
+
+function aggregateManagedPreToolPass(
+  yields: Array<{
+    permissionBehavior?: string
+    hookPermissionDecisionReason?: string
+    blockingError?: { blockingError: string; command: string }
+    updatedInput?: Record<string, unknown>
+    additionalContexts?: string[]
+  }>,
+  tool: Tool,
+): ManagedHookPass['result'] {
+  let kind: keyof typeof MANAGED_PRE_TOOL_RANK = 'none'
+  let reason: string | undefined
+  let updatedInput: Record<string, unknown> | undefined
+  let additionalContext: string[] | undefined
+  for (const item of yields) {
+    if (item.blockingError) {
+      kind = 'deny'
+      reason = getPreToolHookBlockingMessage(
+        `PreToolUse:${tool.name}`,
+        item.blockingError,
+      )
+    }
+    if (item.updatedInput !== undefined && !isEmptyRecord(item.updatedInput)) {
+      const schemaCheck = validateUpdatedInputAgainstSchema(
+        tool,
+        item.updatedInput,
+      )
+      if (!schemaCheck.ok) {
+        const validationMessage = `PreToolUse hook for ${tool.name} returned updatedInput that failed schema validation: ${schemaCheck.formatted}`
+        logForDebugging(validationMessage, { level: 'warn' })
+        kind = 'deny'
+        reason = validationMessage
+        continue
+      }
+      updatedInput = schemaCheck.strippedInput
+    }
+    switch (item.permissionBehavior) {
+      case 'deny':
+        if (MANAGED_PRE_TOOL_RANK[kind] < MANAGED_PRE_TOOL_RANK.deny) {
+          kind = 'deny'
+          reason = item.hookPermissionDecisionReason ?? 'denied'
+        }
+        break
+      case 'ask':
+        if (MANAGED_PRE_TOOL_RANK[kind] < MANAGED_PRE_TOOL_RANK.ask) {
+          kind = 'ask'
+          reason = item.hookPermissionDecisionReason ?? ''
+        }
+        break
+      case 'allow':
+        if (MANAGED_PRE_TOOL_RANK[kind] < MANAGED_PRE_TOOL_RANK.allow) {
+          kind = 'allow'
+        }
+        break
+      default:
+        break
+    }
+    if (item.additionalContexts && item.additionalContexts.length > 0) {
+      additionalContext = [
+        ...(additionalContext ?? []),
+        ...item.additionalContexts,
+      ]
+    }
+  }
+  const result: ManagedHookPass['result'] = {}
+  if (kind === 'deny') result.deny = reason
+  if (kind === 'ask') result.ask = reason
+  if (kind === 'allow') result.allow = true
+  if (updatedInput && kind !== 'deny') result.updatedInput = updatedInput
+  if (additionalContext) result.additionalContext = additionalContext
+  return result
+}
+
+/** densable Rq(zTe(..., {managedHooksOnly:!0})) */
+async function drainManagedPreToolUse(
+  tool: Tool,
+  toolUseID: string,
+  input: { [key: string]: boolean | string | number },
+  toolUseContext: ToolUseContext,
+): Promise<ManagedHookPass> {
+  const yields: ManagedHookPass['yields'] = []
+  const permissionMode = toolUseContext.getAppState().toolPermissionContext.mode
+  for await (const item of executePreToolHooks(
+    tool.name,
+    toolUseID,
+    input,
+    toolUseContext,
+    permissionMode,
+    toolUseContext.abortController.signal,
+    undefined,
+    undefined,
+    undefined,
+    { managedHooksOnly: true },
+  )) {
+    yields.push(item)
+  }
+  const result = aggregateManagedPreToolPass(
+    yields as Parameters<typeof aggregateManagedPreToolPass>[0],
+    tool,
+  )
+  // densable Uat: decisions, rewrites and context live in result; only
+  // diagnostics, stops and deferrals are replayed as yields.
+  const replayYields: unknown[] = []
+  for (const item of yields as Array<Record<string, unknown>>) {
+    const {
+      permissionBehavior,
+      hookPermissionDecisionReason: _reason,
+      heldForServedCall: _held,
+      blockingError: _blocking,
+      updatedInput: _input,
+      additionalContexts: _contexts,
+      ...rest
+    } = item
+    if (permissionBehavior === 'defer') {
+      replayYields.push({ permissionBehavior, hookSource: rest.hookSource })
+    }
+    if (Object.keys(rest).some(key => key !== 'hookSource'))
+      replayYields.push(rest)
+  }
+  return { result, yields: replayYields }
+}
+
+async function dispatchToolCallCore(
   tool: Tool,
   toolUseID: string,
   input: { [key: string]: boolean | string | number },
@@ -1375,6 +2932,7 @@ async function dispatchCheckPermissionsAndCallTool(
       | ProgressMessage<HookProgress>
       | ToolBridgeEvent,
   ) => void,
+  toolCallCapture?: ToolCallCoreCapture,
 ): Promise<MessageUpdateLazy[]> {
   if (!isInsideAgentSpawnLaunch() && hasMatchingFunctionHook('tool.call')) {
     const rawCoerced =
@@ -1426,6 +2984,13 @@ async function dispatchCheckPermissionsAndCallTool(
               const resultValue = capture.output
                 ? capture.output.value
                 : extractToolUseResultFromMessages(messages)
+              if (toolCallCapture) {
+                toolCallCapture.lastCoreInput = rewrittenInput
+                if (capture.output) {
+                  toolCallCapture.output = capture.output
+                  toolCallCapture.durationMs = capture.durationMs
+                }
+              }
               const summary = extractToolResultSummary(messages, toolUseID)
               const ref = coreRuns.push({
                 input: rewrittenInput,
@@ -1486,11 +3051,84 @@ async function dispatchCheckPermissionsAndCallTool(
       const out = isPlainRecord(rawChainOut) ? rawChainOut : {}
       const matchedRun =
         typeof out.ref === 'number' ? coreRuns[out.ref - 1] : undefined
-      const keptCoreResult =
+      let keptCoreResult =
         matchedRun !== undefined &&
         (out.result === undefined ||
           out.result === matchedRun.result ||
           pinValue(out.result) === pinValue(matchedRun.result))
+      const accountMemoryImpersonated =
+        !keptCoreResult &&
+        out.deny === undefined &&
+        tool.mcpInfo?.accountMemory === true
+      if (accountMemoryImpersonated) {
+        logForDebugging(
+          `tool.call ${tool.name} ${toolUseID}: a hooks module answered for the account memory server; its answer was dropped`,
+          { level: 'warn' },
+        )
+      }
+      const effectiveRun = keptCoreResult
+        ? matchedRun
+        : accountMemoryImpersonated
+          ? coreRuns.at(-1)
+          : undefined
+      if (effectiveRun !== undefined) {
+        keptCoreResult = true
+      }
+      const undeliveredManagedMessages = (): MessageUpdateLazy[] => {
+        const pass = toolUseContext.managedPass?.pass
+        if (!pass || coreRuns.length > 0 || coreThrown !== undefined) return []
+        const outMsgs: MessageUpdateLazy[] = []
+        if (pass.result.additionalContext?.length) {
+          outMsgs.push({
+            message: createAttachmentMessage({
+              type: 'hook_additional_context',
+              content: pass.result.additionalContext,
+              hookName: `PreToolUse:${tool.name}`,
+              toolUseID,
+              hookEvent: 'PreToolUse',
+            }),
+          })
+        }
+        for (const item of pass.yields as Array<{
+          message?: Message
+          preventContinuation?: boolean
+          stopReason?: string
+        }>) {
+          if (
+            item.message !== undefined &&
+            item.message.type !== 'progress' &&
+            !(
+              item.message.type === 'attachment' &&
+              item.message.attachment?.type === 'hook_blocking_error'
+            )
+          ) {
+            outMsgs.push({ message: item.message })
+          }
+          if (item.preventContinuation) {
+            outMsgs.push({
+              message: createAttachmentMessage({
+                type: 'hook_stopped_continuation',
+                message:
+                  item.stopReason || 'Execution stopped by PreToolUse hook',
+                hookName: `PreToolUse:${tool.name}`,
+                toolUseID,
+                hookEvent: 'PreToolUse',
+              }),
+            })
+          }
+        }
+        return outMsgs
+      }
+      if (accountMemoryImpersonated && effectiveRun === undefined) {
+        return [
+          ...undeliveredManagedMessages(),
+          ...buildToolCallDenyMessages(
+            toolUseID,
+            'A plugin hook answered a call to the account memory server in place of the server; the call is refused.',
+            assistantMessage.uuid,
+          ),
+        ]
+      }
       // densable DVt @189565200: if (!ve) log hook-resolved without core.
       if (!keptCoreResult) {
         logForDebugging(
@@ -1500,24 +3138,40 @@ async function dispatchCheckPermissionsAndCallTool(
         )
       }
       if (typeof out.deny === 'string') {
-        return buildToolCallDenyMessages(
-          toolUseID,
-          out.deny,
-          assistantMessage.uuid,
-        )
+        if (toolCallCapture) {
+          toolCallCapture.deny = out.deny
+        }
+        return [
+          ...undeliveredManagedMessages(),
+          ...buildToolCallDenyMessages(
+            toolUseID,
+            out.deny,
+            assistantMessage.uuid,
+          ),
+        ]
       }
 
       let finalMessages: MessageUpdateLazy[]
-      if (keptCoreResult) {
-        finalMessages = [...matchedRun.messages]
+      if (keptCoreResult && effectiveRun !== undefined) {
+        if (toolCallCapture) {
+          toolCallCapture.lastCoreInput = effectiveRun.input
+        }
+        finalMessages = [...effectiveRun.messages]
+      } else if (
+        toolCallCapture !== undefined &&
+        toolUseContext.managedPass !== undefined
+      ) {
+        // densable DVt @189565600: run managed PostToolUse (kce) BEFORE outputSchema.safeParse!
+        toolCallCapture.hookSynthesized = {
+          rawResult: out.result,
+          rawText: typeof out.text === 'string' ? out.text : undefined,
+          priorRun: matchedRun ?? coreRuns.at(-1),
+          undelivered: undeliveredManagedMessages(),
+        }
+        finalMessages = []
       } else {
-        const hasExplicitResult = Object.hasOwn(out, 'result')
         let replacementResult = out.result
-        if (
-          tool.outputSchema &&
-          (replacementResult !== undefined ||
-            (hasExplicitResult && typeof out.text !== 'string'))
-        ) {
+        if (tool.outputSchema) {
           const parsedOut = tool.outputSchema.safeParse(replacementResult)
           if (!parsedOut.success) {
             const shapeErr = `tool.call step resolved ${tool.name} with a result that does not match its output shape: ${parsedOut.error.message}`
@@ -1556,34 +3210,35 @@ async function dispatchCheckPermissionsAndCallTool(
             }
           }
         }
-        const preserveResult =
-          !toolUseContext.agentId ||
-          toolUseContext.preserveToolUseResults === true
-        finalMessages = rebuildMessagesWithReplacedToolResult(
-          matchedRun ?? coreRuns.at(-1),
-          toolUseID,
-          mappedBlock,
-          preserveResult ? replacementResult : undefined,
-          assistantMessage.uuid,
+        const preserveResult = shouldPreserveManagedToolHookPass(
+          toolUseContext,
+          tool,
         )
+        if (toolCallCapture) {
+          toolCallCapture.synthesizedOutput = {
+            value:
+              replacementResult !== undefined
+                ? replacementResult
+                : typeof out.text === 'string'
+                  ? out.text
+                  : '',
+          }
+        }
+        finalMessages = [
+          ...undeliveredManagedMessages(),
+          ...rebuildMessagesWithReplacedToolResult(
+            matchedRun ?? coreRuns.at(-1),
+            toolUseID,
+            mappedBlock,
+            preserveResult ? replacementResult : undefined,
+            assistantMessage.uuid,
+          ),
+        ]
       }
 
-      const contextEntries = Array.isArray(out.context)
-        ? (out.context as unknown[]).filter(
-            (entry): entry is string =>
-              typeof entry === 'string' && entry !== '',
-          )
-        : []
-      if (contextEntries.length > 0) {
-        finalMessages.push({
-          message: createAttachmentMessage({
-            type: 'hook_additional_context',
-            content: contextEntries,
-            hookName: 'tool.call',
-            toolUseID: `${toolUseID}-context`,
-            hookEvent: 'PostToolUse',
-          }),
-        })
+      const contextEntries = listOfContextTexts(out.context)
+      if (toolCallCapture && contextEntries !== undefined) {
+        toolCallCapture.context = contextEntries
       }
       return finalMessages
     }
@@ -1601,7 +3256,460 @@ async function dispatchCheckPermissionsAndCallTool(
     mcpServerType,
     mcpServerBaseUrl,
     onToolProgress,
+    toolCallCapture,
   )
+}
+
+/** densable n2o / Iyo — rlt first, then kce messages minus duplicate attachments. */
+async function appendToolCallContextKce(
+  messages: MessageUpdateLazy[],
+  opts: {
+    tool: Tool
+    toolUseID: string
+    nextInput: { [key: string]: boolean | string | number }
+    toolUseContext: ToolUseContext
+    context: string[] | undefined
+    skip: boolean
+    managedRan?: boolean
+  },
+): Promise<MessageUpdateLazy[]> {
+  if (opts.skip || !opts.context || opts.context.length === 0) {
+    return messages
+  }
+  // densable Iyo `!managedRan()` → `[...s, rlt(await kcn(g, "tool.call"))]`
+  if (opts.managedRan === false) {
+    const packed = await packToolCallContext(opts.context)
+    return packed.length === 0
+      ? messages
+      : [
+          ...messages,
+          {
+            message: createAttachmentMessage({
+              type: 'hook_additional_context',
+              content: packed,
+              hookName: 'tool.call',
+              toolUseID: `${opts.toolUseID}-context`,
+              hookEvent: 'PostToolUse',
+            }),
+          },
+        ]
+  }
+  const stopped = [...messages].some(
+    update =>
+      update.message?.type === 'attachment' &&
+      update.message.attachment?.type === 'hook_stopped_continuation',
+  )
+  const kce = await collectManagedOnlyPostToolUse({
+    tool: opts.tool,
+    toolUseID: opts.toolUseID,
+    toolInput: opts.nextInput as Record<string, unknown>,
+    output: opts.context,
+    toolUseContext: opts.toolUseContext,
+  })
+  const rewrite = {
+    rewritten: kce.rewritten,
+    output: kce.output,
+    messages: kce.messages,
+  }
+  const stoppedAfter =
+    stopped ||
+    rewrite.messages.some(
+      update =>
+        update.message?.type === 'attachment' &&
+        update.message.attachment?.type === 'hook_stopped_continuation',
+    )
+  const rewritten = stoppedAfter
+    ? undefined
+    : rewrittenToolCallContext(opts.context, rewrite)
+  const packed =
+    rewritten !== undefined && rewritten.length > 0
+      ? await packToolCallContext(rewritten)
+      : []
+  const priorPins = new Set(
+    messages.flatMap(update => {
+      const message = update.message
+      return message?.type === 'attachment'
+        ? [pinHookAttachment(message.attachment)]
+        : []
+    }),
+  )
+  const rlt =
+    packed.length > 0
+      ? [
+          {
+            message: createAttachmentMessage({
+              type: 'hook_additional_context',
+              content: packed,
+              hookName: 'tool.call',
+              toolUseID: `${opts.toolUseID}-context`,
+              hookEvent: 'PostToolUse',
+            }),
+          },
+        ]
+      : []
+  const kceMessages = rewrite.messages.filter(update => {
+    const message = update.message
+    if (message?.type !== 'attachment') {
+      return true
+    }
+    return !priorPins.has(pinHookAttachment(message.attachment))
+  })
+  return [...messages, ...rlt, ...kceMessages]
+}
+
+/** densable AVt — managed PreToolUse before core, managedPass on the clone. */
+async function dispatchCheckPermissionsAndCallTool(
+  tool: Tool,
+  toolUseID: string,
+  input: { [key: string]: boolean | string | number },
+  toolUseContext: ToolUseContext,
+  canUseTool: CanUseToolFn,
+  assistantMessage: AssistantMessage,
+  messageId: string,
+  requestId: string | undefined,
+  mcpServerType: McpServerType,
+  mcpServerBaseUrl: ReturnType<typeof getLoggingSafeMcpBaseUrl>,
+  onToolProgress: (
+    progress:
+      | ToolProgress<ToolProgressData>
+      | ProgressMessage<HookProgress>
+      | ToolBridgeEvent,
+  ) => void,
+): Promise<MessageUpdateLazy[]> {
+  const capture: ToolCallCoreCapture = {}
+  let managedRan = false
+  const runCore = (
+    nextInput: { [key: string]: boolean | string | number },
+    ctx: ToolUseContext,
+  ) =>
+    dispatchToolCallCore(
+      tool,
+      toolUseID,
+      nextInput,
+      ctx,
+      canUseTool,
+      assistantMessage,
+      messageId,
+      requestId,
+      mcpServerType,
+      mcpServerBaseUrl,
+      onToolProgress,
+      capture,
+    )
+
+  if (
+    toolUseContext.options.settingsHooksOff === true ||
+    toolUseContext.options.bareFork === true ||
+    (tool.mcpInfo === undefined && tool.name === END_CONVERSATION_TOOL_NAME)
+  ) {
+    return runCore(input, toolUseContext)
+  }
+
+  const drained = await drainManagedPreToolUse(
+    tool,
+    toolUseID,
+    input,
+    toolUseContext,
+  )
+  if (drained.result.deny !== undefined) {
+    const messages = buildToolCallDenyMessages(
+      toolUseID,
+      drained.result.deny,
+      assistantMessage.uuid,
+    )
+    // A managed refusal never reaches the core PreToolUse consumer.
+    // Preserve the stop signal on that early-return path as well.
+    for (const item of drained.yields as Array<{
+      preventContinuation?: boolean
+      stopReason?: string
+    }>) {
+      if (item.preventContinuation) {
+        messages.push({
+          message: createAttachmentMessage({
+            type: 'hook_stopped_continuation',
+            message: item.stopReason || 'Execution stopped by PreToolUse hook',
+            hookName: `PreToolUse:${tool.name}`,
+            toolUseID,
+            hookEvent: 'PreToolUse',
+          }),
+        })
+        break
+      }
+    }
+    return messages
+  }
+  if (
+    didAccountMemoryHookRewriteInput(tool, input, drained.result.updatedInput)
+  ) {
+    return buildToolCallDenyMessages(
+      toolUseID,
+      accountMemoryHookRewriteDenied(tool, 'PreToolUse', 'policySettings')
+        .message,
+      assistantMessage.uuid,
+    )
+  }
+
+  const nextInput = (drained.result.updatedInput ?? input) as typeof input
+  const managedPass: ToolCallManagedPass = {
+    toolUseId: toolUseID,
+    input: nextInput,
+    inputKey: () => pinValue(nextInput),
+    pass: drained,
+  }
+  managedRan = true
+  const ctx: ToolUseContext = { ...toolUseContext, managedPass }
+  try {
+    const messages = await runCore(nextInput, ctx)
+    const effectiveHookInput = (capture.lastCoreInput ??
+      nextInput) as typeof input
+
+    // densable DVt @189565600 + dlt @187739800: when tool.call resolved without
+    // keeping a core run, managed PostToolUse (kce) runs BEFORE outputSchema.safeParse!
+    if (capture.hookSynthesized !== undefined) {
+      const synth = capture.hookSynthesized
+      const kce = await collectManagedOnlyPostToolUse({
+        tool,
+        toolUseID,
+        toolInput: effectiveHookInput as Record<string, unknown>,
+        output: synth.rawResult,
+        toolUseContext,
+        durationMs: capture.durationMs,
+      })
+      let candidateOutput: unknown = kce.output
+      if (tool.outputSchema) {
+        const parsedOut = tool.outputSchema.safeParse(candidateOutput)
+        if (!parsedOut.success) {
+          const shapeErr = `${kce.rewritten ? 'a managed PostToolUse hook rewrote' : 'tool.call step resolved'} ${tool.name} with a result that does not match its output shape: ${parsedOut.error.message}`
+          return appendToolCallContextKce(
+            [
+              ...synth.undelivered,
+              ...buildToolCallDenyMessages(
+                toolUseID,
+                shapeErr,
+                assistantMessage.uuid,
+              ),
+              ...kce.messages,
+            ],
+            {
+              tool,
+              toolUseID,
+              nextInput: effectiveHookInput,
+              toolUseContext,
+              context: capture.context,
+              skip: false,
+              managedRan,
+            },
+          )
+        }
+        candidateOutput = parsedOut.data
+      }
+      let mappedBlock: ToolResultBlockParam
+      if (candidateOutput === undefined) {
+        mappedBlock = {
+          type: 'tool_result',
+          tool_use_id: toolUseID,
+          content: kce.rewritten ? '' : (synth.rawText ?? ''),
+        }
+      } else {
+        try {
+          mappedBlock = await processToolResultBlock(
+            tool,
+            candidateOutput,
+            toolUseID,
+          )
+        } catch (err) {
+          if (kce.rewritten) {
+            const shapeErr = `a managed PostToolUse hook rewrote ${tool.name} with a result that does not match its output shape: ${errorMessage(err)}`
+            return appendToolCallContextKce(
+              [
+                ...synth.undelivered,
+                ...buildToolCallDenyMessages(
+                  toolUseID,
+                  shapeErr,
+                  assistantMessage.uuid,
+                ),
+                ...kce.messages,
+              ],
+              {
+                tool,
+                toolUseID,
+                nextInput: effectiveHookInput,
+                toolUseContext,
+                context: capture.context,
+                skip: false,
+                managedRan,
+              },
+            )
+          }
+          mappedBlock = {
+            type: 'tool_result',
+            tool_use_id: toolUseID,
+            content:
+              synth.rawText ??
+              (typeof candidateOutput === 'string'
+                ? candidateOutput
+                : jsonStringify(candidateOutput)),
+          }
+        }
+      }
+      const preserveResult = shouldPreserveManagedToolHookPass(
+        toolUseContext,
+        tool,
+      )
+      const built = [
+        ...synth.undelivered,
+        ...rebuildMessagesWithReplacedToolResult(
+          synth.priorRun,
+          toolUseID,
+          mappedBlock,
+          preserveResult ? candidateOutput : undefined,
+          assistantMessage.uuid,
+        ),
+        ...kce.messages,
+      ]
+      return appendToolCallContextKce(built, {
+        tool,
+        toolUseID,
+        nextInput: effectiveHookInput,
+        toolUseContext,
+        context: capture.context,
+        skip: false,
+        managedRan,
+      })
+    }
+
+    if (!shouldPreserveManagedToolHookPass(toolUseContext, tool)) {
+      return appendToolCallContextKce(messages, {
+        tool,
+        toolUseID,
+        nextInput: effectiveHookInput,
+        toolUseContext,
+        context: capture.context,
+        skip: capture.deny !== undefined,
+        managedRan,
+      })
+    }
+    const coreOutput = capture.output?.value
+    // densable DVt: wrap `{deny}` + last core → kce messages only
+    if (capture.deny !== undefined) {
+      if (coreOutput === undefined) {
+        return messages
+      }
+      const kce = await collectManagedOnlyPostToolUse({
+        tool,
+        toolUseID,
+        toolInput: effectiveHookInput as Record<string, unknown>,
+        output: coreOutput,
+        toolUseContext,
+        durationMs: capture.durationMs,
+      })
+      return [...messages, ...kce.messages]
+    }
+    const output = capture.detached
+      ? undefined
+      : (coreOutput ??
+        capture.synthesizedOutput?.value ??
+        extractSuccessfulToolUseResult(messages))
+    if (output === undefined) {
+      return appendToolCallContextKce(messages, {
+        tool,
+        toolUseID,
+        nextInput: effectiveHookInput,
+        toolUseContext,
+        context: capture.context,
+        skip: false,
+        managedRan,
+      })
+    }
+    const kce = await collectManagedOnlyPostToolUse({
+      tool,
+      toolUseID,
+      toolInput: effectiveHookInput as Record<string, unknown>,
+      output,
+      toolUseContext,
+      durationMs: capture.durationMs,
+    })
+    let nextMessages = messages
+    if (kce.rewritten) {
+      let rewrittenOutput: unknown = kce.output
+      if (tool.outputSchema) {
+        const parsedOut = tool.outputSchema.safeParse(rewrittenOutput)
+        if (!parsedOut.success) {
+          const shapeErr = `a managed PostToolUse hook rewrote ${tool.name} with a result that does not match its output shape: ${parsedOut.error.message}`
+          return appendToolCallContextKce(
+            [
+              ...buildToolCallDenyMessages(
+                toolUseID,
+                shapeErr,
+                assistantMessage.uuid,
+              ),
+              ...kce.messages,
+            ],
+            {
+              tool,
+              toolUseID,
+              nextInput: effectiveHookInput,
+              toolUseContext,
+              context: capture.context,
+              skip: false,
+              managedRan,
+            },
+          )
+        }
+        rewrittenOutput = parsedOut.data
+      }
+      try {
+        const mapped = await processToolResultBlock(
+          tool,
+          rewrittenOutput,
+          toolUseID,
+        )
+        const preserveResult = shouldPreserveManagedToolHookPass(
+          toolUseContext,
+          tool,
+        )
+        nextMessages = rebuildMessagesWithReplacedToolResult(
+          { messages },
+          toolUseID,
+          mapped,
+          preserveResult ? rewrittenOutput : undefined,
+          assistantMessage.uuid,
+        )
+      } catch (err) {
+        const shapeErr = `a managed PostToolUse hook rewrote ${tool.name} with a result that does not match its output shape: ${errorMessage(err)}`
+        return appendToolCallContextKce(
+          [
+            ...buildToolCallDenyMessages(
+              toolUseID,
+              shapeErr,
+              assistantMessage.uuid,
+            ),
+            ...kce.messages,
+          ],
+          {
+            tool,
+            toolUseID,
+            nextInput: effectiveHookInput,
+            toolUseContext,
+            context: capture.context,
+            skip: false,
+            managedRan,
+          },
+        )
+      }
+    }
+    return appendToolCallContextKce([...nextMessages, ...kce.messages], {
+      tool,
+      toolUseID,
+      nextInput: effectiveHookInput,
+      toolUseContext,
+      context: capture.context,
+      skip: false,
+      managedRan,
+    })
+  } finally {
+    ctx.managedPass = undefined
+  }
 }
 
 function streamedCheckPermissionsAndCallTool(
@@ -1950,6 +4058,39 @@ async function checkPermissionsAndCallTool(
     processedInput = backfilledClone
   }
 
+  // Schema defaults/transforms and observable backfill are core-owned changes.
+  // Reuse policy only when the core received the exact approved input; a plugin
+  // that changed its input must still run policy for the new call.
+  const managed = matchToolCallManagedPass(
+    toolUseContext.managedPass,
+    toolUseID,
+    input,
+  )
+  if (managed !== undefined) {
+    const inputKey = pinValue(processedInput)
+    const { updatedInput: _managedInput, ...managedResult } = managed.result
+    toolUseContext = {
+      ...toolUseContext,
+      managedPass: {
+        toolUseId: toolUseID,
+        input: processedInput,
+        inputKey: () => inputKey,
+        // AVt/Uat consume the policy rewrite before entering the core. It must
+        // not be applied again after the core normalized that approved input.
+        pass: {
+          result: managedResult,
+          yields: managed.yields.map(item => {
+            const { updatedInput: _input, ...rest } = item as Record<
+              string,
+              unknown
+            >
+            return rest
+          }),
+        },
+      },
+    }
+  }
+
   let shouldPreventContinuation = false
   let stopReason: string | undefined
   let hookPermissionResult: PermissionResult | undefined
@@ -2009,9 +4150,25 @@ async function checkPermissionsAndCallTool(
           }
         }
         break
-      case 'hookPermissionResult':
-        hookPermissionResult = result.hookPermissionResult
+      case 'hookPermissionResult': {
+        const incoming = result.hookPermissionResult
+        // densable Uat/o5r: deny > ask > allow. Managed replay and user
+        // settings may arrive as separate yields in the local hook adapter.
+        if (hookPermissionResult?.behavior === 'deny') break
+        if (
+          hookPermissionResult?.behavior === 'ask' &&
+          incoming.behavior === 'allow'
+        ) {
+          hookPermissionResult = {
+            ...hookPermissionResult,
+            updatedInput:
+              incoming.updatedInput ?? hookPermissionResult.updatedInput,
+          }
+        } else {
+          hookPermissionResult = incoming
+        }
         break
+      }
       case 'hookUpdatedInput':
         // Hook provided updatedInput without making a permission decision (passthrough)
         // Update processedInput so it's used in the normal permission flow
@@ -2191,7 +4348,8 @@ async function checkPermissionsAndCallTool(
     assistantMessage,
     toolUseID,
   )
-  const permissionDecision = resolved.decision
+  const permissionDecision =
+    detachedLetGoPermissionDeny(toolUseID) ?? resolved.decision
   processedInput = resolved.input
   const permissionDurationMs = Date.now() - permissionStart
   // In auto mode, canUseTool awaits the classifier (side_query) — if that's
@@ -2428,10 +4586,76 @@ async function checkPermissionsAndCallTool(
     ...mcpToolDetailsForAnalytics(tool.name, mcpServerType, mcpServerBaseUrl),
   })
 
-  // Use the updated input from permissions if provided
-  // (Don't overwrite if undefined - processedInput may have been modified by passthrough hooks)
-  if (permissionDecision.updatedInput !== undefined) {
-    processedInput = permissionDecision.updatedInput
+  // Use the updated input from permissions if provided (densable zyo @188835250 + Gyo @188820550:
+  // ignore empty {} Q2e, and validate against tool.inputSchema ignoring unrecognized_keys).
+  if (
+    permissionDecision.updatedInput !== undefined &&
+    !isEmptyRecord(permissionDecision.updatedInput)
+  ) {
+    const schemaCheck = validateUpdatedInputAgainstSchema(
+      tool,
+      permissionDecision.updatedInput,
+    )
+    if (!schemaCheck.ok) {
+      const validationError =
+        `The permission handler returned updatedInput for ${tool.name} that failed schema validation: ${schemaCheck.formatted}\n` +
+        `This is a configuration issue in your canUseTool callback, PermissionRequest hook, or permission-prompt tool — updatedInput must satisfy the tool's input schema. The tool input from the model was valid.`
+      endToolBlockedOnUserSpan('reject', 'permission_updated_input_invalid')
+      endToolSpan()
+      logForDebugging(
+        `Permission handler updatedInput for ${tool.name} failed schema validation (${schemaCheck.issueCodes.join(',')})`,
+        { level: 'warn' },
+      )
+      logEvent('tengu_tool_use_error', {
+        error:
+          'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        errorCode:
+          'PERMISSION_UPDATED_INPUT' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        messageID:
+          messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        toolName: sanitizeToolNameForAnalytics(tool.name),
+        isMcp: tool.isMcp ?? false,
+        queryChainId: toolUseContext.queryTracking
+          ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        queryDepth: toolUseContext.queryTracking?.depth,
+        ...(mcpServerType && {
+          mcpServerType:
+            mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(mcpServerBaseUrl && {
+          mcpServerBaseUrl:
+            mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(requestId && {
+          requestId:
+            requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...mcpToolDetailsForAnalytics(
+          tool.name,
+          mcpServerType,
+          mcpServerBaseUrl,
+        ),
+      })
+      resultingMessages.push({
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>${validationError}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUseID,
+            },
+          ],
+          toolUseResult: `InputValidationError: permission handler updatedInput failed schema for ${tool.name}`,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      })
+      pushPreToolUsePreventContinuation(
+        stopReason || 'Execution stopped by hook',
+      )
+      return resultingMessages
+    }
+    processedInput = schemaCheck.strippedInput as typeof processedInput
   }
 
   // Prepare tool parameters for logging in tool_result event.
@@ -2549,44 +4773,177 @@ async function checkPermissionsAndCallTool(
     //
     // The invoke lambda is shared between the flag-on (wrapper) and flag-off
     // (direct) paths so that post-call processing is never duplicated.
-    const invokeToolCall = () =>
-      tool.call(
-        callInput,
+    const runPostPermissionCall = async (
+      callCtx: ToolUseContext,
+      callCanUseTool: CanUseToolFn,
+      progressFn: typeof onToolProgress,
+    ) => {
+      const invokeToolCall = () =>
+        tool.call(
+          callInput,
+          {
+            ...callCtx,
+            toolUseId: toolUseID,
+            userModified: permissionDecision.userModified ?? false,
+            // gold @184489530 — call never inherits the Desktop-forward stamp.
+            desktopForwardToolUseId: undefined,
+          },
+          callCanUseTool,
+          assistantMessage,
+          progress => {
+            if (isToolBridgeEvent(progress)) {
+              progressFn(progress)
+              return
+            }
+            progressFn({
+              toolUseID: progress.toolUseID,
+              data: progress.data,
+            })
+          },
+        )
+      // Fast-path: skip wrapper entirely when skill-learning is disabled to
+      // avoid even the cached-import resolution on the hot path.
+      return isSkillLearningEnabled()
+        ? await (async () => {
+            const { runToolCallWithSkillLearningHooks } =
+              await getSkillLearningWrapper()
+            return runToolCallWithSkillLearningHooks(
+              tool.name,
+              callInput,
+              {
+                sessionId: (callCtx as { sessionId?: string }).sessionId,
+              },
+              invokeToolCall,
+            )
+          })()
+        : await invokeToolCall()
+    }
+
+    const callOutcome = await runWithDetachSupport({
+      tool,
+      input: callInput,
+      toolUseID,
+      toolUseContext,
+      canUseTool,
+      onProgress: onToolProgress,
+      run: runPostPermissionCall,
+    })
+    if (callOutcome.detached) {
+      const durationMs = Date.now() - startTime
+      if (toolCallCapture) {
+        toolCallCapture.detached = true
+        toolCallCapture.durationMs = durationMs
+      }
+      addToToolDuration(durationMs)
+      endToolExecutionSpan({ success: true })
+      endToolSpan('[detached]')
+      const toolResultSizeBytes = callOutcome.text.length
+      logEvent('tengu_tool_use_success', {
+        messageID:
+          messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        toolName: sanitizeToolNameForAnalytics(tool.name),
+        isMcp: tool.isMcp ?? false,
+        durationMs,
+        detached: true,
+        preToolHookDurationMs,
+        toolResultSizeBytes,
+        queryChainId: toolUseContext.queryTracking
+          ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        queryDepth: toolUseContext.queryTracking?.depth,
+        ...(mcpServerType && {
+          mcpServerType:
+            mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(mcpServerBaseUrl && {
+          mcpServerBaseUrl:
+            mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(requestId && {
+          requestId:
+            requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...mcpToolDetailsForAnalytics(
+          tool.name,
+          mcpServerType,
+          mcpServerBaseUrl,
+        ),
+      })
+      const mcpServerScope = isMcpTool(tool)
+        ? getMcpServerScopeFromToolName(tool.name)
+        : null
+      void logOTelEvent('tool_result', {
+        tool_name: sanitizeToolNameForAnalytics(tool.name),
+        success: 'true',
+        duration_ms: String(durationMs),
+        ...(Object.keys(toolParameters).length > 0 && {
+          tool_parameters: jsonStringify(toolParameters),
+        }),
+        ...(telemetryToolInput && { tool_input: telemetryToolInput }),
+        tool_result_size_bytes: String(toolResultSizeBytes),
+        ...(decisionInfo && {
+          decision_source: decisionInfo.source,
+          decision_type: decisionInfo.decision,
+        }),
+        ...(mcpServerScope && { mcp_server_scope: mcpServerScope }),
+      })
+
+      // densable zyo Fr @188844900: preserve acceptFeedback, contentBlocks, imagePasteIds, toolDuration
+      const detachedContentBlocks: ContentBlockParam[] = [
         {
-          ...toolUseContext,
-          toolUseId: toolUseID,
-          userModified: permissionDecision.userModified ?? false,
-          // gold @184489530 — call never inherits the Desktop-forward stamp.
-          desktopForwardToolUseId: undefined,
+          type: 'tool_result',
+          tool_use_id: toolUseID,
+          content: callOutcome.text,
         },
-        canUseTool,
-        assistantMessage,
-        progress => {
-          if (isToolBridgeEvent(progress)) {
-            onToolProgress(progress)
-            return
-          }
-          onToolProgress({
-            toolUseID: progress.toolUseID,
-            data: progress.data,
-          })
-        },
-      )
-    // Fast-path: skip wrapper entirely when skill-learning is disabled to
-    // avoid even the cached-import resolution on the hot path.
-    const result = isSkillLearningEnabled()
-      ? await (async () => {
-          const { runToolCallWithSkillLearningHooks } =
-            await getSkillLearningWrapper()
-          return runToolCallWithSkillLearningHooks(
-            tool.name,
-            callInput,
-            { sessionId: (toolUseContext as { sessionId?: string }).sessionId },
-            invokeToolCall,
+      ]
+      if (
+        'acceptFeedback' in permissionDecision &&
+        permissionDecision.acceptFeedback
+      ) {
+        detachedContentBlocks.push({
+          type: 'text',
+          text: permissionDecision.acceptFeedback,
+        })
+      }
+      const allowContentBlocks =
+        'contentBlocks' in permissionDecision
+          ? permissionDecision.contentBlocks
+          : undefined
+      if (allowContentBlocks?.length) {
+        detachedContentBlocks.push(...allowContentBlocks)
+      }
+      let allowImageIds: number[] | undefined
+      if (allowContentBlocks?.length) {
+        const imageCount = count(
+          allowContentBlocks,
+          (b: ContentBlockParam) => b.type === 'image',
+        )
+        if (imageCount > 0) {
+          const startId = getNextImagePasteId(toolUseContext.messages)
+          allowImageIds = Array.from(
+            { length: imageCount },
+            (_, i) => startId + i,
           )
-        })()
-      : await invokeToolCall()
+        }
+      }
+      resultingMessages.push({
+        message: createUserMessage({
+          content: detachedContentBlocks,
+          imagePasteIds: allowImageIds,
+          toolUseResult: shouldPreserveManagedToolHookPass(toolUseContext, tool)
+            ? { detachedToolCall: true }
+            : undefined,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+        toolDuration: { toolName: tool.name, durationMs },
+      })
+      pushPreToolUsePreventContinuation(
+        stopReason || 'Execution stopped by hook',
+      )
+      return resultingMessages
+    }
+    const result = callOutcome.result
     const durationMs = Date.now() - startTime
+    if (toolCallCapture) toolCallCapture.durationMs = durationMs
     addToToolDuration(durationMs)
 
     // Log tool content/output as span event if enabled
@@ -2854,10 +5211,9 @@ async function checkPermissionsAndCallTool(
         content: contentBlocks,
         hostClassifierContext: hostContext.value,
         imagePasteIds: allowImageIds,
-        toolUseResult:
-          toolUseContext.agentId && !toolUseContext.preserveToolUseResults
-            ? undefined
-            : toolUseResult,
+        toolUseResult: shouldPreserveManagedToolHookPass(toolUseContext, tool)
+          ? toolUseResult
+          : undefined,
         mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
         toolEndsTurn: endsTurn,
         sourceToolAssistantUUID: assistantMessage.uuid,

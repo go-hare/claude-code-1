@@ -140,6 +140,11 @@ export type UserMessage = Message & {
     _meta?: Record<string, unknown>
     structuredContent?: Record<string, unknown>
   }
+  /**
+   * densable BX `taskDelivery` — GetTask snapshot stamped from a queued
+   * bash-complete notification. As paints the delivery suffix from this.
+   */
+  taskDelivery?: unknown
 }
 export type NormalizedUserMessage = UserMessage
 export type RequestStartEvent = { type: string; [key: string]: unknown }

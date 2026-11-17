@@ -3407,7 +3407,7 @@ async function bashToolHasPermissionInner(
   appState = context.getAppState() // re-compute the latest in case the user hit shift+tab
   if (subcommands.length === 1) {
     const result = await checkCommandAndSuggestRules(
-      { command: subcommands[0]! },
+      { ...input, command: subcommands[0]! },
       appState.toolPermissionContext,
       commandSubcommandPrefix,
       compoundCommandHasCd,

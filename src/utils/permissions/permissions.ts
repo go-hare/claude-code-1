@@ -129,11 +129,13 @@ import { getFeatureValueWithSource } from '../../services/analytics/growthbook.j
 import { getBootstrapSession } from '../sessionRoot.js'
 import { isEnvTruthy, isInProtectedNamespace } from '../envUtils.js'
 import { executePermissionRequestHooks } from '../hooks.js'
+import { detachedToolCallWasLetGo } from '../detachedToolCallStore.js'
 import {
   AUTO_REJECT_MESSAGE,
   buildClassifierUnavailableMessage,
   buildYoloRejectionMessage,
   DONT_ASK_REJECT_MESSAGE,
+  REJECT_MESSAGE,
 } from '../messages.js'
 import { calculateCostFromTokens } from '../modelCost.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -1085,7 +1087,29 @@ export async function evaluatePermissionWithToolCheck<
   return decided ?? evaluate()
 }
 
-export const hasPermissionsToUseTool: CanUseToolFn = async (
+/** densable UPt.wasLetGo — send-now took the call; later Allow must refuse. */
+export function detachedLetGoPermissionDeny(
+  toolUseID: string,
+): PermissionDenyDecision | null {
+  if (!detachedToolCallWasLetGo(toolUseID)) return null
+  return {
+    behavior: 'deny',
+    message: REJECT_MESSAGE,
+    decisionReason: {
+      type: 'other',
+      reason: 'detached tool call was let go',
+    },
+  }
+}
+
+export const hasPermissionsToUseTool: CanUseToolFn = async (...args) => {
+  const before = detachedLetGoPermissionDeny(args[4])
+  if (before) return before
+  const result = await evaluateToolPermission(...args)
+  return detachedLetGoPermissionDeny(args[4]) ?? result
+}
+
+const evaluateToolPermission: CanUseToolFn = async (
   tool,
   input,
   context,
@@ -1093,6 +1117,9 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   toolUseID,
   forceDecision,
 ): Promise<PermissionDecision> => {
+  const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
+  if (letGoDeny) return letGoDeny
+
   const result =
     forceDecision !== undefined
       ? forceDecision
@@ -1398,6 +1425,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
                 'high' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               fastPath:
                 'acceptEdits' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              hookAllowVouch: context.hookAllowVouched === true,
             })
             return {
               behavior: 'allow',
@@ -1474,6 +1502,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             'high' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           fastPath:
             'allowlist' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          hookAllowVouch: context.hookAllowVouched === true,
         })
         return {
           behavior: 'allow',
@@ -1533,6 +1562,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
             'high' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           fastPath:
             'desktop_forward' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          hookAllowVouch: context.hookAllowVouched === true,
         })
         return {
           behavior: 'allow',
@@ -1669,6 +1699,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
         sessionCacheReadInputTokens: getTotalCacheReadInputTokens(),
         sessionCacheCreationInputTokens: getTotalCacheCreationInputTokens(),
         classifierCostUSD,
+        hookAllowVouch: context.hookAllowVouched === true,
         classifierStage:
           classifierResult.stage as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         classifierStage1InputTokens: classifierResult.stage1Usage?.inputTokens,

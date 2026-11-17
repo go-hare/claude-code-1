@@ -334,6 +334,7 @@ export async function launchBackgroundForkedSkill({
     prompt,
     selectedAgent: agentDefinition,
     setAppState,
+    getAppState,
     // Background forked skills survive main-thread ESC (same as AgentTool async).
     toolUseId: context.toolUseId,
     ownerAgentId: ownerId,

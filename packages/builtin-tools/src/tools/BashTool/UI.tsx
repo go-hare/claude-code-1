@@ -22,14 +22,25 @@ import type { BashProgress, BashToolInput, Out } from './BashTool.js';
 import BashToolResultMessage from './BashToolResultMessage.js';
 import { extractBashCommentLabel } from './commentLabel.js';
 import { parseSedEditCommand } from './sedEditParser.js';
+import { ToolProgressHint } from 'src/components/ToolProgressHint.js';
 
 // Constants for command display
 const MAX_COMMAND_DISPLAY_LINES = 2;
 const MAX_COMMAND_DISPLAY_CHARS = 160;
 
-// Simple component to show background hint and handle ctrl+b
-// When ctrl+b is pressed, backgrounds ALL running foreground commands
-export function BackgroundHint({ onBackground }: { onBackground?: () => void } = {}): React.ReactElement | null {
+/**
+ * densable `jHn` — ctrl+b background hint. Gold draws via ToolProgressHint
+ * (`S`) with the real toolUseId; keyOnly draws nothing.
+ */
+export function BackgroundHint({
+  onBackground,
+  toolUseId,
+  keyOnly,
+}: {
+  onBackground?: () => void;
+  toolUseId?: string;
+  keyOnly?: boolean;
+} = {}): React.ReactElement | null {
   const store = useAppStateStore();
   const setAppState = useSetAppState();
 
@@ -54,7 +65,16 @@ export function BackgroundHint({ onBackground }: { onBackground?: () => void } =
   if (isBackgroundTasksDisabled()) {
     return null;
   }
-
+  if (keyOnly === true) {
+    return null;
+  }
+  if (shortcut === '') {
+    return null;
+  }
+  const hint = `(${shortcut} to run in background)`;
+  if (toolUseId !== undefined && toolUseId !== '') {
+    return <ToolProgressHint toolUseId={toolUseId} hint={hint} />;
+  }
   return (
     <Box paddingLeft={5}>
       <Text dimColor>

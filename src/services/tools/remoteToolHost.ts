@@ -5,8 +5,20 @@
  * an empty machine list is `sOn` (`unknown_host`, attached: []).
  */
 
+import { createHash } from 'crypto'
 import { isViolinWoodEnabledSync } from '../../cli/violinWood.js'
+import { checkGate_CACHED_OR_BLOCKING } from '../analytics/growthbook.js'
+import {
+  getCapturedCcrIngressBase,
+  isMcpCcrProxyUrl,
+} from '../mcp/mcpConnectTimeout.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { logForDebugging } from '../../utils/debug.js'
+import type { ToolStateSlots } from '../../utils/toolState.js'
+import {
+  logEvent,
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from '../analytics/index.js'
 
 export const REMOTE_TOOL_HOST_FIELD = '_host'
 
@@ -94,17 +106,6 @@ export const REMOTE_TOOL_PROTOCOL_VERSIONS = [1] as const
 export const REMOTE_ANNOUNCE_WAIT_SLICE_MS = 5_000
 export const REMOTE_ANNOUNCE_WAIT_MS = 58_000
 
-type AnnounceWaiter = {
-  resolve: (kind: 'announced' | 'aborted') => void
-}
-
-const announceWaiters: AnnounceWaiter[] = []
-
-function notifyAnnounceWaiters(): void {
-  const waiting = announceWaiters.splice(0)
-  for (const waiter of waiting) waiter.resolve('announced')
-}
-
 /** densable `Yo` host, kept only as far as routing needs. */
 export type AnnouncedRemoteMachine = {
   instanceId: string
@@ -127,8 +128,161 @@ export type AnnouncedRemoteMachine = {
   homeDir?: string
 }
 
-const announcedMachines: AnnouncedRemoteMachine[] = []
-const withdrawnMachineNames = new Set<string>()
+/**
+ * densable `ZO` — session announce registry. `toolState.get(RemoteSessionRegistry)`
+ * is the per-session slot; `defaultSessionRegistry` is the process fallback.
+ */
+export class RemoteSessionRegistry {
+  readonly machines: AnnouncedRemoteMachine[] = []
+  readonly withdrawn = new Set<string>()
+  #announcedThisLife = false
+  #announceWaitExpiredMs: number | undefined
+  #announceWaiters = new Set<() => void>()
+
+  onNextAnnounce(callback: () => void): () => void {
+    this.#announceWaiters.add(callback)
+    return () => {
+      this.#announceWaiters.delete(callback)
+    }
+  }
+
+  announceWaitExpired(): number | undefined {
+    return this.#announceWaitExpiredMs
+  }
+
+  markAnnounceWaitExpired(waitedMs: number): void {
+    this.#announceWaitExpiredMs = waitedMs
+  }
+
+  #notifyAnnounceWaiters(): void {
+    const waiting = [...this.#announceWaiters]
+    this.#announceWaiters.clear()
+    for (const callback of waiting) {
+      try {
+        callback()
+      } catch {}
+    }
+  }
+
+  hasAnnouncedThisLife(): boolean {
+    return this.#announcedThisLife
+  }
+
+  entries(): AnnouncedRemoteMachine[] {
+    return [...this.machines]
+  }
+
+  withdrawnThisLife(name: string): boolean {
+    return this.withdrawn.has(name)
+  }
+
+  clear(): void {
+    this.machines.length = 0
+  }
+
+  hostsForTable(): Array<{
+    kind: 'remote'
+    source: 'session'
+    name: string
+    instanceId: string
+    status: 'online' | 'offline'
+    enforcement: 'self'
+    servedTools: Set<string>
+    transport: import('../../utils/toolState.js').RemoteToolRoutedHost['transport']
+    passthroughTools?: Map<string, { localName: string }>
+    protocol:
+      | { kind: 'compatible'; version?: number }
+      | { kind: 'incompatible'; announced: number[] }
+  }> {
+    const { createSessionRemoteToolTransport } =
+      require('../../utils/toolState.js') as typeof import('../../utils/toolState.js')
+    return this.machines
+      .filter(machine => machine.source === 'session')
+      .map(machine => ({
+        kind: 'remote' as const,
+        source: 'session' as const,
+        name: machine.name,
+        instanceId: machine.instanceId,
+        status: machine.status,
+        enforcement: 'self' as const,
+        servedTools: new Set(machine.tools.map(tool => tool.name)),
+        transport: createSessionRemoteToolTransport(
+          () => {
+            const current = this.machines.find(
+              entry =>
+                entry.name === machine.name &&
+                entry.instanceId === machine.instanceId,
+            )
+            return {
+              hostName: machine.name,
+              instanceId: machine.instanceId,
+              live: current ?? null,
+              stale: current?.stale ?? true,
+            }
+          },
+          {
+            heard: epoch => {
+              const current = this.machines.find(
+                entry => entry.instanceId === machine.instanceId,
+              )
+              if (!current) return
+              current.status = 'online'
+              current.lastHeardAt = Date.now()
+              if (epoch) current.epoch = epoch
+            },
+            missed: () => {
+              const current = this.machines.find(
+                entry => entry.instanceId === machine.instanceId,
+              )
+              if (!current) return
+              current.status = 'offline'
+              current.stale = true
+            },
+            rebind: () => {
+              const current = this.machines.find(
+                entry => entry.name === machine.name,
+              )
+              if (!current) return undefined
+              return {
+                hostName: current.name,
+                instanceId: current.instanceId,
+                live: current,
+                stale: current.stale,
+              }
+            },
+          },
+        ),
+        ...(machine.passthroughTools.length > 0 && {
+          passthroughTools: new Map(
+            machine.passthroughTools.map(name => [name, { localName: name }]),
+          ),
+        }),
+        protocol: remoteToolProtocol(
+          machine.protocolVersions.length > 0
+            ? machine.protocolVersions
+            : undefined,
+        ),
+      }))
+  }
+
+  accept(
+    input: Parameters<typeof acceptIntoRegistry>[1],
+  ): RemoteAnnounceAccept {
+    const result = acceptIntoRegistry(this, input)
+    if (result.status !== 'invalid') {
+      this.#announcedThisLife = true
+      this.#notifyAnnounceWaiters()
+    }
+    return result
+  }
+}
+
+export const defaultSessionRegistry = new RemoteSessionRegistry()
+
+/** densable ZO: per-session slot when present, else the process fallback. */
+function sessionRegistry(toolState?: ToolStateSlots): RemoteSessionRegistry {
+  return toolState?.get(RemoteSessionRegistry) ?? defaultSessionRegistry
+}
 
 /** densable `rU` — session channel explicitly off. */
 export function isRemoteToolsSessionChannelOff(): boolean {
@@ -154,8 +308,17 @@ export function remoteToolsAnnounceSwitch():
 
 /** densable `markAway` — a missed or gone probe takes the machine offline. */
 /** densable `heard` — a probe answer carries the epoch it was heard under. */
-export function noteRemoteMachineHeard(name: string, epoch?: string): void {
-  const machine = announcedMachines.find(item => item.name === name)
+export function noteRemoteMachineHeard(
+  name: string,
+  epoch?: string,
+  toolState?: ToolStateSlots,
+  instanceId?: string,
+): void {
+  const machine = sessionRegistry(toolState).machines.find(item =>
+    instanceId === undefined
+      ? item.name === name
+      : item.instanceId === instanceId,
+  )
   if (!machine) return
   machine.lastHeardAt = Date.now()
   machine.status = 'online'
@@ -165,28 +328,1321 @@ export function noteRemoteMachineHeard(name: string, epoch?: string): void {
 export function markRemoteMachineAway(
   name: string,
   why?: 'probe_missed',
+  toolState?: ToolStateSlots,
+  instanceId?: string,
 ): void {
-  const machine = announcedMachines.find(item => item.name === name)
+  const machine = sessionRegistry(toolState).machines.find(item =>
+    instanceId === undefined
+      ? item.name === name
+      : item.instanceId === instanceId,
+  )
   if (!machine) return
   machine.status = 'offline'
   if (why === 'probe_missed') machine.stale = true
 }
 
-export function announcedRemoteMachines(): readonly AnnouncedRemoteMachine[] {
-  return announcedMachines
+export function announcedRemoteMachines(
+  toolState?: ToolStateSlots,
+): readonly AnnouncedRemoteMachine[] {
+  return sessionRegistry(toolState).machines
 }
 
-export function clearAnnouncedRemoteMachines(): void {
-  announcedMachines.length = 0
-  withdrawnMachineNames.clear()
-  announceWaitExpiredMs = undefined
+/** densable `Hbn` — missing versions are protocol v1. */
+export function remoteToolProtocol(
+  versions: readonly number[] | undefined,
+):
+  | { kind: 'compatible'; version?: number }
+  | { kind: 'incompatible'; announced: number[] } {
+  if (versions === undefined) {
+    return { kind: 'compatible', version: 1 }
+  }
+  const compatible = versions.filter(version =>
+    (REMOTE_TOOL_PROTOCOL_VERSIONS as readonly number[]).includes(version),
+  )
+  if (compatible.length > 0) {
+    return { kind: 'compatible', version: Math.max(...compatible) }
+  }
+  return { kind: 'incompatible', announced: [...versions] }
 }
 
-/** densable `markAnnounceWaitExpired` — a later unknown name does not wait again. */
-let announceWaitExpiredMs: number | undefined
+/**
+ * densable `ZO.hostsForTable` — session-source machines as rF replace rows.
+ */
+export function hostsForTable(toolState?: ToolStateSlots) {
+  return sessionRegistry(toolState).hostsForTable()
+}
 
-export function announceWaitAlreadyExpired(): number | undefined {
-  return announceWaitExpiredMs
+/** densable `A` — session-source identity for QFn skip. */
+function sourceHostsIdentity(
+  hosts: Array<{
+    name: string
+    status?: 'online' | 'offline'
+    servedTools?: Set<string>
+    passthroughTools?: Map<string, { localName: string }>
+  }>,
+): string {
+  return hosts
+    .map(
+      host =>
+        `${host.name}\0${host.status ?? 'online'}\0${host.servedTools?.size ?? 0}\0${host.passthroughTools?.size ?? 0}`,
+    )
+    .sort()
+    .join('\n')
+}
+
+/** densable `ie`. */
+function sourceHostsEvent(
+  before: Array<{ status?: 'online' | 'offline' }>,
+  after: Array<{ status?: 'online' | 'offline' }>,
+): 'discovered' | 'went_offline' | 'came_online' | 'changed' {
+  const hadOnline = before.some(host => host.status === 'online')
+  const hasOnline = after.some(host => host.status === 'online')
+  if (before.length === 0) return after.length === 0 ? 'changed' : 'discovered'
+  if (hadOnline && !hasOnline) return 'went_offline'
+  if (!hadOnline && hasOnline) return 'came_online'
+  return 'changed'
+}
+
+/**
+ * densable `QFn` — copy ZO.hostsForTable into rF session source and stamp
+ * `tengu_remote_tool_targets` when the session identity changes.
+ */
+export function syncSessionRemoteHosts(
+  toolState: ToolStateSlots,
+  trigger: string,
+): void {
+  const { RemoteToolHosts } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/toolState.js') as typeof import('../../utils/toolState.js')
+  const hosts = toolState.get(RemoteToolHosts)
+  const zo = toolState.get(RemoteSessionRegistry)
+  const before = hosts.sourceHosts('session')
+  hosts.replaceRemoteHosts('session', zo.hostsForTable())
+  const after = hosts.sourceHosts('session')
+  if (sourceHostsIdentity(before) === sourceHostsIdentity(after)) return
+  const event =
+    zo.entries().filter(machine => machine.source === 'session').length === 0
+      ? 'withdrawn'
+      : sourceHostsEvent(before, after)
+  logEvent('tengu_remote_tool_targets', {
+    event: event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    source:
+      'session' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    trigger:
+      trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    target_count: after.length,
+    served_tool_count: after.reduce(
+      (count, host) => count + (host.servedTools?.size ?? 0),
+      0,
+    ),
+    passthrough_tool_count: after.reduce(
+      (count, host) => count + (host.passthroughTools?.size ?? 0),
+      0,
+    ),
+    incompatible_count: after.filter(
+      host => host.protocol?.kind === 'incompatible',
+    ).length,
+  })
+}
+
+/** densable `T5`. */
+export const DEVICE_BRIDGE_MCP_NAME = 'remote-devices'
+
+function telemetryPayload(
+  after: Array<{
+    servedTools?: Set<string>
+    passthroughTools?: Map<string, { localName: string }>
+    protocol?: { kind: string; version?: number }
+  }>,
+  trigger: string,
+  event: string,
+): Record<string, boolean | number | string | undefined> {
+  return {
+    event: event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    trigger:
+      trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    target_count: after.length,
+    served_tool_count: after.reduce(
+      (count, host) => count + (host.servedTools?.size ?? 0),
+      0,
+    ),
+    passthrough_tool_count: after.reduce(
+      (count, host) => count + (host.passthroughTools?.size ?? 0),
+      0,
+    ),
+    incompatible_count: after.filter(
+      host => host.protocol?.kind === 'incompatible',
+    ).length,
+    protocol_version:
+      after[0]?.protocol?.kind === 'compatible'
+        ? after[0].protocol.version
+        : undefined,
+  }
+}
+
+/**
+ * densable `ne` — replace rF bridge source and stamp tengu_remote_tool_targets.
+ */
+export function applyBridgeRemoteHosts(
+  toolState: ToolStateSlots,
+  hosts: import('../../utils/toolState.js').RemoteToolReplaceHost[],
+  meta: {
+    trigger: string
+    invalid?: string
+    unreadable?: number
+    unreadableMarkers?: number
+  },
+): void {
+  const { RemoteToolHosts } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/toolState.js') as typeof import('../../utils/toolState.js')
+  const table = toolState.get(RemoteToolHosts)
+  const before = table.sourceHosts('bridge')
+  const { dropped } = table.replaceRemoteHosts('bridge', hosts)
+  if (dropped.length > 0) {
+    logForDebugging(
+      `[remote-tools] the bridge announced ${dropped.length} machine(s) under a name this session cannot adopt; not adopted: ${dropped.join(', ')}`,
+      { level: 'warn' },
+    )
+  }
+  const after = table.sourceHosts('bridge')
+  if (meta.invalid !== undefined) {
+    logEvent('tengu_remote_tool_targets', {
+      event:
+        'listing_invalid' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      reason:
+        meta.invalid as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      trigger:
+        meta.trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+  }
+  if (sourceHostsIdentity(before) !== sourceHostsIdentity(after)) {
+    logEvent(
+      'tengu_remote_tool_targets',
+      telemetryPayload(after, meta.trigger, sourceHostsEvent(before, after)),
+    )
+  }
+  const unreadable = meta.unreadable ?? 0
+  const unreadableMarkers = meta.unreadableMarkers ?? 0
+  if (unreadable > 0 || unreadableMarkers > 0) {
+    logEvent('tengu_remote_tool_targets', {
+      event:
+        'unreadable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      trigger:
+        meta.trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      unreadable_count: unreadable,
+      unreadable_marker_count: unreadableMarkers,
+    })
+  }
+}
+
+export type DeviceBridgeMcpClient = {
+  name: string
+  type: string
+  config?: {
+    type?: string
+    scope?: string
+    pluginSource?: unknown
+    agentSource?: unknown
+    url?: unknown
+  }
+  client?: {
+    callTool: (
+      params: {
+        name: string
+        arguments?: Record<string, unknown>
+        _meta?: Record<string, unknown>
+      },
+      options?: { signal?: AbortSignal; timeout?: number },
+    ) => Promise<{
+      content?: unknown
+      isError?: boolean
+      structuredContent?: unknown
+      _meta?: Record<string, unknown>
+    }>
+  }
+  listTools?: (opts?: { timeout?: number }) => Promise<{
+    tools?: Array<{ name?: unknown; _meta?: Record<string, unknown> }>
+    nextCursor?: unknown
+    _meta?: Record<string, unknown>
+  }>
+  callTool?: (args: {
+    name: string
+    arguments: Record<string, unknown>
+    timeout?: number
+    _meta?: Record<string, unknown>
+  }) => Promise<{
+    content?: unknown
+    isError?: boolean
+    structuredContent?: unknown
+    _meta?: Record<string, unknown>
+  }>
+  ensureConnectedClient?: (opts: {
+    signal?: AbortSignal
+    timeoutMs?: number
+  }) => Promise<unknown>
+  reinitialize?: () => Promise<void>
+}
+
+/** densable `R5` — tools the attached machine serves over the bridge. */
+const BRIDGE_SERVED_TOOLS = new Set([
+  'Bash',
+  'PowerShell',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+])
+const BRIDGE_PLUMBING_TOOLS = new Set(['sync_files'])
+const BRIDGE_DEFAULT_HOST = 'attached-machine'
+const OFFICE_BRIDGE_LISTING = 'office_bridge.listing'
+/** densable `NT`. */
+export const REMOTE_TOOL_EXECUTION_META = 'anthropic/remoteToolExecution'
+/** densable `Ile`. */
+export const DEVICE_PASSTHROUGH_META = 'anthropic/devicePassthrough'
+
+function hostNameFromTarget(target: unknown): string | undefined {
+  if (target === null || typeof target !== 'object' || Array.isArray(target)) {
+    return undefined
+  }
+  const name = (target as { name?: unknown }).name
+  if (typeof name !== 'string') return undefined
+  if (!HOST_NAME.test(name) || isReservedRemoteHostName(name)) return undefined
+  return name
+}
+
+function servedToolMarker(tool: {
+  name: string
+  _meta?: Record<string, unknown>
+}):
+  | {
+      name: string
+      protocol_versions?: number[]
+      description: { name: string; kind?: string; platform?: string }
+    }
+  | undefined {
+  const raw = tool._meta?.[REMOTE_TOOL_EXECUTION_META]
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined
+  }
+  const rec = raw as Record<string, unknown>
+  if (typeof rec.tool === 'string' && rec.tool !== tool.name) return undefined
+  const name = hostNameFromTarget(rec.target)
+  if (name === undefined) return undefined
+  const target = rec.target as { kind?: unknown; platform?: unknown }
+  const versions = Array.isArray(rec.protocol_versions)
+    ? rec.protocol_versions.filter(
+        (version): version is number =>
+          typeof version === 'number' &&
+          Number.isInteger(version) &&
+          version > 0,
+      )
+    : undefined
+  return {
+    name,
+    protocol_versions: versions,
+    description: {
+      name,
+      ...(typeof target.kind === 'string' && { kind: target.kind }),
+      ...(typeof target.platform === 'string' && { platform: target.platform }),
+    },
+  }
+}
+
+function passthroughToolMarker(tool: {
+  name: string
+  _meta?: Record<string, unknown>
+}): { bridgeName: string; localName: string; name: string } | undefined {
+  const raw = tool._meta?.[DEVICE_PASSTHROUGH_META]
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined
+  }
+  const rec = raw as Record<string, unknown>
+  const first = tool.name.indexOf('__')
+  const last = tool.name.lastIndexOf('__')
+  const afterFirst = first < 0 ? tool.name : tool.name.slice(first + 2)
+  const afterLast = last < 0 ? tool.name : tool.name.slice(last + 2)
+  if (
+    typeof rec.tool === 'string' &&
+    rec.tool !== tool.name &&
+    rec.tool !== afterFirst &&
+    rec.tool !== afterLast
+  ) {
+    return undefined
+  }
+  const localName = afterLast
+  const name = hostNameFromTarget(rec.target)
+  if (name === undefined) return undefined
+  return {
+    bridgeName: tool.name,
+    localName: typeof rec.tool === 'string' ? rec.tool : localName,
+    name,
+  }
+}
+
+/** densable `ue` — W transport limits. */
+const BRIDGE_TRANSPORT_LIMITS = {
+  maxRequestBytes: 4_128_768,
+  defaultDeadlineMs: 58_000,
+} as const
+
+const BRIDGE_MCP_TIMEOUT_CODE = -32001
+const BRIDGE_APPROVAL_UNVERIFIED_CODE = -32003
+const BRIDGE_DOWNSTREAM_UNREACHABLE_ERRNOS = new Set([
+  'ECONNREFUSED',
+  'ConnectionRefused',
+  'ENOTFOUND',
+  'ENETUNREACH',
+  'EAI_AGAIN',
+  'FailedToOpenSocket',
+])
+
+/**
+ * densable `W` — MCP device-bridge transport. `call` is Ce.
+ */
+export function createBridgeTransport(
+  client: DeviceBridgeMcpClient,
+):
+  | import('../../utils/toolState.js').RemoteToolRoutedHost['transport']
+  | undefined {
+  // densable W / _F requires n.client.callTool.
+  if (typeof client.client?.callTool !== 'function') {
+    return undefined
+  }
+  const OFFICE_BRIDGE_KIND = 'office_bridge.kind'
+  const OFFICE_BRIDGE_BOUND_MISS = 'office_bridge.bound_miss'
+  const TIMED_OUT_KINDS = new Set(['timeout'])
+  const DROPPED_KINDS = new Set(['disconnected', 'cancelled'])
+  const UNREACHABLE_KINDS = new Set([
+    'not_connected',
+    'send_failed',
+    'contested',
+    'unsupported_on_bound',
+  ])
+  type TransportCall =
+    import('../../utils/toolState.js').RemoteToolTransportCall
+  /** densable `Q`. */
+  function contentText(content: unknown): string {
+    if (typeof content === 'string') return content
+    if (!Array.isArray(content)) return ''
+    return content
+      .flatMap(block =>
+        block !== null &&
+        typeof block === 'object' &&
+        (block as { type?: unknown }).type === 'text' &&
+        typeof (block as { text?: unknown }).text === 'string'
+          ? [(block as { text: string }).text]
+          : [],
+      )
+      .join('\n')
+  }
+  /** densable `Yv`. */
+  function responseBytesOf(payload: unknown): number {
+    try {
+      return Buffer.byteLength(JSON.stringify(payload) ?? 'null', 'utf8')
+    } catch {
+      return 0
+    }
+  }
+  function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
+  }
+  function numericErrorCode(err: unknown): number | undefined {
+    return err !== null &&
+      typeof err === 'object' &&
+      'code' in err &&
+      typeof (err as { code?: unknown }).code === 'number'
+      ? (err as { code: number }).code
+      : undefined
+  }
+  function stringErrorCode(err: unknown): string | undefined {
+    return err !== null &&
+      typeof err === 'object' &&
+      'code' in err &&
+      typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined
+  }
+  function sanitizeDetail(err: unknown): string {
+    return remoteHostSanitizeText(errorMessage(err), 8192)
+  }
+  /** densable `we`. */
+  function isUnverifiedApproval(err: unknown, toolUseId?: string): boolean {
+    const data =
+      err !== null && typeof err === 'object' && 'data' in err
+        ? (err as { data?: unknown }).data
+        : undefined
+    if (typeof data !== 'object' || data === null) return false
+    const rec = data as Record<string, unknown>
+    return (
+      typeof rec.args_sha256 === 'string' &&
+      typeof rec.tool_name === 'string' &&
+      typeof rec.tool_use_id === 'string' &&
+      toolUseId !== undefined &&
+      rec.tool_use_id === toolUseId
+    )
+  }
+  /** densable `YK` slice used by J. */
+  function mcpErrorSourceOf(err: unknown): string {
+    if (
+      err !== null &&
+      typeof err === 'object' &&
+      'mcpErrorSource' in err &&
+      typeof (err as { mcpErrorSource?: unknown }).mcpErrorSource === 'string'
+    ) {
+      return (err as { mcpErrorSource: string }).mcpErrorSource
+    }
+    if (typeof DOMException !== 'undefined' && err instanceof DOMException) {
+      return err.name === 'TimeoutError' ? 'downstream_unreachable' : 'other'
+    }
+    const numeric = numericErrorCode(err)
+    if (numeric === BRIDGE_MCP_TIMEOUT_CODE || numeric === -32000) {
+      return 'downstream_unreachable'
+    }
+    const code = stringErrorCode(err)
+    if (code !== undefined && BRIDGE_DOWNSTREAM_UNREACHABLE_ERRNOS.has(code)) {
+      return 'downstream_unreachable'
+    }
+    return 'other'
+  }
+  function officeBridgeKind(
+    payload: Record<string, unknown>,
+  ): string | undefined {
+    const meta = payload._meta
+    if (meta === null || typeof meta !== 'object') return undefined
+    const rec = meta as Record<string, unknown>
+    if (typeof rec[OFFICE_BRIDGE_KIND] === 'string')
+      return rec[OFFICE_BRIDGE_KIND]
+    if (rec[OFFICE_BRIDGE_BOUND_MISS] !== undefined) return 'not_connected'
+    return undefined
+  }
+  /** densable `X` / `ke`. */
+  function classifyBridgeError(
+    payload: Record<string, unknown>,
+    content: unknown,
+    capMs: number,
+  ): TransportCall | undefined {
+    const kind = officeBridgeKind(payload)
+    if (kind !== undefined && TIMED_OUT_KINDS.has(kind)) {
+      return { kind: 'timed_out', capMs }
+    }
+    if (kind !== undefined && DROPPED_KINDS.has(kind)) {
+      return { kind: 'dropped', detail: `bridge: ${kind}` }
+    }
+    if (kind !== undefined && UNREACHABLE_KINDS.has(kind)) {
+      return {
+        kind: 'unreachable',
+        detail: `bridge: ${kind}`,
+        ...(kind === 'not_connected' && { machineNotAnswering: true }),
+      }
+    }
+    if (kind === 'malformed_result') {
+      return {
+        kind: 'transport_error',
+        detail: 'bridge: malformed result',
+        unreadableResult: true,
+      }
+    }
+    const text = contentText(content)
+    if (text.length > 200) return undefined
+    if (/did not respond within/i.test(text))
+      return { kind: 'timed_out', capMs }
+    if (
+      /disconnected before responding|connection may be closing/i.test(text)
+    ) {
+      return { kind: 'dropped', detail: 'bridge: disconnected' }
+    }
+    if (/not connected|not reachable|offline/i.test(text)) {
+      return {
+        kind: 'unreachable',
+        detail: 'bridge: not connected',
+        machineNotAnswering: true,
+      }
+    }
+    return undefined
+  }
+  /** densable `J`. */
+  function classifyFailed(
+    err: unknown,
+    capMs: number,
+    toolUseId?: string,
+  ): TransportCall {
+    if (
+      numericErrorCode(err) === BRIDGE_MCP_TIMEOUT_CODE ||
+      stringErrorCode(err) === 'REQUEST_TIMEOUT'
+    ) {
+      return { kind: 'timed_out', capMs }
+    }
+    const detail = sanitizeDetail(err)
+    if (
+      numericErrorCode(err) === BRIDGE_APPROVAL_UNVERIFIED_CODE &&
+      isUnverifiedApproval(err, toolUseId)
+    ) {
+      return { kind: 'approval_unverified' }
+    }
+    if (mcpErrorSourceOf(err) !== 'downstream_unreachable') {
+      return { kind: 'transport_error', detail }
+    }
+    return BRIDGE_DOWNSTREAM_UNREACHABLE_ERRNOS.has(stringErrorCode(err) ?? '')
+      ? { kind: 'unreachable', detail }
+      : { kind: 'dropped', detail }
+  }
+  /** densable `K`. */
+  function asPlumbingCall(call: TransportCall): TransportCall {
+    switch (call.kind) {
+      case 'timed_out':
+      case 'unreachable':
+      case 'dropped':
+      case 'transport_error':
+      case 'cancelled':
+        return call
+      default:
+        return { kind: 'transport_error', detail: `unexpected: ${call.kind}` }
+    }
+  }
+  /** densable `Re`. */
+  function interpret(
+    sent: {
+      content?: unknown
+      isError?: boolean
+      structuredContent?: unknown
+    } & Record<string, unknown>,
+    elapsedMs: number,
+    capMs: number,
+  ): TransportCall {
+    const { parseRemoteToolAnswer } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./remoteToolCall.js') as typeof import('./remoteToolCall.js')
+    const parsed = parseRemoteToolAnswer(sent)
+    if (parsed.envelope.status === 'malformed') {
+      return {
+        kind: 'transport_error',
+        detail: 'malformed result envelope',
+        unreadableResult: true,
+      }
+    }
+    if (parsed.envelope.status === 'present') {
+      const env = parsed.envelope.envelope
+      return {
+        kind: 'result',
+        content: parsed.content,
+        isError: parsed.isError,
+        envelope: {
+          outcome: typeof env.outcome === 'string' ? env.outcome : undefined,
+          output: env.output,
+          content: parsed.content,
+        },
+        elapsedMs,
+        responseBytes: responseBytesOf(sent),
+      }
+    }
+    if (parsed.isError === true) {
+      const classified = classifyBridgeError(
+        sent,
+        parsed.content ?? sent.content,
+        capMs,
+      )
+      if (classified) return classified
+    }
+    return {
+      kind: 'result',
+      content: parsed.content,
+      isError: parsed.isError,
+      envelope: undefined,
+      elapsedMs,
+      responseBytes: responseBytesOf(sent),
+    }
+  }
+  function isSessionExpired(err: unknown, idempotent = false): boolean {
+    try {
+      const { isMcpSessionExpiredError } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../mcp/client.js') as typeof import('../mcp/client.js')
+      if (err instanceof Error && isMcpSessionExpiredError(err)) return true
+    } catch {
+      /* client module unavailable in some tests */
+    }
+    if (!idempotent) return false
+    const msg = err instanceof Error ? err.message : String(err)
+    const code =
+      err !== null && typeof err === 'object' && 'code' in err
+        ? (err as { code?: unknown }).code
+        : undefined
+    const closed =
+      (code === -32000 && msg.includes('Connection closed')) ||
+      msg === 'CONNECTION_CLOSED'
+    if (!closed) return false
+    const configType = (client.config as { type?: string } | undefined)?.type
+    return configType === 'http' || configType === 'claudeai-proxy'
+  }
+  /** densable `T()` — Fl / mcpClientModule. */
+  function T(): ReturnType<typeof import('../mcp/client.js').mcpClientModule> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (
+      require('../mcp/client.js') as typeof import('../mcp/client.js')
+    ).mcpClientModule()
+  }
+  /** densable `RU` — floor 1, cap int32. */
+  function capDeadlineMs(ms: number): number {
+    if (Number.isNaN(ms) || ms < 1) return 1
+    return Math.min(Math.floor(ms), 2_147_483_647)
+  }
+  /** densable `x` — WeakMap session recovery via clearServerCache. */
+  class BridgeSessionRecovery {
+    #e = new WeakMap<object, Promise<void>>()
+    reinitialize(connection: DeviceBridgeMcpClient): Promise<void> {
+      const existing = this.#e.get(connection)
+      if (existing) return existing
+      const config = connection.config
+      const work =
+        config && typeof config.type === 'string'
+          ? T()
+              .clearServerCache(
+                connection.name,
+                config as Parameters<
+                  ReturnType<typeof T>['clearServerCache']
+                >[1],
+              )
+              .catch(() => {})
+          : (connection.reinitialize?.() ?? Promise.resolve())
+      this.#e.set(connection, work)
+      return work
+    }
+  }
+  const recovery = new BridgeSessionRecovery()
+  type DialKind =
+    | { kind: 'ok'; value: unknown }
+    | { kind: 'connect_failed'; error: unknown }
+    | { kind: 'session_expired'; connection: DeviceBridgeMcpClient }
+    | { kind: 'failed'; error: unknown }
+    | { kind: 'expired_twice' }
+  /** densable `_F`. */
+  function _F(
+    conn: DeviceBridgeMcpClient,
+    params: {
+      name: string
+      arguments?: Record<string, unknown>
+      _meta?: Record<string, unknown>
+    },
+    options: { signal?: AbortSignal; timeout?: number },
+  ) {
+    return T().invokeToolRaw(conn.client!, params, options)
+  }
+  /** densable `j`. */
+  async function j(n: DeviceBridgeMcpClient, e: DialKind): Promise<DialKind> {
+    if (e.kind === 'connect_failed') {
+      await T()
+        .evictStaleFailedConnectMemoForServe(
+          n.name,
+          n.config as Parameters<
+            ReturnType<typeof T>['evictStaleFailedConnectMemoForServe']
+          >[1],
+        )
+        .catch(() => {})
+    }
+    return e
+  }
+  /** densable `V`. */
+  async function V(
+    n: DeviceBridgeMcpClient,
+    opts: {
+      deadlineAt: number
+      signal?: AbortSignal
+      idempotent?: boolean
+    },
+    send: (conn: DeviceBridgeMcpClient, remaining: number) => Promise<unknown>,
+  ): Promise<DialKind> {
+    const u = T()
+    let p: DeviceBridgeMcpClient
+    try {
+      p = (await u.ensureConnectedClient(
+        n as unknown as Parameters<typeof u.ensureConnectedClient>[0],
+        {
+          signal: opts.signal,
+          timeoutMs: Math.max(1, opts.deadlineAt - Date.now()),
+          context: 'remote tool execution',
+        },
+      )) as DeviceBridgeMcpClient
+    } catch (f) {
+      return { kind: 'connect_failed', error: f }
+    }
+    const remaining = opts.deadlineAt - Date.now()
+    if (remaining <= 0) {
+      return {
+        kind: 'connect_failed',
+        error: new Error('deadline reached before the request could be sent'),
+      }
+    }
+    try {
+      return { kind: 'ok', value: await send(p, remaining) }
+    } catch (f) {
+      return f instanceof Error && isSessionExpired(f, opts.idempotent === true)
+        ? { kind: 'session_expired', connection: p }
+        : { kind: 'failed', error: f }
+    }
+  }
+  /** densable `M`. */
+  async function M(
+    n: DeviceBridgeMcpClient,
+    opts: {
+      deadlineAt: number
+      signal?: AbortSignal
+      idempotent?: boolean
+    },
+    send: (conn: DeviceBridgeMcpClient, remaining: number) => Promise<unknown>,
+  ): Promise<DialKind> {
+    const first = await V(n, opts, send)
+    if (first.kind !== 'session_expired') return j(n, first)
+    await recovery.reinitialize(first.connection)
+    const second = await V(n, opts, send)
+    return second.kind === 'session_expired'
+      ? { kind: 'expired_twice' }
+      : j(n, second)
+  }
+  /** densable `lqo` — approval meta only when it stays small enough. */
+  function attachedCallMeta(
+    envelope: Record<string, unknown>,
+  ): Record<string, unknown> | undefined {
+    const copy = { ...envelope }
+    try {
+      const bytes = Buffer.byteLength(JSON.stringify(copy) ?? '{}', 'utf8')
+      return bytes <= 8192 ? copy : undefined
+    } catch {
+      return undefined
+    }
+  }
+  /** densable `Ce`. */
+  async function Ce(
+    toolName: string,
+    input: Record<string, unknown>,
+    envelope: Record<string, unknown>,
+    opts: { signal: AbortSignal; deadlineMs: number; toolUseId: string },
+  ): Promise<TransportCall> {
+    const startedAt = Date.now()
+    const capMs = capDeadlineMs(opts.deadlineMs)
+    const metaCopy = attachedCallMeta(envelope)
+    const wireInput = { ...input }
+    delete wireInput._host
+    const dialed = await M(
+      client,
+      { deadlineAt: startedAt + capMs, signal: opts.signal },
+      (conn, remaining) =>
+        _F(
+          conn,
+          {
+            name: toolName,
+            arguments: { ...wireInput, __remote_tool_call: envelope },
+            _meta: {
+              'claudecode/toolUseId': opts.toolUseId,
+              ...(metaCopy !== undefined && {
+                'claudecode/remoteToolCall': metaCopy,
+              }),
+            },
+          },
+          { signal: opts.signal, timeout: remaining },
+        ),
+    )
+    if (dialed.kind === 'ok') {
+      const mapped = interpret(
+        dialed.value as {
+          content?: unknown
+          isError?: boolean
+          structuredContent?: unknown
+        } & Record<string, unknown>,
+        Date.now() - startedAt,
+        capMs,
+      )
+      return mapped.kind === 'result'
+        ? {
+            ...mapped,
+            metaCopy: metaCopy === undefined ? 'omitted' : 'attached',
+          }
+        : mapped
+    }
+    if (opts.signal.aborted) return { kind: 'cancelled' }
+    switch (dialed.kind) {
+      case 'connect_failed':
+        return { kind: 'unreachable', detail: sanitizeDetail(dialed.error) }
+      case 'expired_twice':
+        return {
+          kind: 'unreachable',
+          detail:
+            'the device bridge rejected the session again right after re-initializing it; nothing ran',
+        }
+      case 'failed':
+        return classifyFailed(dialed.error, capMs, opts.toolUseId)
+      default:
+        return {
+          kind: 'unreachable',
+          detail:
+            'the device bridge rejected the session again right after re-initializing it; nothing ran',
+        }
+    }
+  }
+  /** densable `Te`. */
+  async function Te(
+    toolName: string,
+    input: Record<string, unknown>,
+    opts: { signal: AbortSignal; deadlineMs: number; idempotent?: boolean },
+  ): Promise<TransportCall> {
+    if (!BRIDGE_PLUMBING_TOOLS.has(toolName)) {
+      throw new Error('callPlumbing: not a bridge plumbing tool')
+    }
+    const startedAt = Date.now()
+    const capMs = capDeadlineMs(opts.deadlineMs)
+    const dialed = await M(
+      client,
+      {
+        deadlineAt: startedAt + capMs,
+        signal: opts.signal,
+        idempotent: opts.idempotent,
+      },
+      (conn, remaining) =>
+        _F(
+          conn,
+          { name: toolName, arguments: { ...input } },
+          { signal: opts.signal, timeout: remaining },
+        ),
+    )
+    if (dialed.kind === 'ok') {
+      const payload = dialed.value as {
+        content?: unknown
+        isError?: boolean
+        structuredContent?: unknown
+      } & Record<string, unknown>
+      const { parseRemoteToolAnswer } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./remoteToolCall.js') as typeof import('./remoteToolCall.js')
+      const parsed = parseRemoteToolAnswer(payload)
+      const text = contentText(parsed.content)
+      const classified =
+        parsed.isError && parsed.envelope.status === 'absent'
+          ? classifyBridgeError(
+              payload,
+              parsed.content ?? payload.content,
+              capMs,
+            )
+          : undefined
+      if (classified !== undefined) return asPlumbingCall(classified)
+      return {
+        kind: 'result',
+        structuredContent: payload.structuredContent,
+        text,
+        isError: parsed.isError,
+      }
+    }
+    if (opts.signal.aborted) return { kind: 'cancelled' }
+    switch (dialed.kind) {
+      case 'connect_failed':
+        return { kind: 'unreachable', detail: sanitizeDetail(dialed.error) }
+      case 'expired_twice':
+        return {
+          kind: 'unreachable',
+          detail:
+            'the device bridge rejected the session again right after re-initializing it; nothing ran',
+        }
+      case 'failed':
+        return asPlumbingCall(classifyFailed(dialed.error, capMs, undefined))
+      default:
+        return {
+          kind: 'unreachable',
+          detail:
+            'the device bridge rejected the session again right after re-initializing it; nothing ran',
+        }
+    }
+  }
+  return {
+    kind: 'bridge',
+    limits: { ...BRIDGE_TRANSPORT_LIMITS },
+    call: (toolName, input, envelope, opts) =>
+      Ce(toolName, input, envelope, opts),
+    callPlumbing: (toolName, input, opts) => Te(toolName, input, opts),
+  }
+}
+
+/** densable `Z` result. */
+export type BridgeListingParse = {
+  hosts: import('../../utils/toolState.js').RemoteToolReplaceHost[]
+  invalid?: 'two_names' | 'duplicate_tool'
+  unreadable: number
+  unreadableMarkers: number
+}
+
+/** densable `Z` — tools/list → one bridge ToolHost. */
+export function parseBridgeToolList(
+  tools: Array<{ name: string; _meta?: Record<string, unknown> }>,
+  transport?: import('../../utils/toolState.js').RemoteToolRoutedHost['transport'],
+): BridgeListingParse {
+  const served = tools.filter(tool => BRIDGE_SERVED_TOOLS.has(tool.name))
+  const servedMarkers = served.flatMap(tool => {
+    const marker = servedToolMarker(tool)
+    return marker ? [marker] : []
+  })
+  const unreadable = served.length - servedMarkers.length
+  const passTools = tools.filter(
+    tool =>
+      !BRIDGE_SERVED_TOOLS.has(tool.name) &&
+      !BRIDGE_PLUMBING_TOOLS.has(tool.name) &&
+      tool._meta?.[DEVICE_PASSTHROUGH_META] !== undefined,
+  )
+  const passMarkers = passTools.flatMap(tool => {
+    const marker = passthroughToolMarker(tool)
+    return marker ? [marker] : []
+  })
+  const unreadableMarkers = passTools.length - passMarkers.length
+  const servedNames = new Set(served.map(tool => tool.name))
+  const names = new Set([
+    ...servedMarkers.map(marker => marker.name),
+    ...passMarkers.map(marker => marker.name),
+  ])
+  const invalid =
+    names.size > 1
+      ? 'two_names'
+      : servedNames.size < served.length
+        ? 'duplicate_tool'
+        : undefined
+  if (
+    served.length === 0 &&
+    passMarkers.length === 0 &&
+    unreadableMarkers === 0
+  ) {
+    return { hosts: [], invalid, unreadable, unreadableMarkers }
+  }
+  const hostName =
+    servedMarkers[0]?.name ?? passMarkers[0]?.name ?? BRIDGE_DEFAULT_HOST
+  const plumbing = new Set(
+    tools
+      .filter(tool => BRIDGE_PLUMBING_TOOLS.has(tool.name))
+      .map(tool => tool.name),
+  )
+  const rejected = new Set(
+    passTools
+      .filter(
+        tool => !passMarkers.some(marker => marker.bridgeName === tool.name),
+      )
+      .map(tool => tool.name),
+  )
+  return {
+    hosts: [
+      {
+        source: 'bridge',
+        name: hostName,
+        instanceId: 'bridge',
+        status: invalid === undefined ? 'online' : 'offline',
+        enforcement: 'self',
+        servedTools: servedNames,
+        ...(passMarkers.length > 0 && {
+          passthroughTools: new Map(
+            passMarkers.map(marker => [
+              marker.bridgeName,
+              { localName: marker.localName },
+            ]),
+          ),
+        }),
+        ...(plumbing.size > 0 && { plumbingTools: plumbing }),
+        ...(rejected.size > 0 && { rejectedPassthroughTools: rejected }),
+        ...(servedMarkers[0]?.description !== undefined && {
+          description: servedMarkers[0].description,
+        }),
+        protocol: remoteToolProtocol(servedMarkers[0]?.protocol_versions),
+        ...(transport !== undefined && { transport }),
+      },
+    ],
+    invalid,
+    unreadable,
+    unreadableMarkers,
+  }
+}
+
+export function bridgeHostsFromToolList(
+  tools: Array<{ name: string; _meta?: Record<string, unknown> }>,
+  transport?: import('../../utils/toolState.js').RemoteToolRoutedHost['transport'],
+): import('../../utils/toolState.js').RemoteToolReplaceHost[] {
+  return parseBridgeToolList(tools, transport).hosts
+}
+
+function isScopedDeviceBridgeEntry(client: DeviceBridgeMcpClient): boolean {
+  const config = client.config
+  if (!config) return false
+  return (
+    config.scope === 'project' ||
+    config.scope === 'local' ||
+    config.scope === 'agent' ||
+    config.pluginSource !== undefined ||
+    config.agentSource !== undefined
+  )
+}
+
+const BRIDGE_UPSTREAM_HOSTS = new Set([
+  'bridge.claudeusercontent.com',
+  'bridge-staging.claudeusercontent.com',
+])
+const BRIDGE_DEVICES_MCP_PATH = '/devices/mcp'
+const NIL_UUID_HEX = '00000000000000000000000000000000'
+
+function uuidV5Hex(name: string, namespaceHex32: string): string {
+  const digest = createHash('sha1')
+    .update(Buffer.from(namespaceHex32, 'hex'))
+    .update(Buffer.from(name, 'utf8'))
+    .digest()
+  digest[6] = (digest[6]! & 0x0f) | 0x50
+  digest[8] = (digest[8]! & 0x3f) | 0x80
+  return digest.subarray(0, 16).toString('hex')
+}
+
+function deriveDeviceBridgeToolboxId(sessionSegment: string): string {
+  const segHex = uuidV5Hex(sessionSegment, NIL_UUID_HEX)
+  const hex = uuidV5Hex(DEVICE_BRIDGE_MCP_NAME, segHex)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+/** densable `wme` — CCR proxy URL carrying `mcp_url` pointing at `/devices/mcp`. */
+export function isDevicesUpstreamUrl(url: string): boolean {
+  if (!isMcpCcrProxyUrl(url)) return false
+  try {
+    const outer = new URL(url)
+    const upstreamRaw = outer.searchParams.get('mcp_url')
+    if (!upstreamRaw) return false
+    const upstream = new URL(upstreamRaw)
+    return (
+      BRIDGE_UPSTREAM_HOSTS.has(upstream.hostname) &&
+      upstream.pathname === BRIDGE_DEVICES_MCP_PATH
+    )
+  } catch {
+    return false
+  }
+}
+
+/** densable `re` — single `mcp_url` and valid optional `toolbox_mcp_server_id`. */
+export function hasValidBridgeRoutingShape(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.searchParams.getAll('mcp_url').length !== 1) return false
+    const toolboxIds = parsed.searchParams.getAll('toolbox_mcp_server_id')
+    if (toolboxIds.length === 0) return true
+    if (toolboxIds.length !== 1) return false
+    const id = toolboxIds[0]!
+    if (id === DEVICE_BRIDGE_MCP_NAME) return true
+    const sessionSegment = /\/v2\/ccr-sessions\/([^/]+)\/mcp$/.exec(
+      parsed.pathname,
+    )?.[1]
+    return (
+      sessionSegment !== undefined &&
+      id === deriveDeviceBridgeToolboxId(sessionSegment)
+    )
+  } catch {
+    return false
+  }
+}
+
+function classifyUnadoptedBridgeEntry(client: DeviceBridgeMcpClient): string {
+  if (isScopedDeviceBridgeEntry(client)) return 'scoped_entry'
+  const url = client.config?.url
+  if (typeof url !== 'string' || url.length === 0) return 'no_url'
+  if (!isMcpCcrProxyUrl(url)) return 'not_ccr_proxy_url'
+  if (!isDevicesUpstreamUrl(url)) return 'not_devices_upstream'
+  if (!hasValidBridgeRoutingShape(url)) return 'routing_shape'
+  switch (client.type) {
+    case 'connected':
+      return 'none'
+    case 'disabled':
+      return 'disabled'
+    case 'needs-auth':
+      return 'needs_auth'
+    default:
+      return 'connecting'
+  }
+}
+
+/** densable `ze` / `te` — connected unscoped `remote-devices` with validated CCR bridge URL. */
+export function findDeviceBridgeClient(
+  clients: DeviceBridgeMcpClient[],
+): DeviceBridgeMcpClient | undefined {
+  return clients.find(
+    client =>
+      client.type === 'connected' &&
+      client.name === DEVICE_BRIDGE_MCP_NAME &&
+      !isScopedDeviceBridgeEntry(client) &&
+      typeof client.config?.url === 'string' &&
+      isDevicesUpstreamUrl(client.config.url) &&
+      hasValidBridgeRoutingShape(client.config.url),
+  )
+}
+
+/** densable `KJ` — nfe() && violin_wood. */
+async function remoteToolsListingGate(): Promise<boolean> {
+  if (!isRemoteToolsForwardEnabled()) return false
+  try {
+    return await checkGate_CACHED_OR_BLOCKING('tengu_violin_wood')
+  } catch {
+    return false
+  }
+}
+
+/** densable `WK` — subagent that is not the main session skips Fe. */
+function skipBridgeListingForAgent(): boolean {
+  const { getAgentContext } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/agentContext.js') as typeof import('../../utils/agentContext.js')
+  const ctx = getAgentContext()
+  return ctx?.agentType === 'subagent' && ctx.isMainSession !== true
+}
+
+/** densable `Ue`. */
+async function listDeviceBridgeTools(client: DeviceBridgeMcpClient): Promise<
+  | {
+      tools: Array<{ name: string; _meta?: Record<string, unknown> }>
+      truncated: boolean
+      stub: boolean
+    }
+  | undefined
+> {
+  if (typeof client.listTools !== 'function') return undefined
+  const listed = await client.listTools({ timeout: 5000 })
+  const tools = (listed.tools ?? []).flatMap(tool =>
+    typeof tool.name === 'string' && tool.name !== ''
+      ? [{ name: tool.name, _meta: tool._meta }]
+      : [],
+  )
+  const meta = listed._meta
+  return {
+    tools,
+    truncated: Boolean(listed.nextCursor),
+    stub:
+      typeof meta === 'object' &&
+      meta !== null &&
+      meta[OFFICE_BRIDGE_LISTING] === 'stub',
+  }
+}
+
+/**
+ * densable `Fe`: no ze → Ye + ne([]); connected → Ue + Z + ne.
+ */
+async function listDeviceBridgeHosts(
+  toolState: ToolStateSlots,
+  trigger: string,
+  clients: DeviceBridgeMcpClient[],
+): Promise<void> {
+  if (skipBridgeListingForAgent()) return
+  const { RemoteBridgeListing } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/toolState.js') as typeof import('../../utils/toolState.js')
+  const slot = toolState.get(RemoteBridgeListing)
+  const connected = findDeviceBridgeClient(clients)
+  if (connected !== undefined) {
+    try {
+      const listed = await listDeviceBridgeTools(connected)
+      if (listed === undefined) return
+      if (listed.truncated) {
+        logForDebugging(
+          '[remote-tools] device-bridge tools/list is paginated; only the first page is read for machine discovery',
+          { level: 'warn' },
+        )
+      }
+      const parsed = parseBridgeToolList(
+        listed.tools,
+        createBridgeTransport(connected),
+      )
+      if (parsed.hosts.length === 0) {
+        logEvent('tengu_remote_tool_targets', {
+          event:
+            'listed_empty' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          trigger:
+            trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          tool_count: listed.tools.length,
+          truncated: listed.truncated,
+          stub: listed.stub,
+        })
+      }
+      applyBridgeRemoteHosts(toolState, parsed.hosts, {
+        invalid: parsed.invalid,
+        unreadable: parsed.unreadable,
+        unreadableMarkers: parsed.unreadableMarkers,
+        trigger,
+      })
+    } catch (err) {
+      logForDebugging(
+        `[remote-tools] device-bridge tools/list failed; keeping last known machines${err instanceof Error ? `: ${err.message}` : ''}`,
+        { level: 'warn' },
+      )
+      logEvent('tengu_remote_tool_targets', {
+        event:
+          'list_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        trigger:
+          trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+    return
+  }
+  const named = clients.filter(client => client.name === DEVICE_BRIDGE_MCP_NAME)
+  if (named.length > 0 && !slot.reportedUnmatched) {
+    slot.reportedUnmatched = true
+    const reasons = named.map(classifyUnadoptedBridgeEntry)
+    logForDebugging(
+      `[remote-tools] a '${DEVICE_BRIDGE_MCP_NAME}' MCP entry exists but was not adopted as the device bridge`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_remote_tool_targets', {
+      event:
+        'no_bridge_connection' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      trigger:
+        trigger as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      servers_seen: named.length,
+      reason: (reasons[0] ??
+        'none') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      ingress_base_unset: getCapturedCcrIngressBase() === undefined,
+    })
+  }
+  applyBridgeRemoteHosts(toolState, [], {
+    invalid: undefined,
+    unreadable: 0,
+    unreadableMarkers: 0,
+    trigger,
+  })
+}
+
+/** densable `He`. */
+export async function syncBridgeRemoteHosts(
+  toolState: ToolStateSlots,
+  trigger: string,
+  clients: DeviceBridgeMcpClient[] = [],
+): Promise<void> {
+  if (!(await remoteToolsListingGate())) return
+  const { RemoteBridgeListing } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/toolState.js') as typeof import('../../utils/toolState.js')
+  const slot = toolState.get(RemoteBridgeListing)
+  slot.inFlight ??= listDeviceBridgeHosts(toolState, trigger, clients)
+    .catch(() => {})
+    .finally(() => {
+      slot.inFlight = undefined
+    })
+  return slot.inFlight
+}
+
+/**
+ * densable `Wit` — QFn, await He, QFn.
+ */
+export async function refreshRemoteToolHosts(
+  toolState: ToolStateSlots,
+  trigger: string,
+  clients: DeviceBridgeMcpClient[] = [],
+): Promise<void> {
+  syncSessionRemoteHosts(toolState, trigger)
+  await syncBridgeRemoteHosts(toolState, trigger, clients)
+  syncSessionRemoteHosts(toolState, trigger)
+}
+
+export function clearAnnouncedRemoteMachines(toolState?: ToolStateSlots): void {
+  sessionRegistry(toolState).clear()
+}
+
+/** densable `ZO.announceWaitExpired` — later unknown names in this session skip waiting. */
+export function announceWaitAlreadyExpired(
+  toolState?: ToolStateSlots,
+): number | undefined {
+  return sessionRegistry(toolState).announceWaitExpired()
 }
 
 export type RemoteAnnounceAccept = {
@@ -203,20 +1659,23 @@ export type RemoteAnnounceAccept = {
  * is withdrawn. A different instance of the same name displaces the old
  * one. A version outside `Cje` is stored incompatible (`Q8t`).
  */
-export function acceptRemoteMachineAnnounce(input: {
-  instanceId: string
-  name: string
-  tools: AnnouncedRemoteTool[]
-  ignoredTools?: string[]
-  passthrough?: string[]
-  rejectedPassthrough?: string[]
-  plumbing?: string[]
-  epoch?: string
-  protocolVersions?: number[]
-  source?: 'session' | 'bridge'
-  homeDir?: string
-  now?: number
-}): RemoteAnnounceAccept {
+function acceptIntoRegistry(
+  registry: RemoteSessionRegistry,
+  input: {
+    instanceId: string
+    name: string
+    tools: AnnouncedRemoteTool[]
+    ignoredTools?: string[]
+    passthrough?: string[]
+    rejectedPassthrough?: string[]
+    plumbing?: string[]
+    epoch?: string
+    protocolVersions?: number[]
+    source?: 'session' | 'bridge'
+    homeDir?: string
+    now?: number
+  },
+): RemoteAnnounceAccept {
   const empty: RemoteAnnounceAccept = {
     status: 'invalid',
     ignoredTools: [],
@@ -228,16 +1687,33 @@ export function acceptRemoteMachineAnnounce(input: {
   if (!HOST_NAME.test(input.name) || isReservedRemoteHostName(input.name)) {
     return empty
   }
-  const index = announcedMachines.findIndex(
+  const previous = registry.machines.find(
     machine => machine.name === input.name,
   )
-  const previous = index >= 0 ? announcedMachines[index] : undefined
-  if (input.tools.length === 0 && previous?.instanceId === input.instanceId) {
-    announcedMachines.splice(index, 1)
-    withdrawnMachineNames.add(input.name)
+  const aliases = registry.machines
+    .filter(machine => machine.instanceId === input.instanceId)
+    .map(machine => machine.name)
+  const withdrawing =
+    input.tools.length === 0 &&
+    (input.passthrough?.length ?? 0) === 0 &&
+    (input.plumbing?.length ?? 0) === 0 &&
+    (input.ignoredTools?.length ?? 0) === 0
+  // densable ZO: each instance owns one current name; withdraw removes its
+  // prior aliases without removing a replacement instance holding this name.
+  for (let index = registry.machines.length - 1; index >= 0; index--) {
+    if (registry.machines[index]?.instanceId === input.instanceId) {
+      registry.machines.splice(index, 1)
+    }
+  }
+  if (withdrawing) {
+    const heldByAnother =
+      previous !== undefined && previous.instanceId !== input.instanceId
+    for (const name of heldByAnother ? aliases : [...aliases, input.name]) {
+      if (registry.withdrawn.size < 256) registry.withdrawn.add(name)
+    }
     return { ...empty, status: 'withdrawn' }
   }
-  withdrawnMachineNames.delete(input.name)
+  registry.withdrawn.delete(input.name)
   const versions = input.protocolVersions ?? []
   const compatible = versions.some(version =>
     (REMOTE_TOOL_PROTOCOL_VERSIONS as readonly number[]).includes(version),
@@ -257,9 +1733,9 @@ export function acceptRemoteMachineAnnounce(input: {
     epoch: input.epoch,
     homeDir: input.homeDir,
   }
-  if (index >= 0) announcedMachines[index] = machine
-  else announcedMachines.push(machine)
-  notifyAnnounceWaiters()
+  const index = registry.machines.findIndex(entry => entry.name === input.name)
+  if (index >= 0) registry.machines[index] = machine
+  else registry.machines.push(machine)
   return {
     status: 'announced',
     ignoredTools: input.ignoredTools ?? [],
@@ -279,12 +1755,22 @@ export function acceptRemoteMachineAnnounce(input: {
   }
 }
 
+export function acceptRemoteMachineAnnounce(
+  input: Parameters<RemoteSessionRegistry['accept']>[0],
+  toolState?: ToolStateSlots,
+): RemoteAnnounceAccept {
+  // densable QFn reads `toolState.get(ZO)` only. Write that slot when
+  // present; otherwise the process fallback registry.
+  return sessionRegistry(toolState).accept(input)
+}
+
 /** densable `Q8t` when the announced versions share nothing with `Cje`. */
 export function remoteHostIncompatibleMessage(
   name: string,
   announced: readonly number[],
   toolName?: string,
   runsOnlyThere = false,
+  toolState?: ToolStateSlots,
 ): string {
   const ours = REMOTE_TOOL_PROTOCOL_VERSIONS.map(version => `v${version}`).join(
     '/',
@@ -305,7 +1791,7 @@ export function remoteHostIncompatibleMessage(
     : 'on this machine'
   let tail = `Omit "${REMOTE_TOOL_HOST_FIELD}" to run it ${here} instead.`
   if (toolName !== undefined) {
-    const elsewhere = announcedMachines.find(
+    const elsewhere = sessionRegistry(toolState).machines.find(
       machine =>
         machine.name !== name &&
         machine.status === 'online' &&
@@ -326,13 +1812,15 @@ export function remoteHostIncompatibleMessage(
  */
 export function resolveAnnouncedMachine(
   requested: string,
+  toolState?: ToolStateSlots,
 ):
   | { kind: 'remote'; machine: AnnouncedRemoteMachine }
   | { kind: 'case'; canonical: string; offline: boolean }
   | { kind: 'unknown' } {
-  const exact = announcedMachines.find(machine => machine.name === requested)
+  const machines = sessionRegistry(toolState).machines
+  const exact = machines.find(machine => machine.name === requested)
   if (exact) return { kind: 'remote', machine: exact }
-  const folded = announcedMachines.find(
+  const folded = machines.find(
     machine => machine.name === requested.toLowerCase(),
   )
   if (folded) {
@@ -350,8 +1838,8 @@ export function remoteHostNotEnabledMessage(): string {
   return `Running tool calls on an attached machine is not enabled in this session; omit "${REMOTE_TOOL_HOST_FIELD}" to run here.`
 }
 
-function attachedMachineLabels(): string[] {
-  return announcedMachines.map(machine =>
+function attachedMachineLabels(toolState?: ToolStateSlots): string[] {
+  return sessionRegistry(toolState).machines.map(machine =>
     machine.status === 'offline' ? `${machine.name} (offline)` : machine.name,
   )
 }
@@ -361,7 +1849,10 @@ function attachedMachineLabels(): string[] {
  * The invisible-character note needs the displayed name to already be
  * attached; an empty list never adds it.
  */
-export function remoteHostUnknownMessage(requested: string): string {
+export function remoteHostUnknownMessage(
+  requested: string,
+  toolState?: ToolStateSlots,
+): string {
   const shown = displayRemoteHostName(requested)
   const bare = requested.trim().replace(/\s+\(offline\)$/i, '')
   if (
@@ -370,7 +1861,7 @@ export function remoteHostUnknownMessage(requested: string): string {
   ) {
     return `No machine named "${shown}" is attached to this session — to run this in the session's own environment, omit "${REMOTE_TOOL_HOST_FIELD}".`
   }
-  const labels = attachedMachineLabels()
+  const labels = attachedMachineLabels(toolState)
   const folded = labels.find(
     label => label.replace(/ \(offline\)$/, '') === bare.toLowerCase(),
   )
@@ -794,6 +2285,7 @@ function capRemoteBlocks(blocks: RemoteResultBlock[]): RemoteResultBlock[] {
 }
 
 const BASH_OUTPUT_FIELDS = new Set([
+  'backgroundTaskId',
   'stdout',
   'stderr',
   'interrupted',
@@ -1113,41 +2605,40 @@ export async function waitForAnnouncedMachine(
   name: string,
   signal: AbortSignal,
   deadlineMs = REMOTE_ANNOUNCE_WAIT_MS,
+  toolState?: ToolStateSlots,
 ): Promise<'announced' | 'aborted' | 'gave_up'> {
-  if (announcedMachines.some(machine => machine.name === name)) {
+  const registry = sessionRegistry(toolState)
+  const machines = () => registry.machines
+  if (machines().some(machine => machine.name === name)) {
     return 'announced'
   }
   const started = Date.now()
   while (!signal.aborted) {
     const left = deadlineMs - (Date.now() - started)
     if (left <= 0) {
-      announceWaitExpiredMs = Date.now() - started
+      registry.markAnnounceWaitExpired(Date.now() - started)
       return 'gave_up'
     }
     const slice = Math.min(REMOTE_ANNOUNCE_WAIT_SLICE_MS, left)
     const kind = await new Promise<'announced' | 'aborted' | 'slice'>(
       resolve => {
-        const waiter: AnnounceWaiter = {
-          resolve: value => resolve(value),
-        }
-        const timer = setTimeout(() => {
-          const at = announceWaiters.indexOf(waiter)
-          if (at >= 0) announceWaiters.splice(at, 1)
-          resolve('slice')
-        }, slice)
-        waiter.resolve = value => {
+        const finish = (kind: 'announced' | 'aborted' | 'slice') => {
           clearTimeout(timer)
-          resolve(value)
+          unsubscribe()
+          signal.removeEventListener('abort', abort)
+          resolve(kind)
         }
-        announceWaiters.push(waiter)
-        if (signal.aborted) waiter.resolve('aborted')
+        const abort = () => finish('aborted')
+        const unsubscribe = registry.onNextAnnounce(() => finish('announced'))
+        const timer = setTimeout(() => finish('slice'), slice)
+        signal.addEventListener('abort', abort, { once: true })
+        if (signal.aborted) abort()
       },
     )
     if (kind === 'aborted') return 'aborted'
-    if (announcedMachines.some(machine => machine.name === name)) {
+    if (machines().some(machine => machine.name === name)) {
       return 'announced'
     }
-    if (kind === 'announced') return 'announced'
   }
   return 'aborted'
 }
@@ -1155,8 +2646,9 @@ export async function waitForAnnouncedMachine(
 /** A machine that lists this tool, MCP passthrough or served. */
 export function machineServingTool(
   toolName: string,
+  toolState?: ToolStateSlots,
 ): AnnouncedRemoteMachine | undefined {
-  return announcedMachines.find(
+  return sessionRegistry(toolState).machines.find(
     machine =>
       machine.status === 'online' &&
       (machine.tools.some(tool => tool.name === toolName) ||
@@ -1166,9 +2658,11 @@ export function machineServingTool(
 
 export function machineAdoptingMcpTool(
   toolName: string,
+  toolState?: ToolStateSlots,
 ): AnnouncedRemoteMachine | undefined {
+  const machines = sessionRegistry(toolState).machines
   const matches = (source: AnnouncedRemoteMachine['source']) =>
-    announcedMachines.find(
+    machines.find(
       machine =>
         machine.source === source &&
         machine.status === 'online' &&
@@ -1186,11 +2680,19 @@ export function remoteToolsWorkerEpoch(): number {
   return value
 }
 
-/**
- * densable `askOnce` — one `remote_tools_reannounce` per process, and only
- * when the epoch says this is a replacement worker.
- */
-let reannounceAsked = false
+/** densable `Git` — one reannounce request per session slot. */
+export class RemoteToolsReannounce {
+  #asked = false
+
+  askOnce(send: () => void): boolean {
+    if (this.#asked) return false
+    this.#asked = true
+    send()
+    return true
+  }
+}
+
+const defaultReannounce = new RemoteToolsReannounce()
 
 export function askRemoteToolsReannounce(
   send: (request: {
@@ -1199,20 +2701,21 @@ export function askRemoteToolsReannounce(
     deadlineMs: number
   }) => void,
   deadlineMs: number,
+  toolState?: ToolStateSlots,
 ): boolean {
   const epoch = remoteToolsWorkerEpoch()
   if (
     epoch <= 1 ||
-    reannounceAsked ||
     isRemoteToolsSessionChannelOff() ||
     !isViolinWoodEnabledSync() ||
-    announcedMachines.length > 0
+    sessionRegistry(toolState).machines.length > 0
   ) {
     return false
   }
-  reannounceAsked = true
-  send({ subtype: 'remote_tools_reannounce', workerEpoch: epoch, deadlineMs })
-  return true
+  const slot = toolState?.get(RemoteToolsReannounce) ?? defaultReannounce
+  return slot.askOnce(() => {
+    send({ subtype: 'remote_tools_reannounce', workerEpoch: epoch, deadlineMs })
+  })
 }
 
 /**
@@ -1223,6 +2726,7 @@ export function remoteHostRoute(
   input: unknown,
   toolName: string,
   channelOpen = false,
+  toolState?: ToolStateSlots,
 ):
   | { kind: 'local' }
   | { kind: 'error'; message: string }
@@ -1231,15 +2735,17 @@ export function remoteHostRoute(
   if (!isRemoteToolsForwardEnabled() || requested === undefined) {
     return { kind: 'local' }
   }
-  const resolved = resolveAnnouncedMachine(requested)
+  const zo = sessionRegistry(toolState)
+  const machines = zo.machines
+  const resolved = resolveAnnouncedMachine(requested, toolState)
   if (resolved.kind === 'unknown' || resolved.kind === 'case') {
-    if (withdrawnMachineNames.has(requested)) {
+    if (zo.withdrawn.has(requested)) {
       return {
         kind: 'error',
         message: remoteHostWithdrawnMessage(requested, toolName),
       }
     }
-    if (announcedMachines.length === 0) {
+    if (machines.length === 0) {
       return {
         kind: 'error',
         message: channelOpen
@@ -1247,10 +2753,13 @@ export function remoteHostRoute(
           : remoteHostUnreachableMessage(),
       }
     }
-    if (announcedMachines.every(machine => machine.status === 'offline')) {
+    if (machines.every(machine => machine.status === 'offline')) {
       return { kind: 'error', message: remoteHostNotConnectedMessage() }
     }
-    return { kind: 'error', message: remoteHostUnknownMessage(requested) }
+    return {
+      kind: 'error',
+      message: remoteHostUnknownMessage(requested, toolState),
+    }
   }
   const toolVersions = resolved.machine.tools.find(
     tool => tool.name === toolName,
@@ -1271,6 +2780,8 @@ export function remoteHostRoute(
         resolved.machine.name,
         versions,
         toolName,
+        false,
+        toolState,
       ),
     }
   }
@@ -1298,7 +2809,7 @@ export function remoteHostRoute(
         message: remoteHostServesNothingMessage(resolved.machine.name),
       }
     }
-    const elsewhere = announcedMachines.find(
+    const elsewhere = machines.find(
       machine =>
         machine.name !== resolved.machine.name &&
         machine.status === 'online' &&
@@ -1324,9 +2835,12 @@ export function remoteHostRoute(
 export function remoteHostRefusalMessage(
   input: unknown,
   toolName = '',
+  toolState?: ToolStateSlots,
 ): string {
-  const route = remoteHostRoute(input, toolName)
-  return route.kind === 'error' ? route.message : remoteHostUnknownMessage('')
+  const route = remoteHostRoute(input, toolName, false, toolState)
+  return route.kind === 'error'
+    ? route.message
+    : remoteHostUnknownMessage('', toolState)
 }
 
 /**
@@ -1336,12 +2850,13 @@ export function remoteHostRefusalMessage(
 export function remoteHostForwardRefusal(
   input: unknown,
   toolName = '',
+  toolState?: ToolStateSlots,
 ): { result: false; message: string } | undefined {
   const requested = requestedRemoteHost(input)
   if (!isRemoteToolsForwardEnabled() || requested === undefined) {
     return undefined
   }
-  const resolved = resolveAnnouncedMachine(requested)
+  const resolved = resolveAnnouncedMachine(requested, toolState)
   if (resolved.kind === 'remote' && resolved.machine.status === 'online') {
     const toolVersions = resolved.machine.tools.find(
       tool => tool.name === toolName,
@@ -1363,12 +2878,13 @@ export function remoteHostForwardRefusal(
           versions,
           toolName,
           true,
+          toolState,
         ),
       }
     }
     return undefined
   }
-  const route = remoteHostRoute(input, toolName)
+  const route = remoteHostRoute(input, toolName, false, toolState)
   if (route.kind !== 'error') return undefined
   return { result: false, message: route.message }
 }

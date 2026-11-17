@@ -32,6 +32,8 @@ import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 export type SubagentContext = {
   /** The subagent's UUID (from createAgentId()) */
   agentId: string
+  /** Immediate parent subagent ID when nested (`parentAgentId` in gold `bDo` / `yk`). */
+  parentAgentId?: string
   /** The team lead's session ID (from CLAUDE_CODE_PARENT_SESSION_ID env var), undefined for main REPL subagents */
   parentSessionId?: string
   /** Agent type - 'subagent' for Agent tool agents */
@@ -57,6 +59,17 @@ export type SubagentContext = {
    * set this true; foreground sync subagents leave it false/undefined.
    */
   isBackgroundAgent?: boolean
+  /**
+   * densable `isAsync` on gold agentContext. `cZe` is `isAsync===!1`, not
+   * `isBackgroundAgent`. Sync spawn stamps false even when the parent is a
+   * background agent (Yn).
+   */
+  isAsync?: boolean
+  /**
+   * densable `isMainSession` — `WK` is `pv(e)&&!e.isMainSession`. A subagent
+   * that is the main session still lists the device bridge.
+   */
+  isMainSession?: boolean
   /** Optional depth for nested subagents (official O4). */
   depth?: number
   /**

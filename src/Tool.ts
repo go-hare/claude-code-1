@@ -308,6 +308,31 @@ export type ToolUseContext = {
      * `tool.call` passes `withoutModuleHandlers` when this is true.
      */
     settingsHooksOff?: boolean
+    /**
+     * densable `s.options.bareFork` — Nx skips JSON tool hooks (with
+     * EndConversation and settingsHooksOff). Gold 2.1.289 only *reads*
+     * this option (no CLI write site); SDK/tests set it.
+     */
+    bareFork?: boolean
+  }
+  /**
+   * densable `s.managedPass` — AVt stashes the managed PreToolUse pass so
+   * inner PreToolUse can replay it and PostToolUse can exclude policy hooks.
+   */
+  managedPass?: {
+    toolUseId: string
+    input: unknown
+    inputKey: () => string
+    pass: {
+      result: {
+        deny?: string
+        ask?: string
+        allow?: boolean
+        updatedInput?: Record<string, unknown>
+        additionalContext?: string[]
+      }
+      yields: unknown[]
+    }
   }
   /**
    * densable `promptShellHandOff` collector on the context root
@@ -326,6 +351,14 @@ export type ToolUseContext = {
    * object. Design grants live at `toolState.get(DesignSessionState)`.
    */
   toolState?: import('./utils/toolState.js').ToolStateSlots
+  /**
+   * densable `e.taskRegistry` / `Xm` — GetTask `Po` `.get`; xSl `.all()`.
+   */
+  taskRegistry?: import('./utils/taskRegistry.js').TaskRegistry
+  /**
+   * densable `s.session` — TTe.of(s.session) / TTe.peek(session) keyed by `.root`.
+   */
+  session?: { readonly root: object }
   /**
    * densable 2.1.283 `forRemoteExecution` — this hasPermissionsToUseTool
    * run is for a remote agent, not the local REPL. yBt skips DualInk.
@@ -531,6 +564,11 @@ export type ToolUseContext = {
    * the classifier would allow ("a classifier allow re-surfaces as this ask").
    */
   hookAskFloor?: boolean
+  /**
+   * densable `hookAllowVouched` — PreToolUse allow was funneled through the
+   * auto-mode classifier (tengu_virtual_knuth). NHo reports `hookAllowVouch`.
+   */
+  hookAllowVouched?: boolean
   /**
    * densable `hookCaller` — plugin that invoked this tool on the main thread.
    * `tqn` skips the auto classifier when this is set (`plugin-origin`).
@@ -906,7 +944,7 @@ export type Tool<
    * the tool foreground-only). Gold SubagentHandback sets `never`; Bash
    * sets `self` (tool manages its own backgrounding).
    */
-  readonly backgrounding?: 'never' | 'allow' | 'prefer' | 'self'
+  readonly backgrounding?: 'never' | 'allow' | 'prefer' | 'self' | 'detach'
   /**
    * densable `Dy(tool)` — remote execution may name a machine via input
    * `_host`. `a9e` gates on `supported`. Gold also carries
@@ -963,6 +1001,12 @@ export type Tool<
    * Only applied when the tengu_tool_pear is enabled.
    */
   readonly strict?: boolean
+  /**
+   * densable `preserveToolUseResultInSubagents` — I$ keeps managed PostToolUse
+   * for this tool even when the caller is a subagent without
+   * `preserveToolUseResults`.
+   */
+  readonly preserveToolUseResultInSubagents?: boolean
 
   /**
    * Called on copies of tool_use input before observers see it (SDK stream,
@@ -1118,7 +1162,13 @@ export type Tool<
    */
   renderToolUseMessage(
     input: Partial<z.infer<Input>>,
-    options: { theme: ThemeName; verbose: boolean; commands?: Command[] },
+    options: {
+      theme: ThemeName
+      verbose: boolean
+      commands?: Command[]
+      isTranscriptMode?: boolean
+      toolUseResult?: unknown
+    },
   ): React.ReactNode
   /**
    * Returns true when the non-verbose rendering of this output is truncated

@@ -13,15 +13,275 @@ import {
   createChildAbortController,
   isRemoteCancelAbortReason,
 } from '../../utils/abortController.js'
+import {
+  isSingleShotPrintSession,
+  getMainThreadAgentHooks,
+  getRegisteredHooks,
+  getSessionId,
+} from '../../bootstrap/state.js'
+import { getPermissionConfirm } from '../../dialog/permissionConfirmRegistry.js'
+import {
+  getHooksConfigFromSnapshot,
+  shouldDisableAllHooksIncludingManaged,
+} from '../../utils/hooks/hooksConfigSnapshot.js'
+import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js'
+import { isUserPromptWaiting } from '../../utils/sessionHost.js'
+import { ToolPermissionPromptsUp } from '../../utils/toolState.js'
+import { escapeXml } from '../../utils/xml.js'
 import { isToolBridgeEvent, runToolUse } from './toolExecution.js'
 import type { ToolBridgeEvent } from './toolExecution.js'
-import {
-  queryForegroundSession,
-  registerForegroundToolCall,
-} from '../../utils/foregroundToolCalls.js'
+import { registerForegroundToolCall } from '../../utils/foregroundToolCalls.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
 import { logEvent } from '../analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { areBackgroundTasksDisabled } from '../../utils/sessionBackgroundGates.js'
+import {
+  persistToolResult,
+  processPreMappedToolResultBlock,
+} from '../../utils/toolResultStorage.js'
+import { plural } from '../../utils/stringUtils.js'
+
+/** densable `lOt` = `fwt - 2000` (notification cap 1e5). */
+const DETACH_OVERSIZE_CHARS = 98_000
+import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
+import { logForDebugging } from '../../utils/debug.js'
+import {
+  detachedToolCallEnded,
+  detachedToolCallLetGo,
+  detachedToolCallResultQueued,
+  detachedToolCallSetText,
+  detachedToolCallSettled,
+  detachedToolCallStarted,
+  detachedToolCallWasLetGo,
+  getDetachedToolCallSnapshot,
+  isDetachBackgrounding,
+} from '../../utils/detachedToolCallStore.js'
+import { AbortError } from '../../utils/errors.js'
+import {
+  enqueueDetachedToolCallResult,
+  stillRunningDetachText,
+} from '../../utils/detachedToolCallNotify.js'
+
+const RUN_TOOL_USE_HANDLES_DETACH_SYMBOL = Symbol.for(
+  'claude.runToolUseHandlesDetach',
+)
+
+function executorCanDetachFallback(
+  tool: { name: string; aliases?: string[]; backgrounding?: string },
+  toolUseContext: ToolUseContext,
+): boolean {
+  try {
+    if (
+      !isDetachBackgrounding(tool) ||
+      toolUseContext.session === undefined ||
+      toolUseContext.agentId !== undefined ||
+      toolUseContext.innerCall === true ||
+      (toolUseContext as { remoteCall?: unknown }).remoteCall !== undefined
+    ) {
+      return false
+    }
+    if (toolUseContext.options.isNonInteractiveSession) {
+      const nonInteractiveDetachAllowed =
+        !isSingleShotPrintSession() &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvet_panda', true) ===
+          true &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_bubbly_meteor', true) ===
+          true
+      if (!nonInteractiveDetachAllowed) return false
+    }
+    if (
+      areBackgroundTasksDisabled() ||
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_tool_detach', true) !== true
+    ) {
+      return false
+    }
+    if (shouldDisableAllHooksIncludingManaged()) return true
+    if (
+      hasMatchingFunctionHook('PostToolUse', { tool_name: tool.name }) ||
+      hasMatchingFunctionHook('PostToolUseFailure', { tool_name: tool.name }) ||
+      hasMatchingFunctionHook('PostToolBatch') ||
+      hasMatchingFunctionHook('tool.call', { tool: tool.name })
+    ) {
+      return false
+    }
+    if (toolUseContext.options.settingsHooksOff === true) return true
+    let sessionHooksForId:
+      | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+      | undefined
+    try {
+      const appState = toolUseContext.getAppState?.()
+      const sessionObj = toolUseContext.session as { id?: string } | undefined
+      const sid = toolUseContext.agentId ?? sessionObj?.id ?? getSessionId()
+      sessionHooksForId = appState?.sessionHooks?.get(sid)?.hooks as
+        | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+        | undefined
+    } catch {
+      sessionHooksForId = undefined
+    }
+    const names = [tool.name, ...(tool.aliases ?? [])]
+    const matchesTool = (pattern: string | undefined): boolean => {
+      if (!pattern || pattern === '*') return true
+      if (names.includes(pattern)) return true
+      try {
+        const re = new RegExp(`^(${pattern})$`)
+        return names.some(n => re.test(n))
+      } catch {
+        return false
+      }
+    }
+    const sources = [
+      getHooksConfigFromSnapshot() as
+        | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+        | null
+        | undefined,
+      getRegisteredHooks() as
+        | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+        | null
+        | undefined,
+      getMainThreadAgentHooks() as
+        | Record<string, Array<{ matcher?: string; hooks: unknown[] }>>
+        | null
+        | undefined,
+      sessionHooksForId,
+    ]
+    for (const event of ['PostToolUse', 'PostToolUseFailure'] as const) {
+      for (const src of sources) {
+        const matchers = src?.[event]
+        if (!Array.isArray(matchers)) continue
+        if (matchers.some(m => m.hooks.length > 0 && matchesTool(m.matcher))) {
+          return false
+        }
+      }
+    }
+    for (const src of sources) {
+      const matchers = src?.PostToolBatch
+      if (Array.isArray(matchers) && matchers.some(m => m.hooks.length > 0)) {
+        return false
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function executorPermissionPromptOpen(
+  toolUseContext: ToolUseContext,
+  toolUseId: string,
+): boolean {
+  if ((toolUseContext.toolState?.get(ToolPermissionPromptsUp).count ?? 0) > 0) {
+    return true
+  }
+  if (getPermissionConfirm(toolUseId) !== undefined) return true
+  if (toolUseContext.session !== undefined) {
+    try {
+      if (isUserPromptWaiting(toolUseContext.session)) return true
+    } catch {
+      // Synthetic session objects in unit tests may omit SessionHost state.
+    }
+  }
+  try {
+    const queue = (
+      toolUseContext.getAppState?.() as
+        | { toolUseConfirmQueue?: unknown[] }
+        | undefined
+    )?.toolUseConfirmQueue
+    if (Array.isArray(queue) && queue.length > 0) return true
+  } catch {
+    // Ignore partial test appState objects.
+  }
+  return false
+}
+
+/** densable `fie` — detach ceiling before the background call is stopped. */
+const DETACH_CEILING_MS = 300_000
+
+/**
+ * densable detach ceiling settle. `runToolUse` abort yields CANCEL_MESSAGE
+ * and returns (does not throw), so the drain success arm must force this
+ * — do not rely on the rejection arm.
+ */
+function isDetachedCeilingHit(
+  ceilingHit: boolean,
+  abortReason: unknown,
+): boolean {
+  return ceilingHit || abortReason === 'detached-ceiling'
+}
+
+function detachedCeilingResultText(): string {
+  return `The call did not finish within ${DETACH_CEILING_MS / 60000} minutes and was stopped.`
+}
+
+function detachedResultText(messages: Message[]): {
+  text: string
+  failed: boolean
+} {
+  let failed = false
+  const parts: string[] = []
+  let nonText = 0
+  for (const m of messages) {
+    if (m.type !== 'user' || m.message === undefined) continue
+    const c = m.message.content
+    if (typeof c === 'string') {
+      parts.push(c)
+      continue
+    }
+    if (!Array.isArray(c)) continue
+    for (const b of c) {
+      if (!b || typeof b !== 'object') continue
+      if (b.type === 'tool_result') {
+        if (b.is_error === true) failed = true
+        const inner = (b as { content?: unknown }).content
+        if (typeof inner === 'string') parts.push(inner)
+        else if (Array.isArray(inner)) {
+          for (const x of inner) {
+            if (x && typeof x === 'object' && 'text' in x) {
+              parts.push(String((x as { text?: unknown }).text ?? ''))
+            } else {
+              nonText++
+            }
+          }
+        }
+      } else if (b.type === 'text' && 'text' in b) {
+        parts.push(String((b as { text?: unknown }).text ?? ''))
+      }
+    }
+  }
+  if (nonText > 0) {
+    parts.push(
+      `[${nonText} non-text ${plural(nonText, 'block')} of the result could not be carried in a notification]`,
+    )
+  }
+  return { text: parts.join('\n'), failed }
+}
+
+/** densable `eyo` — mapToolResult content → notification text. */
+function eyo(content: unknown): string {
+  if (content === undefined) return ''
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return String(content)
+  const parts: string[] = []
+  let nonText = 0
+  for (const s of content) {
+    if (
+      s &&
+      typeof s === 'object' &&
+      (s as { type?: string }).type === 'text' &&
+      typeof (s as { text?: unknown }).text === 'string'
+    ) {
+      parts.push((s as { text: string }).text)
+    } else {
+      nonText++
+    }
+  }
+  if (nonText > 0) {
+    parts.push(
+      `[${nonText} non-text ${plural(nonText, 'block')} of the result could not be carried in a notification]`,
+    )
+  }
+  return parts.join('\n')
+}
 
 type MessageUpdate = {
   message?: Message
@@ -43,6 +303,7 @@ type TrackedTool = {
   // densable pendingBridgeEvents — jR control events (set_expanded_view)
   pendingBridgeEvents: ToolBridgeEvent[]
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
+  contextModifiersApplied?: boolean
 }
 
 /**
@@ -59,7 +320,10 @@ export class StreamingToolExecutor {
   private siblingAbortController: AbortController
   private discarded = false
   private progressAvailableResolve?: () => void
+  private drainableResolve?: () => void
+  private drainGeneration = 0
   private turnSpan: LangfuseSpan | null = null
+  private appliedConcurrentContextModifiers = false
 
   constructor(
     private readonly toolDefinitions: Tools,
@@ -84,6 +348,7 @@ export class StreamingToolExecutor {
    */
   discard(): void {
     this.discarded = true
+    this.wakeWaiters()
     // Abort running tool subprocesses (Bash spawns, etc.) so they don't
     // continue producing results after the executor is replaced.
     this.siblingAbortController.abort('streaming_fallback')
@@ -138,6 +403,7 @@ export class StreamingToolExecutor {
           }),
         ],
       })
+      this.wakeWaiters()
       return
     }
 
@@ -164,6 +430,23 @@ export class StreamingToolExecutor {
     void this.processQueue()
   }
 
+  private wakeWaiters(): void {
+    this.drainGeneration++
+    this.progressAvailableResolve?.()
+    this.progressAvailableResolve = undefined
+    this.drainableResolve?.()
+    this.drainableResolve = undefined
+  }
+
+  waitForDrainable(generation: number): Promise<number> {
+    if (this.drainGeneration > generation) {
+      return Promise.resolve(this.drainGeneration)
+    }
+    return new Promise(resolve => {
+      this.drainableResolve = () => resolve(this.drainGeneration)
+    })
+  }
+
   /**
    * Check if a tool can execute based on current concurrency state
    */
@@ -183,6 +466,7 @@ export class StreamingToolExecutor {
       if (tool.status !== 'queued') continue
 
       if (this.canExecuteTool(tool.isConcurrencySafe)) {
+        this.applyFinishedConcurrentContextModifiers()
         await this.executeTool(tool)
       } else {
         // Can't execute this tool yet, and since we need to maintain order for non-concurrent tools, stop here
@@ -396,6 +680,7 @@ export class StreamingToolExecutor {
         tool.results = messages
         tool.contextModifiers = contextModifiers
         tool.status = 'completed'
+        this.wakeWaiters()
         this.updateInterruptibleState()
         return
       }
@@ -410,6 +695,7 @@ export class StreamingToolExecutor {
         tool.results = messages
         tool.contextModifiers = contextModifiers
         tool.status = 'completed'
+        this.wakeWaiters()
         this.updateInterruptibleState()
         return
       }
@@ -421,15 +707,23 @@ export class StreamingToolExecutor {
       // the query controller so the query loop's post-tool abort check ends
       // the turn. Without bubble-up, ExitPlanMode "clear context + auto"
       // sends REJECT_MESSAGE to the model instead of aborting (#21056 regression).
+      const session = this.toolUseContext.session
+      const runnerHandlesDetach = Boolean(
+        (runToolUse as unknown as Record<symbol, unknown>)[
+          RUN_TOOL_USE_HANDLES_DETACH_SYMBOL
+        ],
+      )
       const toolAbortController = createAbortController()
       let detached = false
+      const isDetachedOrLetGo = () =>
+        detached || detachedToolCallWasLetGo(tool.id, session)
       const queryLinked = createChildAbortController(
         this.siblingAbortController,
       )
       queryLinked.signal.addEventListener(
         'abort',
         () => {
-          if (!detached) {
+          if (!isDetachedOrLetGo()) {
             toolAbortController.abort(queryLinked.signal.reason)
           }
         },
@@ -440,7 +734,7 @@ export class StreamingToolExecutor {
         () => {
           if (
             toolAbortController.signal.reason !== 'sibling_error' &&
-            !detached &&
+            !isDetachedOrLetGo() &&
             !this.toolUseContext.abortController.signal.aborted &&
             !this.discarded
           ) {
@@ -452,17 +746,43 @@ export class StreamingToolExecutor {
         { once: true },
       )
 
-      const unregisterForeground = registerForegroundToolCall(
-        queryForegroundSession,
-        {
-          toolUseId: tool.id,
-          backgroundNow: () => {
-            if (detached || toolAbortController.signal.aborted) return false
-            detached = true
-            return true
-          },
-        },
+      let signalDetachEarly: (() => void) | undefined
+      const detachEarly = new Promise<void>(resolve => {
+        signalDetachEarly = resolve
+      })
+
+      const detachableTool = findToolByName(
+        this.toolUseContext.options.tools,
+        tool.block.name,
       )
+      // densable FDe + dOt: real runToolUse wraps post-permission tool.call in
+      // dOt directly; keep fallback active when tests mock runToolUse.
+      const canDetach =
+        !runnerHandlesDetach &&
+        detachableTool !== undefined &&
+        executorCanDetachFallback(detachableTool, this.toolUseContext)
+      const unregisterForeground = canDetach
+        ? registerForegroundToolCall(session!, {
+            toolUseId: tool.id,
+            backgroundNow: () => {
+              if (
+                detached ||
+                this.discarded ||
+                toolAbortController.signal.aborted ||
+                this.toolUseContext.abortController.signal.aborted ||
+                areBackgroundTasksDisabled() ||
+                executorPermissionPromptOpen(this.toolUseContext, tool.id)
+              ) {
+                return false
+              }
+              detached = true
+              // densable V.letGo(r) then ye() — started() is after the race.
+              detachedToolCallLetGo(tool.id, session)
+              signalDetachEarly?.()
+              return true
+            },
+          })
+        : () => {}
 
       const generator = runToolUse(
         tool.block,
@@ -481,86 +801,325 @@ export class StreamingToolExecutor {
       // message when it is the one that caused the error.
       let thisToolErrored = false
 
-      try {
-        for await (const update of generator) {
-          // densable jR: control events (set_expanded_view) skip the message path
-          if (isToolBridgeEvent(update)) {
-            tool.pendingBridgeEvents.push(update)
-            if (this.progressAvailableResolve) {
-              this.progressAvailableResolve()
-              this.progressAvailableResolve = undefined
+      const drainGenerator = async () => {
+        try {
+          for await (const update of generator) {
+            // densable jR: control events (set_expanded_view) skip the message path
+            if (isToolBridgeEvent(update)) {
+              tool.pendingBridgeEvents.push(update)
+              this.wakeWaiters()
+              continue
             }
-            continue
-          }
-          // Check if we were aborted by a sibling tool error or user interruption.
-          // Only add the synthetic error if THIS tool didn't produce the error.
-          // densable send-now: detached tools ignore the query abort (do not cancel).
-          const abortReason = detached ? null : this.getAbortReason(tool)
-          if (abortReason === 'remote_cancel' && !thisToolErrored) {
-            break
-          }
-          if (
-            abortReason &&
-            abortReason !== 'remote_cancel' &&
-            !thisToolErrored
-          ) {
-            messages.push(
-              this.createSyntheticErrorMessage(
-                tool.id,
-                abortReason,
-                tool.assistantMessage,
-              ),
-            )
-            break
-          }
-
-          const isErrorResult =
-            update.message.type === 'user' &&
-            Array.isArray(update.message.message!.content) &&
-            update.message.message!.content.some(
-              _ => _.type === 'tool_result' && _.is_error === true,
-            )
-
-          if (isErrorResult) {
-            thisToolErrored = true
-            // Only Bash errors cancel siblings. Bash commands often have implicit
-            // dependency chains (e.g. mkdir fails → subsequent commands pointless).
-            // Read/WebFetch/etc are independent — one failure shouldn't nuke the rest.
-            if (tool.block.name === BASH_TOOL_NAME) {
-              this.hasErrored = true
-              this.erroredToolDescription = this.getToolDescription(tool)
-              this.siblingAbortController.abort('sibling_error')
+            // Check if we were aborted by a sibling tool error or user interruption.
+            // Only add the synthetic error if THIS tool didn't produce the error.
+            // densable send-now: detached tools ignore the query abort (do not cancel).
+            const abortReason = isDetachedOrLetGo()
+              ? null
+              : this.getAbortReason(tool)
+            if (abortReason === 'remote_cancel' && !thisToolErrored) {
+              break
             }
-          }
+            if (
+              abortReason &&
+              abortReason !== 'remote_cancel' &&
+              !thisToolErrored
+            ) {
+              messages.push(
+                this.createSyntheticErrorMessage(
+                  tool.id,
+                  abortReason,
+                  tool.assistantMessage,
+                ),
+              )
+              break
+            }
 
-          if (update.message) {
-            // Progress messages go to pendingProgress for immediate yielding
-            if (update.message.type === 'progress') {
-              tool.pendingProgress.push(update.message)
-              // Signal that progress is available
-              if (this.progressAvailableResolve) {
-                this.progressAvailableResolve()
-                this.progressAvailableResolve = undefined
+            const isErrorResult =
+              update.message.type === 'user' &&
+              Array.isArray(update.message.message!.content) &&
+              update.message.message!.content.some(
+                _ => _.type === 'tool_result' && _.is_error === true,
+              )
+
+            if (isErrorResult) {
+              thisToolErrored = true
+              // Only Bash errors cancel siblings. Bash commands often have implicit
+              // dependency chains (e.g. mkdir fails → subsequent commands pointless).
+              // Read/WebFetch/etc are independent — one failure shouldn't nuke the rest.
+              if (tool.block.name === BASH_TOOL_NAME) {
+                this.hasErrored = true
+                this.erroredToolDescription = this.getToolDescription(tool)
+                this.siblingAbortController.abort('sibling_error')
               }
-            } else {
-              messages.push(update.message)
+            }
+
+            if (update.message) {
+              // Progress messages go to pendingProgress for immediate yielding
+              if (update.message.type === 'progress') {
+                tool.pendingProgress.push(update.message)
+                const data = update.message.data
+                if (
+                  data !== null &&
+                  typeof data === 'object' &&
+                  'type' in data &&
+                  data.type === 'tool_heartbeat'
+                ) {
+                  this.wakeWaiters()
+                } else if (this.progressAvailableResolve) {
+                  this.progressAvailableResolve()
+                  this.progressAvailableResolve = undefined
+                }
+              } else {
+                messages.push(update.message)
+              }
+            }
+            if (update.contextModifier) {
+              contextModifiers.push(update.contextModifier.modifyContext)
             }
           }
-          if (update.contextModifier) {
-            contextModifiers.push(update.contextModifier.modifyContext)
-          }
+        } finally {
+          unregisterForeground()
         }
+      }
+
+      const drain = drainGenerator()
+      let race: 'settled' | 'detach'
+      try {
+        race = await Promise.race([
+          drain.then(
+            () => 'settled' as const,
+            () => 'settled' as const,
+          ),
+          detachEarly.then(() => 'detach' as const),
+        ])
       } finally {
         unregisterForeground()
+      }
+      const def = findToolByName(
+        this.toolUseContext.options.tools,
+        tool.block.name,
+      )
+      // gold: settled / query-abort wins over detach — yield the real result.
+      if (
+        race === 'settled' ||
+        this.discarded ||
+        this.toolUseContext.abortController.signal.aborted
+      ) {
+        try {
+          await drain
+        } finally {
+          if (!runnerHandlesDetach) detachedToolCallEnded(tool.id, session)
+        }
+      } else if (detached && def?.backgrounding === 'detach') {
+        const isOnScreen =
+          this.toolUseContext.options.isNonInteractiveSession !== true
+        logEvent('tengu_tool_call_detached', {
+          toolName: sanitizeToolNameForAnalytics(def.name),
+        })
+        logForDebugging(
+          `[detach] ${def.name} ${tool.id} moved to the background to deliver a message`,
+        )
+        detachedToolCallStarted(
+          tool.id,
+          {
+            tool: def,
+            input: tool.block.input,
+            detachedAt: Date.now(),
+          },
+          reason => toolAbortController.abort(reason),
+          session,
+        )
+        const fpt = stillRunningDetachText(def.name, isOnScreen)
+        tool.results = [
+          createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: tool.id,
+                content: fpt,
+              },
+            ],
+            toolUseResult: { detachedToolCall: true },
+            sourceToolAssistantUUID: tool.assistantMessage.uuid,
+          }),
+        ]
+        tool.contextModifiers = contextModifiers
+        tool.status = 'completed'
+        this.wakeWaiters()
+        this.updateInterruptibleState()
+        let ceilingHit = false
+        const ceiling = setTimeout(() => {
+          ceilingHit = true
+          toolAbortController.abort('detached-ceiling')
+        }, DETACH_CEILING_MS)
+        ceiling.unref?.()
+        const stillHeard = () =>
+          getDetachedToolCallSnapshot(session).has(tool.id)
+        void drain
+          .finally(() => clearTimeout(ceiling))
+          .then(val => {
+            if (toolAbortController.signal.aborted) {
+              throw new AbortError()
+            }
+            return val
+          })
+          .then(
+            async () => {
+              // densable Zho: mapToolResult → eyo(content) → size > lOt → persist.
+              const rendered = detachedResultText(messages)
+              let text = rendered.text
+              let failed = rendered.failed
+              const resultMessage = messages.find(
+                m =>
+                  m.type === 'user' &&
+                  Array.isArray(m.message?.content) &&
+                  m.message.content.some(
+                    block =>
+                      block.type === 'tool_result' &&
+                      block.tool_use_id === tool.id,
+                  ),
+              )
+              const data =
+                resultMessage?.type === 'user'
+                  ? resultMessage.toolUseResult
+                  : undefined
+              if (!failed) {
+                if (
+                  !detachedToolCallSettled(
+                    tool.id,
+                    { status: 'completed', data },
+                    session,
+                  )
+                ) {
+                  return
+                }
+              }
+              let notifyFailed = failed
+              try {
+                if (!failed && data !== undefined) {
+                  const mapped = def.mapToolResultToToolResultBlockParam(
+                    data as never,
+                    tool.id,
+                  )
+                  const block = await processPreMappedToolResultBlock(
+                    mapped,
+                    def.name,
+                    def.maxResultSizeChars ?? Number.POSITIVE_INFINITY,
+                  )
+                  if (!stillHeard()) return
+                  text = eyo(block?.content)
+                  if (block?.is_error === true) {
+                    failed = true
+                    notifyFailed = true
+                  }
+                } else {
+                  const concat = detachedResultText(messages)
+                  text = concat.text
+                  failed = concat.failed
+                  notifyFailed = failed
+                }
+                if (
+                  !notifyFailed &&
+                  escapeXml(text).length > DETACH_OVERSIZE_CHARS
+                ) {
+                  const saved = await persistToolResult(text, tool.id)
+                  if (!stillHeard()) return
+                  if ('error' in saved) {
+                    notifyFailed = true
+                    text =
+                      'The call completed, but its result is too large to carry in a notification and could not be saved to a file.'
+                  } else {
+                    text = `The result is ${saved.originalSize} characters, too large to carry in a notification, so none of it is quoted here. ${saved.truncatedAtBytes === undefined ? 'All of it' : `Its first ${saved.truncatedAtBytes} bytes`} was saved to ${saved.filepath}. Read that file to see it.`
+                  }
+                }
+              } catch {
+                if (!stillHeard()) return
+                notifyFailed = true
+                text =
+                  'The call completed but its result could not be rendered.'
+              }
+              if (!stillHeard()) return
+              if (failed) {
+                if (
+                  !detachedToolCallSettled(
+                    tool.id,
+                    { status: 'failed', text, data },
+                    session,
+                  )
+                ) {
+                  return
+                }
+              } else if (!notifyFailed) {
+                detachedToolCallSetText(tool.id, text, session)
+              }
+              const status = notifyFailed ? 'failed' : 'completed'
+              enqueueDetachedToolCallResult({
+                toolName: def.name,
+                toolUseId: tool.id,
+                status,
+                text,
+                isOnScreen,
+              })
+              detachedToolCallResultQueued(tool.id, session)
+            },
+            (err: unknown) => {
+              const ceilingAbort = isDetachedCeilingHit(
+                ceilingHit,
+                toolAbortController.signal.reason,
+              )
+              const userCancel =
+                !ceilingAbort &&
+                (toolAbortController.signal.reason === 'user-cancel' ||
+                  this.toolUseContext.abortController.signal.reason ===
+                    'user-cancel')
+              const text = ceilingAbort
+                ? detachedCeilingResultText()
+                : userCancel
+                  ? 'The user stopped this call before it finished.'
+                  : err instanceof Error
+                    ? err.message
+                    : String(err)
+              const status = userCancel ? 'stopped' : 'failed'
+              if (
+                !detachedToolCallSettled(
+                  tool.id,
+                  {
+                    status,
+                    text,
+                  },
+                  session,
+                )
+              ) {
+                return
+              }
+              enqueueDetachedToolCallResult({
+                toolName: def.name,
+                toolUseId: tool.id,
+                status,
+                text,
+                isOnScreen,
+                passive: userCancel,
+              })
+              detachedToolCallResultQueued(tool.id, session)
+            },
+          )
+          .finally(() => detachedToolCallEnded(tool.id, session))
+        return
+      } else {
+        try {
+          await drain
+        } finally {
+          if (!runnerHandlesDetach) detachedToolCallEnded(tool.id, session)
+        }
       }
       tool.results = messages
       tool.contextModifiers = contextModifiers
       tool.status = 'completed'
+      this.wakeWaiters()
       this.updateInterruptibleState()
 
-      // NOTE: we currently don't support context modifiers for concurrent
-      //       tools. None are actively being used, but if we want to use
-      //       them in concurrent tools, we need to support that here.
+      // Exclusive calls apply immediately; concurrent calls merge in queue
+      // order after the entire run settles (densable ds.applyEndedRunLayers).
       if (!tool.isConcurrencySafe && contextModifiers.length > 0) {
         for (const modifier of contextModifiers) {
           this.toolUseContext = modifier(this.toolUseContext)
@@ -666,8 +1225,31 @@ export class StreamingToolExecutor {
       yield result
     }
 
+    this.applyFinishedConcurrentContextModifiers()
+    if (this.appliedConcurrentContextModifiers) {
+      yield { newContext: this.toolUseContext }
+    }
+
     endToolBatchSpan(this.turnSpan)
     this.turnSpan = null
+  }
+
+  private applyFinishedConcurrentContextModifiers(): void {
+    if (this.hasExecutingTools()) return
+    for (const tool of this.tools) {
+      if (
+        tool.isConcurrencySafe &&
+        !tool.contextModifiersApplied &&
+        tool.contextModifiers &&
+        tool.contextModifiers.length > 0
+      ) {
+        for (const modifier of tool.contextModifiers) {
+          this.toolUseContext = modifier(this.toolUseContext)
+        }
+        tool.contextModifiersApplied = true
+        this.appliedConcurrentContextModifiers = true
+      }
+    }
   }
 
   /**
@@ -696,6 +1278,56 @@ export class StreamingToolExecutor {
    */
   getUpdatedContext(): ToolUseContext {
     return this.toolUseContext
+  }
+}
+
+/** densable sa — drain tools even when the model's next stream event stalls. */
+export async function* mergeToolDrainEvents<T>(
+  stream: AsyncIterable<T> | Iterable<T>,
+  getExecutor: () =>
+    | Pick<StreamingToolExecutor, 'waitForDrainable'>
+    | undefined,
+): AsyncGenerator<T | { type: 'tool_drain_tick' }> {
+  const iterator =
+    Symbol.asyncIterator in stream
+      ? stream[Symbol.asyncIterator]()
+      : stream[Symbol.iterator]()
+  let pending:
+    | Promise<{ kind: 'stream'; result: IteratorResult<T> }>
+    | undefined
+  let executor = getExecutor()
+  let generation = 0
+  try {
+    while (true) {
+      pending ??= Promise.resolve(iterator.next()).then(result => ({
+        kind: 'stream' as const,
+        result,
+      }))
+      const current = getExecutor()
+      if (current !== executor) {
+        executor = current
+        generation = 0
+      }
+      const next = current
+        ? await Promise.race([
+            pending,
+            current.waitForDrainable(generation).then(value => ({
+              kind: 'drain' as const,
+              generation: value,
+            })),
+          ])
+        : await pending
+      if (next.kind === 'drain') {
+        generation = next.generation
+        yield { type: 'tool_drain_tick' }
+        continue
+      }
+      pending = undefined
+      if (next.result.done) return
+      yield next.result.value
+    }
+  } finally {
+    Promise.resolve(iterator.return?.()).catch(() => {})
   }
 }
 

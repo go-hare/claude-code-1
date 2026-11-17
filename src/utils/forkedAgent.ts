@@ -562,6 +562,8 @@ export type SubagentContextOverrides = {
    * are re-replaced (prompt cache stability). */
   contentReplacementState?: ContentReplacementState
   activeTaskExecutionContext?: ActiveTaskExecutionContext
+  /** densable Eqn @194788100 — appended after parentContext.permissionLayers */
+  permissionLayers?: HostPermissionLayer[]
 }
 
 /**
@@ -681,6 +683,7 @@ export function createSubagentContext(
 
     // AppState access
     getAppState,
+    session: parentContext.session,
     setAppState: overrides?.shareSetAppState
       ? parentContext.setAppState
       : () => {},
@@ -697,6 +700,8 @@ export function createSubagentContext(
     // are never registered and never killed (PPID=1 zombie).
     setAppStateForTasks:
       parentContext.setAppStateForTasks ?? parentContext.setAppState,
+    // Same Xm instance as parent — nested concurrent cap / WebSearch budget.
+    taskRegistry: parentContext.taskRegistry,
     // Async subagents whose setAppState is a no-op need local denial tracking
     // so the denial counter actually accumulates across retries.
     localDenialTracking: overrides?.shareSetAppState
@@ -756,6 +761,13 @@ export function createSubagentContext(
     criticalSystemReminder_EXPERIMENTAL:
       overrides?.criticalSystemReminder_EXPERIMENTAL,
     requireCanUseTool: overrides?.requireCanUseTool,
+    ...((parentContext.permissionLayers !== undefined ||
+      overrides?.permissionLayers !== undefined) && {
+      permissionLayers: [
+        ...(parentContext.permissionLayers ?? []),
+        ...(overrides?.permissionLayers ?? []),
+      ],
+    }),
   }
 }
 

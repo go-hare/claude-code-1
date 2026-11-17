@@ -57,6 +57,10 @@ const MonitorTool = feature('MONITOR_TOOL')
   ? require('@claude-code/builtin-tools/tools/MonitorTool/MonitorTool.js')
       .MonitorTool
   : null
+// densable `eg` GetTask — always in base pool; isEnabled() is gF (violin_rosin).
+const GetTaskTool =
+  require('@claude-code/builtin-tools/tools/GetTaskTool/GetTaskTool.js')
+    .GetTaskTool as typeof import('@claude-code/builtin-tools/tools/GetTaskTool/GetTaskTool.js').GetTaskTool
 const SendUserFileTool = feature('KAIROS')
   ? require('@claude-code/builtin-tools/tools/SendUserFileTool/SendUserFileTool.js')
       .SendUserFileTool
@@ -287,6 +291,7 @@ export function getAllBaseTools(): Tools {
     ScheduleWakeupTool,
     ...(RemoteTriggerTool ? [RemoteTriggerTool] : []),
     ...(MonitorTool ? [MonitorTool] : []),
+    GetTaskTool,
     BriefTool,
     ...(SendUserFileTool ? [SendUserFileTool] : []),
     ...(PushNotificationTool ? [PushNotificationTool] : []),

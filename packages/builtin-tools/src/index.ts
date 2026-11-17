@@ -31,6 +31,7 @@ export { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResource
 export { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
 export { SkillTool } from './tools/SkillTool/SkillTool.js'
 export { TaskOutputTool } from './tools/TaskOutputTool/TaskOutputTool.js'
+export { GetTaskTool } from './tools/GetTaskTool/GetTaskTool.js'
 export { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 export { TodoWriteTool } from './tools/TodoWriteTool/TodoWriteTool.js'
 export { SearchExtraToolsTool } from './tools/SearchExtraToolsTool/SearchExtraToolsTool.js'

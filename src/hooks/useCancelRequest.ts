@@ -35,6 +35,7 @@ import {
   isPoppableEditableCommand,
 } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
+import { createTaskRegistry } from '../utils/taskRegistry.js'
 
 /** Time window in ms during which a second press kills all background agents. */
 const KILL_AGENTS_CONFIRM_WINDOW_MS = 3000
@@ -278,7 +279,11 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       ([, t]) => t.type === 'local_agent' && t.status === 'running',
     )
     if (running.length === 0) return false
-    killAllRunningAgentTasks(tasks, setAppState)
+    killAllRunningAgentTasks(
+      tasks,
+      createTaskRegistry(store.getState, setAppState),
+      'user',
+    )
     const descriptions: string[] = []
     for (const [taskId, task] of running) {
       markAgentsNotified(taskId, setAppState)

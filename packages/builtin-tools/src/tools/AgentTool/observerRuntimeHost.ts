@@ -15,6 +15,7 @@ import {
   markAgentsNotified,
   registerAsyncAgent,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { createTaskRegistry } from 'src/utils/taskRegistry.js'
 import { asAgentId } from 'src/types/ids.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -234,6 +235,7 @@ export function createAgentObserverRuntimeHostHandlers(
         notificationTargetAgentId: asAgentId(mainOwnerId),
         isObserver: true,
         attachOwnerKeepalive: false,
+        getAppState: armCtx.getAppState,
       })
       // densable spawnFirstRun: Kle(s, a) immediately after Sot
       markAgentsNotified(
@@ -381,10 +383,13 @@ export function createAgentObserverRuntimeHostHandlers(
         deps.toolUseContext,
       )
       try {
-        killAsyncAgent(
-          observerTaskId,
-          armSetAppState as Parameters<typeof killAsyncAgent>[1],
-        )
+        const getAppState = deps.toolUseContext?.getAppState
+        if (getAppState) {
+          killAsyncAgent(
+            observerTaskId,
+            createTaskRegistry(getAppState, armSetAppState),
+          )
+        }
       } catch {
         // best-effort
       }

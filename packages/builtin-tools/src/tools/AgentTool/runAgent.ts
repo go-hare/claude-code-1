@@ -6,6 +6,8 @@ import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
+import type { HostPermissionLayer } from 'src/engine/hostPermissionLayers.js'
+import { levelSessionEffort } from 'src/utils/effort.js'
 import {
   getMainThreadAgentId,
   getProjectRoot,
@@ -674,12 +676,14 @@ export async function* runAgent({
     let agentPermissionMode =
       liveSelectedAgent?.permissionMode ?? agentDefinition.permissionMode
 
-    // densable 2.1.223: agent definition bypassPermissions must honor org disable
-    // policy and the contained no-internet availability flag — keep parent mode.
+    // densable 2.1.223 / 2.1.289 Ol @194775600: agent definition bypassPermissions
+    // must honor org disable policy, availability flag, and parent bypass mode.
     if (
       agentPermissionMode === 'bypassPermissions' &&
       (isBypassPermissionsModeDisabled() ||
-        !state.toolPermissionContext.isBypassPermissionsModeAvailable)
+        !state.toolPermissionContext.isBypassPermissionsModeAvailable ||
+        (spawnMode !== 'bypassPermissions' &&
+          state.toolPermissionContext.mode !== 'bypassPermissions'))
     ) {
       logForDebugging(
         `Subagent declared permissionMode: bypassPermissions but this session is not running in a contained no-internet environment (or bypass is policy-disabled); keeping parent mode '${state.toolPermissionContext.mode}'.`,
@@ -700,6 +704,15 @@ export async function* runAgent({
         { level: 'warn' },
       )
       agentPermissionMode = undefined
+    }
+
+    // densable Lt @194777900: bubble cannot escalate out of plan or dontAsk.
+    if (
+      agentPermissionMode === 'bubble' &&
+      (state.toolPermissionContext.mode === 'plan' ||
+        state.toolPermissionContext.mode === 'dontAsk')
+    ) {
+      agentPermissionMode = state.toolPermissionContext.mode
     }
 
     // Override permission mode if agent defines one (unless parent is bypassPermissions, acceptEdits, or auto)
@@ -755,23 +768,46 @@ export async function* runAgent({
       toolPermissionContext = {
         ...toolPermissionContext,
         alwaysAllowRules: {
-          // Preserve SDK-level permissions from --allowedTools
+          // Preserve SDK-level permissions from --allowedTools + MCP policy
           cliArg: state.toolPermissionContext.alwaysAllowRules.cliArg,
+          ...(state.toolPermissionContext.alwaysAllowRules.mcpServerPolicy && {
+            mcpServerPolicy:
+              state.toolPermissionContext.alwaysAllowRules.mcpServerPolicy,
+          }),
           // Use the provided allowedTools as session-level permissions
           session: [...allowedTools],
         },
       }
     }
 
-    // Override effort level if agent defines one
+    // densable Lt @194778750: register worktreePath in additionalWorkingDirectories
+    if (
+      worktreePath &&
+      !toolPermissionContext.additionalWorkingDirectories.has(worktreePath)
+    ) {
+      toolPermissionContext = {
+        ...toolPermissionContext,
+        additionalWorkingDirectories: new Map([
+          ...toolPermissionContext.additionalWorkingDirectories,
+          [worktreePath, { path: worktreePath, source: 'session' as const }],
+        ]),
+      }
+    }
+
+    // Override effort level if agent defines one (sync both effortValue and sessionEffort)
     const effortValue =
       agentDefinition.effort !== undefined
         ? agentDefinition.effort
         : state.effortValue
+    const sessionEffort =
+      agentDefinition.effort !== undefined
+        ? levelSessionEffort(agentDefinition.effort)
+        : state.sessionEffort
 
     if (
       toolPermissionContext === state.toolPermissionContext &&
-      effortValue === state.effortValue
+      effortValue === state.effortValue &&
+      sessionEffort === state.sessionEffort
     ) {
       return state
     }
@@ -779,6 +815,7 @@ export async function* runAgent({
       ...state,
       toolPermissionContext,
       effortValue,
+      ...(agentDefinition.effort !== undefined && { sessionEffort }),
     }
   }
 
@@ -1177,6 +1214,14 @@ export async function* runAgent({
     fallbackModel: toolUseContext.options.fallbackModel,
   }
 
+  // densable MC @194778900 `le`: model + optional effort layer on subagent context
+  const subagentPermissionLayers: HostPermissionLayer[] = [
+    { kind: 'model', mainLoopModel: resolvedAgentModel },
+    ...(agentDefinition.effort !== undefined
+      ? [{ kind: 'effort' as const, effort: agentDefinition.effort }]
+      : []),
+  ]
+
   // Create subagent context using shared helper
   // - Sync agents share setAppState, setResponseLength, abortController with parent
   // - Async agents are fully isolated (but with explicit unlinked abortController)
@@ -1192,6 +1237,7 @@ export async function* runAgent({
     readFileState: agentReadFileState,
     abortController: agentAbortController,
     getAppState: agentGetAppState,
+    permissionLayers: subagentPermissionLayers,
     // Sync agents share these callbacks with parent
     shareSetAppState: !isAsync,
     shareSetResponseLength: true, // Both sync and async contribute to response metrics
@@ -1514,21 +1560,66 @@ export async function* runAgent({
       const { [agentId]: _removed, ...todos } = prev.todos
       return { ...prev, todos }
     })
-    // Kill any background bash tasks this agent spawned. Without this, a
-    // `run_in_background` shell loop (e.g. test fixture fake-logs.sh) outlives
-    // the agent as a PPID=1 zombie once the main session eventually exits.
-    killShellTasksForAgent(agentId, toolUseContext.getAppState, rootSetAppState)
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    if (feature('MONITOR_TOOL')) {
-      const mcpMod =
-        require('src/tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
-      mcpMod.killMonitorMcpTasksForAgent(
+    // densable MC @192520872 `x = g && eo && !ot.signal.aborted && (wHo(ge, n.taskRegistry) || GTe(ge, n.taskRegistry))`:
+    // Async subagents that finished cleanly while holding keepalive reasons
+    // (bash:<id>, monitor:<id>, agent:<id>, workflow:<id>) or owning running
+    // backgrounded bash / monitor tasks park so child events/exit notifications
+    // can wake them — do NOT reap their background shells/monitors!
+    const allTasks =
+      toolUseContext.taskRegistry?.all() ??
+      toolUseContext.getAppState().tasks ??
+      {}
+    const liveAgentTask = allTasks[agentId]
+    const hasKeepaliveReasons =
+      isLocalAgentTask(liveAgentTask) &&
+      (liveAgentTask.keepaliveReasons?.size ?? 0) > 0
+    const hasRunningOwnedBackgroundTasks = Object.values(allTasks).some(
+      task => {
+        const isBackgroundBash =
+          task.type === 'local_bash' && Boolean(task.isBackgrounded)
+        return (
+          task.status === 'running' &&
+          (isBackgroundBash ||
+            task.type === 'monitor_mcp' ||
+            task.type === 'monitor_ws') &&
+          'agentId' in task &&
+          task.agentId === agentId
+        )
+      },
+    )
+    const keepaliveGated = Boolean(
+      isAsync &&
+        queryCompleted &&
+        !agentAbortController.signal.aborted &&
+        (hasKeepaliveReasons || hasRunningOwnedBackgroundTasks),
+    )
+    if (!keepaliveGated) {
+      killShellTasksForAgent(
         agentId,
         toolUseContext.getAppState,
         rootSetAppState,
       )
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      if (feature('MONITOR_TOOL')) {
+        const mcpMod =
+          require('src/tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('src/tasks/MonitorMcpTask/MonitorMcpTask.js')
+        mcpMod.killMonitorMcpTasksForAgent(
+          agentId,
+          toolUseContext.getAppState,
+          rootSetAppState,
+        )
+        const wsMod =
+          require('src/tasks/MonitorWsTask/MonitorWsTask.js') as typeof import('src/tasks/MonitorWsTask/MonitorWsTask.js')
+        const { createTaskRegistry } =
+          require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+        wsMod.killMonitorWsTasksForAgent(
+          agentId,
+          toolUseContext.taskRegistry ??
+            createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+        )
+      }
+      /* eslint-enable @typescript-eslint/no-require-imports */
     }
-    /* eslint-enable @typescript-eslint/no-require-imports */
   }
 }
 

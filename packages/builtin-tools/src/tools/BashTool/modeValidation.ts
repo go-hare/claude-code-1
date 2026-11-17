@@ -90,14 +90,31 @@ export function checkPermissionMode(
   }
 
   const commands = splitCommand_DEPRECATED(input.command)
+  let allAllowed = false
 
-  // Check each subcommand
+  // Check each subcommand (densable w4t @189696492: every subcommand must allow)
   for (const cmd of commands) {
     const result = validateCommandForMode(cmd, toolPermissionContext)
-
-    // If any command triggers mode-specific behavior, return that result
-    if (result.behavior !== 'passthrough') {
+    if (result.behavior === 'ask' || result.behavior === 'deny') {
       return result
+    }
+    if (result.behavior === 'passthrough') {
+      return {
+        behavior: 'passthrough',
+        message: 'No mode-specific validation required',
+      }
+    }
+    allAllowed = true
+  }
+
+  if (allAllowed) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      decisionReason: {
+        type: 'mode',
+        mode: toolPermissionContext.mode,
+      },
     }
   }
 

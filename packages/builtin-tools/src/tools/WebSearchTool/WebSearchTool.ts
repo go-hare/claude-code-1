@@ -90,6 +90,7 @@ import type { WebSearchProgress } from 'src/types/tools.js'
 export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
   searchHint: 'search the web for current information',
+  backgrounding: 'detach',
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   async description(input) {
@@ -174,7 +175,9 @@ export const WebSearchTool = buildTool({
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { consumeWebSearchBudgetOrCapMessage } =
         require('src/utils/sessionSpawnCaps.js') as typeof import('src/utils/sessionSpawnCaps.js')
-      const cap = consumeWebSearchBudgetOrCapMessage()
+      const cap = consumeWebSearchBudgetOrCapMessage({
+        taskRegistry: context.taskRegistry,
+      })
       if (cap) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports

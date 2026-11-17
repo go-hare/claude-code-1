@@ -3,6 +3,7 @@ import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import type { AppState } from 'src/state/AppState.js';
+import { pdSessionEffort } from 'src/utils/effort.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import {
@@ -40,6 +41,7 @@ import {
   updateAgentProgress as updateAsyncAgentProgress,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import { addKeepaliveReason, agentKeepaliveReason } from 'src/utils/task/framework.js';
+import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import {
   checkRemoteAgentEligibility,
   formatPreconditionError,
@@ -454,6 +456,10 @@ export const AgentTool = buildTool({
   searchHint: 'delegate work to a subagent',
   aliases: [LEGACY_AGENT_TOOL_NAME],
   maxResultSizeChars: 100_000,
+  backgrounding: 'self' as const,
+  get preserveToolUseResultInSubagents(): boolean {
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_velvety_sprout', false) === true;
+  },
   async description() {
     return 'Launch a new agent';
   },
@@ -1416,8 +1422,11 @@ export const AgentTool = buildTool({
       const slotAppState = toolUseContext.getAppState();
       releaseConcurrencySlot = assertAndTakeConcurrencySlot({
         mainLoopModel: toolUseContext.options.mainLoopModel,
-        effortValue: slotAppState.effortValue,
+        effortValue: pdSessionEffort(slotAppState, toolUseContext.options.mainLoopModel) ?? slotAppState.effortValue,
         ultracode: slotAppState.ultracode,
+        taskRegistry: toolUseContext.taskRegistry,
+        getAppState: toolUseContext.getAppState,
+        setAppState: rootSetAppState,
       });
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Concurrent subagent limit reached')) {
@@ -1482,6 +1491,7 @@ export const AgentTool = buildTool({
         webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
         outputFileReadable: canReadOutputFile,
         model: resolvedAgentModel,
+        getAppState: toolUseContext.getAppState,
         // densable YP after handover — Gge only when taken.
         attachOwnerKeepalive: false,
       });
@@ -1492,9 +1502,12 @@ export const AgentTool = buildTool({
         });
         if (!taken) {
           // densable zA(..., {lifecycleNotStarted:!0}), ze(), lx() — never-started.
-          killAsyncAgent(agentBackgroundTask.agentId, rootSetAppState, 'system', {
-            lifecycleNotStarted: true,
-          });
+          killAsyncAgent(
+            agentBackgroundTask.agentId,
+            createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+            'system',
+            { lifecycleNotStarted: true },
+          );
           releaseConcurrencySlot?.();
           logEvent('tengu_feature_bad', {
             feature_name: 'subagent_launch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1505,7 +1518,11 @@ export const AgentTool = buildTool({
         }
       }
       if (!getIsNonInteractiveSession()) {
-        addKeepaliveReason(ownerId, agentKeepaliveReason(asyncAgentId), rootSetAppState);
+        addKeepaliveReason(
+          ownerId,
+          agentKeepaliveReason(asyncAgentId),
+          createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+        );
       }
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1538,6 +1555,7 @@ export const AgentTool = buildTool({
         invocationKind: 'spawn' as const,
         invocationEmitted: false,
         isBackgroundAgent: true,
+        isAsync: true,
         // densable depth:ie
         depth: childSpawnDepth,
         ...(isDelegatedObservation(getAgentContext()) ? { delegatedObservation: true } : {}),
@@ -1615,6 +1633,8 @@ export const AgentTool = buildTool({
         invocationEmitted: false,
         // Official He: sync only backgrounds when parent agentContext is background
         isBackgroundAgent: toolUseContext.isBackgroundAgent ?? false,
+        // densable isAsync:!1 — cZe uses this, not isBackgroundAgent
+        isAsync: false,
         // densable depth:ie
         depth: childSpawnDepth,
         ...(isDelegatedObservation(getAgentContext()) ? { delegatedObservation: true } : {}),
@@ -1688,6 +1708,7 @@ export const AgentTool = buildTool({
                 webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
                 outputFileReadable: fgCanRead,
                 model: resolvedAgentModel,
+                getAppState: toolUseContext.getAppState,
               });
               foregroundTaskId = registration.taskId;
               backgroundPromise = registration.backgroundSignal.then(() => ({
@@ -1744,7 +1765,7 @@ export const AgentTool = buildTool({
                 ) {
                   backgroundHintShown = true;
                   toolUseContext.setToolJSX({
-                    jsx: <BackgroundHint />,
+                    jsx: <BackgroundHint toolUseId={toolUseContext.toolUseId} />,
                     shouldHidePromptInput: false,
                     shouldContinueAnimation: true,
                     showSpinner: true,
@@ -1788,7 +1809,11 @@ export const AgentTool = buildTool({
                       const ownerId =
                         resolvePanelOwnerAgentId(toolUseContext.agentId, toolUseContext.getAppState) ??
                         getMainThreadAgentId();
-                      addKeepaliveReason(ownerId, agentKeepaliveReason(backgroundedTaskId), rootSetAppState);
+                      addKeepaliveReason(
+                        ownerId,
+                        agentKeepaliveReason(backgroundedTaskId),
+                        createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+                      );
                       rootSetAppState(prev => {
                         const t = prev.tasks[backgroundedTaskId];
                         if (!isLocalAgentTask(t)) return prev;
@@ -1929,7 +1954,11 @@ export const AgentTool = buildTool({
                         // densable Yqe (single Jeo + same Z):
                         // Jeo → Z=JXt → Cns(suppressTelemetry:Z) → DSu → if(Z) park
                         // JXt reads root via set-snapshot (same store as Jeo).
-                        const preCompleteJxt = sweepAndDetectLiveAgentChildren(backgroundedTaskId, rootSetAppState);
+                        const preCompleteJxt = sweepAndDetectLiveAgentChildren(
+                          backgroundedTaskId,
+                          rootSetAppState,
+                          toolUseContext.getAppState,
+                        );
                         const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata, {
                           suppressTelemetry: preCompleteJxt,
                         });
@@ -1939,7 +1968,11 @@ export const AgentTool = buildTool({
                         // cleanupWorktreeIfNeeded can hang — they must not gate
                         // the status transition (gh-20236).
                         // skipJeo: Jeo already ran for Z; DSu must not re-Jeo.
-                        completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true });
+                        completeAsyncAgent(
+                          agentResult,
+                          createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+                          { skipJeo: true },
+                        );
 
                         // densable: if (Z) CWr + defer BRt — same Z as suppressTelemetry
                         if (preCompleteJxt) {
@@ -1947,6 +1980,7 @@ export const AgentTool = buildTool({
                             backgroundedTaskId,
                             agentResult.totalDurationMs,
                             rootSetAppState,
+                            toolUseContext.getAppState,
                           );
                           return;
                         }
@@ -1988,7 +2022,7 @@ export const AgentTool = buildTool({
                           description,
                           status: 'completed',
                           maxTurnsReached: readMaxTurnsReached(agentMessages),
-                          setAppState: rootSetAppState,
+                          registry: createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
                           finalMessage,
                           usage: {
                             totalTokens: getTokenCountFromTracker(tracker),
@@ -2002,7 +2036,11 @@ export const AgentTool = buildTool({
                         if (error instanceof AbortError) {
                           // Transition status BEFORE worktree cleanup so
                           // TaskOutput unblocks even if git hangs (gh-20236).
-                          killAsyncAgent(backgroundedTaskId, rootSetAppState);
+                          killAsyncAgent(
+                            backgroundedTaskId,
+                            createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+                            'user',
+                          );
                           try {
                             // eslint-disable-next-line @typescript-eslint/no-require-imports
                             const { maybeStopObserverForObservedTerminal } =
@@ -2030,7 +2068,7 @@ export const AgentTool = buildTool({
                             taskId: backgroundedTaskId,
                             description,
                             status: 'killed',
-                            setAppState: rootSetAppState,
+                            registry: createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
                             toolUseId: toolUseContext.toolUseId,
                             finalMessage: partialResult,
                             ...worktreeResult,
@@ -2038,7 +2076,11 @@ export const AgentTool = buildTool({
                           return;
                         }
                         const errMsg = errorMessage(error);
-                        failAsyncAgent(backgroundedTaskId, errMsg, rootSetAppState);
+                        failAsyncAgent(
+                          backgroundedTaskId,
+                          errMsg,
+                          createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+                        );
                         try {
                           // eslint-disable-next-line @typescript-eslint/no-require-imports
                           const { maybeStopObserverForObservedTerminal } =
@@ -2055,7 +2097,7 @@ export const AgentTool = buildTool({
                           description,
                           status: 'failed',
                           error: errMsg,
-                          setAppState: rootSetAppState,
+                          registry: createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
                           toolUseId: toolUseContext.toolUseId,
                           ...worktreeResult,
                         });
@@ -2310,7 +2352,7 @@ export const AgentTool = buildTool({
 
               // Unregister foreground task if agent completed without being backgrounded
               if (foregroundTaskId) {
-                unregisterAgentForeground(foregroundTaskId, rootSetAppState);
+                unregisterAgentForeground(foregroundTaskId, rootSetAppState, toolUseContext.getAppState);
                 // Notify SDK consumers (e.g. VS Code subagent panel) that this
                 // foreground agent is done. Goes through drainSdkEvents() — does
                 // NOT trigger the print.ts XML task_notification parser or the LLM loop.

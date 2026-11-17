@@ -6,6 +6,7 @@ import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
 import { getKairosActive } from 'src/bootstrap/state.js';
+import { getCwd } from 'src/utils/cwd.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -20,6 +21,12 @@ import {
   spawnShellTask,
   unregisterForeground,
 } from 'src/tasks/LocalShellTask/LocalShellTask.js';
+import {
+  isBackgroundedToDeliverMessage,
+  isBackgroundedByTurnAbort,
+  backgroundShellReapedAtFinalResponse,
+} from 'src/tasks/LocalShellTask/guards.js';
+import { getAgentContext } from 'src/utils/agentContext.js';
 import type { AgentId } from 'src/types/ids.js';
 import type { AssistantMessage } from 'src/types/message.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
@@ -41,6 +48,12 @@ import { semanticNumber } from 'src/utils/semanticNumber.js';
 import { getCachedPowerShellPath } from 'src/utils/shell/powershellDetection.js';
 import { EndTruncatingAccumulator } from 'src/utils/stringUtils.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
+import {
+  backgroundTaskEnding,
+  formatBackgroundShellCopy,
+  formatBackgroundTaskResult,
+  isBashTaskGetDeliveryEnabled,
+} from 'src/utils/bashTaskDelivery.js';
 import { TaskOutput } from 'src/utils/task/TaskOutput.js';
 import { isOutputLineTruncated } from 'src/utils/terminal.js';
 import {
@@ -181,6 +194,8 @@ const PROGRESS_THRESHOLD_MS = 2000;
 const PROGRESS_INTERVAL_MS = 1000;
 // In assistant mode, blocking commands auto-background after this many ms in the main agent
 const ASSISTANT_BLOCKING_BUDGET_MS = 15_000;
+/** densable `kpe` — persist cap (64 MiB). */
+const MAX_PERSISTED_SIZE = 64 * 1024 * 1024;
 
 // Commands that should not be auto-backgrounded (canonical lowercase).
 // 'sleep' is a PS built-in alias for Start-Sleep but not in COMMON_ALIASES,
@@ -296,6 +311,21 @@ const outputSchema = lazySchema(() =>
       .boolean()
       .optional()
       .describe('True if the command was auto-backgrounded by the assistant-mode blocking budget'),
+    backgroundedToDeliverMessage: z.boolean().optional(),
+    backgroundedByTurnAbort: z.boolean().optional(),
+    timedOutAfterMs: z.number().optional(),
+    backgroundCwdHint: z
+      .string()
+      .optional()
+      .describe(
+        'Model-facing note that the session cwd was not changed by a backgrounded command containing a directory-change cmdlet',
+      ),
+    backgroundEndsWithFinalResponse: z
+      .literal(true)
+      .optional()
+      .describe(
+        'True when this backgrounded command is owned by a synchronous subagent and is therefore terminated when that agent gives its final response; absent when the command survives (main loop, async subagents)',
+      ),
   }),
 );
 type OutputSchema = ReturnType<typeof outputSchema>;
@@ -497,14 +527,28 @@ export const PowerShellTool = buildTool({
       persistedOutputSize,
       backgroundTaskId,
       backgroundedByUser,
-      assistantAutoBackgrounded,
+      assistantAutoBackgrounded: _assistantAutoBackgrounded,
+      backgroundedToDeliverMessage,
+      backgroundedByTurnAbort,
+      timedOutAfterMs,
+      backgroundCwdHint,
+      backgroundEndsWithFinalResponse,
     }: Out,
     toolUseID: string,
   ): ToolResultBlockParam {
     // For image data, format as image content block for Claude
     if (isImage) {
       const block = buildImageToolResult(stdout, toolUseID);
-      if (block) return block;
+      if (block) {
+        const trimmedStderr = typeof stderr === 'string' ? stderr.trim() : '';
+        if (trimmedStderr) {
+          return {
+            ...block,
+            content: [...(Array.isArray(block.content) ? block.content : []), { type: 'text', text: trimmedStderr }],
+          };
+        }
+        return block;
+      }
     }
 
     let processedStdout = stdout;
@@ -518,6 +562,7 @@ export const PowerShellTool = buildTool({
         isJson: false,
         preview: preview.preview,
         hasMore: preview.hasMore,
+        truncatedAtBytes: (persistedOutputSize ?? 0) >= MAX_PERSISTED_SIZE ? MAX_PERSISTED_SIZE : undefined,
       });
     } else if (stdout) {
       processedStdout = stdout.replace(/^(\s*\n)+/, '');
@@ -532,13 +577,31 @@ export const PowerShellTool = buildTool({
 
     let backgroundInfo = '';
     if (backgroundTaskId) {
-      const outputPath = getTaskOutputPath(backgroundTaskId);
-      if (assistantAutoBackgrounded) {
-        backgroundInfo = `Command exceeded the assistant-mode blocking budget (${ASSISTANT_BLOCKING_BUDGET_MS / 1000}s) and was moved to the background with ID: ${backgroundTaskId}. It is still running — you will be notified when it completes. Output is being written to: ${outputPath}. In assistant mode, delegate long-running work to a subagent or use run_in_background to keep this conversation responsive.`;
-      } else if (backgroundedByUser) {
-        backgroundInfo = `Command was manually backgrounded by user with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
-      } else {
-        backgroundInfo = `Command running in background with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
+      backgroundInfo = formatBackgroundShellCopy({
+        backgroundTaskId,
+        outputPath: getTaskOutputPath(backgroundTaskId),
+        backgroundedByUser,
+        backgroundedToDeliverMessage,
+        backgroundedByTurnAbort,
+        reapedAtFinalResponse: backgroundEndsWithFinalResponse,
+        timedOutAfterMs,
+      });
+      if (backgroundCwdHint) {
+        backgroundInfo += `\n${backgroundCwdHint}`;
+      }
+      if (isBashTaskGetDeliveryEnabled()) {
+        return {
+          tool_use_id: toolUseID,
+          type: 'tool_result' as const,
+          content: formatBackgroundTaskResult(
+            backgroundTaskId,
+            [errorMessage, backgroundInfo].filter(Boolean).join('\n'),
+            {
+              backgroundedByUser,
+              ending: backgroundTaskEnding(backgroundEndsWithFinalResponse === true),
+            },
+          ),
+        };
       }
     }
 
@@ -588,6 +651,7 @@ export const PowerShellTool = buildTool({
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId,
+        innerCall: toolUseContext.innerCall,
         // densable 2.1.217 VRu — pin isolation worktree into shell gates
         agentWorktree: toolUseContext.agentWorktree,
       });
@@ -658,6 +722,18 @@ export const PowerShellTool = buildTool({
       // model (BashTool has no early return, so all paths flow through its
       // single extraction site).
       if (result.backgroundTaskId) {
+        const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
+          result.backgroundTaskId,
+          getAgentContext(),
+        )
+          ? (true as const)
+          : undefined;
+        const backgroundCwdHint =
+          /(?:^|[;|&\r\n])\s*(?:(?:cd|chdir|sl|set-location|pushd|push-location|popd|pop-location)(?=$|[\s.:\\/+[\]",;=])|[a-z]:\s*(?:$|[;|&\r\n]))/i.test(
+            input.command,
+          )
+            ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
+            : undefined;
         const bgExtracted = extractClaudeCodeHints(result.stdout || '', input.command);
         if (isMainThread && bgExtracted.hints.length > 0) {
           for (const hint of bgExtracted.hints) maybeRecordPluginHint(hint);
@@ -670,6 +746,11 @@ export const PowerShellTool = buildTool({
             backgroundTaskId: result.backgroundTaskId,
             backgroundedByUser: result.backgroundedByUser,
             assistantAutoBackgrounded: result.assistantAutoBackgrounded,
+            backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
+            backgroundedByTurnAbort: result.backgroundedByTurnAbort,
+            timedOutAfterMs: result.timedOutAfterMs,
+            backgroundCwdHint,
+            backgroundEndsWithFinalResponse,
           },
         };
       }
@@ -724,7 +805,6 @@ export const PowerShellTool = buildTool({
       // ordering, where persistence is post-try/finally): a failing command
       // that also produced >maxOutputLength bytes would otherwise do 3-4 disk
       // syscalls, store to tool-results/, then throw — orphaning the file.
-      const MAX_PERSISTED_SIZE = 64 * 1024 * 1024;
       let persistedOutputPath: string | undefined;
       let persistedOutputSize: number | undefined;
       if (result.outputFilePath && result.outputTaskId) {
@@ -806,6 +886,7 @@ async function* runPowerShellCommand({
   isMainThread,
   toolUseId,
   agentId,
+  innerCall,
   agentWorktree,
 }: {
   input: PowerShellToolInput;
@@ -817,6 +898,7 @@ async function* runPowerShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  innerCall?: boolean;
   /** densable agentWorktree for VRu shell isolation gate. */
   agentWorktree?: string;
 }): AsyncGenerator<
@@ -851,6 +933,7 @@ async function* runPowerShellCommand({
   let backgroundShellId: string | undefined;
   let interruptBackgroundingStarted = false;
   let assistantAutoBackgrounded = false;
+  let timedOutAfterMs: number | undefined;
 
   // Progress signal: resolved when backgroundShellId is set in the async
   // .then() path, waking the generator's Promise.race immediately instead of
@@ -921,6 +1004,8 @@ async function* runPowerShellCommand({
         shellCommand,
         toolUseId,
         agentId,
+        innerCall,
+        timeout: timeoutMs,
       },
       {
         abortController,
@@ -985,6 +1070,7 @@ async function* runPowerShellCommand({
   // Set up auto-backgrounding on timeout if enabled
   if (shellCommand.onTimeout && shouldAutoBackground) {
     shellCommand.onTimeout(backgroundFn => {
+      timedOutAfterMs = timeoutMs;
       startBackgrounding('tengu_powershell_command_timeout_backgrounded', backgroundFn);
     });
   }
@@ -1002,6 +1088,7 @@ async function* runPowerShellCommand({
     setTimeout(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         assistantAutoBackgrounded = true;
+        timedOutAfterMs = ASSISTANT_BLOCKING_BUDGET_MS;
         startBackgrounding('tengu_powershell_command_assistant_auto_backgrounded');
       }
     }, ASSISTANT_BLOCKING_BUDGET_MS).unref();
@@ -1092,7 +1179,12 @@ async function* runPowerShellCommand({
           code: 0,
           interrupted: false,
           backgroundTaskId: backgroundShellId,
+          backgroundedByTurnAbort: isBackgroundedByTurnAbort(getAppState().tasks[backgroundShellId]),
           assistantAutoBackgrounded,
+          timedOutAfterMs,
+          ...(isBackgroundedToDeliverMessage(getAppState().tasks[backgroundShellId])
+            ? { backgroundedToDeliverMessage: true }
+            : {}),
         };
       }
 
@@ -1123,7 +1215,12 @@ async function* runPowerShellCommand({
             code: 0,
             interrupted: false,
             backgroundTaskId: foregroundTaskId,
-            backgroundedByUser: true,
+            timedOutAfterMs,
+            ...(isBackgroundedToDeliverMessage(getAppState().tasks[foregroundTaskId])
+              ? { backgroundedToDeliverMessage: true }
+              : isBackgroundedByTurnAbort(getAppState().tasks[foregroundTaskId])
+                ? { backgroundedByTurnAbort: true }
+                : { backgroundedByUser: true }),
           };
         }
       }
@@ -1132,12 +1229,12 @@ async function* runPowerShellCommand({
       const elapsed = Date.now() - startTime;
       const elapsedSeconds = Math.floor(elapsed / 1000);
 
-      // Show backgrounding UI hint after threshold
+      // Register foreground task & show backgrounding UI hint after threshold
       if (
         !isBackgroundTasksDisabled &&
+        !interruptBackgroundingStarted &&
         backgroundShellId === undefined &&
-        elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 &&
-        setToolJSX
+        elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000
       ) {
         if (!foregroundTaskId) {
           foregroundTaskId = registerForeground(
@@ -1146,18 +1243,22 @@ async function* runPowerShellCommand({
               description: description || command,
               shellCommand,
               agentId,
+              innerCall,
             },
             setAppState,
             toolUseId,
+            getAppState,
           );
         }
 
-        setToolJSX({
-          jsx: <BackgroundHint />,
-          shouldHidePromptInput: false,
-          shouldContinueAnimation: true,
-          showSpinner: true,
-        });
+        if (setToolJSX) {
+          setToolJSX({
+            jsx: <BackgroundHint toolUseId={toolUseId} />,
+            shouldHidePromptInput: false,
+            shouldContinueAnimation: true,
+            showSpinner: true,
+          });
+        }
       }
 
       yield {

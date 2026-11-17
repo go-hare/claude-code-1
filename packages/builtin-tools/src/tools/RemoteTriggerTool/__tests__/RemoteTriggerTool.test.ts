@@ -8,9 +8,12 @@ import {
   mock,
   test,
 } from 'bun:test'
-import { authMock } from '../../../../../../tests/mocks/auth'
+import { authMock, restoreAuthMock } from '../../../../../../tests/mocks/auth'
 import { setupAxiosMock } from '../../../../../../tests/mocks/axios'
-import { oauthClientMock } from '../../../../../../tests/mocks/oauthSurface.js'
+import {
+  oauthClientMock,
+  restoreOauthClientMock,
+} from '../../../../../../tests/mocks/oauthSurface.js'
 import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js'
 import * as realRemoteTriggerAudit from 'src/utils/remoteTriggerAudit.js'
 
@@ -47,23 +50,14 @@ mock.module('src/services/analytics/growthbook.js', () => ({
 // still kept below declarations for readability / no TDZ confusion).
 afterAll(() => {
   axiosHandle.useStubs = false
+  mock.module('src/utils/auth.js', restoreAuthMock)
+  mock.module('src/services/oauth/client.js', restoreOauthClientMock)
+  mock.module('src/utils/remoteTriggerAudit.js', () => ({
+    ...remoteTriggerAuditSnap,
+  }))
   mock.module('src/services/analytics/growthbook.js', () => ({
     ...growthbookSnap,
   }))
-})
-
-// Narrow mock for the side-effectful entries in `src/constants/oauth.js`.
-// Pure data exports (ALL_OAUTH_SCOPES, CLAUDE_AI_*_SCOPE, etc.) come from
-// the real module and are not mocked, per the test policy that constants
-// modules without side effects should not be replaced wholesale.
-mock.module('src/constants/oauth.js', () => {
-  const actual = require('../../../../../../src/constants/oauth.js')
-  return {
-    ...actual,
-    fileSuffixForOauthConfig: () => '',
-    getOauthConfig: () => ({ BASE_API_URL: 'https://example.test' }),
-    MCP_CLIENT_METADATA_URL: 'https://example.test/oauth/metadata',
-  }
 })
 
 mock.module('src/utils/remoteTriggerAudit.js', () => ({

@@ -5,13 +5,6 @@ import { snapshotModuleExports } from '../../../../../../tests/mocks/settings.js
 
 mock.module('src/utils/auth.js', authMock)
 
-const realOauth = await import('src/constants/oauth.js')
-const oauthSnap = snapshotModuleExports(realOauth)
-mock.module('src/constants/oauth.js', () => ({
-  ...oauthSnap,
-  getOauthConfig: () => ({ BASE_API_URL: 'https://example.test' }),
-}))
-
 const realDesignOauth = await import('src/cli/handlers/designOauth.js')
 const designOauthSnap = snapshotModuleExports(realDesignOauth)
 mock.module('src/cli/handlers/designOauth.js', () => ({
@@ -41,7 +34,6 @@ beforeAll(() => {
 
 afterAll(() => {
   axiosHandle.useStubs = false
-  mock.module('src/constants/oauth.js', () => ({ ...oauthSnap }))
   mock.module('src/cli/handlers/designOauth.js', () => ({
     ...designOauthSnap,
   }))

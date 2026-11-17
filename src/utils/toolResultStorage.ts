@@ -3,7 +3,7 @@
  */
 
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { mkdir, writeFile } from 'fs/promises'
+import { lstat, mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
 import {
@@ -87,6 +87,8 @@ export type PersistedToolResult = {
   isJson: boolean
   preview: string
   hasMore: boolean
+  /** densable persist `truncatedAtBytes` — unset when the full payload was saved. */
+  truncatedAtBytes?: number
 }
 
 // Error result when persistence fails
@@ -155,7 +157,11 @@ export async function persistToolResult(
 
   await ensureToolResultsDir()
   const filepath = getToolResultPath(toolUseId, isJson)
-  const contentStr = isJson ? jsonStringify(content, null, 2) : content
+  const raw = isJson ? jsonStringify(content, null, 2) : content
+  // densable `tMe` — UTF-8 byte cap; truncatedAtBytes set when clipped.
+  const contentStr = truncateToUtf8Bytes(raw, MAX_TOOL_RESULT_BYTES)
+  const truncatedAtBytes =
+    contentStr === raw ? undefined : MAX_TOOL_RESULT_BYTES
 
   // tool_use_id is unique per invocation and content is deterministic for a
   // given id, so skip if the file already exists. This prevents re-writing
@@ -171,7 +177,22 @@ export async function persistToolResult(
       logError(toError(error))
       return { error: getFileSystemErrorMessage(toError(error)) }
     }
-    // EEXIST: already persisted on a prior turn, fall through to preview
+    // densable jG @186719850: verify existing path is a regular single-linked file
+    let existingStat: Awaited<ReturnType<typeof lstat>>
+    try {
+      existingStat = await lstat(filepath)
+    } catch {
+      return { error: 'tool result path could not be checked; not persisted' }
+    }
+    if (existingStat.isSymbolicLink()) {
+      return { error: 'tool result path is a link; not persisted' }
+    }
+    if (!existingStat.isFile()) {
+      return { error: 'tool result path is not a regular file; not persisted' }
+    }
+    if (existingStat.nlink > 1) {
+      return { error: 'tool result path has another name; not persisted' }
+    }
   }
 
   // Generate a preview
@@ -179,11 +200,41 @@ export async function persistToolResult(
 
   return {
     filepath,
-    originalSize: contentStr.length,
+    originalSize: raw.length,
     isJson,
     preview,
     hasMore,
+    truncatedAtBytes,
   }
+}
+
+/** densable `tMe` — encode-into UTF-8 cap (max 4MiB scratch). */
+export function truncateToUtf8Bytes(text: string, maxBytes: number): string {
+  if (text.length * 3 <= maxBytes) return text
+  const encoder = new TextEncoder()
+  const buf = new Uint8Array(Math.max(0, Math.min(maxBytes, 4_194_304)))
+  let written = 0
+  let offset = 0
+  while (offset < text.length) {
+    const room = maxBytes - written
+    if (room <= 0) break
+    const dest = room < buf.length ? buf.subarray(0, room) : buf
+    let sliceEnd = Math.min(text.length, offset + dest.length)
+    if (sliceEnd < text.length) {
+      const lastCode = text.charCodeAt(sliceEnd - 1)
+      if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+        sliceEnd++
+      }
+    }
+    const { read, written: n } = encoder.encodeInto(
+      text.slice(offset, sliceEnd),
+      dest,
+    )
+    if (read === 0) break
+    offset += read
+    written += n
+  }
+  return offset >= text.length ? text : text.slice(0, offset)
 }
 
 /**
@@ -193,7 +244,10 @@ export function buildLargeToolResultMessage(
   result: PersistedToolResult,
 ): string {
   let message = `${PERSISTED_OUTPUT_TAG}\n`
-  message += `Output too large (${formatFileSize(result.originalSize)}). Full output saved to: ${result.filepath}\n\n`
+  message +=
+    result.truncatedAtBytes === undefined
+      ? `Output too large (${formatFileSize(result.originalSize)}). Full output saved to: ${result.filepath}\n\n`
+      : `Output exceeded the ${formatFileSize(result.truncatedAtBytes)} persist limit; only the first ${formatFileSize(result.truncatedAtBytes)} were saved to: ${result.filepath}\n\n`
   message += `Preview (first ${formatFileSize(PREVIEW_SIZE_BYTES)}):\n`
   message += result.preview
   message += result.hasMore ? '\n...\n' : '\n'

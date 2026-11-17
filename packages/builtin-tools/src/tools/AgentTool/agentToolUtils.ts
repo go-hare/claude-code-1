@@ -70,6 +70,7 @@ import {
   classifyYoloAction,
 } from 'src/utils/permissions/yoloClassifier.js'
 import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkProgress.js'
+import { createTaskRegistry } from 'src/utils/taskRegistry.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { getTokenCountFromUsage } from 'src/utils/tokens.js'
 import { WORKFLOW_TOOL_NAME } from '@claude-code/workflow-engine'
@@ -846,13 +847,20 @@ export function parkAgentOnKeepaliveDeferNotify(
   taskId: string,
   durationMs: number,
   setAppState: SetAppState,
+  getAppState?: () => AppState,
 ): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { countAgentKeepaliveChildren } =
     require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
-  const pe = countAgentKeepaliveChildren(taskId, () =>
-    readAppStateViaSet(setAppState),
-  )
+  const { createTaskRegistry } =
+    require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+  const pe =
+    getAppState !== undefined
+      ? countAgentKeepaliveChildren(
+          taskId,
+          createTaskRegistry(getAppState, setAppState),
+        )
+      : 0
   const turnDuration = createTurnDurationMessage(
     durationMs,
     undefined,
@@ -891,14 +899,17 @@ export function parkAgentOnKeepaliveDeferNotify(
 export function sweepAndDetectLiveAgentChildren(
   taskId: string,
   setAppState: SetAppState,
+  getAppState?: () => AppState,
 ): boolean {
+  if (!getAppState) return false
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { sweepStaleKeepaliveReasons, hasLiveAgentKeepaliveChildren } =
     require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
-  sweepStaleKeepaliveReasons(taskId, setAppState)
-  return hasLiveAgentKeepaliveChildren(taskId, () =>
-    readAppStateViaSet(setAppState),
-  )
+  const { createTaskRegistry } =
+    require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+  const registry = createTaskRegistry(getAppState, setAppState)
+  sweepStaleKeepaliveReasons(taskId, registry)
+  return hasLiveAgentKeepaliveChildren(taskId, registry)
 }
 
 /**
@@ -1091,6 +1102,7 @@ export async function runAsyncAgentLifecycle({
     const preCompleteJxt = sweepAndDetectLiveAgentChildren(
       taskId,
       rootSetAppState,
+      toolUseContext.getAppState,
     )
     const agentResult = finalizeAgentTool(agentMessages, taskId, metadata, {
       suppressTelemetry: preCompleteJxt,
@@ -1101,7 +1113,11 @@ export async function runAsyncAgentLifecycle({
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
     // skipJeo: Jeo already ran above for Z.
-    completeAsyncAgent(agentResult, rootSetAppState, { skipJeo: true })
+    completeAsyncAgent(
+      agentResult,
+      createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+      { skipJeo: true },
+    )
     // Official zqe: if(m) try{m()}catch — before keepalive park.
     if (onTerminalSuccess) {
       try {
@@ -1123,6 +1139,7 @@ export async function runAsyncAgentLifecycle({
         taskId,
         agentResult.totalDurationMs,
         rootSetAppState,
+        toolUseContext.getAppState,
       )
       return settledFinalText !== undefined
         ? { finalText: settledFinalText }
@@ -1175,7 +1192,7 @@ export async function runAsyncAgentLifecycle({
       description,
       status: 'completed',
       maxTurnsReached: readMaxTurnsReached(agentMessages),
-      setAppState: rootSetAppState,
+      registry: createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
       finalMessage,
       usage: {
         totalTokens: getTokenCountFromTracker(tracker),
@@ -1198,7 +1215,11 @@ export async function runAsyncAgentLifecycle({
           error instanceof Error ? error.message : undefined,
         )
       ) {
-        killAsyncAgent(taskId, rootSetAppState)
+        killAsyncAgent(
+          taskId,
+          createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+          'user',
+        )
         markAgentsNotified(taskId, rootSetAppState)
         return
       }
@@ -1206,7 +1227,11 @@ export async function runAsyncAgentLifecycle({
       // but only this catch handler has agentMessages, so the notification
       // must fire unconditionally. Transition status BEFORE worktree cleanup
       // so TaskOutput unblocks even if git hangs (gh-20236).
-      killAsyncAgent(taskId, rootSetAppState)
+      killAsyncAgent(
+        taskId,
+        createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+        'user',
+      )
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { maybeStopObserverForObservedTerminal } =
@@ -1251,7 +1276,10 @@ export async function runAsyncAgentLifecycle({
         description,
         status: 'killed',
         killedBy,
-        setAppState: rootSetAppState,
+        registry: createTaskRegistry(
+          toolUseContext.getAppState,
+          rootSetAppState,
+        ),
         toolUseId: toolUseContext.toolUseId,
         finalMessage: partialResult,
         ...worktreeResult,
@@ -1259,7 +1287,11 @@ export async function runAsyncAgentLifecycle({
       return
     }
     const msg = errorMessage(error)
-    failAsyncAgent(taskId, msg, rootSetAppState)
+    failAsyncAgent(
+      taskId,
+      msg,
+      createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+    )
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { maybeStopObserverForObservedTerminal } =
@@ -1276,7 +1308,7 @@ export async function runAsyncAgentLifecycle({
       description,
       status: 'failed',
       error: msg,
-      setAppState: rootSetAppState,
+      registry: createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
       toolUseId: toolUseContext.toolUseId,
       ...worktreeResult,
     })

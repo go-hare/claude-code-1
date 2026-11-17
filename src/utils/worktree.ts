@@ -69,8 +69,6 @@ import {
 import {
   executeWorktreeCreateHook,
   executeWorktreeRemoveHook,
-  hasWorktreeCreateHook,
-  hasWorktreeRemoveHook,
 } from './hooks.js'
 import {
   containsPathTraversal,
@@ -1509,8 +1507,8 @@ export async function createWorktreeForSession(
   // refuse must leave getCurrentWorktreeSession() unchanged. Disk orphan
   // on ODt fail is also SEA; do not invent cleanup.
   let session: WorktreeSession
-  if (hasWorktreeCreateHook()) {
-    const hookResult = await executeWorktreeCreateHook(slug)
+  const hookResult = await executeWorktreeCreateHook(slug)
+  if (hookResult) {
     logForDebugging(
       `Created hook-based worktree at: ${hookResult.worktreePath}`,
     )
@@ -1692,12 +1690,13 @@ export async function cleanupWorktree(persist?: {
 
     let hookRemoved = false
     if (hookBased) {
-      hookRemoved = await executeWorktreeRemoveHook(worktreePath, persist)
+      const removal = await executeWorktreeRemoveHook(worktreePath, persist)
+      hookRemoved = removal.kind === 'removed'
       if (hookRemoved) {
         logForDebugging(`Removed hook-based worktree at: ${worktreePath}`)
-      } else if (hasWorktreeRemoveHook()) {
+      } else if (removal.kind === 'failed') {
         logForDebugging(
-          `WorktreeRemove hook did not remove worktree, kept at: ${worktreePath}`,
+          `WorktreeRemove hook ${removal.summary}; kept at: ${worktreePath}`,
           { level: 'warn' },
         )
         clearActiveWorktreeSession()
@@ -1823,8 +1822,8 @@ export async function createAgentWorktree(slug: string): Promise<{
   const fromCwd = getCwd()
 
   // Try hook-based worktree creation first (allows user-configured VCS)
-  if (hasWorktreeCreateHook()) {
-    const hookResult = await executeWorktreeCreateHook(slug)
+  const hookResult = await executeWorktreeCreateHook(slug)
+  if (hookResult) {
     logForDebugging(
       `Created hook-based agent worktree at: ${hookResult.worktreePath}`,
     )
@@ -2456,7 +2455,8 @@ export async function removeAgentWorktree(
       }
       hookPath = expectedResolvedPath
     }
-    if (await executeWorktreeRemoveHook(hookPath, persist)) {
+    const removal = await executeWorktreeRemoveHook(hookPath, persist)
+    if (removal.kind === 'removed') {
       logEvent('tengu_worktree_removed', {
         source:
           reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -2473,7 +2473,10 @@ export async function removeAgentWorktree(
     )
     return {
       outcome: 'failed',
-      errorSummary: 'WorktreeRemove hook failed',
+      errorSummary:
+        removal.kind === 'failed'
+          ? `WorktreeRemove hook ${removal.summary}`
+          : 'No WorktreeRemove hook configured',
     }
   }
 
@@ -3895,16 +3898,14 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
   // (anthropics/claude-code#39281). Git path below runs only when no hook.
   let worktreeDir: string
   let repoName: string
-  if (hasWorktreeCreateHook()) {
-    try {
-      const hookResult = await executeWorktreeCreateHook(worktreeName)
-      worktreeDir = hookResult.worktreePath
-    } catch (error) {
-      return {
-        handled: false,
-        error: `Error: ${errorMessage(error)}`,
-      }
-    }
+  let hookResult: Awaited<ReturnType<typeof executeWorktreeCreateHook>>
+  try {
+    hookResult = await executeWorktreeCreateHook(worktreeName)
+  } catch (error) {
+    return { handled: false, error: `Error: ${errorMessage(error)}` }
+  }
+  if (hookResult) {
+    worktreeDir = hookResult.worktreePath
     repoName = basename(findCanonicalGitRoot(getCwd()) ?? getCwd())
     try {
       await assertIsolationWorktreeAllowed(

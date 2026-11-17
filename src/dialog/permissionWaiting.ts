@@ -101,3 +101,55 @@ export function resolveHostPermissionWaitingFor(
 ): string | undefined {
   return resolveHostWaitingFor(kind, payload)
 }
+
+/** densable `Sye` / `uio` input. */
+export type SessionPromptStatusInput = {
+  queuedElicitation: boolean
+  topDialogWaitingFor: string | undefined
+  pendingWorkerRequest: boolean
+  pendingSandboxRequest: boolean
+  isShowingLocalJSXCommand: boolean
+  isResponseStreaming: boolean
+  isLoading: boolean
+  isQueryActive: boolean
+  delegatedActive: boolean
+}
+
+export type SessionPromptStatus = {
+  status: 'waiting' | 'busy' | 'idle'
+  waitingFor: string | undefined
+  working: boolean
+}
+
+/** densable `uio`. */
+function sessionPromptWaitingFor(
+  h: SessionPromptStatusInput,
+): string | undefined {
+  if (h.queuedElicitation) return 'input needed'
+  if (h.topDialogWaitingFor !== undefined) return h.topDialogWaitingFor
+  if (h.pendingWorkerRequest) return 'worker request'
+  if (h.pendingSandboxRequest) return 'sandbox request'
+  if (
+    h.isShowingLocalJSXCommand &&
+    !h.isResponseStreaming &&
+    !h.delegatedActive
+  ) {
+    return 'dialog open'
+  }
+  return undefined
+}
+
+/** densable `Sye`. */
+export function resolveSessionPromptStatus(
+  h: SessionPromptStatusInput,
+): SessionPromptStatus {
+  const waitingFor = sessionPromptWaitingFor(h)
+  if (waitingFor !== undefined) {
+    return { status: 'waiting', waitingFor, working: false }
+  }
+  return {
+    status: h.isLoading || h.delegatedActive ? 'busy' : 'idle',
+    waitingFor: undefined,
+    working: h.isQueryActive,
+  }
+}

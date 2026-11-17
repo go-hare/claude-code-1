@@ -1181,6 +1181,7 @@ async function resumeAgentBackgroundAfterClaim({
       ? { forkedSkillName: resolvedForkedSkillName }
       : {}),
     attachOwnerKeepalive: false,
+    getAppState: toolUseContext.getAppState,
     webFetchSavedFiles: webFetchSavedFilesForAgent(selectedAgent),
   })
 

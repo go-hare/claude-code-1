@@ -211,23 +211,34 @@ describe('densable 2.1.289 upload_asset ownership (Tu/AE/gNe ALIGN)', () => {
     )) as { behavior: string; message?: string }
     expect(both.behavior).toBe('deny')
     expect(both.message).toContain('not both')
+    seedStatus('tu-batch-outside')
+    const outside = await checkArtifactActionPermissions(
+      { action: 'upload_asset', url: URL, file_paths: [FILE, '/tmp/b.png'] },
+      fakeContext('default', 'tu-batch-outside'),
+    )
+    expect(outside.behavior).toBe('deny')
+    // A batch can carry only files whose Read gate needs no separate approval.
+    const files = [
+      join(process.cwd(), 'bunfig.toml'),
+      join(process.cwd(), '.editorconfig'),
+    ]
     seedStatus('tu-batch')
     const batch = (await checkArtifactActionPermissions(
-      { action: 'upload_asset', url: URL, file_paths: [FILE, '/tmp/b.png'] },
+      { action: 'upload_asset', url: URL, file_paths: files },
       fakeContext('default', 'tu-batch'),
     )) as {
       behavior: string
       message?: string
       updatedInput?: Record<string, unknown>
     }
-    expect(batch.behavior).toBe('ask')
+    expect(batch.behavior, batch.message).toBe('ask')
     expect(batch.message).toContain('2 local files')
     const pin = batch.updatedInput?.__artifactAssetUploadPin as {
       slug: string
       batch: Array<{ real: string; identity: unknown }>
     }
     expect(pin.slug).toBe(SLUG)
-    expect(pin.batch.map(row => row.real)).toEqual([FILE, '/tmp/b.png'])
+    expect(pin.batch.map(row => row.real)).toEqual(files)
     for (const row of pin.batch) {
       expect(row.identity === null || typeof row.identity === 'string').toBe(
         true,

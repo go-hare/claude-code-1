@@ -1,22 +1,61 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test'
+import * as realBootstrap from '../../../bootstrap/state.js'
+import * as realConcurrent from '../../concurrentSessions.js'
+import * as realPermissionsLoader from '../permissionsLoader.js'
+import {
+  analyticsMock,
+  restoreAnalyticsMock,
+} from '../../../../tests/mocks/analytics.js'
+import { snapshotModuleExports } from '../../../../tests/mocks/settings.js'
 
 let managedOnly = false
 
+const bootstrapSnap = snapshotModuleExports(realBootstrap)
+const concurrentSnap = snapshotModuleExports(realConcurrent)
+const loaderSnap = snapshotModuleExports(realPermissionsLoader)
+
 mock.module('../permissionsLoader.js', () => ({
+  ...loaderSnap,
+  shouldAllowManagedPermissionRulesOnly: () => managedOnly,
+}))
+mock.module('src/utils/permissions/permissionsLoader.js', () => ({
+  ...loaderSnap,
   shouldAllowManagedPermissionRulesOnly: () => managedOnly,
 }))
 
 mock.module('src/bootstrap/state.js', () => ({
+  ...bootstrapSnap,
+  getPrintOutputFormat: () => null,
+}))
+mock.module('../../../bootstrap/state.js', () => ({
+  ...bootstrapSnap,
   getPrintOutputFormat: () => null,
 }))
 
 mock.module('src/utils/concurrentSessions.js', () => ({
+  ...concurrentSnap,
+  isBgSession: () => false,
+}))
+mock.module('../../concurrentSessions.js', () => ({
+  ...concurrentSnap,
   isBgSession: () => false,
 }))
 
-mock.module('src/services/analytics/index.js', () => ({
-  logEvent: () => {},
-}))
+mock.module('src/services/analytics/index.js', analyticsMock)
+mock.module('../../../services/analytics/index.js', analyticsMock)
+
+afterAll(() => {
+  mock.module('../permissionsLoader.js', () => ({ ...loaderSnap }))
+  mock.module('src/utils/permissions/permissionsLoader.js', () => ({
+    ...loaderSnap,
+  }))
+  mock.module('src/bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('../../../bootstrap/state.js', () => ({ ...bootstrapSnap }))
+  mock.module('src/utils/concurrentSessions.js', () => ({ ...concurrentSnap }))
+  mock.module('../../concurrentSessions.js', () => ({ ...concurrentSnap }))
+  mock.module('src/services/analytics/index.js', restoreAnalyticsMock)
+  mock.module('../../../services/analytics/index.js', restoreAnalyticsMock)
+})
 
 const {
   isSkillAllowedToolsTrusted,

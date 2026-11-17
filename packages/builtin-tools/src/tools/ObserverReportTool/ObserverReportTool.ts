@@ -191,6 +191,7 @@ export const ObserverReportTool = buildTool({
           priority: 'next',
           isMeta: true,
           skipSlashCommands: true,
+          skipAttachments: true,
           origin: origin as never,
         })
       },

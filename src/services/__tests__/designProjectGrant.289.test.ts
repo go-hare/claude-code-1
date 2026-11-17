@@ -136,7 +136,9 @@ describe('gold 2.1.289 design project grant', () => {
     }
     const first = ClaudeDesignTool.checkPermissions!(writeInput, mainContext())
     const second = ClaudeDesignTool.checkPermissions!(writeInput, mainContext())
-    for (let i = 0; i < 20 && getCalls === 0; i++) await Promise.resolve()
+    for (let i = 0; i < 20 && getCalls === 0; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve))
+    }
     expect(getCalls).toBe(1)
     releaseGets?.()
     const [left, right] = await Promise.all([first, second])

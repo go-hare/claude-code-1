@@ -7,6 +7,14 @@ import {
   hasLiveAgentKeepaliveChildren,
 } from 'src/utils/task/framework.js'
 import type { AppState } from 'src/state/AppState.js'
+import { createTaskRegistry } from 'src/utils/taskRegistry.js'
+
+function registryOf(state: AppState) {
+  return createTaskRegistry(
+    () => state,
+    () => {},
+  )
+}
 
 /**
  * Park-on-keepalive: turn_duration pe count + defer owner notify source anchors.
@@ -45,10 +53,14 @@ describe('agent keepalive park + defer owner notify', () => {
         },
       },
     } as unknown as AppState
-    expect(countAgentKeepaliveChildren('parent', () => state)).toBe(2)
-    expect(hasLiveAgentKeepaliveChildren('parent', () => state)).toBe(true)
-    expect(countAgentKeepaliveChildren('missing', () => state)).toBe(0)
-    expect(hasLiveAgentKeepaliveChildren('missing', () => state)).toBe(false)
+    expect(countAgentKeepaliveChildren('parent', registryOf(state))).toBe(2)
+    expect(hasLiveAgentKeepaliveChildren('parent', registryOf(state))).toBe(
+      true,
+    )
+    expect(countAgentKeepaliveChildren('missing', registryOf(state))).toBe(0)
+    expect(hasLiveAgentKeepaliveChildren('missing', registryOf(state))).toBe(
+      false,
+    )
   })
 
   test('hasLiveAgentKeepaliveChildren false when only non-agent keepalive', () => {
@@ -61,8 +73,10 @@ describe('agent keepalive park + defer owner notify', () => {
         },
       },
     } as unknown as AppState
-    expect(countAgentKeepaliveChildren('parent', () => state)).toBe(0)
-    expect(hasLiveAgentKeepaliveChildren('parent', () => state)).toBe(false)
+    expect(countAgentKeepaliveChildren('parent', registryOf(state))).toBe(0)
+    expect(hasLiveAgentKeepaliveChildren('parent', registryOf(state))).toBe(
+      false,
+    )
   })
 
   test('runAsyncAgentLifecycle park path: turn_duration + defer notify when live children', () => {
@@ -92,7 +106,7 @@ describe('agent keepalive park + defer owner notify', () => {
     // order: sweep → finalize(suppress) → complete(skipJeo) → if live children park → else enqueue
     const sweepIdx = utils.indexOf('sweepAndDetectLiveAgentChildren(')
     const suppressIdx = utils.indexOf('suppressTelemetry: preCompleteJxt')
-    const completeIdx = utils.indexOf('completeAsyncAgent(agentResult')
+    const completeIdx = utils.indexOf('completeAsyncAgent(')
     const skipJeoIdx = utils.indexOf('skipJeo: true', completeIdx)
     const parkIdx = utils.indexOf(
       'parkAgentOnKeepaliveDeferNotify(',
@@ -126,7 +140,7 @@ describe('agent keepalive park + defer owner notify', () => {
     expect(agent).toContain('suppressTelemetry: preCompleteJxt')
     expect(agent).toContain('skipJeo: true')
     expect(agent).toContain('if (preCompleteJxt)')
-    const completeIdx = agent.indexOf('completeAsyncAgent(agentResult')
+    const completeIdx = agent.indexOf('completeAsyncAgent(')
     const parkIdx = agent.indexOf(
       'parkAgentOnKeepaliveDeferNotify(',
       completeIdx,

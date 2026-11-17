@@ -23,6 +23,13 @@ import {
   spawnShellTask,
   unregisterForeground,
 } from 'src/tasks/LocalShellTask/LocalShellTask.js';
+import {
+  isBackgroundedToDeliverMessage,
+  isBackgroundedByTurnAbort,
+  backgroundShellReapedAtFinalResponse,
+} from 'src/tasks/LocalShellTask/guards.js';
+import { isInterruptAbortReason } from 'src/utils/abortController.js';
+import { getAgentContext } from 'src/utils/agentContext.js';
 import type { AgentId } from 'src/types/ids.js';
 import type { AssistantMessage } from 'src/types/message.js';
 import { parseForSecurity } from 'src/utils/bash/ast.js';
@@ -53,6 +60,12 @@ import { semanticBoolean } from 'src/utils/semanticBoolean.js';
 import { semanticNumber } from 'src/utils/semanticNumber.js';
 import { EndTruncatingAccumulator } from 'src/utils/stringUtils.js';
 import { getTaskOutputPath } from 'src/utils/task/diskOutput.js';
+import {
+  backgroundTaskEnding,
+  formatBackgroundShellCopy,
+  formatBackgroundTaskResult,
+  isBashTaskGetDeliveryEnabled,
+} from 'src/utils/bashTaskDelivery.js';
 import { TaskOutput } from 'src/utils/task/TaskOutput.js';
 import { isOutputLineTruncated } from 'src/utils/terminal.js';
 import {
@@ -108,6 +121,8 @@ const EOL = '\n';
 const PROGRESS_THRESHOLD_MS = 2000; // Show progress after 2 seconds
 // In assistant mode, blocking bash auto-backgrounds after this many ms in the main agent
 const ASSISTANT_BLOCKING_BUDGET_MS = 15_000;
+/** densable `kpe` — bash persist cap (64 MiB). */
+const MAX_PERSISTED_SIZE = 64 * 1024 * 1024;
 
 // Search commands for collapsible display (grep, find, etc.)
 const BASH_SEARCH_COMMANDS = new Set(['find', 'grep', 'rg', 'ag', 'ack', 'locate', 'which', 'whereis']);
@@ -431,6 +446,21 @@ const outputSchema = lazySchema(() =>
       .boolean()
       .optional()
       .describe('True if assistant-mode auto-backgrounded a long-running blocking command'),
+    backgroundedToDeliverMessage: z.boolean().optional(),
+    backgroundedByTurnAbort: z.boolean().optional(),
+    timedOutAfterMs: z.number().optional(),
+    backgroundCwdHint: z
+      .string()
+      .optional()
+      .describe(
+        'Model-facing note that the session cwd was not changed by a backgrounded command containing a directory-change builtin (cd/pushd/popd/chdir)',
+      ),
+    backgroundEndsWithFinalResponse: z
+      .literal(true)
+      .optional()
+      .describe(
+        'True when this backgrounded command is owned by a synchronous subagent and is therefore terminated when that agent gives its final response; absent when the command survives (main loop, async subagents)',
+      ),
     dangerouslyDisableSandbox: z.boolean().optional().describe('Flag to indicate if sandbox mode was overridden'),
     returnCodeInterpretation: z
       .string()
@@ -775,7 +805,12 @@ export const BashTool = buildTool({
       isImage,
       backgroundTaskId,
       backgroundedByUser,
-      assistantAutoBackgrounded,
+      assistantAutoBackgrounded: _assistantAutoBackgrounded,
+      backgroundedToDeliverMessage,
+      backgroundedByTurnAbort,
+      timedOutAfterMs,
+      backgroundEndsWithFinalResponse,
+      backgroundCwdHint,
       structuredContent,
       persistedOutputPath,
       persistedOutputSize,
@@ -795,7 +830,16 @@ export const BashTool = buildTool({
     // For image data, format as image content block for Claude
     if (isImage) {
       const block = buildImageToolResult(stdout, toolUseID);
-      if (block) return block;
+      if (block) {
+        const trimmedStderr = typeof stderr === 'string' ? stderr.trim() : '';
+        if (trimmedStderr) {
+          return {
+            ...block,
+            content: [...(Array.isArray(block.content) ? block.content : []), { type: 'text', text: trimmedStderr }],
+          };
+        }
+        return block;
+      }
     }
 
     let processedStdout = stdout;
@@ -816,6 +860,7 @@ export const BashTool = buildTool({
         isJson: false,
         preview: preview.preview,
         hasMore: preview.hasMore,
+        truncatedAtBytes: (persistedOutputSize ?? 0) >= MAX_PERSISTED_SIZE ? MAX_PERSISTED_SIZE : undefined,
       });
     }
 
@@ -827,13 +872,31 @@ export const BashTool = buildTool({
 
     let backgroundInfo = '';
     if (backgroundTaskId) {
-      const outputPath = getTaskOutputPath(backgroundTaskId);
-      if (assistantAutoBackgrounded) {
-        backgroundInfo = `Command exceeded the assistant-mode blocking budget (${ASSISTANT_BLOCKING_BUDGET_MS / 1000}s) and was moved to the background with ID: ${backgroundTaskId}. It is still running — you will be notified when it completes. Output is being written to: ${outputPath}. In assistant mode, delegate long-running work to a subagent or use run_in_background to keep this conversation responsive.`;
-      } else if (backgroundedByUser) {
-        backgroundInfo = `Command was manually backgrounded by user with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
-      } else {
-        backgroundInfo = `Command running in background with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
+      backgroundInfo = formatBackgroundShellCopy({
+        backgroundTaskId,
+        outputPath: getTaskOutputPath(backgroundTaskId),
+        backgroundedByUser,
+        backgroundedToDeliverMessage,
+        backgroundedByTurnAbort,
+        reapedAtFinalResponse: backgroundEndsWithFinalResponse,
+        timedOutAfterMs,
+      });
+      if (backgroundCwdHint) {
+        backgroundInfo += `\n${backgroundCwdHint}`;
+      }
+      if (isBashTaskGetDeliveryEnabled()) {
+        return {
+          tool_use_id: toolUseID,
+          type: 'tool_result',
+          content: formatBackgroundTaskResult(
+            backgroundTaskId,
+            [errorMessage, backgroundInfo].filter(Boolean).join('\n'),
+            {
+              backgroundedByUser,
+              ending: backgroundTaskEnding(backgroundEndsWithFinalResponse === true),
+            },
+          ),
+        };
       }
     }
 
@@ -902,6 +965,7 @@ export const BashTool = buildTool({
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId,
+        innerCall: toolUseContext.innerCall,
         // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
         agentWorktree: toolUseContext.agentWorktree,
       });
@@ -988,7 +1052,6 @@ export const BashTool = buildTool({
     // stdout already contains the first chunk (from getStdout()). Copy the
     // output file to the tool-results dir so the model can read it via
     // FileRead. If > 64 MB, truncate after copying.
-    const MAX_PERSISTED_SIZE = 64 * 1024 * 1024;
     let persistedOutputPath: string | undefined;
     let persistedOutputSize: number | undefined;
     if (result.outputFilePath && result.outputTaskId) {
@@ -1065,6 +1128,16 @@ export const BashTool = buildTool({
       }
     }
 
+    const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
+      result.backgroundTaskId,
+      getAgentContext(),
+    )
+      ? (true as const)
+      : undefined;
+    const backgroundCwdHint =
+      result.backgroundTaskId && commandHasAnyCd(input.command)
+        ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
+        : undefined;
     const data: Out = {
       stdout: compressedStdout,
       stderr: mergeBashStderr(stderrForShellReset, sandboxViolationSuffix, EOL),
@@ -1075,6 +1148,11 @@ export const BashTool = buildTool({
       backgroundTaskId: result.backgroundTaskId,
       backgroundedByUser: result.backgroundedByUser,
       assistantAutoBackgrounded: result.assistantAutoBackgrounded,
+      backgroundedToDeliverMessage: result.backgroundedToDeliverMessage,
+      backgroundedByTurnAbort: result.backgroundedByTurnAbort,
+      timedOutAfterMs: result.timedOutAfterMs,
+      backgroundEndsWithFinalResponse,
+      backgroundCwdHint,
       dangerouslyDisableSandbox:
         'dangerouslyDisableSandbox' in input ? (input.dangerouslyDisableSandbox as boolean | undefined) : undefined,
       persistedOutputPath,
@@ -1108,6 +1186,7 @@ async function* runShellCommand({
   isMainThread,
   toolUseId,
   agentId,
+  innerCall,
   agentWorktree,
 }: {
   input: BashToolInput;
@@ -1119,6 +1198,7 @@ async function* runShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  innerCall?: boolean;
   /** densable agentWorktree for VRu/ZRu shell isolation gates. */
   agentWorktree?: string;
 }): AsyncGenerator<
@@ -1138,12 +1218,13 @@ async function* runShellCommand({
   const { command, description, timeout, run_in_background } = input;
   // Official WYn: when main agent can auto-background, env may clamp timeout.
   const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
+  const baseTimeoutMs = Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
   const timeoutMs =
     clampTimeoutForAutoBackground({
-      requestedTimeoutMs: timeout || getDefaultTimeoutMs(),
+      requestedTimeoutMs: baseTimeoutMs,
       isMainAgent: isMainThread === true,
       canAutoBackground: shouldAutoBackground,
-    }) ?? getDefaultTimeoutMs();
+    }) ?? baseTimeoutMs;
 
   let fullOutput = '';
   let lastProgressOutput = '';
@@ -1151,6 +1232,7 @@ async function* runShellCommand({
   let lastTotalBytes = 0;
   let backgroundShellId: string | undefined;
   let assistantAutoBackgrounded = false;
+  let timedOutAfterMs: number | undefined;
 
   // Progress signal: resolved by onProgress callback from the shared poller,
   // waking the generator to yield a progress update.
@@ -1196,6 +1278,8 @@ async function* runShellCommand({
         shellCommand,
         toolUseId,
         agentId,
+        innerCall,
+        timeout: timeoutMs,
       },
       {
         abortController,
@@ -1263,6 +1347,7 @@ async function* runShellCommand({
   // Only background commands that are allowed to be auto-backgrounded (not sleep, etc.)
   if (shellCommand.onTimeout && shouldAutoBackground) {
     shellCommand.onTimeout(backgroundFn => {
+      timedOutAfterMs = timeoutMs;
       startBackgrounding('tengu_bash_command_timeout_backgrounded', backgroundFn);
     });
   }
@@ -1280,6 +1365,7 @@ async function* runShellCommand({
     setTimeout(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         assistantAutoBackgrounded = true;
+        timedOutAfterMs = ASSISTANT_BLOCKING_BUDGET_MS;
         startBackgrounding('tengu_bash_command_assistant_auto_backgrounded');
       }
     }, ASSISTANT_BLOCKING_BUDGET_MS).unref();
@@ -1308,83 +1394,43 @@ async function* runShellCommand({
   // Wait for the initial threshold before showing progress
   const startTime = Date.now();
   let foregroundTaskId: string | undefined;
-
-  {
-    const initialResult = await Promise.race([
-      resultPromise,
-      new Promise<null>(resolve => {
-        const t = setTimeout((r: (v: null) => void) => r(null), PROGRESS_THRESHOLD_MS, resolve);
-        t.unref();
-      }),
-    ]);
-
-    if (initialResult !== null) {
-      shellCommand.cleanup();
-      return initialResult;
+  let interruptBackgroundingStarted = false;
+  let wakeInitialWait: (() => void) | null = null;
+  const isTurnInterrupt = () => abortController.signal.aborted && isInterruptAbortReason(abortController.signal.reason);
+  const onAbort = () => {
+    if (!isTurnInterrupt()) return;
+    wakeInitialWait?.();
+    const resolve = resolveProgress;
+    if (resolve) {
+      resolveProgress = null;
+      resolve();
     }
+  };
+  abortController.signal.addEventListener('abort', onAbort);
 
-    if (backgroundShellId) {
-      return {
-        stdout: '',
-        stderr: '',
-        code: 0,
-        interrupted: false,
-        backgroundTaskId: backgroundShellId,
-        assistantAutoBackgrounded,
-      };
-    }
-  }
-
-  // Start polling the output file for progress. The poller's #tick calls
-  // onProgress every second, which resolves progressSignal below.
-  TaskOutput.startPolling(shellCommand.taskOutput.taskId);
-
-  // Progress loop: wake is driven by the shared poller calling onProgress,
-  // which resolves the progressSignal.
   try {
-    while (true) {
-      const progressSignal = createProgressSignal();
-      const result = await Promise.race([resultPromise, progressSignal]);
-
-      if (result !== null) {
-        // Race: backgrounding fired (15s timer / onTimeout / Ctrl+B) but the
-        // command completed before the next poll tick. #handleExit sets
-        // backgroundTaskId but skips outputFilePath (it assumes the background
-        // message or <task_notification> will carry the path). Strip
-        // backgroundTaskId so the model sees a clean completed command,
-        // reconstruct outputFilePath for large outputs, and suppress the
-        // redundant <task_notification> from the .then() handler.
-        // Check result.backgroundTaskId (not the closure var) to also cover
-        // Ctrl+B, which calls shellCommand.background() directly.
-        if (result.backgroundTaskId !== undefined) {
-          markTaskNotified(result.backgroundTaskId, setAppState);
-          const fixedResult: ExecResult = {
-            ...result,
-            backgroundTaskId: undefined,
-          };
-          // Mirror ShellCommand.#handleExit's large-output branch that was
-          // skipped because #backgroundTaskId was set.
-          const { taskOutput } = shellCommand;
-          if (taskOutput.stdoutToFile && !taskOutput.outputFileRedundant) {
-            fixedResult.outputFilePath = taskOutput.path;
-            fixedResult.outputFileSize = taskOutput.outputFileSize;
-            fixedResult.outputTaskId = taskOutput.taskId;
+    {
+      const initialResult = await Promise.race([
+        resultPromise,
+        new Promise<null>(resolve => {
+          const t = setTimeout((r: (v: null) => void) => r(null), PROGRESS_THRESHOLD_MS, resolve);
+          t.unref();
+        }),
+        new Promise<null>(resolve => {
+          if (isTurnInterrupt()) {
+            resolve(null);
+          } else {
+            wakeInitialWait = () => resolve(null);
           }
-          shellCommand.cleanup();
-          return fixedResult;
-        }
-        // Command has completed - return the actual result
-        // If we registered as a foreground task, unregister it
-        if (foregroundTaskId) {
-          unregisterForeground(foregroundTaskId, setAppState);
-        }
-        // Clean up stream resources for foreground commands
-        // (backgrounded commands are cleaned up by LocalShellTask)
+        }),
+      ]);
+      wakeInitialWait = null;
+
+      if (initialResult !== null) {
         shellCommand.cleanup();
-        return result;
+        return initialResult;
       }
 
-      // Check if command was backgrounded (either via old mechanism or new backgroundAll)
       if (backgroundShellId) {
         return {
           stdout: '',
@@ -1392,70 +1438,186 @@ async function* runShellCommand({
           code: 0,
           interrupted: false,
           backgroundTaskId: backgroundShellId,
+          backgroundedByTurnAbort: isBackgroundedByTurnAbort(getAppState().tasks[backgroundShellId]),
           assistantAutoBackgrounded,
+          timedOutAfterMs,
+          ...(isBackgroundedToDeliverMessage(getAppState().tasks[backgroundShellId])
+            ? { backgroundedToDeliverMessage: true }
+            : {}),
         };
       }
+    }
 
-      // Check if this foreground task was backgrounded via backgroundAll()
-      if (foregroundTaskId) {
-        // shellCommand.status becomes 'backgrounded' when background() is called
-        if (shellCommand.status === 'backgrounded') {
+    // Start polling the output file for progress. The poller's #tick calls
+    // onProgress every second, which resolves progressSignal below.
+    TaskOutput.startPolling(shellCommand.taskOutput.taskId);
+
+    // Progress loop: wake is driven by the shared poller calling onProgress,
+    // which resolves the progressSignal (or immediately on turn interrupt).
+    try {
+      while (true) {
+        const progressSignal =
+          !interruptBackgroundingStarted && isTurnInterrupt() ? Promise.resolve(null) : createProgressSignal();
+        const result = await Promise.race([resultPromise, progressSignal]);
+
+        if (result !== null) {
+          // Race: backgrounding fired (15s timer / onTimeout / Ctrl+B) but the
+          // command completed before the next poll tick. #handleExit sets
+          // backgroundTaskId but skips outputFilePath (it assumes the background
+          // message or <task_notification> will carry the path). Strip
+          // backgroundTaskId so the model sees a clean completed command,
+          // reconstruct outputFilePath for large outputs, and suppress the
+          // redundant <task_notification> from the .then() handler.
+          // Check result.backgroundTaskId (not the closure var) to also cover
+          // Ctrl+B, which calls shellCommand.background() directly.
+          if (result.backgroundTaskId !== undefined) {
+            markTaskNotified(result.backgroundTaskId, setAppState);
+            const fixedResult: ExecResult = {
+              ...result,
+              backgroundTaskId: undefined,
+            };
+            // Mirror ShellCommand.#handleExit's large-output branch that was
+            // skipped because #backgroundTaskId was set.
+            const { taskOutput } = shellCommand;
+            if (taskOutput.stdoutToFile && !taskOutput.outputFileRedundant) {
+              fixedResult.outputFilePath = taskOutput.path;
+              fixedResult.outputFileSize = taskOutput.outputFileSize;
+              fixedResult.outputTaskId = taskOutput.taskId;
+            }
+            shellCommand.cleanup();
+            return fixedResult;
+          }
+          // Command has completed - return the actual result
+          // If we registered as a foreground task, unregister it
+          if (foregroundTaskId) {
+            unregisterForeground(foregroundTaskId, setAppState);
+          }
+          // Clean up stream resources for foreground commands
+          // (backgrounded commands are cleaned up by LocalShellTask)
+          shellCommand.cleanup();
+          return result;
+        }
+
+        // Check if command was backgrounded (either via old mechanism or new backgroundAll)
+        if (backgroundShellId) {
           return {
-            stdout: '',
+            stdout: interruptBackgroundingStarted ? fullOutput : '',
             stderr: '',
             code: 0,
             interrupted: false,
-            backgroundTaskId: foregroundTaskId,
-            backgroundedByUser: true,
+            backgroundTaskId: backgroundShellId,
+            backgroundedByTurnAbort:
+              interruptBackgroundingStarted || isBackgroundedByTurnAbort(getAppState().tasks[backgroundShellId]),
+            assistantAutoBackgrounded,
+            timedOutAfterMs,
+            ...(isBackgroundedToDeliverMessage(getAppState().tasks[backgroundShellId])
+              ? { backgroundedToDeliverMessage: true }
+              : {}),
           };
         }
-      }
 
-      // Time for a progress update
-      const elapsed = Date.now() - startTime;
-      const elapsedSeconds = Math.floor(elapsed / 1000);
-
-      // Show minimal backgrounding UI if available
-      // Skip if background tasks are disabled
-      if (
-        !isBackgroundTasksDisabled &&
-        backgroundShellId === undefined &&
-        elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 &&
-        setToolJSX
-      ) {
-        // Register this command as a foreground task so it can be backgrounded via Ctrl+B
-        if (!foregroundTaskId) {
-          foregroundTaskId = registerForeground(
-            {
-              command,
-              description: description || command,
-              shellCommand,
-              agentId,
-            },
-            setAppState,
-            toolUseId,
-          );
+        // User submitted a new message - background instead of killing (densable QEr @191286300)
+        if (!interruptBackgroundingStarted && isTurnInterrupt()) {
+          interruptBackgroundingStarted = true;
+          if (!isBackgroundTasksDisabled) {
+            startBackgrounding('tengu_bash_command_interrupt_backgrounded');
+            if (backgroundShellId) {
+              return {
+                stdout: fullOutput,
+                stderr: '',
+                code: 0,
+                interrupted: false,
+                backgroundTaskId: backgroundShellId,
+                backgroundedByTurnAbort: true,
+                assistantAutoBackgrounded,
+                timedOutAfterMs,
+              };
+            }
+            continue;
+          }
+          if (shellCommand.status === 'running') {
+            shellCommand.kill();
+          }
+          continue;
         }
 
-        setToolJSX({
-          jsx: <BackgroundHint />,
-          shouldHidePromptInput: false,
-          shouldContinueAnimation: true,
-          showSpinner: true,
-        });
+        // Check if this foreground task was backgrounded via backgroundAll()
+        if (foregroundTaskId) {
+          // shellCommand.status becomes 'backgrounded' when background() is called
+          if (shellCommand.status === 'backgrounded') {
+            return {
+              stdout: '',
+              stderr: '',
+              code: 0,
+              interrupted: false,
+              backgroundTaskId: foregroundTaskId,
+              timedOutAfterMs,
+              ...(isBackgroundedToDeliverMessage(getAppState().tasks[foregroundTaskId])
+                ? { backgroundedToDeliverMessage: true }
+                : isBackgroundedByTurnAbort(getAppState().tasks[foregroundTaskId])
+                  ? { backgroundedByTurnAbort: true }
+                  : { backgroundedByUser: true }),
+            };
+          }
+        }
+
+        // Time for a progress update
+        const elapsed = Date.now() - startTime;
+        const elapsedSeconds = Math.floor(elapsed / 1000);
+
+        // Register foreground task & show minimal backgrounding UI if available (skip if disabled)
+        if (
+          !isBackgroundTasksDisabled &&
+          !interruptBackgroundingStarted &&
+          backgroundShellId === undefined &&
+          elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000
+        ) {
+          // Register this command as a foreground task so it can be backgrounded via Ctrl+B / detach
+          if (!foregroundTaskId) {
+            foregroundTaskId = registerForeground(
+              {
+                command,
+                description: description || command,
+                shellCommand,
+                agentId,
+                innerCall,
+              },
+              setAppState,
+              toolUseId,
+              getAppState,
+            );
+          }
+
+          if (setToolJSX) {
+            setToolJSX({
+              jsx: <BackgroundHint toolUseId={toolUseId} />,
+              shouldHidePromptInput: false,
+              shouldContinueAnimation: true,
+              showSpinner: true,
+            });
+          }
+        }
+        yield {
+          type: 'progress',
+          fullOutput,
+          output: lastProgressOutput,
+          elapsedTimeSeconds: elapsedSeconds,
+          totalLines: lastTotalLines,
+          totalBytes: lastTotalBytes,
+          taskId: shellCommand.taskOutput.taskId,
+          ...(timeout ? { timeoutMs } : undefined),
+        };
       }
-      yield {
-        type: 'progress',
-        fullOutput,
-        output: lastProgressOutput,
-        elapsedTimeSeconds: elapsedSeconds,
-        totalLines: lastTotalLines,
-        totalBytes: lastTotalBytes,
-        taskId: shellCommand.taskOutput.taskId,
-        ...(timeout ? { timeoutMs } : undefined),
-      };
+    } finally {
+      TaskOutput.stopPolling(shellCommand.taskOutput.taskId);
+      if (!backgroundShellId && shellCommand.status !== 'backgrounded') {
+        if (foregroundTaskId) {
+          unregisterForeground(foregroundTaskId, setAppState);
+        }
+        shellCommand.cleanup();
+      }
     }
   } finally {
-    TaskOutput.stopPolling(shellCommand.taskOutput.taskId);
+    abortController.signal.removeEventListener('abort', onAbort);
   }
 }
