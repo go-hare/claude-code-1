@@ -180,11 +180,13 @@ export function FuzzyPicker<T>({
     event.stopImmediatePropagation();
   };
 
-  // onKeyDown fires after useSearchInput's useInput, so onExit must be a
-  // no-op — return/downArrow are handled by handleKeyDown below. onCancel
-  // still covers escape/ctrl+c/ctrl+d. Backspace-on-empty is disabled so
-  // a held backspace doesn't eject the user from the dialog.
-  const { query, cursorOffset } = useSearchInput({
+  // The focused SearchBox owns editing; picker navigation is handled first.
+  const {
+    query,
+    cursorOffset,
+    handleKeyDown: handleSearchKeyDown,
+    handlePaste,
+  } = useSearchInput({
     isActive: true,
     onExit: () => {},
     onCancel,
@@ -230,7 +232,9 @@ export function FuzzyPicker<T>({
       } else {
         onSelect(selected);
       }
+      return;
     }
+    handleSearchKeyDown(e);
   };
 
   useEffect(() => {
@@ -273,6 +277,9 @@ export function FuzzyPicker<T>({
       cursorOffset={cursorOffset}
       placeholder={placeholder}
       isFocused
+      autoFocus
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       isTerminalFocused={isTerminalFocused}
     />
   );
@@ -326,7 +333,7 @@ export function FuzzyPicker<T>({
   const inputAbove = direction !== 'up';
   return (
     <Pane color="permission">
-      <Box flexDirection="column" tabIndex={0} autoFocus onKeyDown={handleKeyDown} onWheel={handleWheel}>
+      <Box flexDirection="column" tabIndex={-1} onWheel={handleWheel}>
         <Text bold color="permission">
           {title}
         </Text>

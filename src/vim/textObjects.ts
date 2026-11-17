@@ -8,7 +8,7 @@ import {
   isVimPunctuation,
   isVimWhitespace,
   isVimWordChar,
-} from '../utils/Cursor.js'
+} from '@anthropic/ink'
 import { getGraphemeSegmenter } from '../utils/intl.js'
 
 export type TextObjectRange = { start: number; end: number } | null
@@ -68,6 +68,7 @@ function findWordObject(
   for (const { segment, index } of getGraphemeSegmenter().segment(text)) {
     graphemes.push({ segment, index })
   }
+  if (graphemes.length === 0) return null
 
   // Find which grapheme index the offset falls in
   let graphemeIdx = graphemes.length - 1

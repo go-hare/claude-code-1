@@ -260,6 +260,8 @@ export const KEYBINDING_ACTIONS = [
   // Settings config panel actions
   'settings:search',
   'settings:retry',
+  'settings:periodDay',
+  'settings:periodWeek',
   'settings:close',
   'select:previousValue',
   'select:nextValue',

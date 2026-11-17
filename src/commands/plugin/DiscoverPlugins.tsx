@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { SearchBox } from '../../components/SearchBox.js';
 import { Byline } from '@anthropic/ink';
-import { useSearchInput } from '../../hooks/useSearchInput.js';
+import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
 import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
@@ -148,10 +148,16 @@ export function DiscoverPlugins({
     },
     [onSearchModeChange],
   );
+  const enterSearchMode = useCallback(() => {
+    setIsSearchMode(true);
+  }, [setIsSearchMode]);
   const {
     query: searchQuery,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    setCursorOffset: setSearchCursorOffset,
+    handleKeyDown: handleSearchKeyDown,
+    handlePaste: handleSearchPaste,
   } = useSearchInput({
     isActive: viewState === 'plugin-list' && isSearchMode && !loading,
     onExit: () => {
@@ -805,9 +811,14 @@ export function DiscoverPlugins({
         <SearchBox
           query={searchQuery}
           isFocused={isSearchMode}
+          onFocus={enterSearchMode}
           isTerminalFocused={isTerminalFocused}
           width={terminalWidth - 4}
           cursorOffset={searchCursorOffset}
+          onCursorOffsetChange={setSearchCursorOffset}
+          onKeyDown={isSearchMode ? handleSearchKeyDown : undefined}
+          onPaste={isSearchMode ? handleSearchPaste : undefined}
+          autoFocus={isSearchMode}
         />
       </Box>
 

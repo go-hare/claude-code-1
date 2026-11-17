@@ -298,7 +298,7 @@ describe('iHt four gates before Ki (densable 239)', () => {
 })
 
 describe('Lbs / LAc Esc is Dialog-only (densable Ln)', () => {
-  test('Select has no onCancel — Esc is Dialog onCancel', () => {
+  test('Lbs Select has no onCancel; LAc uses ConfirmSelect + Dialog onCancel', () => {
     const lbs = readFileSync(
       join(import.meta.dir, '../../components/ExitBackgroundWorkDialog.tsx'),
       'utf8',
@@ -311,10 +311,9 @@ describe('Lbs / LAc Esc is Dialog-only (densable Ln)', () => {
       '<Select options={options} onChange={handleChange} />',
     )
     expect(lbs).not.toContain("onCancel={() => handleChange('stay')}")
-    const lacSelect = lac.slice(lac.indexOf('<Select'))
-    expect(lacSelect).toContain('onChange={v => {')
-    expect(lacSelect).not.toContain('onCancel=')
     expect(lbs).toContain('Esc is Dialog onCancel only')
-    expect(lac).toContain('Esc is Dialog onCancel only')
+    expect(lac).toContain('<ConfirmSelect')
+    expect(lac).toContain('onCancel={onCancel}')
+    expect(lac).not.toContain('Esc is Dialog onCancel only')
   })
 })

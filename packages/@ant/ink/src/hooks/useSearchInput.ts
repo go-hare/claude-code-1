@@ -1,34 +1,44 @@
-/**
- * Minimal stub of useSearchInput for the standalone @anthropic/ink package.
- *
- * Provides the same interface as the full implementation but without
- * kill-ring / yank support. Suitable for FuzzyPicker and other theme
- * components that need text input handling.
- */
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import type { KeyboardEvent } from '../core/events/keyboard-event.js'
+import type { PasteEvent } from '../core/events/paste-event.js'
+import {
+  Cursor,
+  getLastKill,
+  pushToKillRing,
+  recordYank,
+  resetKillAccumulation,
+  resetYankState,
+  updateYankLength,
+  yankPop,
+} from '../core/utils/Cursor.js'
+import { useTerminalSize } from './useTerminalSize.js'
 
-import { useCallback, useState } from 'react'
-import { KeyboardEvent } from '../core/events/keyboard-event.js'
-import type { Key, InputEvent } from '../core/events/input-event.js'
-import type { ParsedKey } from '../core/parse-keypress.js'
-import useInput from './use-input.js'
-import { useTerminalSize } from '../hooks/useTerminalSize.js'
+export type SearchInputBuffer = {
+  subscribe: (listener: () => void) => () => void
+  getSnapshot: () => { query: string; cursorOffset: number }
+  setQueryAndCursor: (query: string, cursorOffset: number) => void
+}
 
 type UseSearchInputOptions = {
   isActive: boolean
   onExit: () => void
   onCancel?: () => void
   onExitUp?: () => void
+  onExitDown?: () => void
   columns?: number
   passthroughCtrlKeys?: string[]
   initialQuery?: string
+  buffer?: SearchInputBuffer
   backspaceExitsOnEmpty?: boolean
-}
-
-type UseSearchInputReturn = {
-  query: string
-  setQuery: (q: string) => void
-  cursorOffset: number
-  handleKeyDown: (e: KeyboardEvent) => void
+  multiline?: boolean
+  onSpaceOnEmpty?: () => void
+  onTabOnEmpty?: () => void
 }
 
 const UNHANDLED_SPECIAL_KEYS = new Set([
@@ -38,6 +48,8 @@ const UNHANDLED_SPECIAL_KEYS = new Set([
   'wheelup',
   'wheeldown',
   'mouse',
+  'clear',
+  'enter',
   'f1',
   'f2',
   'f3',
@@ -52,179 +64,345 @@ const UNHANDLED_SPECIAL_KEYS = new Set([
   'f12',
 ])
 
+const noopSubscribeBuffer =
+  (_listener: () => void): (() => void) =>
+  () => {}
+
+/** Gold 289 ph: focused input handlers, with the prompt's shared Cursor/kill ring. */
 export function useSearchInput({
   isActive,
   onExit,
   onCancel,
   onExitUp,
+  onExitDown,
   columns,
+  passthroughCtrlKeys = [],
   initialQuery = '',
+  buffer,
   backspaceExitsOnEmpty = true,
-}: UseSearchInputOptions): UseSearchInputReturn {
+  multiline = false,
+  onSpaceOnEmpty,
+  onTabOnEmpty,
+}: UseSearchInputOptions) {
   const { columns: terminalColumns } = useTerminalSize()
-  const _effectiveColumns = columns ?? terminalColumns
-  const [query, setQueryState] = useState(initialQuery)
-  const [cursorOffset, setCursorOffset] = useState(initialQuery.length)
-
-  const setQuery = useCallback((q: string) => {
-    setQueryState(q)
-    setCursorOffset(q.length)
-  }, [])
-
-  const handleKeyDown = (e: KeyboardEvent): void => {
-    if (!isActive) return
-
-    if (e.key === 'return' || e.key === 'down') {
-      e.preventDefault()
-      onExit()
-      return
-    }
-    if (e.key === 'up') {
-      e.preventDefault()
-      onExitUp?.()
-      return
-    }
-    if (e.key === 'escape') {
-      e.preventDefault()
-      if (onCancel) {
-        onCancel()
-      } else if (query.length > 0) {
-        setQueryState('')
-        setCursorOffset(0)
-      } else {
-        onExit()
-      }
-      return
-    }
-    if (e.key === 'backspace') {
-      e.preventDefault()
-      if (query.length === 0) {
-        if (backspaceExitsOnEmpty) (onCancel ?? onExit)()
+  const effectiveColumns = columns ?? terminalColumns
+  const [localQuery, setQueryState] = useState(initialQuery)
+  const [localCursorOffset, setCursorOffsetState] = useState(
+    initialQuery.length,
+  )
+  const bufferQuery = useSyncExternalStore(
+    buffer ? buffer.subscribe : noopSubscribeBuffer,
+    () => (buffer ? buffer.getSnapshot().query : undefined),
+    () => (buffer ? buffer.getSnapshot().query : undefined),
+  )
+  const bufferCursorOffset = useSyncExternalStore(
+    buffer ? buffer.subscribe : noopSubscribeBuffer,
+    () => (buffer ? buffer.getSnapshot().cursorOffset : undefined),
+    () => (buffer ? buffer.getSnapshot().cursorOffset : undefined),
+  )
+  const query = bufferQuery ?? localQuery
+  const cursorOffset = bufferCursorOffset ?? localCursorOffset
+  const localQueryRef = useRef(localQuery)
+  const localCursorOffsetRef = useRef(localCursorOffset)
+  const queryRef = useMemo(
+    () =>
+      buffer
+        ? {
+            get current(): string {
+              return buffer.getSnapshot().query
+            },
+            set current(value: string) {
+              buffer.setQueryAndCursor(value, buffer.getSnapshot().cursorOffset)
+            },
+          }
+        : localQueryRef,
+    [buffer],
+  )
+  const cursorOffsetRef = useMemo(
+    () =>
+      buffer
+        ? {
+            get current(): number {
+              return buffer.getSnapshot().cursorOffset
+            },
+            set current(value: number) {
+              buffer.setQueryAndCursor(buffer.getSnapshot().query, value)
+            },
+          }
+        : localCursorOffsetRef,
+    [buffer],
+  )
+  const updateQuery = useCallback(
+    (value: string) => {
+      if (buffer) {
+        buffer.setQueryAndCursor(value, buffer.getSnapshot().cursorOffset)
         return
       }
-      const newOffset = Math.max(0, cursorOffset - 1)
-      setQueryState(query.slice(0, newOffset) + query.slice(cursorOffset))
-      setCursorOffset(newOffset)
-      return
-    }
-    if (e.key === 'delete') {
-      e.preventDefault()
-      if (cursorOffset < query.length) {
-        setQueryState(
-          query.slice(0, cursorOffset) + query.slice(cursorOffset + 1),
-        )
+      localQueryRef.current = value
+      setQueryState(value)
+    },
+    [buffer],
+  )
+  const setCursorOffset = useCallback(
+    (offset: number) => {
+      if (buffer) {
+        buffer.setQueryAndCursor(buffer.getSnapshot().query, offset)
+        return
       }
+      localCursorOffsetRef.current = offset
+      setCursorOffsetState(offset)
+    },
+    [buffer],
+  )
+  const setQuery = useCallback(
+    (value: string) => {
+      if (buffer) {
+        buffer.setQueryAndCursor(value, value.length)
+        return
+      }
+      updateQuery(value)
+      setCursorOffset(value.length)
+    },
+    [buffer, updateQuery, setCursorOffset],
+  )
+  const applyCursor = (cursor: Cursor) => {
+    if (buffer) {
+      buffer.setQueryAndCursor(cursor.text, cursor.offset)
       return
     }
-    if (e.key === 'left') {
-      e.preventDefault()
-      setCursorOffset(Math.max(0, cursorOffset - 1))
+    updateQuery(cursor.text)
+    setCursorOffset(cursor.offset)
+  }
+  const willInsertNewline = useCallback(
+    (event: KeyboardEvent): boolean => {
+      if (!isActive || !multiline || event.name !== 'return') return false
+      const offset = cursorOffsetRef.current
+      return (
+        (offset > 0 && queryRef.current[offset - 1] === '\\') ||
+        event.shift ||
+        event.meta
+      )
+    },
+    [isActive, multiline, cursorOffsetRef, queryRef],
+  )
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    if (!isActive) return
+    const text = queryRef.current
+    const offset = cursorOffsetRef.current
+    const cursor = Cursor.fromText(text, effectiveColumns, offset)
+    const key = event.key.toLowerCase()
+    const kill =
+      (event.ctrl && ['k', 'u', 'w'].includes(key)) ||
+      ((event.meta || event.ctrl) && event.name === 'backspace') ||
+      (event.meta && !event.ctrl && key === 'd')
+    const yank = (event.ctrl || event.meta) && key === 'y'
+    if (!kill && !yank) {
+      resetKillAccumulation()
+      resetYankState()
+    }
+    if (event.ctrl && passthroughCtrlKeys.includes(key)) return
+    if (event.name === 'return') {
+      event.preventDefault()
+      if (willInsertNewline(event)) {
+        if (text[offset - 1] === '\\') {
+          updateQuery(text.slice(0, offset - 1) + '\n' + text.slice(offset))
+        } else {
+          updateQuery(text.slice(0, offset) + '\n' + text.slice(offset))
+          setCursorOffset(offset + 1)
+        }
+      } else onExit()
       return
     }
-    if (e.key === 'right') {
-      e.preventDefault()
-      setCursorOffset(Math.min(query.length, cursorOffset + 1))
+    if (
+      multiline &&
+      (event.name === 'enter' ||
+        (event.ctrl && !event.shift && !event.meta && event.name === 'j'))
+    ) {
+      event.preventDefault()
+      applyCursor(cursor.insert('\n'))
       return
     }
-    if (e.key === 'home') {
-      e.preventDefault()
-      setCursorOffset(0)
+    if (event.name === 'down' || event.name === 'up') {
+      event.preventDefault()
+      if (multiline) {
+        const next = event.name === 'down' ? cursor.down() : cursor.up()
+        if (!next.equals(cursor)) {
+          setCursorOffset(next.offset)
+          return
+        }
+      }
+      if (event.name === 'up') onExitUp?.()
+      else if (onExitDown) onExitDown()
+      else if (!multiline) onExit()
       return
     }
-    if (e.key === 'end') {
-      e.preventDefault()
-      setCursorOffset(query.length)
+    if (event.name === 'escape') {
+      event.preventDefault()
+      if (onCancel) onCancel()
+      else if (text.length > 0) setQuery('')
+      else onExit()
       return
     }
-    if (e.ctrl) {
-      switch (e.key.toLowerCase()) {
+    if (event.name === 'backspace') {
+      event.preventDefault()
+      if (event.ctrl || event.meta) {
+        const killed = cursor.backwardKillWord()
+        pushToKillRing(killed.killed, 'prepend')
+        applyCursor(killed.cursor)
+      } else if (text.length === 0) {
+        if (backspaceExitsOnEmpty) (onCancel ?? onExit)()
+      } else applyCursor(cursor.backspace())
+      return
+    }
+    if (event.name === 'delete') {
+      event.preventDefault()
+      applyCursor(cursor.del())
+      return
+    }
+    if (event.name === 'left' || event.name === 'right') {
+      event.preventDefault()
+      const word = event.ctrl || event.meta || event.fn
+      const next =
+        event.name === 'left'
+          ? word
+            ? cursor.backwardWord()
+            : cursor.left()
+          : word
+            ? cursor.forwardWord()
+            : cursor.right()
+      setCursorOffset(next.offset)
+      return
+    }
+    if (event.name === 'home' || event.name === 'end') {
+      event.preventDefault()
+      setCursorOffset(
+        (event.name === 'home' ? cursor.startOfLine() : cursor.endOfLine())
+          .offset,
+      )
+      return
+    }
+    if (event.ctrl) {
+      event.preventDefault()
+      switch (key) {
         case 'a':
-          e.preventDefault()
-          setCursorOffset(0)
+          setCursorOffset(cursor.startOfLogicalLine().offset)
           return
         case 'e':
-          e.preventDefault()
-          setCursorOffset(query.length)
+          setCursorOffset(cursor.endOfLogicalLine().offset)
           return
         case 'b':
-          e.preventDefault()
-          setCursorOffset(Math.max(0, cursorOffset - 1))
+          setCursorOffset(cursor.left().offset)
           return
         case 'f':
-          e.preventDefault()
-          setCursorOffset(Math.min(query.length, cursorOffset + 1))
+          setCursorOffset(cursor.right().offset)
           return
-        case 'd': {
-          e.preventDefault()
-          if (query.length === 0) {
-            ;(onCancel ?? onExit)()
-            return
-          }
-          if (cursorOffset < query.length) {
-            setQueryState(
-              query.slice(0, cursorOffset) + query.slice(cursorOffset + 1),
-            )
-          }
+        case 'd':
+          if (text.length === 0) (onCancel ?? onExit)()
+          else applyCursor(cursor.del())
           return
-        }
-        case 'h': {
-          e.preventDefault()
-          if (query.length === 0) {
+        case 'h':
+          if (text.length === 0) {
             if (backspaceExitsOnEmpty) (onCancel ?? onExit)()
-            return
-          }
-          const newOffset = Math.max(0, cursorOffset - 1)
-          setQueryState(query.slice(0, newOffset) + query.slice(cursorOffset))
-          setCursorOffset(newOffset)
-          return
-        }
-        case 'c':
-          e.preventDefault()
-          onCancel?.()
-          return
-        case 'u':
-          e.preventDefault()
-          setQueryState(query.slice(cursorOffset))
-          setCursorOffset(0)
+          } else applyCursor(cursor.backspace())
           return
         case 'k':
-          e.preventDefault()
-          setQueryState(query.slice(0, cursorOffset))
-          return
+        case 'u':
         case 'w': {
-          e.preventDefault()
-          // Delete word before cursor
-          const before = query.slice(0, cursorOffset)
-          const after = query.slice(cursorOffset)
-          const trimmed = before.replace(/\S+\s*$/, '')
-          setQueryState(trimmed + after)
-          setCursorOffset(trimmed.length)
+          const killed =
+            key === 'k'
+              ? cursor.deleteToLineEnd()
+              : key === 'u'
+                ? cursor.deleteToLineStart()
+                : cursor.deleteWORDBefore()
+          pushToKillRing(killed.killed, key === 'k' ? 'append' : 'prepend')
+          applyCursor(killed.cursor)
+          return
+        }
+        case 'y': {
+          const text = getLastKill()
+          if (text.length > 0) {
+            recordYank(cursor.offset, text.length)
+            applyCursor(cursor.insert(text))
+          }
+          return
+        }
+        case 'g':
+        case 'c':
+          onCancel?.()
+          return
+      }
+      return
+    }
+    if (event.meta) {
+      event.preventDefault()
+      switch (key) {
+        case 'b':
+          setCursorOffset(cursor.backwardWord().offset)
+          return
+        case 'f':
+          setCursorOffset(cursor.forwardWord().offset)
+          return
+        case 'd': {
+          const killed = cursor.killWord()
+          pushToKillRing(killed.killed, 'append')
+          applyCursor(killed.cursor)
+          return
+        }
+        case 'y': {
+          const pop = yankPop()
+          if (pop) {
+            updateQuery(
+              text.slice(0, pop.start) +
+                pop.text +
+                text.slice(pop.start + pop.length),
+            )
+            setCursorOffset(pop.start + pop.text.length)
+            updateYankLength(pop.text.length)
+          }
           return
         }
       }
       return
     }
-    if (e.key === 'tab') {
+    if (event.name === 'tab') {
+      event.preventDefault()
+      if (text === '') onTabOnEmpty?.()
       return
     }
-
-    // Regular character input
-    if (e.key.length >= 1 && !UNHANDLED_SPECIAL_KEYS.has(e.key)) {
-      e.preventDefault()
-      setQueryState(
-        query.slice(0, cursorOffset) + e.key + query.slice(cursorOffset),
-      )
-      setCursorOffset(cursorOffset + 1)
+    if (onSpaceOnEmpty && event.key === ' ' && text === '') {
+      event.preventDefault()
+      onSpaceOnEmpty()
+      return
+    }
+    if (event.key.length >= 1 && !UNHANDLED_SPECIAL_KEYS.has(event.name)) {
+      event.preventDefault()
+      applyCursor(cursor.insert(event.key))
     }
   }
-
-  // Bridge: subscribe via useInput and adapt to KeyboardEvent
-  useInput(
-    (_input: string, _key: Key, event: InputEvent) => {
-      handleKeyDown(new KeyboardEvent(event.keypress as ParsedKey))
-    },
-    { isActive },
-  )
-
-  return { query, setQuery, cursorOffset, handleKeyDown }
+  const handlePaste = (event: PasteEvent): void => {
+    if (!isActive || event.text.length === 0) return
+    event.preventDefault()
+    const text = multiline
+      ? event.text.replace(/\r\n|\r/g, '\n')
+      : (event.text.split(/\r\n|\r|\n/, 2)[0] ?? '')
+    if (text.length === 0) return
+    applyCursor(
+      Cursor.fromText(
+        queryRef.current,
+        effectiveColumns,
+        cursorOffsetRef.current,
+      ).insert(text),
+    )
+  }
+  return {
+    query,
+    queryRef,
+    setQuery,
+    cursorOffset,
+    cursorOffsetRef,
+    setCursorOffset,
+    handleKeyDown,
+    handlePaste,
+    willInsertNewline,
+  }
 }

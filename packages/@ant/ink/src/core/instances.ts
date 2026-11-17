@@ -8,7 +8,6 @@
 // createRoot/wrappedRender wait out a managed-settings standalone consent dialog
 // before claiming stdout. everMounted mirrors densable Zjn/Yhp process flag.
 
-import { createRequire } from 'node:module'
 import type Ink from './ink.js'
 
 /** densable process-level everMounted (Zjn/Yhp) — set on first instances.set. */
@@ -35,9 +34,10 @@ function U(): { host: object } {
     return session
   }
   try {
-    const require = createRequire(import.meta.url)
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const { getBootstrapSession } =
-      require('../../../../../src/utils/sessionRoot.ts') as typeof import('../../../../../src/utils/sessionRoot.ts')
+      require('../../../../../src/utils/sessionRoot.js') as typeof import('../../../../../src/utils/sessionRoot.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
     return getBootstrapSession()
   } catch {
     return inkDefaultSession

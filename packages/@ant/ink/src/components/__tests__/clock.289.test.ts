@@ -23,6 +23,7 @@ describe('densable 2.1.289 Clock v()', () => {
     expect(src).toContain('subscribeFollower')
     expect(src).toContain('setTimeout(callback, ms)')
     expect(src).toContain('const origin = performance.now()')
+    expect(src).toContain('useClock must be used within a ClockProvider')
     expect(src).not.toContain('subscribe(onChange, true)')
     expect(src).not.toContain('clock.subscribe(')
   })

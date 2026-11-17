@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Cursor } from '../Cursor.js'
+import { Cursor } from '@anthropic/ink'
 
 describe('Cursor.backspaceH densable 2.1.238', () => {
   test('deletes one grapheme before cursor', () => {

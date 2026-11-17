@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { Cursor } from '../../utils/Cursor.js'
+import { Cursor } from '@anthropic/ink'
 import { executePaste, type OperatorContext } from '../operators.js'
 import {
   createInitialPersistentState,

@@ -9,8 +9,9 @@ import type { CommandResultDisplay } from '../../../commands.js';
 import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useSearchInput } from '../../../hooks/useSearchInput.js';
+import { useSearchInput } from '@anthropic/ink';
 import {
+  type DOMElement,
   type KeyboardEvent,
   type PasteEvent,
   Box,
@@ -21,6 +22,7 @@ import {
   Tab,
   Tabs,
   Text,
+  useFocusReclaim,
   useTabHeaderFocus,
   useTabsWidth,
   useTerminalFocus,
@@ -210,11 +212,13 @@ function RulesTabContent(props: RulesTabContentProps): React.ReactNode {
   useEffect(() => {
     if (isSearchMode && headerFocused) blurHeader();
   }, [isSearchMode, headerFocused, blurHeader]);
+  const containerRef = useRef<DOMElement | null>(null);
+  useFocusReclaim(containerRef, isSearchMode);
   useEffect(() => {
     onHeaderFocusChange?.(headerFocused);
   }, [headerFocused, onHeaderFocusChange]);
   return (
-    <Box flexDirection="column">
+    <Box ref={containerRef} flexDirection="column">
       <Box marginBottom={1} flexDirection="column">
         <SearchBox
           query={searchQuery}
@@ -321,6 +325,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
   } | null>(null);
   const [isAddingWorkspaceDirectory, setIsAddingWorkspaceDirectory] = useState(false);
   const [removingDirectory, setRemovingDirectory] = useState<string | null>(null);
+  const [isAutoModeSubdialogOpen, setIsAutoModeSubdialogOpen] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [headerFocused, setHeaderFocused] = useState(true);
   const handleHeaderFocusChange = useCallback((focused: boolean) => {
@@ -415,7 +420,12 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
   const exitState = useExitOnCtrlCDWithKeybindings();
 
   const isSearchModeActive =
-    !selectedRule && !addingRuleToTab && !validatedRule && !isAddingWorkspaceDirectory && !removingDirectory;
+    !selectedRule &&
+    !addingRuleToTab &&
+    !validatedRule &&
+    !isAddingWorkspaceDirectory &&
+    !removingDirectory &&
+    !isAutoModeSubdialogOpen;
 
   const searchInput = useSearchInput({
     isActive: isSearchModeActive && isSearchMode,
@@ -425,27 +435,16 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
   });
   const { query: searchQuery, setQuery: setSearchQuery, cursorOffset: searchCursorOffset } = searchInput;
 
-  const handlePaste = useCallback(
-    (e: PasteEvent) => {
-      const upstreamHandlePaste = (searchInput as { handlePaste?: (e: PasteEvent) => void }).handlePaste;
-      if (upstreamHandlePaste) {
-        upstreamHandlePaste(e);
-        return;
-      }
-      if (!isSearchModeActive || !isSearchMode || e.text.length === 0) return;
-      e.preventDefault();
-      const firstLine = e.text.split(/\r\n|\r|\n/, 2)[0] ?? '';
-      if (firstLine.length === 0) return;
-      setSearchQuery(searchQuery.slice(0, searchCursorOffset) + firstLine + searchQuery.slice(searchCursorOffset));
-    },
-    [searchInput, isSearchModeActive, isSearchMode, searchQuery, searchCursorOffset, setSearchQuery],
-  );
+  const handlePaste = searchInput.handlePaste;
 
   // Handle entering search mode
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!isSearchModeActive) return;
-      if (isSearchMode) return;
+      if (isSearchMode) {
+        searchInput.handleKeyDown(e);
+        return;
+      }
       if (e.ctrl || e.meta) return;
 
       // Enter search mode with '/' or any printable character.
@@ -472,7 +471,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
         setSearchQuery(e.key);
       }
     },
-    [isSearchModeActive, isSearchMode, setSearchQuery],
+    [isSearchModeActive, isSearchMode, setSearchQuery, searchInput.handleKeyDown],
   );
 
   const handleToolSelect = useCallback(
@@ -763,6 +762,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
                       cursorOffset={searchCursorOffset}
                       onCancel={handleRulesCancel}
                       onHeaderFocusChange={handleHeaderFocusChange}
+                      onSubdialogChange={setIsAutoModeSubdialogOpen}
                     />
                   </Tab>,
                 ]

@@ -4,7 +4,7 @@
  * Pure functions for executing vim operators (delete, change, yank, etc.)
  */
 
-import { Cursor } from '../utils/Cursor.js'
+import { Cursor, isVimWhitespace } from '@anthropic/ink'
 import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
 import { countCharInString } from '../utils/stringUtils.js'
 import {
@@ -48,11 +48,31 @@ export function executeOperatorMotion(
   ctx: OperatorContext,
 ): void {
   const target = resolveMotion(motion, ctx.cursor, count)
-  if (target.equals(ctx.cursor)) return
+  if (target.equals(ctx.cursor) && !isInclusiveMotion(motion)) {
+    const changeWordAtEnd =
+      op === 'change' &&
+      (motion === 'w' || motion === 'W') &&
+      count > 0 &&
+      ctx.cursor.isAtEnd()
+    if (motion === '0' || motion === '^' || changeWordAtEnd) {
+      if (op === 'yank') ctx.setRegister('', false)
+      else if (op === 'change') ctx.enterInsert(ctx.cursor.offset)
+      recordNonYankChange(ctx, { type: 'operator', op, motion, count })
+    }
+    return
+  }
 
   const range = getOperatorRange(ctx.cursor, target, motion, op, count)
+  if (range.from === range.to) {
+    if (op === 'change' || op === 'yank') ctx.setRegister('', false)
+    if (op === 'change') {
+      ctx.enterInsert(range.from)
+      recordNonYankChange(ctx, { type: 'operator', op, motion, count })
+    }
+    return
+  }
   applyOperator(op, range.from, range.to, ctx, range.linewise)
-  ctx.recordChange({ type: 'operator', op, motion, count })
+  recordNonYankChange(ctx, { type: 'operator', op, motion, count })
 }
 
 /**
@@ -73,7 +93,13 @@ export function executeOperatorFind(
 
   applyOperator(op, range.from, range.to, ctx)
   ctx.setLastFind(findType, char)
-  ctx.recordChange({ type: 'operatorFind', op, find: findType, char, count })
+  recordNonYankChange(ctx, {
+    type: 'operatorFind',
+    op,
+    find: findType,
+    char,
+    count,
+  })
 }
 
 /**
@@ -95,7 +121,13 @@ export function executeOperatorTextObj(
   if (!range) return
 
   applyOperator(op, range.start, range.end, ctx)
-  ctx.recordChange({ type: 'operatorTextObj', op, objType, scope, count })
+  recordNonYankChange(ctx, {
+    type: 'operatorTextObj',
+    op,
+    objType,
+    scope,
+    count,
+  })
 }
 
 /**
@@ -164,7 +196,7 @@ export function executeLineOp(
     }
   }
 
-  ctx.recordChange({ type: 'operator', op, motion: op[0]!, count })
+  recordNonYankChange(ctx, { type: 'operator', op, motion: op[0]!, count })
 }
 
 /**
@@ -260,7 +292,7 @@ export function executeToggleCase(count: number, ctx: OperatorContext): void {
 export function executeJoin(count: number, ctx: OperatorContext): void {
   const text = ctx.text
   const lines = text.split('\n')
-  const { line: currentLine } = ctx.cursor.getPosition()
+  const currentLine = getLogicalLineIndex(ctx.cursor.text, ctx.cursor.offset)
 
   if (currentLine >= lines.length - 1) return
 
@@ -313,7 +345,7 @@ export function executePaste(
   if (isLinewise) {
     const text = ctx.text
     const lines = text.split('\n')
-    const { line: currentLine } = ctx.cursor.getPosition()
+    const currentLine = getLogicalLineIndex(ctx.cursor.text, ctx.cursor.offset)
 
     const insertLine = after ? currentLine + 1 : currentLine
     const contentLines = content.split('\n')
@@ -360,7 +392,7 @@ export function executeIndent(
 ): void {
   const text = ctx.text
   const lines = text.split('\n')
-  const { line: currentLine } = ctx.cursor.getPosition()
+  const currentLine = getLogicalLineIndex(ctx.cursor.text, ctx.cursor.offset)
   const linesToAffect = Math.min(count, lines.length - currentLine)
   const indent = '  ' // Two spaces
 
@@ -408,7 +440,7 @@ export function executeOpenLine(
 ): void {
   const text = ctx.text
   const lines = text.split('\n')
-  const { line: currentLine } = ctx.cursor.getPosition()
+  const currentLine = getLogicalLineIndex(ctx.cursor.text, ctx.cursor.offset)
 
   const insertLine = direction === 'below' ? currentLine + 1 : currentLine
   const newLines = [
@@ -426,6 +458,24 @@ export function executeOpenLine(
 // ============================================================================
 // Internal Helpers
 // ============================================================================
+
+/** densable `$e` — logical line index by counting newlines before offset. */
+function getLogicalLineIndex(text: string, offset: number): number {
+  return countCharInString(text.slice(0, offset), '\n')
+}
+
+/** densable `rt` (@197415050) — yank must not overwrite `.` dot-repeat. */
+function recordNonYankChange(
+  ctx: OperatorContext,
+  change: Extract<
+    RecordedChange,
+    { type: 'operator' | 'operatorFind' | 'operatorTextObj' }
+  >,
+): void {
+  if (change.op !== 'yank') {
+    ctx.recordChange(change)
+  }
+}
 
 /**
  * Calculate the offset of a line's start position.
@@ -446,15 +496,50 @@ function getOperatorRange(
   let linewise = false
 
   // Special case: cw/cW changes to end of word, not start of next word
-  if (op === 'change' && (motion === 'w' || motion === 'W')) {
+  const isChangeWord = op === 'change' && (motion === 'w' || motion === 'W')
+  const curChar = cursor.text[cursor.offset]
+  const onPlainWhitespace =
+    (curChar === ' ' || curChar === '\t' || curChar === '\n') &&
+    cursor.snapOutOfPlaceholder(cursor.offset, 'start') === cursor.offset
+
+  if (isChangeWord && onPlainWhitespace) {
+    let wordCursor = cursor
+    for (let i = 0; i < count - 1; i++) {
+      const next =
+        motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
+      if (next.offset === wordCursor.offset) break
+      wordCursor = next
+    }
+    to = Math.min(to, wordCursor.endOfLogicalLine().offset)
+    if (to > from && cursor.text[to - 1] === '\n') {
+      to -= 1
+      const lineStart = cursor.startOfLogicalLine().offset
+      if (/^[ \t]*$/.test(cursor.text.slice(lineStart, from))) {
+        from = lineStart
+        linewise = true
+      }
+    }
+  } else if (isChangeWord) {
     // For cw with count, move forward (count-1) words, then find end of that word
     let wordCursor = cursor
     for (let i = 0; i < count - 1; i++) {
       wordCursor =
         motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
     }
-    const wordEnd =
+    let wordEnd =
       motion === 'w' ? wordCursor.endOfVimWord() : wordCursor.endOfWORD()
+    const nextOff = cursor.measuredText.nextOffset(wordCursor.offset)
+    const nextWord =
+      motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
+    if (
+      (nextOff >= cursor.text.length ||
+        isVimWhitespace(cursor.text[nextOff] ?? '') ||
+        nextWord.offset === nextOff) &&
+      !isVimWhitespace(cursor.text[cursor.offset] ?? '') &&
+      !isVimWhitespace(cursor.text[wordCursor.offset] ?? '')
+    ) {
+      wordEnd = wordCursor
+    }
     to = cursor.measuredText.nextOffset(wordEnd.offset)
   } else if (isLinewiseMotion(motion)) {
     // Linewise motions extend to include entire lines
@@ -470,14 +555,18 @@ function getOperatorRange(
     } else {
       to = nextNewline + 1
     }
-  } else if (isInclusiveMotion(motion) && cursor.offset <= target.offset) {
+  } else if (
+    isInclusiveMotion(motion) &&
+    cursor.offset <= target.offset &&
+    cursor.text[to] !== '\n'
+  ) {
     to = cursor.measuredText.nextOffset(to)
   }
 
-  // Word motions can land inside an [Image #N] chip; extend the range to
+  // Word motions can land inside a placeholder chip; extend the range to
   // cover the whole chip so dw/cw/yw never leave a partial placeholder.
-  from = cursor.snapOutOfImageRef(from, 'start')
-  to = cursor.snapOutOfImageRef(to, 'end')
+  from = cursor.snapOutOfPlaceholder(from, 'start')
+  to = cursor.snapOutOfPlaceholder(to, 'end')
 
   return { from, to, linewise }
 }
@@ -492,9 +581,15 @@ function getOperatorRangeForFind(
   target: Cursor,
   _findType: FindType,
 ): { from: number; to: number } {
-  const from = Math.min(cursor.offset, target.offset)
   const maxOffset = Math.max(cursor.offset, target.offset)
-  const to = cursor.measuredText.nextOffset(maxOffset)
+  const from = cursor.snapOutOfPlaceholder(
+    Math.min(cursor.offset, target.offset),
+    'start',
+  )
+  const to = cursor.snapOutOfPlaceholder(
+    cursor.measuredText.nextOffset(maxOffset),
+    'end',
+  )
   return { from, to }
 }
 
@@ -543,7 +638,7 @@ export function executeOperatorG(
 
   const range = getOperatorRange(ctx.cursor, target, 'G', op, count)
   applyOperator(op, range.from, range.to, ctx, range.linewise)
-  ctx.recordChange({ type: 'operator', op, motion: 'G', count })
+  recordNonYankChange(ctx, { type: 'operator', op, motion: 'G', count })
 }
 
 export function executeOperatorGg(
@@ -560,5 +655,5 @@ export function executeOperatorGg(
 
   const range = getOperatorRange(ctx.cursor, target, 'gg', op, count)
   applyOperator(op, range.from, range.to, ctx, range.linewise)
-  ctx.recordChange({ type: 'operator', op, motion: 'gg', count })
+  recordNonYankChange(ctx, { type: 'operator', op, motion: 'gg', count })
 }

@@ -2,8 +2,8 @@
  * densable 2.1.289 — `/permissions` Auto mode tab (`kn` / `Ce` / `gt` / `vt` / `Sn` / `Fm` / `Vn`).
  */
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Text, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type DOMElement, Box, Text, useFocusReclaim, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
 import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import TextInput from '../../../components/TextInput.js';
@@ -137,6 +137,7 @@ export function AutoModeRulesTab({
   cursorOffset: searchCursorOffset,
   onCancel,
   onHeaderFocusChange,
+  onSubdialogChange,
 }: {
   searchQuery?: string;
   isSearchMode?: boolean;
@@ -144,6 +145,7 @@ export function AutoModeRulesTab({
   cursorOffset?: number;
   onCancel?: () => void;
   onHeaderFocusChange?: (focused: boolean) => void;
+  onSubdialogChange?: (open: boolean) => void;
 }): React.ReactNode {
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [tick, setTick] = useState(0);
@@ -160,6 +162,17 @@ export function AutoModeRulesTab({
       blurHeader();
     }
   }, [isSearchMode, headerFocused, blurHeader]);
+
+  const containerRef = useRef<DOMElement | null>(null);
+  useFocusReclaim(containerRef, isSearchMode && mode.kind === 'list');
+
+  const isSubdialogOpen = mode.kind !== 'list';
+  useEffect(() => {
+    onSubdialogChange?.(isSubdialogOpen);
+    return () => {
+      onSubdialogChange?.(false);
+    };
+  }, [isSubdialogOpen, onSubdialogChange]);
 
   useEffect(() => {
     onHeaderFocusChange?.(headerFocused);
@@ -392,7 +405,7 @@ export function AutoModeRulesTab({
   ];
 
   return (
-    <Box flexDirection="column">
+    <Box ref={containerRef} flexDirection="column">
       <Text>
         Extra rules for the auto mode classifier. Rules are plain sentences; new rules are saved to your user settings.
       </Text>
@@ -438,7 +451,7 @@ export function AutoModeRulesTab({
           onCancel?.();
         }}
         visibleOptionCount={Math.min(10, options.length)}
-        isDisabled={!isFocused || isSearchMode || headerFocused}
+        isDisabled={isSearchMode || headerFocused}
         hidePromptWhileDisabled={true}
         pointerWhileDisabled={!isSearchMode}
         onUpFromFirstItem={focusHeader}

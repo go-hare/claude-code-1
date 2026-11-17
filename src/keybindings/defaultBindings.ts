@@ -152,6 +152,9 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       '/': 'settings:search',
       // Retry loading usage data (only active on error)
       r: 'settings:retry',
+      // densable Ts — contributing window (only active when that table is shown)
+      d: 'settings:periodDay',
+      w: 'settings:periodWeek',
     },
   },
   {

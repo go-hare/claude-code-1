@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import { coerce, gte } from 'semver'
 import type { Writable } from 'stream'
 import {
@@ -29,9 +28,10 @@ function isEnvTruthyLike(value: string | undefined): boolean {
  */
 function isScreenReaderEnvEnabled(): boolean {
   try {
-    const require = createRequire(import.meta.url)
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const { isScreenReaderModeEnabled } =
-      require('../../../../../src/utils/screenReaderGate.ts') as typeof import('../../../../../src/utils/screenReaderGate.ts')
+      require('../../../../../src/utils/screenReaderGate.js') as typeof import('../../../../../src/utils/screenReaderGate.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
     return isScreenReaderModeEnabled()
   } catch {
     return (
@@ -44,9 +44,10 @@ function isScreenReaderEnvEnabled(): boolean {
 /** densable `k("tengu_native_cursor", !1)===!0`. */
 function kNativeCursor(): boolean {
   try {
-    const require = createRequire(import.meta.url)
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      require('../../../../../src/services/analytics/growthbook.ts') as typeof import('../../../../../src/services/analytics/growthbook.ts')
+      require('../../../../../src/services/analytics/growthbook.js') as typeof import('../../../../../src/services/analytics/growthbook.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
     return (
       getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
         'tengu_native_cursor',
@@ -61,9 +62,10 @@ function kNativeCursor(): boolean {
 /** densable `k("tengu_marlin_porch", !1)===!0`. */
 function kMarlinPorch(): boolean {
   try {
-    const require = createRequire(import.meta.url)
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const { getFeatureValue_CACHED_MAY_BE_STALE } =
-      require('../../../../../src/services/analytics/growthbook.ts') as typeof import('../../../../../src/services/analytics/growthbook.ts')
+      require('../../../../../src/services/analytics/growthbook.js') as typeof import('../../../../../src/services/analytics/growthbook.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
     return (
       getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
         'tengu_marlin_porch',
@@ -114,9 +116,10 @@ function Oo(): SessionFeaturePins {
  */
 function isTmuxControlModeGold(): boolean {
   try {
-    const require = createRequire(import.meta.url)
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const { isTmuxControlMode } =
-      require('../../../../../src/utils/fullscreen.ts') as typeof import('../../../../../src/utils/fullscreen.ts')
+      require('../../../../../src/utils/fullscreen.js') as typeof import('../../../../../src/utils/fullscreen.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
     return isTmuxControlMode()
   } catch {
     return false

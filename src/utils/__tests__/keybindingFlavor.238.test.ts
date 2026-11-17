@@ -5,7 +5,7 @@ import {
   restoreSettingsMockWith,
   snapshotModuleExports,
 } from '../../../tests/mocks/settings.js'
-import { Cursor } from '../Cursor.js'
+import { Cursor } from '@anthropic/ink'
 import { SettingsSchema } from '../settings/types.js'
 
 const settingsSnap = snapshotModuleExports(realSettings)

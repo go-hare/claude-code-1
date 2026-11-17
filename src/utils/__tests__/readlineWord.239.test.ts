@@ -2,7 +2,7 @@
  * densable 2.1.239 #52 / #41 — readline word keys + placeholder kill.
  */
 import { describe, expect, test } from 'bun:test'
-import { Cursor } from '../Cursor.js'
+import { Cursor } from '@anthropic/ink'
 
 describe('Cursor readline word keys densable 2.1.239', () => {
   test('forwardWord stops at punctuation; nextWord jumps to next start', () => {

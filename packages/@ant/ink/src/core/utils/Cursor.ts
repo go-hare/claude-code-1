@@ -1,9 +1,10 @@
-import { stringWidth, wrapAnsi } from '@anthropic/ink'
+import { stringWidth } from '../stringWidth.js'
+import { wrapAnsi } from '../wrapAnsi.js'
 import {
   firstGrapheme,
   getGraphemeSegmenter,
   getWordSegmenter,
-} from './intl.js'
+} from './grapheme.js'
 
 /**
  * Kill ring for storing killed (cut) text that can be yanked (pasted) with Ctrl+Y.
@@ -129,6 +130,9 @@ const PLACEHOLDER_RE_SRC =
 const PLACEHOLDER_ENDING_RE = new RegExp(`${PLACEHOLDER_RE_SRC}$`)
 const PLACEHOLDER_STARTING_RE = new RegExp(`^${PLACEHOLDER_RE_SRC}`)
 const PLACEHOLDER_GLOBAL_RE = new RegExp(PLACEHOLDER_RE_SRC, 'g')
+const PLACEHOLDER_TOKEN_BEFORE_RE = new RegExp(
+  `(^|\\s)(${PLACEHOLDER_RE_SRC})$`,
+)
 /** densable 2.1.239 `TOE` — digit segments count as word-like. */
 const WORD_LIKE_NUMBER_RE = /\p{N}/u
 /** densable 2.1.239 `AOE` — readline words; punctuation separates. */
@@ -516,6 +520,13 @@ export class Cursor {
     return new Cursor(this.measuredText, this.findLogicalLineEnd(), 0)
   }
 
+  lastCharInLogicalLine(): Cursor {
+    const start = this.findLogicalLineStart()
+    const end = this.findLogicalLineEnd()
+    const offset = end > start ? this.measuredText.prevOffset(end) : start
+    return new Cursor(this.measuredText, offset, 0)
+  }
+
   startOfLogicalLine(): Cursor {
     return new Cursor(this.measuredText, this.findLogicalLineStart(), 0)
   }
@@ -728,6 +739,20 @@ export class Cursor {
       return this
     }
 
+    const chip =
+      this.placeholderStartingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip) {
+      let after = chip.end
+      while (
+        after < this.text.length &&
+        WHITESPACE_REGEX.test(this.graphemeAt(after))
+      ) {
+        after = this.measuredText.nextOffset(after)
+      }
+      return new Cursor(this.measuredText, after)
+    }
+
     let pos = this.offset
     const advance = (p: number): number => this.measuredText.nextOffset(p)
 
@@ -753,12 +778,19 @@ export class Cursor {
       pos = advance(pos)
     }
 
-    return new Cursor(this.measuredText, pos)
+    return new Cursor(this.measuredText, this.snapOutOfPlaceholder(pos, 'end'))
   }
 
   endOfVimWord(): Cursor {
     if (this.isAtEnd()) {
       return this
+    }
+
+    const chip =
+      this.placeholderStartingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip && this.offset < chip.end - 1) {
+      return new Cursor(this.measuredText, chip.end - 1)
     }
 
     const text = this.text
@@ -799,6 +831,12 @@ export class Cursor {
       }
     }
 
+    const endChip =
+      this.placeholderStartingAt(pos) ?? this.placeholderContaining(pos)
+    if (endChip) {
+      pos = endChip.end - 1
+    }
+
     return new Cursor(this.measuredText, pos)
   }
 
@@ -806,6 +844,11 @@ export class Cursor {
     if (this.isAtStart()) {
       return this
     }
+
+    const endChip = this.placeholderEndingAt(this.offset)
+    if (endChip) return new Cursor(this.measuredText, endChip.start)
+    const inChip = this.placeholderContaining(this.offset)
+    if (inChip) return new Cursor(this.measuredText, inChip.start)
 
     let pos = this.offset
     const retreat = (p: number): number => this.measuredText.prevOffset(p)
@@ -836,7 +879,10 @@ export class Cursor {
       }
     }
 
-    return new Cursor(this.measuredText, pos)
+    return new Cursor(
+      this.measuredText,
+      this.snapOutOfPlaceholder(pos, 'start'),
+    )
   }
 
   nextWORD(): Cursor {
@@ -858,6 +904,13 @@ export class Cursor {
       return this
     }
 
+    const chip =
+      this.placeholderStartingAt(this.offset) ??
+      this.placeholderContaining(this.offset)
+    if (chip && this.offset < chip.end - 1) {
+      return new Cursor(this.measuredText, chip.end - 1)
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let cursor: Cursor = this
 
@@ -876,6 +929,10 @@ export class Cursor {
     // If we're on a whitespace character, find the next WORD
     if (cursor.isOverWhitespace()) {
       cursor = cursor.nextWORD()
+      const startChip = cursor.placeholderStartingAt(cursor.offset)
+      if (startChip) {
+        return new Cursor(this.measuredText, startChip.end - 1)
+      }
     }
 
     // Now move to the end of the current WORD
@@ -914,16 +971,20 @@ export class Cursor {
     const startOffset = this.offset
     const endOffset = end.offset
 
-    const newText =
-      this.text.slice(0, startOffset) +
-      insertString +
-      this.text.slice(endOffset)
-
-    return Cursor.fromText(
-      newText,
-      this.columns,
-      startOffset + insertString.normalize('NFC').length,
-    )
+    const prefixAndInsert = this.text.slice(0, startOffset) + insertString
+    const newText = prefixAndInsert + this.text.slice(endOffset)
+    const normalizedOffset = prefixAndInsert.normalize('NFC').length
+    const next = Cursor.fromText(newText, this.columns, normalizedOffset)
+    const mergedAcrossBoundary =
+      normalizedOffset !== startOffset + insertString.normalize('NFC').length
+    const { measuredText, offset } = next
+    if (
+      mergedAcrossBoundary &&
+      measuredText.snapToGraphemeBoundary(offset) !== offset
+    ) {
+      return new Cursor(measuredText, measuredText.nextOffset(offset))
+    }
+    return next
   }
 
   insert(insertString: string): Cursor {
@@ -1048,10 +1109,8 @@ export class Cursor {
 
     const textBefore = this.text.slice(0, this.offset)
 
-    // densable 2.1.239 — include Audio chips
-    const pasteMatch = textBefore.match(
-      /(^|\s)\[(Pasted text #\d+(?: \+\d+ lines)?|Image #\d+|Audio #\d+|\.\.\.Truncated text #\d+ \+\d+ lines\.\.\.)\]$/,
-    )
+    // densable 2.1.289 — match all PLACEHOLDER_RE_SRC chips atomically
+    const pasteMatch = textBefore.match(PLACEHOLDER_TOKEN_BEFORE_RE)
     if (pasteMatch) {
       const matchStart = pasteMatch.index! + pasteMatch[1]!.length
       return new Cursor(this.measuredText, matchStart).modifyText(this)

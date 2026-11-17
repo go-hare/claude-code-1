@@ -22,20 +22,30 @@ import {
   convertEffortValueToLevel,
   type EffortLevel,
   effortModelSettingsPatch,
+  explicitSessionEffort,
   getDefaultEffortForModel,
   getSupportedEffortLevels,
   isEffortLaunchPinned,
   isEffortLevel,
   isUltracodeModeActive,
   modelSupportsEffort,
+  pdSessionEffort,
   readUserSettingsEffortForModel,
   resolvePickerEffortPersistence,
+  teSettingsEffortTable,
   toPersistableEffort,
   unpinAllEffortLaunchPins,
 } from '../utils/effort.js';
+import { has1mContext } from '../utils/context.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { isModelAlias } from '../utils/model/aliases.js';
+import { isSameFablePickerRow } from '../utils/model/fablePicker.js';
+import { isModelAllowed } from '../utils/model/modelAllowlist.js';
 import {
+  getCanonicalName,
   getDefaultMainLoopModel,
+  isNonCustomOpusModel,
+  isOpus1mMergeEnabled,
   type ModelSetting,
   modelDisplayString,
   parseUserSpecifiedModel,
@@ -96,6 +106,60 @@ export type Props = {
 
 const NO_PREFERENCE = '__NO_PREFERENCE__';
 
+function isAliasModelSpec(spec: string | null): boolean {
+  if (spec === null) return false;
+  const stripped = spec
+    .trim()
+    .toLowerCase()
+    .replace(/\[1m\]$/, '');
+  return isModelAlias(stripped);
+}
+
+/** densable `jTe` (@189442462) — suppress session override when semantically identical to base model. */
+export function resolveSessionModelOverride(
+  sessionModel: string | null | undefined,
+  initial: string | null,
+): string | null {
+  const trimmedSession = sessionModel?.trim() || null;
+  if (trimmedSession === null) return null;
+  if (initial !== null && trimmedSession.toLowerCase() === initial.trim().toLowerCase()) {
+    return null;
+  }
+  const trimmedInitial = initial?.trim() || null;
+  if (isAliasModelSpec(trimmedSession) || isAliasModelSpec(trimmedInitial)) {
+    return trimmedSession;
+  }
+  const resolvedInitial = trimmedInitial === null ? getDefaultMainLoopModel() : parseUserSpecifiedModel(trimmedInitial);
+  return parseUserSpecifiedModel(trimmedSession).toLowerCase() === resolvedInitial.toLowerCase()
+    ? null
+    : trimmedSession;
+}
+
+/** densable `cs` (@186193149) — semantic option identity (canonical model + 1M window / opus merge). */
+export function isSameModelPickerOption(left: { value: string | null }, right: { value: string | null }): boolean {
+  if (left.value === right.value) return true;
+  if (typeof left.value !== 'string' || typeof right.value !== 'string') return false;
+  if (isSameFablePickerRow(left, right)) return true;
+  const resolvedLeft = parseUserSpecifiedModel(left.value);
+  const resolvedRight = parseUserSpecifiedModel(right.value);
+  if (getCanonicalName(resolvedLeft) !== getCanonicalName(resolvedRight)) return false;
+  return (
+    has1mContext(left.value) === has1mContext(right.value) ||
+    (isNonCustomOpusModel(resolvedLeft) && isOpus1mMergeEnabled())
+  );
+}
+
+/** densable `bfn` (@186191356) — map `--model claude-sonnet-4-6` etc. to matching built-in option value. */
+export function findMatchingModelOptionValue(
+  options: ReadonlyArray<{ value: string | null }>,
+  model: string,
+): string | undefined {
+  if (options.some(opt => opt.value === model)) return model;
+  const probe = { value: model };
+  const hit = options.find(opt => isSameModelPickerOption(opt, probe));
+  return typeof hit?.value === 'string' ? hit.value : undefined;
+}
+
 function isMaxEffortReminderEnabled(): boolean {
   if (process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER !== undefined) {
     return isEnvTruthy(process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER);
@@ -119,6 +183,11 @@ export function ModelPicker({
   const setAppState = useSetAppState();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel, undefined, isStandaloneCommand === true);
   const { rows } = useTerminalSize();
+  const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
+  // Memoize all derived values to prevent re-renders
+  const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
+
+  const sessionOverride = useMemo(() => resolveSessionModelOverride(sessionModel, initial), [sessionModel, initial]);
   // densable sgM — LFh=14 chrome; no XKl search host → ngM=0
   const maxVisible = computeModelPickerVisibleSlots({
     rows,
@@ -129,46 +198,66 @@ export function ModelPicker({
       isFastModeAvailable(),
       isFastModeCooldown(),
     ),
-    sessionModelBanner: sessionModel != null,
+    sessionModelBanner: sessionOverride !== null,
   });
 
-  const initialValue = initial === null ? NO_PREFERENCE : initial;
+  const currentModel = sessionOverride ?? initial;
+  const initialValue =
+    currentModel === null ? NO_PREFERENCE : (findMatchingModelOptionValue(modelOptions, currentModel) ?? currentModel);
   const [focusedValue, setFocusedValue] = useState<string | undefined>(initialValue);
-
-  const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
 
   // densable 2.1.289: no Space 1M toggle row; `[1m]` is on the option value.
 
   const [hasToggledEffort, setHasToggledEffort] = useState(false);
   const effortValue = useAppState(s => s.effortValue);
+  const sessionEffort = useAppState(s => s.sessionEffort);
+  const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const ultracodeFlag = useAppState(s => s.ultracode);
-  const [effort, setEffort] = useState<EffortLevel | undefined>(() =>
-    effortValue !== undefined ? convertEffortValueToLevel(effortValue) : undefined,
-  );
+  const [effort, setEffort] = useState<EffortLevel | undefined>(() => {
+    const pd = pdSessionEffort({ sessionEffort, effortValue, settingsEffortTable }, resolveOptionModel(initialValue));
+    return pd !== undefined ? convertEffortValueToLevel(pd) : undefined;
+  });
 
-  // Memoize all derived values to prevent re-renders
-  const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
-
-  // Ensure the initial value is in the options list
-  // This handles edge cases where the user's current model (e.g., 'haiku' for 3P users)
-  // is not in the base options but should still be selectable and shown as selected
+  // Ensure the current / base model values are in the options list
   const optionsWithInitial = useMemo(() => {
     const withDefaultDesc =
       defaultOptionDescription === undefined
         ? modelOptions
         : modelOptions.map(opt => (opt.value === null ? { ...opt, description: defaultOptionDescription } : opt));
-    if (initial !== null && !withDefaultDesc.some(opt => opt.value === initial)) {
-      return [
-        ...withDefaultDesc,
-        {
-          value: initial,
-          label: modelDisplayString(initial),
-          description: 'Current model',
-        },
-      ];
+    const currentOptVal =
+      currentModel === null
+        ? NO_PREFERENCE
+        : (findMatchingModelOptionValue(withDefaultDesc, currentModel) ?? currentModel);
+    const baseOptVal =
+      initial === null ? NO_PREFERENCE : (findMatchingModelOptionValue(withDefaultDesc, initial) ?? initial);
+    const extra: typeof withDefaultDesc = [];
+    const pairs: Array<[string | null, string, string]> = [
+      [currentModel, currentOptVal, 'Current model'],
+      [sessionOverride === null ? null : initial, baseOptVal, 'Base model'],
+    ];
+    for (const [modelVal, optVal, description] of pairs) {
+      if (
+        modelVal !== null &&
+        !withDefaultDesc.some(opt => opt.value === optVal || opt.value === modelVal) &&
+        !extra.some(opt => opt.value === modelVal) &&
+        isModelAllowed(modelVal)
+      ) {
+        extra.push({
+          value: modelVal,
+          label: modelDisplayString(modelVal),
+          description,
+        });
+      }
     }
-    return withDefaultDesc;
-  }, [modelOptions, initial, defaultOptionDescription]);
+    if (extra.length === 0) {
+      return withDefaultDesc;
+    }
+    const disabledIdx = withDefaultDesc.findIndex(opt => 'disabled' in opt && opt.disabled === true);
+    if (disabledIdx === -1) {
+      return [...withDefaultDesc, ...extra];
+    }
+    return [...withDefaultDesc.slice(0, disabledIdx), ...extra, ...withDefaultDesc.slice(disabledIdx)];
+  }, [modelOptions, currentModel, sessionOverride, initial, defaultOptionDescription]);
 
   const selectOptions = useMemo(
     () =>
@@ -208,11 +297,13 @@ export function ModelPicker({
   const handleFocus = useCallback(
     (value: string) => {
       setFocusedValue(value);
-      if (!hasToggledEffort && effortValue === undefined) {
-        setEffort(getDefaultEffortLevelForOption(value));
+      if (!hasToggledEffort) {
+        const targetModel = resolveOptionModel(value);
+        const pd = pdSessionEffort({ sessionEffort, effortValue, settingsEffortTable }, targetModel);
+        setEffort(pd !== undefined ? convertEffortValueToLevel(pd) : getDefaultEffortLevelForOption(value));
       }
     },
-    [hasToggledEffort, effortValue],
+    [hasToggledEffort, sessionEffort, effortValue, settingsEffortTable],
   );
 
   // Effort level cycling keybindings (densable gbp / QOe).
@@ -287,6 +378,8 @@ export function ModelPicker({
       setAppState(prev => ({
         ...prev,
         effortValue: effortLevel,
+        sessionEffort: explicitSessionEffort(effortLevel),
+        settingsEffortTable: teSettingsEffortTable(),
       }));
     };
 
@@ -324,9 +417,9 @@ export function ModelPicker({
             {headerText ??
               'Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.'}
           </Text>
-          {sessionModel && (
+          {sessionOverride && (
             <Text dimColor>
-              Currently using {modelDisplayString(sessionModel)} for this session only (base model:{' '}
+              Currently using {modelDisplayString(sessionOverride)} for this session only (base model:{' '}
               {modelDisplayString(initial)}). Selecting a model here replaces both.
             </Text>
           )}

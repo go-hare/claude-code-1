@@ -4,7 +4,7 @@
  * Pure functions for resolving vim motions to cursor positions.
  */
 
-import type { Cursor } from '../utils/Cursor.js'
+import type { Cursor } from '@anthropic/ink'
 
 /**
  * Resolve a motion to a target cursor position.
@@ -32,6 +32,7 @@ function applySingleMotion(key: string, cursor: Cursor): Cursor {
     case 'h':
       return cursor.left()
     case 'l':
+    case ' ':
       return cursor.right()
     case 'j':
       return cursor.downLogicalLine()
@@ -58,7 +59,7 @@ function applySingleMotion(key: string, cursor: Cursor): Cursor {
     case '^':
       return cursor.firstNonBlankInLogicalLine()
     case '$':
-      return cursor.endOfLogicalLine()
+      return cursor.lastCharInLogicalLine()
     case 'G':
       return cursor.startOfLastLine()
     default:

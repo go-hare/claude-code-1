@@ -5,7 +5,7 @@ import React from 'react';
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js';
 import { useModalOrTerminalSize } from '../context/modalContext.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useSearchInput } from '../hooks/useSearchInput.js';
+import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
   applyColor,
@@ -210,6 +210,7 @@ export function LogSelector({
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
     handlePaste: handleSearchPaste,
+    handleKeyDown: handleSearchKeyDown,
   } = useSearchInput({
     isActive: viewMode === 'search',
     onExit: () => {
@@ -739,6 +740,7 @@ export function LogSelector({
 
   const handlePaste = React.useCallback(
     (event: PasteEvent) => {
+      if (event.defaultPrevented) return;
       if (viewMode === 'search') {
         handleSearchPaste(event);
         return;
@@ -870,8 +872,12 @@ export function LogSelector({
       <SearchBox
         query={searchQuery}
         isFocused={viewMode === 'search'}
+        onFocus={enterSearchMode}
         isTerminalFocused={isTerminalFocused}
         cursorOffset={searchCursorOffset}
+        onKeyDown={viewMode === 'search' ? handleSearchKeyDown : undefined}
+        onPaste={viewMode === 'search' ? handleSearchPaste : undefined}
+        autoFocus={viewMode === 'search'}
       />
       {showAdditionalFilterLine &&
         (filterIndicators.length > 0 ? (

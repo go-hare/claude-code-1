@@ -27,7 +27,7 @@ import {
   type PromptCommand,
 } from '../../commands.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useSearchInput } from '../../hooks/useSearchInput.js';
+import { getFocusManager, useIsFocused, useSearchInput } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { roughTokenCountEstimation } from '../../services/tokenEstimation.js';
@@ -584,19 +584,32 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
   const focusedSkillRef = useRef<SkillCommand | undefined>(skills[0]);
   const isTerminalFocused = useTerminalFocus();
   const containerRef = useRef<DOMElement | null>(null);
-  const [isSearchMode, setIsSearchMode] = useState(false);
-  const isSearchModeRef = useRef(false);
-  isSearchModeRef.current = isSearchMode;
+  const searchRef = useRef<DOMElement | null>(null);
+  const isSearchMode = useIsFocused(searchRef);
+  const isSearchFocused = useCallback(() => {
+    const node = searchRef.current;
+    return node !== null && getFocusManager(node).activeElement === node;
+  }, []);
+  const focusSearch = useCallback(() => {
+    const node = searchRef.current;
+    if (node) getFocusManager(node).focus(node);
+  }, []);
 
-  const { query, setQuery, cursorOffset } = useSearchInput({
-    isActive: isSearchMode,
+  const {
+    query,
+    queryRef,
+    setQuery,
+    cursorOffset,
+    handleKeyDown: handleSearchKeyDown,
+    handlePaste: handleSearchPaste,
+  } = useSearchInput({
+    isActive: true,
     onExit: () => {
-      setIsSearchMode(false);
+      const node = containerRef.current;
+      if (node) getFocusManager(node).focus(node);
     },
     passthroughCtrlKeys: ['c', 'd'],
   });
-  const queryRef = useRef(query);
-  queryRef.current = query;
 
   useExitOnCtrlCDWithKeybindings();
 
@@ -667,11 +680,11 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
   useKeybindings(
     {
       'select:accept': () => {
-        if (isSearchModeRef.current) return false;
+        if (isSearchFocused()) return false;
         cycleFocusedSkill();
       },
       'settings:sortByTokens': () => {
-        if (isSearchModeRef.current) return false;
+        if (isSearchFocused()) return false;
         setSortByTokens(prev => !prev);
       },
     },
@@ -681,16 +694,17 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
   useKeybindings(
     {
       'confirm:no': () => {
-        if (isSearchModeRef.current) return false;
+        if (isSearchFocused()) return false;
         void saveAndClose();
       },
     },
     { context: 'Settings' },
   );
 
+  const [wrapState, setWrapState] = useState({ epoch: 0, focusIndex: 0 });
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isSearchModeRef.current) return;
+      if (e.defaultPrevented || e.target === searchRef.current || isSearchFocused()) return;
       if (e.name === 'tab') {
         e.preventDefault();
         return;
@@ -699,38 +713,33 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
       if (e.name === 'backspace') {
         if (queryRef.current) {
           e.preventDefault();
-          setIsSearchMode(true);
+          focusSearch();
           setQuery(queryRef.current.slice(0, -1));
         }
-        return;
-      }
-      if (e.key === sortShortcut) {
-        e.preventDefault();
-        setSortByTokens(prev => !prev);
         return;
       }
       if (e.name.length > 1 && e.name !== 'number') return;
       if (e.key.length >= 1 && e.key !== ' ') {
         e.preventDefault();
-        setIsSearchMode(true);
+        focusSearch();
         const next = e.key.startsWith('/') ? e.key.slice(1) : e.key;
         setQuery(queryRef.current + next);
       }
     },
-    [setQuery, sortShortcut],
+    [setQuery, focusSearch, isSearchFocused, queryRef],
   );
 
   const handlePaste = useCallback(
     (e: PasteEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.target === searchRef.current || isSearchFocused()) return;
       const firstLine = e.text.split(/\r\n|\r|\n/, 2)[0] ?? '';
       if (firstLine.length === 0) return;
       e.preventDefault();
-      setIsSearchMode(true);
-      const next = !isSearchModeRef.current && firstLine.startsWith('/') ? firstLine.slice(1) : firstLine;
+      focusSearch();
+      const next = firstLine.startsWith('/') ? firstLine.slice(1) : firstLine;
       setQuery(queryRef.current + next);
     },
-    [setQuery],
+    [setQuery, focusSearch, isSearchFocused, queryRef],
   );
 
   const handleCancel = useCallback((): void => {
@@ -781,8 +790,10 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
         onPaste={handlePaste}
       >
         <SearchBox
+          ref={searchRef}
+          onKeyDown={handleSearchKeyDown}
+          onPaste={handleSearchPaste}
           query={query}
-          isFocused={isSearchMode}
           isTerminalFocused={isTerminalFocused}
           cursorOffset={cursorOffset}
           placeholder="Search skills…"
@@ -794,9 +805,23 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
         ) : (
           // wrap={true} overflowHint="count" (replaces 247 <FuzzyPicker onSelect={skill => )
           <ItemList
-            key={sortByTokens ? 'tok' : 'name'}
+            key={`${sortByTokens ? 'tok' : 'name'}-${wrapState.epoch}`}
+            defaultFocusIndex={wrapState.focusIndex}
             visibleOptionCount={visibleCount}
             isDisabled={isSearchMode}
+            onUpFromFirst={() => {
+              if (filteredSkills.length > 1 && filteredSkills.length <= visibleCount) {
+                const lastIdx = filteredSkills.length - 1;
+                focusedSkillRef.current = filteredSkills[lastIdx];
+                setWrapState(prev => ({ epoch: prev.epoch + 1, focusIndex: lastIdx }));
+              }
+            }}
+            onDownFromLast={() => {
+              if (filteredSkills.length > 1) {
+                focusedSkillRef.current = filteredSkills[0];
+                setWrapState(prev => ({ epoch: prev.epoch + 1, focusIndex: 0 }));
+              }
+            }}
             onFocus={idx => {
               focusedSkillRef.current = filteredSkills[idx];
             }}

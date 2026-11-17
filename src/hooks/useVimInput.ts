@@ -5,7 +5,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import { Cursor } from '../utils/Cursor.js'
+import { Cursor } from '@anthropic/ink'
 import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
 import {
   executeIndent,

@@ -11,7 +11,31 @@ describe('densable 2.1.289 Ns Ht factory / querier.owed', () => {
     resetInkSessionHostForTests()
   })
 
-  test('two Ns() calls return the same map as the default export', () => {
+  test('two Ns() calls return the same map as the default export', async () => {
+    // Other suites reset the bootstrap host after the default map was captured.
+    // Check the initial-load contract before any session replacement in a child.
+    if (process.env.CLAUDE_TEST_INK_INITIAL_HOST_CHILD !== '1') {
+      const child = Bun.spawn({
+        cmd: [
+          process.execPath,
+          'test',
+          import.meta.path,
+          '--test-name-pattern',
+          'two Ns\\(\\) calls return the same map as the default export',
+        ],
+        env: { ...process.env, CLAUDE_TEST_INK_INITIAL_HOST_CHILD: '1' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(exit, `${stdout}\n${stderr}`).toBe(0)
+      expect(stderr).toContain('1 pass')
+      return
+    }
     expect(Ns()).toBe(Ns())
     expect(Ns()).toBe(instances)
   })

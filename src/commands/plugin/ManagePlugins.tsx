@@ -12,7 +12,7 @@ import { MCPToolDetailView } from '../../components/mcp/MCPToolDetailView.js';
 import { MCPToolListView } from '../../components/mcp/MCPToolListView.js';
 import type { ClaudeAIServerInfo, HTTPServerInfo, SSEServerInfo, StdioServerInfo } from '../../components/mcp/types.js';
 import { SearchBox } from '../../components/SearchBox.js';
-import { useSearchInput } from '../../hooks/useSearchInput.js';
+import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
 import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
@@ -563,6 +563,9 @@ export function ManagePlugins({
     },
     [onSearchModeChange],
   );
+  const enterSearchMode = useCallback(() => {
+    setIsSearchMode(true);
+  }, [setIsSearchMode]);
   const isTerminalFocused = useTerminalFocus();
   const { columns: terminalWidth } = useTerminalSize();
 
@@ -573,6 +576,9 @@ export function ManagePlugins({
     query: searchQuery,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    setCursorOffset: setSearchCursorOffset,
+    handleKeyDown: handleSearchKeyDown,
+    handlePaste: handleSearchPaste,
   } = useSearchInput({
     isActive: viewState === 'plugin-list' && isSearchMode,
     onExit: () => {
@@ -2560,9 +2566,14 @@ export function ManagePlugins({
         <SearchBox
           query={searchQuery}
           isFocused={isSearchMode}
+          onFocus={enterSearchMode}
           isTerminalFocused={isTerminalFocused}
           width={terminalWidth - 4}
           cursorOffset={searchCursorOffset}
+          onCursorOffsetChange={setSearchCursorOffset}
+          onKeyDown={isSearchMode ? handleSearchKeyDown : undefined}
+          onPaste={isSearchMode ? handleSearchPaste : undefined}
+          autoFocus={isSearchMode}
         />
       </Box>
 

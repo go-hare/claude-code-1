@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { FRAME_INTERVAL_MS } from '../core/constants.js';
 import { useTerminalFocus } from '../hooks/use-terminal-focus.js';
 
@@ -90,6 +90,15 @@ export function createClock(tickIntervalMs: number): Clock {
 }
 
 export const ClockContext = createContext<Clock | null>(null);
+
+/** densable `rn` — REPL `lr=rn()` is the Xj clock. */
+export function useClock(): Clock {
+  const clock = useContext(ClockContext);
+  if (!clock) {
+    throw new Error('useClock must be used within a ClockProvider');
+  }
+  return clock;
+}
 
 const BLURRED_TICK_INTERVAL_MS = FRAME_INTERVAL_MS * 2;
 

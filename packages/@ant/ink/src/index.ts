@@ -295,7 +295,12 @@ export {
 } from './components/Button.js'
 export { default as Link } from './components/Link.js'
 export type { Props as LinkProps } from './components/Link.js'
-export { ClockContext, type Clock } from './components/ClockContext.js'
+export {
+  ClockContext,
+  ClockProvider,
+  useClock,
+  type Clock,
+} from './components/ClockContext.js'
 export { default as Newline } from './components/Newline.js'
 export type { Props as NewlineProps } from './components/Newline.js'
 export { default as Spacer } from './components/Spacer.js'
@@ -344,6 +349,23 @@ export {
 // ============================================================
 export { default as useApp } from './hooks/use-app.js'
 export { default as useInput } from './hooks/use-input.js'
+export { useSearchInput } from './hooks/useSearchInput.js'
+export {
+  Cursor,
+  MeasuredText,
+  WHITESPACE_REGEX,
+  isVimWordChar,
+  isVimWhitespace,
+  isVimPunctuation,
+  getLastKill,
+  pushToKillRing,
+  recordYank,
+  resetKillAccumulation,
+  resetYankState,
+  updateYankLength,
+  yankPop,
+} from './core/utils/Cursor.js'
+export { useIsFocused } from './hooks/use-is-focused.js'
 export { useFocusReclaim } from './hooks/use-focus-reclaim.js'
 export { useAnimationFrame } from './hooks/use-animation-frame.js'
 export { useAnimationTimer, useInterval } from './hooks/use-interval.js'
