@@ -16,6 +16,7 @@ import {
   getProgressMessagesFromLookup,
   getSiblingToolUseIDsFromLookup,
   getToolUseID,
+  hasUnresolvedHooksFromLookup,
 } from '../utils/messages.js';
 import { hasThinkingContent, Message } from './Message.js';
 
@@ -391,6 +392,21 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
 
   // Only bail out for truly static messages
   if (isStreaming || !isResolved) return false;
+
+  // Align with shouldRenderStatically: keep transient while the tool is still
+  // in progress or PostToolUse hooks are still producing progress updates.
+  if (prev.message.type === 'user' || prev.message.type === 'assistant' || prev.message.type === 'attachment') {
+    const toolUseID = getToolUseID(prev.message);
+    if (
+      toolUseID &&
+      (prev.inProgressToolUseIDs.has(toolUseID) ||
+        next.inProgressToolUseIDs.has(toolUseID) ||
+        hasUnresolvedHooksFromLookup(toolUseID, 'PostToolUse', prev.lookups) ||
+        hasUnresolvedHooksFromLookup(toolUseID, 'PostToolUse', next.lookups))
+    ) {
+      return false;
+    }
+  }
 
   // densable bT_: turn_duration briefHiddenCount can change under focus filter
   // even when the row is otherwise static (stamp is applied via new object, so

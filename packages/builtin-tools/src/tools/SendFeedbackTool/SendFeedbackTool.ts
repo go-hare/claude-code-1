@@ -31,7 +31,7 @@ import {
   tryConsumeSendFeedbackCall,
 } from 'src/utils/feedbackDrafts/notice.js'
 import { writeFeedbackDraft } from 'src/utils/feedbackDrafts/writeDraft.js'
-import { resolveAppliedEffort } from 'src/utils/effort.js'
+import { pdSessionEffort, resolveAppliedEffort } from 'src/utils/effort.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getRuntimeMainLoopModel } from 'src/utils/model/model.js'
 import { getTranscriptPathForSession } from 'src/utils/sessionPaths.js'
@@ -253,7 +253,7 @@ export const SendFeedbackTool = buildTool({
     })
     const effort = resolveAppliedEffort(
       model,
-      context.getAppState().effortValue,
+      pdSessionEffort(context.getAppState(), model),
     )
     const thinking = context.options.thinkingConfig
     const draft = createFeedbackDraft({

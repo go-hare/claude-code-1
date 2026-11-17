@@ -7,10 +7,10 @@ import { logError } from 'src/utils/log.js';
 import { z } from 'zod/v4';
 import { callIdeRpc } from '../services/mcp/client.js';
 import type { ConnectedMCPServer, MCPServerConnection } from '../services/mcp/types.js';
+import { useMessageQueue } from '../state/AppState.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, isTrackedClaudeInChromeTabId } from '../utils/claudeInChrome/common.js';
 import { lazySchema } from '../utils/lazySchema.js';
-import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
 
 // Chrome extension prompt notification — custom params on notifications/message
 const CLAUDE_IN_CHROME_PROMPT_METHOD = 'notifications/message';
@@ -37,6 +37,7 @@ export function usePromptsFromClaudeInChrome(
   toolPermissionMode: PermissionMode,
 ): void {
   const mcpClientRef = useRef<ConnectedMCPServer | undefined>(undefined);
+  const messageQueue = useMessageQueue();
 
   useEffect(() => {
     if (process.env.USER_TYPE !== 'ant') {
@@ -77,12 +78,12 @@ export function usePromptsFromClaudeInChrome(
                   },
                 },
               ];
-              enqueuePendingNotification({
+              messageQueue.enqueuePendingNotification({
                 value: contentBlocks,
                 mode: 'prompt',
               });
             } else {
-              enqueuePendingNotification({ value: prompt, mode: 'prompt' });
+              messageQueue.enqueuePendingNotification({ value: prompt, mode: 'prompt' });
             }
           } catch (error) {
             logError(error as Error);
@@ -90,7 +91,7 @@ export function usePromptsFromClaudeInChrome(
         },
       );
     }
-  }, [mcpClients]);
+  }, [mcpClients, messageQueue]);
 
   // Official 2.1.x (IHa): sync permission mode with Chrome extension whenever it
   // changes. bypassPermissions → skip_all_permission_checks; otherwise ask.

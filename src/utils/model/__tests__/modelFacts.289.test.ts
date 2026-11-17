@@ -177,7 +177,10 @@ describe('densable 2.1.289 Fi stream_request_start', () => {
     expect(schema).toContain("z.literal('requesting')")
     const queue = readFileSync(join(ROOT, 'src/utils/sdkEventQueue.ts'), 'utf8')
     expect(queue).toContain("'compacting' | 'requesting' | null")
-    const repl = readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8')
-    expect(repl).toContain("if (status === 'requesting') return")
+    const sessionEngine = readFileSync(
+      join(ROOT, 'src/screens/repl/SessionEngine.ts'),
+      'utf8',
+    )
+    expect(sessionEngine).toContain("if (status === 'requesting') return")
   })
 })

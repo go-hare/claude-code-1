@@ -87,12 +87,12 @@ export function viewedAgentNameForPlaceholder(
 
 /** Caller-passed transcript bag. Do not invent a second store. */
 export type ViewedTranscript = {
-  messages?: Message[]
+  messages?: readonly Message[]
   inProgressToolUseIDs?: Set<string>
 }
 
 type ViewedTaskFields = {
-  messages: Message[]
+  messages: readonly Message[]
   inProgressToolUseIDs: Set<string>
   conversationKey: string | undefined
   isLoading: boolean

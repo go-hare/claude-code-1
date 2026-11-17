@@ -1,6 +1,10 @@
 import { type FSWatcher, watch } from 'fs'
-import { useEffect, useSyncExternalStore } from 'react'
-import { useAppState, useSetAppState } from '../state/AppState.js'
+import { useContext, useEffect, useSyncExternalStore } from 'react'
+import {
+  TaskStoreContext,
+  useAppState,
+  useSetAppState,
+} from '../state/AppState.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { createSignal } from '../utils/signal.js'
@@ -28,7 +32,7 @@ const FALLBACK_POLL_MS = 5000 // Fallback in case fs.watch misses events
  *
  * Implements the useSyncExternalStore contract: subscribe/getSnapshot.
  */
-class TasksV2Store {
+export class TasksV2Store {
   /** Stable array reference; replaced only on fetch. undefined until started. */
   #tasks: Task[] | undefined = undefined
   /**
@@ -284,10 +288,11 @@ const NOOP_SNAPSHOT = (): undefined => undefined
  */
 export function useTasksV2(): Task[] | undefined {
   const teamContext = useAppState(s => s.teamContext)
+  const providerTaskStore = useContext(TaskStoreContext)
 
   const enabled = isTodoV2Enabled() && (!teamContext || isTeamLead(teamContext))
 
-  const store = enabled ? getStore() : null
+  const store = enabled ? (providerTaskStore ?? getStore()) : null
 
   return useSyncExternalStore(
     store ? store.subscribe : NOOP_SUBSCRIBE,

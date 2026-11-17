@@ -29,7 +29,7 @@ import {
 } from '../../services/analytics/index.js';
 import { useAppState } from '../../state/AppState.js';
 import { type GlobalConfig, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { getEffortSuffix, isUltracodeModeActive } from '../../utils/effort.js';
+import { getEffortSuffix, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { truncate } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
@@ -471,10 +471,10 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
   const srContext = useContext(AccessibilityContext);
   const screenReader = srContext || isScreenReaderModeEnabled();
   const agent = useAppState(s => s.agent);
-  const effortValue = useAppState(s => s.effortValue);
   const ultracode = useAppState(s => s.ultracode);
   const model = useMainLoopModel();
   const resolvedModel = parseUserSpecifiedModel(model);
+  const effortValue = useAppState(s => pdSessionEffort(s, resolvedModel));
   const modelDisplayName = renderModelSetting(model);
   const { version, cwd, billingType, agentName: agentNameFromSettings } = getLogoDisplayData();
 

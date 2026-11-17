@@ -22,9 +22,6 @@ mock.module('src/constants/common.js', () => ({
 mock.module('src/utils/settings/settings.js', () => ({
   getInitialSettings: () => ({ language: undefined }),
 }))
-mock.module('src/commands/poor/poorMode.js', () => ({
-  isPoorModeActive: () => false,
-}))
 mock.module('src/utils/env.js', () => ({ env: { platform: 'linux' } }))
 mock.module('src/utils/envUtils.js', () => ({ isEnvTruthy: () => false }))
 mock.module('src/utils/model/model.js', () => ({

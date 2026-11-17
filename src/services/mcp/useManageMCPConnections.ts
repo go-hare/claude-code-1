@@ -59,6 +59,7 @@ import { useNotifications } from '../../context/notifications.js'
 import {
   useAppState,
   useAppStateStore,
+  useMcpConnections,
   useSetAppState,
 } from '../../state/AppState.js'
 import { getClaudeAIOAuthTokens } from '../../utils/auth.js'
@@ -163,6 +164,7 @@ export function useManageMCPConnections(
   isStrictMcpConfig = false,
 ) {
   const store = useAppStateStore()
+  const mcpConnections = useMcpConnections()
   const _authVersion = useAppState(s => s.authVersion)
   // Incremented by /reload-plugins (refreshActivePlugins) to pick up newly
   // enabled plugin MCP servers. getClaudeCodeMcpConfigs() reads loadAllPlugins()
@@ -1017,74 +1019,44 @@ export function useManageMCPConnections(
       // Add MCP errors to plugin errors for UI visibility (deduplicated)
       addErrorsToAppState(setAppState, mcpErrors)
 
-      setAppState(prevState => {
-        // Disconnect MCP servers that are stale: plugin servers removed from
-        // config, or any server whose config hash changed (edited .mcp.json).
-        // Stale servers get re-added as 'pending' below since their name is
-        // now absent from mcpWithoutStale.clients.
-        const { stale, ...mcpWithoutStale } = excludeStalePluginClients(
-          prevState.mcp,
-          configs,
-        )
-        // Clean up stale connections. Fire-and-forget — state updaters must
-        // be synchronous. Three hazards to defuse before calling cleanup:
-        //   1. Pending reconnect timer would fire with the OLD config.
-        //   2. onclose (set at L254) starts reconnectWithBackoff with the
-        //      OLD config from its closure — it checks isMcpServerDisabled
-        //      but config-changed servers aren't disabled, so it'd race the
-        //      fresh connection and last updateServer wins.
-        //   3. clearServerCache internally calls connectToServer (memoized).
-        //      For never-connected servers (disabled/pending/failed) the
-        //      cache is empty → real connect attempt → spawn/OAuth just to
-        //      immediately kill it. Only connected servers need cleanup.
-        for (const s of stale) {
-          const timer = reconnectTimersRef.current.get(s.name)
-          if (timer) {
-            clearTimeout(timer)
-            reconnectTimersRef.current.delete(s.name)
-          }
-          if (s.type === 'connected') {
-            s.client.onclose = undefined
-            void clearServerCache(s.name, s.config).catch(() => {})
-          }
-        }
-
-        const existingServerNames = new Set(
-          mcpWithoutStale.clients.map(c => c.name),
-        )
-        const newClients = Object.entries(configs)
-          .filter(([name]) => !existingServerNames.has(name))
-          .map(([name, config]) => ({
-            name,
-            type: isMcpServerDisabled(name)
-              ? ('disabled' as const)
-              : ('pending' as const),
-            config,
-          }))
-
-        // densable gDs stamp: even with no new/stale clients, flip
-        // clientsInitialized so deferred adopt resume can settle.
-        if (newClients.length === 0 && stale.length === 0) {
-          if (prevState.mcp.clientsInitialized) return prevState
+      mcpConnections.reconcileConfiguredServers(
+        prevMcp => {
+          const { stale, ...mcpWithoutStale } = excludeStalePluginClients(
+            prevMcp,
+            configs,
+          )
+          const existingServerNames = new Set(
+            mcpWithoutStale.clients.map(c => c.name),
+          )
+          const newClients: MCPServerConnection[] = Object.entries(configs)
+            .filter(([name]) => !existingServerNames.has(name))
+            .map(([name, config]) => ({
+              name,
+              type: isMcpServerDisabled(name)
+                ? ('disabled' as const)
+                : ('pending' as const),
+              config,
+            }))
           return {
-            ...prevState,
-            mcp: {
-              ...prevState.mcp,
-              clientsInitialized: true,
-            },
+            stale,
+            mcpWithoutStale,
+            newClients,
           }
-        }
-
-        return {
-          ...prevState,
-          mcp: {
-            ...prevState.mcp,
-            ...mcpWithoutStale,
-            clientsInitialized: true,
-            clients: [...mcpWithoutStale.clients, ...newClients],
-          },
-        }
-      })
+        },
+        stale => {
+          for (const s of stale) {
+            const timer = reconnectTimersRef.current.get(s.name)
+            if (timer) {
+              clearTimeout(timer)
+              reconnectTimersRef.current.delete(s.name)
+            }
+            if (s.type === 'connected') {
+              s.client.onclose = undefined
+              void clearServerCache(s.name, s.config).catch(() => {})
+            }
+          }
+        },
+      )
     }
 
     void initializeServersAsPending().catch(error => {

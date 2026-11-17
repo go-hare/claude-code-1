@@ -16,8 +16,7 @@
  */
 
 import type { ToolPermissionContext, ToolUseContext } from '../Tool.js'
-import type { AppState } from '../state/AppState.js'
-import { pdSessionEffort } from '../utils/effort.js'
+import { type EffortValue, pdSessionEffort } from '../utils/effort.js'
 import type { PermissionMode } from '../types/permissions.js'
 import type { ThinkingConfig } from '../utils/thinking.js'
 import { isBypassPermissionsModeDisabled } from '../utils/permissions/permissionSetup.js'
@@ -168,14 +167,14 @@ export function getEffortValueFromLayers(
     ToolUseContext,
     'getAppState' | 'permissionLayers' | 'options'
   >,
-): AppState['effortValue'] {
+): EffortValue | undefined {
   const model = getMainLoopModelFromLayers(toolUseContext)
   let effort = pdSessionEffort(toolUseContext.getAppState(), model)
   const layers = toolUseContext.permissionLayers
   if (!layers) return effort
   for (const layer of layers) {
     if (layer && layer.kind === 'effort') {
-      effort = (layer as { effort?: AppState['effortValue'] }).effort
+      effort = (layer as { effort?: EffortValue }).effort
     }
   }
   return effort

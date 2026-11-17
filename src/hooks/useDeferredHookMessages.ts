@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useMessageQueue } from '../state/AppState.js'
 import type { HookResultMessage, Message } from '../types/message.js'
-import { enqueueReportingAdmission } from '../utils/messageQueueManager.js'
 import { takeInitialUserMessage } from '../utils/sessionStart.js'
 
 /**
@@ -15,6 +15,7 @@ export function useDeferredHookMessages(
   pendingHookMessages: Promise<HookResultMessage[]> | undefined,
   setMessages: (action: React.SetStateAction<Message[]>) => void,
 ): () => Promise<void> {
+  const messageQueue = useMessageQueue()
   const pendingRef = useRef(pendingHookMessages ?? null)
   const resolvedRef = useRef(!pendingHookMessages)
 
@@ -33,7 +34,7 @@ export function useDeferredHookMessages(
       // the command queue so the REPL executes a real first-turn user prompt.
       const initial = takeInitialUserMessage()
       if (initial) {
-        enqueueReportingAdmission(
+        messageQueue.enqueueReportingAdmission(
           { mode: 'prompt', value: initial, priority: 'now' },
           { ahead: true },
         )
@@ -42,7 +43,7 @@ export function useDeferredHookMessages(
     return () => {
       cancelled = true
     }
-  }, [setMessages])
+  }, [setMessages, messageQueue])
 
   return useCallback(async () => {
     if (resolvedRef.current || !pendingRef.current) return
@@ -55,10 +56,10 @@ export function useDeferredHookMessages(
     }
     const initial = takeInitialUserMessage()
     if (initial) {
-      enqueueReportingAdmission(
+      messageQueue.enqueueReportingAdmission(
         { mode: 'prompt', value: initial, priority: 'now' },
         { ahead: true },
       )
     }
-  }, [setMessages])
+  }, [setMessages, messageQueue])
 }

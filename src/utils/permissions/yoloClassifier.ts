@@ -37,8 +37,7 @@ import {
   formatClassifierWaitDuration,
 } from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
-import { getDefaultSonnetModel, getMainLoopModel } from '../model/model.js'
-import { isPoorModeActive } from '../../commands/poor/poorMode.js'
+import { getMainLoopModel } from '../model/model.js'
 import { getAutoModeConfig } from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
 import {
@@ -1683,8 +1682,7 @@ function resolveModelByMainModel(
  *    registers the env name but the 2.1.207 classifier path does not read it)
  * 2. GrowthBook tengu_auto_mode_config.modelByMainModel[mainModel]
  * 3. GrowthBook tengu_auto_mode_config.model
- * 4. Poor mode → default Sonnet (fork-only cost control)
- * 5. Main loop model
+ * 4. Main loop model
  *
  * densable 2.1.236: config via KD()/resolveTenguAutoModeConfig (qTa when !KIt).
  */
@@ -1706,11 +1704,6 @@ function getClassifierModel(): string {
 
   if (config?.model) {
     return config.model
-  }
-
-  // Poor mode: downgrade classifier to Sonnet to reduce cost (fork-only).
-  if (isPoorModeActive()) {
-    return getDefaultSonnetModel()
   }
 
   return mainModel

@@ -8,7 +8,7 @@ import {
   getSessionId,
   isSessionPersistenceDisabled,
 } from 'src/bootstrap/state.js'
-import { getBootstrapSession } from 'src/utils/sessionRoot.js'
+import { createSessionToolUseContext } from './engine/createSessionToolUseContext.js'
 import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
@@ -41,8 +41,6 @@ import { categorizeRetryableAPIError } from './services/api/errors.js'
 import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
 import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
-import { createAppStatePermissionContextSetters } from './utils/permissions/permissionContextSetters.js'
-import { retireDepartedAdditionalDirectories } from './utils/settings/applySettingsChange.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
@@ -56,7 +54,6 @@ import type { HookDeferredToolAttachment } from './utils/attachments.js'
 import { transformCompletedAssistantMessage } from './utils/messageDisplayTransform.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
-import type { AttributionState } from './utils/commitAttribution.js'
 import { getCwd } from './utils/cwd.js'
 import { isBareMode } from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
@@ -543,7 +540,7 @@ export class QueryEngine {
       }
     }
 
-    let processUserInputContext: ProcessUserInputContext = {
+    let processUserInputContext = createSessionToolUseContext({
       messages: this.mutableMessages,
       // Slash commands that mutate the message array (e.g. /force-snip)
       // call setMessages(fn).  In interactive mode this writes back to
@@ -557,82 +554,44 @@ export class QueryEngine {
         pruneDetachedToolCalls(this.mutableMessages, next)
         this.mutableMessages = next
       },
-      onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
       requestDialog: this.config.requestDialog,
-      options: {
-        commands,
-        debug: false, // we use stdout, so don't want to clobber it
-        tools,
-        verbose,
-        mainLoopModel: initialMainLoopModel,
-        fallbackModel,
-        thinkingConfig: initialThinkingConfig,
-        mcpClients,
-        mcpResources: {},
-        ideInstallationStatus: null,
-        isNonInteractiveSession: true,
-        customSystemPrompt,
-        appendSystemPrompt,
-        appendSubagentSystemPrompt,
-        agentDefinitions: { activeAgents: agents, allAgents: [] },
-        theme: resolveThemeSetting(getThemeSetting()),
-        maxBudgetUsd,
-        // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
-        forwardSubagentText,
-        toolAliases,
-        messageClientPlatform: options?.clientPlatform,
-      },
+      commands,
+      debug: false, // we use stdout, so don't want to clobber it
+      tools,
+      verbose,
+      mainLoopModel: initialMainLoopModel,
+      fallbackModel,
+      thinkingConfig: initialThinkingConfig,
+      mcpClients,
+      mcpResources: {},
+      ideInstallationStatus: null,
+      isNonInteractiveSession: true,
+      customSystemPrompt,
+      appendSystemPrompt,
+      appendSubagentSystemPrompt,
+      baseAgentDefinitions: { activeAgents: agents, allAgents: [] },
+      theme: resolveThemeSetting(getThemeSetting()),
+      maxBudgetUsd,
+      // densable 2.1.219 #6 — plumb into ToolUseContext for AgentTool
+      forwardSubagentText,
+      toolAliases,
+      messageClientPlatform: options?.clientPlatform,
       getAppState,
       taskRegistry: this.taskRegistry,
-      session: getBootstrapSession(),
       setAppState,
-      // densable y8r(setAppState) for headless/SDK ToolUseContext
-      ...createAppStatePermissionContextSetters(setAppState),
-      retireDepartedAdditionalDirectories: directories => {
-        setAppState(prev => {
-          const next = retireDepartedAdditionalDirectories(
-            prev.toolPermissionContext,
-            directories,
-          )
-          return next === prev.toolPermissionContext
-            ? prev
-            : { ...prev, toolPermissionContext: next }
-        })
-      },
       abortController: this.abortController,
       readFileState: this.readFileState,
       toolState: this.sessionToolState,
       credentials: headlessCredentials(this.config.credentials),
-      nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
-      dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: createSetInProgressToolUseIDs(this.taskRegistry),
-      setResponseLength: () => {},
       setRetryStatus: leftoverIhrSdkRetry,
       setStreamMode: leftoverIhrSdkMode,
-      updateFileHistoryState: (
-        updater: (prev: FileHistoryState) => FileHistoryState,
-      ) => {
-        setAppState(prev => {
-          const updated = updater(prev.fileHistory)
-          if (updated === prev.fileHistory) return prev
-          return { ...prev, fileHistory: updated }
-        })
-      },
-      updateAttributionState: (
-        updater: (prev: AttributionState) => AttributionState,
-      ) => {
-        setAppState(prev => {
-          const updated = updater(prev.attribution)
-          if (updated === prev.attribution) return prev
-          return { ...prev, attribution: updated }
-        })
-      },
       setSDKStatus,
-    }
+    })
 
     // Handle orphaned permission (only once per engine lifetime)
     if (orphanedPermission && !this.hasHandledOrphanedPermission) {
@@ -932,68 +891,46 @@ export class QueryEngine {
 
     // Recreate after processing the prompt to pick up updated messages and
     // model (from slash commands).
-    processUserInputContext = {
+    processUserInputContext = createSessionToolUseContext({
       messages,
       setMessages: () => {},
-      onChangeAPIKey: () => {},
       handleElicitation: this.config.handleElicitation,
       requestDialog: this.config.requestDialog,
-      options: {
-        commands,
-        debug: false,
-        tools,
-        verbose,
-        mainLoopModel,
-        thinkingConfig: initialThinkingConfig,
-        mcpClients,
-        mcpResources: {},
-        ideInstallationStatus: null,
-        isNonInteractiveSession: true,
-        customSystemPrompt,
-        appendSystemPrompt,
-        appendSubagentSystemPrompt,
-        theme: resolveThemeSetting(getThemeSetting()),
-        agentDefinitions: { activeAgents: agents, allAgents: [] },
-        maxBudgetUsd,
-        // densable 2.1.219 #6
-        forwardSubagentText,
-        toolAliases,
-        messageClientPlatform: options?.clientPlatform,
-      },
+      commands,
+      debug: false,
+      tools,
+      verbose,
+      mainLoopModel,
+      thinkingConfig: initialThinkingConfig,
+      mcpClients,
+      mcpResources: {},
+      ideInstallationStatus: null,
+      isNonInteractiveSession: true,
+      customSystemPrompt,
+      appendSystemPrompt,
+      appendSubagentSystemPrompt,
+      theme: resolveThemeSetting(getThemeSetting()),
+      baseAgentDefinitions: { activeAgents: agents, allAgents: [] },
+      maxBudgetUsd,
+      // densable 2.1.219 #6
+      forwardSubagentText,
+      toolAliases,
+      messageClientPlatform: options?.clientPlatform,
       getAppState,
       taskRegistry: this.taskRegistry,
-      session: getBootstrapSession(),
       setAppState,
-      // densable y8r(setAppState) for headless/SDK ToolUseContext
-      ...createAppStatePermissionContextSetters(setAppState),
-      retireDepartedAdditionalDirectories: directories => {
-        setAppState(prev => {
-          const next = retireDepartedAdditionalDirectories(
-            prev.toolPermissionContext,
-            directories,
-          )
-          return next === prev.toolPermissionContext
-            ? prev
-            : { ...prev, toolPermissionContext: next }
-        })
-      },
       abortController: this.abortController,
       readFileState: this.readFileState,
       toolState: this.sessionToolState,
       credentials: headlessCredentials(this.config.credentials),
-      nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       pendingNestedMemoryTriggers: this.pendingNestedMemoryTriggers,
-      dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
       setInProgressToolUseIDs: createSetInProgressToolUseIDs(this.taskRegistry),
-      setResponseLength: () => {},
       setRetryStatus: leftoverIhrSdkRetry,
       setStreamMode: leftoverIhrSdkMode,
-      updateFileHistoryState: processUserInputContext.updateFileHistoryState,
-      updateAttributionState: processUserInputContext.updateAttributionState,
       setSDKStatus,
-    }
+    })
 
     headlessProfilerCheckpoint('before_skills_plugins')
     // Cache-only: headless/SDK/CCR startup must not block on network for

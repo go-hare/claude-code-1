@@ -10,6 +10,7 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import {
   useAppState,
   useAppStateStore,
+  useMessageQueue,
   useSetAppState,
 } from 'src/state/AppState.js'
 import { isVimModeEnabled } from '../components/PromptInput/utils.js'
@@ -29,11 +30,7 @@ import {
   markAgentsNotified,
 } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { PromptInputMode, VimMode } from '../types/textInputTypes.js'
-import {
-  clearCommandQueue,
-  enqueuePendingNotification,
-  isPoppableEditableCommand,
-} from '../utils/messageQueueManager.js'
+import { isPoppableEditableCommand } from '../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 import { createTaskRegistry } from '../utils/taskRegistry.js'
 
@@ -89,6 +86,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   const store = useAppStateStore()
   const dialogStore = useDialogStore()
   const setAppState = useSetAppState()
+  const messageQueue = useMessageQueue()
   // Subscribe so isActive re-evaluates when the queue mutates (useSyncExternalStore).
   const queuedCommands = useCommandQueue()
   const { addNotification, removeNotification } = useNotifications()
@@ -297,10 +295,13 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       descriptions.length === 1
         ? `Background agent "${descriptions[0]}" was stopped by the user.`
         : `${descriptions.length} background agents were stopped by the user: ${descriptions.map(d => `"${d}"`).join(', ')}.`
-    enqueuePendingNotification({ value: summary, mode: 'task-notification' })
+    messageQueue.enqueuePendingNotification({
+      value: summary,
+      mode: 'task-notification',
+    })
     onAgentsKilled()
     return true
-  }, [store, setAppState, onAgentsKilled])
+  }, [store, setAppState, onAgentsKilled, messageQueue])
 
   // Ctrl+C (app:interrupt). Scoped to teammate-view: killing agents from the
   // main prompt stays a deliberate gesture (chat:killAgents), not a
@@ -376,7 +377,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       } catch {
         // ignore
       }
-      clearCommandQueue()
+      messageQueue.clear()
       killAllAgentsAndNotify()
       return
     }
@@ -393,7 +394,13 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       priority: 'immediate',
       timeoutMs: KILL_AGENTS_CONFIRM_WINDOW_MS,
     })
-  }, [store, addNotification, removeNotification, killAllAgentsAndNotify])
+  }, [
+    store,
+    addNotification,
+    removeNotification,
+    killAllAgentsAndNotify,
+    messageQueue,
+  ])
 
   // Must stay always-active: ctrl+x is consumed as a chord prefix regardless
   // of isActive (because ctrl+x ctrl+e is always live), so an inactive handler

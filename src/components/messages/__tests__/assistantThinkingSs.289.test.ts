@@ -54,8 +54,10 @@ describe('gold thinking Ss paint', () => {
     expect(spinner).not.toContain('leftoverIhrBind')
     expect(spinner).toContain('leftoverIhrSlice')
     expect(spinner).toContain('leftoverIhrHas')
-    const repl = await Bun.file(join(ROOT, 'src/screens/REPL.tsx')).text()
-    expect(repl).toContain('leftoverIhr.main.applyCompactProgress')
+    const sessionEngine = await Bun.file(
+      join(ROOT, 'src/screens/repl/SessionEngine.ts'),
+    ).text()
+    expect(sessionEngine).toContain('leftoverIhr.main.applyCompactProgress')
     const clock = await Bun.file(
       join(ROOT, 'src/components/messages/CollapsedReadSearchContent.tsx'),
     ).text()
@@ -190,10 +192,13 @@ describe('gold thinking Ss paint', () => {
     expect(repl).toContain('leftoverIhrUxe.setSpinnerColors')
     expect(repl).toContain('leftoverIhr.main.setRetryStatus')
     expect(repl).toContain('leftoverIhr.main.setMode')
-    expect(repl).toContain('leftoverIhr.main.applyCompactProgress')
     expect(repl).toContain('leftoverIhr.main.resetOverrides')
     expect(repl).toContain('leftoverIhr.main.setTurnEffort')
     expect(repl).toContain('LeftoverMhrRetryRow')
+    const sessionEngine = await Bun.file(
+      join(ROOT, 'src/screens/repl/SessionEngine.ts'),
+    ).text()
+    expect(sessionEngine).toContain('leftoverIhr.main.applyCompactProgress')
     const bootstrap = await Bun.file(
       join(ROOT, 'src/services/api/bootstrap.ts'),
     ).text()

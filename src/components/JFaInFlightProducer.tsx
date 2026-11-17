@@ -9,9 +9,8 @@
 
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { getSessionId } from '../bootstrap/state.js';
-import { useAppState, useAppStateStore } from '../state/AppState.js';
+import { useAppState, useAppStateStore, useMessageQueue } from '../state/AppState.js';
 import { budgetProgressKey, fanItemsKey, isBgJobSession, setBgInFlightRegistry } from '../utils/bgNeedsInputBridge.js';
-import { getCommandQueueLength, subscribeToCommandQueue } from '../utils/messageQueueManager.js';
 import { buildJFaInFlightSnapshot, setJFaAppStateReader, snapshotTurnBudget } from '../utils/task/jfaInFlightStamp.js';
 
 /**
@@ -20,13 +19,18 @@ import { buildJFaInFlightSnapshot, setJFaAppStateReader, snapshotTurnBudget } fr
  */
 export function JFaInFlightProducer(): null {
   const store = useAppStateStore();
+  const messageQueue = useMessageQueue();
   const tasks = useAppState(s => s.tasks);
   const todosMap = useAppState(s => s.todos);
   const sessionId = getSessionId();
   const sessionTodos = todosMap[sessionId];
 
   // densable PCt
-  const queued = useSyncExternalStore(subscribeToCommandQueue, getCommandQueueLength, getCommandQueueLength);
+  const queued = useSyncExternalStore(
+    messageQueue.subscribe,
+    () => messageQueue.getLength(),
+    () => messageQueue.getLength(),
+  );
 
   // densable Xat(Jjb) — recompute with task/todo/queue deps
   const budgetKey = useMemo(

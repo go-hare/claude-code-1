@@ -21,7 +21,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { type AppState, useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
+import { type AppState, useAppState, useAppStateStore, useMessageQueue, useSetAppState } from 'src/state/AppState.js';
 import type { FooterItem } from 'src/state/AppStateStore.js';
 import { createOnBgDetach } from '../../daemon/rendezvousServer.js';
 import { getCwd } from 'src/utils/cwd.js';
@@ -29,8 +29,6 @@ import {
   clampQueueEditIndex,
   isPoppableEditableCommand,
   isQueuedCommandEditable,
-  popAllEditable,
-  popEditableAt,
   queueEditIndexAfterHistoryDown,
   queueEditIndexAfterHistoryUp,
 } from 'src/utils/messageQueueManager.js';
@@ -132,7 +130,7 @@ import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { createPromptEditComposer, hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
-import { type EffortLevel, isUltracodeModeActive } from '../../utils/effort.js';
+import { type EffortLevel, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
 import { env } from '../../utils/env.js';
 import {
   applyLeftArrowGestureDecision,
@@ -617,6 +615,7 @@ function PromptInput({
   }
   const store = useAppStateStore();
   const setAppState = useSetAppState();
+  const messageQueue = useMessageQueue();
   const { columns, rows } = useTerminalSize();
   const tasks = useAppState(s => s.tasks);
   const replBridgeConnected = useAppState(s => s.replBridgeConnected);
@@ -682,15 +681,15 @@ function PromptInput({
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
-  const effortValue = useAppState(s => s.effortValue);
+  const effortValue = useAppState(s => pdSessionEffort(s));
   const ultracode = useAppState(s => s.ultracode);
   const agentNameRegistry = useAppState(s => s.agentNameRegistry);
-  // densable Iln — viewed-task envelope. No second transcript store: pass
-  // the existing bag (empty here; REPL keeps messages on the task / loop).
+  const transcripts = useAppState(s => s.transcripts);
+  // densable Iln / d9 — viewed-task envelope backed by AppState.transcripts.
   const viewed = resolveViewedTask({
     viewingAgentTaskId,
     tasks,
-    transcripts: {},
+    transcripts,
     mainIsBusy: isLoading,
     mainConversationId: undefined,
   });
@@ -1576,7 +1575,7 @@ function PromptInput({
       });
       return true;
     }
-    const result = popEditableAt(index, live, cursorOffsetRef.current);
+    const result = messageQueue.popEditableAt(index, live, cursorOffsetRef.current);
     setQueueEditIndex(null);
     if (!result) {
       logEvent('tengu_feature_sad', {
@@ -1605,6 +1604,7 @@ function PromptInput({
     return true;
   }, [
     addNotification,
+    messageQueue,
     onModeChange,
     onRestoreIdeSelection,
     queuedCommands,
@@ -2056,7 +2056,7 @@ function PromptInput({
 
   // densable Phe: fii(h6(), Xe, S) — live draft, not the render snapshot.
   const popAllCommandsFromQueue = useCallback((): boolean => {
-    const result = popAllEditable(liveInputRef.current, cursorOffsetRef.current);
+    const result = messageQueue.popAllEditable(liveInputRef.current, cursorOffsetRef.current);
     if (!result) {
       return false;
     }
@@ -2085,7 +2085,7 @@ function PromptInput({
       feature_name: 'input_queue_pop_to_edit' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
     return true;
-  }, [trackAndSetInput, onModeChange, onRestoreIdeSelection, setPastedContents, setAppState]);
+  }, [trackAndSetInput, onModeChange, onRestoreIdeSelection, setPastedContents, setAppState, messageQueue]);
 
   // Insert the at-mentioned reference (the file and, optionally, a line range) when
   // we receive an at-mentioned notification the IDE.

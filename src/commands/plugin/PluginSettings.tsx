@@ -14,7 +14,7 @@ import { Byline, Pane, StatusIcon, Tab, Tabs } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
+import { useActivePlugins, useAppState } from '../../state/AppState.js';
 import type { PluginError, PluginWarning } from '../../types/plugin.js';
 import { uniq } from '../../utils/array.js';
 import { errorMessage } from '../../utils/errors.js';
@@ -465,7 +465,7 @@ function ErrorsTabContent({
   const errors = useAppState(s => s.plugins.errors);
   const warnings = useAppState(s => (s.plugins as { warnings?: PluginWarning[] }).warnings);
   const installationStatus = useAppState(s => s.plugins.installationStatus);
-  const setAppState = useSetAppState();
+  const activePlugins = useActivePlugins();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [marketplaceLoadFailures, setMarketplaceLoadFailures] = useState<Array<{ name: string; error: string }>>([]);
@@ -583,17 +583,7 @@ function ErrorsTabContent({
         // updates glitch-free. markPluginsChanged only sets needsRefresh —
         // it does not refresh plugins.errors, so this is the authoritative
         // cleanup until the user runs /reload-plugins.
-        setAppState(prev => ({
-          ...prev,
-          plugins: {
-            ...prev.plugins,
-            errors: prev.plugins.errors.filter(e => !('marketplace' in e && e.marketplace === action.name)),
-            installationStatus: {
-              ...prev.plugins.installationStatus,
-              marketplaces: prev.plugins.installationStatus.marketplaces.filter(m => m.name !== action.name),
-            },
-          },
-        }));
+        activePlugins.clearMarketplaceState(action.name);
         setActionMessage(`${figures.tick} Removed "${action.name}" from ${scopes} settings`);
         markPluginsChanged();
         break;
@@ -1056,7 +1046,6 @@ export function PluginSettings({
     parsedCommand.type === 'usage-error' ? parsedCommand.message : null,
   );
   const [childSearchActive, setChildSearchActive] = useState(false);
-  const setAppState = useSetAppState();
   const { storageV5 } = useSessionServices();
   const mcpClients = useAppState(s => s.mcp.clients);
   const mcpCommands = useAppState(s => s.mcp.commands);
@@ -1143,15 +1132,14 @@ export function PluginSettings({
   // plugin changes require /reload-plugins.
   const pluginsChangedThisVisit = useRef(false);
   const closeReloadOnce = useRef(false);
+  const activePlugins = useActivePlugins();
   const needsRefresh = useAppState(s => s.plugins.needsRefresh);
   const autoReloadOnClose = getFeatureValue_CACHED_MAY_BE_STALE('tengu_plugin_menu_close_reload', true);
 
   const markPluginsChanged = useCallback(() => {
     pluginsChangedThisVisit.current = true;
-    setAppState(prev =>
-      prev.plugins.needsRefresh ? prev : { ...prev, plugins: { ...prev.plugins, needsRefresh: true } },
-    );
-  }, [setAppState]);
+    activePlugins.markNeedsRefresh();
+  }, [activePlugins]);
 
   const completePluginMenu = useCallback(
     (message?: string) => {

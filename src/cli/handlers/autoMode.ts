@@ -6,7 +6,6 @@
  */
 
 import { createInterface } from 'readline'
-import { isPoorModeActive } from '../../commands/poor/poorMode.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -17,7 +16,6 @@ import { getFsImplementation } from '../../utils/fsOperations.js'
 import { safeParseJSON } from '../../utils/json.js'
 import {
   getMainLoopModel,
-  getSmallFastModel,
   parseUserSpecifiedModel,
 } from '../../utils/model/model.js'
 import {
@@ -114,9 +112,7 @@ export async function autoModeCritiqueHandler(options: {
 
   const model = options.model
     ? parseUserSpecifiedModel(options.model)
-    : isPoorModeActive()
-      ? getSmallFastModel()
-      : getMainLoopModel()
+    : getMainLoopModel()
 
   const defaults = getDefaultExternalAutoModeRules()
   const classifierPrompt = buildDefaultExternalSystemPrompt()

@@ -59,12 +59,11 @@ import type { PermissionMode, SDKMessage } from '../entrypoints/agentSdkTypes.js
 import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js';
 import { Text } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
-import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
+import { useAppState, useAppStateStore, useMessageQueue, useSetAppState } from '../state/AppState.js';
 import type { Message } from '../types/message.js';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
 import { errorMessage } from '../utils/errors.js';
-import { enqueue } from '../utils/messageQueueManager.js';
 import { buildSystemInitMessage } from '../utils/messages/systemInit.js';
 import { createBridgeStatusMessage, createSystemMessage } from '../utils/messages.js';
 import {
@@ -319,6 +318,7 @@ export function useReplBridge(
   /** densable `ye` — unattended revive count; cap `Qtt=10`. */
   const authReviveCountRef = useRef(0);
   const setAppState = useSetAppState();
+  const messageQueue = useMessageQueue();
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
   const mainLoopModelRef = useRef(mainLoopModel);
@@ -662,7 +662,7 @@ export function useReplBridge(
 
               const preview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} content blocks]`;
               logForDebugging(`[bridge:repl] Injecting inbound user message: ${preview}${uuid ? ` uuid=${uuid}` : ''}`);
-              enqueue({
+              messageQueue.enqueue({
                 value: content,
                 mode: 'prompt' as const,
                 uuid,

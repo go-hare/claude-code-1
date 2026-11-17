@@ -1,9 +1,6 @@
 import { useSyncExternalStore } from 'react'
+import { useMessageQueue } from '../state/AppState.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
-import {
-  getCommandQueueSnapshot,
-  subscribeToCommandQueue,
-} from '../utils/messageQueueManager.js'
 
 /**
  * React hook to subscribe to the unified command queue.
@@ -11,5 +8,6 @@ import {
  * Components re-render only when the queue changes.
  */
 export function useCommandQueue(): readonly QueuedCommand[] {
-  return useSyncExternalStore(subscribeToCommandQueue, getCommandQueueSnapshot)
+  const messageQueue = useMessageQueue()
+  return useSyncExternalStore(messageQueue.subscribe, messageQueue.getSnapshot)
 }

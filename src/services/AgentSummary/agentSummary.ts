@@ -11,7 +11,6 @@
  */
 
 import type { TaskContext } from '../../Task.js'
-import { isPoorModeActive } from '../../commands/poor/poorMode.js'
 import { updateAgentSummary } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -32,7 +31,6 @@ const SUMMARY_INTERVAL_MS = 30_000
 export type AgentSummaryDependencies = Partial<{
   clearTimeout: typeof clearTimeout
   getAgentTranscript: typeof getAgentTranscript
-  isPoorModeActive: typeof isPoorModeActive
   logError: typeof logError
   logForDebugging: typeof logForDebugging
   runForkedAgent: typeof runForkedAgent
@@ -59,7 +57,6 @@ export function startAgentSummarization(
   const clearTimeoutImpl = dependencies.clearTimeout ?? clearTimeout
   const getAgentTranscriptImpl =
     dependencies.getAgentTranscript ?? getAgentTranscript
-  const isPoorModeActiveImpl = dependencies.isPoorModeActive ?? isPoorModeActive
   const logErrorImpl = dependencies.logError ?? logError
   const logForDebuggingImpl = dependencies.logForDebugging ?? logForDebugging
   const runForkedAgentImpl = dependencies.runForkedAgent ?? runForkedAgent
@@ -69,11 +66,6 @@ export function startAgentSummarization(
 
   async function runSummary(): Promise<void> {
     if (stopped) return
-    if (isPoorModeActiveImpl()) {
-      logForDebuggingImpl('[AgentSummary] Skipping summary — poor mode active')
-      scheduleNext()
-      return
-    }
 
     logForDebuggingImpl(`[AgentSummary] Timer fired for agent ${agentId}`)
 

@@ -6,8 +6,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
-import { enqueuePendingNotification } from 'src/utils/messageQueueManager.js';
+import { useAppState, useAppStateStore, useMessageQueue, useSetAppState } from 'src/state/AppState.js';
 import { isUltraplanProductEnabled } from 'src/utils/ultraplanKeyword.js';
 import { launchUltraplan } from '../../../commands/ultraplan.js';
 import {
@@ -208,6 +207,7 @@ export function ExitPlanModePermissionRequest({
   const nextPasteIdRef = useRef(0);
 
   const store = useAppStateStore();
+  const messageQueue = useMessageQueue();
   const ultraplanSessionUrl = useAppState(s => s.ultraplanSessionUrl);
   const ultraplanLaunching = useAppState(s => s.ultraplanLaunching);
   const showUltraplan = isUltraplanProductEnabled() && !ultraplanSessionUrl && !ultraplanLaunching;
@@ -393,7 +393,7 @@ export function ExitPlanModePermissionRequest({
         setAppState: store.setState,
         signal: new AbortController().signal,
       })
-        .then(msg => enqueuePendingNotification({ value: msg, mode: 'task-notification' }))
+        .then(msg => messageQueue.enqueuePendingNotification({ value: msg, mode: 'task-notification' }))
         .catch(logError);
       return;
     }

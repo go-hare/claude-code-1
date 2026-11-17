@@ -34,9 +34,8 @@ describe('248 stickyBetas (oe / Yd / Pvt)', () => {
     expect(src).toContain(
       'getBootstrapSession().conversationLatches.unlatchStickyBetas()',
     )
-    expect(src).toMatch(/stickyBetas\s+[—-]\s+LAND cut/)
     expect(src).not.toContain('requestLatches.stickyBetas')
-    expect(src).not.toMatch(/STATE\.stickyBetas/)
+    expect(src).not.toMatch(/\bSTATE\.stickyBetas/)
   })
 
   test('stickySend / stickyReject / reset round-trip on bag', () => {

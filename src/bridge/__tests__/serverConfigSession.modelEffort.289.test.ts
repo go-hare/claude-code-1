@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { AppState } from '../../state/AppStateStore.js'
+import { INHERIT_SESSION_EFFORT, pdSessionEffort } from '../../utils/effort.js'
 import { resetCliOwnedConfigsForTests } from '../../services/mcp/cliOwnedConfigs.js'
 import type { MCPServerConnection } from '../../services/mcp/types.js'
 import { createServerConfigSession } from '../serverConfigSession.js'
@@ -27,7 +28,7 @@ function makeStores() {
       alwaysAskRules: {},
       mode: 'default',
     },
-    effortValue: undefined as unknown,
+    sessionEffort: INHERIT_SESSION_EFFORT,
   } as unknown as AppState
   return {
     getAppState: () => state,
@@ -81,7 +82,7 @@ describe('densable 2.1.289 serverConfigSession model/effort lanes', () => {
         efforts.push(effort)
         return { ok: true }
       },
-      getSessionEffort: () => stores.getState().effortValue,
+      getSessionEffort: () => pdSessionEffort(stores.getState()),
       reconnect: async () => ({
         client: {
           name: 'x',
@@ -119,7 +120,7 @@ describe('densable 2.1.289 serverConfigSession model/effort lanes', () => {
         efforts.push(effort)
         return { ok: true }
       },
-      getSessionEffort: () => stores.getState().effortValue,
+      getSessionEffort: () => pdSessionEffort(stores.getState()),
       reconnect: async () => ({
         client: {
           name: 'x',
@@ -151,7 +152,7 @@ describe('densable 2.1.289 serverConfigSession model/effort lanes', () => {
       sdkHostConfigs: () => ({}),
       applyModelPick: () => ({ ok: true }),
       applyEffortSeed: () => ({ ok: true }),
-      getSessionEffort: () => stores.getState().effortValue,
+      getSessionEffort: () => pdSessionEffort(stores.getState()),
       reconnect: async () => ({
         client: {
           name: 'x',

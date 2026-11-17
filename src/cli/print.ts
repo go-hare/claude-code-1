@@ -530,6 +530,38 @@ import { randomUUID } from 'crypto'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { AppState } from 'src/state/AppStateStore.js'
 import {
+  HeadlessControlPlane,
+  type HeadlessAppState,
+  type HeadlessSetAppState,
+  type DynamicMcpState,
+  type SdkMcpState,
+  type McpSetServersResult,
+  buildSdkInitializeResponse,
+  handleInitializeRequest,
+  handleRewindFiles,
+  handleSetPermissionMode,
+  handleChannelEnable,
+  reregisterChannelHandlerAfterReconnect,
+  handleOrphanedPermissionResponse,
+  permissionPoliciesFromDynamicMcpConfigs,
+  handleMcpSetServers,
+  reconcileMcpServers,
+} from 'src/cli/headless/HeadlessControlPlane.js'
+export type {
+  HeadlessAppState,
+  HeadlessSetAppState,
+  DynamicMcpState,
+  SdkMcpState,
+  McpSetServersResult,
+}
+export {
+  HeadlessControlPlane,
+  handleOrphanedPermissionResponse,
+  permissionPoliciesFromDynamicMcpConfigs,
+  handleMcpSetServers,
+  reconcileMcpServers,
+}
+import {
   fileHistoryRewind,
   fileHistoryCanRestore,
   fileHistoryEnabled,
@@ -764,10 +796,10 @@ function countsAsHeadlessLastMessage(message: {
   )
 }
 
-export async function runHeadless(
+export async function runHeadless<TState extends HeadlessAppState = AppState>(
   inputPrompt: string | AsyncIterable<string>,
-  getAppState: () => AppState,
-  setAppState: (f: (prev: AppState) => AppState) => void,
+  getAppStateParam: () => TState,
+  setAppStateParam: HeadlessSetAppState<TState>,
   commands: Command[],
   tools: Tools,
   sdkMcpConfigs: Record<string, McpSdkServerConfig>,
@@ -821,6 +853,10 @@ export async function runHeadless(
     permissionModeSuppliedOnInvocation?: boolean
   },
 ): Promise<void> {
+  const getAppState = getAppStateParam as unknown as () => AppState
+  const setAppState = setAppStateParam as unknown as (
+    f: (prev: AppState) => AppState,
+  ) => void
   // Official EXIT_AFTER_FIRST_RENDER densable — ant-only startup bench exit.
   try {
     const { isExitAfterFirstRenderEnabled } = await import(
@@ -1698,7 +1734,7 @@ export async function runHeadless(
   )
 }
 
-function runHeadlessStreaming(
+function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   structuredIO: StructuredIO,
   mcpClients: MCPServerConnection[],
   commands: Command[],
@@ -1706,8 +1742,8 @@ function runHeadlessStreaming(
   initialMessages: Message[],
   canUseTool: CanUseToolFn,
   sdkMcpConfigs: Record<string, McpSdkServerConfig>,
-  getAppState: () => AppState,
-  setAppState: (f: (prev: AppState) => AppState) => void,
+  getAppStateParam: () => TState,
+  setAppStateParam: HeadlessSetAppState<TState>,
   agents: AgentDefinition[],
   options: {
     verbose: boolean | undefined
@@ -1772,6 +1808,10 @@ function runHeadlessStreaming(
     options?: { signal?: AbortSignal },
   ) => Promise<unknown>,
 ): AsyncIterable<StdoutMessage> {
+  const getAppState = getAppStateParam as unknown as () => AppState
+  const setAppState = setAppStateParam as unknown as (
+    f: (prev: AppState) => AppState,
+  ) => void
   // Official QueryEngine latches F once. Local print builds a new ask()
   // engine per queued command — consume Q on the first ask only.
   let pendingDeferredToolUse = options.deferredToolUse
@@ -4824,6 +4864,7 @@ function runHeadlessStreaming(
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
         statusListeners.delete(rateLimitListener)
+        controlPlane.dispose()
         output.done()
       }
     }
@@ -5265,33 +5306,23 @@ function runHeadlessStreaming(
       : { handled: true, element: rec.element }
   }
 
-  const sendControlResponseSuccess = function (
+  const controlPlane = new HeadlessControlPlane({
+    output,
+    getAppState: getAppState as () => HeadlessAppState,
+    setAppState: setAppState as unknown as (
+      f: (prev: HeadlessAppState) => HeadlessAppState,
+    ) => void,
+  })
+
+  const sendControlResponseSuccess = (
     message: { request_id: string } | SDKControlRequest,
     response?: Record<string, unknown>,
-  ) {
-    output.enqueue({
-      type: 'control_response',
-      response: {
-        subtype: 'success',
-        request_id: message.request_id,
-        response: response,
-      },
-    })
-  }
+  ) => controlPlane.sendControlResponseSuccess(message, response)
 
-  const sendControlResponseError = function (
+  const sendControlResponseError = (
     message: { request_id: string } | SDKControlRequest,
     errorMessage: string,
-  ) {
-    output.enqueue({
-      type: 'control_response',
-      response: {
-        subtype: 'error',
-        request_id: message.request_id,
-        error: errorMessage,
-      },
-    })
-  }
+  ) => controlPlane.sendControlResponseError(message, errorMessage)
 
   // Handle unexpected permission responses by looking up the unresolved tool
   // call in the transcript and executing it
@@ -5308,33 +5339,6 @@ function runHeadlessStreaming(
       },
     })
   })
-
-  // Track active OAuth flows per server so we can abort a previous flow
-  // when a new mcp_authenticate request arrives for the same server.
-  const activeOAuthFlows = new Map<string, AbortController>()
-  // Track manual callback URL submit functions for active OAuth flows.
-  // Used when localhost is not reachable (e.g., browser-based IDEs).
-  const oauthCallbackSubmitters = new Map<
-    string,
-    (callbackUrl: string) => void
-  >()
-  // Track servers where the manual callback was actually invoked (so the
-  // automatic reconnect path knows to skip — the extension will reconnect).
-  const oauthManualCallbackUsed = new Set<string>()
-  // Track OAuth auth-only promises so mcp_oauth_callback_url can await
-  // token exchange completion. Reconnect is handled separately by the
-  // extension via handleAuthDone → mcp_reconnect.
-  const oauthAuthPromises = new Map<string, Promise<void>>()
-
-  // In-flight Anthropic OAuth flow (claude_authenticate). Single-slot: a
-  // second authenticate request cleans up the first. The service holds the
-  // PKCE verifier + localhost listener; the promise settles after
-  // installOAuthTokens — after it resolves, the in-process memoized token
-  // cache is already cleared and the next API call picks up the new creds.
-  let claudeOAuth: {
-    service: OAuthService
-    flow: Promise<void>
-  } | null = null
 
   // This is essentially spawning a parallel async task- we have two
   // running in parallel- one reading from stdin and adding to the
@@ -5534,128 +5538,19 @@ function runHeadlessStreaming(
             // notifySessionMetadataChanged that used to follow here is
             // now fired by onChangeAppState (with externalized mode name).
           } else if (msg.request.subtype === 'set_model') {
-            // densable 2.1.212 print set_model (RGf/DGf/h5/Z0 + Ye/HS/session):
-            // type check → default trim → recognition → allowlist/step-down →
-            // Ye + HS + mainLoopModelForSession + metadata; breadcrumbs only when
-            // main model or family actually changes (avoids redundant remote /model).
-            const decision = decidePrintSetModel(
-              msg.request.model,
-              activeUserSpecifiedModel,
-            )
-            if (!decision.ok) {
-              if (decision.analytics === 'invalid_model_type') {
-                logEvent('tengu_feature_bad', {
-                  feature_name:
-                    'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  error_code:
-                    'invalid_model_type' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              } else if (decision.analytics === 'unrecognized_model') {
-                logEvent('tengu_set_model_unrecognized', {
-                  shape: (decision.recognitionShape ??
-                    'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  had_suggestion: decision.hadSuggestion === true,
-                  surface:
-                    'print' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-                logEvent('tengu_feature_bad', {
-                  feature_name:
-                    'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  error_code:
-                    'unrecognized_model' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              } else if (decision.analytics === 'not_allowed') {
-                logEvent('tengu_feature_bad', {
-                  feature_name:
-                    'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  error_code:
-                    'not_allowed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              } else if (decision.analytics === 'denied_by_managed_settings') {
-                logEvent('tengu_feature_bad', {
-                  feature_name:
-                    'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  error_code:
-                    'denied_by_managed_settings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                })
-              }
-              sendControlResponseError(msg, decision.error)
-              continue
-            }
-
-            const fromModel = getMainLoopModel()
-            const requestedModel =
-              decision.requestedArg.trim().toLowerCase() === 'default'
-                ? null
-                : decision.requestedArg
-            const pre = await executePreModelSwitchHooks(
-              {
-                fromModel,
-                toModel: decision.model,
-                requestedModel,
-                source: 'print',
+            await controlPlane.handleSetModel(
+              msg as SDKControlRequest & {
+                request: { subtype: 'set_model'; model?: string }
               },
-              mutableMessages,
-            )
-            if (pre.decision === 'block' || pre.decision === 'ask') {
-              sendControlResponseError(
-                msg,
-                pre.reason ?? 'PreModelSwitch hooks blocked the switch',
-              )
-              continue
-            }
-
-            activeUserSpecifiedModel = decision.model
-            setMainLoopModelOverride(decision.model)
-            // densable 2.1.219 #12 / Bcn: mde() on every model switch when fast
-            // is enabled so RC clients drop stale cooldown after set_model.
-            if (isFastModeEnabled()) {
-              clearFastModeCooldown()
-            }
-            // densable 2.1.218 #31 — print/SDK set_model also runs uU/dU (MB)
-            setAppState(prev => {
-              const applied = applyFastModeOnModelSwitch(
-                decision.model,
-                prev.fastMode,
-              )
-              return {
-                ...prev,
-                mainLoopModelForSession: decision.model,
-                ...(applied.changed
-                  ? { fastMode: applied.nextFastMode }
-                  : null),
-              }
-            })
-            notifySessionMetadataChanged({ model: decision.model })
-            if (decision.injectBreadcrumbs) {
-              injectModelSwitchBreadcrumbs(
-                decision.requestedArg,
-                decision.model,
-              )
-            }
-            if (decision.steppedDown) {
-              logEvent('tengu_feature_sad', {
-                feature_name:
-                  'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                error_code:
-                  'family_alias_stepped_down' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              })
-            } else {
-              logEvent('tengu_feature_ok', {
-                feature_name:
-                  'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              })
-            }
-            executePostModelSwitchHooks(
               {
-                fromModel,
-                toModel: decision.model,
-                requestedModel,
-                source: 'print',
+                activeUserSpecifiedModel,
+                setActiveUserSpecifiedModel: model => {
+                  activeUserSpecifiedModel = model
+                },
+                mutableMessages,
+                injectModelSwitchBreadcrumbs,
               },
-              mutableMessages,
             )
-            sendControlResponseSuccess(msg)
           } else if (msg.request.subtype === 'set_max_thinking_tokens') {
             if (msg.request.max_thinking_tokens === null) {
               options.thinkingConfig = undefined
@@ -6272,43 +6167,20 @@ function runHeadlessStreaming(
             }
             sendControlResponseSuccess(msg)
           } else if (msg.request.subtype === 'mcp_set_servers') {
-            // densable: if hint===HEARTH_BINDING_CHANGED_HINT, sync hearth
-            // reply mount(s) with binding_changed; empty servers short-circuit.
-            const { HEARTH_BINDING_CHANGED_HINT } = await import(
-              'src/bridge/hearthBinding.js'
+            await controlPlane.handleMcpSetServersRequest(
+              msg as SDKControlRequest & {
+                request: {
+                  subtype: 'mcp_set_servers'
+                  servers: Record<string, unknown>
+                }
+              },
+              {
+                applyMcpServerChanges,
+                updateSdkMcp,
+                workSecretSession,
+                hearthMount,
+              },
             )
-            const hearthHint = (msg.request as { hint?: string }).hint
-            if (hearthHint === HEARTH_BINDING_CHANGED_HINT) {
-              workSecretSession?.resyncProjectsReplyMount()
-              // densable Ga?.sync("binding_changed") when sdkUrl hearth mount lives.
-              void hearthMount?.sync('binding_changed')
-              const servers = msg.request.servers as Record<string, unknown>
-              if (
-                servers !== null &&
-                typeof servers === 'object' &&
-                !Array.isArray(servers) &&
-                Object.keys(servers).length === 0
-              ) {
-                sendControlResponseSuccess(msg, {
-                  added: [],
-                  removed: [],
-                  errors: {},
-                })
-                continue
-              }
-            }
-            const { response, sdkServersChanged } = await applyMcpServerChanges(
-              msg.request.servers as Record<
-                string,
-                McpServerConfigForProcessTransport
-              >,
-            )
-            sendControlResponseSuccess(msg, response)
-
-            // Connect SDK servers AFTER response to avoid deadlock
-            if (sdkServersChanged) {
-              void updateSdkMcp()
-            }
           } else if (msg.request.subtype === 'reload_plugins') {
             try {
               // leftover 239 $1h — Uln.discardInflight + remint zXl raced with fun()
@@ -6771,592 +6643,58 @@ function runHeadlessStreaming(
               output,
             )
           } else if (req.subtype === 'mcp_authenticate') {
-            const serverName = req.serverName as string
-            const currentAppState = getAppState()
-            const config =
-              getMcpConfigByName(serverName) ??
-              mcpClients.find(c => c.name === serverName)?.config ??
-              currentAppState.mcp.clients.find(c => c.name === serverName)
-                ?.config ??
-              null
-            if (!config) {
-              sendControlResponseError(msg, `Server not found: ${serverName}`)
-            } else if (config.type !== 'sse' && config.type !== 'http') {
-              sendControlResponseError(
-                msg,
-                `Server type "${config.type}" does not support OAuth authentication`,
-              )
-            } else {
-              try {
-                // Abort any previous in-flight OAuth flow for this server
-                activeOAuthFlows.get(serverName as string)?.abort()
-                const controller = new AbortController()
-                activeOAuthFlows.set(serverName as string, controller)
-
-                // Capture the auth URL from the callback
-                let resolveAuthUrl: (url: string) => void
-                const authUrlPromise = new Promise<string>(resolve => {
-                  resolveAuthUrl = resolve
-                })
-
-                // Start the OAuth flow in the background
-                const oauthPromise = performMCPOAuthFlow(
-                  serverName as string,
-                  config,
-                  url => resolveAuthUrl!(url),
-                  controller.signal,
-                  {
-                    skipBrowserOpen: true,
-                    onWaitingForCallback: submit => {
-                      oauthCallbackSubmitters.set(serverName as string, submit)
-                    },
-                  },
-                )
-
-                // Wait for the auth URL (or the flow to complete without needing redirect)
-                const authUrl = await Promise.race([
-                  authUrlPromise,
-                  oauthPromise.then(() => null as string | null),
-                ])
-
-                if (authUrl) {
-                  sendControlResponseSuccess(msg, {
-                    authUrl,
-                    requiresUserAction: true,
-                  })
-                } else {
-                  sendControlResponseSuccess(msg, {
-                    requiresUserAction: false,
-                  })
+            await controlPlane.handleMcpAuthenticate(msg, req, {
+              mcpClients,
+              withControlReconnect,
+              onDynamicMcpStateUpdate: (serverName, client, tools) => {
+                const prefix = getMcpPrefix(serverName)
+                dynamicMcpState = {
+                  ...dynamicMcpState,
+                  clients: [
+                    ...dynamicMcpState.clients.filter(
+                      c => c.name !== serverName,
+                    ),
+                    client,
+                  ],
+                  tools: [
+                    ...dynamicMcpState.tools.filter(
+                      t => !t.name?.startsWith(prefix),
+                    ),
+                    ...tools,
+                  ],
                 }
-
-                // Store auth-only promise for mcp_oauth_callback_url handler.
-                // Don't swallow errors — the callback handler needs to detect
-                // auth failures and report them to the caller.
-                oauthAuthPromises.set(serverName, oauthPromise)
-
-                // Handle background completion — reconnect after auth.
-                // When manual callback is used, skip the reconnect here;
-                // the extension's handleAuthDone → mcp_reconnect handles it
-                // (which also updates dynamicMcpState for tool registration).
-                const fullFlowPromise = oauthPromise
-                  .then(async () => {
-                    // Don't reconnect if the server was disabled during the OAuth flow
-                    if (isMcpServerDisabled(serverName as string)) {
-                      return
-                    }
-                    // Skip reconnect if the manual callback path was used —
-                    // handleAuthDone will do it via mcp_reconnect (which
-                    // updates dynamicMcpState for tool registration).
-                    if (oauthManualCallbackUsed.has(serverName as string)) {
-                      return
-                    }
-                    // Reconnect the server after successful auth
-                    const result = await withControlReconnect(
-                      serverName as string,
-                      () =>
-                        reconnectMcpServerImpl(serverName as string, config),
-                    )
-                    const prefix = getMcpPrefix(serverName as string)
-                    setAppState(prev => ({
-                      ...prev,
-                      mcp: {
-                        ...prev.mcp,
-                        clients: prev.mcp.clients.map(c =>
-                          c.name === (serverName as string) ? result.client : c,
-                        ),
-                        tools: [
-                          ...reject(prev.mcp.tools, t =>
-                            t.name?.startsWith(prefix),
-                          ),
-                          ...result.tools,
-                        ],
-                        commands: [
-                          ...reject(prev.mcp.commands, c =>
-                            commandBelongsToServer(c, serverName as string),
-                          ),
-                          ...result.commands,
-                        ],
-                        resources:
-                          result.resources && result.resources.length > 0
-                            ? {
-                                ...prev.mcp.resources,
-                                [serverName as string]: result.resources,
-                              }
-                            : omit(prev.mcp.resources, serverName as string),
-                      },
-                    }))
-                    // Also update dynamicMcpState so run() picks up the new tools
-                    // on the next turn (run() reads dynamicMcpState, not appState)
-                    dynamicMcpState = {
-                      ...dynamicMcpState,
-                      clients: [
-                        ...dynamicMcpState.clients.filter(
-                          c => c.name !== serverName,
-                        ),
-                        result.client,
-                      ],
-                      tools: [
-                        ...dynamicMcpState.tools.filter(
-                          t => !t.name?.startsWith(prefix),
-                        ),
-                        ...result.tools,
-                      ],
-                    }
-                  })
-                  .catch(error => {
-                    logForDebugging(
-                      `MCP OAuth failed for ${serverName as string}: ${error}`,
-                      { level: 'error' },
-                    )
-                  })
-                  .finally(() => {
-                    // Clean up only if this is still the active flow
-                    if (
-                      activeOAuthFlows.get(serverName as string) === controller
-                    ) {
-                      activeOAuthFlows.delete(serverName as string)
-                      oauthCallbackSubmitters.delete(serverName as string)
-                      oauthManualCallbackUsed.delete(serverName as string)
-                      oauthAuthPromises.delete(serverName as string)
-                    }
-                  })
-                void fullFlowPromise
-              } catch (error) {
-                sendControlResponseError(msg, errorMessage(error))
-              }
-            }
+              },
+            })
           } else if (req.subtype === 'mcp_oauth_callback_url') {
-            const serverName = req.serverName as string
-            const callbackUrl = req.callbackUrl as string
-            const submit = oauthCallbackSubmitters.get(serverName)
-            if (submit) {
-              // Validate the callback URL before submitting. The submit
-              // callback in auth.ts silently ignores URLs missing a code
-              // param, which would leave the auth promise unresolved and
-              // block the control message loop until timeout.
-              let hasCodeOrError = false
-              try {
-                const parsed = new URL(callbackUrl as string | URL)
-                hasCodeOrError =
-                  parsed.searchParams.has('code') ||
-                  parsed.searchParams.has('error')
-              } catch {
-                // Invalid URL
-              }
-              if (!hasCodeOrError) {
-                sendControlResponseError(
-                  msg,
-                  'Invalid callback URL: missing authorization code. Please paste the full redirect URL including the code parameter.',
-                )
-              } else {
-                oauthManualCallbackUsed.add(serverName)
-                submit(callbackUrl as string)
-                // Wait for auth (token exchange) to complete before responding.
-                // Reconnect is handled by the extension via handleAuthDone →
-                // mcp_reconnect (which updates dynamicMcpState for tools).
-                const authPromise = oauthAuthPromises.get(serverName)
-                if (authPromise) {
-                  try {
-                    await authPromise
-                    sendControlResponseSuccess(msg)
-                  } catch (error) {
-                    sendControlResponseError(
-                      msg,
-                      error instanceof Error
-                        ? error.message
-                        : 'OAuth authentication failed',
-                    )
-                  }
-                } else {
-                  sendControlResponseSuccess(msg)
-                }
-              }
-            } else {
-              sendControlResponseError(
-                msg,
-                `No active OAuth flow for server: ${serverName}`,
-              )
-            }
+            await controlPlane.handleMcpOAuthCallbackUrl(msg, req)
           } else if (req.subtype === 'claude_authenticate') {
-            // Anthropic OAuth over the control channel. The SDK client owns
-            // the user's browser (we're headless in -p mode); we hand back
-            // both URLs and wait. Automatic URL → localhost listener catches
-            // the redirect if the browser is on this host; manual URL → the
-            // success page shows "code#state" for claude_oauth_callback.
-            const loginWithClaudeAi = req.loginWithClaudeAi as
-              | boolean
-              | undefined
-
-            // densable Stt(Fr??!0) — refuse when enterprise forceLoginMethod pin mismatches
-            const { validateForcedLoginMethod } = await import(
-              'src/utils/forceLoginMethod.js'
-            )
-            const forcePin = validateForcedLoginMethod(
-              loginWithClaudeAi ?? true,
-            )
-            if (!forcePin.valid) {
-              logEvent(
-                'tengu_sdk_claude_authenticate_force_login_method_refused',
-                {},
-              )
-              sendControlResponseError(msg, forcePin.message)
-              continue
-            }
-
-            // Clean up any prior flow. cleanup() closes the localhost listener
-            // and nulls the manual resolver. The prior `flow` promise is left
-            // pending (AuthCodeListener.close() does not reject) but its object
-            // graph becomes unreachable once the server handle is released and
-            // is GC'd — no fd or port is held.
-            claudeOAuth?.service.cleanup()
-
-            logEvent('tengu_oauth_flow_start', {
-              loginWithClaudeAi: (loginWithClaudeAi ?? true) as
-                | boolean
-                | number,
+            await controlPlane.handleClaudeAuthenticate(msg, req, {
+              headlessMcpIdentityBoundary,
             })
-
-            const service = new OAuthService()
-            // densable: suppress forceLoginOrgUUID when requested method mismatches pin
-            const { getInitialSettings } = await import(
-              'src/utils/settings/settings.js'
-            )
-            const authSettings = getInitialSettings()
-            const wantsClaudeAi = loginWithClaudeAi ?? true
-            const methodMismatch =
-              authSettings.forceLoginMethod !== undefined &&
-              wantsClaudeAi !== (authSettings.forceLoginMethod === 'claudeai')
-            const orgUUID = oauthLoginOrgUUIDHint(
-              authSettings.forceLoginOrgUUID,
-              methodMismatch,
-            )
-            let urlResolver!: (urls: {
-              manualUrl: string
-              automaticUrl: string
-            }) => void
-            const urlPromise = new Promise<{
-              manualUrl: string
-              automaticUrl: string
-            }>(resolve => {
-              urlResolver = resolve
-            })
-
-            const flow = service
-              .startOAuthFlow(
-                async (manualUrl, automaticUrl) => {
-                  // automaticUrl is always defined when skipBrowserOpen is set;
-                  // the signature is optional only for the existing single-arg callers.
-                  urlResolver({ manualUrl, automaticUrl: automaticUrl! })
-                },
-                {
-                  loginWithClaudeAi: (loginWithClaudeAi ?? true) as boolean,
-                  skipBrowserOpen: true,
-                  orgUUID,
-                },
-              )
-              .then(async tokens => {
-                // installOAuthTokens: performLogout (clear stale state) →
-                // store profile → saveOAuthTokensIfNeeded → clearOAuthTokenCache
-                // → clearAuthRelatedCaches. After this resolves, the memoized
-                // getClaudeAIOAuthTokens in this process is invalidated; the
-                // next API call re-reads keychain/file and works. No respawn.
-                await installOAuthTokens(tokens)
-                const connectorMounted = headlessMcpIdentityBoundary.refresh()
-                if (connectorMounted) {
-                  await Promise.race([
-                    connectorMounted,
-                    new Promise<void>(resolve => {
-                      const timer = setTimeout(resolve, 1000)
-                      timer.unref?.()
-                    }),
-                  ])
-                }
-                logEvent('tengu_oauth_success', {
-                  loginWithClaudeAi: (loginWithClaudeAi ?? true) as
-                    | boolean
-                    | number,
-                })
-              })
-              .finally(() => {
-                service.cleanup()
-                if (claudeOAuth?.service === service) {
-                  claudeOAuth = null
-                }
-              })
-
-            claudeOAuth = { service, flow }
-
-            // Attach the rejection handler before awaiting so a synchronous
-            // startOAuthFlow failure doesn't surface as an unhandled rejection.
-            // The claude_oauth_callback handler re-awaits flow for the manual
-            // path and surfaces the real error to the client.
-            void flow.catch(err =>
-              logForDebugging(`claude_authenticate flow ended: ${err}`, {
-                level: 'info',
-              }),
-            )
-
-            try {
-              // Race against flow: if startOAuthFlow rejects before calling
-              // the authURLHandler (e.g. AuthCodeListener.start() fails with
-              // EACCES or fd exhaustion), urlPromise would pend forever and
-              // wedge the stdin loop. flow resolving first is unreachable in
-              // practice (it's suspended on the same urls we're waiting for).
-              const { manualUrl, automaticUrl } = await Promise.race([
-                urlPromise,
-                flow.then(() => {
-                  throw new Error(
-                    'OAuth flow completed without producing auth URLs',
-                  )
-                }),
-              ])
-              sendControlResponseSuccess(msg, {
-                manualUrl,
-                automaticUrl,
-              })
-            } catch (error) {
-              sendControlResponseError(msg, errorMessage(error))
-            }
           } else if (
             req.subtype === 'claude_oauth_callback' ||
             req.subtype === 'claude_oauth_wait_for_completion'
           ) {
-            if (!claudeOAuth) {
-              sendControlResponseError(
-                msg,
-                'No active claude_authenticate flow',
-              )
-            } else {
-              // Inject the manual code synchronously — must happen in stdin
-              // message order so a subsequent claude_authenticate doesn't
-              // replace the service before this code lands.
-              if (req.subtype === 'claude_oauth_callback') {
-                claudeOAuth.service.handleManualAuthCodeInput({
-                  authorizationCode: req.authorizationCode as string,
-                  state: req.state as string,
-                })
-              }
-              // Detach the await — the stdin reader is serial and blocking
-              // here deadlocks claude_oauth_wait_for_completion: flow may
-              // only resolve via a future claude_oauth_callback on stdin,
-              // which can't be read while we're parked. Capture the binding;
-              // claudeOAuth is nulled in flow's own .finally.
-              const { flow } = claudeOAuth
-              void flow.then(
-                () => {
-                  const accountInfo = getAccountInformation()
-                  sendControlResponseSuccess(msg, {
-                    account: {
-                      email: accountInfo?.email,
-                      organization: accountInfo?.organization,
-                      subscriptionType: accountInfo?.subscription,
-                      tokenSource: accountInfo?.tokenSource,
-                      apiKeySource: accountInfo?.apiKeySource,
-                      apiProvider: getAPIProvider(),
-                    },
-                  })
-                },
-                (error: unknown) =>
-                  sendControlResponseError(msg, errorMessage(error)),
-              )
-            }
+            controlPlane.handleClaudeOAuthCallbackOrWait(msg, req)
           } else if (req.subtype === 'mcp_clear_auth') {
-            const serverName = req.serverName as string
-            const currentAppState = getAppState()
-            const config =
-              getMcpConfigByName(serverName) ??
-              mcpClients.find(c => c.name === serverName)?.config ??
-              currentAppState.mcp.clients.find(c => c.name === serverName)
-                ?.config ??
-              null
-            if (!config) {
-              sendControlResponseError(msg, `Server not found: ${serverName}`)
-            } else if (config.type !== 'sse' && config.type !== 'http') {
-              sendControlResponseError(
-                msg,
-                `Cannot clear auth for server type "${config.type}"`,
-              )
-            } else {
-              await revokeServerTokens(serverName, config)
-              const result = await withControlReconnect(serverName, () =>
-                reconnectMcpServerImpl(serverName, config),
-              )
-              const prefix = getMcpPrefix(serverName)
-              setAppState(prev => ({
-                ...prev,
-                mcp: {
-                  ...prev.mcp,
-                  clients: prev.mcp.clients.map(c =>
-                    c.name === (serverName as string) ? result.client : c,
-                  ),
-                  tools: [
-                    ...reject(prev.mcp.tools, t => t.name?.startsWith(prefix)),
-                    ...result.tools,
-                  ],
-                  commands: [
-                    ...reject(prev.mcp.commands, c =>
-                      commandBelongsToServer(c, serverName),
-                    ),
-                    ...result.commands,
-                  ],
-                  resources:
-                    result.resources && result.resources.length > 0
-                      ? {
-                          ...prev.mcp.resources,
-                          [serverName]: result.resources,
-                        }
-                      : omit(prev.mcp.resources, serverName),
-                },
-              }))
-              sendControlResponseSuccess(msg, {})
-            }
+            await controlPlane.handleMcpClearAuth(msg, req, {
+              mcpClients,
+              withControlReconnect,
+            })
           } else if (msg.request.subtype === 'apply_flag_settings') {
-            // Snapshot the current model before applying — we need to detect
-            // model switches so we can inject breadcrumbs and notify listeners.
-            const prevModel = getMainLoopModel()
-
-            // Merge the provided settings into the in-memory flag settings
-            const existing = getFlagSettingsInline() ?? {}
-            const incoming = msg.request.settings
-            // Shallow-merge top-level keys; getSettingsForSource handles
-            // the deep merge with file-based flag settings via mergeWith.
-            // JSON serialization drops `undefined`, so callers use `null`
-            // to signal "clear this key". Convert nulls to deletions so
-            // SettingsSchema().safeParse() doesn't reject the whole object
-            // (z.string().optional() accepts string | undefined, not null).
-            const merged = { ...existing, ...incoming }
-            for (const key of Object.keys(merged)) {
-              if (merged[key as keyof typeof merged] === null) {
-                delete merged[key as keyof typeof merged]
-              }
-            }
-            setFlagSettingsInline(merged)
-
-            // densable 211 review: apply model override BEFORE notifyChange so
-            // applySettingsChange (settings → AppState effort/ultracode sync)
-            // resolves ultracode wire against the post-switch model via
-            // getMainLoopModel(), not the pre-packet model. Direct
-            // resolveHostEffortFlagPatch below still finalizes AppState.
-            // Override has higher priority than the settings cascade in
-            // getUserSpecifiedModelSetting() (matching set_model).
-            if ('model' in incoming) {
-              if (incoming.model != null) {
-                setMainLoopModelOverride(String(incoming.model))
-              } else {
-                setMainLoopModelOverride(undefined)
-              }
-            }
-
-            // Route through notifyChange so fanOut() resets the settings cache
-            // before listeners run. The subscriber at :392 calls
-            // applySettingsChange for us. Pre-#20625 this was a direct
-            // applySettingsChange() call that relied on its own internal reset —
-            // now that the reset is centralized in fanOut, a direct call here
-            // would read stale cached settings and silently drop the update.
-            // Bonus: going through notifyChange also tells the other subscribers
-            // (loadPluginHooks, sandbox-adapter) about the change, which the
-            // previous direct call skipped.
-            settingsChangeDetector.notifyChange('flagSettings')
-
-            // If the model changed, inject breadcrumbs so the model sees the
-            // mid-conversation switch, and notify metadata listeners (CCR).
-            const newModel = getMainLoopModel()
-            if (newModel !== prevModel) {
-              activeUserSpecifiedModel = newModel
-              const modelArg = incoming.model
-                ? String(incoming.model)
-                : 'default'
-              notifySessionMetadataChanged({ model: newModel })
-              injectModelSwitchBreadcrumbs(modelArg, newModel)
-            }
-
-            // densable apply_flag: effortLevel / ultracode write AppState directly
-            // (M9/UBn + XLr ultracode + N9), not only via settings disk sync.
-            // settings.effortLevel enum rejects "ultracode", so flag-only alias
-            // must be handled here. Model for wire resolution is post-override.
-            // densable 211: non-ultracode / null clears ultracode; no wire
-            // refuses empty ultracode flag (matches bootstrap/applySettingsChange).
-            // Product: no hard control_response error on no-wire — soft success
-            // + effortNotes so multi-key merges are not partially rolled back.
-            const effortModel = newModel
-            let effortNotes: ReturnType<
-              typeof resolveHostEffortFlagPatch
-            >['notes']
-            if ('effortLevel' in incoming || 'ultracode' in incoming) {
-              const patch = resolveHostEffortFlagPatch({
-                model: effortModel,
-                effortLevel: incoming.effortLevel,
-                hasEffortLevel: 'effortLevel' in incoming,
-                ultracode: incoming.ultracode,
-                hasUltracode: 'ultracode' in incoming,
-              })
-              effortNotes = patch.notes
-              if (
-                patch.clearEffort ||
-                patch.effortValue !== undefined ||
-                patch.ultracode !== undefined
-              ) {
-                setAppState(prev => {
-                  let next = prev
-                  if (patch.clearEffort) {
-                    if (
-                      next.effortValue !== undefined ||
-                      !sessionEffortEquals(
-                        next.sessionEffort,
-                        DEFAULT_SESSION_EFFORT,
-                      )
-                    ) {
-                      next = {
-                        ...next,
-                        effortValue: undefined,
-                        sessionEffort: DEFAULT_SESSION_EFFORT,
-                        settingsEffortTable:
-                          teSettingsEffortTable() ?? next.settingsEffortTable,
-                      }
-                    }
-                  }
-                  if (patch.effortValue !== undefined) {
-                    const targetSessionEffort = levelSessionEffort(
-                      patch.effortValue,
-                    )
-                    if (
-                      next.effortValue !== patch.effortValue ||
-                      !sessionEffortEquals(
-                        next.sessionEffort,
-                        targetSessionEffort,
-                      )
-                    ) {
-                      next = {
-                        ...next,
-                        effortValue: patch.effortValue,
-                        sessionEffort: targetSessionEffort,
-                        settingsEffortTable:
-                          teSettingsEffortTable() ?? next.settingsEffortTable,
-                      }
-                    }
-                  }
-                  if (patch.ultracode !== undefined) {
-                    if (next.ultracode !== patch.ultracode) {
-                      next = { ...next, ultracode: patch.ultracode }
-                    }
-                  }
-                  return next
-                })
-              }
-              if (patch.unpin) {
-                unpinAllEffortLaunchPins()
-              }
-            }
-
-            // Always success for apply_flag_settings (incl. soft ultracode
-            // refusals). Hosts that need explicit no-wire feedback read
-            // response.effortNotes and/or re-query get_settings.applied.
-            sendControlResponseSuccess(
-              msg,
-              effortNotes && effortNotes.length > 0
-                ? { effortNotes }
-                : undefined,
+            controlPlane.handleApplyFlagSettings(
+              msg as SDKControlRequest & {
+                request: {
+                  subtype: 'apply_flag_settings'
+                  settings: Record<string, unknown>
+                }
+              },
+              {
+                setActiveUserSpecifiedModel: model => {
+                  activeUserSpecifiedModel = model
+                },
+                injectModelSwitchBreadcrumbs,
+              },
             )
           } else if (req.subtype === 'get_memory_dialog') {
             sendControlResponseError(
@@ -7731,28 +7069,24 @@ function runHeadlessStreaming(
                           let next = prev
                           if (
                             parsed !== undefined &&
-                            (prev.effortValue !== parsed ||
-                              !sessionEffortEquals(
-                                prev.sessionEffort,
-                                levelSessionEffort(parsed),
-                              ))
+                            !sessionEffortEquals(
+                              prev.sessionEffort,
+                              levelSessionEffort(parsed),
+                            )
                           ) {
                             next = {
                               ...next,
-                              effortValue: parsed,
                               sessionEffort: levelSessionEffort(parsed),
                             }
                           } else if (
                             ultracodeWire !== undefined &&
-                            (prev.effortValue !== ultracodeWire ||
-                              !sessionEffortEquals(
-                                prev.sessionEffort,
-                                levelSessionEffort(ultracodeWire),
-                              ))
+                            !sessionEffortEquals(
+                              prev.sessionEffort,
+                              levelSessionEffort(ultracodeWire),
+                            )
                           ) {
                             next = {
                               ...next,
-                              effortValue: ultracodeWire,
                               sessionEffort: levelSessionEffort(ultracodeWire),
                             }
                           }
@@ -9065,6 +8399,7 @@ function runHeadlessStreaming(
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
+      controlPlane.dispose()
       output.done()
     }
   })()
@@ -9296,600 +8631,6 @@ export function getCanUseToolFn(
 }
 
 /**
- * densable inl — full initialize payload for first init and reinit redelivery.
- */
-async function buildSdkInitializeResponse(
-  commands: Command[],
-  agents: AgentDefinition[],
-  modelInfos: ModelInfo[],
-  options: { userSpecifiedModel?: string | undefined },
-  getAppState: () => AppState,
-): Promise<SDKControlInitializeResponse> {
-  const settings = getSettings_DEPRECATED()
-  const outputStyle = settings?.outputStyle || DEFAULT_OUTPUT_STYLE_NAME
-  const availableOutputStyles = await getAllOutputStyles(getCwd())
-  const accountInfo = getAccountInformation()
-  const initResponse: SDKControlInitializeResponse = {
-    commands: commands
-      .filter(cmd => cmd.userInvocable !== false)
-      .map(cmd => ({
-        name: getCommandName(cmd),
-        description: formatDescriptionWithSource(cmd),
-        argumentHint: cmd.argumentHint || '',
-      })),
-    agents: agents.map(agent => ({
-      name: agent.agentType,
-      description: agent.whenToUse,
-      // 'inherit' is an internal sentinel; normalize to undefined for the public API
-      model: agent.model === 'inherit' ? undefined : agent.model,
-    })),
-    output_style: outputStyle,
-    available_output_styles: Object.keys(availableOutputStyles),
-    models: modelInfos as unknown as SDKControlInitializeResponse['models'],
-    account: {
-      email: accountInfo?.email,
-      organization: accountInfo?.organization,
-      subscriptionType: accountInfo?.subscription,
-      tokenSource: accountInfo?.tokenSource,
-      apiKeySource: accountInfo?.apiKeySource,
-      // getAccountInformation() returns undefined under 3P providers, so the
-      // other fields are all absent. apiProvider disambiguates "not logged
-      // in" (firstParty + tokenSource:none) from "3P, login not applicable".
-      apiProvider: getAPIProvider() as
-        | 'firstParty'
-        | 'bedrock'
-        | 'vertex'
-        | 'foundry',
-    },
-    pid: process.pid,
-  }
-
-  if (isFastModeEnabled() && isFastModeAvailable()) {
-    const appState = getAppState()
-    initResponse.fast_mode_state = getFastModeState(
-      options.userSpecifiedModel ?? null,
-      appState.fastMode,
-    )
-  }
-  return initResponse
-}
-
-async function handleInitializeRequest(
-  request: SDKControlInitializeRequest,
-  requestId: string,
-  initialized: boolean,
-  output: Stream<StdoutMessage>,
-  commands: Command[],
-  modelInfos: ModelInfo[],
-  structuredIO: StructuredIO,
-  enableAuthStatus: boolean,
-  options: {
-    systemPrompt: string | undefined
-    appendSystemPrompt: string | undefined
-    agent?: string | undefined
-    userSpecifiedModel?: string | undefined
-    [key: string]: unknown
-  },
-  agents: AgentDefinition[],
-  getAppState: () => AppState,
-): Promise<void> {
-  // densable 2.1.216 #5 / l1S: re-initialize after web idle returns **success**
-  // with full init payload + pending permission/dialog requests so the host
-  // redelivers AskUserQuestion / permission UI instead of re-asking or
-  // dropping the answer. Pre-216 error "Already initialized" broke CCR web.
-  if (initialized) {
-    const {
-      buildReinitSuccessResponse,
-      reinitRedeliveryTelemetry,
-      TENG_U_REINIT_PENDING_REDELIVERY,
-    } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../utils/sdkReinitRedelivery.js') as typeof import('../utils/sdkReinitRedelivery.js')
-    const pendingPermissionRequests =
-      structuredIO.getPendingPermissionRequests()
-    const pendingUserDialogRequests =
-      structuredIO.getPendingUserDialogRequests()
-    // densable M("tengu_reinit_pending_redelivery", { n_pending_*: Mh(len) })
-    // — local logEvent accepts numeric metadata directly.
-    logEvent(
-      TENG_U_REINIT_PENDING_REDELIVERY,
-      reinitRedeliveryTelemetry(
-        pendingPermissionRequests.length,
-        pendingUserDialogRequests.length,
-      ),
-    )
-    const initResponse = await buildSdkInitializeResponse(
-      commands,
-      agents,
-      modelInfos,
-      options,
-      getAppState,
-    )
-    output.enqueue({
-      type: 'control_response',
-      response: buildReinitSuccessResponse({
-        requestId,
-        // SDKControlInitializeResponse is a structured object; control schema
-        // types response as Record<string, unknown>.
-        initResponse: initResponse as unknown as Record<string, unknown>,
-        pendingPermissionRequests,
-        pendingUserDialogRequests,
-      }),
-    })
-    return
-  }
-
-  // Apply systemPrompt/appendSystemPrompt from stdin to avoid ARG_MAX limits
-  if (request.systemPrompt !== undefined) {
-    options.systemPrompt = request.systemPrompt
-  }
-  if (request.appendSystemPrompt !== undefined) {
-    options.appendSystemPrompt = request.appendSystemPrompt
-  }
-  if (request.promptSuggestions !== undefined) {
-    options.promptSuggestions = request.promptSuggestions
-  }
-
-  // Merge agents from stdin to avoid ARG_MAX limits
-  if (request.agents) {
-    const stdinAgents = parseAgentsFromJson(request.agents, 'flagSettings')
-    agents.push(...stdinAgents)
-  }
-
-  // Re-evaluate main thread agent after SDK agents are merged
-  // This allows --agent to reference agents defined via SDK
-  if (options.agent) {
-    // If main.tsx already found this agent (filesystem-defined), it already
-    // applied systemPrompt/model/initialPrompt. Skip to avoid double-apply.
-    const alreadyResolved = getMainThreadAgentType() === options.agent
-    const mainThreadAgent = agents.find(a => a.agentType === options.agent)
-    if (mainThreadAgent && !alreadyResolved) {
-      // Update the main thread agent type in bootstrap state
-      setMainThreadAgentType(mainThreadAgent.agentType)
-
-      // Apply the agent's system prompt if user hasn't specified a custom one
-      // SDK agents are always custom agents (not built-in), so getSystemPrompt() takes no args
-      if (!options.systemPrompt && !isBuiltInAgent(mainThreadAgent)) {
-        const agentSystemPrompt = mainThreadAgent.getSystemPrompt()
-        if (agentSystemPrompt) {
-          options.systemPrompt = agentSystemPrompt
-        }
-      }
-
-      // Apply the agent's model if user didn't specify one and agent has a model
-      if (
-        !options.userSpecifiedModel &&
-        mainThreadAgent.model &&
-        mainThreadAgent.model !== 'inherit'
-      ) {
-        const agentModel = parseUserSpecifiedModel(mainThreadAgent.model)
-        setMainLoopModelOverride(agentModel)
-      }
-
-      // SDK-defined agents arrive via init, so main.tsx's lookup missed them.
-      if (mainThreadAgent.initialPrompt) {
-        structuredIO.prependUserMessage(mainThreadAgent.initialPrompt)
-      }
-    } else if (mainThreadAgent?.initialPrompt) {
-      // Filesystem-defined agent (alreadyResolved by main.tsx). main.tsx
-      // handles initialPrompt for the string inputPrompt case, but when
-      // inputPrompt is an AsyncIterable (SDK stream-json), it can't
-      // concatenate — fall back to prependUserMessage here.
-      structuredIO.prependUserMessage(mainThreadAgent.initialPrompt)
-    }
-  }
-
-  if (request.hooks) {
-    const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {}
-    for (const [event, matchers] of Object.entries(request.hooks) as [
-      string,
-      Array<{ hookCallbackIds: string[]; timeout?: number; matcher?: string }>,
-    ][]) {
-      hooks[event as HookEvent] = matchers.map(matcher => {
-        const callbacks = matcher.hookCallbackIds.map(callbackId => {
-          return structuredIO.createHookCallback(callbackId, matcher.timeout)
-        })
-        return {
-          matcher: matcher.matcher,
-          hooks: callbacks,
-        }
-      })
-    }
-    registerHookCallbacks(hooks)
-  }
-  if (request.jsonSchema) {
-    setInitJsonSchema(request.jsonSchema)
-  }
-  // Official supportedDialogKinds densable (vje + xyn source=initialize).
-  if (request.supportedDialogKinds !== undefined) {
-    try {
-      const { sanitizeDeclaredDialogKinds } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../utils/userDialog.js') as typeof import('../utils/userDialog.js')
-      const kinds = sanitizeDeclaredDialogKinds(request.supportedDialogKinds)
-      setSdkSupportedDialogKinds(
-        kinds.length > 0 ? kinds : undefined,
-        'initialize',
-      )
-    } catch {
-      // densable optional
-    }
-  }
-  const initResponse = await buildSdkInitializeResponse(
-    commands,
-    agents,
-    modelInfos,
-    options,
-    getAppState,
-  )
-
-  output.enqueue({
-    type: 'control_response',
-    response: {
-      subtype: 'success',
-      request_id: requestId,
-      response: initResponse,
-    },
-  })
-
-  // After the initialize message, check the auth status-
-  // This will get notified of changes, but we also want to send the
-  // initial state.
-  if (enableAuthStatus) {
-    const authStatusManager = AwsAuthStatusManager.getInstance()
-    const status = authStatusManager.getStatus()
-    if (status) {
-      output.enqueue({
-        type: 'auth_status',
-        isAuthenticating: status.isAuthenticating,
-        output: status.output,
-        error: status.error,
-        uuid: randomUUID(),
-        session_id: getSessionId(),
-      })
-    }
-  }
-}
-
-async function handleRewindFiles(
-  userMessageId: UUID,
-  appState: AppState,
-  setAppState: (updater: (prev: AppState) => AppState) => void,
-  dryRun: boolean,
-): Promise<RewindFilesResult> {
-  if (!fileHistoryEnabled()) {
-    return {
-      canRewind: false,
-      error: 'File rewinding is not enabled.',
-      filesChanged: [],
-    }
-  }
-  if (!fileHistoryCanRestore(appState.fileHistory, userMessageId)) {
-    return {
-      canRewind: false,
-      error: 'No file checkpoint found for this message.',
-      filesChanged: [],
-    }
-  }
-
-  if (dryRun) {
-    const diffStats = await fileHistoryGetDiffStats(
-      appState.fileHistory,
-      userMessageId,
-    )
-    return {
-      canRewind: true,
-      filesChanged: diffStats?.filesChanged ?? [],
-      insertions: diffStats?.insertions,
-      deletions: diffStats?.deletions,
-    }
-  }
-
-  try {
-    // densable: real rewind returns filesChanged + skippedLinks (dryRun omits)
-    const { filesChanged, skippedLinks } = await fileHistoryRewind(
-      updater =>
-        setAppState(prev => ({
-          ...prev,
-          fileHistory: updater(prev.fileHistory),
-        })),
-      userMessageId,
-    )
-    return {
-      canRewind: true,
-      filesChanged,
-      skippedLinks,
-    }
-  } catch (error) {
-    return {
-      canRewind: false,
-      error: `Failed to rewind: ${errorMessage(error)}`,
-      filesChanged: [],
-    }
-  }
-}
-
-function handleSetPermissionMode(
-  request: { mode: InternalPermissionMode },
-  requestId: string,
-  toolPermissionContext: ToolPermissionContext,
-  output: Stream<StdoutMessage>,
-): ToolPermissionContext {
-  // Check if trying to switch to bypassPermissions mode
-  if (request.mode === 'bypassPermissions') {
-    if (isBypassPermissionsModeDisabled()) {
-      output.enqueue({
-        type: 'control_response',
-        response: {
-          subtype: 'error',
-          request_id: requestId,
-          error:
-            'Cannot set permission mode to bypassPermissions because it is disabled by settings or configuration',
-        },
-      })
-      return toolPermissionContext
-    }
-    if (!toolPermissionContext.isBypassPermissionsModeAvailable) {
-      output.enqueue({
-        type: 'control_response',
-        response: {
-          subtype: 'error',
-          request_id: requestId,
-          error:
-            'Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions',
-        },
-      })
-      return toolPermissionContext
-    }
-  }
-
-  // Check if trying to switch to auto mode without the classifier gate
-  if (
-    feature('TRANSCRIPT_CLASSIFIER') &&
-    request.mode === 'auto' &&
-    !isAutoModeGateEnabled()
-  ) {
-    const reason = getAutoModeUnavailableReason()
-    output.enqueue({
-      type: 'control_response',
-      response: {
-        subtype: 'error',
-        request_id: requestId,
-        error: reason
-          ? `Cannot set permission mode to auto: ${getAutoModeUnavailableNotification(reason)}`
-          : 'Cannot set permission mode to auto',
-      },
-    })
-    return toolPermissionContext
-  }
-
-  // Allow the mode switch
-  output.enqueue({
-    type: 'control_response',
-    response: {
-      subtype: 'success',
-      request_id: requestId,
-      response: {
-        mode: request.mode,
-      },
-    },
-  })
-
-  return {
-    ...transitionPermissionMode(
-      toolPermissionContext.mode,
-      request.mode,
-      toolPermissionContext,
-    ),
-    mode: request.mode,
-  }
-}
-
-/**
- * IDE-triggered channel enable. Derives the ChannelEntry from the connection's
- * pluginSource (IDE can't spoof kind/marketplace — we only take the server
- * name), appends it to session allowedChannels, and runs the full gate. On
- * gate failure, rolls back the append. On success, registers a notification
- * handler that enqueues channel messages at priority:'next' — drainCommandQueue
- * picks them up between turns.
- *
- * Intentionally does NOT register the claude/channel/permission handler that
- * useManageMCPConnections sets up for interactive mode. That handler resolves
- * a pending dialog inside handleInteractivePermission — but print.ts never
- * calls handleInteractivePermission. When SDK permission lands on 'ask', it
- * goes to the consumer's canUseTool callback over stdio; there is no CLI-side
- * dialog for a remote "yes tbxkq" to resolve. If an IDE wants channel-relayed
- * tool approval, that's IDE-side plumbing against its own pending-map. (Also
- * gated separately by tengu_harbor_permissions — not yet shipping on
- * interactive either.)
- */
-function handleChannelEnable(
-  requestId: string,
-  serverName: string,
-  connectionPool: readonly MCPServerConnection[],
-  output: Stream<StdoutMessage>,
-): void {
-  const respondError = (error: string) =>
-    output.enqueue({
-      type: 'control_response',
-      response: { subtype: 'error', request_id: requestId, error },
-    })
-
-  if (!(feature('KAIROS') || feature('KAIROS_CHANNELS'))) {
-    return respondError('channels feature not available in this build')
-  }
-
-  // Only a 'connected' client has .capabilities and .client to register the
-  // handler on. The pool spread at the call site matches mcp_status.
-  const connection = connectionPool.find(
-    c => c.name === serverName && c.type === 'connected',
-  )
-  if (!connection || connection.type !== 'connected') {
-    return respondError(`server ${serverName} is not connected`)
-  }
-
-  const pluginSource = connection.config.pluginSource
-  const parsed = pluginSource ? parsePluginIdentifier(pluginSource) : undefined
-  if (!parsed?.marketplace) {
-    // No pluginSource or @-less source — can never pass the {plugin,
-    // marketplace}-keyed allowlist. Short-circuit with the same reason the
-    // gate would produce.
-    return respondError(
-      `server ${serverName} is not plugin-sourced; channel_enable requires a marketplace plugin`,
-    )
-  }
-
-  const entry: ChannelEntry = {
-    kind: 'plugin',
-    name: parsed.name,
-    marketplace: parsed.marketplace,
-  }
-  // Idempotency: don't double-append on repeat enable.
-  const prior = getAllowedChannels()
-  const already = prior.some(
-    e =>
-      e.kind === 'plugin' &&
-      e.name === entry.name &&
-      e.marketplace === entry.marketplace,
-  )
-  if (!already) setAllowedChannels([...prior, entry])
-
-  const gate = gateChannelServer(
-    serverName,
-    connection.capabilities,
-    pluginSource,
-    connection.protocolEra,
-  )
-  if (gate.action === 'skip') {
-    // Rollback — only remove the entry we appended.
-    if (!already) setAllowedChannels(prior)
-    return respondError(gate.reason)
-  }
-
-  const pluginId =
-    `${entry.name}@${entry.marketplace}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-  logMCPDebug(serverName, 'Channel notifications registered')
-  logEvent('tengu_mcp_channel_enable', { plugin: pluginId })
-
-  // Identical enqueue shape to the interactive register block in
-  // useManageMCPConnections. drainCommandQueue processes it between turns —
-  // channel messages queue at priority 'next' and are seen by the model on
-  // the turn after they arrive.
-  // densable/v2: setNotificationHandler(method, {params}, handler)
-  connection.client.setNotificationHandler(
-    CHANNEL_MESSAGE_METHOD,
-    { params: ChannelMessageParamsSchema() },
-    async params => {
-      const { content, meta } = params
-      logMCPDebug(
-        serverName,
-        `notifications/claude/channel: ${content.slice(0, 80)}`,
-      )
-      logEvent('tengu_mcp_channel_message', {
-        content_length: content.length,
-        meta_key_count: Object.keys(meta ?? {}).length,
-        entry_kind:
-          'plugin' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        is_dev: false,
-        plugin: pluginId,
-      })
-      enqueue({
-        mode: 'prompt',
-        value: wrapChannelMessage(serverName, content, meta),
-        priority: 'next',
-        isMeta: true,
-        origin: { kind: 'channel', server: serverName },
-        skipSlashCommands: true,
-        skipAttachments: true,
-      })
-    },
-  )
-
-  output.enqueue({
-    type: 'control_response',
-    response: {
-      subtype: 'success',
-      request_id: requestId,
-      response: undefined,
-    },
-  })
-}
-
-/**
- * Re-register the channel notification handler after mcp_reconnect /
- * mcp_toggle creates a new client. handleChannelEnable bound the handler to
- * the OLD client object; allowedChannels survives the reconnect but the
- * handler binding does not. Without this, channel messages silently drop
- * after a reconnect while the IDE still believes the channel is live.
- *
- * Mirrors the interactive CLI's onConnectionAttempt in
- * useManageMCPConnections, which re-gates on every new connection. Paired
- * with registerElicitationHandlers at the same call sites.
- *
- * No-op if the server was never channel-enabled: gateChannelServer calls
- * findChannelEntry internally and returns skip/session for an unlisted
- * server, so reconnecting a non-channel MCP server costs one feature-flag
- * check.
- */
-function reregisterChannelHandlerAfterReconnect(
-  connection: MCPServerConnection,
-): void {
-  // Channels always available — feature flag guard removed
-  if (connection.type !== 'connected') return
-
-  const gate = gateChannelServer(
-    connection.name,
-    connection.capabilities,
-    connection.config.pluginSource,
-    connection.protocolEra,
-  )
-  if (gate.action !== 'register') return
-
-  const entry = findChannelEntry(connection.name, getAllowedChannels())
-  const pluginId =
-    entry?.kind === 'plugin'
-      ? (`${entry.name}@${entry.marketplace}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-      : undefined
-
-  logMCPDebug(
-    connection.name,
-    'Channel notifications re-registered after reconnect',
-  )
-  // densable/v2: setNotificationHandler(method, {params}, handler)
-  connection.client.setNotificationHandler(
-    CHANNEL_MESSAGE_METHOD,
-    { params: ChannelMessageParamsSchema() },
-    async params => {
-      const { content, meta } = params
-      logMCPDebug(
-        connection.name,
-        `notifications/claude/channel: ${content.slice(0, 80)}`,
-      )
-      logEvent('tengu_mcp_channel_message', {
-        content_length: content.length,
-        meta_key_count: Object.keys(meta ?? {}).length,
-        entry_kind:
-          entry?.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        is_dev: entry?.dev ?? false,
-        plugin: pluginId,
-      })
-      enqueue({
-        mode: 'prompt',
-        value: wrapChannelMessage(connection.name, content, meta),
-        priority: 'next',
-        isMeta: true,
-        origin: {
-          kind: 'channel',
-          server: connection.name,
-        },
-        skipSlashCommands: true,
-        skipAttachments: true,
-      })
-    },
-  )
-}
-
-/**
  * Emits an error message in the correct format based on outputFormat.
  * When using stream-json, writes JSON to stdout; otherwise writes plain text to stderr.
  */
@@ -9947,8 +8688,8 @@ type LoadInitialMessagesResult = {
   deferredToolUse?: HookDeferredToolAttachment
 }
 
-function applyPrintPlanModeResume(
-  setAppState: (f: (prev: AppState) => AppState) => void,
+function applyPrintPlanModeResume<TState extends HeadlessAppState = AppState>(
+  setAppStateParam: HeadlessSetAppState<TState>,
   restored: RestoredWorkerState,
   options: {
     forkSession?: boolean
@@ -9957,6 +8698,9 @@ function applyPrintPlanModeResume(
   },
   messages?: Message[],
 ): PlanModeOnResume {
+  const setAppState = setAppStateParam as unknown as (
+    f: (prev: AppState) => AppState,
+  ) => void
   return hydratePlanModeFromRestoredWorker(setAppState, restored, {
     forkSession: !!options.forkSession,
     lane: options.sdkUrl ? 'sdk_url' : 'print',
@@ -9968,8 +8712,8 @@ function applyPrintPlanModeResume(
   })
 }
 
-async function loadInitialMessages(
-  setAppState: (f: (prev: AppState) => AppState) => void,
+async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
+  setAppStateParam: HeadlessSetAppState<TState>,
   options: {
     continue: boolean | undefined
     teleport: string | true | null | undefined
@@ -9993,6 +8737,9 @@ async function loadInitialMessages(
     > | null
   },
 ): Promise<LoadInitialMessagesResult> {
+  const setAppState = setAppStateParam as unknown as (
+    f: (prev: AppState) => AppState,
+  ) => void
   const persistSession = !isSessionPersistenceDisabled()
   // Handle continue in print mode
   if (options.continue) {
@@ -10515,570 +9262,4 @@ function getStructuredIO(
   return options.sdkUrl
     ? new RemoteIO(options.sdkUrl, inputStream, options.replayUserMessages)
     : new StructuredIO(inputStream, options.replayUserMessages)
-}
-
-/**
- * Handles unexpected permission responses by looking up the unresolved tool
- * call in the transcript and enqueuing it for execution.
- *
- * Returns true if a permission was enqueued, false otherwise.
- */
-export async function handleOrphanedPermissionResponse({
-  message,
-  setAppState: _setAppState,
-  onEnqueued,
-  handledToolUseIds,
-}: {
-  message: SDKControlResponse
-  setAppState: (f: (prev: AppState) => AppState) => void
-  onEnqueued?: () => void
-  handledToolUseIds: Set<string>
-}): Promise<boolean> {
-  const responseInner = message.response as
-    | {
-        subtype?: string
-        response?: Record<string, unknown>
-        request_id?: string
-      }
-    | undefined
-  if (
-    responseInner?.subtype === 'success' &&
-    responseInner.response?.toolUseID &&
-    typeof responseInner.response.toolUseID === 'string'
-  ) {
-    const permissionResult = responseInner.response as PermissionResult & {
-      toolUseID?: string
-    }
-    const toolUseID = permissionResult.toolUseID
-    if (!toolUseID) {
-      return false
-    }
-
-    logForDebugging(
-      `handleOrphanedPermissionResponse: received orphaned control_response for toolUseID=${toolUseID} request_id=${responseInner.request_id}`,
-    )
-
-    // Prevent re-processing the same orphaned tool_use. Without this guard,
-    // duplicate control_response deliveries (e.g. from WebSocket reconnect)
-    // cause the same tool to be executed multiple times, producing duplicate
-    // tool_use IDs in the messages array and a 400 error from the API.
-    // Once corrupted, every retry accumulates more duplicates.
-    if (handledToolUseIds.has(toolUseID)) {
-      logForDebugging(
-        `handleOrphanedPermissionResponse: skipping duplicate orphaned permission for toolUseID=${toolUseID} (already handled)`,
-      )
-      return false
-    }
-
-    const assistantMessage = await findUnresolvedToolUse(toolUseID)
-    if (!assistantMessage) {
-      logForDebugging(
-        `handleOrphanedPermissionResponse: no unresolved tool_use found for toolUseID=${toolUseID} (already resolved in transcript)`,
-      )
-      return false
-    }
-
-    // Guard: skip if the tool_use belongs to a cancelled subagent (sidechain).
-    // Enqueuing an orphaned permission for a dead agent context would crash.
-    if ((assistantMessage as Record<string, unknown>).isSidechain) {
-      logForDebugging(
-        `handleOrphanedPermissionResponse: skipping orphaned permission for toolUseID=${toolUseID} (belongs to a cancelled subagent)`,
-      )
-      return false
-    }
-
-    handledToolUseIds.add(toolUseID)
-    logForDebugging(
-      `handleOrphanedPermissionResponse: enqueuing orphaned permission for toolUseID=${toolUseID} messageID=${assistantMessage.message.id}`,
-    )
-    enqueue({
-      mode: 'orphaned-permission' as const,
-      value: [],
-      orphanedPermission: {
-        permissionResult,
-        assistantMessage,
-      },
-    })
-
-    onEnqueued?.()
-    return true
-  }
-  return false
-}
-
-export type DynamicMcpState = {
-  clients: MCPServerConnection[]
-  tools: Tools
-  configs: Record<string, ScopedMcpServerConfig>
-}
-
-/**
- * densable a$f — fold mcp_set_servers tools[].org_max_permission into
- * toolPermissions (skip "allow"; only non-allow ceilings matter).
- * Official: org map fully replaces top-level toolPermissions when present —
- * peer cannot lower an admin "blocked" ceiling via toolPermissions.
- */
-function toolPermissionsFromSetServersTools(
-  tools:
-    | ReadonlyArray<{
-        name: string
-        org_max_permission?: 'allow' | 'ask' | 'blocked' | string
-      }>
-    | undefined,
-): Record<string, 'allow' | 'ask' | 'blocked'> | undefined {
-  if (!tools?.length) return undefined
-  // Null-proto: tool names may be Object.prototype keys (`constructor`).
-  const out = Object.create(null) as Record<string, 'allow' | 'ask' | 'blocked'>
-  for (const t of tools) {
-    if (!t.org_max_permission || t.org_max_permission === 'allow') continue
-    if (t.org_max_permission === 'ask' || t.org_max_permission === 'blocked') {
-      out[t.name] = t.org_max_permission
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined
-}
-
-type McpSetServersToolPolicy = {
-  name: string
-  permission_policy?: 'always_allow' | 'always_ask' | 'always_deny' | string
-  org_max_permission?: 'allow' | 'ask' | 'blocked' | string
-}
-
-/**
- * densable hpi — aggregate dynamic MCP tools[].permission_policy into
- * always_allow / always_deny / always_ask lists of fully-qualified tool names.
- * Stricter policy wins when the same tool appears on multiple servers.
- */
-export function permissionPoliciesFromDynamicMcpConfigs(
-  configs: Record<
-    string,
-    {
-      type?: string
-      tools?: ReadonlyArray<McpSetServersToolPolicy>
-    }
-  >,
-): {
-  allow: string[]
-  deny: string[]
-  ask: string[]
-} {
-  const rank: Record<string, number> = {
-    always_allow: 0,
-    always_ask: 1,
-    always_deny: 2,
-  }
-  const byTool = new Map<
-    string,
-    'always_allow' | 'always_ask' | 'always_deny'
-  >()
-  for (const [serverName, cfg] of Object.entries(configs)) {
-    if (cfg.type !== 'http' && cfg.type !== 'sse') continue
-    for (const tool of cfg.tools ?? []) {
-      const pol = tool.permission_policy
-      if (
-        pol !== 'always_allow' &&
-        pol !== 'always_ask' &&
-        pol !== 'always_deny'
-      ) {
-        continue
-      }
-      const fq = buildMcpToolName(serverName, tool.name)
-      const prev = byTool.get(fq)
-      if (prev === undefined || rank[pol]! > (rank[prev] ?? -1)) {
-        byTool.set(fq, pol)
-      }
-    }
-  }
-  const allow: string[] = []
-  const deny: string[] = []
-  const ask: string[] = []
-  for (const [name, pol] of byTool) {
-    if (pol === 'always_allow') allow.push(name)
-    else if (pol === 'always_deny') deny.push(name)
-    else ask.push(name)
-  }
-  return { allow, deny, ask }
-}
-
-/**
- * densable Ryl / u$f seed — replace mcpServerPolicy buckets on permission
- * context from the current dynamic MCP desired map (empty list clears key).
- */
-function withMcpServerPolicyRules<
-  T extends {
-    alwaysAllowRules: Record<string, string[] | undefined>
-    alwaysDenyRules: Record<string, string[] | undefined>
-    alwaysAskRules: Record<string, string[] | undefined>
-  },
->(ctx: T, policies: { allow: string[]; deny: string[]; ask: string[] }): T {
-  const setBucket = (
-    rules: Record<string, string[] | undefined>,
-    names: string[],
-  ): Record<string, string[] | undefined> => {
-    const prev = rules.mcpServerPolicy ?? []
-    if (names.length === prev.length && names.every((n, i) => n === prev[i])) {
-      return rules
-    }
-    if (names.length === 0) {
-      if (!('mcpServerPolicy' in rules)) return rules
-      const { mcpServerPolicy: _drop, ...rest } = rules
-      return rest
-    }
-    return { ...rules, mcpServerPolicy: names }
-  }
-  const alwaysAllowRules = setBucket(ctx.alwaysAllowRules, policies.allow)
-  const alwaysDenyRules = setBucket(ctx.alwaysDenyRules, policies.deny)
-  const alwaysAskRules = setBucket(ctx.alwaysAskRules, policies.ask)
-  if (
-    alwaysAllowRules === ctx.alwaysAllowRules &&
-    alwaysDenyRules === ctx.alwaysDenyRules &&
-    alwaysAskRules === ctx.alwaysAskRules
-  ) {
-    return ctx
-  }
-  return {
-    ...ctx,
-    alwaysAllowRules,
-    alwaysDenyRules,
-    alwaysAskRules,
-  }
-}
-
-/**
- * densable uUt — convert process transport config to a scoped config.
- * For http/sse: drop tools[], fold org_max_permission → toolPermissions
- * (a$f replaces any top-level toolPermissions when present), scope:"dynamic".
- * tools[] is kept only long enough for hpi; callers that need permission_policy
- * seed must read the raw desired map before uUt.
- */
-function toScopedConfig(
-  config: McpServerConfigForProcessTransport,
-): ScopedMcpServerConfig {
-  // McpServerConfigForProcessTransport is a subset of McpServerConfig
-  // (it excludes IDE-specific types like sse-ide and ws-ide)
-  const rec = config as McpServerConfigForProcessTransport & {
-    type?: string
-    tools?: ReadonlyArray<McpSetServersToolPolicy>
-    toolPermissions?: Record<string, 'allow' | 'ask' | 'blocked'>
-  }
-  if (rec.type === 'http' || rec.type === 'sse') {
-    const { tools, toolPermissions: existing, ...rest } = rec
-    // densable a$f/uUt: when tools carry org ceilings, they WIN exclusively.
-    // Top-level toolPermissions is only used when a$f yields nothing.
-    const fromTools = toolPermissionsFromSetServersTools(tools)
-    const toolPermissions = fromTools ?? existing
-    return {
-      ...rest,
-      ...(toolPermissions && Object.keys(toolPermissions).length > 0
-        ? { toolPermissions }
-        : {}),
-      scope: 'dynamic',
-    } as ScopedMcpServerConfig
-  }
-  return { ...config, scope: 'dynamic' } as ScopedMcpServerConfig
-}
-
-/**
- * State for SDK MCP servers that run in the SDK process.
- */
-export type SdkMcpState = {
-  configs: Record<string, McpSdkServerConfig>
-  clients: MCPServerConnection[]
-  tools: Tools
-}
-
-/**
- * Result of handleMcpSetServers - contains new state and response data.
- */
-export type McpSetServersResult = {
-  response: SDKControlMcpSetServersResponse
-  newSdkState: SdkMcpState
-  newDynamicState: DynamicMcpState
-  sdkServersChanged: boolean
-}
-
-/**
- * Handles mcp_set_servers requests by processing both SDK and process-based servers.
- * SDK servers run in the SDK process; process-based servers are spawned by the CLI.
- *
- * Applies enterprise allowedMcpServers/deniedMcpServers policy — same filter as
- * --mcp-config (see filterMcpServersByPolicy call in main.tsx). Without this,
- * SDK V2 Query.setMcpServers() was a second policy bypass vector. Blocked servers
- * are reported in response.errors so the SDK consumer knows why they weren't added.
- */
-export async function handleMcpSetServers(
-  servers: Record<string, McpServerConfigForProcessTransport>,
-  sdkState: SdkMcpState,
-  dynamicState: DynamicMcpState,
-  setAppState: (f: (prev: AppState) => AppState) => void,
-): Promise<McpSetServersResult> {
-  // Enforce enterprise MCP policy on process-based servers (stdio/http/sse).
-  // Mirrors the --mcp-config filter in main.tsx — both user-controlled injection
-  // paths must have the same gate. type:'sdk' servers are exempt (SDK-managed,
-  // CLI never spawns/connects for them — see filterMcpServersByPolicy jsdoc).
-  // Blocked servers go into response.errors so the SDK caller sees why.
-  const { allowed: allowedServers, blocked } = filterMcpServersByPolicy(servers)
-  const policyErrors: Record<string, string> = {}
-  for (const name of blocked) {
-    policyErrors[name] =
-      'Blocked by enterprise policy (allowedMcpServers/deniedMcpServers)'
-  }
-
-  // densable 2.1.229 mcp_set_servers soft-ignore (remote+enterprise / hermetic):
-  // keep only type==="sdk"; non-sdk get ignore reason instead of hard exit.
-  // Priority: hermetic > enterprise remote (same as densable S assignment).
-  let serversAfterExclusive: Record<
-    string,
-    McpServerConfigForProcessTransport
-  > = allowedServers
-  const exclusiveIgnoreReason = isRemoteHermeticSession()
-    ? HERMETIC_MCP_SET_SERVERS_IGNORE_REASON
-    : isRemoteEnvEnabled() && doesEnterpriseMcpConfigExist()
-      ? ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON
-      : undefined
-  if (exclusiveIgnoreReason !== undefined) {
-    const kept: Record<string, McpServerConfigForProcessTransport> = {}
-    for (const [name, config] of Object.entries(allowedServers)) {
-      if ((config.type as string) === 'sdk') {
-        kept[name] = config
-      } else {
-        policyErrors[name] = exclusiveIgnoreReason
-      }
-    }
-    serversAfterExclusive = kept
-  }
-
-  // Separate SDK servers from process-based servers
-  const sdkServers: Record<string, McpSdkServerConfig> = {}
-  const processServers: Record<string, McpServerConfigForProcessTransport> = {}
-
-  for (const [name, config] of Object.entries(serversAfterExclusive)) {
-    if ((config.type as string) === 'sdk') {
-      sdkServers[name] = config as unknown as McpSdkServerConfig
-    } else {
-      processServers[name] = config
-    }
-  }
-
-  // Handle SDK servers
-  const currentSdkNames = new Set(Object.keys(sdkState.configs))
-  const newSdkNames = new Set(Object.keys(sdkServers))
-  const sdkAdded: string[] = []
-  const sdkRemoved: string[] = []
-
-  const newSdkConfigs = { ...sdkState.configs }
-  let newSdkClients = [...sdkState.clients]
-  let newSdkTools = [...sdkState.tools]
-
-  // Remove SDK servers no longer in desired state
-  for (const name of currentSdkNames) {
-    if (!newSdkNames.has(name)) {
-      const client = newSdkClients.find(c => c.name === name)
-      if (client && client.type === 'connected') {
-        await client.cleanup()
-      }
-      newSdkClients = newSdkClients.filter(c => c.name !== name)
-      const prefix = `mcp__${name}__`
-      newSdkTools = newSdkTools.filter(t => !t.name.startsWith(prefix))
-      delete newSdkConfigs[name]
-      sdkRemoved.push(name)
-    }
-  }
-
-  // Add new SDK servers as pending - they'll be upgraded to connected
-  // when updateSdkMcp() runs on the next query
-  for (const [name, config] of Object.entries(sdkServers)) {
-    if (!currentSdkNames.has(name)) {
-      newSdkConfigs[name] = config
-      const pendingClient: MCPServerConnection = {
-        type: 'pending',
-        name,
-        config: { ...config, scope: 'dynamic' as const },
-      }
-      newSdkClients = [...newSdkClients, pendingClient]
-      sdkAdded.push(name)
-    }
-  }
-
-  // Handle process-based servers
-  const processResult = await reconcileMcpServers(
-    processServers,
-    dynamicState,
-    setAppState,
-  )
-
-  return {
-    response: {
-      added: [...sdkAdded, ...processResult.response.added],
-      removed: [...sdkRemoved, ...processResult.response.removed],
-      errors: { ...policyErrors, ...processResult.response.errors },
-    },
-    newSdkState: {
-      configs: newSdkConfigs,
-      clients: newSdkClients,
-      tools: newSdkTools,
-    },
-    newDynamicState: processResult.newState,
-    sdkServersChanged: sdkAdded.length > 0 || sdkRemoved.length > 0,
-  }
-}
-
-/**
- * Reconciles the current set of dynamic MCP servers with a new desired state.
- * Handles additions, removals, and config changes.
- */
-export async function reconcileMcpServers(
-  desiredConfigs: Record<string, McpServerConfigForProcessTransport>,
-  currentState: DynamicMcpState,
-  setAppState: (f: (prev: AppState) => AppState) => void,
-): Promise<{
-  response: SDKControlMcpSetServersResponse
-  newState: DynamicMcpState
-}> {
-  const currentNames = new Set(Object.keys(currentState.configs))
-  const desiredNames = new Set(Object.keys(desiredConfigs))
-
-  const toRemove = [...currentNames].filter(n => !desiredNames.has(n))
-  const toAdd = [...desiredNames].filter(n => !currentNames.has(n))
-
-  // Check for config changes (same name, different config)
-  const toCheck = [...currentNames].filter(n => desiredNames.has(n))
-  const toReplace = toCheck.filter(name => {
-    const currentConfig = currentState.configs[name]
-    const desiredConfigRaw = desiredConfigs[name]
-    if (!currentConfig || !desiredConfigRaw) return true
-    const desiredConfig = toScopedConfig(desiredConfigRaw)
-    return !areMcpConfigsEqual(currentConfig, desiredConfig)
-  })
-
-  const removed: string[] = []
-  const added: string[] = []
-  const errors: Record<string, string> = {}
-
-  let newClients = [...currentState.clients]
-  let newTools = [...currentState.tools]
-
-  // Remove old servers (including ones being replaced)
-  for (const name of [...toRemove, ...toReplace]) {
-    const client = newClients.find(c => c.name === name)
-    const config = currentState.configs[name]
-    if (client && config) {
-      if (client.type === 'connected') {
-        try {
-          await client.cleanup()
-        } catch (e) {
-          logError(e)
-        }
-      }
-      // Clear the memoization cache
-      await clearServerCache(name, config)
-    }
-
-    // Remove tools from this server
-    const prefix = `mcp__${name}__`
-    newTools = newTools.filter(t => !t.name.startsWith(prefix))
-
-    // Remove from clients list
-    newClients = newClients.filter(c => c.name !== name)
-
-    // Track removal (only for actually removed, not replaced)
-    if (toRemove.includes(name)) {
-      removed.push(name)
-    }
-  }
-
-  // Add new servers (including replacements)
-  for (const name of [...toAdd, ...toReplace]) {
-    const config = desiredConfigs[name]
-    if (!config) continue
-    const scopedConfig = toScopedConfig(config)
-
-    // SDK servers are managed by the SDK process, not the CLI.
-    // Just track them without trying to connect.
-    if ((config.type as string) === 'sdk') {
-      added.push(name)
-      continue
-    }
-
-    try {
-      const client = await connectToServer(name, scopedConfig)
-      newClients.push(client)
-
-      if (client.type === 'connected') {
-        const serverTools = await fetchToolsForClient(client)
-        newTools.push(...serverTools)
-      } else if (client.type === 'failed') {
-        errors[name] = client.error || 'Connection failed'
-      }
-
-      added.push(name)
-    } catch (e) {
-      const err = toError(e)
-      errors[name] = err.message
-      logError(err)
-    }
-  }
-
-  // Build new configs
-  const newConfigs: Record<string, ScopedMcpServerConfig> = {}
-  for (const name of desiredNames) {
-    const config = desiredConfigs[name]
-    if (config) {
-      newConfigs[name] = toScopedConfig(config)
-    }
-  }
-
-  const newState: DynamicMcpState = {
-    clients: newClients,
-    tools: newTools,
-    configs: newConfigs,
-  }
-
-  // densable hpi: seed permission context from desired RAW tools[].permission_policy
-  // (before uUt strips tools[]). Always recompute so removals clear mcpServerPolicy.
-  const policies = permissionPoliciesFromDynamicMcpConfigs(desiredConfigs)
-
-  // Update AppState with the new tools + densable Ryl mcpServerPolicy seed
-  setAppState(prev => {
-    // Get all dynamic server names (current + new)
-    const allDynamicServerNames = new Set([
-      ...Object.keys(currentState.configs),
-      ...Object.keys(newConfigs),
-    ])
-
-    // Remove old dynamic tools
-    const nonDynamicTools = prev.mcp.tools.filter(t => {
-      for (const serverName of allDynamicServerNames) {
-        if (t.name.startsWith(`mcp__${serverName}__`)) {
-          return false
-        }
-      }
-      return true
-    })
-
-    // Remove old dynamic clients
-    const nonDynamicClients = prev.mcp.clients.filter(c => {
-      return !allDynamicServerNames.has(c.name)
-    })
-
-    const toolPermissionContext = withMcpServerPolicyRules(
-      prev.toolPermissionContext,
-      policies,
-    )
-
-    return {
-      ...prev,
-      mcp: {
-        ...prev.mcp,
-        tools: [...nonDynamicTools, ...newTools],
-        clients: [...nonDynamicClients, ...newClients],
-      },
-      toolPermissionContext,
-    }
-  })
-
-  return {
-    response: { added, removed, errors },
-    newState,
-  }
 }

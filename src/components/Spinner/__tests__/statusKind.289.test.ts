@@ -213,10 +213,14 @@ describe('densable 2.1.289 Je extras', () => {
       join(import.meta.dir, '../../../query.ts'),
       'utf8',
     )
+    const queryHelpers = readFileSync(
+      join(import.meta.dir, '../../../query/queryHelpers.ts'),
+      'utf8',
+    )
     expect(query).toContain(
       'announceOutputLimitRecovery(state.transition, toolUseContext)',
     )
-    expect(query).toContain("setStreamMode?.('requesting')")
+    expect(queryHelpers).toContain("setStreamMode?.('requesting')")
     expect(query).not.toContain('export function fl(')
   })
 
@@ -287,8 +291,9 @@ describe('densable 2.1.289 Je extras', () => {
     )
     expect(spinner).not.toContain('teammates running')
     expect(spinner).toContain(
-      'compactingHint && compactProgressActiveRef?.current',
+      'Boolean(isCompacting || compactProgressActiveRef?.current)',
     )
+    expect(spinner).toContain('compactingHint && effectiveIsCompacting')
     expect(spinner).not.toContain('compactProgressActiveRef?.current ? null')
     expect(spinner).toContain('retryStatus ? (')
     expect(spinner).toContain("status.kind !== 'retrying'")

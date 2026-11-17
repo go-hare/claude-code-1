@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import type { Dirent } from 'fs'
-import { createSignal } from './signal.js'
+import { getSessionOnceLatches } from './sessionRoot.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
@@ -4277,16 +4277,14 @@ export function getCurrentSessionAgentName(): string | undefined {
  * currentSessionTitle / currentSessionAiTitle cache mutates so terminal
  * tab title can useSyncExternalStore instead of a one-shot render read.
  */
-const sessionTitleChanged = createSignal()
-
 export function subscribeSessionTitleChanged(
   onStoreChange: () => void,
 ): () => void {
-  return sessionTitleChanged.subscribe(onStoreChange)
+  return getSessionOnceLatches().sessionTitleChanged.subscribe(onStoreChange)
 }
 
 function notifySessionTitleChanged(): void {
-  sessionTitleChanged.emit()
+  getSessionOnceLatches().sessionTitleChanged.emit()
 }
 
 /**

@@ -47,7 +47,8 @@ import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fulls
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { useAppState } from '../state/AppState.js';
-import { createStore } from '../state/store.js';
+import { createStore, type Store } from '../state/store.js';
+import { getBootstrapSessionHost } from '../utils/sessionHost.js';
 import { isNotificationVisible } from '../context/notifications.js';
 import { notificationsHoldToasts } from '../utils/replDiffMouseHost.js';
 import { NotificationBody } from './PromptInput/Notifications.js';
@@ -2215,12 +2216,31 @@ function StickyPromptHeader({
   );
 }
 
+const dockLitStoresByHost = new WeakMap<object, Store<boolean>>();
+
+/** Host-keyed `xw.dockLitStore` (`CL`) — shared dock grip hover/drag state. */
+export function getDockLitStore(): Store<boolean> {
+  const host = getBootstrapSessionHost();
+  let store = dockLitStoresByHost.get(host);
+  if (!store) {
+    store = createStore(false);
+    dockLitStoresByHost.set(host, store);
+  }
+  return store;
+}
+
 /** densable `xw.dockLitStore` (`CL`) — shared dock grip hover/drag state. */
-export const dockLitStore = createStore(false);
+export const dockLitStore: Store<boolean> = {
+  getSnapshot: () => getDockLitStore().getSnapshot(),
+  getState: () => getDockLitStore().getState(),
+  setState: updater => getDockLitStore().setState(updater),
+  subscribe: listener => getDockLitStore().subscribe(listener),
+};
 
 /** densable `JZ` / `Pw` — left `│` dock rule over the prompt anchor margin gap. */
 function DefaultDockRule(): React.ReactNode {
-  const dockLit = useSyncExternalStore(dockLitStore.subscribe, dockLitStore.getState, () => false);
+  const store = getDockLitStore();
+  const dockLit = useSyncExternalStore(store.subscribe, store.getState, () => false);
   const paneFocused = useSyncExternalStore(
     subscribePanes,
     () => getPanesState().focusedId !== null,

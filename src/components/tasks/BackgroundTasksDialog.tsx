@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import React, { type ReactNode, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { getIsInteractive } from 'src/bootstrap/state.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { useAppState, useSetAppState } from 'src/state/AppState.js';
+import { useAppState, useMessageQueue, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import type { ToolUseContext } from 'src/Tool.js';
 import { AutoModeScanTask, type AutoModeScanTaskState } from 'src/tasks/AutoModeScanTask/AutoModeScanTask.js';
@@ -46,7 +46,7 @@ import type { AppState } from '../../state/AppStateStore.js';
 import { count } from '../../utils/array.js';
 import { truncateToWidth } from '../../utils/format.js';
 import { toInkColor } from '../../utils/ink.js';
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+import type { MessageQueueInstance } from '../../utils/messageQueueManager.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { ConfirmSelect } from '../ConfirmSelect.js';
 import { Select } from '../CustomSelect/select.js';
@@ -279,17 +279,18 @@ async function stopRemoteReview(
   source: 'task_list' | 'task_detail',
   setAppState: (f: (prev: AppState) => AppState) => void,
   getAppState: () => AppState,
+  messageQueue: MessageQueueInstance,
 ): Promise<void> {
   await RemoteAgentTask.kill(taskId, createTaskRegistry(getAppState, setAppState));
   logEvent('tengu_review_remote_stopped', {
     source: source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
-  enqueuePendingNotification({
+  messageQueue.enqueuePendingNotification({
     value:
       'Ultrareview stopped. Run /ultrareview to start a new review, which uses one of your free ultrareviews or bills as usage credits.',
     mode: 'task-notification',
   });
-  enqueuePendingNotification({
+  messageQueue.enqueuePendingNotification({
     value:
       'The user stopped the ultrareview session above. Do not respond to the stop notification — wait for their next message.',
     mode: 'task-notification',
@@ -352,6 +353,7 @@ export function BackgroundTasksDialog({
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const setAppState = useSetAppState();
+  const messageQueue = useMessageQueue();
   const registry = createTaskRegistry(toolUseContext.getAppState, setAppState);
   const { rows: termRows, columns: termColumns } = useTerminalSize();
   const screenReader = isScreenReaderModeEnabled();
@@ -828,7 +830,7 @@ export function BackgroundTasksDialog({
       return (
         <ConfirmStopReviewDialog
           onStop={() => {
-            void stopRemoteReview(viewState.itemId, 'task_list', setAppState, toolUseContext.getAppState);
+            void stopRemoteReview(viewState.itemId, 'task_list', setAppState, toolUseContext.getAppState, messageQueue);
             setViewState({ mode: 'list' });
           }}
           onBack={() => setViewState({ mode: 'list' })}
@@ -879,7 +881,14 @@ export function BackgroundTasksDialog({
                 : task.isUltraplan
                   ? () => void stopUltraplan(task.id, task.sessionId, setAppState, toolUseContext.getAppState)
                   : task.isRemoteReview
-                    ? () => void stopRemoteReview(task.id, 'task_detail', setAppState, toolUseContext.getAppState)
+                    ? () =>
+                        void stopRemoteReview(
+                          task.id,
+                          'task_detail',
+                          setAppState,
+                          toolUseContext.getAppState,
+                          messageQueue,
+                        )
                     : () => void killRemoteAgentTask(task.id)
             }
             key={`session-${task.id}`}

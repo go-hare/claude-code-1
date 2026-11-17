@@ -57,7 +57,6 @@ describe('startAgentSummarization', () => {
           messages: transcriptMessagesForTest,
           contentReplacements: [],
         }),
-        isPoorModeActive: () => false,
         logError: error => {
           loggedErrors.push(
             error instanceof Error ? error : new Error(String(error)),
@@ -178,25 +177,6 @@ describe('startAgentSummarization', () => {
     expectDebugLogContaining(
       '[AgentSummary] Skipping summary for task-1: not enough messages (2)',
     )
-  })
-
-  test('skips and reschedules while poor mode is active', async () => {
-    handle = startTestSummarization({
-      isPoorModeActive: () => true,
-    })
-
-    expect(typeof scheduled).toBe('function')
-    const initialScheduledCount = scheduledCount
-    const initialTimerHandle = lastTimerHandle
-    await scheduled!()
-
-    expect(forkCalls).toEqual([])
-    expect(updateCalls).toEqual([])
-    expectDebugLogContaining(
-      '[AgentSummary] Skipping summary — poor mode active',
-    )
-    expect(scheduledCount).toBe(initialScheduledCount + 1)
-    expect(lastTimerHandle).not.toBe(initialTimerHandle)
   })
 
   test('logs summary errors and schedules the next timer', async () => {

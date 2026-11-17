@@ -209,12 +209,11 @@ export function ModelPicker({
   // densable 2.1.289: no Space 1M toggle row; `[1m]` is on the option value.
 
   const [hasToggledEffort, setHasToggledEffort] = useState(false);
-  const effortValue = useAppState(s => s.effortValue);
   const sessionEffort = useAppState(s => s.sessionEffort);
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const ultracodeFlag = useAppState(s => s.ultracode);
   const [effort, setEffort] = useState<EffortLevel | undefined>(() => {
-    const pd = pdSessionEffort({ sessionEffort, effortValue, settingsEffortTable }, resolveOptionModel(initialValue));
+    const pd = pdSessionEffort({ sessionEffort, settingsEffortTable }, resolveOptionModel(initialValue));
     return pd !== undefined ? convertEffortValueToLevel(pd) : undefined;
   });
 
@@ -299,11 +298,11 @@ export function ModelPicker({
       setFocusedValue(value);
       if (!hasToggledEffort) {
         const targetModel = resolveOptionModel(value);
-        const pd = pdSessionEffort({ sessionEffort, effortValue, settingsEffortTable }, targetModel);
+        const pd = pdSessionEffort({ sessionEffort, settingsEffortTable }, targetModel);
         setEffort(pd !== undefined ? convertEffortValueToLevel(pd) : getDefaultEffortLevelForOption(value));
       }
     },
-    [hasToggledEffort, sessionEffort, effortValue, settingsEffortTable],
+    [hasToggledEffort, sessionEffort, settingsEffortTable],
   );
 
   // Effort level cycling keybindings (densable gbp / QOe).
@@ -377,7 +376,6 @@ export function ModelPicker({
       unpinAllEffortLaunchPins();
       setAppState(prev => ({
         ...prev,
-        effortValue: effortLevel,
         sessionEffort: explicitSessionEffort(effortLevel),
         settingsEffortTable: teSettingsEffortTable(),
       }));
@@ -402,8 +400,10 @@ export function ModelPicker({
     columnSizingOptions: selectOptions,
   } as unknown as Record<string, never>;
 
+  const focusedPdEffort =
+    focusedModel !== undefined ? pdSessionEffort({ sessionEffort, settingsEffortTable }, focusedModel) : undefined;
   const ultracodeActiveForFocused =
-    focusedModel !== undefined && isUltracodeModeActive(focusedModel, effortValue, ultracodeFlag);
+    focusedModel !== undefined && isUltracodeModeActive(focusedModel, focusedPdEffort, ultracodeFlag);
   const showMaxReminder = displayEffort === 'max' && isMaxEffortReminderEnabled();
 
   const content = (

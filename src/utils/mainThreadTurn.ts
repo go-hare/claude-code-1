@@ -3,7 +3,7 @@
  *
  * Main-thread query() bind/release slot. Never export densable ids.
  */
-import { createSignal } from './signal.js'
+import { getSessionOnceLatches } from './sessionRoot.js'
 
 export type MainThreadTurnSlot = {
   turnId: string
@@ -13,12 +13,13 @@ export type MainThreadTurnSlot = {
   cancel: () => void
 }
 
-let slot: MainThreadTurnSlot | undefined
-const turnBegan = createSignal()
-const turnEnded = createSignal()
+export function subscribeMainThreadTurnBegin(listener: () => void): () => void {
+  return getSessionOnceLatches().mainThreadTurn.turnBegan.subscribe(listener)
+}
 
-export const subscribeMainThreadTurnBegin = turnBegan.subscribe
-export const subscribeMainThreadTurnEnd = turnEnded.subscribe
+export function subscribeMainThreadTurnEnd(listener: () => void): () => void {
+  return getSessionOnceLatches().mainThreadTurn.turnEnded.subscribe(listener)
+}
 
 /** densable `Sss`. */
 export function bindMainThreadTurn(input: {
@@ -28,7 +29,8 @@ export function bindMainThreadTurn(input: {
   startedBy?: string
 }): void {
   let cancelled = false
-  slot = {
+  const state = getSessionOnceLatches().mainThreadTurn
+  state.slot = {
     turnId: input.turnId,
     started: input.started ?? Promise.resolve(),
     isPersonStarted: input.startedBy === 'person',
@@ -38,25 +40,30 @@ export function bindMainThreadTurn(input: {
       cancelled = true
       input.abort()
     },
-  }
-  turnBegan.emit()
+  } satisfies MainThreadTurnSlot
+  state.turnBegan.emit()
 }
 
 /** densable `yHr`. */
 export function releaseMainThreadTurn(turnId: string): void {
-  const wasCurrent = slot?.turnId === turnId
-  if (wasCurrent) slot = undefined
-  if (wasCurrent) turnEnded.emit()
+  const state = getSessionOnceLatches().mainThreadTurn
+  const current = state.slot as MainThreadTurnSlot | undefined
+  const wasCurrent = current?.turnId === turnId
+  if (wasCurrent) state.slot = undefined
+  if (wasCurrent) state.turnEnded.emit()
 }
 
 /** densable `g_e`. */
 export function getMainThreadTurn(): MainThreadTurnSlot | undefined {
-  return slot
+  return getSessionOnceLatches().mainThreadTurn.slot as
+    | MainThreadTurnSlot
+    | undefined
 }
 
 /** Test cleanup. */
 export function resetMainThreadTurn(): void {
-  slot = undefined
-  turnBegan.clear()
-  turnEnded.clear()
+  const state = getSessionOnceLatches().mainThreadTurn
+  state.slot = undefined
+  state.turnBegan.clear()
+  state.turnEnded.clear()
 }

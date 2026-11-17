@@ -1480,10 +1480,12 @@ const MessagesImpl = ({
   // via isResultTruncated. Callback must be stable across message updates: if
   // its identity (or return value) flips during streaming, onMouseEnter
   // attaches after the mouse is already inside → hover never fires. tools is
-  // session-stable; lookups is read via ref so the callback doesn't churn on
-  // every new message.
+  // session-stable; lookups and renderableMessages are read via ref so the
+  // callback doesn't churn on every new message.
   const lookupsRef = useRef(lookups);
   lookupsRef.current = lookups;
+  const renderableMessagesRef = useRef(renderableMessages);
+  renderableMessagesRef.current = renderableMessages;
   const bashOutputCacheRef = useRef(new WeakMap<object, { stdout: string; stderr: string }>());
   const isItemClickable = useCallback(
     (msg: RenderableMessage): boolean => {
@@ -1504,11 +1506,12 @@ const MessagesImpl = ({
                     .map(block => block.text ?? '')
                     .join('\n')
                 : '';
-          const idx = renderableMessages.indexOf(msg);
+          const currentMessages = renderableMessagesRef.current;
+          const idx = currentMessages.indexOf(msg);
           const labelled =
             idx > 0 &&
-            (renderableMessages[idx - 1]?.type === 'speaker_label' ||
-              precedingSpeakerLabel(renderableMessages, idx)?.speaker?.kind === 'inbound');
+            (currentMessages[idx - 1]?.type === 'speaker_label' ||
+              precedingSpeakerLabel(currentMessages, idx)?.speaker?.kind === 'inbound');
           return isUserTextExpandClickable(promptText, msg.attachment.origin as { kind?: string } | undefined, {
             labelled,
             columns,
@@ -1555,11 +1558,12 @@ const MessagesImpl = ({
       }
       if (b?.type === 'text' && typeof b.text === 'string') {
         if (verbose || isTranscriptMode) return false;
-        const idx = renderableMessages.indexOf(msg);
+        const currentMessages = renderableMessagesRef.current;
+        const idx = currentMessages.indexOf(msg);
         const labelled =
           idx > 0 &&
-          (renderableMessages[idx - 1]?.type === 'speaker_label' ||
-            precedingSpeakerLabel(renderableMessages, idx)?.speaker?.kind === 'inbound');
+          (currentMessages[idx - 1]?.type === 'speaker_label' ||
+            precedingSpeakerLabel(currentMessages, idx)?.speaker?.kind === 'inbound');
         return isUserTextExpandClickable(b.text, msg.origin, { labelled, columns });
       }
       if (b?.type !== 'tool_result') return false;
@@ -1571,7 +1575,7 @@ const MessagesImpl = ({
       const tool = name ? findToolByName(tools, name) : undefined;
       return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
-    [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID, renderableMessages],
+    [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID],
   );
 
   const canAnimate =

@@ -1930,7 +1930,7 @@ export function getUltraEffortAttachments(
 ): Attachment[] {
   // Lazy require avoids static cycle risk (effort ↔ attachments via messages).
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { isUltracodeModeActive } =
+  const { isUltracodeModeActive, pdSessionEffort } =
     require('./effort.js') as typeof import('./effort.js')
   /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -1938,7 +1938,7 @@ export function getUltraEffortAttachments(
   const model = toolUseContext.options.mainLoopModel
   const active = isUltracodeModeActive(
     model,
-    appState.effortValue,
+    pdSessionEffort(appState, model),
     appState.ultracode,
   )
 
@@ -3184,13 +3184,6 @@ export function startRelevantMemoryPrefetch(
     !isAutoMemoryEnabled() ||
     !getFeatureValue_CACHED_MAY_BE_STALE('tengu_moth_copse', false)
   ) {
-    return undefined
-  }
-
-  // Poor mode: skip the side-query to save tokens
-  const { isPoorModeActive } =
-    require('../commands/poor/poorMode.js') as typeof import('../commands/poor/poorMode.js')
-  if (isPoorModeActive()) {
     return undefined
   }
 

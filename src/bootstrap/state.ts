@@ -25,8 +25,14 @@ import { createSignal } from 'src/utils/signal.js'
 // settingsSource / extensionsConfig.
 // eslint-disable-next-line custom-rules/bootstrap-isolation
 import {
+  isClaudeInChromeWiredThisSession,
+  setClaudeInChromeWiredThisSession,
+} from 'src/utils/claudeInChrome/sessionState.js'
+// eslint-disable-next-line custom-rules/bootstrap-isolation
+import {
   getBootstrapSession,
   getBootstrapSessionHost,
+  getHostTeleportedSessionIds,
   resetSessionHostForTests,
 } from 'src/utils/sessionHost.js'
 // eslint-disable-next-line custom-rules/bootstrap-isolation
@@ -53,97 +59,6 @@ export type ChannelEntry =
 export type AttributedCounter = {
   add(value: number, additionalAttributes?: Attributes): void
 }
-
-type State = {
-  /**
-   * LAND cut (248): bag-owned type/init mirrors removed — costLedger
-   * (totalCostUSD / totalAPIDuration*), lastInteractionTime - LAND cut,
-   * mainLoopBusy - LAND cut, teleportedSessionInfo - LAND cut,
-   * loopChainStartedAt / loopEnded / loopTick*, midConv/stickyBetas - LAND cut /
-   * foundry/allowlist/directConnect/replBridge/hooks, Ie/Fe/Oe/credential/telemetry
-   * mirrors, pendingPrLinks/pendingBranchLinks, etc. Accessors stay bag-only.
-   * Gold: gold-248-state-dead-fields.txt
-   */
-  turnHookDurationMs: number
-  turnToolDurationMs: number
-  turnClassifierDurationMs: number
-  turnToolCount: number
-  turnHookCount: number
-  turnClassifierCount: number
-  /**
-   * Residual leftover-only kairosActive (no official n() sibling bag).
-   * Gold 248 redig (gold-248-kairosActive-redig.txt): SEA string/export hits=0;
-   * ge @178521439 / Ie @178534988 have no kairos* slot.
-   */
-  kairosActive: boolean
-  // KEEP g() type residual — official dual-path; leftover accessors bag-only
-  cachedClaudeMdContent: string | null
-  claudeInChromeSessionPromptActive: boolean
-  sessionCronTasks: SessionCronTask[]
-  registeredHooks: Partial<Record<HookEvent, RegisteredHookMatcher[]>> | null
-  /**
-   * KEEP STATE - official `Qo().teleportedSessionIds` on host-keyed class `s`
-   * (`i.of(z().host)` @179876551), NOT n().host.* / n() sibling bags.
-   */
-  teleportedSessionIds: Set<string>
-  mainThreadAgentType: string | undefined
-  // mainThreadAgentHooks - LAND cut; bag = n().hookRegistry (se)
-  // via Yne/b1r @178579577. No STATE dual-write.
-  // replBridgeActive - LAND cut; bag = n().surfaceCapabilities (he)
-  // via Pl/Qne @178583588. No STATE dual-write.
-  /**
-   * KEEP STATE - official `replBridgeSessionId` lives on AppState (React store),
-   * not n() bags. SEA get/setReplBridgeSessionId export aliases hits=0.
-   * invent-ban inventing a bootstrap bag slot for it.
-   */
-  replBridgeSessionId: string | undefined
-  // KEEP STATE - SEA `"promptCache1hEligible"` hits=0; invent-ban bag slot.
-  promptCache1hEligible: boolean | null
-  // densable 2.1.248 `zce` / `rl().pinnedFeatureValues` - first GB read wins.
-  pinnedFeatureValues: Map<string, unknown> | undefined
-  // Sticky-on latch for AFK_MODE_BETA_HEADER. Once auto mode is first
-  // activated, keep sending the header for the rest of the session so
-  // Shift+Tab toggles don't bust the ~50-70K token prompt cache.
-  afkModeHeaderLatched: boolean | null
-  // Sticky-on latch for FAST_MODE_BETA_HEADER. Once fast mode is first
-  // enabled, keep sending the header so cooldown enter/exit doesn't
-  // double-bust the prompt cache. The `speed` body param stays dynamic.
-  fastModeHeaderLatched: boolean | null
-  // Sticky-on latch for the cache-editing beta header. Once cached
-  // microcompact is first enabled, keep sending the header so mid-session
-  // GrowthBook/settings toggles don't bust the prompt cache.
-  cacheEditingHeaderLatched: boolean | null
-}
-
-// ALSO HERE - THINK THRICE BEFORE MODIFYING
-function getInitialState(): State {
-  const state: State = {
-    turnHookDurationMs: 0,
-    turnToolDurationMs: 0,
-    turnClassifierDurationMs: 0,
-    turnToolCount: 0,
-    turnHookCount: 0,
-    turnClassifierCount: 0,
-    kairosActive: false,
-    cachedClaudeMdContent: null,
-    claudeInChromeSessionPromptActive: false,
-    sessionCronTasks: [],
-    registeredHooks: null,
-    teleportedSessionIds: new Set(),
-    mainThreadAgentType: undefined,
-    replBridgeSessionId: undefined,
-    promptCache1hEligible: null,
-    pinnedFeatureValues: undefined,
-    afkModeHeaderLatched: null,
-    fastModeHeaderLatched: null,
-    cacheEditingHeaderLatched: null,
-  }
-
-  return state
-}
-
-// AND ESPECIALLY HERE
-const STATE: State = getInitialState()
 
 export function getSessionId(): SessionId {
   return getBootstrapSession().id as SessionId
@@ -585,59 +500,53 @@ export function getTotalToolDuration(): number {
 }
 
 export function addToToolDuration(duration: number): void {
-  getBootstrapSession().costLedger.recordToolDuration(duration)
-  // Turn-scoped leftover counters (no official CostLedger sibling).
-  STATE.turnToolDurationMs += duration
-  STATE.turnToolCount++
+  const session = getBootstrapSession()
+  session.costLedger.recordToolDuration(duration)
+  session.turnBudget.recordTurnToolDuration(duration)
 }
 
 export function getTurnHookDurationMs(): number {
-  return STATE.turnHookDurationMs
+  return getBootstrapSession().turnBudget.turnHookDurationMs()
 }
 
 export function addToTurnHookDuration(duration: number): void {
-  STATE.turnHookDurationMs += duration
-  STATE.turnHookCount++
+  getBootstrapSession().turnBudget.recordTurnHookDuration(duration)
 }
 
 export function resetTurnHookDuration(): void {
-  STATE.turnHookDurationMs = 0
-  STATE.turnHookCount = 0
+  getBootstrapSession().turnBudget.resetTurnHookDuration()
 }
 
 export function getTurnHookCount(): number {
-  return STATE.turnHookCount
+  return getBootstrapSession().turnBudget.turnHookCount()
 }
 
 export function getTurnToolDurationMs(): number {
-  return STATE.turnToolDurationMs
+  return getBootstrapSession().turnBudget.turnToolDurationMs()
 }
 
 export function resetTurnToolDuration(): void {
-  STATE.turnToolDurationMs = 0
-  STATE.turnToolCount = 0
+  getBootstrapSession().turnBudget.resetTurnToolDuration()
 }
 
 export function getTurnToolCount(): number {
-  return STATE.turnToolCount
+  return getBootstrapSession().turnBudget.turnToolCount()
 }
 
 export function getTurnClassifierDurationMs(): number {
-  return STATE.turnClassifierDurationMs
+  return getBootstrapSession().turnBudget.turnClassifierDurationMs()
 }
 
 export function addToTurnClassifierDuration(duration: number): void {
-  STATE.turnClassifierDurationMs += duration
-  STATE.turnClassifierCount++
+  getBootstrapSession().turnBudget.recordTurnClassifierDuration(duration)
 }
 
 export function resetTurnClassifierDuration(): void {
-  STATE.turnClassifierDurationMs = 0
-  STATE.turnClassifierCount = 0
+  getBootstrapSession().turnBudget.resetTurnClassifierDuration()
 }
 
 export function getTurnClassifierCount(): number {
-  return STATE.turnClassifierCount
+  return getBootstrapSession().turnBudget.turnClassifierCount()
 }
 
 export function getStatsStore(): {
@@ -1142,9 +1051,6 @@ export function resetStateForTests(): void {
   if (process.env.NODE_ENV !== 'test') {
     throw new Error('resetStateForTests can only be called in tests')
   }
-  Object.entries(getInitialState()).forEach(([key, value]) => {
-    STATE[key as keyof State] = value as never
-  })
   sessionSwitched.clear()
   resetSessionHostForTests()
 }
@@ -1732,11 +1638,11 @@ export function setSearchToolsOptIn(value: boolean): void {
  * Do NOT collapse onto launchOptions.userMsgOptIn.
  */
 export function getKairosActive(): boolean {
-  return STATE.kairosActive
+  return getBootstrapSession().sessionFlags.kairosActive()
 }
 
 export function setKairosActive(value: boolean): void {
-  STATE.kairosActive = value
+  getBootstrapSession().sessionFlags.replaceKairosActive(value)
 }
 
 /**
@@ -2302,11 +2208,11 @@ export function getChromeFlagOverride(): boolean | undefined {
 }
 
 export function setClaudeInChromeSessionPromptActive(value: boolean): void {
-  STATE.claudeInChromeSessionPromptActive = value
+  setClaudeInChromeWiredThisSession(value)
 }
 
 export function getClaudeInChromeSessionPromptActive(): boolean {
-  return STATE.claudeInChromeSessionPromptActive
+  return isClaudeInChromeWiredThisSession()
 }
 
 /**
@@ -2753,7 +2659,7 @@ export function markTeleportedSessionId(sessionId: string): void {
   if (!sessionId) return
   const key = normalizeTeleportedSessionId(sessionId)
   if (!key) return
-  const set = STATE.teleportedSessionIds
+  const set = getHostTeleportedSessionIds()
   // Re-add to move to insertion end (freshest) when already present
   if (set.has(key)) set.delete(key)
   set.add(key)
@@ -2767,13 +2673,15 @@ export function markTeleportedSessionId(sessionId: string): void {
 /** densable G7  - true if session was teleported to cloud. */
 export function isTeleportedSessionId(sessionId: string): boolean {
   if (!sessionId) return false
-  return STATE.teleportedSessionIds.has(normalizeTeleportedSessionId(sessionId))
+  return getHostTeleportedSessionIds().has(
+    normalizeTeleportedSessionId(sessionId),
+  )
 }
 
 /** densable Ljp  - clear teleported mark (rare; tests / session recycle). */
 export function clearTeleportedSessionId(sessionId: string): void {
   if (!sessionId) return
-  STATE.teleportedSessionIds.delete(normalizeTeleportedSessionId(sessionId))
+  getHostTeleportedSessionIds().delete(normalizeTeleportedSessionId(sessionId))
 }
 
 // Invoked skills tracking for preservation across compaction
@@ -3137,63 +3045,47 @@ export function setInferenceProfileBackingModel(
   )
 }
 
-/**
- * KEEP STATE - SEA `"promptCache1hEligible"` hits=0. Official qe/requestLatches
- * has `promptCache1hAllowlist` only (nTn/rTn @178581416). invent-ban bag slot.
- */
 export function getPromptCache1hEligible(): boolean | null {
-  return STATE.promptCache1hEligible
+  return getBootstrapSession().conversationLatches.promptCache1hEligible()
 }
 
 export function setPromptCache1hEligible(eligible: boolean | null): void {
-  STATE.promptCache1hEligible = eligible
+  getBootstrapSession().conversationLatches.replacePromptCache1hEligible(
+    eligible,
+  )
 }
 
-/** densable 2.1.248 `rl().pinnedFeatureValues ??= new Map` */
+/** densable 2.1.289 `Oo().pinnedFeatureValues ??= new Map()` @181542214 */
 export function getPinnedFeatureValues(): Map<string, unknown> {
-  return (STATE.pinnedFeatureValues ??= new Map())
+  return (getBootstrapSession().onceLatches.pinnedFeatureValues ??= new Map())
 }
 
-/**
- * KEEP STATE - SEA `"afkModeHeaderLatched"` / `"fastModeHeaderLatched"` /
- * `"cacheEditingHeaderLatched"` hits=0; not on qe/Ee/he/ge. invent-ban bag.
- */
 export function getAfkModeHeaderLatched(): boolean | null {
-  return STATE.afkModeHeaderLatched
+  return getBootstrapSession().conversationLatches.afkModeHeaderLatched()
 }
 
 export function setAfkModeHeaderLatched(v: boolean): void {
-  STATE.afkModeHeaderLatched = v
+  getBootstrapSession().conversationLatches.replaceAfkModeHeaderLatched(v)
 }
 
 export function getFastModeHeaderLatched(): boolean | null {
-  return STATE.fastModeHeaderLatched
+  return getBootstrapSession().conversationLatches.fastModeHeaderLatched()
 }
 
 export function setFastModeHeaderLatched(v: boolean): void {
-  STATE.fastModeHeaderLatched = v
+  getBootstrapSession().conversationLatches.replaceFastModeHeaderLatched(v)
 }
 
 export function getCacheEditingHeaderLatched(): boolean | null {
-  return STATE.cacheEditingHeaderLatched
+  return getBootstrapSession().conversationLatches.cacheEditingHeaderLatched()
 }
 
 export function setCacheEditingHeaderLatched(v: boolean): void {
-  STATE.cacheEditingHeaderLatched = v
+  getBootstrapSession().conversationLatches.replaceCacheEditingHeaderLatched(v)
 }
 
-/**
- * Official Pvt @178583191 (gold-248-stickyBetas):
- * `if(g()) e.stickyBetas=k4(); else n().conversationLatches.unlatchStickyBetas();
- *  e?.perTurnEffortPins.clear()`  - no header nulls, no requestLatches.reset.
- * Leftover: bag unlatch (C()/g() empty) + KEEP header nulls + resetRequestLatches.
- * Callers that also need getAllModelBetas re-evaluation must clearBetasCaches().
- */
 export function clearBetaHeaderLatches(): void {
-  STATE.afkModeHeaderLatched = null
-  STATE.fastModeHeaderLatched = null
-  STATE.cacheEditingHeaderLatched = null
-  getBootstrapSession().conversationLatches.unlatchStickyBetas()
+  getBootstrapSession().conversationLatches.clearBetaHeaderLatches()
   resetRequestLatches()
 }
 
@@ -3242,11 +3134,13 @@ export function setReplBridgeActive(active: boolean): void {
 
 /** densable bridge cse_* id for G7 teleport mark + remint suppress. */
 export function getReplBridgeSessionId(): string | undefined {
-  return STATE.replBridgeSessionId
+  return getBootstrapSession().surfaceCapabilities.replBridgeSessionId()
 }
 
 export function setReplBridgeSessionId(sessionId: string | undefined): void {
-  STATE.replBridgeSessionId = sessionId
+  getBootstrapSession().surfaceCapabilities.replaceReplBridgeSessionId(
+    sessionId,
+  )
 }
 
 /**

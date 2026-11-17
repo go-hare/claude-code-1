@@ -93,7 +93,12 @@ describe('densable 2.1.289 authoringProgress', () => {
     expect(messages).toContain('onToolUseStart')
     expect(messages).toContain('onInputJsonDelta')
     expect(messages).toContain('onToolUseStop')
-    const repl = readFileSync(REPL, 'utf8')
-    expect(repl).toContain('true, // densable authoringProgressSurface:!0')
+    const runReplTurn = readFileSync(
+      join(import.meta.dir, '../../../screens/repl/runReplTurn.ts'),
+      'utf8',
+    )
+    expect(runReplTurn).toContain(
+      'true, // densable authoringProgressSurface:!0',
+    )
   })
 })

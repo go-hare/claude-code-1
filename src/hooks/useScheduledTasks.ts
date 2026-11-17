@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { useAppStateStore, useSetAppState } from '../state/AppState.js'
+import {
+  useAppStateStore,
+  useMessageQueue,
+  useSetAppState,
+} from '../state/AppState.js'
 import { isTerminalTaskStatus } from '../Task.js'
 import {
   findTeammateTaskByAgentId,
@@ -30,7 +34,6 @@ import {
   appendLoopWakeupMessages,
   createLoopScheduledTaskFireMessage,
 } from '../utils/loopNoopFold.js'
-import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
 import { createScheduledTaskFireMessage } from '../utils/messages.js'
 import { setLoopTickInFlightPrompt } from '../bootstrap/state.js'
 import { WORKLOAD_CRON } from '../utils/workloadContext.js'
@@ -108,6 +111,7 @@ export function useScheduledTasks({
 
   const store = useAppStateStore()
   const setAppState = useSetAppState()
+  const messageQueue = useMessageQueue()
 
   useEffect(() => {
     // Runtime gate checked here (not at the hook call site) so the hook
@@ -163,7 +167,7 @@ export function useScheduledTasks({
       // densable stamps flags only — do NOT overwrite value with bare expanded
       // (that strips #20 RZn and local autonomy_authority; slash re-open reads
       // the body via extractModelScheduledSlashInput).
-      enqueuePendingNotification({
+      messageQueue.enqueuePendingNotification({
         ...command,
         isMeta: true,
         priority: 'later',
@@ -295,7 +299,7 @@ export function useScheduledTasks({
           }
           // densable 2.1.221 fire stamp 1:1 — flags only; keep prepared value
           // (basePrompt already expanded via resolveLoopDefaultFire above).
-          enqueuePendingNotification({
+          messageQueue.enqueuePendingNotification({
             ...command,
             isMeta: true,
             priority: 'later',

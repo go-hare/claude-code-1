@@ -21,7 +21,7 @@ import {
 } from '../utils/sessionState.js'
 import { isObserverAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { TaskState } from '../tasks/types.js'
-import type { AppState } from './AppStateStore.js'
+import type { AppState, SessionAppState, UIAppState } from './AppStateStore.js'
 
 /**
  * densable 2.1.211 Kw / 2.1.289 yg — live background membership for stream

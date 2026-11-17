@@ -24,6 +24,7 @@ import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { createHash } from 'node:crypto'
 import { createAgentId } from '../../utils/uuid.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { pdSessionEffort } from '../../utils/effort.js'
 import { runWithCwdOverride } from '../../utils/cwd.js'
 import {
   createAgentWorktree,
@@ -314,9 +315,10 @@ export const claudeCodeBackend: AgentAdapter = {
     // densable 2.1.229 #24 — same-prefix prompt-cache warm-up stagger (FZp)
     const toolNames = workerTools.map(t => t.name).sort()
     // densable Ze = model, effort, agentType, tools, schema, cwd (newline-joined)
-    const sessionEffort = toolUseContext.getAppState?.()?.effortValue ?? ''
+    const effectiveModel = model ?? toolUseContext.options.mainLoopModel
+    const sessionEffort = pdSessionEffort(appState, effectiveModel) ?? ''
     const prefixKey = buildWorkflowPrefixKey({
-      model: model ?? toolUseContext.options.mainLoopModel,
+      model: effectiveModel,
       effort: sessionEffort,
       agentType: agentDef.agentType,
       toolNames,

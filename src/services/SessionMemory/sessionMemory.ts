@@ -281,12 +281,6 @@ const extractSessionMemory = sequential(async function (
     return
   }
 
-  // Poor mode: skip to reduce token consumption
-  if (feature('POOR')) {
-    const { isPoorModeActive } = await import('../../commands/poor/poorMode.js')
-    if (isPoorModeActive()) return
-  }
-
   // Check gate lazily when hook runs (cached, non-blocking)
   if (!isSessionMemoryGateEnabled()) {
     // Log gate failure once per session (ant-only)

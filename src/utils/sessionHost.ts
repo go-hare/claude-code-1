@@ -721,3 +721,19 @@ export function wasWarmSpareClaimed(): boolean {
 export function isDisklessLaunch(): boolean {
   return bootstrapHost().launchOptions.diskless()
 }
+
+/**
+ * Official `Kr().teleportedSessionIds` @181213749 — host-keyed `WeakMap<SessionHost, Set<string>>`
+ * (`var ano = new z(() => new i); function Kr() { return ano.of(U().host) }`).
+ */
+const teleportedSessionIdsByHost = new WeakMap<object, Set<string>>()
+
+export function getHostTeleportedSessionIds(): Set<string> {
+  const host = bootstrapHost()
+  let set = teleportedSessionIdsByHost.get(host)
+  if (!set) {
+    set = new Set()
+    teleportedSessionIdsByHost.set(host, set)
+  }
+  return set
+}

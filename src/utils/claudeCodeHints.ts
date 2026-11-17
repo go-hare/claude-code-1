@@ -16,7 +16,7 @@
  */
 
 import { logForDebugging } from './debug.js'
-import { createSignal } from './signal.js'
+import { getBootstrapSession } from './sessionRoot.js'
 
 export type ClaudeCodeHintType = 'plugin'
 
@@ -161,45 +161,39 @@ function firstCommandToken(command: string): string {
 // the same store.
 // ============================================================================
 
-let pendingHint: ClaudeCodeHint | null = null
-let shownThisSession = false
-const pendingHintChanged = createSignal()
-const notify = pendingHintChanged.emit
-
 /** Raw store write. Callers should gate first (see module comment). */
 export function setPendingHint(hint: ClaudeCodeHint): void {
-  if (shownThisSession) return
-  pendingHint = hint
-  notify()
+  getBootstrapSession().pendingHint.offer(hint)
 }
 
 /** Clear the slot without flipping the session flag — for rejected hints. */
 export function clearPendingHint(): void {
-  if (pendingHint !== null) {
-    pendingHint = null
-    notify()
-  }
+  getBootstrapSession().pendingHint.dismiss()
 }
 
 /** Flip the once-per-session flag. Call only when a dialog is actually shown. */
 export function markShownThisSession(): void {
-  shownThisSession = true
+  getBootstrapSession().pendingHint.markShown()
 }
 
-export const subscribeToPendingHint = pendingHintChanged.subscribe
+export function subscribeToPendingHint(listener: () => void): () => void {
+  return getBootstrapSession().pendingHint.subscribe(listener)
+}
 
 export function getPendingHintSnapshot(): ClaudeCodeHint | null {
-  return pendingHint
+  return getBootstrapSession().pendingHint.getSnapshot() as ClaudeCodeHint | null
 }
 
 export function hasShownHintThisSession(): boolean {
-  return shownThisSession
+  return getBootstrapSession().pendingHint.shownThisSession
 }
 
 /** Test-only reset. */
 export function _resetClaudeCodeHintStore(): void {
-  pendingHint = null
-  shownThisSession = false
+  const slot = getBootstrapSession().pendingHint
+  slot.pending = null
+  slot.shownThisSession = false
+  slot.changed.clear()
 }
 
 export const _test = {

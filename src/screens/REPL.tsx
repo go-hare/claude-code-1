@@ -3,7 +3,6 @@ import { feature } from 'bun:bundle';
 import {
   detachedToolCallAbort,
   getDetachedToolCallSnapshot,
-  pruneDetachedToolCalls,
   stopRunningDetachedToolCalls,
   subscribeDetachedToolCalls,
 } from '../utils/detachedToolCallStore.js';
@@ -427,7 +426,7 @@ import { FORK_SUBAGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/f
 import { escapeXml } from '../utils/xml.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
 import { gracefulShutdown, gracefulShutdownSync } from '../utils/gracefulShutdown.js';
-import { handlePromptSubmit, joinHandedBackPrompt, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
+import { joinHandedBackPrompt, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
 import { useQueueProcessor } from '../hooks/useQueueProcessor.js';
 import { useMailboxBridge } from '../hooks/useMailboxBridge.js';
 import { queryCheckpoint, logQueryProfileReport } from '../utils/queryProfiler.js';
@@ -472,7 +471,20 @@ import { resolveAgentTools } from '@claude-code/builtin-tools/tools/AgentTool/ag
 import { resumeAgentBackground } from '@claude-code/builtin-tools/tools/AgentTool/resumeAgent.js';
 import { useMainLoopModel } from '../hooks/useMainLoopModel.js';
 import { useStrandedAgentResume } from '../hooks/useStrandedAgentResume.js';
-import { useAppState, useSetAppState, useAppStateStore } from '../state/AppState.js';
+import {
+  useAppState,
+  useAppStateSession,
+  useAppStateStore,
+  useMcpConnections,
+  useMessageQueue,
+  useSessionHooksRegistry,
+  useSetAppState,
+} from '../state/AppState.js';
+import { SessionEngine } from './repl/SessionEngine.js';
+import { SubmitController } from './repl/SubmitController.js';
+import { TranscriptProjection } from './repl/TranscriptProjection.js';
+import { TurnController } from './repl/TurnController.js';
+import { ViewController } from './repl/ViewController.js';
 import type { ContentBlockParam, ContentBlock, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { ProcessUserInputContext } from '../utils/processUserInput/processUserInput.js';
 import { isEndedByModelCommandBlocked } from '../utils/processUserInput/processUserInput.js';
@@ -603,24 +615,7 @@ import {
   type LeftArrowVia,
 } from '../utils/leftArrowVia.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
-import {
-  popAllEditable,
-  enqueue,
-  type SetAppState,
-  getCommandQueue,
-  getCommandQueueSnapshot,
-  getCommandQueueLength,
-  isFoldInFlight,
-  isMidTurnFoldSuspended,
-  promoteToNow,
-  demoteFromNow,
-  getMainThreadQueueLength,
-  removeByFilter,
-  someInFlightDrainCommand,
-  isPoppableEditableCommand,
-  isQueuedCommandEditable,
-  subscribeToCommandQueue,
-} from '../utils/messageQueueManager.js';
+import { type SetAppState, isPoppableEditableCommand } from '../utils/messageQueueManager.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
 import {
   trySendQueuedNowKey,
@@ -1388,6 +1383,7 @@ export function REPL({
   }, []);
   const disableMessageActions = feature('MESSAGE_ACTIONS') ? disableMessageActionsRaw : false;
   const buddyEnabled = isBuddyEnabled();
+  const messageQueue = useMessageQueue();
 
   // Log REPL mount/unmount lifecycle
   useEffect(() => {
@@ -1398,13 +1394,13 @@ export function REPL({
   // Official resume-return densable — inject continue prompt once after resume.
   useEffect(() => {
     if (!initialAutoContinuePrompt) return;
-    enqueue({
+    messageQueue.enqueue({
       mode: 'prompt',
       value: initialAutoContinuePrompt,
       priority: 'next',
       isMeta: true,
     });
-  }, [initialAutoContinuePrompt]);
+  }, [initialAutoContinuePrompt, messageQueue]);
 
   // Agent definition is state so /resume can update it mid-session
   const [mainThreadAgentDefinition, setMainThreadAgentDefinition] = useState(initialMainThreadAgentDefinition);
@@ -1433,26 +1429,6 @@ export function REPL({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const setAppState = useSetAppState();
-  // densable Qr (@209940969) — seed transcripts[Ve()] synchronously on init
-  // before effects/stream events read store.getState().transcripts[Ve()].
-  useState(() => {
-    const mainAgentId = getMainThreadAgentId();
-    setAppState(prev => {
-      const existing = prev.transcripts[mainAgentId];
-      if (existing !== undefined) return prev;
-      return {
-        ...prev,
-        transcripts: {
-          ...prev.transcripts,
-          [mainAgentId]: {
-            messages: initialMessages ?? [],
-            inProgressToolUseIDs: new Set(),
-          },
-        },
-      };
-    });
-    return null;
-  });
   // densable NDr / TZt / H$y — willow crate diff tab baseline
   const willowCrateEnabled = isDiffPanelEnabled();
   const replTab = useAppState(s => s.replTab);
@@ -1492,6 +1468,43 @@ export function REPL({
   }, [viewingAgentTaskId, needsBootstrap, setAppState]);
 
   const store = useAppStateStore();
+  const mcpConnections = useMcpConnections();
+  const sessionHooksRegistry = useSessionHooksRegistry();
+  const appStateSession = useAppStateSession();
+  // Official `IW` + `RJ` + `NJ` controller instances owned by REPL lifecycle.
+  const [sessionEngine] = useState(
+    () =>
+      new SessionEngine({
+        store,
+        session: appStateSession,
+        initialCommands,
+        initialTools,
+        initialDynamicMcpConfig,
+        mainThreadAgentDefinition,
+      }),
+  );
+  // Synchronous state machine for the query lifecycle. Replaces the
+  // error-prone dual-state pattern where isLoading (React state, async
+  // batched) and isQueryRunning (ref, sync) could desync. See QueryGuard.ts.
+  const queryGuard = React.useRef(new QueryGuard()).current;
+
+  const [turnController] = useState(
+    () => new TurnController({ store, initialLoading: remoteSessionConfig?.hasInitialPrompt ?? false }),
+  );
+  const [submitController] = useState(() => new SubmitController({ store, turnController, messageQueue, queryGuard }));
+  const [viewController] = useState(() => new ViewController());
+  const [transcriptProjection] = useState(
+    () => new TranscriptProjection({ store, initialMessages: initialMessages ?? [] }),
+  );
+  useEffect(
+    () => () => {
+      sessionEngine.dispose();
+      turnController.dispose();
+      submitController.dispose();
+      sessionHooksRegistry.clear(getMainThreadAgentId());
+    },
+    [sessionEngine, turnController, submitController, sessionHooksRegistry],
+  );
   // densable `Xm(e,o)` / REPL `Er` — one registry for getToolUseContext.
   const taskRegistry = useMemo(() => createTaskRegistry(() => store.getState(), setAppState), [store, setAppState]);
   useEffect(() => {
@@ -1615,47 +1628,17 @@ export function REPL({
 
   const mcpClients = useMergedClients(initialMcpClients, mcp.clients);
 
-  // IDE integration
-  const [ideSelection, setIDESelection] = useState<IDESelection | undefined>(undefined);
-  const ideSelectionConsumedByRef = useRef<{
-    selection: IDESelection;
-    promptUuid: string;
-  } | null>(null);
-  const consumeIdeSelection = useCallback((uuid: string | undefined) => {
-    setIDESelection(current => {
-      if (current && uuid) {
-        ideSelectionConsumedByRef.current = {
-          selection: current,
-          promptUuid: uuid,
-        };
-      }
-      return undefined;
-    });
-  }, []);
-  const recordIdeSelectionConsumedBy = useCallback((uuid: string, selection: IDESelection | undefined) => {
-    if (selection) {
-      ideSelectionConsumedByRef.current = {
-        selection,
-        promptUuid: uuid,
-      };
-    }
-  }, []);
-  const returnIdeSelection = useCallback((selection: IDESelection | undefined) => {
-    if (selection === undefined) {
-      return;
-    }
-    setIDESelection(current => (current?.text || current?.source === 'diff' ? current : selection));
-  }, []);
-  const restoreIdeSelectionConsumedBy = useCallback(
-    (uuid: string, selection: IDESelection | undefined) => {
-      if (selection !== undefined) {
-        returnIdeSelection(selection);
-      } else if (ideSelectionConsumedByRef.current?.promptUuid === uuid) {
-        returnIdeSelection(ideSelectionConsumedByRef.current.selection);
-      }
-    },
-    [returnIdeSelection],
+  // IDE integration (delegated to Official NJ ViewController)
+  const { ideSelection, bashesDialog: showBashesDialog } = useSyncExternalStore(
+    viewController.subscribe,
+    viewController.getSnapshot,
   );
+  const setIDESelection = viewController.setIdeSelection;
+  const consumeIdeSelection = viewController.consumeIdeSelection;
+  const recordIdeSelectionConsumedBy = viewController.recordIdeSelectionConsumedBy;
+  const returnIdeSelection = viewController.returnIdeSelection;
+  const restoreIdeSelectionConsumedBy = viewController.restoreIdeSelectionConsumedBy;
+  const setShowBashesDialog = viewController.setBashesDialog;
   const [ideToInstallExtension, setIDEToInstallExtension] = useState<IdeType | null>(null);
   const [ideInstallationStatus, setIDEInstallationStatus] = useState<IDEExtensionInstallationStatus | null>(null);
   // Dead code elimination: model switch callout state (ant-only)
@@ -1819,25 +1802,33 @@ export function REPL({
   useIdeLogging(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients);
   useIdeSelection(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients, setIDESelection);
 
-  const [streamMode, setStreamModeState] = useState<SpinnerMode>('responding');
+  const { streamMode, streamingToolUses, streamingThinking } = useSyncExternalStore(
+    turnController.subscribe,
+    turnController.getSnapshot,
+  );
+  const setStreamingToolUses = turnController.setStreamingToolUses;
+  const setStreamingThinking = turnController.setStreamingThinking;
   // densable fl / Ihr.outputLimitRecovery — "picking the thought back up"
   const [outputLimitRecovery, setOutputLimitRecovery] = useState<
     import('../components/Spinner/statusKind.js').OutputLimitRecovery | null
   >(null);
   // densable Ihr.setMode: recovery bag only lives on requesting.
-  const setStreamMode = useCallback((mode: SpinnerMode) => {
-    setStreamModeState(mode);
-    if (mode !== 'requesting') setOutputLimitRecovery(null);
-    try {
-      const { leftoverIhrUxe, leftoverIhr } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-      leftoverIhr.main.setMode(mode);
-      if (mode !== 'thinking') leftoverIhrUxe.setSpinnerMessage(null);
-    } catch {
-      // isolation — optional
-    }
-  }, []);
+  const setStreamMode = useCallback(
+    (mode: SpinnerMode) => {
+      turnController.setStreamMode(mode);
+      if (mode !== 'requesting') setOutputLimitRecovery(null);
+      try {
+        const { leftoverIhrUxe, leftoverIhr } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
+        leftoverIhr.main.setMode(mode);
+        if (mode !== 'thinking') leftoverIhrUxe.setSpinnerMessage(null);
+      } catch {
+        // isolation — optional
+      }
+    },
+    [turnController],
+  );
   // Ref mirror so onSubmit can read the latest value without adding
   // streamMode to its deps. streamMode flips between
   // requesting/responding/tool-use ~10x per turn during streaming; having it
@@ -1848,25 +1839,9 @@ export function REPL({
   // harmless — but ref mirrors sync on every render anyway so it's fresh.
   const streamModeRef = useRef(streamMode);
   streamModeRef.current = streamMode;
-  const [streamingToolUses, setStreamingToolUses] = useState<StreamingToolUse[]>([]);
-  const [streamingThinking, setStreamingThinking] = useState<StreamingThinking | null>(null);
   // densable hJ `X` = `xe(io)` from `Cco=Ds(!1)`. Gold 289 `WE=null` so v2
   // never writes the store — X stays false. Keep the `N&&!X` conjunct.
   const [liveStateRowMounted] = useState(false);
-
-  // Auto-hide streaming thinking after 30 seconds of being completed
-  useEffect(() => {
-    if (streamingThinking && !streamingThinking.isStreaming && streamingThinking.streamingEndedAt) {
-      const elapsed = Date.now() - streamingThinking.streamingEndedAt;
-      const remaining = 30000 - elapsed;
-      if (remaining > 0) {
-        const timer = setTimeout(setStreamingThinking, remaining, null);
-        return () => clearTimeout(timer);
-      } else {
-        setStreamingThinking(null);
-      }
-    }
-  }, [streamingThinking]);
 
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   // Ref that always points to the current abort controller, used by the
@@ -1899,10 +1874,10 @@ export function REPL({
 
   // densable `_abortOnNowPriorityCommand` — `#k` promoteToNow aborts the live turn.
   useEffect(() => {
-    return subscribeToCommandQueue(() => {
+    return messageQueue.subscribe(() => {
       abortOnNowPriorityCommand(abortControllerRef.current);
     });
-  }, []);
+  }, [messageQueue]);
 
   // Timestamp (ms) of the most recent local-jsx panel dismissal (e.g. ESC on
   // /workflows). Used by onCancel's grace-period guard: the ESC that closes
@@ -1935,11 +1910,6 @@ export function REPL({
   // Plumbing kept for future modal-scroll wiring.
   const modalScrollRef = useRef<ScrollBoxHandle>(null);
 
-  // Synchronous state machine for the query lifecycle. Replaces the
-  // error-prone dual-state pattern where isLoading (React state, async
-  // batched) and isQueryRunning (ref, sync) could desync. See QueryGuard.ts.
-  const queryGuard = React.useRef(new QueryGuard()).current;
-
   // Subscribe to the guard — true during dispatching or running.
   // This is the single source of truth for "is a local query in flight".
   const isQueryActive = React.useSyncExternalStore(queryGuard.subscribe, queryGuard.getSnapshot);
@@ -1955,6 +1925,9 @@ export function REPL({
   // loading is driven by queryGuard (reserve/tryStart/end/cancelReservation),
   // external loading by setIsExternalLoading.
   const isLoading = isQueryActive || isExternalLoading;
+  useEffect(() => {
+    turnController.setLoading(isLoading);
+  }, [turnController, isLoading]);
 
   // Elapsed time is computed by SpinnerWithVerb from these refs on each
   // animation frame, avoiding a useInterval that re-renders the entire REPL.
@@ -2572,9 +2545,9 @@ export function REPL({
     };
   }, [store, addNotification, onChangeDynamicMcpConfig]);
 
-  const [messages, rawSetMessages] = useState<MessageType[]>(initialMessages ?? []);
+  const messages = useSyncExternalStore(transcriptProjection.subscribe, transcriptProjection.getSnapshot);
   const messagesRef = useRef(messages);
-  messagesRef.current = messages;
+  messagesRef.current = transcriptProjection.getCurrent();
   // densable REPL `lr=rn()` — Ink ClockProvider `useClock`, not IdleReturnClock.
   const clock = useClock();
   // densable REPL `wa` / `new Xj({turn,messageQueue,transcript,store,session,taskRegistry,spinnerStore,dialogStore,clock:lr})`.
@@ -2603,13 +2576,13 @@ export function REPL({
         spinnerStore: leftoverIhr,
         dialogStore,
         messageQueue: {
-          getCommandQueueSnapshot,
-          getCommandQueue,
-          subscribe: subscribeToCommandQueue,
-          isFoldInFlight,
-          isMidTurnFoldSuspended,
-          promoteToNow,
-          demoteFromNow,
+          getCommandQueueSnapshot: messageQueue.getSnapshot,
+          getCommandQueue: () => messageQueue.getCommands(),
+          subscribe: messageQueue.subscribe,
+          isFoldInFlight: (uuid: string) => messageQueue.isFoldInFlight(uuid),
+          isMidTurnFoldSuspended: () => messageQueue.isMidTurnFoldSuspended(),
+          promoteToNow: (uuid: string) => messageQueue.promoteToNow(uuid),
+          demoteFromNow: (uuid: string, raisedFrom) => messageQueue.demoteFromNow(uuid, raisedFrom),
         },
         transcript: { getSnapshot: () => messagesRef.current },
         clock,
@@ -2617,7 +2590,7 @@ export function REPL({
         getAppState: () => store.getState(),
         setAppState,
       }),
-    [store, setAppState, taskRegistry, queryGuard, dialogStore, clock],
+    [store, setAppState, taskRegistry, queryGuard, dialogStore, clock, messageQueue],
   );
   useEffect(() => () => queuedNowLowLatencyHost.dispose(), [queuedNowLowLatencyHost]);
   // densable je/Wt — turn-start snapshot for idle-fork nzu(replyOnResume).
@@ -2633,46 +2606,21 @@ export function REPL({
   const setAbortControllerForQuery = useCallback(
     (ac: AbortController | null) => {
       if (ac) markTurnStart();
+      abortControllerRef.current = ac;
       setAbortController(ac);
     },
     [markTurnStart],
   );
-  // Wrap setMessages so messagesRef is always current the instant the
-  // call returns — not when React later processes the batch.  Apply the
-  // updater eagerly against the ref, then hand React the computed value
-  // (not the function).  rawSetMessages batching becomes last-write-wins,
-  // and the last write is correct because each call composes against the
-  // already-updated ref.  This is the Zustand pattern: ref is source of
-  // truth, React state is the render projection.  Without this, paths
-  // that queue functional updaters then synchronously read the ref
-  // (e.g. handleSpeculationAccept → onQuery) see stale data.
+  // Delegate transcript state updates, detached tool-call pruning, and
+  // AppState.transcripts[mainAgentId] projection to TranscriptProjection,
+  // keeping messagesRef synced synchronously for closures that read it
+  // immediately after calling setMessages.
   const setMessages = useCallback(
     (action: React.SetStateAction<MessageType[]>) => {
-      const next = typeof action === 'function' ? action(messagesRef.current) : action;
-      pruneDetachedToolCalls(messagesRef.current, next);
-      messagesRef.current = next;
-      rawSetMessages(next);
-      // densable l9 (@209943150) — keep transcripts[Ve()].messages synchronized
-      // with live transcript writes, /clear, /compact, and rewinds.
-      setAppState(prev => {
-        const mainAgentId = getMainThreadAgentId();
-        const existing = prev.transcripts[mainAgentId];
-        if (existing !== undefined && existing.messages === next) {
-          return prev;
-        }
-        return {
-          ...prev,
-          transcripts: {
-            ...prev.transcripts,
-            [mainAgentId]: {
-              messages: next,
-              inProgressToolUseIDs: existing?.inProgressToolUseIDs ?? new Set(),
-            },
-          },
-        };
-      });
+      transcriptProjection.setMessages(action);
+      messagesRef.current = transcriptProjection.getCurrent();
     },
-    [setAppState],
+    [transcriptProjection],
   );
 
   // densable useUiLog — $.ui.log lines become notice-level system messages.
@@ -2900,7 +2848,7 @@ export function REPL({
             const check = checkInterruptedOutputBoundary(payload.prefill, payload.prefill.boundaryUuid);
             if (check.accept) {
               const hint = buildInterruptedOutputHintContent(payload.prefill.text);
-              enqueue({
+              messageQueue.enqueue({
                 mode: 'prompt',
                 value: hint,
                 priority: 'next',
@@ -3582,7 +3530,6 @@ export function REPL({
   });
 
   const [vimMode, setVimMode] = useState<VimMode>('INSERT');
-  const [showBashesDialog, setShowBashesDialog] = useState<string | boolean>(false);
   // When ultraplan approval fires while the pill dialog is open, PromptInput
   // unmounts (focusedInputDialog → 'ultraplan-choice') but this stays true;
   // (the completed ultraplan task has been filtered out). Close it here.
@@ -3738,7 +3685,7 @@ export function REPL({
       swarmBudgetInfoRef.current = undefined;
       const pendingWork = countPendingTurnDurationWork({
         tasks: store.getState().tasks,
-        queuedCommands: getCommandQueue(),
+        queuedCommands: messageQueue.getCommands(),
       });
       setMessages(prev => [
         ...prev,
@@ -3858,7 +3805,7 @@ export function REPL({
       // Without this, the spinner briefly disappears between consecutive
       // notifications (e.g., multiple background agents completing in rapid
       // succession) because isLoading goes false momentarily between each one.
-      getMainThreadQueueLength() > 0) &&
+      messageQueue.getMainThreadLength() > 0) &&
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
@@ -4768,7 +4715,7 @@ export function REPL({
 
   // Function to handle queued command when canceling a permission request
   const handleQueuedCommandOnCancel = useCallback(() => {
-    const result = popAllEditable(inputValueRef.current, 0);
+    const result = submitController.popAllEditable(inputValueRef.current, 0);
     if (!result) return;
     setInputValue(result.text);
     // densable 2.1.234 #19: restore bash when every popped cmd was bash
@@ -5036,127 +4983,31 @@ export function REPL({
       _newMessages: MessageType[],
       abortController: AbortController,
       mainLoopModel: string,
-    ): ProcessUserInputContext => {
-      // Read mutable values fresh from the store rather than closure-capturing
-      // useAppState() snapshots. Same values today (closure is refreshed by the
-      // render between turns); decouples freshness from React's render cycle for
-      // a future headless conversation loop. Same pattern refreshTools() uses.
-      const s = store.getState();
-
-      // Compute tools fresh from store.getState() rather than the closure-
-      // captured `tools`. useManageMCPConnections populates appState.mcp
-      // async as servers connect — the store may have newer MCP state than
-      // the closure captured at render time. Also doubles as refreshTools()
-      // for mid-query tool list updates.
-      const computeTools = () => {
-        const state = store.getState();
-        const assembled = assembleToolPool(state.toolPermissionContext, state.mcp.tools);
-        const merged = mergeAndFilterTools(combinedInitialTools, assembled, state.toolPermissionContext.mode);
-        if (!mainThreadAgentDefinition) return merged;
-        return resolveAgentTools(mainThreadAgentDefinition, merged, false, true).resolvedTools;
-      };
-      // densable computeMcpClients — gold refreshMcpClients:be.computeMcpClients
-      const computeMcpClients = () => preferLiveMcpClients(store.getState().mcp.clients, initialMcpClients);
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { getBootstrapSession } = require('../utils/sessionRoot.js') as typeof import('../utils/sessionRoot.js');
-        getBootstrapSession().mcpSessionWiring.registerConnections({
-          adoptServer(name, client, opts) {
-            setAppState(prev => {
-              const clients = prev.mcp.clients;
-              const idx = clients.findIndex(c => c.name === name);
-              if (idx >= 0) {
-                const next = [...clients];
-                next[idx] = client as (typeof clients)[number];
-                return { ...prev, mcp: { ...prev.mcp, clients: next } };
-              }
-              if (opts?.appendIfAbsent === true) {
-                return {
-                  ...prev,
-                  mcp: {
-                    ...prev.mcp,
-                    clients: [...clients, client as (typeof clients)[number]],
-                  },
-                };
-              }
-              return prev;
-            });
-          },
-        });
-      } catch {
-        // connections owner optional until session root is up
-      }
-
-      return {
-        abortController,
-        // densable: shouldStopBeforeNextApiCall: () => Ki.current !== null
-        shouldStopBeforeNextApiCall: () => leftArrowDeferRef.current !== null,
-        options: {
-          commands,
-          tools: computeTools(),
-          debug,
-          verbose: s.verbose,
-          mainLoopModel,
-          fallbackModel,
-          thinkingConfig: s.thinkingEnabled !== false ? thinkingConfig : { type: 'disabled' },
-          // Merge fresh from store rather than closing over useMergedClients'
-          // memoized output. initialMcpClients is a prop (session-constant).
-          mcpClients: preferLiveMcpClients(s.mcp.clients, initialMcpClients),
-          mcpResources: s.mcp.resources,
-          ideInstallationStatus: ideInstallationStatus,
-          isNonInteractiveSession: false,
-          dynamicMcpConfig,
-          theme,
-          agentDefinitions: (() => {
-            const registered = getRegisteredPluginAgentDefinitions();
-            const defs = s.agentDefinitions;
-            if (registered.length === 0) {
-              return allowedAgentTypes ? { ...defs, allowedAgentTypes } : defs;
-            }
-            const seen = new Set(defs.activeAgents.map(a => a.agentType));
-            const extra = registered.filter(a => !seen.has(a.agentType));
-            const allSeen = new Set(defs.allAgents.map(a => a.agentType));
-            const extraAll = registered.filter(a => !allSeen.has(a.agentType));
-            const merged = {
-              ...defs,
-              activeAgents: extra.length === 0 ? defs.activeAgents : [...defs.activeAgents, ...extra],
-              allAgents: extraAll.length === 0 ? defs.allAgents : [...defs.allAgents, ...extraAll],
-            };
-            return allowedAgentTypes ? { ...merged, allowedAgentTypes } : merged;
-          })(),
-          customSystemPrompt,
-          appendSystemPrompt,
-          appendSubagentSystemPrompt,
-          refreshTools: computeTools,
-          refreshMcpClients: computeMcpClients,
-        },
-        getAppState: () => store.getState(),
-        taskRegistry,
-        session: getBootstrapSession(),
-        getProactivityLevel: () => store.getState().proactivityLevel,
-        setAppState,
-        // densable y8r: main session both setters write toolPermissionContext
-        setToolPermissionContext: setSessionToolPermissionContext,
-        setSessionToolPermissionContext,
+    ): ProcessUserInputContext =>
+      sessionEngine.buildToolUseContext({
         messages,
+        _newMessages,
+        abortController,
+        mainLoopModel,
+        commands,
+        combinedInitialTools,
+        debug,
+        fallbackModel,
+        thinkingConfig,
+        initialMcpClients,
+        ideInstallationStatus,
+        dynamicMcpConfig,
+        theme,
+        allowedAgentTypes,
+        customSystemPrompt,
+        appendSystemPrompt,
+        appendSubagentSystemPrompt,
+        mcpConnections,
+        shouldStopBeforeNextApiCall: () => leftArrowDeferRef.current !== null,
+        taskRegistry,
+        setAppState,
+        setSessionToolPermissionContext,
         setMessages,
-        updateFileHistoryState(updater: (prev: FileHistoryState) => FileHistoryState) {
-          // Perf: skip the setState when the updater returns the same reference
-          // (e.g. fileHistoryTrackEdit returns `state` when the file is already
-          // tracked). Otherwise every no-op call would notify all store listeners.
-          setAppState(prev => {
-            const updated = updater(prev.fileHistory);
-            if (updated === prev.fileHistory) return prev;
-            return { ...prev, fileHistory: updated };
-          });
-        },
-        updateAttributionState(updater: (prev: AttributionState) => AttributionState) {
-          setAppState(prev => {
-            const updated = updater(prev.attribution);
-            if (updated === prev.attribution) return prev;
-            return { ...prev, attribution: updated };
-          });
-        },
         openMessageSelector: () => {
           if (!disabled) {
             setIsMessageSelectorVisible(true);
@@ -5167,16 +5018,13 @@ export function REPL({
         toolState: toolStateRef.current,
         setToolJSX,
         addNotification,
-        appendSystemMessage: msg => setMessages(prev => [...prev, msg]),
         sendOSNotification: opts => {
           void sendNotification(opts, terminal);
         },
         onChangeDynamicMcpConfig,
         onInstallIDEExtension: setIDEToInstallExtension,
-        nestedMemoryAttachmentTriggers: new Set<string>(),
         loadedNestedMemoryPaths: loadedNestedMemoryPathsRef.current,
         pendingNestedMemoryTriggers: pendingNestedMemoryTriggersRef.current,
-        dynamicSkillDirTriggers: new Set<string>(),
         discoveredSkillNames: discoveredSkillNamesRef.current,
         setResponseLength,
         pushApiMetricsEntry:
@@ -5194,110 +5042,38 @@ export function REPL({
               }
             : undefined,
         setStreamMode,
-        // densable 2.1.214 #39 dYd/setRetryStatus
         setRetryStatus,
-        // densable fl — spinner recovering bag on max_output_tokens_recovery
         setOutputLimitRecovery,
-        onCompactProgress: event => {
-          try {
-            const { leftoverIhr } =
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-            leftoverIhr.main.applyCompactProgress(event);
-          } catch {
-            // isolation — optional
-          }
-          switch (event.type) {
-            case 'hooks_start':
-              setSpinnerColor('claudeBlue_FOR_SYSTEM_SPINNER');
-              setSpinnerShimmerColor('claudeBlueShimmer_FOR_SYSTEM_SPINNER');
-              setSpinnerMessage(
-                event.hookType === 'pre_compact'
-                  ? 'Running PreCompact hooks\u2026'
-                  : event.hookType === 'post_compact'
-                    ? 'Running PostCompact hooks\u2026'
-                    : 'Running SessionStart hooks\u2026',
-              );
-              break;
-            case 'compact_start':
-              setSpinnerMessage('Compacting conversation');
-              compactProgressActiveRef.current = true;
-              setCompactingHint(event.hintText ?? null);
-              setCompactingStartTime(start => start ?? Date.now());
-              break;
-            case 'compact_end':
-              setSpinnerMessage(null);
-              setSpinnerColor(null);
-              setSpinnerShimmerColor(null);
-              compactProgressActiveRef.current = false;
-              setCompactingHint(null);
-              setCompactingStartTime(null);
-              break;
-          }
-        },
-        // densable 2.1.224 #21 — compact progress to RC via system/status
-        // (setSDKStatus('compacting'|null) → enqueueSdkEvent → bridge write).
-        setSDKStatus: (status: string | null | undefined) => {
-          if (!feature('BRIDGE_MODE')) return;
-          // densable fDl: skip "requesting"; only emit when bridge can drain.
-          if (status === 'requesting') return;
-          try {
-            // Lazy require avoids circular import weight at REPL module init.
-            const { enqueueSdkEvent } =
-              require('../utils/sdkEventQueue.js') as typeof import('../utils/sdkEventQueue.js');
-            // densable $Oi / SDKStatusSchema: only 'compacting' | null on the wire
-            const wireStatus: 'compacting' | null = status === 'compacting' ? 'compacting' : null;
-            enqueueSdkEvent({
-              type: 'system',
-              subtype: 'status',
-              status: wireStatus,
-            });
-          } catch {
-            // optional path
-          }
-        },
+        setSpinnerColor,
+        setSpinnerShimmerColor,
+        setSpinnerMessage,
+        setCompactingHint,
+        setCompactingStartTime,
+        compactProgressActiveRef,
         setInProgressToolUseIDs,
         setHasInterruptibleToolInProgress: (v: boolean) => {
           hasInterruptibleToolInProgressRef.current = v;
         },
         resume,
-        // densable /cd `Mt` — refresh plugins/MCP after a directory move
-        reloadPlugins: async () => {
-          await refreshActivePlugins(setAppState, { applyStagedInstalls: false });
-        },
-        // densable Te/`le` — `/cd` `Rt` skips project MCP approval when set
         strictMcpConfig,
-        // densable /cd `p()` — retire previous project additionalDirectories
-        retireDepartedAdditionalDirectories: directories => {
-          setAppState(prev => {
-            const next = retireDepartedAdditionalDirectories(prev.toolPermissionContext, directories);
-            return next === prev.toolPermissionContext ? prev : { ...prev, toolPermissionContext: next };
-          });
-        },
         setConversationId,
         requestPrompt: feature('HOOK_PROMPTS') ? requestPrompt : undefined,
         contentReplacementState: contentReplacementStateRef.current,
-        // densable doo / Bgp — REPL DialogStore requestDialog host
         requestDialog: requestDialog as NonNullable<ProcessUserInputContext['requestDialog']>,
-        // densable PBr / We() — session services Provider, not lastPinned.
         storageV5,
         credentials,
-        presentation: isFullscreenEnvEnabled() ? 'fullscreen' : 'inline',
-        toggleDiffPanel: async () =>
-          toggleDiffPanelForSlash(getReplDiffHost(), setAppState, () => store.getState().replTab, replDiffColumns),
-      };
-    },
+        replDiffColumns,
+      }),
     [
+      sessionEngine,
       commands,
       combinedInitialTools,
-      mainThreadAgentDefinition,
       debug,
       initialMcpClients,
       ideInstallationStatus,
       dynamicMcpConfig,
       theme,
       allowedAgentTypes,
-      store,
       taskRegistry,
       storageV5,
       credentials,
@@ -5318,6 +5094,16 @@ export function REPL({
       setConversationId,
       strictMcpConfig,
       replDiffColumns,
+      mcpConnections,
+      setStreamMode,
+      setSpinnerColor,
+      setSpinnerShimmerColor,
+      setSpinnerMessage,
+      setResponseLength,
+      setToolJSX,
+      setInProgressToolUseIDs,
+      terminal,
+      thinkingConfig,
     ],
   );
 
@@ -5467,7 +5253,7 @@ export function REPL({
     // Aborting subagents may produce task-completed notifications.
     // Clear task notifications so the queue processor doesn't immediately
     // start a new foreground query; forward them to the background session.
-    const removedNotifications = removeByFilter(cmd => cmd.mode === 'task-notification');
+    const removedNotifications = messageQueue.removeByFilter(cmd => cmd.mode === 'task-notification');
 
     void (async () => {
       const toolUseContext = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
@@ -5567,303 +5353,32 @@ export function REPL({
 
   const onQueryEvent = useCallback(
     (event: Parameters<typeof handleMessageFromStream>[0]) => {
-      handleMessageFromStream(
+      turnController.dispatchStreamEvent({
         event,
-        newMessage => {
-          if (isCompactBoundaryMessage(newMessage)) {
-            // Fullscreen: keep pre-compact messages for scrollback. query.ts
-            // slices at the boundary for API calls, Messages.tsx skips the
-            // boundary filter in fullscreen, and useLogMessages treats this
-            // as an incremental append (first uuid unchanged). Cap at one
-            // compact-interval of scrollback — normalizeMessages/applyGrouping
-            // are O(n) per render, so drop everything before the previous
-            // boundary to keep n bounded across multi-day sessions.
-            if (isFullscreenEnvEnabled()) {
-              setMessages(old => {
-                const postBoundary = getMessagesAfterCompactBoundary(old, {
-                  includeSnipped: true,
-                });
-                // Hard cap: keep at most 500 messages in fullscreen scrollback
-                // to prevent unbounded memory growth in multi-day sessions.
-                // normalizeMessages/applyGrouping are O(n), and Ink fiber
-                // trees cost ~250KB RSS per message. Without this cap,
-                // scrollback after several compactions can reach thousands
-                // of messages (observed: 13k+, 1GB+ heap).
-                const MAX_FULLSCREEN_SCROLLBACK = 500;
-                const kept =
-                  postBoundary.length > MAX_FULLSCREEN_SCROLLBACK
-                    ? postBoundary.slice(-MAX_FULLSCREEN_SCROLLBACK)
-                    : postBoundary;
-                return [...kept, newMessage];
-              });
-            } else {
-              setMessages(() => [newMessage]);
-            }
-            // Bump conversationId so Messages.tsx row keys change and
-            // stale memoized rows remount with post-compact content.
-            setConversationId(randomUUID());
-            // densable z$l after compact boundary replace — prune displayedMessageContent
-            setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
-            // Compaction succeeded — clear the context-blocked flag so ticks resume
-            if (feature('PROACTIVE') || feature('KAIROS')) {
-              proactiveModule?.setContextBlocked(false);
-            }
-          } else if (
-            newMessage.type === 'progress' &&
-            isEphemeralToolProgress(
-              newMessage.data &&
-                typeof newMessage.data === 'object' &&
-                newMessage.data !== null &&
-                'type' in newMessage.data
-                ? newMessage.data.type
-                : undefined,
-            )
-          ) {
-            // densable iCe replace-last-ephemeral-progress (mcn/XVt).
-            // agent_progress / hook_progress / skill_progress are NOT ephemeral.
-            setMessages(oldMessages =>
-              applyMessageStoreAction(oldMessages, {
-                type: 'replace-last-ephemeral-progress',
-                message: newMessage,
-              }),
-            );
-          } else {
-            // densable: salvage/remove-by-uuid BEFORE Nt()?eBt:append (one copy).
-            if (newMessage.type === 'assistant') {
-              const st = streamingDisplayStore.getState();
-              if (
-                st.salvage !== null &&
-                !('isVirtual' in newMessage && newMessage.isVirtual) &&
-                !('isApiErrorMessage' in newMessage && newMessage.isApiErrorMessage)
-              ) {
-                const content = newMessage.message?.content;
-                const hasText =
-                  Array.isArray(content) &&
-                  content.some(
-                    b =>
-                      typeof b !== 'string' &&
-                      b.type === 'text' &&
-                      typeof b.text === 'string' &&
-                      b.text.trim().length > 0,
-                  );
-                if (hasText && newMessage.message?.id) {
-                  salvageRef.current = {
-                    apiMessageId: newMessage.message.id,
-                    salvageText: st.salvage,
-                    exact: st.exact,
-                  };
-                  const replaces = refusalReplacesUuidsRef.current;
-                  if (replaces !== null) {
-                    refusalReplacesUuidsRef.current = null;
-                    const drop = new Set(replaces);
-                    setMessages(old => old.filter(m => !drop.has(m.uuid)));
-                    for (const uuid of replaces) {
-                      void removeTranscriptMessage(uuid as `${string}-${string}-${string}-${string}-${string}`);
-                    }
-                  }
-                  streamingDisplayStore.setSalvage(null);
-                }
-              }
-            }
-            // densable 2.1.251 #46: Nt()? append-or-move-by-uuid : append
-            if (isFullscreenEnvEnabled()) {
-              setMessages(oldMessages =>
-                applyMessageStoreAction(oldMessages, {
-                  type: 'append-or-move-by-uuid',
-                  message: newMessage,
-                }),
-              );
-            } else {
-              setMessages(oldMessages => [...oldMessages, newMessage]);
-            }
-            if (newMessage.type === 'assistant') {
-              clearStreamingText();
-            }
-          }
-          // Block ticks on API errors to prevent tick → error → tick
-          // runaway loops (e.g., auth failure, rate limit, blocking limit).
-          // Cleared on compact boundary (above) or successful response (below).
-          if (feature('PROACTIVE') || feature('KAIROS')) {
-            if (newMessage.type === 'assistant' && 'isApiErrorMessage' in newMessage && newMessage.isApiErrorMessage) {
-              proactiveModule?.setContextBlocked(true);
-            } else if (newMessage.type === 'assistant') {
-              proactiveModule?.setContextBlocked(false);
-            }
-          }
-          // Relay assistant response to master when in slave mode.
-          if (feature('UDS_INBOX') && newMessage.type === 'assistant') {
-            // Extract text from content blocks (API format)
-            const msg = newMessage.message as any;
-            const contentBlocks = msg?.content ?? (newMessage as any).content ?? [];
-            const textParts: string[] = [];
-            if (Array.isArray(contentBlocks)) {
-              for (const block of contentBlocks) {
-                if (typeof block === 'string') {
-                  textParts.push(block);
-                } else if (block?.type === 'text' && block.text) {
-                  textParts.push(block.text);
-                }
-              }
-            } else if (typeof contentBlocks === 'string') {
-              textParts.push(contentBlocks);
-            }
-            const text = textParts.join('\n').trim();
-            if ('isApiErrorMessage' in newMessage && newMessage.isApiErrorMessage) {
-              pipeReturnHadErrorRef.current = true;
-              relayPipeMessage({
-                type: 'error',
-                data: text || 'Slave request failed',
-              });
-            } else if (text) {
-              relayPipeMessage({ type: 'stream', data: text });
-            }
-          }
-        },
-        // densable qQs onUpdateLength(d.length) — delta is already a char count
-        deltaChars => {
-          // setResponseLength handles updating both responseLengthRef (for
-          // spinner animation) and apiMetricsRef (endResponseLength/lastTokenTime
-          // for OTPS). No separate metrics update needed here.
-          setResponseLength(length => length + deltaChars);
-        },
+        setMessages,
+        messagesRef,
+        setConversationId,
+        setAppState,
+        streamingDisplayStore,
+        salvageRef,
+        refusalReplacesUuidsRef,
+        clearStreamingText,
+        pipeReturnHadErrorRef,
+        relayPipeMessage,
+        setResponseLength,
         setStreamMode,
         setStreamingToolUses,
-        tombstonedMessage => {
-          setMessages(oldMessages => oldMessages.filter(m => m !== tombstonedMessage));
-          void removeTranscriptMessage(tombstonedMessage.uuid);
-        },
         setStreamingThinking,
-        metrics => {
-          // densable: start → TTFT lifecycle; thinking_progress/end ignored for spinner OTPS
-          let ttftMs: number | undefined;
-          if ('type' in metrics && metrics.type === 'start') {
-            ttftMs = metrics.ttftMs;
-          } else if ('ttftMs' in metrics && typeof (metrics as { ttftMs?: unknown }).ttftMs === 'number') {
-            ttftMs = (metrics as { ttftMs: number }).ttftMs;
-          }
-          if (ttftMs === undefined) return;
-          const now = Date.now();
-          const baseline = responseLengthRef.current;
-          apiMetricsRef.current.push({
-            ttftMs,
-            firstTokenTime: now,
-            lastTokenTime: now,
-            responseLengthBaseline: baseline,
-            endResponseLength: baseline,
-          });
-        },
+        responseLengthRef,
+        apiMetricsRef,
         onStreamingText,
         displayTransform,
-        // densable yEt onRefusalContinuation
-        event => {
-          if (event.phase === 'begin') {
-            salvageRef.current = null;
-            refusalReplacesUuidsRef.current =
-              event.replacesUuids !== undefined && event.replacesUuids.length > 0 ? event.replacesUuids : null;
-            streamingDisplayStore.setSalvage(event.salvageText ?? null, event.join === 'exact');
-          } else {
-            refusalReplacesUuidsRef.current = null;
-            streamingDisplayStore.setSalvage(null);
-          }
-        },
-        undefined, // streamContext (main thread)
-        // densable yEt remaining control surfaces
-        {
-          onConversationReset: newConversationId => {
-            setConversationId(newConversationId as `${string}-${string}-${string}-${string}-${string}`);
-          },
-          onInProgressToolUseIDs: op => {
-            const ids = Array.isArray(op.ids) ? op.ids : [];
-            const action = op.action ?? 'set';
-            // densable q4n (@185174892) — preserve Set identity on no-op clear/remove/add.
-            const apply = (prev: Set<string>): Set<string> => {
-              if (action === 'clear') {
-                return prev.size === 0 ? prev : new Set();
-              }
-              if (action === 'remove') {
-                if (ids.length === 0 || prev.size === 0) return prev;
-                const next = new Set(prev);
-                for (const id of ids) next.delete(id);
-                return next.size === prev.size ? prev : next;
-              }
-              if (action === 'add') {
-                if (ids.length === 0) return prev;
-                const next = new Set(prev);
-                for (const id of ids) next.add(id);
-                return next.size === prev.size ? prev : next;
-              }
-              return ids.length === 0 && prev.size === 0 ? prev : new Set(ids);
-            };
-            setInProgressToolUseIDs(apply);
-          },
-          onNotification: notification => {
-            if (notification && typeof notification === 'object' && 'text' in (notification as object)) {
-              const n = notification as {
-                key?: string;
-                text?: string;
-                priority?: 'immediate' | 'high' | 'medium' | 'low';
-              };
-              if (typeof n.text === 'string' && n.text.length > 0) {
-                addNotification({
-                  key: n.key ?? `stream-notification-${Date.now()}`,
-                  text: n.text,
-                  priority: n.priority ?? 'medium',
-                });
-              }
-            }
-          },
-          onExpandedView: expandedView => {
-            // densable 2.1.283 host: teammates → none. CLI HWf onQueryEvent
-            // drops set_expanded_view entirely; this path is leftover yEt.
-            if (expandedView === 'teammates') {
-              setAppState(prev => (prev.expandedView === 'none' ? prev : { ...prev, expandedView: 'none' }));
-              return;
-            }
-            if (typeof expandedView === 'string' || expandedView === null) {
-              setAppState(prev =>
-                prev.expandedView === expandedView
-                  ? prev
-                  : { ...prev, expandedView: expandedView as typeof prev.expandedView },
-              );
-            }
-          },
-          onActiveGoal: value => {
-            // densable yEt / P9e: onActiveGoal?.(value) only. Idle cancel is
-            // stopHooks / restoreGoalFromTranscript — not yEt, not vJe.
-            setAppState(prev => {
-              if (value === undefined || value === null) {
-                if (prev.activeGoal === undefined) return prev;
-                return { ...prev, activeGoal: undefined };
-              }
-              if (typeof value === 'object') {
-                return {
-                  ...prev,
-                  activeGoal: value as NonNullable<typeof prev.activeGoal>,
-                };
-              }
-              return prev;
-            });
-          },
-          onPostTurnSummary: value => {
-            void value;
-          },
-          onHintClears: () => {
-            // Hint clear is optional UI; no-op when no hint store is wired.
-          },
-          onInterruptibleToolInProgress: () => {
-            // Spinner / interruptible tool UI optional.
-          },
-          onOSNotification: () => {
-            // OS notification path optional for local REPL.
-          },
-          onCommandLifecycle: () => {
-            // Host/engine owns command_lifecycle; REPL ignores.
-          },
-        },
-        true, // densable authoringProgressSurface:!0
-      );
+        setInProgressToolUseIDs,
+        addNotification,
+      });
     },
     [
+      turnController,
       setMessages,
       setResponseLength,
       setStreamMode,
@@ -5877,435 +5392,11 @@ export function REPL({
       setConversationId,
       setInProgressToolUseIDs,
       addNotification,
-      taskRegistry,
-    ],
-  );
-
-  const onQueryImpl = useCallback(
-    async (
-      messagesIncludingNewMessages: MessageType[],
-      newMessages: MessageType[],
-      abortController: AbortController,
-      shouldQuery: boolean,
-      additionalAllowedTools: string[],
-      mainLoopModelParam: string,
-      effort?: EffortValue,
-      /** Official JWH.stopHookActive — seed query loop for stop-hook continuations. */
-      stopHookActive?: boolean,
-      /** densable 2.1.229 — slash/skill disallowedTools → alwaysDenyRules.command */
-      additionalDisallowedTools: string[] = [],
-    ) => {
-      // Prepare IDE integration for new prompt. Read mcpClients fresh from
-      // store — useManageMCPConnections may have populated it since the
-      // render that captured this closure (same pattern as computeTools).
-      if (shouldQuery) {
-        const freshClients = preferLiveMcpClients(store.getState().mcp.clients, initialMcpClients);
-        void diagnosticTracker.handleQueryStart(freshClients);
-        const ideClient = getConnectedIdeClient(freshClients);
-        if (ideClient) {
-          void closeOpenDiffs(ideClient);
-        }
-      }
-
-      // Mark onboarding as complete when any user message is sent to Claude
-      void maybeMarkProjectOnboardingComplete();
-
-      // Extract a session title from the first real user message. One-shot
-      // via ref (was tengu_birch_mist experiment: first-message-only to save
-      // Haiku calls). The ref replaces the old `messages.length <= 1` check,
-      // which was broken by SessionStart hook messages (prepended via
-      // useDeferredHookMessages) and attachment messages (appended by
-      // processTextPrompt) — both pushed length past 1 on turn one, so the
-      // title silently fell through to the "Claude Code" default.
-      // densable 2.1.246 `_runImpl`: !titleDisabled && !sessionTitle &&
-      // !aiSessionTitle && !agentTitle && !haikuTitleAttempted
-      if (!titleDisabled && !sessionTitle && !sessionAiTitle && !agentTitle && !haikuTitleAttemptedRef.current) {
-        const firstUserMessage = newMessages.find(m => m.type === 'user' && !m.isMeta);
-        const text =
-          firstUserMessage?.type === 'user'
-            ? getContentText(firstUserMessage.message!.content as string | ContentBlockParam[])
-            : null;
-        // densable 2.1.246: ye && !Abe(ye) && !KSe(ye, cmd => MN(cmd, commands))
-        const isRegisteredSlash =
-          text != null && startsWithRegisteredSlashCommand(text, name => hasCommand(name, commands));
-        if (text && !isSyntheticSessionTitleText(text) && !isRegisteredSlash) {
-          haikuTitleAttemptedRef.current = true;
-          const titleSessionId = getSessionId();
-          void generateSessionTitle(text, new AbortController().signal).then(
-            title => {
-              // densable: drop if the session id changed while Haiku ran
-              if (titleSessionId !== getSessionId()) return;
-              if (title) {
-                setHaikuTitle(title);
-                // densable: persist ai-title so resume + BQi subscribers see it
-                saveAiGeneratedTitle(titleSessionId as UUID, title);
-                getReplBridgeHandle()?.adoptLocalAiTitle?.();
-              } else haikuTitleAttemptedRef.current = false;
-            },
-            () => {
-              haikuTitleAttemptedRef.current = false;
-            },
-          );
-        }
-      }
-
-      // Apply slash-command-scoped allowedTools (from skill frontmatter) to the
-      // store once per turn. This also covers the reset: the next non-skill turn
-      // passes [] and clears it. Must run before the !shouldQuery gate: forked
-      // commands (executeForkedSlashCommand) return shouldQuery=false, and
-      // createGetAppStateWithAllowedTools in forkedAgent.ts reads this field, so
-      // stale skill tools would otherwise leak into forked agent permissions.
-      // Previously this write was hidden inside getToolUseContext's getAppState
-      // (~85 calls/turn); hoisting it here makes getAppState a pure read and stops
-      // ephemeral contexts (permission dialog, BackgroundTasksDialog) from
-      // accidentally clearing it mid-turn.
-      // densable 2.1.229 xai — when disallowedTools non-empty, union into
-      // alwaysDenyRules.command (length>0 only; no clear → sticky session deny).
-      // alwaysAllowRules.command is replaced each turn (skill-scoped allow).
-      store.setState(prev => {
-        const curAllow = prev.toolPermissionContext.alwaysAllowRules.command;
-        const allowSame =
-          curAllow === additionalAllowedTools ||
-          (curAllow?.length === additionalAllowedTools.length &&
-            curAllow.every((v, i) => v === additionalAllowedTools[i]));
-        const curDeny = prev.toolPermissionContext.alwaysDenyRules.command ?? [];
-        const nextDeny =
-          additionalDisallowedTools.length === 0
-            ? curDeny
-            : Array.from(new Set([...curDeny, ...additionalDisallowedTools]));
-        const denySame = curDeny.length === nextDeny.length && curDeny.every((v, i) => v === nextDeny[i]);
-        if (allowSame && denySame) {
-          return prev;
-        }
-        return {
-          ...prev,
-          toolPermissionContext: {
-            ...prev.toolPermissionContext,
-            alwaysAllowRules: {
-              ...prev.toolPermissionContext.alwaysAllowRules,
-              command: additionalAllowedTools,
-            },
-            alwaysDenyRules: {
-              ...prev.toolPermissionContext.alwaysDenyRules,
-              command: nextDeny.length > 0 ? nextDeny : undefined,
-            },
-          },
-        };
-      });
-
-      // The last message is an assistant message if the user input was a bash command,
-      // or if the user input was an invalid slash command.
-      if (!shouldQuery) {
-        // Manual /compact sets messages directly (shouldQuery=false) bypassing
-        // handleMessageFromStream. Clear context-blocked if a compact boundary
-        // is present so proactive ticks resume after compaction.
-        if (newMessages.some(isCompactBoundaryMessage)) {
-          // Bump conversationId so Messages.tsx row keys change and
-          // stale memoized rows remount with post-compact content.
-          setConversationId(randomUUID());
-          // densable z$l after manual /compact (shouldQuery=false path)
-          setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
-          if (feature('PROACTIVE') || feature('KAIROS')) {
-            proactiveModule?.setContextBlocked(false);
-          }
-        }
-        resetLoadingState();
-        setAbortController(null);
-        return;
-      }
-
-      const toolUseContext = getToolUseContext(
-        messagesIncludingNewMessages,
-        newMessages,
-        abortController,
-        mainLoopModelParam,
-      );
-      // getToolUseContext reads tools/mcpClients fresh from store.getState()
-      // (via computeTools/mergeClients). Use those rather than the closure-
-      // captured `tools`/`mcpClients` — useManageMCPConnections may have
-      // flushed new MCP state between the render that captured this closure
-      // and now. Turn 1 via processInitialMessage is the main beneficiary.
-      const { tools: freshTools, mcpClients: freshMcpClients } = toolUseContext.options;
-
-      // Scope the skill's effort override to this turn's context only —
-      // wrapping getAppState keeps the override out of the global store so
-      // background agents and UI subscribers (Spinner, LogoV2) never see it.
-      if (effort !== undefined) {
-        const previousGetAppState = toolUseContext.getAppState;
-        toolUseContext.getAppState = () => ({
-          ...previousGetAppState(),
-          effortValue: effort,
-          sessionEffort: levelSessionEffort(effort),
-        });
-        try {
-          const { leftoverIhr } =
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require('../utils/collapseReadSearch.js') as typeof import('../utils/collapseReadSearch.js');
-          leftoverIhr.main.setTurnEffort(effort);
-        } catch {
-          // isolation — optional
-        }
-      }
-
-      // densable Qo=Tqe then hn=tte(), before context Promise.all.
-      const modelFacts = await resolveModelFacts(mainLoopModelParam, {
-        credentials: toolUseContext.credentials,
-        abortController,
-      });
-      const promptRenderEpoch = getPromptRenderEpoch();
-
-      queryCheckpoint('query_context_loading_start');
-      const [, , defaultSystemPrompt, baseUserContext, systemContext] = await Promise.all([
-        // IMPORTANT: do this after setMessages() above, to avoid UI jank
-        undefined,
-        // Fast-mode circuit breaker check
-        feature('TRANSCRIPT_CLASSIFIER')
-          ? checkAndDisableAutoModeIfNeeded(toolPermissionContext, setAppState, store.getState().fastMode)
-          : undefined,
-        getSystemPrompt(
-          freshTools,
-          mainLoopModelParam,
-          Array.from(toolPermissionContext.additionalWorkingDirectories.keys()),
-          freshMcpClients,
-        ),
-        getUserContext(),
-        getSystemContext(),
-      ]);
-      const userContext = {
-        ...baseUserContext,
-        ...getCoordinatorUserContext(
-          freshMcpClients,
-          isScratchpadEnabled() ? getScratchpadDir() : undefined,
-          freshTools,
-        ),
-        ...((feature('PROACTIVE') || feature('KAIROS')) &&
-        proactiveModule?.isProactiveActive() &&
-        !terminalFocusRef.current
-          ? {
-              terminalFocus: 'The terminal is unfocused \u2014 the user is not actively watching.',
-            }
-          : {}),
-      };
-      queryCheckpoint('query_context_loading_end');
-
-      const systemPrompt = buildEffectiveSystemPrompt({
-        mainThreadAgentDefinition,
-        toolUseContext,
-        customSystemPrompt,
-        defaultSystemPrompt,
-        appendSystemPrompt,
-      });
-      toolUseContext.renderedSystemPrompt = systemPrompt;
-
-      queryCheckpoint('query_query_start');
-      resetTurnHookDuration();
-      resetTurnToolDuration();
-      resetTurnClassifierDuration();
-
-      // densable HWf: push turn params → streamInput once → drain engine to result.
-      const turnInput: QueryParams = {
-        messages: messagesIncludingNewMessages,
-        systemPrompt,
-        userContext,
-        systemContext,
-        canUseTool,
-        toolUseContext,
-        querySource: getQuerySourceForREPL(),
-        // Official drain: seed stopHookActive so nested stop hooks see
-        // stop_hook_active=true when this turn was a stop-hook continuation
-        // or concurrent re-queue of one.
-        stopHookActive,
-        promptRenderEpoch,
-        modelFacts,
-      };
-      const onAbort = () => {
-        void hostEngine.interrupt('user-cancel');
-      };
-      if (abortController.signal.aborted) {
-        onAbort();
-      } else {
-        abortController.signal.addEventListener('abort', onAbort, { once: true });
-      }
-      try {
-        await runHostEngineTurn({
-          engine: hostEngine,
-          inputRef: hostInputRef,
-          pendingQueryParamsRef,
-          turnInput,
-          newMessages,
-          onQueryEvent: event => {
-            onQueryEvent(event as Parameters<typeof onQueryEvent>[0]);
-          },
-          addNotification: n => {
-            addNotification({
-              key: n.key ?? 'engine-notification',
-              text: n.text,
-              priority:
-                n.priority === 'low' || n.priority === 'medium' || n.priority === 'high' || n.priority === 'immediate'
-                  ? n.priority
-                  : 'medium',
-              timeoutMs: n.timeoutMs,
-            });
-          },
-        });
-      } finally {
-        abortController.signal.removeEventListener('abort', onAbort);
-      }
-
-      // densable _runImpl post-query: if Ki still armed → refuse or proceed
-      {
-        const arm = leftArrowDeferRef.current;
-        if (arm) {
-          arm.clearCapTimer();
-          leftArrowDeferRef.current = null;
-          if (!abortController.signal.aborted) {
-            const liveTasks = (store.getState().tasks ?? {}) as Record<string, TaskState>;
-            const abandon = countAbandonableLeftArrow(liveTasks);
-            const newMonitors = countNewMonitorsSincePress(liveTasks, arm.carriedAtPress);
-            const queued = countLeftArrowBlockingQueuedCommands(getCommandQueue());
-            const hasUnsent = inputValueRef.current.trim() !== '';
-            if (queued > 0 || hasUnsent || (!arm.confirmedInterstitial && abandon > 0) || newMonitors > 0) {
-              const [why, hint] =
-                queued > 0
-                  ? [
-                      `${queued} queued ${queued === 1 ? 'command' : 'commands'} would be lost`,
-                      'Press ← again once the queue clears.',
-                    ]
-                  : hasUnsent
-                    ? ['you have unsent text in the input', 'Send it or clear it, then press ← again.']
-                    : newMonitors > 0
-                      ? [
-                          `${newMonitors} Artifact comment ${newMonitors === 1 ? 'monitor' : 'monitors'} started after you pressed ←`,
-                          'Press ← again to review and confirm.',
-                        ]
-                      : [
-                          `${abandon} background ${abandon === 1 ? 'task' : 'tasks'} would be abandoned`,
-                          'Press ← again to confirm.',
-                        ];
-              // densable post-query refuse: K({append, Ss(...,"warning")}) — not yi
-              setMessages(prev => [
-                ...prev,
-                createSystemMessage(`Backgrounding cancelled — ${why}. ${hint}`, 'warning'),
-              ]);
-              markIdleForkMidTurn();
-            } else {
-              // densable: q.current=!0; await K9(W.getSnapshot(),…); $e=await he.proceed();
-              // append Ss($e,"warning"); G()
-              // tip: recordTranscript (storageV5 5th arg invent-ban)
-              leftArrowToAgentsFired.current = true;
-              try {
-                const { recordTranscript } = await import('../utils/sessionStorage.js');
-                await recordTranscript(messagesRef.current as never);
-              } catch {
-                /* best-effort persist before handoff */
-              }
-              const $e = await arm.proceed();
-              setMessages(prev => [...prev, createSystemMessage($e, 'warning')]);
-              markIdleForkMidTurn();
-            }
-          }
-        }
-      }
-
-      if (buddyEnabled && typeof (globalThis as Record<string, unknown>).fireCompanionObserver === 'function') {
-        const _fireCompanionObserver = (globalThis as Record<string, unknown>).fireCompanionObserver as (
-          msgs: unknown,
-          cb: (r: unknown) => void,
-        ) => void;
-        void _fireCompanionObserver(messagesRef.current, reaction =>
-          setAppState(prev =>
-            prev.companionReaction === (reaction as typeof prev.companionReaction)
-              ? prev
-              : { ...prev, companionReaction: reaction as typeof prev.companionReaction },
-          ),
-        );
-      }
-
-      queryCheckpoint('query_end');
-
-      if (feature('UDS_INBOX')) {
-        if (abortController.signal.aborted) {
-          pipeReturnHadErrorRef.current = true;
-          relayPipeMessage({
-            type: 'error',
-            data: 'Slave request was interrupted before completion.',
-          });
-        }
-      }
-
-      // Capture ant-only API metrics before resetLoadingState clears the ref.
-      // For multi-request turns (tool use loops), compute P50 across all requests.
-      if (process.env.USER_TYPE === 'ant' && apiMetricsRef.current.length > 0) {
-        const entries = apiMetricsRef.current;
-
-        const ttfts = entries.map(e => e.ttftMs);
-        // Compute per-request OTPS using only active streaming time and
-        // streaming-only content. endResponseLength tracks content added by
-        // streaming deltas only, excluding subagent/compaction inflation.
-        const otpsValues = entries.map(e => {
-          const delta = Math.round((e.endResponseLength - e.responseLengthBaseline) / 4);
-          const samplingMs = e.lastTokenTime - e.firstTokenTime;
-          return samplingMs > 0 ? Math.round(delta / (samplingMs / 1000)) : 0;
-        });
-
-        const isMultiRequest = entries.length > 1;
-        const hookMs = getTurnHookDurationMs();
-        const hookCount = getTurnHookCount();
-        const toolMs = getTurnToolDurationMs();
-        const toolCount = getTurnToolCount();
-        const classifierMs = getTurnClassifierDurationMs();
-        const classifierCount = getTurnClassifierCount();
-        const turnMs = performance.now() - loadingStartTimeRef.current;
-        setMessages(prev => [
-          ...prev,
-          createApiMetricsMessage({
-            ttftMs: isMultiRequest ? median(ttfts) : ttfts[0]!,
-            otps: isMultiRequest ? median(otpsValues) : otpsValues[0]!,
-            isP50: isMultiRequest,
-            hookDurationMs: hookMs > 0 ? hookMs : undefined,
-            hookCount: hookCount > 0 ? hookCount : undefined,
-            turnDurationMs: turnMs > 0 ? turnMs : undefined,
-            toolDurationMs: toolMs > 0 ? toolMs : undefined,
-            toolCount: toolCount > 0 ? toolCount : undefined,
-            classifierDurationMs: classifierMs > 0 ? classifierMs : undefined,
-            classifierCount: classifierCount > 0 ? classifierCount : undefined,
-            configWriteCount: getGlobalConfigWriteCount(),
-          }),
-        ]);
-      }
-
-      resetLoadingState();
-
-      // Log query profiling report if enabled
-      logQueryProfileReport();
-
-      // Signal that a query turn has completed successfully
-      await onTurnComplete?.(messagesRef.current);
-    },
-    [
-      initialMcpClients,
-      resetLoadingState,
-      getToolUseContext,
-      toolPermissionContext,
-      setAppState,
-      customSystemPrompt,
-      onTurnComplete,
-      appendSystemPrompt,
-      canUseTool,
-      mainThreadAgentDefinition,
-      onQueryEvent,
-      sessionTitle,
-      sessionAiTitle,
-      titleDisabled,
-      commands,
-      hostEngine,
-      addNotification,
-      markIdleForkMidTurn,
     ],
   );
 
   const onQuery = useCallback(
-    async (
+    (
       newMessages: MessageType[],
       abortController: AbortController,
       shouldQuery: boolean,
@@ -6320,284 +5411,110 @@ export function REPL({
       clientPlatform?: string,
       /** densable 2.1.229 — slash/skill disallowedTools for the turn. */
       additionalDisallowedTools: string[] = [],
-    ): Promise<boolean> => {
-      // If this is a teammate, mark them as active when starting a turn
-      if (isAgentSwarmsEnabled()) {
-        const teamName = getTeamName();
-        const agentName = getAgentName();
-        if (teamName && agentName) {
-          // Fire and forget - turn starts immediately, write happens in background
-          void setMemberActive(teamName, agentName, true);
-        }
-      }
-
-      // Concurrent guard via state machine. tryStart() atomically checks
-      // and transitions idle→running, returning the generation number.
-      // Returns null if already running — no separate check-then-set.
-      const thisGeneration = queryGuard.tryStart();
-      if (thisGeneration === null) {
-        logEvent('tengu_concurrent_onquery_detected', {});
-
-        // densable concurrent onquery when tryStart null:
-        // IT({ value: stackedOriginal??Kce(content), mode:"prompt", agentId:mi(),
-        //      uuid, origin, isMeta, skipSlashCommands:Ace(origin),
-        //      stopHookActive:e9, clientPlatform:t5, priority:queuePriority,
-        //      verifiedSlackHumanTurn, inputSource, preExpansionValue })
-        // Kce is text-only (images/blocks collapse) — gold does the same.
-        // Skip stackedExpansion intermediate skill-stack messages.
-        // Ace: keep peer/channel/observer meta (skip bare meta ticks).
-        let enqueued = false;
-        for (const m of newMessages) {
-          if (m.type !== 'user') continue;
-          if (m.isMeta && !isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined)) {
-            continue;
-          }
-          // densable: if (Ad.stackedExpansion) continue
-          if ((m as { stackedExpansion?: boolean }).stackedExpansion) {
-            continue;
-          }
-          const userContent = m.message?.content;
-          if (userContent === undefined) continue;
-          // densable: _y?.value ?? stackedOriginalInput ?? Kce(content)
-          const stackedOriginal = (m as { stackedOriginalInput?: string }).stackedOriginalInput;
-          const textContent = stackedOriginal ?? getContentText(userContent as string | ContentBlockParam[]);
-          if (textContent === null || textContent === undefined) continue;
-          const queuePriority = (m as { queuePriority?: 'now' | 'next' | 'later' }).queuePriority;
-          const verifiedSlackHumanTurn = (m as { verifiedSlackHumanTurn?: boolean }).verifiedSlackHumanTurn;
-          const promptSource = (m as { promptSource?: string }).promptSource;
-          enqueue({
-            value: textContent,
-            mode: 'prompt',
-            agentId: getMainThreadAgentId(),
-            uuid: m.uuid,
-            origin: m.origin,
-            isMeta: m.isMeta,
-            skipSlashCommands: isMetaVisibleOrigin(m.origin as { kind?: string; senderTaskId?: string } | undefined),
-            // Official e9/t5 — ride the onQuery args, not message extras.
-            ...(stopHookActive !== undefined ? { stopHookActive } : {}),
-            ...(clientPlatform !== undefined ? { clientPlatform } : {}),
-            ...(queuePriority !== undefined ? { priority: queuePriority } : {}),
-            ...(verifiedSlackHumanTurn !== undefined ? { verifiedSlackHumanTurn } : {}),
-            ...(promptSource === 'suggestion_accepted' ? { inputSource: 'suggestion_accepted' } : {}),
-            ...(stackedOriginal !== undefined ? { preExpansionValue: stackedOriginal } : {}),
-          });
-          if (!enqueued) {
-            enqueued = true;
-            logEvent('tengu_concurrent_onquery_enqueued', {});
-          }
-        }
-        return false;
-      }
-
-      // Official jGo — block bg shell pressure reap while the main loop is busy.
-      setMainLoopBusy(true);
-
-      try {
-        pipeReturnHadErrorRef.current = false;
-        // isLoading is derived from queryGuard — tryStart() above already
-        // transitioned dispatching→running, so no setter call needed here.
-        resetTimingRefs();
-        setMessages(oldMessages => [...oldMessages, ...newMessages]);
-        responseLengthRef.current = 0;
-        if (feature('TOKEN_BUDGET')) {
-          const parsedBudget = input ? parseTokenBudget(input) : null;
-          snapshotOutputTokensForTurn(parsedBudget ?? getCurrentTurnTokenBudget());
-        }
-        apiMetricsRef.current = [];
-        setStreamingToolUses([]);
-        clearStreamingText();
-        // densable: mG.newTurn() after pH.clear / setTransformed null
-        displayTransform.newTurn();
-
-        // messagesRef is updated synchronously by the setMessages wrapper
-        // above, so it already includes newMessages from the append at the
-        // top of this try block.  No reconstruction needed, no waiting for
-        // React's scheduler (previously cost 20-56ms per prompt; the 56ms
-        // case was a GC pause caught during the await).
-        const latestMessages = messagesRef.current;
-
-        if (input) {
-          await mrOnBeforeQuery(input, latestMessages, newMessages.length);
-        }
-
-        // Pass full conversation history to callback
-        if (onBeforeQueryCallback && input) {
-          const shouldProceed = await onBeforeQueryCallback(input, latestMessages);
-          if (!shouldProceed) {
-            return true;
-          }
-        }
-
-        try {
-          await onQueryImpl(
-            latestMessages,
-            newMessages,
-            abortController,
-            shouldQuery,
-            additionalAllowedTools,
-            mainLoopModelParam,
-            effort,
-            stopHookActive,
-            additionalDisallowedTools,
-          );
-        } catch (error) {
-          if (feature('UDS_INBOX')) {
-            pipeReturnHadErrorRef.current = true;
-            relayPipeMessage({
-              type: 'error',
-              data: error instanceof Error ? error.message : String(error),
-            });
-          }
-          throw error;
-        }
-      } finally {
-        // queryGuard.end() atomically checks generation and transitions
-        // running→idle. Returns false if a newer query owns the guard
-        // (cancel+resubmit race where the stale finally fires as a microtask).
-        if (queryGuard.end(thisGeneration)) {
-          setMainLoopBusy(false);
-          setLastQueryCompletionTime(Date.now());
-          // Always reset loading state in finally - this ensures cleanup even
-          // if onQueryImpl throws. onTurnComplete is called separately in
-          // onQueryImpl only on successful completion.
-          resetLoadingState();
-
-          await mrOnTurnComplete(messagesRef.current, abortController.signal.aborted);
-
-          if (feature('UDS_INBOX') && !pipeReturnHadErrorRef.current) {
-            relayPipeMessage({
-              type: 'done',
-              data: '',
-            });
-          }
-
-          // Notify bridge clients that the turn is complete so mobile apps
-          // can stop the spark animation and show post-turn UI.
-          sendBridgeResultRef.current();
-
-          // Auto-hide tungsten panel content at turn end (ant-only), but keep
-          // tungstenActiveSession set so the pill stays in the footer and the user
-          // can reopen the panel. Background tmux tasks (e.g. /hunter) run for
-          // minutes — wiping the session made the pill disappear entirely, forcing
-          // the user to re-invoke Tmux just to peek. Skip on abort so the panel
-          // stays open for inspection (matches the turn-duration guard below).
-          if (process.env.USER_TYPE === 'ant' && !abortController.signal.aborted) {
-            setAppState(prev => {
-              if (prev.tungstenActiveSession === undefined) return prev;
-              if (prev.tungstenPanelAutoHidden === true) return prev;
-              return { ...prev, tungstenPanelAutoHidden: true };
-            });
-          }
-
-          // Capture budget info before clearing (ant-only)
-          let budgetInfo: { tokens: number; limit: number; nudges: number } | undefined;
-          if (feature('TOKEN_BUDGET')) {
-            if (
-              getCurrentTurnTokenBudget() !== null &&
-              getCurrentTurnTokenBudget()! > 0 &&
-              !abortController.signal.aborted
-            ) {
-              budgetInfo = {
-                tokens: getTurnOutputTokens(),
-                limit: getCurrentTurnTokenBudget()!,
-                nudges: getBudgetContinuationCount(),
-              };
-            }
-            snapshotOutputTokensForTurn(null);
-          }
-
-          // densable 2.1.289 QueryEngine: always Spt(duration) when the guard
-          // ends (no 30s floor). Skip abort / loop ticks; defer swarm.
-          const turnDurationMs = performance.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
-          if (!abortController.signal.aborted && !proactiveActive) {
-            const hasRunningSwarmAgents = getAllInProcessTeammateTasks(store.getState().tasks).some(
-              t => t.status === 'running',
-            );
-            if (hasRunningSwarmAgents) {
-              // Only record start time on the first deferred turn
-              if (swarmStartTimeRef.current === null) {
-                swarmStartTimeRef.current = loadingStartTimeRef.current;
-              }
-              // Always update budget — later turns may carry the actual budget
-              if (budgetInfo) {
-                swarmBudgetInfoRef.current = budgetInfo;
-              }
-            } else {
-              const now = performance.now();
-              const resolvedDuration = resolveTurnDurationWithBackgroundWait({
-                tasks: store.getState().tasks,
-                queuedCommands: getCommandQueue(),
-                turnDurationMs,
-                turnStartTime: loadingStartTimeRef.current,
-                now,
-                backgroundWaitStartTime: backgroundWaitStartTimeRef.current,
-              });
-              backgroundWaitStartTimeRef.current = resolvedDuration.backgroundWaitStartTime;
-              setMessages(prev => [
-                ...prev,
-                createTurnDurationMessage(
-                  resolvedDuration.durationMs,
-                  budgetInfo,
-                  count(prev, isLoggableMessage),
-                  resolvedDuration.pendingBackgroundAgentCount,
-                  resolvedDuration.pendingWorkflowCount,
-                ),
-              ]);
-            }
-          }
-          // Clear the controller so CancelRequestHandler's canCancelRunningTask
-          // reads false at the idle prompt. Without this, the stale non-aborted
-          // controller makes ctrl+c fire onCancel() (aborting nothing) instead of
-          // propagating to the double-press exit flow.
-          setAbortController(null);
-        }
-
-        // Auto-restore: if the user interrupted before any meaningful response
-        // arrived, rewind the conversation and restore their prompt — same as
-        // opening the message selector and picking the last message.
-        // This runs OUTSIDE the queryGuard.end() check because onCancel calls
-        // forceEnd(), which bumps the generation so end() returns false above.
-        // Guards: reason === 'user-cancel' (onCancel/Esc; programmatic aborts
-        // use 'background'/'interrupt' and must not rewind — note abort() with
-        // no args sets reason to a DOMException, not undefined), !isActive (no
-        // newer query started — cancel+resubmit race), empty input (don't
-        // clobber text typed during loading), no queued commands AND no
-        // in-flight drain (official Cuy `w`: B is already dequeued but still
-        // the next turn — restoring A would finish B early / repeat actions),
-        // not viewing a teammate (messagesRef is the main conversation — the
-        // old Up-arrow quick-restore had this guard, preserve it).
-        if (
-          abortController.signal.reason === 'user-cancel' &&
-          !queryGuard.isActive &&
-          inputValueRef.current === '' &&
-          getCommandQueueLength() === 0 &&
-          !someInFlightDrainCommand() &&
-          !store.getState().viewingAgentTaskId
-        ) {
-          const msgs = messagesRef.current;
-          const lastUserMsg = msgs.findLast(selectableUserMessagesFilter);
-          if (lastUserMsg) {
-            const idx = msgs.lastIndexOf(lastUserMsg);
-            if (messagesAfterAreOnlySynthetic(msgs, idx)) {
-              // The submit is being undone — undo its history entry too,
-              // otherwise Up-arrow shows the restored text twice.
-              removeLastFromHistory();
-              restoreMessageSyncRef.current(lastUserMsg);
-            }
-          }
-        }
-      }
-      return true;
-    },
+    ): Promise<boolean> =>
+      turnController.runTurn(
+        {
+          newMessages,
+          abortController,
+          shouldQuery,
+          additionalAllowedTools,
+          mainLoopModelParam,
+          onBeforeQueryCallback,
+          input,
+          effort,
+          stopHookActive,
+          clientPlatform,
+          additionalDisallowedTools,
+        },
+        {
+          store,
+          queryGuard,
+          initialMcpClients,
+          titleDisabled,
+          sessionTitle,
+          sessionAiTitle,
+          agentTitle,
+          haikuTitleAttemptedRef,
+          setHaikuTitle,
+          commands,
+          setConversationId,
+          setAppState,
+          messagesRef,
+          setMessages,
+          resetLoadingState,
+          setAbortController,
+          getToolUseContext,
+          toolPermissionContext,
+          terminalFocusRef,
+          mainThreadAgentDefinition,
+          customSystemPrompt,
+          appendSystemPrompt,
+          canUseTool,
+          hostEngine,
+          hostInputRef,
+          pendingQueryParamsRef,
+          onQueryEvent,
+          addNotification,
+          leftArrowDeferRef,
+          inputValueRef,
+          markIdleForkMidTurn,
+          leftArrowToAgentsFired,
+          buddyEnabled,
+          pipeReturnHadErrorRef,
+          relayPipeMessage,
+          apiMetricsRef,
+          loadingStartTimeRef,
+          totalPausedMsRef,
+          swarmStartTimeRef,
+          swarmBudgetInfoRef,
+          backgroundWaitStartTimeRef,
+          onTurnComplete,
+          resetTimingRefs,
+          responseLengthRef,
+          setStreamingToolUses,
+          clearStreamingText,
+          displayTransform,
+          mrOnBeforeQuery,
+          mrOnTurnComplete,
+          setLastQueryCompletionTime,
+          sendBridgeResultRef,
+          proactiveActive,
+          restoreMessageSyncRef,
+        },
+      ),
     [
-      onQueryImpl,
-      setAppState,
-      resetLoadingState,
+      turnController,
+      store,
       queryGuard,
-      mrOnBeforeQuery,
-      mrOnTurnComplete,
+      initialMcpClients,
+      titleDisabled,
+      sessionTitle,
+      sessionAiTitle,
+      agentTitle,
+      commands,
+      setConversationId,
+      setAppState,
+      setMessages,
+      resetLoadingState,
+      getToolUseContext,
+      toolPermissionContext,
+      mainThreadAgentDefinition,
+      customSystemPrompt,
+      appendSystemPrompt,
+      canUseTool,
+      hostEngine,
+      onQueryEvent,
+      addNotification,
+      markIdleForkMidTurn,
+      buddyEnabled,
+      onTurnComplete,
+      resetTimingRefs,
+      setStreamingToolUses,
       clearStreamingText,
       displayTransform,
+      mrOnBeforeQuery,
+      mrOnTurnComplete,
+      proactiveActive,
     ],
   );
 
@@ -6818,6 +5735,8 @@ export function REPL({
     void processInitialMessage(pending);
   }, [initialMessage, isLoading, setMessages, setAppState, onQuery, mainLoopModel, tools]);
 
+  const { routeToSelectedPipes } = usePipeRouter({ store, setAppState, addNotification });
+
   const onSubmit = useCallback(
     async (
       input: string,
@@ -6829,661 +5748,71 @@ export function REPL({
       },
       options?: {
         fromKeybinding?: boolean;
-        /**
-         * Live paste map when parent state is not yet committed:
-         * - PromptInput dual-write ref on paste+Enter same tick
-         * - idle-return Continue re-submit after dialog
-         */
         pastedContentsOverride?: Record<number, PastedContent>;
         resumesStaleQuotaWait?: boolean;
-        /** densable 2.1.283 chat:sendNow — interrupt, flush queue, background tools. */
         sendNow?: boolean;
-        /** densable 2.1.283 chat:queueSubmit — always enqueue even if idle. */
         queueSubmit?: boolean;
-        /** densable Vwr — PromptInput composer Enter. print/QE omit. */
         composerEnter?: unknown;
       },
     ) => {
-      // Union paste maps: PromptInput dual-write override backfills lagging parent
-      // state; parent state backfills if override was emptied (fork OSe used to
-      // wipe the ref while prop already had the image). Never prefer empty
-      // override over non-empty parent — that re-swallowed images.
-      const effectivePastedContents =
-        options?.pastedContentsOverride != null
-          ? { ...pastedContents, ...options.pastedContentsOverride }
-          : pastedContents;
-
-      // densable `$Ze` / YD: empty send-now prefers cAt (no cancel). Fallback interrupt.
-      if (options?.sendNow && input.trim() === '') {
-        trySendQueuedNowKey(() => store.getState(), setAppState, {
-          mode: 'prompt',
-          isTurnRunning: () => queryGuard.isRunning,
-          isTurnActive: () => queryGuard.isActive,
-          abortSignal: abortControllerRef.current,
-          lowLatency: queuedNowLowLatencyHost,
-          interruptForSubmit: () => {
-            const ac = abortControllerRef.current;
-            if (!ac || ac.signal.aborted) return false;
-            ac.abort('interrupt');
-            return true;
-          },
-        });
-        return;
-      }
-
-      // Re-pin scroll to bottom on submit so the user always sees the new
-      // exchange. force=true: autoScroll-off still pins on submit (SEA
-      // neighborhood did not gate this path on autoScrollEnabled).
-      repinScroll(true, 'submit');
-
-      // Resume loop mode if paused
-      if (feature('PROACTIVE') || feature('KAIROS')) {
-        proactiveModule?.resumeProactive();
-      }
-
-      // Route user input to selected pipe targets (extracted to usePipeRouter)
-      if (routeToSelectedPipes(input)) {
-        // Show the user's prompt in the message list so they can see what was sent
-        const userMessage = createUserMessage({ content: input });
-        setMessages(prev => [...prev, userMessage]);
-
-        if (!options?.fromKeybinding) {
-          addToHistory({
-            display: prependModeCharacterToInput(input, inputMode),
-            pastedContents: effectivePastedContents,
-          });
-        }
-        setInputValue('');
-        helpers.setCursorOffset(0);
-        helpers.clearBuffer();
-        setPastedContents({});
-        setInputMode('prompt');
-        setIDESelection(undefined);
-        clearHeldClearedDraft();
-        return;
-      }
-
-      // Handle immediate commands - these bypass the queue and execute right away
-      // even while Claude is processing. Commands opt-in via `immediate: true`.
-      // Commands triggered via keybindings are always treated as immediate.
-      if (!speculationAccept && input.trim().startsWith('/')) {
-        // Expand [Pasted text #N] refs so immediate commands (e.g. /btw) receive
-        // the pasted content, not the placeholder. The non-immediate path gets
-        // this expansion later in handlePromptSubmit.
-        const trimmedInput = expandPastedTextRefs(input, effectivePastedContents).trim();
-        const spaceIndex = trimmedInput.indexOf(' ');
-        const commandName = spaceIndex === -1 ? trimmedInput.slice(1) : trimmedInput.slice(1, spaceIndex);
-        const commandArgs = spaceIndex === -1 ? '' : trimmedInput.slice(spaceIndex + 1).trim();
-
-        // Find matching command - treat as immediate if:
-        // 1. Command has `immediate: true`, OR
-        // 2. Command was triggered via keybinding (fromKeybinding option)
-        const matchingCommand = commands.find(
-          cmd =>
-            isCommandEnabled(cmd) &&
-            (cmd.name === commandName || cmd.aliases?.includes(commandName) || getCommandName(cmd) === commandName),
-        );
-        if (matchingCommand?.name === 'clear') {
-          idleReturnController.onClearSubmitted();
-        }
-
-        // densable ARt(cmd, args): immediate may be boolean | (args)=>boolean
-        const presentationMode: 'fullscreen' | 'inline' = isFullscreenEnvEnabled() ? 'fullscreen' : 'inline';
-        const isImmediateNow = isCommandImmediate(matchingCommand, commandArgs, presentationMode);
-        const shouldTreatAsImmediate = queryGuard.isActive && (isImmediateNow || options?.fromKeybinding);
-        const isImmediatePluginLocal =
-          queryGuard.isActive &&
-          isImmediateNow &&
-          matchingCommand?.type === 'local' &&
-          matchingCommand.loadedFrom === 'plugin' &&
-          matchingCommand.immediate === true;
-
-        if (
-          matchingCommand &&
-          ((shouldTreatAsImmediate && matchingCommand.type === 'local-jsx') || isImmediatePluginLocal)
-        ) {
-          // densable aQr(cmd, endedByModel) — toast + return, do not run the command.
-          if (isEndedByModelCommandBlocked(matchingCommand, store.getState().endedByModel)) {
-            addNotification({
-              key: 'immediate-ended-by-model',
-              kind: 'feedback',
-              text: 'Claude ended this conversation. Start a new session (or /clear) to continue.',
-              priority: 'immediate',
-            });
-            return;
-          }
-          // Only clear input if the submitted text matches what's in the prompt.
-          // When a command keybinding fires, input is "/<command>" but the actual
-          // input value is the user's existing text - don't clear it in that case.
-          if (input.trim() === inputValueRef.current.trim()) {
-            setInputValue('');
-            helpers.setCursorOffset(0);
-            helpers.clearBuffer();
-            setPastedContents({});
-            clearHeldClearedDraft();
-          }
-
-          const pastedTextRefs = parseReferences(input).filter(r => effectivePastedContents[r.id]?.type === 'text');
-          const pastedTextCount = pastedTextRefs.length;
-          const pastedTextBytes = pastedTextRefs.reduce(
-            (sum, r) => sum + (effectivePastedContents[r.id]?.content.length ?? 0),
-            0,
-          );
-          logEvent('tengu_paste_text', { pastedTextCount, pastedTextBytes });
-          logEvent('tengu_immediate_command_executed', {
-            commandName: matchingCommand.name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            fromKeybinding: options?.fromKeybinding ?? false,
-          });
-
-          // Execute the command directly
-          const executeImmediateCommand = async (): Promise<void> => {
-            let doneWasCalled = false;
-            const onDone = (
-              result?: string,
-              doneOptions?: {
-                display?: CommandResultDisplay;
-                metaMessages?: string[];
-                displayArgs?: string;
-              },
-            ): void => {
-              doneWasCalled = true;
-              setToolJSX({
-                jsx: null,
-                shouldHidePromptInput: false,
-                clearLocalJSX: true,
-              });
-              const newMessages: MessageType[] = [];
-              if (result && doneOptions?.display !== 'skip') {
-                addNotification({
-                  key: `immediate-${matchingCommand.name}`,
-                  text: result,
-                  priority: 'immediate',
-                });
-                // In fullscreen the command just showed as a centered modal
-                // pane — the notification above is enough feedback. Adding
-                // "❯ /config" + "⎿ dismissed" to the transcript is clutter
-                // (those messages are type:system subtype:local_command —
-                // user-visible but NOT sent to the model, so skipping them
-                // doesn't change model context). Outside fullscreen the
-                // transcript entry stays so scrollback shows what ran.
-                if (!isFullscreenEnvEnabled()) {
-                  const breadcrumbArgs = doneOptions?.displayArgs ?? commandArgs;
-                  const commandRun = {
-                    command: getCommandName(matchingCommand),
-                    args: breadcrumbArgs,
-                  };
-                  newMessages.push(
-                    createCommandInputMessage(formatCommandInputTags(getCommandName(matchingCommand), breadcrumbArgs), {
-                      commandRun,
-                    }),
-                    createCommandInputMessage(
-                      `<${LOCAL_COMMAND_STDOUT_TAG}>${escapeXml(result)}</${LOCAL_COMMAND_STDOUT_TAG}>`,
-                      { commandRun },
-                    ),
-                  );
-                }
-              }
-              // Inject meta messages (model-visible, user-hidden) into the transcript
-              if (doneOptions?.metaMessages?.length) {
-                newMessages.push(
-                  ...doneOptions.metaMessages.map(content => createUserMessage({ content, isMeta: true })),
-                );
-              }
-              if (newMessages.length) {
-                setMessages(prev => [...prev, ...newMessages]);
-              }
-              // Restore stashed prompt after local-jsx command completes.
-              // The normal stash restoration path (below) is skipped because
-              // local-jsx commands return early from onSubmit.
-              if (stashedPrompt !== undefined) {
-                setInputValue(stashedPrompt.text);
-                helpers.setCursorOffset(stashedPrompt.cursorOffset);
-                setPastedContents(stashedPrompt.pastedContents);
-                setStashedPrompt(undefined);
-                addNotification({
-                  key: 'stash-restored',
-                  kind: 'feedback',
-                  text: 'Draft restored',
-                  priority: 'high',
-                  timeoutMs: 5000,
-                });
-              }
-            };
-
-            // Build context for the command (reuses existing getToolUseContext).
-            // Read messages via ref to keep onSubmit stable across message
-            // updates — matches the pattern at L2384/L2400/L2662 and avoids
-            // pinning stale REPL render scopes in downstream closures.
-            const context = getToolUseContext(messagesRef.current, [], createAbortController(), mainLoopModel);
-            const canonicalName = getCommandName(matchingCommand);
-            const stdoutColumns = process.stdout.columns;
-            const commandPresentation = {
-              isFullscreen: presentationMode === 'fullscreen',
-              columns: typeof stdoutColumns === 'number' && stdoutColumns > 0 ? stdoutColumns : 80,
-            };
-            const commandOrigin = options?.fromKeybinding ? { kind: 'keybinding' } : { kind: 'composer' };
-            const hasCmdRunHook =
-              hasMatchingFunctionHook('command.run', { command: canonicalName }) ||
-              (canonicalName !== matchingCommand.name &&
-                hasMatchingFunctionHook('command.run', { command: matchingCommand.name }));
-
-            if (matchingCommand.type === 'local') {
-              const mod = await matchingCommand.load();
-              const callCtx = {
-                ...context,
-                isMidTurn: true,
-                dispatchedAsImmediate: true,
-                presentation: presentationMode,
-                submissionOrigin: commandOrigin,
-              };
-              if (hasCmdRunHook) {
-                let coreText: string | undefined;
-                let coreRan = false;
-                const chainOut = await runFunctionHookChain(
-                  'command.run',
-                  {
-                    command: canonicalName,
-                    args: commandArgs,
-                    origin: commandOrigin,
-                    presentation: commandPresentation,
-                  },
-                  async event => {
-                    const nextArgs = typeof event.args === 'string' ? event.args : commandArgs;
-                    const res = await mod.call(nextArgs, callCtx);
-                    coreRan = true;
-                    coreText = res.type === 'text' ? res.value : undefined;
-                    return { ref: 1, text: coreText ?? '' };
-                  },
-                  undefined,
-                  undefined,
-                  { signal: context.abortController.signal },
-                );
-                const outRec =
-                  typeof chainOut === 'object' && chainOut !== null && !Array.isArray(chainOut)
-                    ? (chainOut as Record<string, unknown>)
-                    : {};
-                const answeredText = typeof outRec.text === 'string' ? outRec.text : undefined;
-                const answeredContext = Array.isArray(outRec.context)
-                  ? outRec.context.filter((item): item is string => typeof item === 'string' && item !== '')
-                  : [];
-                const finalText = !coreRan ? answeredText : (answeredText ?? coreText);
-                onDone(finalText || undefined, {
-                  ...(answeredContext.length > 0 && { metaMessages: answeredContext }),
-                });
-                return;
-              }
-              const res = await mod.call(commandArgs, callCtx);
-              if (res.type === 'text') {
-                onDone(res.value || undefined);
-              } else {
-                onDone(undefined, { display: 'skip' });
-              }
-              return;
-            }
-
-            const mod = await matchingCommand.load();
-            let jsx: React.ReactNode = null;
-            if (hasCmdRunHook) {
-              let coreRan = false;
-              const chainOut = await runFunctionHookChain(
-                'command.run',
-                {
-                  command: canonicalName,
-                  args: commandArgs,
-                  origin: commandOrigin,
-                  presentation: commandPresentation,
-                },
-                async event => {
-                  const nextArgs = typeof event.args === 'string' ? event.args : commandArgs;
-                  jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, nextArgs);
-                  coreRan = true;
-                  return { ref: 1, text: '' };
-                },
-                undefined,
-                undefined,
-                { signal: context.abortController.signal },
-              );
-              if (!coreRan) {
-                const outRec =
-                  typeof chainOut === 'object' && chainOut !== null && !Array.isArray(chainOut)
-                    ? (chainOut as Record<string, unknown>)
-                    : {};
-                const answeredText = typeof outRec.text === 'string' ? outRec.text : undefined;
-                const answeredContext = Array.isArray(outRec.context)
-                  ? outRec.context.filter((item): item is string => typeof item === 'string' && item !== '')
-                  : [];
-                onDone(answeredText, answeredContext.length > 0 ? { metaMessages: answeredContext } : undefined);
-                return;
-              }
-            } else {
-              jsx = await mod.call(onDone, { ...context, dispatchedAsImmediate: true }, commandArgs);
-            }
-
-            // Skip if onDone already fired — prevents stuck isLocalJSXCommand
-            // (see processSlashCommand.tsx local-jsx case for full mechanism).
-            if (jsx && !doneWasCalled) {
-              // shouldHidePromptInput: false keeps Notifications mounted
-              // so the onDone result isn't lost
-              setToolJSX({
-                jsx,
-                shouldHidePromptInput: false,
-                isLocalJSXCommand: true,
-              });
-            }
-          };
-          void executeImmediateCommand();
-          return; // Always return early - don't add to history or queue
-        }
-      }
-
-      // Remote mode: skip empty input early before any state mutations
-      if (activeRemote.isRemoteMode && !input.trim()) {
-        return;
-      }
-
-      // densable 2.1.234 #20: build historyEntry at submit; flush on drain (JDr).
-      // Mid-turn queue must NOT addToHistory here — otherwise ↑ shows still-queued text.
-      const isSlashCommand = !speculationAccept && input.trim().startsWith('/');
-      // densable sendQueuedNow(mode, uuid) is lowLatency after enqueue, not a
-      // pre-submit interrupt. Empty send-now is `$Ze` above.
-      // Submit runs "now" (not queued) when not already loading, or when
-      // accepting speculation, or in remote mode (which sends via WS and
-      // returns early without calling handlePromptSubmit).
-      // queueSubmit always enqueues. sendNow enqueues only while a turn is
-      // running so the flushed batch drains together after interrupt.
-      const submitsNow = options?.queueSubmit
-        ? false
-        : options?.sendNow
-          ? !(isLoading || queryGuard.isActive)
-          : !isLoading || speculationAccept || activeRemote.isRemoteMode;
-      const historyEntry =
-        options?.fromKeybinding || speculationAccept
-          ? undefined
-          : {
-              display: prependModeCharacterToInput(input, inputMode),
-              pastedContents: effectivePastedContents,
-            };
-      if (submitsNow && historyEntry) {
-        addToHistory(historyEntry);
-        // Add the just-submitted command to the front of the ghost-text
-        // cache so it's suggested immediately (not after the 60s TTL).
-        if (inputMode === 'bash') {
-          prependToShellHistoryCache(input.trim());
-        }
-      }
-
-      // Restore stash if present, but NOT for slash commands or when loading.
-      // - Slash commands (especially interactive ones like /model, /context) hide
-      //   the prompt and show a picker UI. Restoring the stash during a command would
-      //   place the text in a hidden input, and the user would lose it by typing the
-      //   next command. Instead, preserve the stash so it survives across command runs.
-      // - When loading, the submitted input will be queued and handlePromptSubmit
-      //   will clear the input field (onInputChange('')), which would clobber the
-      //   restored stash. Defer restoration to after handlePromptSubmit (below).
-      //   Remote mode is exempt: it sends via WebSocket and returns early without
-      //   calling handlePromptSubmit, so there's no clobbering risk — restore eagerly.
-      // In both deferred cases, the stash is restored after await handlePromptSubmit.
-      if (stashedPrompt !== undefined && !isSlashCommand && submitsNow) {
-        setInputValue(stashedPrompt.text);
-        helpers.setCursorOffset(stashedPrompt.cursorOffset);
-        setPastedContents(stashedPrompt.pastedContents);
-        setStashedPrompt(undefined);
-        addNotification({
-          key: 'stash-restored',
-          kind: 'feedback',
-          text: 'Draft restored',
-          priority: 'high',
-          timeoutMs: 5000,
-        });
-      } else if (submitsNow) {
-        if (!options?.fromKeybinding) {
-          // Clear input when not loading or accepting speculation.
-          // Preserve input for keybinding-triggered commands.
-          setInputValue('');
-          helpers.setCursorOffset(0);
-          // densable #y outside-empty: drop Ctrl+C held draft
-          clearHeldClearedDraft();
-        }
-        setPastedContents({});
-      }
-
-      if (submitsNow) {
-        setInputMode('prompt');
-        setIDESelection(undefined);
-        setSubmitCount(_ => _ + 1);
-        helpers.clearBuffer();
-        tipPickedThisTurnRef.current = false;
-
-        // Show the placeholder in the same React batch as setInputValue('').
-        // Skip for slash/bash (they have their own echo), speculation and remote
-        // mode (both setMessages directly with no gap to bridge).
-        if (!isSlashCommand && inputMode === 'prompt' && !speculationAccept && !activeRemote.isRemoteMode) {
-          setUserInputOnProcessing(input);
-          // showSpinner includes userInputOnProcessing, so the spinner appears
-          // on this render. Reset timing refs now (before queryGuard.reserve()
-          // would) so elapsed time doesn't read as Date.now() - 0. The
-          // isQueryActive transition above does the same reset — idempotent.
-          resetTimingRefs();
-        }
-
-        // Increment prompt count for attribution tracking and save snapshot
-        // The snapshot persists promptCount so it survives compaction
-        if (feature('COMMIT_ATTRIBUTION')) {
-          setAppState(prev => ({
-            ...prev,
-            attribution: incrementPromptCount(prev.attribution, snapshot => {
-              void recordAttributionSnapshot(snapshot).catch(error => {
-                logForDebugging(`Attribution: Failed to save snapshot: ${error}`);
-              });
-            }),
-          }));
-        }
-      }
-
-      // Handle speculation acceptance
-      if (speculationAccept) {
-        const { queryRequired } = await handleSpeculationAccept(
-          speculationAccept.state,
-          speculationAccept.speculationSessionTimeSavedMs,
-          speculationAccept.setAppState,
-          input,
-          {
-            setMessages,
-            readFileState,
-            cwd: getOriginalCwd(),
-          },
-        );
-        if (queryRequired) {
-          const newAbortController = createAbortController();
-          setAbortControllerForQuery(newAbortController);
-          void onQuery([], newAbortController, true, [], mainLoopModel);
-        }
-        return;
-      }
-
-      // Remote mode: send input via stream-json instead of local query.
-      // Permission requests from the remote are bridged into toolUseConfirmQueue
-      // + DialogHost (doo / mirror); Host paints — no PermissionRequest overlay.
-      //
-      // local-jsx slash commands (e.g. /agents, /config) render UI in THIS
-      // process — they have no remote equivalent. Let those fall through to
-      // handlePromptSubmit so they execute locally. Prompt commands and
-      // plain text go to the remote.
-      if (
-        activeRemote.isRemoteMode &&
-        !(
-          isSlashCommand &&
-          commands.find(c => {
-            const name = input.trim().slice(1).split(/\s/)[0];
-            return isCommandEnabled(c) && (c.name === name || c.aliases?.includes(name!) || getCommandName(c) === name);
-          })?.type === 'local-jsx'
-        )
-      ) {
-        // Build content blocks when there are pasted attachments (images)
-        const pastedValues = Object.values(effectivePastedContents);
-        const imageContents = pastedValues.filter(c => c.type === 'image');
-        const imagePasteIds = imageContents.length > 0 ? imageContents.map(c => c.id) : undefined;
-
-        let messageContent: string | ContentBlockParam[] = input.trim();
-        let remoteContent: RemoteMessageContent = input.trim();
-        if (pastedValues.length > 0) {
-          const contentBlocks: ContentBlockParam[] = [];
-          const remoteBlocks: Array<{ type: string; [key: string]: unknown }> = [];
-
-          const trimmedInput = input.trim();
-          if (trimmedInput) {
-            contentBlocks.push({ type: 'text', text: trimmedInput });
-            remoteBlocks.push({ type: 'text', text: trimmedInput });
-          }
-
-          for (const pasted of pastedValues) {
-            if (pasted.type === 'image') {
-              const source = {
-                type: 'base64' as const,
-                media_type: (pasted.mediaType ?? 'image/png') as
-                  | 'image/jpeg'
-                  | 'image/png'
-                  | 'image/gif'
-                  | 'image/webp',
-                data: pasted.content,
-              };
-              contentBlocks.push({ type: 'image', source });
-              remoteBlocks.push({ type: 'image', source });
-            } else {
-              contentBlocks.push({ type: 'text', text: pasted.content });
-              remoteBlocks.push({ type: 'text', text: pasted.content });
-            }
-          }
-
-          messageContent = contentBlocks;
-          remoteContent = remoteBlocks;
-        }
-
-        // Create and add user message to UI
-        // Note: empty input already handled by early return above
-        const userMessage = createUserMessage({
-          content: messageContent,
-          imagePasteIds,
-        });
-        setMessages(prev => [...prev, userMessage]);
-
-        // Send to remote session
-        await activeRemote.sendMessage(remoteContent, {
-          uuid: userMessage.uuid,
-        });
-        return;
-      }
-
-      // Ensure SessionStart hook context is available before the first API call.
-      await awaitPendingHooks();
-
-      const abortBeforeSubmit = abortControllerRef.current;
-      await handlePromptSubmit({
+      await submitController.submit(
         input,
         helpers,
-        queryGuard,
-        isExternalLoading,
-        mode: inputMode,
-        commands,
-        onInputChange: setInputValue,
-        setPastedContents,
-        setToolJSX,
-        getToolUseContext,
-        messages: messagesRef.current,
-        mainLoopModel,
-        pastedContents: effectivePastedContents,
-        ideSelection,
-        setUserInputOnProcessing,
-        setAbortController: setAbortControllerForQuery,
-        abortController,
-        onQuery,
-        setAppState,
-        querySource: getQuerySourceForREPL(),
-        onBeforeQuery,
-        canUseTool,
-        addNotification,
-        setMessages,
-        // Read via ref so streamMode can be dropped from onSubmit deps —
-        // handlePromptSubmit only uses it for debug log + telemetry event.
-        streamMode: streamModeRef.current,
-        hasInterruptibleToolInProgress: hasInterruptibleToolInProgressRef.current,
-        // densable 2.1.234 #20: defer history + reset bang mode on mid-turn queue
-        historyEntry,
-        onSubmitProceed: submitsNow ? undefined : () => setInputMode('prompt'),
-        queuePriority: options?.sendNow ? 'now' : options?.queueSubmit ? 'next' : undefined,
-        forceQueue: Boolean(options?.queueSubmit || (options?.sendNow && (isLoading || queryGuard.isActive))),
-        resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
-        composerEnter: options?.composerEnter,
-        takeIdeSelectionForQueue:
-          inputMode !== 'bash' &&
-          Boolean(ideSelection?.text || ideSelection?.filePath) &&
-          (ideSelection?.source !== 'diff' || !isSlashCommand)
-            ? () => {
-                if (!submitsNow) {
-                  consumeIdeSelection(undefined);
-                }
-                return ideSelection;
-              }
-            : undefined,
-        recordIdeSelectionConsumedBy,
-        onPromptHandedBack: restoreIdeSelectionConsumedBy,
-        getCurrentInput: () => inputValueRef.current,
-        restoreHandedBackPrompt,
-        awaitSessionStartHooks: awaitPendingHooks,
-      });
-      // densable p6(uO, mO) → SessionHost.sendQueuedNow(h,v):
-      // v===undefined → $Ze; else h==="prompt" && Cln() && Xj.sendQueuedNow(v).
-      const viewed = viewedAgentForInput({
-        viewingAgentTaskId: store.getState().viewingAgentTaskId,
-        tasks: store.getState().tasks,
-      });
-      const namedTaskId = viewed.type === 'named_agent' ? viewed.task.id : undefined;
-      const sameAbort = abortBeforeSubmit !== null && abortControllerRef.current === abortBeforeSubmit;
-      const leaderEmptyKey = inputMode === 'prompt' && viewed.type === 'leader' && sameAbort;
-      const namedAgentSendNow = inputMode === 'prompt' && namedTaskId !== undefined;
-      if (leaderEmptyKey) {
-        trySendQueuedNowKey(() => store.getState(), setAppState, {
-          mode: 'prompt',
-          isTurnRunning: () => queryGuard.isRunning,
-          isTurnActive: () => queryGuard.isActive,
-          abortSignal: abortControllerRef.current,
-          lowLatency: queuedNowLowLatencyHost,
-          interruptForSubmit: () => {
-            const ac = abortControllerRef.current;
-            if (!ac || ac.signal.aborted) return false;
-            ac.abort('interrupt');
-            return true;
+        {
+          isLoading,
+          isExternalLoading,
+          inputMode,
+          commands,
+          mainLoopModel,
+          pastedContents,
+          ideSelection,
+          stashedPrompt,
+          abortController,
+          getAbortController: () => abortControllerRef.current,
+          getCurrentInput: () => inputValueRef.current,
+          getMessages: () => messagesRef.current,
+          getStreamMode: () => streamModeRef.current,
+          getHasInterruptibleToolInProgress: () => hasInterruptibleToolInProgressRef.current,
+          onResetTipPickedThisTurn: () => {
+            tipPickedThisTurnRef.current = false;
           },
-        });
-      } else if (namedAgentSendNow && isVelvetPandaEnabled()) {
-        queuedNowLowLatencyHost.sendQueuedNow(namedTaskId);
-      }
-
-      // Restore stash that was deferred above. Two cases:
-      // - Slash command: handlePromptSubmit awaited the full command execution
-      //   (including interactive pickers). Restoring now places the stash back in
-      //   the visible input.
-      // - Loading (queued): handlePromptSubmit enqueued + cleared input, then
-      //   returned quickly. Restoring now places the stash back after the clear.
-      if ((isSlashCommand || isLoading) && stashedPrompt !== undefined) {
-        setInputValue(stashedPrompt.text);
-        helpers.setCursorOffset(stashedPrompt.cursorOffset);
-        setPastedContents(stashedPrompt.pastedContents);
-        setStashedPrompt(undefined);
-        addNotification({
-          key: 'stash-restored',
-          kind: 'feedback',
-          text: 'Draft restored',
-          priority: 'high',
-          timeoutMs: 5000,
-        });
-      }
+          queuedNowLowLatencyHost,
+          activeRemote,
+          querySource: getQuerySourceForREPL(),
+          readFileState,
+          setAppState,
+          setMessages,
+          setInputValue,
+          setInputMode,
+          setPastedContents,
+          setIDESelection,
+          setSubmitCount,
+          setUserInputOnProcessing,
+          setStashedPrompt,
+          setToolJSX,
+          setAbortControllerForQuery,
+          addNotification,
+          getToolUseContext,
+          onQuery,
+          onBeforeQuery,
+          canUseTool,
+          awaitPendingHooks,
+          repinScroll,
+          routeToSelectedPipes,
+          onClearSubmitted: () => idleReturnController.onClearSubmitted(),
+          resetTimingRefs,
+          consumeIdeSelection,
+          recordIdeSelectionConsumedBy,
+          restoreIdeSelectionConsumedBy,
+          restoreHandedBackPrompt,
+          onResumeProactive: () => proactiveModule?.resumeProactive(),
+        },
+        speculationAccept,
+        options,
+      );
     },
     [
-      queryGuard,
-      // isLoading is read at the !isLoading checks above for input-clearing
-      // and submitCount gating. It's derived from isQueryActive || isExternalLoading,
-      // so including it here ensures the closure captures the fresh value.
+      submitController,
       isLoading,
       isExternalLoading,
       inputMode,
@@ -7495,13 +5824,6 @@ export function REPL({
       setIDESelection,
       setToolJSX,
       getToolUseContext,
-      // messages is read via messagesRef.current inside the callback to
-      // keep onSubmit stable across message updates (see L2384/L2400/L2662).
-      // Without this, each setMessages call (~30× per turn) recreates
-      // onSubmit, pinning the REPL render scope (1776B) + that render's
-      // messages array in downstream closures (PromptInput, handleAutoRunIssue).
-      // Heap analysis showed ~9 REPL scopes and ~15 messages array versions
-      // accumulating after #20174/#20175, all traced to this dep.
       mainLoopModel,
       pastedContents,
       ideSelection,
@@ -7514,7 +5836,12 @@ export function REPL({
       setAppState,
       onBeforeQuery,
       canUseTool,
-      remoteSession,
+      activeRemote,
+      queuedNowLowLatencyHost,
+      abortController,
+      idleReturnController,
+      resetTimingRefs,
+      routeToSelectedPipes,
       setMessages,
       awaitPendingHooks,
       repinScroll,
@@ -7524,7 +5851,6 @@ export function REPL({
       restoreHandedBackPrompt,
     ],
   );
-
   // Callback for when user submits input while viewing a teammate's transcript
   const onAgentSubmit = useCallback(
     async (input: string, task: InProcessTeammateTaskState | LocalAgentTaskState, helpers: PromptInputHelpers) => {
@@ -7966,55 +6292,37 @@ export function REPL({
 
   const executeQueuedInput = useCallback(
     async (queuedCommands: QueuedCommand[]) => {
-      const firstEditable = queuedCommands.find(isQueuedCommandEditable);
-      const consumeLive =
-        firstEditable !== undefined &&
-        firstEditable.ideSelection === undefined &&
-        (ideSelection?.source !== 'diff' ||
-          (firstEditable.mode !== 'bash' &&
-            !(typeof firstEditable.value === 'string' && firstEditable.value.trim().startsWith('/'))));
-      if (consumeLive) {
-        consumeIdeSelection(firstEditable.uuid);
-      } else if (firstEditable?.ideSelection && firstEditable.uuid) {
-        recordIdeSelectionConsumedBy(firstEditable.uuid, firstEditable.ideSelection);
-      }
-      await handlePromptSubmit({
-        helpers: {
-          setCursorOffset: () => {},
-          clearBuffer: () => {},
-          resetHistory: () => {},
-        },
-        queryGuard,
+      await submitController.executeQueuedInput(queuedCommands, {
         commands,
-        setPastedContents,
-        setToolJSX,
-        getToolUseContext,
-        messages,
         mainLoopModel,
-        ideSelection: consumeLive ? ideSelection : undefined,
-        setUserInputOnProcessing,
-        setAbortController: setAbortControllerForQuery,
-        onQuery,
-        setAppState,
+        ideSelection,
         querySource: getQuerySourceForREPL(),
+        getCurrentInput: () => inputValueRef.current,
+        getMessages: () => messagesRef.current,
+        setAppState,
+        setMessages,
+        setInputValue,
+        setPastedContents,
+        setUserInputOnProcessing,
+        setToolJSX,
+        setAbortControllerForQuery,
+        addNotification,
+        getToolUseContext,
+        onQuery,
         onBeforeQuery,
         canUseTool,
-        addNotification,
-        setMessages,
-        queuedCommands,
-        onPromptHandedBack: restoreIdeSelectionConsumedBy,
-        onInputChange: setInputValue,
-        getCurrentInput: () => inputValueRef.current,
+        awaitPendingHooks,
+        consumeIdeSelection,
+        recordIdeSelectionConsumedBy,
+        restoreIdeSelectionConsumedBy,
         restoreHandedBackPrompt,
-        awaitSessionStartHooks: awaitPendingHooks,
       });
     },
     [
-      queryGuard,
+      submitController,
       commands,
       setToolJSX,
       getToolUseContext,
-      messages,
       mainLoopModel,
       ideSelection,
       setUserInputOnProcessing,
@@ -8031,6 +6339,7 @@ export function REPL({
       setInputValue,
       awaitPendingHooks,
       setPastedContents,
+      setMessages,
     ],
   );
 
@@ -8065,90 +6374,17 @@ export function REPL({
   // Returns true if submission succeeded, false if a query is already running
   const handleIncomingPrompt = useCallback(
     (input: string | QueuedCommand, options?: { isMeta?: boolean }): boolean => {
-      if (queryGuard.isActive) return false;
-
-      // Defer to user-queued commands — user input always takes priority
-      // over system messages (teammate messages, task list items, etc.)
-      // Read from the module-level store at call time (not the render-time
-      // snapshot) to avoid a stale closure — this callback's deps don't
-      // include the queue.
-      if (getCommandQueue().some(cmd => cmd.mode === 'prompt' || cmd.mode === 'bash')) {
-        return false;
-      }
-
-      const queuedCommand =
-        typeof input === 'string'
-          ? ({
-              value: input,
-              mode: 'prompt',
-              isMeta: options?.isMeta ? true : undefined,
-            } satisfies QueuedCommand)
-          : input;
-
-      void (async () => {
-        const claim = await claimConsumableQueuedAutonomyCommands([queuedCommand]);
-        const command = claim.attachmentCommands[0];
-        if (!command) return;
-
-        const newAbortController = createAbortController();
-        setAbortControllerForQuery(newAbortController);
-
-        // Create a user message with the formatted content (includes XML wrapper).
-        // densable HXd/Fws: when origin is peer/observer, apply turn-start
-        // framing (midTurn:false) so the model sees the laundering note.
-        const userMessage = createUserMessage({
-          content: command.value,
-          isMeta: command.isMeta ? true : undefined,
-          origin: command.origin,
-        });
-        if (command.origin) {
-          applyTurnStartOriginFraming(userMessage, command.origin as { kind?: string; from?: string });
-        }
-
-        let executed = false;
-        try {
-          executed = (await onQuery([userMessage], newAbortController, true, [], mainLoopModel)) !== false;
-        } catch (error: unknown) {
-          try {
-            await finalizeAutonomyCommandsForTurn({
-              commands: claim.claimedCommands,
-              outcome: { type: 'failed', error },
-              currentDir: getCwd(),
-              priority: 'later',
-            });
-          } catch (finalizeError: unknown) {
-            logError(toError(finalizeError));
-          }
-          logError(toError(error));
-          return;
-        }
-
-        // Only finalize as completed when onQuery actually executed the turn
-        // (it returns false from the concurrent-guard path without running).
-        // Keep this finalize in its own try/catch so a failure here does not
-        // trigger a second finalize as `failed` for the same commands.
-        if (!executed) {
-          return;
-        }
-        try {
-          const nextCommands = await finalizeAutonomyCommandsForTurn({
-            commands: claim.claimedCommands,
-            outcome: { type: 'completed' },
-            currentDir: getCwd(),
-            priority: 'later',
-          });
-          for (const nextCommand of nextCommands) {
-            enqueue(nextCommand);
-          }
-        } catch (finalizeError: unknown) {
-          logError(toError(finalizeError));
-        }
-      })().catch((error: unknown) => {
-        logError(toError(error));
-      });
-      return true;
+      return submitController.handleIncomingPrompt(
+        input,
+        {
+          mainLoopModel,
+          setAbortControllerForQuery,
+          onQuery,
+        },
+        options,
+      );
     },
-    [onQuery, mainLoopModel, store],
+    [submitController, onQuery, mainLoopModel, setAbortControllerForQuery],
   );
 
   const { relayPipeMessage, pipeReturnHadErrorRef } = usePipeRelay();
@@ -8189,7 +6425,6 @@ export function REPL({
 
   // Pipe IPC lifecycle — extracted to usePipeIpc hook
   usePipeIpc({ store, handleIncomingPrompt });
-  const { routeToSelectedPipes } = usePipeRouter({ store, setAppState, addNotification });
 
   // Scheduled tasks from .claude/scheduled_tasks.json (CronCreate/Delete/List)
   if (feature('AGENT_TRIGGERS')) {
@@ -8228,7 +6463,7 @@ export function REPL({
     queuedCommandsLength: queuedCommands.length,
     hasActiveLocalJsxUI: isShowingLocalJSXCommand,
     isInPlanMode: toolPermissionContext.mode === 'plan',
-    onQueueTick: (command: QueuedCommand) => enqueue(command),
+    onQueueTick: (command: QueuedCommand) => messageQueue.enqueue(command),
   });
 
   useEffect(() => {
@@ -9592,7 +7827,6 @@ export function REPL({
                             if (selection !== 'dismiss') {
                               setAppState(prev => ({
                                 ...prev,
-                                effortValue: selection,
                                 sessionEffort: explicitSessionEffort(selection),
                               }));
                               try {
@@ -9850,7 +8084,7 @@ export function REPL({
                                       const iht = evaluateLeftArrowIhtGates({
                                         persistenceDisabled: isPersistenceSuppressed(),
                                         endedByModel: store.getState().endedByModel === true,
-                                        queuedCount: countLeftArrowBlockingQueuedCommands(getCommandQueue()),
+                                        queuedCount: countLeftArrowBlockingQueuedCommands(messageQueue.getCommands()),
                                         draft: inputValueRef.current,
                                         inFlight: Xr,
                                       });
@@ -10094,9 +8328,9 @@ export function REPL({
                                           const arm = leftArrowDeferRef.current;
                                           if (!arm || arm.armedAtMs !== armedAtMs) return;
                                           const hy = (store.getState().tasks ?? {}) as Record<string, TaskState>;
-                                          const fre = getCommandQueue().filter(
-                                            c => !isLeftArrowDeferStickyQueueCmd(c),
-                                          ).length;
+                                          const fre = messageQueue
+                                            .getCommands()
+                                            .filter(c => !isLeftArrowDeferStickyQueueCmd(c)).length;
                                           if (
                                             fre > 0 ||
                                             (!arm.confirmedInterstitial && countAbandonableLeftArrow(hy) > 0) ||

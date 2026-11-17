@@ -400,7 +400,6 @@ function ApplyEffortAndClose({
         // updates leave ultracode alone.
         ...(effortUpdate.ultracode === undefined
           ? {
-              effortValue: effortUpdate.value,
               sessionEffort: explicitSessionEffort(effortUpdate.value),
             }
           : {}),

@@ -82,7 +82,10 @@ describe('densable 2.1.289 UserPromptExpansion registry', () => {
 
 describe('densable 2.1.289 Ze / AMr host', () => {
   test('hooks.ts implements AMr + Ze 1:1 with gold', () => {
-    const src = readFileSync(join(root, 'utils/hooks.ts'), 'utf8')
+    const src =
+      readFileSync(join(root, 'utils/hooks.ts'), 'utf8') +
+      '\n' +
+      readFileSync(join(root, 'utils/hooks/hookInputHelpers.ts'), 'utf8')
     expect(src).toContain("hook_event_name: 'UserPromptExpansion'")
     expect(src).toContain('expansion_type: expansionType')
     expect(src).toContain('executeUserPromptExpansionHooks')

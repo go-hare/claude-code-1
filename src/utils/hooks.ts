@@ -280,379 +280,53 @@ const TOOL_HOOK_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000
 /** densable `HFe` — UserPromptSubmit per-hook timeout. */
 const USER_PROMPT_SUBMIT_HOOK_TIMEOUT_MS = 30_000
 
-/** densable `ygo` — SessionEnd per-hook / bound floor. */
-const SESSIONEND_HOOKS_TIMEOUT_FLOOR_MS = 1500
-/** densable `ARo` — SessionEnd bound ceiling when env is unset. */
-const SESSIONEND_HOOKS_TIMEOUT_CEILING_MS = 60_000
-
-/**
- * densable `_go`. Per-hook SessionEnd timeout: env
- * CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS if a positive int, else 1500.
- * Not the overall AbortSignal bound — see getSessionEndHooksBoundMs.
- */
-export function getSessionEndHookTimeoutMs(): number {
-  return resolveSessionEndHooksTimeoutMs()
-}
-
-function sessionEndHooksTimeoutEnvMs(): number | undefined {
-  const raw = process.env.CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS
-  const parsed = raw ? parseInt(raw, 10) : NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
-}
-
-/**
- * densable `Kfe` body. Env if set; else max(matcher hook.timeout*1000)
- * clamped to [1500, 60000].
- */
-export function computeSessionEndHooksBoundMs(
-  envMs: number | undefined,
-  sessionEndMatchers: ReadonlyArray<{
-    hooks: ReadonlyArray<{ timeout?: number }>
-  }>,
-): number {
-  if (envMs !== undefined) {
-    return envMs
-  }
-  let maxTimeoutMs = 0
-  for (const matcher of sessionEndMatchers) {
-    for (const hook of matcher.hooks) {
-      if (hook.timeout && hook.timeout * 1000 > maxTimeoutMs) {
-        maxTimeoutMs = hook.timeout * 1000
-      }
-    }
-  }
-  return Math.max(
-    SESSIONEND_HOOKS_TIMEOUT_FLOOR_MS,
-    Math.min(maxTimeoutMs, SESSIONEND_HOOKS_TIMEOUT_CEILING_MS),
-  )
-}
-
-/**
- * densable `Kfe`. Overall SessionEnd AbortSignal bound.
- * Env if set; else max(SessionEnd matcher hook.timeout*1000) clamped to
- * [1500, 60000]. Do not pass this as timeoutMs — that is `_go`.
- */
-export function getSessionEndHooksBoundMs(): number {
-  const agentSessionEnd = shouldAllowManagedHooksOnly()
-    ? []
-    : (getMainThreadAgentHooks()?.SessionEnd ?? [])
-  return computeSessionEndHooksBoundMs(sessionEndHooksTimeoutEnvMs(), [
-    ...(getHooksConfigFromSnapshot()?.SessionEnd ?? []),
-    ...agentSessionEnd,
-  ])
-}
-
-/** densable Aqo @189460720 */
-const ASYNC_REWAKE_SUMMARY_CAP = 300
-const BROKEN_ASYNC_REWAKE_DEDUP_CAP = 64
-const brokenAsyncRewakeOutputs = new Map<string, string>()
-
-export function resetBrokenAsyncRewakeForTests(): void {
-  brokenAsyncRewakeOutputs.clear()
-}
-
-/** densable `_ce` @189501200 — official marketplace / builtin plugin provenance. */
-export function isOfficialHookPluginId(pluginId: string | undefined): boolean {
-  if (!pluginId) return false
-  const atIndex = pluginId.lastIndexOf('@')
-  if (atIndex <= 0) return false
-  const marketplace = pluginId.slice(atIndex + 1)
-  return (
-    ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(marketplace) ||
-    marketplace === 'builtin'
-  )
-}
-
-function normalizeScriptLookupPath(raw: string): string {
-  const normalized = raw.replace(/[\\/]+/g, '/')
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized
-}
-
-export function extractCommandScriptPaths(command: string): string[] {
-  const tokens: string[] = []
-  let current = ''
-  let quote: '"' | "'" | undefined
-  let active = false
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i]!
-    if (quote !== undefined) {
-      if (ch === quote) quote = undefined
-      else current += ch
-      continue
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch
-      active = true
-    } else if (ch === '\\' && i + 1 < command.length) {
-      current += command[++i]!
-      active = true
-    } else if (/\s/.test(ch)) {
-      if (active) {
-        tokens.push(current)
-        current = ''
-        active = false
-      }
-    } else {
-      current += ch
-      active = true
-    }
-  }
-  if (active) tokens.push(current)
-  return tokens.filter(
-    (token, idx) =>
-      idx > 0 &&
-      !token.startsWith('-') &&
-      (token.includes('/') ||
-        token.includes('\\') ||
-        /\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|pl|rb|ps1)$/i.test(token)),
-  )
-}
-
-const MISSING_SCRIPT_LINE_RE =
-  /^(?:(?:[A-Za-z]:\\[^:]*|[^\s:]+): )?(?:\d+: )?(?:[Cc]an't|cannot) open (?:file |perl script )?(?:(['"])(.+?)\1[:( ]|([^'"]+?): )|(?:No such file or directory):\s*([^\r\n]+)|([^\s:'"]+):\s*No such file or directory/i
-
-/** densable `Amt` @187847941 — detect missing script on asyncRewake exit 2. */
-async function detectMissingAsyncRewakeScript(opts: {
-  stdout: string
-  stderr: string
-  scriptPaths: readonly string[]
-}): Promise<{ scriptPath: string; output: string } | undefined> {
-  if (
-    opts.scriptPaths.length === 0 ||
-    (opts.stdout.trim() !== '' && opts.stderr.trim() !== '')
-  ) {
-    return undefined
-  }
-  const output = opts.stderr.trim() !== '' ? opts.stderr : opts.stdout
-  const lines = output
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-  if (lines.length === 0) return undefined
-  const known = new Map<string, string>()
-  for (const scriptPath of opts.scriptPaths) {
-    known.set(normalizeScriptLookupPath(scriptPath), scriptPath)
-  }
-  const matched = new Set<string>()
-  for (const line of lines) {
-    const execMatch = MISSING_SCRIPT_LINE_RE.exec(line)
-    const candidate =
-      execMatch?.[2] ?? execMatch?.[3] ?? execMatch?.[4] ?? execMatch?.[5]
-    const found =
-      candidate === undefined
-        ? undefined
-        : known.get(normalizeScriptLookupPath(candidate.trim()))
-    if (found === undefined) return undefined
-    matched.add(found)
-  }
-  for (const scriptPath of matched) {
-    if (await pathExists(scriptPath)) return undefined
-  }
-  const [first] = matched
-  return first === undefined ? undefined : { scriptPath: first, output }
-}
-
-/** densable `Imt` @187848551 — suppress duplicate broken-script wakeups. */
-function isDuplicateBrokenAsyncRewake(
-  key: string,
-  output: string | undefined,
-): boolean {
-  if (output === undefined) {
-    brokenAsyncRewakeOutputs.delete(key)
-    return false
-  }
-  if (brokenAsyncRewakeOutputs.get(key) === output) {
-    return true
-  }
-  brokenAsyncRewakeOutputs.delete(key)
-  brokenAsyncRewakeOutputs.set(key, output)
-  if (brokenAsyncRewakeOutputs.size > BROKEN_ASYNC_REWAKE_DEDUP_CAP) {
-    const [oldest] = brokenAsyncRewakeOutputs.keys()
-    if (oldest !== undefined) brokenAsyncRewakeOutputs.delete(oldest)
-  }
-  return false
-}
-
-export function executeInBackground({
-  processId,
-  hookId,
-  shellCommand,
-  asyncResponse,
-  hookEvent,
-  hookName,
-  command,
-  asyncRewake,
-  rewakeMessage,
-  rewakeSummary,
-  scriptPaths,
-  pluginId,
-}: {
-  processId: string
-  hookId: string
-  shellCommand: ShellCommand
-  asyncResponse: AsyncHookJSONOutput
-  hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion'
-  hookName: string
-  command: string
-  asyncRewake?: boolean
-  rewakeMessage?: string
-  rewakeSummary?: string
-  scriptPaths?: readonly string[]
-  pluginId?: string
-}): boolean {
-  if (asyncRewake) {
-    // asyncRewake hooks bypass the registry entirely. On completion, if exit
-    // code 2 (blocking error), enqueue as a task-notification so it wakes the
-    // model via useQueueProcessor (idle) or gets injected mid-query via
-    // queued_command attachments (busy).
-    void shellCommand.result.then(async result => {
-      await new Promise(resolve => setImmediate(resolve))
-      const stdout = await shellCommand.taskOutput.getStdout()
-      const stderr = shellCommand.taskOutput.getStderr()
-      shellCommand.cleanup()
-      emitHookResponse({
-        hookId,
-        hookName,
-        hookEvent,
-        output: stdout + stderr,
-        stdout,
-        stderr,
-        exitCode: result.code,
-        outcome: result.code === 0 ? 'success' : 'error',
-      })
-      let jsonRewakeSummary: string | undefined
-      if (pluginId) {
-        for (const line of stdout.split('\n')) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('{')) continue
-          try {
-            const parsed = jsonParse(trimmed) as Record<string, unknown>
-            if (parsed && typeof parsed === 'object' && 'async' in parsed) {
-              continue
-            }
-            if (isSyncHookJSONOutput(parsed)) {
-              const rawSummary = (parsed as { rewakeSummary?: unknown })
-                .rewakeSummary
-              if (
-                typeof rawSummary === 'string' &&
-                rawSummary.trim() !== '' &&
-                isOfficialHookPluginId(pluginId)
-              ) {
-                jsonRewakeSummary = rawSummary
-                  .trim()
-                  .replace(/\s+/g, ' ')
-                  .slice(0, ASYNC_REWAKE_SUMMARY_CAP)
-              }
-            }
-            break
-          } catch {
-            // ignore non-JSON lines
-          }
-        }
-      }
-      const missingScript =
-        result.code === 2
-          ? await detectMissingAsyncRewakeScript({
-              stdout,
-              stderr,
-              scriptPaths: scriptPaths ?? extractCommandScriptPaths(command),
-            })
-          : undefined
-      if (
-        isDuplicateBrokenAsyncRewake(
-          `${hookName}\n${command}`,
-          missingScript?.output,
-        )
-      ) {
-        logForDebugging(
-          `Hooks: asyncRewake hook "${hookName}" (${command}) exited 2 again because ${missingScript?.scriptPath} cannot be opened; already reported, not waking the model`,
-          { level: 'warn' },
-        )
-        return
-      }
-      if (result.code === 2) {
-        let prefix: string
-        let summary: string
-        let output: string
-        if (missingScript !== undefined) {
-          prefix = `${hookName} hook could not run: ${missingScript.scriptPath} cannot be opened, so its command exited with code 2 without doing any work. This is a broken hook installation, not feedback on your work; it is reported this once and identical repeats are dropped. Interpreter output:`
-          summary = `${hookEvent} hook could not open ${basename(missingScript.scriptPath)}`
-          output = missingScript.output
-        } else {
-          prefix =
-            rewakeMessage ??
-            `Stop hook blocking error from command "${hookName}":`
-          summary = jsonRewakeSummary ?? rewakeSummary ?? 'Stop hook feedback'
-          output = stderr || stdout
-        }
-        const escapedSummary = summary
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-        enqueuePendingNotification(
-          {
-            value: `<task-notification>\n<summary>${escapedSummary}</summary>\n</task-notification>\n${wrapInSystemReminder(`${prefix} ${output}`)}`,
-            mode: 'task-notification',
-            priority: 'next',
-            stopHookActive: true,
-            skipAttachments: true,
-          },
-          { turnAttribution: 'inherit' },
-        )
-      }
-    })
-    return true
-  }
-
-  // TaskOutput on the ShellCommand accumulates data — no stream listeners needed
-  if (!shellCommand.background(processId)) {
-    return false
-  }
-
-  registerPendingAsyncHook({
-    processId,
-    hookId,
-    asyncResponse,
-    hookEvent,
-    hookName,
-    command,
-    shellCommand,
-    pluginId,
-  })
-
-  return true
-}
-
-/**
- * Checks if a hook should be skipped due to lack of workspace trust.
- *
- * ALL hooks require workspace trust because they execute arbitrary commands from
- * .claude/settings.json. This is a defense-in-depth security measure.
- *
- * Context: Hooks are captured via captureHooksConfigSnapshot() before the trust
- * dialog is shown. While most hooks won't execute until after trust is established
- * through normal program flow, enforcing trust for ALL hooks prevents:
- * - Future bugs where a hook might accidentally execute before trust
- * - Any codepath that might trigger hooks before trust dialog
- * - Security issues from hook execution in untrusted workspaces
- *
- * Historical vulnerabilities that prompted this check:
- * - SessionEnd hooks executing when user declines trust dialog
- * - SubagentStop hooks executing when subagent completes before trust
- *
- * @returns true if hook should be skipped, false if it should execute
- */
-export function shouldSkipHookDueToTrust(): boolean {
-  // In non-interactive mode (SDK), trust is implicit - always execute
-  const isInteractive = !getIsNonInteractiveSession()
-  if (!isInteractive) {
-    return false
-  }
-
-  // In interactive mode, ALL hooks require trust
-  const hasTrust = checkHasTrustDialogAccepted()
-  return !hasTrust
-}
+import {
+  executeInBackground,
+  extractCommandScriptPaths,
+  isOfficialHookPluginId,
+  resetBrokenAsyncRewakeForTests,
+} from './hooks/hookAsyncRewake.js'
+import {
+  isStorageV5ScopeKindHost,
+  parsePluginCacheIdentity,
+  pluginDirectoryExists,
+  type StorageV5ScopeKindHost,
+} from './hooks/hookCommandRunner.js'
+import {
+  buildFailClosedHookMatchResult,
+  computeSessionEndHooksBoundMs,
+  formatHookMatchBlockedMessage,
+  getPreToolHookBlockingMessage,
+  getSessionEndHookTimeoutMs,
+  getSessionEndHooksBoundMs,
+  getStopHookMessage,
+  getTaskCompletedHookMessage,
+  getTaskCreatedHookMessage,
+  getTeammateIdleHookMessage,
+  getUserPromptExpansionHookBlockingMessage,
+  getUserPromptSubmitHookBlockingMessage,
+  shouldDowngradeMissingHookScriptExit2,
+  shouldFailClosedHookInput,
+  shouldSkipHookDueToTrust,
+  validateHookInputSize,
+} from './hooks/hookInputHelpers.js'
+import {
+  Eve,
+  Swt,
+  Uct,
+  isSeveralJsonDocuments,
+  validateHookJson,
+  parseHttpHookOutput,
+  wwt,
+} from './hooks/hookOutputValidation.js'
+import type {
+  AggregatedHookResult,
+  ElicitationResponse,
+  HookBlockingError,
+  HookCommandResult,
+  HookOutsideReplResult,
+  HookResult,
+} from './hooks/hookTypes.js'
 
 /**
  * Creates the base hook input that's common to all hook types
@@ -756,271 +430,6 @@ function resolveScratchpadDirField(
   }
 }
 
-export interface HookBlockingError {
-  blockingError: string
-  command: string
-}
-
-/** Re-export ElicitResult from MCP SDK as ElicitationResponse for backward compat. */
-export type ElicitationResponse = ElicitResult
-
-export interface HookResult {
-  message?: HookResultMessage
-  systemMessage?: string
-  blockingError?: HookBlockingError
-  outcome: 'success' | 'blocking' | 'non_blocking_error' | 'cancelled'
-  /** densable Mo.timedOut — prompt Stop timeout, not parent abort. */
-  timedOut?: boolean
-  preventContinuation?: boolean
-  stopReason?: string
-  permissionBehavior?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
-  hookPermissionDecisionReason?: string
-  additionalContext?: string
-  initialUserMessage?: string
-  sessionTitle?: string
-  reloadSkills?: boolean
-  suppressOriginalPrompt?: boolean
-  updatedInput?: Record<string, unknown>
-  updatedMCPToolOutput?: unknown
-  updatedToolOutput?: unknown
-  classifierContext?: string
-  legacyMcpRewriteSuppressed?: boolean
-  impossible?: boolean
-  permissionRequestResult?: PermissionRequestResult
-  elicitationResponse?: ElicitationResponse
-  watchPaths?: string[]
-  elicitationResultResponse?: ElicitationResponse
-  retry?: boolean
-  /** densable 2.1.222 MessageDisplay */
-  displayContent?: string
-  /** densable i4 terminalSequence after hxe allowlist. */
-  terminalSequence?: string
-  hook: HookCommand | HookCallback | FunctionHook
-}
-
-export type AggregatedHookResult = {
-  message?: HookResultMessage // 插入会话的钩子消息（含系统/附件类），供 UI 与后续轮次展示
-  blockingError?: HookBlockingError // 致命阻塞：附带命令与错误文案，调用方应中止当前工具/流程
-  preventContinuation?: boolean // 为 true 时请求不再继续后续对话轮次（与 stopReason 配套）
-  stopReason?: string // 停止继续时的可读原因，用于日志、遥测或向用户解释为何结束
-  hookPermissionDecisionReason?: string // 钩子对权限决策的补充说明，常与 permissionBehavior 一同产出
-  hookSource?: string // 产生本次权限/改参结果的定义来源（如 settings 与 policy 合并后的条目来源）
-  permissionBehavior?: PermissionResult['behavior'] | 'defer' // 多钩并行时按 deny > defer > ask > allow 聚合后的权限行为
-  updatedToolOutput?: unknown
-  classifierContexts?: Array<{ value: string; hostPrincipal: boolean }>
-  pairedRewrite?: 'direct' | 'legacy_mcp' | 'suppressed' | 'none'
-  impossible?: boolean
-  additionalContexts?: string[] // 注入模型上下文的补充片段（如 UserPromptSubmit），可与多条钩子结果合并
-  initialUserMessage?: string // 会话启动等场景预置的首条用户侧文案，供首轮上下文使用
-  sessionTitle?: string // SessionStart / UserPromptSubmit 设置的会话标题
-  reloadSkills?: boolean // SessionStart 请求重扫 skill/command 目录
-  suppressOriginalPrompt?: boolean // UserPromptSubmit / UserPromptExpansion block 时是否省略原始 prompt
-  updatedInput?: Record<string, unknown> // 钩子改写后的工具入参；可在 allow/ask 时与权限一起产出，也可单独改参
-  updatedMCPToolOutput?: unknown // PostToolUse 钩子对 MCP 工具原始输出的替换内容
-  permissionRequestResult?: PermissionRequestResult // PermissionRequest 事件钩子的 allow/deny 及可选改参
-  watchPaths?: string[] // SessionStart 等声明的监视路径，供文件变更相关逻辑使用
-  elicitationResponse?: ElicitationResponse // Elicitation 钩子的交互/采集结果（MCP elicit 流程）
-  elicitationResultResponse?: ElicitationResponse // ElicitationResult 钩子对上一轮引导的后续响应数据
-  retry?: boolean // PermissionDenied 等场景是否建议用户重试当前操作
-  /** densable 2.1.222 MessageDisplay — hookSpecificOutput.displayContent */
-  displayContent?: string
-  /** densable ae.hook — Stop goal matching (`prompt === activeGoal.condition`). */
-  hook?: HookCommand | HookCallback | FunctionHook
-  /** densable ae.timedOut — prompt Stop timeout (parent abort is not a timeout). */
-  timedOut?: boolean
-}
-
-function classicResultFields(key: string, event: HookEvent): string[] {
-  switch (key) {
-    case 'block':
-      return event === 'PreModelSwitch'
-        ? ['blockingError']
-        : [
-            'blockingError',
-            'permissionBehavior',
-            'hookPermissionDecisionReason',
-          ]
-    case 'additionalContext':
-      return ['additionalContexts']
-    case 'permissionDecision':
-    case 'permissionDecisionReason':
-      return ['permissionBehavior', 'hookPermissionDecisionReason']
-    case 'decision':
-      return ['permissionRequestResult', 'permissionBehavior', 'updatedInput']
-    case 'delta':
-      return ['displayContent']
-    case 'additionalContexts':
-    case 'permissionBehavior':
-    case 'hookPermissionDecisionReason':
-    case 'permissionRequestResult':
-    case 'updatedInput':
-    case 'preventContinuation':
-    case 'stopReason':
-    case 'sessionTitle':
-    case 'suppressOriginalPrompt':
-    case 'initialUserMessage':
-    case 'watchPaths':
-    case 'reloadSkills':
-    case 'updatedToolOutput':
-    case 'updatedMCPToolOutput':
-    case 'retry':
-    case 'displayContent':
-      return [key]
-    default:
-      return []
-  }
-}
-
-function projectClassicHookResults(
-  results: AggregatedHookResult[],
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = {}
-  const ranks: Record<string, number> = { allow: 1, ask: 2, deny: 3 }
-  for (const result of results) {
-    if (result.blockingError)
-      projected.block = result.blockingError.blockingError
-    if (result.additionalContexts?.length) {
-      projected.additionalContext = [
-        ...((projected.additionalContext as string[] | undefined) ?? []),
-        ...result.additionalContexts,
-      ]
-    }
-    if (result.watchPaths?.length) {
-      projected.watchPaths = [
-        ...((projected.watchPaths as string[] | undefined) ?? []),
-        ...result.watchPaths,
-      ]
-    }
-    if (result.permissionBehavior && ranks[result.permissionBehavior]) {
-      const previous = projected.permissionDecision as string | undefined
-      if (
-        (ranks[result.permissionBehavior] ?? 0) >= (ranks[previous ?? ''] ?? 0)
-      ) {
-        projected.permissionDecision = result.permissionBehavior
-        projected.permissionDecisionReason = result.hookPermissionDecisionReason
-      }
-    }
-    if (result.permissionRequestResult && projected.decision === undefined) {
-      projected.decision = result.permissionRequestResult
-    }
-    for (const key of [
-      'preventContinuation',
-      'stopReason',
-      'initialUserMessage',
-      'sessionTitle',
-      'suppressOriginalPrompt',
-      'reloadSkills',
-      'updatedToolOutput',
-      'updatedMCPToolOutput',
-      'retry',
-      'displayContent',
-    ] as const) {
-      if (result[key] !== undefined) projected[key] = result[key]
-    }
-  }
-  return projected
-}
-
-/**
- * densable 2.1.248 Eve @186234668 — first-line prefix Swt/wwt share.
- * wwt strips this to emit `${event} hook output invalid: …`.
- */
-export const Eve = 'Hook JSON output validation failed \u2014 '
-
-const vNn = new Set(['async', 'hookEventName', 'behavior'])
-
-type HookSchemaIssue = {
-  path: ReadonlyArray<PropertyKey>
-  message: string
-  code?: string
-  errors?: ReadonlyArray<ReadonlyArray<HookSchemaIssue>>
-  unionErrors?: ReadonlyArray<{ issues: ReadonlyArray<HookSchemaIssue> }>
-}
-
-function _wt(path: ReadonlyArray<PropertyKey>): string {
-  return path.map(String).join('.') || '(root)'
-}
-
-function Dz(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** densable 2.1.248 ywt — union-noise on async/hookEventName/behavior. */
-function ywt(issue: HookSchemaIssue): boolean {
-  const last = issue.path.at(-1)
-  return (
-    issue.code === 'invalid_value' && typeof last === 'string' && vNn.has(last)
-  )
-}
-
-/** densable 2.1.248 bwt — flatten union issues onto one path/message. */
-function bwt(
-  issue: HookSchemaIssue,
-  prefix: ReadonlyArray<PropertyKey>,
-): { path: PropertyKey[]; message: string } {
-  const path = [...prefix, ...issue.path]
-  const branches: ReadonlyArray<ReadonlyArray<HookSchemaIssue>> =
-    issue.errors ?? issue.unionErrors?.map(err => err.issues) ?? []
-  if (issue.code !== 'invalid_union' || branches.length === 0) {
-    return { path, message: issue.message.replace(/^Invalid input: /, '') }
-  }
-  const preferred = branches.find(
-    branch => branch.length > 0 && !branch.some(ywt),
-  )?.[0]
-  if (preferred) {
-    return bwt(preferred, path)
-  }
-  const noise = branches.flatMap(branch => branch.filter(ywt))
-  const first = noise[0]
-  if (first) {
-    return bwt(first, path)
-  }
-  return { path, message: issue.message.replace(/^Invalid input: /, '') }
-}
-
-/**
- * densable 2.1.248 Swt @186235528 sha=7cd25b6ba6d5958a
- * PermissionRequest / legacy top-level decision first-line schema copy.
- */
-export function Swt(
-  parsed: unknown,
-  error: { issues: ReadonlyArray<HookSchemaIssue> },
-): string {
-  const hookSpecific = Dz(parsed) ? parsed.hookSpecificOutput : undefined
-  const issues = error.issues.map(issue => bwt(issue, []))
-  const first = issues[0]
-  let lead = first ? `${_wt(first.path)}: ${first.message}` : 'unknown error'
-  if (Dz(hookSpecific) && !('hookEventName' in hookSpecific)) {
-    lead = 'hookSpecificOutput is missing required field "hookEventName"'
-  } else if (
-    Dz(hookSpecific) &&
-    hookSpecific.hookEventName === 'PermissionRequest' &&
-    !Dz(hookSpecific.decision) &&
-    first?.path[0] === 'hookSpecificOutput' &&
-    first.path[1] === 'decision'
-  ) {
-    lead +=
-      ' (PermissionRequest decision must be {"behavior": "allow"} or {"behavior": "deny", "message": "..."})'
-  } else if (
-    Dz(parsed) &&
-    first?.path.length === 1 &&
-    first.path[0] === 'decision' &&
-    (parsed.decision === 'allow' ||
-      parsed.decision === 'deny' ||
-      parsed.decision === 'ask')
-  ) {
-    lead +=
-      parsed.decision === 'ask'
-        ? ' (top-level decision is the legacy approve|block field; for "ask" use hookSpecificOutput.permissionDecision in a PreToolUse hook)'
-        : ` (top-level decision is the legacy approve|block field; for "${parsed.decision}" use hookSpecificOutput.permissionDecision in a PreToolUse hook, or hookSpecificOutput.decision: {"behavior": "${parsed.decision}"} in a PermissionRequest hook)`
-  }
-  const rest = issues
-    .slice(1)
-    .map(issue => `  - ${_wt(issue.path)}: ${issue.message}`)
-    .join('\n')
-  return `${Eve}${lead}${rest ? `\n${rest}` : ''}\n\nThe hook's output was: ${jsonStringify(parsed, null, 2)}`
-}
-
 /**
  * densable 2.1.248 kwt @186236662 — Expected schema dumped after Swt.
  */
@@ -1085,76 +494,6 @@ export function kwt(): string {
   )
 }
 
-/**
- * densable 2.1.248 wwt @186237955 sha=fba5d4f0b9ee6440
- * Agents-row copy: names the hook event + first-line schema/error.
- */
-export function wwt(eventName: string, stderr: string): string {
-  const first =
-    stderr
-      .split('\n')
-      .map(line => line.trim())
-      .find(line => line.length > 0) ?? ''
-  if (first.startsWith(Eve)) {
-    return `${eventName} hook output invalid: ${first.slice(Eve.length)}`
-  }
-  return first
-    ? `${eventName} hook failed: ${first}`
-    : `${eventName} hook failed to run`
-}
-
-/**
- * densable 2.1.248 Uct @186255693 — keep Eve on line 1; append command stderr.
- */
-export function Uct(
-  validationError: string,
-  status: number,
-  stderr: string,
-): string {
-  const trimmed = stderr.trim()
-  return status !== 0 && trimmed
-    ? `${validationError}\n\nHook exited ${status} with stderr:\n${trimmed}`
-    : validationError
-}
-
-/**
- * Parse and validate a JSON string against the hook output Zod schema.
- * Returns the validated output or formatted validation errors.
- */
-function validateHookJson(
-  jsonString: string,
-): { json: HookJSONOutput } | { validationError: string } {
-  const parsed = jsonParse(jsonString)
-  const validation = hookJSONOutputSchema().safeParse(parsed)
-  if (validation.success) {
-    logForDebugging('Successfully parsed and validated hook JSON output')
-    return { json: validation.data }
-  }
-  return {
-    validationError: Swt(parsed, validation.error),
-  }
-}
-
-/**
- * densable 2.1.248 $Nn — NDJSON where every non-empty line is JSON that
- * fails the hook schema or validates to an empty object.
- */
-function isSeveralJsonDocuments(text: string): boolean {
-  const lines = text.split('\n').filter(line => line.trim() !== '')
-  if (lines.length < 2) {
-    return false
-  }
-  using _ = slowLogging`parseHookOutput: json lines (${lines.length})`
-  return lines.every(line => {
-    try {
-      const parsed = hookJSONOutputSchema().safeParse(jsonParse(line.trim()))
-      return !parsed.success || Object.keys(parsed.data).length === 0
-    } catch {
-      return false
-    }
-  })
-}
-
 export function parseHookOutput(stdout: string): {
   json?: HookJSONOutput
   plainText?: string
@@ -1194,584 +533,7 @@ export function parseHookOutput(stdout: string): {
   }
 }
 
-function parseHttpHookOutput(body: string): {
-  json?: HookJSONOutput
-  validationError?: string
-} {
-  const trimmed = body.trim()
-
-  if (trimmed === '') {
-    const validation = hookJSONOutputSchema().safeParse({})
-    if (validation.success) {
-      logForDebugging(
-        'HTTP hook returned empty body, treating as empty JSON object',
-      )
-      return { json: validation.data }
-    }
-  }
-
-  if (!trimmed.startsWith('{')) {
-    const validationError = `HTTP hook must return JSON, but got non-JSON response body: ${trimmed.length > 200 ? trimmed.slice(0, 200) + '\u2026' : trimmed}`
-    logForDebugging(validationError)
-    return { validationError }
-  }
-
-  try {
-    const result = validateHookJson(trimmed)
-    if ('json' in result) {
-      return result
-    }
-    logForDebugging(result.validationError)
-    return result
-  } catch (e) {
-    const validationError = `HTTP hook must return valid JSON, but parsing failed: ${e}`
-    logForDebugging(validationError)
-    return { validationError }
-  }
-}
-
-/** Typed representation of sync hook JSON output, matching the syncHookResponseSchema Zod schema. */
-interface TypedSyncHookOutput {
-  continue?: boolean
-  suppressOutput?: boolean
-  stopReason?: string
-  decision?: 'approve' | 'block'
-  reason?: string
-  systemMessage?: string
-  terminalSequence?: string
-  hookSpecificOutput?:
-    | {
-        hookEventName: 'PreToolUse'
-        permissionDecision?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
-        permissionDecisionReason?: string
-        updatedInput?: Record<string, unknown>
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'UserPromptSubmit'
-        additionalContext?: string
-        sessionTitle?: string
-        suppressOriginalPrompt?: boolean
-      }
-    | {
-        hookEventName: 'UserPromptExpansion'
-        additionalContext?: string
-        suppressOriginalPrompt?: boolean
-      }
-    | {
-        hookEventName: 'SessionStart'
-        additionalContext?: string
-        initialUserMessage?: string
-        sessionTitle?: string
-        watchPaths?: string[]
-        reloadSkills?: boolean
-      }
-    | {
-        hookEventName: 'Setup'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'PreModelSwitch'
-        permissionDecision?: 'allow' | 'deny' | 'ask'
-        permissionDecisionReason?: string
-      }
-    | {
-        hookEventName: 'PostModelSwitch'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'SubagentStart'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'PostToolUse'
-        additionalContext?: string
-        updatedToolOutput?: unknown
-        classifierContext?: string
-        updatedMCPToolOutput?: unknown
-      }
-    | {
-        hookEventName: 'PostToolUseFailure'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'PostToolBatch'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'Stop'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'SubagentStop'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'PermissionDenied'
-        retry?: boolean
-      }
-    | {
-        hookEventName: 'Notification'
-        additionalContext?: string
-      }
-    | {
-        hookEventName: 'PermissionRequest'
-        decision?: PermissionRequestResult
-      }
-    | {
-        hookEventName: 'Elicitation'
-        action?: 'accept' | 'decline' | 'cancel'
-        content?: Record<string, unknown>
-      }
-    | {
-        hookEventName: 'ElicitationResult'
-        action?: 'accept' | 'decline' | 'cancel'
-        content?: Record<string, unknown>
-      }
-    | {
-        hookEventName: 'CwdChanged'
-        watchPaths?: string[]
-      }
-    | {
-        hookEventName: 'FileChanged'
-        watchPaths?: string[]
-      }
-    | {
-        hookEventName: 'WorktreeCreate'
-        worktreePath: string
-      }
-    | {
-        hookEventName: 'MessageDisplay'
-        displayContent?: string
-      }
-}
-
-function processHookJSONOutput({
-  json: rawJson,
-  command,
-  hookName,
-  toolUseID,
-  hookEvent,
-  expectedHookEvent,
-  stdout,
-  stderr,
-  exitCode,
-  durationMs,
-}: {
-  json: SyncHookJSONOutput
-  command: string
-  hookName: string
-  toolUseID: string
-  hookEvent: HookEvent
-  expectedHookEvent?: HookEvent
-  stdout?: string
-  stderr?: string
-  exitCode?: number
-  durationMs?: number
-}): Partial<HookResult> {
-  const result: Partial<HookResult> = {}
-
-  // Cast to typed interface for type-safe property access
-  const json = rawJson as TypedSyncHookOutput
-
-  // At this point we know it's a sync response
-  const syncJson = json
-
-  // Handle common elements
-  if (syncJson.continue === false) {
-    result.preventContinuation = true
-    if (syncJson.stopReason) {
-      result.stopReason = syncJson.stopReason
-    }
-  }
-
-  if (json.decision) {
-    switch (json.decision) {
-      case 'approve':
-        result.permissionBehavior = 'allow'
-        break
-      case 'block':
-        result.permissionBehavior = 'deny'
-        result.blockingError = {
-          blockingError: json.reason || 'Blocked by hook',
-          command,
-        }
-        break
-      default:
-        // Handle unknown decision types as errors
-        throw new Error(
-          `Unknown hook decision type: ${json.decision}. Valid types are: approve, block`,
-        )
-    }
-  }
-
-  // Handle systemMessage field
-  if (json.systemMessage) {
-    result.systemMessage = json.systemMessage
-  }
-
-  if (json.terminalSequence) {
-    const allowed = parseAllowedTerminalSequence(json.terminalSequence)
-    if (allowed !== null) {
-      result.terminalSequence = allowed
-    } else {
-      logForDebugging(rejectedTerminalSequenceMessage(hookName, hookEvent))
-    }
-  }
-
-  // Handle PreToolUse specific
-  if (
-    json.hookSpecificOutput?.hookEventName === 'PreToolUse' &&
-    json.hookSpecificOutput.permissionDecision
-  ) {
-    switch (json.hookSpecificOutput.permissionDecision) {
-      case 'allow':
-        result.permissionBehavior = 'allow'
-        break
-      case 'deny':
-        result.permissionBehavior = 'deny'
-        result.blockingError = {
-          blockingError: json.reason || 'Blocked by hook',
-          command,
-        }
-        break
-      case 'ask':
-        result.permissionBehavior = 'ask'
-        break
-      case 'defer':
-        result.permissionBehavior = 'defer'
-        break
-      default:
-        // Handle unknown decision types as errors
-        throw new Error(
-          `Unknown hook permissionDecision type: ${json.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`,
-        )
-    }
-  }
-  if (result.permissionBehavior !== undefined && json.reason !== undefined) {
-    result.hookPermissionDecisionReason = json.reason
-  }
-
-  // Handle hookSpecificOutput
-  if (json.hookSpecificOutput) {
-    // Validate hook event name matches expected if provided
-    if (
-      expectedHookEvent &&
-      json.hookSpecificOutput.hookEventName !== expectedHookEvent
-    ) {
-      throw new Error(
-        `Hook returned incorrect event name: expected '${expectedHookEvent}' but got '${json.hookSpecificOutput.hookEventName}'. Full stdout: ${jsonStringify(json, null, 2)}`,
-      )
-    }
-
-    switch (json.hookSpecificOutput.hookEventName) {
-      case 'PreToolUse':
-        // Override with more specific permission decision if provided
-        if (json.hookSpecificOutput.permissionDecision) {
-          switch (json.hookSpecificOutput.permissionDecision) {
-            case 'allow':
-              result.permissionBehavior = 'allow'
-              break
-            case 'deny':
-              result.permissionBehavior = 'deny'
-              result.blockingError = {
-                blockingError:
-                  json.hookSpecificOutput.permissionDecisionReason ||
-                  json.reason ||
-                  'Blocked by hook',
-                command,
-              }
-              break
-            case 'ask':
-              result.permissionBehavior = 'ask'
-              break
-            case 'defer':
-              result.permissionBehavior = 'defer'
-              break
-          }
-        }
-        result.hookPermissionDecisionReason =
-          json.hookSpecificOutput.permissionDecisionReason
-        // Extract updatedInput if provided
-        if (json.hookSpecificOutput.updatedInput) {
-          result.updatedInput = json.hookSpecificOutput.updatedInput
-        }
-        // Extract additionalContext if provided
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'UserPromptSubmit':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        result.sessionTitle = json.hookSpecificOutput.sessionTitle
-        result.suppressOriginalPrompt =
-          json.hookSpecificOutput.suppressOriginalPrompt
-        break
-      case 'UserPromptExpansion':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        result.suppressOriginalPrompt =
-          json.hookSpecificOutput.suppressOriginalPrompt
-        break
-      case 'SessionStart':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        result.initialUserMessage = json.hookSpecificOutput.initialUserMessage
-        result.sessionTitle = json.hookSpecificOutput.sessionTitle
-        result.reloadSkills = json.hookSpecificOutput.reloadSkills
-        if (
-          'watchPaths' in json.hookSpecificOutput &&
-          json.hookSpecificOutput.watchPaths
-        ) {
-          result.watchPaths = json.hookSpecificOutput.watchPaths
-        }
-        break
-      case 'Setup':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'PreModelSwitch':
-        if (json.hookSpecificOutput.permissionDecision) {
-          switch (json.hookSpecificOutput.permissionDecision) {
-            case 'allow':
-              result.permissionBehavior = 'allow'
-              break
-            case 'deny':
-              result.permissionBehavior = 'deny'
-              result.blockingError = {
-                blockingError:
-                  json.hookSpecificOutput.permissionDecisionReason ||
-                  json.reason ||
-                  'Blocked by hook',
-                command,
-              }
-              break
-            case 'ask':
-              result.permissionBehavior = 'ask'
-              break
-          }
-        }
-        if (json.hookSpecificOutput.permissionDecisionReason !== undefined) {
-          result.hookPermissionDecisionReason =
-            json.hookSpecificOutput.permissionDecisionReason
-        }
-        break
-      case 'PostModelSwitch':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'SubagentStart':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'PostToolUse':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        if (json.hookSpecificOutput.updatedToolOutput !== undefined) {
-          result.updatedToolOutput = json.hookSpecificOutput.updatedToolOutput
-        }
-        if (json.hookSpecificOutput.updatedMCPToolOutput) {
-          result.updatedMCPToolOutput =
-            json.hookSpecificOutput.updatedMCPToolOutput
-        } else if (json.hookSpecificOutput.updatedMCPToolOutput !== undefined) {
-          result.legacyMcpRewriteSuppressed = true
-        }
-        result.classifierContext = json.hookSpecificOutput.classifierContext
-        break
-      case 'PostToolUseFailure':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'PostToolBatch':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'Stop':
-      case 'SubagentStop':
-        result.additionalContext = json.hookSpecificOutput.additionalContext
-        break
-      case 'PermissionDenied':
-        result.retry = json.hookSpecificOutput.retry
-        break
-      case 'PermissionRequest':
-        // Extract the permission request decision
-        if (json.hookSpecificOutput.decision) {
-          result.permissionRequestResult = json.hookSpecificOutput.decision
-          // Also update permissionBehavior for consistency
-          result.permissionBehavior =
-            json.hookSpecificOutput.decision.behavior === 'allow'
-              ? 'allow'
-              : 'deny'
-          if (
-            json.hookSpecificOutput.decision.behavior === 'allow' &&
-            json.hookSpecificOutput.decision.updatedInput
-          ) {
-            result.updatedInput = json.hookSpecificOutput.decision.updatedInput
-          }
-        }
-        break
-      case 'Elicitation':
-        if (json.hookSpecificOutput.action) {
-          result.elicitationResponse = {
-            action: json.hookSpecificOutput.action,
-            content: json.hookSpecificOutput.content as
-              | ElicitationResponse['content']
-              | undefined,
-          }
-          if (json.hookSpecificOutput.action === 'decline') {
-            result.blockingError = {
-              blockingError: json.reason || 'Elicitation denied by hook',
-              command,
-            }
-          }
-        }
-        break
-      case 'ElicitationResult':
-        if (json.hookSpecificOutput.action) {
-          result.elicitationResultResponse = {
-            action: json.hookSpecificOutput.action,
-            content: json.hookSpecificOutput.content as
-              | ElicitationResponse['content']
-              | undefined,
-          }
-          if (json.hookSpecificOutput.action === 'decline') {
-            result.blockingError = {
-              blockingError:
-                json.reason || 'Elicitation result blocked by hook',
-              command,
-            }
-          }
-        }
-        break
-      // densable 2.1.222 MessageDisplay — displayContent replaces streaming chunk
-      case 'MessageDisplay':
-        if (json.hookSpecificOutput.displayContent !== undefined) {
-          result.displayContent = json.hookSpecificOutput.displayContent
-        }
-        break
-    }
-  }
-
-  return {
-    ...result,
-    message: result.blockingError
-      ? createAttachmentMessage({
-          type: 'hook_blocking_error',
-          hookName,
-          toolUseID,
-          hookEvent,
-          blockingError: result.blockingError,
-        })
-      : createAttachmentMessage({
-          type: 'hook_success',
-          hookName,
-          toolUseID,
-          hookEvent,
-          // JSON-output hooks inject context via additionalContext →
-          // hook_additional_context, not this field. Empty content suppresses
-          // the trivial "X hook success: Success" system-reminder that
-          // otherwise pollutes every turn (messages.ts:3577 skips on '').
-          content: '',
-          stdout,
-          stderr,
-          exitCode,
-          command,
-          durationMs,
-        }),
-  }
-}
-
-/**
- * Execute a command-based hook using bash or PowerShell.
- *
- * Shell resolution: hook.shell → 'bash'. PowerShell hooks spawn pwsh
- * with -NoProfile -NonInteractive -Command and skip bash-specific prep
- * (POSIX path conversion, .sh auto-prepend, CLAUDE_CODE_SHELL_PREFIX).
- * See docs/design/ps-shell-selection.md §5.1.
- */
-type StorageV5ScopeKindHost = {
-  scopeKind: (
-    scope: {
-      namespace: 'pluginCache'
-      marketplace: string
-      plugin: string
-      version: string
-    },
-    opts: { resolveLink: boolean },
-  ) => Promise<{
-    ok: boolean
-    value?: { kind?: string; linkResolves?: boolean }
-  }>
-}
-
-function isStorageV5ScopeKindHost(
-  value: unknown,
-): value is StorageV5ScopeKindHost {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'scopeKind' in value &&
-    typeof (value as { scopeKind?: unknown }).scopeKind === 'function'
-  )
-}
-
-function parsePluginCacheIdentity(
-  pluginRoot: string,
-): { marketplace: string; plugin: string; version: string } | null {
-  const parts = pluginRoot.split(/[/\\]/).filter(Boolean)
-  const cacheIndex = parts.findIndex(
-    (part, i) => part === 'cache' && parts[i - 1] === 'plugins',
-  )
-  if (cacheIndex === -1) {
-    return null
-  }
-  const marketplace = parts[cacheIndex + 1]
-  const plugin = parts[cacheIndex + 2]
-  const version = parts[cacheIndex + 3]
-  if (!marketplace || !plugin || !version) {
-    return null
-  }
-  return { marketplace, plugin, version }
-}
-
-/**
- * densable jIs(storageV5, pluginRoot) @216801547.
- * Official: Be() && host → scopeKind(pluginCache); else el(t)=pathExists.
- * Host is createLocalFsBackend when hover-rest pinned.
- */
-async function pluginDirectoryExists(
-  storageV5: unknown,
-  pluginRoot: string,
-): Promise<boolean> {
-  if (isStorageV5ScopeKindHost(storageV5)) {
-    const parsed = parsePluginCacheIdentity(pluginRoot)
-    if (parsed) {
-      const result = await storageV5.scopeKind(
-        { namespace: 'pluginCache', ...parsed },
-        { resolveLink: true },
-      )
-      if (result.ok) {
-        switch (result.value?.kind) {
-          case 'absent':
-            return false
-          case 'directory':
-          case 'other':
-            return true
-          case 'link':
-            return result.value.linkResolves === true
-          default:
-            return Boolean(result.value)
-        }
-      }
-    }
-  }
-  return pathExists(pluginRoot)
-}
-
-type HookCommandResult = {
-  stdout: string
-  stderr: string
-  output: string
-  status: number
-  aborted?: boolean
-  backgrounded?: boolean
-  spawnFailed?: boolean
-  exitedNormally?: boolean
-  stdioIncomplete?: boolean
-  stdioClosedWithoutEnd?: boolean
-}
-
-async function execCommandHook(
+export async function execCommandHook(
   hook: HookCommand & { type: 'command' },
   hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
   hookName: string,
@@ -2502,6 +1264,579 @@ async function execCommandHook(
  * Allows pipe/comma/space lists and hyphens (MCP tool names often contain `-`).
  * When the matcher only uses this charset it is treated as an exact list, not regex.
  */
+
+export {
+  Eve,
+  Swt,
+  Uct,
+  computeSessionEndHooksBoundMs,
+  executeInBackground,
+  extractCommandScriptPaths,
+  getPreToolHookBlockingMessage,
+  getSessionEndHookTimeoutMs,
+  getSessionEndHooksBoundMs,
+  getStopHookMessage,
+  getTaskCompletedHookMessage,
+  getTaskCreatedHookMessage,
+  getTeammateIdleHookMessage,
+  getUserPromptExpansionHookBlockingMessage,
+  getUserPromptSubmitHookBlockingMessage,
+  isOfficialHookPluginId,
+  resetBrokenAsyncRewakeForTests,
+  shouldDowngradeMissingHookScriptExit2,
+  shouldFailClosedHookInput,
+  shouldSkipHookDueToTrust,
+  wwt,
+}
+export type {
+  AggregatedHookResult,
+  ElicitationResponse,
+  HookBlockingError,
+  HookOutsideReplResult,
+  HookResult,
+}
+
+function classicResultFields(key: string, event: HookEvent): string[] {
+  switch (key) {
+    case 'block':
+      return event === 'PreModelSwitch'
+        ? ['blockingError']
+        : [
+            'blockingError',
+            'permissionBehavior',
+            'hookPermissionDecisionReason',
+          ]
+    case 'additionalContext':
+      return ['additionalContexts']
+    case 'permissionDecision':
+    case 'permissionDecisionReason':
+      return ['permissionBehavior', 'hookPermissionDecisionReason']
+    case 'decision':
+      return ['permissionRequestResult', 'permissionBehavior', 'updatedInput']
+    case 'delta':
+      return ['displayContent']
+    case 'additionalContexts':
+    case 'permissionBehavior':
+    case 'hookPermissionDecisionReason':
+    case 'permissionRequestResult':
+    case 'updatedInput':
+    case 'preventContinuation':
+    case 'stopReason':
+    case 'sessionTitle':
+    case 'suppressOriginalPrompt':
+    case 'initialUserMessage':
+    case 'watchPaths':
+    case 'reloadSkills':
+    case 'updatedToolOutput':
+    case 'updatedMCPToolOutput':
+    case 'retry':
+    case 'displayContent':
+      return [key]
+    default:
+      return []
+  }
+}
+
+function projectClassicHookResults(
+  results: AggregatedHookResult[],
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {}
+  const ranks: Record<string, number> = { allow: 1, ask: 2, deny: 3 }
+  for (const result of results) {
+    if (result.blockingError)
+      projected.block = result.blockingError.blockingError
+    if (result.additionalContexts?.length) {
+      projected.additionalContext = [
+        ...((projected.additionalContext as string[] | undefined) ?? []),
+        ...result.additionalContexts,
+      ]
+    }
+    if (result.watchPaths?.length) {
+      projected.watchPaths = [
+        ...((projected.watchPaths as string[] | undefined) ?? []),
+        ...result.watchPaths,
+      ]
+    }
+    if (result.permissionBehavior && ranks[result.permissionBehavior]) {
+      const previous = projected.permissionDecision as string | undefined
+      if (
+        (ranks[result.permissionBehavior] ?? 0) >= (ranks[previous ?? ''] ?? 0)
+      ) {
+        projected.permissionDecision = result.permissionBehavior
+        projected.permissionDecisionReason = result.hookPermissionDecisionReason
+      }
+    }
+    if (result.permissionRequestResult && projected.decision === undefined) {
+      projected.decision = result.permissionRequestResult
+    }
+    for (const key of [
+      'preventContinuation',
+      'stopReason',
+      'initialUserMessage',
+      'sessionTitle',
+      'suppressOriginalPrompt',
+      'reloadSkills',
+      'updatedToolOutput',
+      'updatedMCPToolOutput',
+      'retry',
+      'displayContent',
+    ] as const) {
+      if (result[key] !== undefined) projected[key] = result[key]
+    }
+  }
+  return projected
+}
+
+/** Typed representation of sync hook JSON output, matching the syncHookResponseSchema Zod schema. */
+interface TypedSyncHookOutput {
+  continue?: boolean
+  suppressOutput?: boolean
+  stopReason?: string
+  decision?: 'approve' | 'block'
+  reason?: string
+  systemMessage?: string
+  terminalSequence?: string
+  hookSpecificOutput?:
+    | {
+        hookEventName: 'PreToolUse'
+        permissionDecision?: 'ask' | 'deny' | 'allow' | 'passthrough' | 'defer'
+        permissionDecisionReason?: string
+        updatedInput?: Record<string, unknown>
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'UserPromptSubmit'
+        additionalContext?: string
+        sessionTitle?: string
+        suppressOriginalPrompt?: boolean
+      }
+    | {
+        hookEventName: 'UserPromptExpansion'
+        additionalContext?: string
+        suppressOriginalPrompt?: boolean
+      }
+    | {
+        hookEventName: 'SessionStart'
+        additionalContext?: string
+        initialUserMessage?: string
+        sessionTitle?: string
+        watchPaths?: string[]
+        reloadSkills?: boolean
+      }
+    | {
+        hookEventName: 'Setup'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PreModelSwitch'
+        permissionDecision?: 'allow' | 'deny' | 'ask'
+        permissionDecisionReason?: string
+      }
+    | {
+        hookEventName: 'PostModelSwitch'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'SubagentStart'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PostToolUse'
+        additionalContext?: string
+        updatedToolOutput?: unknown
+        classifierContext?: string
+        updatedMCPToolOutput?: unknown
+      }
+    | {
+        hookEventName: 'PostToolUseFailure'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PostToolBatch'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'Stop'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'SubagentStop'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PermissionDenied'
+        retry?: boolean
+      }
+    | {
+        hookEventName: 'Notification'
+        additionalContext?: string
+      }
+    | {
+        hookEventName: 'PermissionRequest'
+        decision?: PermissionRequestResult
+      }
+    | {
+        hookEventName: 'Elicitation'
+        action?: 'accept' | 'decline' | 'cancel'
+        content?: Record<string, unknown>
+      }
+    | {
+        hookEventName: 'ElicitationResult'
+        action?: 'accept' | 'decline' | 'cancel'
+        content?: Record<string, unknown>
+      }
+    | {
+        hookEventName: 'CwdChanged'
+        watchPaths?: string[]
+      }
+    | {
+        hookEventName: 'FileChanged'
+        watchPaths?: string[]
+      }
+    | {
+        hookEventName: 'WorktreeCreate'
+        worktreePath: string
+      }
+    | {
+        hookEventName: 'MessageDisplay'
+        displayContent?: string
+      }
+}
+
+function processHookJSONOutput({
+  json: rawJson,
+  command,
+  hookName,
+  toolUseID,
+  hookEvent,
+  expectedHookEvent,
+  stdout,
+  stderr,
+  exitCode,
+  durationMs,
+}: {
+  json: SyncHookJSONOutput
+  command: string
+  hookName: string
+  toolUseID: string
+  hookEvent: HookEvent
+  expectedHookEvent?: HookEvent
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+  durationMs?: number
+}): Partial<HookResult> {
+  const result: Partial<HookResult> = {}
+
+  // Cast to typed interface for type-safe property access
+  const json = rawJson as TypedSyncHookOutput
+
+  // At this point we know it's a sync response
+  const syncJson = json
+
+  // Handle common elements
+  if (syncJson.continue === false) {
+    result.preventContinuation = true
+    if (syncJson.stopReason) {
+      result.stopReason = syncJson.stopReason
+    }
+  }
+
+  if (json.decision) {
+    switch (json.decision) {
+      case 'approve':
+        result.permissionBehavior = 'allow'
+        break
+      case 'block':
+        result.permissionBehavior = 'deny'
+        result.blockingError = {
+          blockingError: json.reason || 'Blocked by hook',
+          command,
+        }
+        break
+      default:
+        // Handle unknown decision types as errors
+        throw new Error(
+          `Unknown hook decision type: ${json.decision}. Valid types are: approve, block`,
+        )
+    }
+  }
+
+  // Handle systemMessage field
+  if (json.systemMessage) {
+    result.systemMessage = json.systemMessage
+  }
+
+  if (json.terminalSequence) {
+    const allowed = parseAllowedTerminalSequence(json.terminalSequence)
+    if (allowed !== null) {
+      result.terminalSequence = allowed
+    } else {
+      logForDebugging(rejectedTerminalSequenceMessage(hookName, hookEvent))
+    }
+  }
+
+  // Handle PreToolUse specific
+  if (
+    json.hookSpecificOutput?.hookEventName === 'PreToolUse' &&
+    json.hookSpecificOutput.permissionDecision
+  ) {
+    switch (json.hookSpecificOutput.permissionDecision) {
+      case 'allow':
+        result.permissionBehavior = 'allow'
+        break
+      case 'deny':
+        result.permissionBehavior = 'deny'
+        result.blockingError = {
+          blockingError: json.reason || 'Blocked by hook',
+          command,
+        }
+        break
+      case 'ask':
+        result.permissionBehavior = 'ask'
+        break
+      case 'defer':
+        result.permissionBehavior = 'defer'
+        break
+      default:
+        // Handle unknown decision types as errors
+        throw new Error(
+          `Unknown hook permissionDecision type: ${json.hookSpecificOutput.permissionDecision}. Valid types are: allow, deny, ask, defer`,
+        )
+    }
+  }
+  if (result.permissionBehavior !== undefined && json.reason !== undefined) {
+    result.hookPermissionDecisionReason = json.reason
+  }
+
+  // Handle hookSpecificOutput
+  if (json.hookSpecificOutput) {
+    // Validate hook event name matches expected if provided
+    if (
+      expectedHookEvent &&
+      json.hookSpecificOutput.hookEventName !== expectedHookEvent
+    ) {
+      throw new Error(
+        `Hook returned incorrect event name: expected '${expectedHookEvent}' but got '${json.hookSpecificOutput.hookEventName}'. Full stdout: ${jsonStringify(json, null, 2)}`,
+      )
+    }
+
+    switch (json.hookSpecificOutput.hookEventName) {
+      case 'PreToolUse':
+        // Override with more specific permission decision if provided
+        if (json.hookSpecificOutput.permissionDecision) {
+          switch (json.hookSpecificOutput.permissionDecision) {
+            case 'allow':
+              result.permissionBehavior = 'allow'
+              break
+            case 'deny':
+              result.permissionBehavior = 'deny'
+              result.blockingError = {
+                blockingError:
+                  json.hookSpecificOutput.permissionDecisionReason ||
+                  json.reason ||
+                  'Blocked by hook',
+                command,
+              }
+              break
+            case 'ask':
+              result.permissionBehavior = 'ask'
+              break
+            case 'defer':
+              result.permissionBehavior = 'defer'
+              break
+          }
+        }
+        result.hookPermissionDecisionReason =
+          json.hookSpecificOutput.permissionDecisionReason
+        // Extract updatedInput if provided
+        if (json.hookSpecificOutput.updatedInput) {
+          result.updatedInput = json.hookSpecificOutput.updatedInput
+        }
+        // Extract additionalContext if provided
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'UserPromptSubmit':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        result.sessionTitle = json.hookSpecificOutput.sessionTitle
+        result.suppressOriginalPrompt =
+          json.hookSpecificOutput.suppressOriginalPrompt
+        break
+      case 'UserPromptExpansion':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        result.suppressOriginalPrompt =
+          json.hookSpecificOutput.suppressOriginalPrompt
+        break
+      case 'SessionStart':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        result.initialUserMessage = json.hookSpecificOutput.initialUserMessage
+        result.sessionTitle = json.hookSpecificOutput.sessionTitle
+        result.reloadSkills = json.hookSpecificOutput.reloadSkills
+        if (
+          'watchPaths' in json.hookSpecificOutput &&
+          json.hookSpecificOutput.watchPaths
+        ) {
+          result.watchPaths = json.hookSpecificOutput.watchPaths
+        }
+        break
+      case 'Setup':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'PreModelSwitch':
+        if (json.hookSpecificOutput.permissionDecision) {
+          switch (json.hookSpecificOutput.permissionDecision) {
+            case 'allow':
+              result.permissionBehavior = 'allow'
+              break
+            case 'deny':
+              result.permissionBehavior = 'deny'
+              result.blockingError = {
+                blockingError:
+                  json.hookSpecificOutput.permissionDecisionReason ||
+                  json.reason ||
+                  'Blocked by hook',
+                command,
+              }
+              break
+            case 'ask':
+              result.permissionBehavior = 'ask'
+              break
+          }
+        }
+        if (json.hookSpecificOutput.permissionDecisionReason !== undefined) {
+          result.hookPermissionDecisionReason =
+            json.hookSpecificOutput.permissionDecisionReason
+        }
+        break
+      case 'PostModelSwitch':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'SubagentStart':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'PostToolUse':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        if (json.hookSpecificOutput.updatedToolOutput !== undefined) {
+          result.updatedToolOutput = json.hookSpecificOutput.updatedToolOutput
+        }
+        if (json.hookSpecificOutput.updatedMCPToolOutput) {
+          result.updatedMCPToolOutput =
+            json.hookSpecificOutput.updatedMCPToolOutput
+        } else if (json.hookSpecificOutput.updatedMCPToolOutput !== undefined) {
+          result.legacyMcpRewriteSuppressed = true
+        }
+        result.classifierContext = json.hookSpecificOutput.classifierContext
+        break
+      case 'PostToolUseFailure':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'PostToolBatch':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'Stop':
+      case 'SubagentStop':
+        result.additionalContext = json.hookSpecificOutput.additionalContext
+        break
+      case 'PermissionDenied':
+        result.retry = json.hookSpecificOutput.retry
+        break
+      case 'PermissionRequest':
+        // Extract the permission request decision
+        if (json.hookSpecificOutput.decision) {
+          result.permissionRequestResult = json.hookSpecificOutput.decision
+          // Also update permissionBehavior for consistency
+          result.permissionBehavior =
+            json.hookSpecificOutput.decision.behavior === 'allow'
+              ? 'allow'
+              : 'deny'
+          if (
+            json.hookSpecificOutput.decision.behavior === 'allow' &&
+            json.hookSpecificOutput.decision.updatedInput
+          ) {
+            result.updatedInput = json.hookSpecificOutput.decision.updatedInput
+          }
+        }
+        break
+      case 'Elicitation':
+        if (json.hookSpecificOutput.action) {
+          result.elicitationResponse = {
+            action: json.hookSpecificOutput.action,
+            content: json.hookSpecificOutput.content as
+              | ElicitationResponse['content']
+              | undefined,
+          }
+          if (json.hookSpecificOutput.action === 'decline') {
+            result.blockingError = {
+              blockingError: json.reason || 'Elicitation denied by hook',
+              command,
+            }
+          }
+        }
+        break
+      case 'ElicitationResult':
+        if (json.hookSpecificOutput.action) {
+          result.elicitationResultResponse = {
+            action: json.hookSpecificOutput.action,
+            content: json.hookSpecificOutput.content as
+              | ElicitationResponse['content']
+              | undefined,
+          }
+          if (json.hookSpecificOutput.action === 'decline') {
+            result.blockingError = {
+              blockingError:
+                json.reason || 'Elicitation result blocked by hook',
+              command,
+            }
+          }
+        }
+        break
+      // densable 2.1.222 MessageDisplay — displayContent replaces streaming chunk
+      case 'MessageDisplay':
+        if (json.hookSpecificOutput.displayContent !== undefined) {
+          result.displayContent = json.hookSpecificOutput.displayContent
+        }
+        break
+    }
+  }
+
+  return {
+    ...result,
+    message: result.blockingError
+      ? createAttachmentMessage({
+          type: 'hook_blocking_error',
+          hookName,
+          toolUseID,
+          hookEvent,
+          blockingError: result.blockingError,
+        })
+      : createAttachmentMessage({
+          type: 'hook_success',
+          hookName,
+          toolUseID,
+          hookEvent,
+          // JSON-output hooks inject context via additionalContext →
+          // hook_additional_context, not this field. Empty content suppresses
+          // the trivial "X hook success: Success" system-reminder that
+          // otherwise pollutes every turn (messages.ts:3577 skips on '').
+          content: '',
+          stdout,
+          stderr,
+          exitCode,
+          command,
+          durationMs,
+        }),
+  }
+}
+
+/**
+ * Execute a command-based hook using bash or PowerShell.
+ *
+ * Shell resolution: hook.shell → 'bash'. PowerShell hooks spawn pwsh
+ * with -NoProfile -NonInteractive -Command and skip bash-specific prep
+ * (POSIX path conversion, .sh auto-prepend, CLAUDE_CODE_SHELL_PREFIX).
+ * See docs/design/ps-shell-selection.md §5.1.
+ */
+
 const HOOK_EXACT_LIST_MATCHER_RE = /^[a-zA-Z0-9_|, -]+$/
 
 /** Official GFy list separators when exact-list mode is active. */
@@ -3292,80 +2627,6 @@ function hookTelemetryFeatureName(event: string): string {
   return `hook_${event.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()}`
 }
 
-/**
- * Format a list of blocking errors from a PreTool hook's configured commands.
- * @param hookName The name of the hook (e.g., 'PreToolUse:Write', 'PreToolUse:Edit', 'PreToolUse:Bash')
- * @param blockingErrors Array of blocking errors from hooks
- * @returns Formatted blocking message
- */
-export function getPreToolHookBlockingMessage(
-  hookName: string,
-  blockingError: HookBlockingError,
-): string {
-  return `${hookName} hook error: ${blockingError.blockingError}`
-}
-
-/**
- * Format a list of blocking errors from a Stop hook's configured commands.
- * @param blockingErrors Array of blocking errors from hooks
- * @returns Formatted message to give feedback to the model
- */
-export function getStopHookMessage(blockingError: HookBlockingError): string {
-  return `Stop hook feedback:\n${blockingError.blockingError}`
-}
-
-/**
- * Format a blocking error from a TeammateIdle hook.
- * @param blockingError The blocking error from the hook
- * @returns Formatted message to give feedback to the model
- */
-export function getTeammateIdleHookMessage(
-  blockingError: HookBlockingError,
-): string {
-  return `TeammateIdle hook feedback:\n${blockingError.blockingError}`
-}
-
-/**
- * Format a blocking error from a TaskCreated hook.
- * @param blockingError The blocking error from the hook
- * @returns Formatted message to give feedback to the model
- */
-export function getTaskCreatedHookMessage(
-  blockingError: HookBlockingError,
-): string {
-  return `TaskCreated hook feedback:\n${blockingError.blockingError}`
-}
-
-/**
- * Format a blocking error from a TaskCompleted hook.
- * @param blockingError The blocking error from the hook
- * @returns Formatted message to give feedback to the model
- */
-export function getTaskCompletedHookMessage(
-  blockingError: HookBlockingError,
-): string {
-  return `TaskCompleted hook feedback:\n${blockingError.blockingError}`
-}
-
-/**
- * Format a list of blocking errors from a UserPromptSubmit hook's configured commands.
- * @param blockingErrors Array of blocking errors from hooks
- * @returns Formatted blocking message
- */
-export function getUserPromptSubmitHookBlockingMessage(
-  blockingError: HookBlockingError,
-): string {
-  return `UserPromptSubmit operation blocked by hook:\n${blockingError.blockingError}`
-}
-
-/**
- * densable Ze — format a blocking error from a UserPromptExpansion hook.
- */
-export function getUserPromptExpansionHookBlockingMessage(
-  blockingError: HookBlockingError,
-): string {
-  return `UserPromptExpansion operation blocked by hook:\n${blockingError.blockingError}`
-}
 const CLASSIC_HOOK_PINNED_FIELDS = [
   'hook_event_name',
   'session_id',
@@ -5435,108 +4696,6 @@ async function* executeHooks({
     numNonBlockingError: outcomes.non_blocking_error,
     numCancelled: outcomes.cancelled,
   })
-}
-
-function hasUsedNonDefaultGrowthBookHost(): boolean {
-  if (isEvalConfined()) return true
-  for (const raw of [
-    process.env.CLAUDE_CODE_GB_BASE_URL,
-    process.env.ANTHROPIC_BASE_URL,
-  ]) {
-    if (!raw) continue
-    try {
-      if (new URL(raw).hostname.toLowerCase() !== 'api.anthropic.com') {
-        return true
-      }
-    } catch {
-      return true
-    }
-  }
-  return false
-}
-
-export function shouldFailClosedHookInput(hookEvent: HookEvent): boolean {
-  if (hookEvent !== 'PreToolUse' && hookEvent !== 'PermissionRequest')
-    return false
-  try {
-    const { value, source } = getFeatureValueWithSource(
-      'tengu_quiet_hopcroft',
-      false,
-    )
-    return !(
-      value === true &&
-      source === 'payload' &&
-      !hasUsedNonDefaultGrowthBookHost()
-    )
-  } catch {
-    return true
-  }
-}
-
-/** densable `mct` @187788000 */
-function formatHookMatchBlockedMessage(
-  hookEvent: HookEvent,
-  err?: unknown,
-): string {
-  return `Blocked: Claude Code could not work out which hooks apply to this call. Retry with a different input. If every call is blocked, check the ${hookEvent} hooks in /hooks or in your settings.${err === undefined ? '' : ` (${errorMessage(err)})`}`
-}
-
-/** densable `aee` @187786800 */
-function buildFailClosedHookMatchResult(
-  hookEvent: HookEvent,
-  hookName: string,
-  message: string,
-): AggregatedHookResult | undefined {
-  if (!shouldFailClosedHookInput(hookEvent)) return undefined
-  return {
-    blockingError: { blockingError: message, command: hookName },
-    ...(hookEvent === 'PermissionRequest' && {
-      permissionRequestResult: { behavior: 'deny', message },
-    }),
-  }
-}
-
-/** densable `Gqn` @189484700 */
-export function shouldDowngradeMissingHookScriptExit2(opts: {
-  hookEvent: HookEvent
-  stdout: string
-  stderr: string
-  pluginId?: string
-  stdioIncomplete?: boolean
-  stdioClosedWithoutEnd?: boolean
-}): boolean {
-  if (opts.stdioIncomplete === true || opts.stdioClosedWithoutEnd === true) {
-    return false
-  }
-  return (
-    (opts.hookEvent === 'Stop' ||
-      opts.hookEvent === 'SubagentStop' ||
-      opts.hookEvent === 'TaskCompleted' ||
-      opts.hookEvent === 'TeammateIdle' ||
-      (Boolean(opts.pluginId) && opts.hookEvent === 'UserPromptSubmit')) &&
-    !opts.stdout.trim() &&
-    /no such file|can't open/i.test(opts.stderr)
-  )
-}
-
-function validateHookInputSize(hookEvent: HookEvent, json: string): void {
-  if (
-    json.length > Math.floor(bufferConstants.MAX_STRING_LENGTH / 2) &&
-    shouldFailClosedHookInput(hookEvent)
-  ) {
-    throw new RangeError('Hook input is over the size limit')
-  }
-}
-
-export type HookOutsideReplResult = {
-  command: string
-  succeeded: boolean
-  output: string
-  blocked: boolean
-  cancelled?: boolean
-  exitCode?: number
-  watchPaths?: string[]
-  systemMessage?: string
 }
 
 function holdOutsideHookActivity(

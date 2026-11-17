@@ -259,10 +259,6 @@ export async function* handleStopHooks(
   // --bare / SIMPLE: skip background bookkeeping (prompt suggestion,
   // memory extraction, auto-dream). Scripted -p calls don't want auto-memory
   // or forked agents contending for resources during shutdown.
-  // Poor mode: also skip prompt suggestion and memory extraction.
-  const poorMode = feature('POOR')
-    ? (await import('../commands/poor/poorMode.js')).isPoorModeActive()
-    : false
   if (!isBareMode()) {
     // Official ENABLE_PROMPT_SUGGESTION densable pure env half.
     let promptSuggestionEnvOff = isEnvDefinedFalsy(
@@ -276,14 +272,13 @@ export async function* handleStopHooks(
     } catch {
       // keep raw env fallback
     }
-    if (!promptSuggestionEnvOff && !poorMode) {
+    if (!promptSuggestionEnvOff) {
       void executePromptSuggestion(stopHookContext)
     }
     if (
       feature('EXTRACT_MEMORIES') &&
       !toolUseContext.agentId &&
       isExtractModeActive() &&
-      !poorMode &&
       !isInternalExtractQuerySource(querySource)
     ) {
       // Fire-and-forget in both interactive and non-interactive. For -p/SDK,
@@ -300,7 +295,7 @@ export async function* handleStopHooks(
         )
         .catch(() => {})
     }
-    if (!toolUseContext.agentId && !poorMode) {
+    if (!toolUseContext.agentId) {
       void executeAutoDream(stopHookContext, toolUseContext.appendSystemMessage)
     }
   }

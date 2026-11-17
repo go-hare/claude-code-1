@@ -223,11 +223,6 @@ const buddy = isBuddyEnabled()
       require('./commands/buddy/index.js') as typeof import('./commands/buddy/index.js')
     ).default
   : null
-const poor = feature('POOR')
-  ? (
-      require('./commands/poor/index.js') as typeof import('./commands/poor/index.js')
-    ).default
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import thinkback from './commands/thinkback/index.js'
 import thinkbackPlay from './commands/thinkback-play/index.js'
@@ -479,7 +474,6 @@ const COMMANDS = memoize((): Command[] => [
     ? [inSessionForkCmd]
     : [sessionForkCmd, ...(subtaskCmdModule ? [subtaskCmdModule] : [])]),
   ...(buddy ? [buddy] : []),
-  ...(poor ? [poor] : []),
   ...(proactive ? [proactive] : []),
   ...(monitorCmd ? [monitorCmd] : []),
   ...(coordinatorCmd ? [coordinatorCmd] : []),

@@ -5,7 +5,11 @@ import { feature } from 'bun:bundle'
 import { WORKFLOW_TOOL_NAME } from '@claude-code/workflow-engine'
 import { isBgSession } from '../concurrentSessions.js'
 import { logForDebugging } from '../debug.js'
-import { isUltracodeModeActive, resolveAppliedEffort } from '../effort.js'
+import {
+  isUltracodeModeActive,
+  pdSessionEffort,
+  resolveAppliedEffort,
+} from '../effort.js'
 import { logEvent } from '../../services/analytics/index.js'
 import {
   getSettingsForSource,
@@ -52,16 +56,14 @@ export function workflowNeedsUsageConsentPrompt(
   // gold yx: ultracode && Qp(workflows) && Tw()==="xhigh". max-tier
   // ultracode (no xhigh on the model) still prompts.
   if (feature('WORKFLOW_SCRIPTS')) {
+    const effort = pdSessionEffort(appState, context.options.mainLoopModel)
     if (
       isUltracodeModeActive(
         context.options.mainLoopModel,
-        appState.effortValue,
+        effort,
         appState.ultracode,
       ) &&
-      resolveAppliedEffort(
-        context.options.mainLoopModel,
-        appState.effortValue,
-      ) === 'xhigh'
+      resolveAppliedEffort(context.options.mainLoopModel, effort) === 'xhigh'
     ) {
       return false
     }

@@ -214,19 +214,24 @@ describe('248 leftover STATE bag rewires', () => {
     expect(consumePostCompaction()).toBe(true)
     expect(consumePostCompaction()).toBe(false)
 
-    // KEEP STATE residuals — SEA hits=0 for these names (not qe/Ee)
-    expect(src).toContain('STATE.promptCache1hEligible')
-    expect(src).toContain('STATE.afkModeHeaderLatched')
-    expect(src).toContain('STATE.fastModeHeaderLatched')
-    expect(src).toContain('STATE.cacheEditingHeaderLatched')
-    expect(src).toContain('STATE.teleportedSessionIds')
-    expect(src).toContain('STATE.replBridgeSessionId')
-    expect(src).toContain('KEEP STATE')
-    expect(src).toMatch(
-      /KEEP STATE\s+[—-].*promptCache1hEligible|KEEP STATE.*SEA.*"promptCache1hEligible"/,
+    // Zero STATE global bag — all remaining session/host latches moved to Session/SessionHost
+    expect(src).not.toMatch(/\bSTATE\./)
+    expect(src).not.toMatch(/function getInitialState\b/)
+    expect(src).toContain(
+      'getBootstrapSession().conversationLatches.promptCache1hEligible()',
     )
-    expect(src).toMatch(
-      /KEEP STATE\s+[—-].*Qo\(\)\.teleportedSessionIds|KEEP STATE.*official `Qo\(\)\.teleportedSessionIds`/,
+    expect(src).toContain(
+      'getBootstrapSession().conversationLatches.afkModeHeaderLatched()',
+    )
+    expect(src).toContain(
+      'getBootstrapSession().conversationLatches.fastModeHeaderLatched()',
+    )
+    expect(src).toContain(
+      'getBootstrapSession().conversationLatches.cacheEditingHeaderLatched()',
+    )
+    expect(src).toContain('getHostTeleportedSessionIds()')
+    expect(src).toContain(
+      'getBootstrapSession().surfaceCapabilities.replBridgeSessionId()',
     )
   })
 
@@ -240,14 +245,7 @@ describe('248 leftover STATE bag rewires', () => {
     expect(src).not.toMatch(/directConnectServerUrl:\s*string/)
     expect(src).not.toMatch(/replBridgeActive:\s*boolean/)
     expect(src).not.toMatch(/mainThreadAgentHooks:\s*\n/)
-    // costLedger / userPresence / surfaceCapabilities / sessionFlags / sessionCron
-    // type fields cut — lock via LAND comments + init literals (param types may
-    // still say `totalCostUSD: number` in setCostStateForRestore).
-    expect(src).toContain('totalCostUSD / totalAPIDuration')
-    expect(src).toContain('lastInteractionTime - LAND cut')
-    expect(src).toContain('mainLoopBusy - LAND cut')
-    expect(src).toContain('teleportedSessionInfo - LAND cut')
-    expect(src).toContain('loopChainStartedAt / loopEnded')
+    expect(src).not.toMatch(/\bSTATE\./)
     expect(src).not.toContain('foundryDeploymentCapabilities: new Map()')
     expect(src).not.toContain('midConvCachePromotionRejected: false')
     expect(src).not.toContain('directConnectServerUrl: undefined')
@@ -298,13 +296,8 @@ describe('248 leftover STATE bag rewires', () => {
     )
     expect(src).toContain('getBootstrapSession().sessionCron.chainStartedAt')
 
-    // KEEP type residuals — official g() dual-path parent shape
-    expect(src).toContain('sessionCronTasks: SessionCronTask[]')
-    expect(src).toContain('cachedClaudeMdContent: string | null')
-    expect(src).toContain(
-      'registeredHooks: Partial<Record<HookEvent, RegisteredHookMatcher[]>> | null',
-    )
-    expect(src).toContain('mainThreadAgentType: string | undefined')
+    // dead STATE type fields cut completely (zero `type State =`)
+    expect(src).not.toMatch(/^type State =/m)
 
     // already-cut promptAssembly fields stay cut
     expect(src).not.toContain('STATE.systemPromptSectionCache')
@@ -362,9 +355,8 @@ describe('248 leftover STATE bag rewires', () => {
     setIsRemoteMode(false)
     expect(getIsRemoteMode()).toBe(false)
 
-    expect(src).toContain('STATE.kairosActive')
-    expect(src).toContain('Residual leftover-only kairosActive')
-    expect(src).toContain('ge @178521439')
+    expect(src).toContain('getBootstrapSession().sessionFlags.kairosActive()')
+    expect(src).not.toMatch(/\bSTATE\./)
     expect(src).not.toContain('sessionSource')
     expect(src).not.toContain('setSessionSource')
   })

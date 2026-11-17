@@ -68,6 +68,13 @@ import type { SpinnerMode } from './components/Spinner.js'
 import type { QuerySource } from './constants/querySource.js'
 import type { SDKStatus } from './entrypoints/agentSdkTypes.js'
 import type { AppState } from './state/AppState.js'
+import type { SessionAppState, UIAppState } from './state/AppStateStore.js'
+
+/**
+ * State shape available in headless / print mode (session-layer state plus
+ * optional UI fields).
+ */
+export type HeadlessAppState = SessionAppState & Partial<UIAppState>
 import type { LangfuseSpan } from './services/langfuse/index.js'
 import type {
   HookProgress,

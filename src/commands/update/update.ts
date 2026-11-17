@@ -30,6 +30,7 @@ import {
   isBgSession,
   registryJobIdFromEnv,
 } from '../../utils/concurrentSessions.js'
+import { pdSessionEffort } from '../../utils/effort.js'
 import {
   formatUpdateUncarriableRefuseMessage,
   getSessionRelaunchUncarriableReasons,
@@ -519,7 +520,7 @@ export const call: LocalCommandCall = async (_args, context) => {
         sessionId: getSessionId(),
         hasNonEmptyTranscript,
         toolPermissionContext: ctx,
-        effort: appState.effortValue,
+        effort: pdSessionEffort(appState),
         injectTuiSwitch: false,
         extraInjectEnv,
         proactivity: {

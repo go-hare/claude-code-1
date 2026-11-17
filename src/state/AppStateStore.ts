@@ -139,11 +139,7 @@ export type FooterItem =
   | 'bridge'
   | 'companion'
 
-export type AppState = DeepImmutable<{
-  settings: SettingsJson
-  verbose: boolean
-  mainLoopModel: ModelSetting
-  mainLoopModelForSession: ModelSetting
+export type UIAppState = DeepImmutable<{
   statusLineText: string | undefined
   expandedView: 'none' | 'tasks' | 'teammates'
   /**
@@ -167,9 +163,6 @@ export type AppState = DeepImmutable<{
    * `diffPanelVisible`; gold `Pte` ORs both.
    */
   paneHoldsToasts: boolean
-  isBriefOnly: boolean
-  // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
-  showTeammateMessagePreview?: boolean
   selectedIPAgentIndex: number
   // CoordinatorTaskPanel selection: -1 = pill, 0 = main, 1..N = agent rows.
   // AppState (not local) so the panel can read it directly without prop-drilling
@@ -180,11 +173,6 @@ export type AppState = DeepImmutable<{
    * cIa=3 into a single idle_summary panel row.
    */
   idleTeammatesExpanded: boolean
-  /**
-   * densable briefTranscript — focus-view style brief transcript (Xat + /focus).
-   * Session-scoped AppState mirror of settings.briefTranscript when toggled.
-   */
-  briefTranscript: boolean
   viewSelectionMode: 'none' | 'selecting-agent' | 'viewing-agent'
   /**
    * densable 2.1.234 `queueEditIndex` — index into editable queued commands
@@ -196,16 +184,6 @@ export type AppState = DeepImmutable<{
   // Lives in AppState so pill components rendered outside PromptInput
   // (CompanionSprite in REPL.tsx) can read their own focused state.
   footerSelection: FooterItem | null
-  toolPermissionContext: ToolPermissionContext
-  spinnerTip?: string
-  /** densable 2.1.247 `spinnerTipLabel` — trusted org `tip.label`; UI Et fallback `"Tip"`. */
-  spinnerTipLabel?: string
-  // Agent name from --agent CLI flag or settings (for logo display)
-  agent: string | undefined
-  // Assistant mode fully enabled (settings + GrowthBook gate + trust).
-  // Single source of truth - computed once in main.tsx before option
-  // mutation, consumers read this instead of re-calling isAssistantMode().
-  kairosEnabled: boolean
   // Remote session URL for --remote mode (shown in footer indicator)
   remoteSessionUrl: string | undefined
   // Remote session WS state (`claude assistant` viewer). 'connected' means the
@@ -222,16 +200,8 @@ export type AppState = DeepImmutable<{
   // AppState.tasks is always empty in viewer mode — the tasks live in a
   // different process.
   remoteBackgroundTaskCount: number
-  // Always-on bridge: desired state (controlled by /config or footer toggle)
-  replBridgeEnabled: boolean
-  // Always-on bridge: true when activated via /remote-control command, false when config-driven
-  replBridgeExplicit: boolean
-  // Outbound-only mode: forward events to CCR but reject inbound prompts/control
-  replBridgeOutboundOnly: boolean
   // Always-on bridge: env registered + session created (= "Ready")
   replBridgeConnected: boolean
-  // Always-on bridge: ingress WebSocket is open (= "Connected" - user on claude.ai)
-  replBridgeSessionActive: boolean
   // Always-on bridge: poll loop is in error backoff (= "Reconnecting")
   replBridgeReconnecting: boolean
   // Always-on bridge: connect URL for Ready state (?bridge=envId)
@@ -245,19 +215,66 @@ export type AppState = DeepImmutable<{
   replBridgeError: string | undefined
   // densable 2.1.224 #22 — failure kind ("terminal" default); kept with error after auto-disable
   replBridgeErrorKind: string | undefined
+  // Always-on bridge: session name set via `/remote-control <name>` (used as session title)
+  replBridgeInitialName: string | undefined
+  // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
+  showRemoteCallout: boolean
+}> & {
+  /**
+   * densable taskDecorations — per-task custom status content from
+   * settings.subagentStatusLine command (agent panel row override).
+   * Excluded from DeepImmutable (plain mutable map).
+   */
+  taskDecorations: { [taskId: string]: { content: string } }
+  notifications: {
+    current: Notification | null
+    queue: Notification[]
+    pinned: Notification[]
+  }
+  // Active overlays (Select dialogs, etc.) for Escape key coordination
+  activeOverlays: ReadonlySet<string>
+}
+
+export type SessionAppState = DeepImmutable<{
+  settings: SettingsJson
+  verbose: boolean
+  mainLoopModel: ModelSetting
+  mainLoopModelForSession: ModelSetting
+  isBriefOnly: boolean
+  // Optional - only present when ENABLE_AGENT_SWARMS is true (for dead code elimination)
+  showTeammateMessagePreview?: boolean
+  /**
+   * densable briefTranscript — focus-view style brief transcript (Xat + /focus).
+   * Session-scoped AppState mirror of settings.briefTranscript when toggled.
+   */
+  briefTranscript: boolean
+  toolPermissionContext: ToolPermissionContext
+  spinnerTip?: string
+  /** densable 2.1.247 `spinnerTipLabel` — trusted org `tip.label`; UI Et fallback `"Tip"`. */
+  spinnerTipLabel?: string
+  // Agent name from --agent CLI flag or settings (for logo display)
+  agent: string | undefined
+  // Assistant mode fully enabled (settings + GrowthBook gate + trust).
+  // Single source of truth - computed once in main.tsx before option
+  // mutation, consumers read this instead of re-calling isAssistantMode().
+  kairosEnabled: boolean
+  // Always-on bridge: desired state (controlled by /config or footer toggle)
+  replBridgeEnabled: boolean
+  // Always-on bridge: true when activated via /remote-control command, false when config-driven
+  replBridgeExplicit: boolean
+  // Outbound-only mode: forward events to CCR but reject inbound prompts/control
+  replBridgeOutboundOnly: boolean
+  // Always-on bridge: ingress WebSocket is open (= "Connected" - user on claude.ai)
+  replBridgeSessionActive: boolean
   /**
    * densable `authChangeGeneration` default 0. `/login` increments so
    * in-flight token snapshots abort and the revive attempt-cap is bypassed.
    */
   authChangeGeneration: number
-  // Always-on bridge: session name set via `/remote-control <name>` (used as session title)
-  replBridgeInitialName: string | undefined
   /** densable leftover hook Gi `replBridgeSessionGroupingId:void 0`. */
   replBridgeSessionGroupingId: string | undefined
   /** densable leftover hook Gi `replBridgeSkipNextArchive:!0`. */
   replBridgeSkipNextArchive: boolean | undefined
-  // Always-on bridge: first-time remote dialog pending (set by /remote-control command)
-  showRemoteCallout: boolean
   ultraplanLaunching?: boolean
   ultraplanSessionUrl?: string
   ultraplanPendingChoice?: { plan: string; sessionId: string; taskId: string }
@@ -276,12 +293,6 @@ export type AppState = DeepImmutable<{
       inProgressToolUseIDs: Set<string>
     }
   }
-  /**
-   * densable taskDecorations — per-task custom status content from
-   * settings.subagentStatusLine command (agent panel row override).
-   * Excluded from DeepImmutable (plain mutable map).
-   */
-  taskDecorations: { [taskId: string]: { content: string } }
   // Name → AgentId registry populated by Agent tool when `name` is provided.
   // Latest-wins on collision. Used by SendMessage to route by name.
   agentNameRegistry: Map<string, AgentId>
@@ -384,11 +395,6 @@ export type AppState = DeepImmutable<{
   attribution: AttributionState
   todos: { [agentId: string]: TodoList }
   remoteAgentTaskSuggestions: { summary: string; task: string }[]
-  notifications: {
-    current: Notification | null
-    queue: Notification[]
-    pinned: Notification[]
-  }
   elicitation: {
     queue: ElicitationRequestEvent[]
   }
@@ -653,18 +659,14 @@ export type AppState = DeepImmutable<{
   }
   // Denial tracking for classifier modes (YOLO, headless, etc.) - falls back to prompting when limits exceeded
   denialTracking?: DenialTrackingState
-  // Active overlays (Select dialogs, etc.) for Escape key coordination
-  activeOverlays: ReadonlySet<string>
   // Fast mode
   fastMode?: boolean
   // Advisor model for server-side advisor tool (undefined = disabled).
   advisorModel?: string
-  // Effort value
-  effortValue?: EffortValue
   /** densable AppState.sessionEffort — `{kind:"inherit"|"default"|"level"}`. */
-  sessionEffort?: SessionEffortTag
+  sessionEffort: SessionEffortTag
   /** densable AppState.settingsEffortTable — `te()` per-model table. */
-  settingsEffortTable?: SettingsEffortTable
+  settingsEffortTable: SettingsEffortTable
   /**
    * official AppState.proactivityLevel — leftover getProactivityLevel().
    */
@@ -704,9 +706,15 @@ export type AppState = DeepImmutable<{
   }
 }
 
+export type AppState = SessionAppState & UIAppState
+
 export type AppStateStore = Store<AppState>
 
-export function getDefaultAppState(): AppState {
+/**
+ * Official `vN()` @195294000 — pure session-layer default state (headless / SDK / worker core).
+ * `getDefaultAppState()` (`Lot()`) spreads this and overlays TUI-only view/panel fields.
+ */
+export function getDefaultSessionAppState(): SessionAppState {
   // Determine initial permission mode for teammates spawned with plan_mode_required
   // Use lazy require to avoid circular dependency with teammate.ts
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -720,29 +728,17 @@ export function getDefaultAppState(): AppState {
 
   return {
     settings: getInitialSettings(),
-    tasks: {},
-    transcripts: {},
+    tasks: {} as { [taskId: string]: TaskState },
+    transcripts: {} as AppState['transcripts'],
     runningSubagents: 0,
-    taskDecorations: {},
-    agentNameRegistry: new Map(),
-    sendMessagePins: {},
-    storedImagePaths: new Map(),
-    displayedMessageContent: {},
+    agentNameRegistry: new Map<string, AgentId>(),
+    sendMessagePins: {} as AppState['sendMessagePins'],
+    storedImagePaths: new Map<number, string>(),
+    displayedMessageContent: {} as { [apiMessageId: string]: string },
     verbose: false,
-    mainLoopModel: null, // alias, full name (as with --model or env var), or null (default)
-    mainLoopModelForSession: null,
-    statusLineText: undefined,
-    expandedView: 'none',
-    // densable defaults: replTab:"convo", panelFileView:null, diffPanelVisible:!1, paneHoldsToasts:!1
-    replTab: 'convo',
-    panelFileView: null,
-    diffPanelVisible: false,
-    paneHoldsToasts: false,
+    mainLoopModel: null as ModelSetting, // alias, full name (as with --model or env var), or null (default)
+    mainLoopModelForSession: null as ModelSetting,
     isBriefOnly: false,
-    showTeammateMessagePreview: false,
-    selectedIPAgentIndex: -1,
-    coordinatorTaskIndex: -1,
-    idleTeammatesExpanded: false,
     // densable J7t seed via isFocusViewActive.
     briefTranscript: (() => {
       const s = getInitialSettings()
@@ -752,18 +748,125 @@ export function getDefaultAppState(): AppState {
         require('../utils/focusView.js') as typeof import('../utils/focusView.js')
       return isFocusViewActive(s.viewMode, s.briefTranscript)
     })(),
-    viewSelectionMode: 'none',
-    queueEditIndex: null,
-    footerSelection: null,
     kairosEnabled: false,
-    remoteSessionUrl: undefined,
-    remoteConnectionStatus: 'connecting',
-    remoteBackgroundTaskCount: 0,
     replBridgeEnabled: false,
     replBridgeExplicit: false,
     replBridgeOutboundOnly: false,
-    replBridgeConnected: false,
     replBridgeSessionActive: false,
+    replBridgeSkipNextArchive: undefined as boolean | undefined,
+    replBridgeSessionGroupingId: undefined as string | undefined,
+    authChangeGeneration: 0,
+    toolPermissionContext: {
+      ...getEmptyToolPermissionContext(),
+      mode: initialMode,
+    },
+    agent: undefined as string | undefined,
+    agentDefinitions: {
+      activeAgents: [],
+      allAgents: [],
+    } as AgentDefinitionsResult,
+    fileHistory: {
+      snapshots: [],
+      trackedFiles: new Set(),
+      snapshotSequence: 0,
+    } as FileHistoryState,
+    attribution: createEmptyAttributionState(),
+    mcp: {
+      clientsInitialized: false,
+      clients: [] as MCPServerConnection[],
+      tools: [] as Tool[],
+      commands: [] as Command[],
+      resources: {} as Record<string, ServerResource[]>,
+      resourceTemplates: {} as Record<string, ServerResourceTemplate[]>,
+      suppressedPluginMcpServers: [] as SuppressedPluginMcpServer[],
+      pluginReconnectKey: 0,
+    },
+    plugins: {
+      enabled: [] as LoadedPlugin[],
+      disabled: [] as LoadedPlugin[],
+      commands: [] as Command[],
+      errors: [] as PluginError[],
+      installationStatus: {
+        marketplaces: [],
+        plugins: [],
+      },
+      needsRefresh: false,
+    } as AppState['plugins'],
+    todos: {} as { [agentId: string]: TodoList },
+    remoteAgentTaskSuggestions: [] as { summary: string; task: string }[],
+    elicitation: {
+      queue: [] as ElicitationRequestEvent[],
+    },
+    thinkingEnabled: shouldEnableThinkingByDefault(),
+    promptSuggestionEnabled: shouldEnablePromptSuggestion(),
+    awaySummaryEnabled: getInitialSettings().awaySummaryEnabled !== false,
+    showMessageTimestamps: getInitialSettings().showMessageTimestamps === true,
+    sessionHooks: new Map() as SessionHooksState,
+    inbox: {
+      messages: [],
+    } as AppState['inbox'],
+    workerSandboxPermissions: {
+      queue: [],
+      selectedIndex: 0,
+    },
+    pendingWorkerRequest: null as AppState['pendingWorkerRequest'],
+    pendingSandboxRequest: null as AppState['pendingSandboxRequest'],
+    promptSuggestion: {
+      text: null,
+      promptId: null,
+      shownAt: 0,
+      acceptedAt: 0,
+      generationRequestId: null,
+    } as AppState['promptSuggestion'],
+    speculation: IDLE_SPECULATION_STATE,
+    speculationSessionTimeSavedMs: 0,
+    skillImprovement: {
+      suggestion: null,
+    } as AppState['skillImprovement'],
+    authVersion: 0,
+    initialMessage: null as AppState['initialMessage'],
+    sessionEffort: { kind: 'inherit' } as SessionEffortTag,
+    settingsEffortTable: {
+      default: undefined,
+      legacyUserEffort: undefined,
+      byModel: {},
+    } as SettingsEffortTable,
+    proactivityLevel: undefined as unknown,
+    ultracode: false,
+    // densable default ultrareviewOverageConfirmed:!1
+    ultrareviewOverageConfirmed: false,
+    // densable 2.1.214 EndConversation
+    endedByModel: false,
+    fastMode: false,
+    liveReplicas: createEmptyLiveReplicas(),
+  }
+}
+
+/**
+ * Official `Lot()` @195642649 — interactive TUI AppState (`...vN()`, plus UI view/panel/bridge fields).
+ */
+export function getDefaultAppState(): AppState {
+  return {
+    ...getDefaultSessionAppState(),
+    taskDecorations: {},
+    statusLineText: undefined,
+    expandedView: 'none',
+    // densable defaults: replTab:"convo", panelFileView:null, diffPanelVisible:!1, paneHoldsToasts:!1
+    replTab: 'convo',
+    panelFileView: null,
+    diffPanelVisible: false,
+    paneHoldsToasts: false,
+    showTeammateMessagePreview: false,
+    selectedIPAgentIndex: -1,
+    coordinatorTaskIndex: -1,
+    idleTeammatesExpanded: false,
+    viewSelectionMode: 'none',
+    queueEditIndex: null,
+    footerSelection: null,
+    remoteSessionUrl: undefined,
+    remoteConnectionStatus: 'connecting',
+    remoteBackgroundTaskCount: 0,
+    replBridgeConnected: false,
     replBridgeReconnecting: false,
     replBridgeConnectUrl: undefined,
     replBridgeSessionUrl: undefined,
@@ -771,101 +874,17 @@ export function getDefaultAppState(): AppState {
     replBridgeSessionId: undefined,
     replBridgeError: undefined,
     replBridgeErrorKind: undefined,
-    authChangeGeneration: 0,
     replBridgeInitialName: undefined,
-    replBridgeSessionGroupingId: undefined,
-    replBridgeSkipNextArchive: undefined,
     showRemoteCallout: false,
     ultraplanLaunching: undefined,
     ultraplanSessionUrl: undefined,
     ultraplanPendingChoice: undefined,
     ultraplanLaunchPending: undefined,
-    toolPermissionContext: {
-      ...getEmptyToolPermissionContext(),
-      mode: initialMode,
-    },
-    agent: undefined,
-    agentDefinitions: { activeAgents: [], allAgents: [] },
-    fileHistory: {
-      snapshots: [],
-      trackedFiles: new Set(),
-      snapshotSequence: 0,
-    },
-    attribution: createEmptyAttributionState(),
-    mcp: {
-      clientsInitialized: false,
-      clients: [],
-      tools: [],
-      commands: [],
-      resources: {},
-      resourceTemplates: {},
-      suppressedPluginMcpServers: [],
-      pluginReconnectKey: 0,
-    },
-    plugins: {
-      enabled: [],
-      disabled: [],
-      commands: [],
-      errors: [],
-      installationStatus: {
-        marketplaces: [],
-        plugins: [],
-      },
-      needsRefresh: false,
-    },
-    todos: {},
-    remoteAgentTaskSuggestions: [],
     notifications: {
       current: null,
       queue: [],
       pinned: [],
     },
-    elicitation: {
-      queue: [],
-    },
-    thinkingEnabled: shouldEnableThinkingByDefault(),
-    promptSuggestionEnabled: shouldEnablePromptSuggestion(),
-    awaySummaryEnabled: getInitialSettings().awaySummaryEnabled !== false,
-    showMessageTimestamps: getInitialSettings().showMessageTimestamps === true,
-    sessionHooks: new Map(),
-    inbox: {
-      messages: [],
-    },
-    workerSandboxPermissions: {
-      queue: [],
-      selectedIndex: 0,
-    },
-    pendingWorkerRequest: null,
-    pendingSandboxRequest: null,
-    promptSuggestion: {
-      text: null,
-      promptId: null,
-      shownAt: 0,
-      acceptedAt: 0,
-      generationRequestId: null,
-    },
-    speculation: IDLE_SPECULATION_STATE,
-    speculationSessionTimeSavedMs: 0,
-    skillImprovement: {
-      suggestion: null,
-    },
-    authVersion: 0,
-    initialMessage: null,
-    effortValue: undefined,
-    sessionEffort: { kind: 'inherit' },
-    settingsEffortTable: {
-      default: undefined,
-      legacyUserEffort: undefined,
-      byModel: {},
-    },
-    proactivityLevel: undefined,
-    ultracode: false,
-    // densable default ultrareviewOverageConfirmed:!1
-    ultrareviewOverageConfirmed: false,
-    // densable 2.1.214 EndConversation
-    endedByModel: false,
     activeOverlays: new Set<string>(),
-    fastMode: false,
-    liveReplicas: createEmptyLiveReplicas(),
   }
 }

@@ -4,15 +4,34 @@
  * otherwise the line waits in pendingUiLog (cap 100).
  */
 import { logForDebugging } from '../debug.js'
+import { getBootstrapSessionHost } from '../sessionHost.js'
 
 export type PluginUiLog = { plugin: string; text: string }
 export type PluginUiLogDelivery = 'again' | 'once'
 
+type PluginUiLogSink = (
+  entry: PluginUiLog,
+  delivery: PluginUiLogDelivery,
+) => void
+
+type PluginUiLogState = {
+  pending: PluginUiLog[]
+  sink: PluginUiLogSink | null
+}
+
 const PENDING_CAP = 100
 
-let pending: PluginUiLog[] = []
-let sink: ((entry: PluginUiLog, delivery: PluginUiLogDelivery) => void) | null =
-  null
+const stateByHost = new WeakMap<object, PluginUiLogState>()
+
+function getState(): PluginUiLogState {
+  const host = getBootstrapSessionHost()
+  let state = stateByHost.get(host)
+  if (!state) {
+    state = { pending: [], sink: null }
+    stateByHost.set(host, state)
+  }
+  return state
+}
 
 export function recordPluginUiLog(
   plugin: string,
@@ -21,11 +40,14 @@ export function recordPluginUiLog(
 ): void {
   logForDebugging(`[${plugin}] $.ui.log: ${text}`)
   const entry = { plugin, text }
-  if (sink) {
-    sink(entry, delivery)
+  const state = getState()
+  if (state.sink) {
+    state.sink(entry, delivery)
     return
   }
-  if (pending.length < PENDING_CAP) pending = [...pending, entry]
+  if (state.pending.length < PENDING_CAP) {
+    state.pending = [...state.pending, entry]
+  }
 }
 
 /** densable `_So` — `$.ui.log(text, { to: 'debug' })`. */
@@ -34,14 +56,13 @@ export function recordPluginUiLogDebug(plugin: string, text: string): void {
 }
 
 /** densable bcn — install the sink and flush queued lines as "again". */
-export function subscribePluginUiLog(
-  next: (entry: PluginUiLog, delivery: PluginUiLogDelivery) => void,
-): () => void {
-  sink = next
-  const queued = pending
-  pending = []
+export function subscribePluginUiLog(next: PluginUiLogSink): () => void {
+  const state = getState()
+  state.sink = next
+  const queued = state.pending
+  state.pending = []
   for (const entry of queued) next(entry, 'again')
   return () => {
-    if (sink === next) sink = null
+    if (state.sink === next) state.sink = null
   }
 }

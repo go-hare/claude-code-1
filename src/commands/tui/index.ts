@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { pdSessionEffort } from '../../utils/effort.js'
 import type { Command, LocalCommandResult } from '../../types/command.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
 import { isTuiJustSwitchedFromFullscreen } from '../../utils/residualFinalEnvGates.js'
@@ -595,7 +596,7 @@ export const tuiNonInteractive: Command = {
         ) {
           carry = {
             toolPermissionContext: state?.toolPermissionContext,
-            effort: state?.effortValue,
+            effort: state ? pdSessionEffort(state) : undefined,
             tasks: state?.tasks,
             messages: context.messages,
             getProactivityLevel: context.getProactivityLevel,

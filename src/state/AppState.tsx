@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle';
-import React, { useContext, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react';
 import { MailboxProvider } from '../context/mailbox.js';
 import { DialogStoreProvider } from '../dialog/DialogStoreContext.js';
 import { useSettingsChange } from '../hooks/useSettingsChange.js';
@@ -8,11 +8,22 @@ import {
   createDisabledBypassPermissionsContext,
   isBypassPermissionsModeDisabled,
 } from '../utils/permissions/permissionSetup.js';
+import { getBootstrapSession } from '../utils/sessionHost.js';
+import type { Session } from '../utils/sessionRoot.js';
 import { applySettingsChange } from '../utils/settings/applySettingsChange.js';
 import type { SettingsChangeExtra } from '../utils/settings/changeDetector.js';
 import type { SettingSource } from '../utils/settings/constants.js';
 import type { SettingsJson } from '../utils/settings/types.js';
-import { createStore } from './store.js';
+import { ActivePluginsFacade, McpConnectionsFacade } from './appStateFacades.js';
+import { createSessionHooksRegistry, type SessionHooksRegistry } from './sessionHooksRegistry.js';
+import { createStore, updateAppState } from './store.js';
+import { TasksV2Store } from '../hooks/useTasksV2.js';
+import {
+  defaultQueue,
+  getActiveMessageQueue,
+  type MessageQueueInstance,
+  setActiveMessageQueue,
+} from '../utils/messageQueueManager.js';
 import { LeftoverIhrStoreProvider } from './leftoverIhrStore.js';
 
 // DCE: voice context is ant-only. External builds get a noop provider that
@@ -35,7 +46,7 @@ const VoiceProvider: (props: { children: React.ReactNode }) => React.ReactNode =
     })();
 
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { type AppState, type AppStateStore, getDefaultAppState } from './AppStateStore.js';
+import { type AppState, type AppStateStore, getDefaultAppState, getDefaultSessionAppState } from './AppStateStore.js';
 
 // TODO: Remove these re-exports once all callers import directly from
 // ./AppStateStore.js. Kept for back-compat during migration so .ts callers
@@ -45,22 +56,47 @@ export {
   type AppStateStore,
   type CompletionBoundary,
   getDefaultAppState,
+  getDefaultSessionAppState,
   IDLE_SPECULATION_STATE,
   type SpeculationResult,
   type SpeculationState,
 } from './AppStateStore.js';
 
 export const AppStoreContext = React.createContext<AppStateStore | null>(null);
+/** Official `lDn` @195652056 — active Session context mounted by `<AppStateProvider />`. */
+export const AppStateSessionContext = React.createContext<Session | null>(null);
+/** Official `cDn` @195652056 — MCP connections facade mounted by `<AppStateProvider />`. */
+export const McpConnectionsContext = React.createContext<McpConnectionsFacade | null>(null);
+/** Official `dDn` @195652056 — Active plugins facade mounted by `<AppStateProvider />`. */
+export const ActivePluginsContext = React.createContext<ActivePluginsFacade | null>(null);
+/** Official `Se` @197297545 — SessionHooksRegistry mounted by `<AppStateProvider />`. */
+export const SessionHooksRegistryContext = React.createContext<SessionHooksRegistry | null>(null);
+/** Official `WMn` @197297545 — TaskStore mounted by `<AppStateProvider />`. */
+export const TaskStoreContext = React.createContext<TasksV2Store | null>(null);
+/** Official `zVe` @197245042 — MessageQueueInstance mounted by `<AppStateProvider />`. */
+export const MessageQueueContext = React.createContext<MessageQueueInstance | null>(null);
 
 type Props = {
   children: React.ReactNode;
+  store?: AppStateStore;
+  session?: Session;
+  sessionHooks?: SessionHooksRegistry;
+  messageQueue?: MessageQueueInstance;
   initialState?: AppState;
   onChangeAppState?: (args: { newState: AppState; oldState: AppState }) => void;
 };
 
 const HasAppStateContext = React.createContext<boolean>(false);
 
-export function AppStateProvider({ children, initialState, onChangeAppState }: Props): React.ReactNode {
+export function AppStateProvider({
+  children,
+  store: providedStore,
+  session: providedSession,
+  sessionHooks: providedSessionHooks,
+  messageQueue: providedMessageQueue,
+  initialState,
+  onChangeAppState,
+}: Props): React.ReactNode {
   // Don't allow nested AppStateProviders.
   const hasAppStateContext = useContext(HasAppStateContext);
   if (hasAppStateContext) {
@@ -70,7 +106,28 @@ export function AppStateProvider({ children, initialState, onChangeAppState }: P
   // Store is created once and never changes -- stable context value means
   // the provider never triggers re-renders. Consumers subscribe to slices
   // via useSyncExternalStore in useAppState(selector).
-  const [store] = useState(() => createStore<AppState>(initialState ?? getDefaultAppState(), onChangeAppState));
+  const [store] = useState(
+    () => providedStore ?? createStore<AppState>(initialState ?? getDefaultAppState(), onChangeAppState),
+  );
+  const [session] = useState(() => providedSession ?? getBootstrapSession());
+  const [sessionHooks] = useState(() => {
+    const registry = providedSessionHooks ?? createSessionHooksRegistry();
+    registry.bindStore(store);
+    return registry;
+  });
+  const [taskStore] = useState(() => new TasksV2Store());
+  const [messageQueue] = useState(() => providedMessageQueue ?? getActiveMessageQueue());
+  useEffect(() => {
+    if (!providedMessageQueue) return;
+    setActiveMessageQueue(providedMessageQueue);
+    return () => {
+      if (getActiveMessageQueue() === providedMessageQueue) {
+        setActiveMessageQueue(defaultQueue);
+      }
+    };
+  }, [providedMessageQueue]);
+  const [mcpConnections] = useState(() => McpConnectionsFacade.over(store));
+  const [activePlugins] = useState(() => ActivePluginsFacade.over(store));
 
   // Check on mount if bypass mode should be disabled
   // This handles the race condition where remote settings load BEFORE this component mounts,
@@ -101,13 +158,25 @@ export function AppStateProvider({ children, initialState, onChangeAppState }: P
   return (
     <HasAppStateContext.Provider value={true}>
       <AppStoreContext.Provider value={store}>
-        <LeftoverIhrStoreProvider>
-          <DialogStoreProvider>
-            <MailboxProvider>
-              <VoiceProvider>{children}</VoiceProvider>
-            </MailboxProvider>
-          </DialogStoreProvider>
-        </LeftoverIhrStoreProvider>
+        <McpConnectionsContext.Provider value={mcpConnections}>
+          <ActivePluginsContext.Provider value={activePlugins}>
+            <AppStateSessionContext.Provider value={session}>
+              <SessionHooksRegistryContext.Provider value={sessionHooks}>
+                <TaskStoreContext.Provider value={taskStore}>
+                  <MessageQueueContext.Provider value={messageQueue}>
+                    <LeftoverIhrStoreProvider>
+                      <DialogStoreProvider>
+                        <MailboxProvider>
+                          <VoiceProvider>{children}</VoiceProvider>
+                        </MailboxProvider>
+                      </DialogStoreProvider>
+                    </LeftoverIhrStoreProvider>
+                  </MessageQueueContext.Provider>
+                </TaskStoreContext.Provider>
+              </SessionHooksRegistryContext.Provider>
+            </AppStateSessionContext.Provider>
+          </ActivePluginsContext.Provider>
+        </McpConnectionsContext.Provider>
       </AppStoreContext.Provider>
     </HasAppStateContext.Provider>
   );
@@ -171,6 +240,77 @@ export function useSetAppState(): (updater: (prev: AppState) => AppState) => voi
  */
 export function useAppStateStore(): AppStateStore {
   return useAppStore();
+}
+
+/**
+ * Official `Ghr()` @195652056 — shallow-patch updater (`updateAppState(store.setState)`).
+ */
+export function useUpdateAppState(): (updater: (prev: AppState) => AppState | Partial<AppState>) => void {
+  const store = useAppStore();
+  return useCallback(updateAppState(store.setState), [store]);
+}
+
+/**
+ * Official `Rv()` @195652056 — returns the Session mounted by `<AppStateProvider />`.
+ */
+export function useAppStateSession(): Session {
+  const session = useContext(AppStateSessionContext);
+  if (!session) {
+    throw new ReferenceError('useAppStateSession cannot be called outside of an <AppStateProvider />');
+  }
+  return session;
+}
+
+/**
+ * Official `GTt()` @195652056 — MCP connections facade mounted by `<AppStateProvider />`.
+ */
+export function useMcpConnections(): McpConnectionsFacade {
+  const mcp = useContext(McpConnectionsContext);
+  if (!mcp) {
+    throw new ReferenceError('useMcpConnections cannot be called outside of an <AppStateProvider />');
+  }
+  return mcp;
+}
+
+/**
+ * Official `GB()` @195652056 — Active plugins facade mounted by `<AppStateProvider />`.
+ */
+export function useActivePlugins(): ActivePluginsFacade {
+  const plugins = useContext(ActivePluginsContext);
+  if (!plugins) {
+    throw new ReferenceError('useActivePlugins cannot be called outside of an <AppStateProvider />');
+  }
+  return plugins;
+}
+
+/**
+ * Official `QX()` @197297545 — SessionHooksRegistry mounted by `<AppStateProvider />`.
+ */
+export function useSessionHooksRegistry(): SessionHooksRegistry {
+  const registry = useContext(SessionHooksRegistryContext);
+  if (!registry) {
+    throw new ReferenceError('useSessionHooksRegistry cannot be called outside of an <AppStateProvider />');
+  }
+  return registry;
+}
+
+/**
+ * Official `WMn` @197297545 — TaskStore mounted by `<AppStateProvider />`.
+ */
+export function useTaskStore(): TasksV2Store {
+  const taskStore = useContext(TaskStoreContext);
+  if (!taskStore) {
+    throw new ReferenceError('useTaskStore cannot be called outside of an <AppStateProvider />');
+  }
+  return taskStore;
+}
+
+/**
+ * Official `Zu()` @197245042 — returns the MessageQueueInstance mounted by `<AppStateProvider />`,
+ * falling back to `getActiveMessageQueue()` outside a provider.
+ */
+export function useMessageQueue(): MessageQueueInstance {
+  return useContext(MessageQueueContext) ?? getActiveMessageQueue();
 }
 
 const NOOP_SUBSCRIBE = () => () => {};

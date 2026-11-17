@@ -6,13 +6,12 @@ import { Box, Text, useInput, type WheelEvent, wrapText } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Select } from '../CustomSelect/select.js';
 import { Dialog } from '../design-system/Dialog.js';
-import { useSetAppState } from '../../state/AppState.js';
+import { useMessageQueue, useSetAppState } from '../../state/AppState.js';
 import type { AppState } from '../../state/AppStateStore.js';
 import type { Message } from '../../types/message.js';
 import { getSessionId } from '../../bootstrap/state.js';
 import { clearConversation } from '../../commands/clear/conversation.js';
 import { createSystemMessage } from '../../utils/messages.js';
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import { updateTaskState } from '../../utils/task/framework.js';
 import { archiveRemoteSession } from '../../utils/teleport.js';
 import { getCwd } from '../../utils/cwd.js';
@@ -61,6 +60,7 @@ export function UltraplanChoiceDialog({
   useRegisterOverlay('ultraplan-choice');
 
   const setAppState = useSetAppState();
+  const messageQueue = useMessageQueue();
   const { rows, columns } = useTerminalSize();
 
   // ── Compute visible lines ──────────────────────────────────────────
@@ -109,7 +109,7 @@ export function UltraplanChoiceDialog({
     async (choice: ChoiceValue) => {
       switch (choice) {
         case 'here':
-          enqueuePendingNotification({
+          messageQueue.enqueuePendingNotification({
             value: [
               'Ultraplan approved in browser. Here is the plan:',
               '',
@@ -148,7 +148,7 @@ export function UltraplanChoiceDialog({
             ]);
           }
 
-          enqueuePendingNotification({
+          messageQueue.enqueuePendingNotification({
             value: `Here is the approved implementation plan:\n\n${plan}\n\nImplement this plan.`,
             mode: 'prompt',
           });

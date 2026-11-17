@@ -1,5 +1,8 @@
+import { getBootstrapSessionHost } from '../sessionHost.js'
+
 /**
- * densable 2.1.239 `slf` / `gP` — chrome session singleton.
+ * densable 2.1.239 `slf` / `gP` / `od()` @184975742 — chrome session singleton
+ * keyed by `getBootstrapSessionHost()` (`var G = new z(() => new M); function od() { return G.of(U().host) }`).
  * densable 2.1.251 #57 — Host bag fields used by VQt call:
  * `bridgeBinding` (Pvr), `resolvedHostByToolUseId` (O),
  * `resolvedUrlByToolUseId`, `lastExecutedTabUrlByScope` (E).
@@ -64,45 +67,55 @@ export type ChromeBrowserHints = {
   hostPlatform?: 'darwin' | 'win32' | 'linux'
 }
 
-const state: ChromeInstallSessionState = {
-  wiredThisSession: false,
-  installUpsellResolution: undefined,
-  installUpsellBypassSuppressionCounted: false,
-  bridgeBinding: undefined,
-  tabGroupCleanupRegistered: false,
-  unsubscribeSessionSwitch: undefined,
-  unregisterExitCleanup: undefined,
-  closesInFlight: new Map(),
-  resolvedHostByToolUseId: new Map(),
-  resolvedUrlByToolUseId: new Map(),
-  lastExecutedTabUrlByScope: new Map(),
-  browserHints: undefined,
-  lastSentPreferredDeviceId: undefined,
+function createChromeInstallSessionState(): ChromeInstallSessionState {
+  return {
+    wiredThisSession: false,
+    installUpsellResolution: undefined,
+    installUpsellBypassSuppressionCounted: false,
+    bridgeBinding: undefined,
+    tabGroupCleanupRegistered: false,
+    unsubscribeSessionSwitch: undefined,
+    unregisterExitCleanup: undefined,
+    closesInFlight: new Map(),
+    resolvedHostByToolUseId: new Map(),
+    resolvedUrlByToolUseId: new Map(),
+    lastExecutedTabUrlByScope: new Map(),
+    browserHints: undefined,
+    lastSentPreferredDeviceId: undefined,
+  }
 }
 
-/** densable `gP()` / `uf()` — session chrome host singleton. */
+const stateByHost = new WeakMap<object, ChromeInstallSessionState>()
+
+/** densable `gP()` / `uf()` / `od()` — session chrome host singleton (`G.of(U().host)`). */
 export function getChromeInstallSessionState(): ChromeInstallSessionState {
+  const host = getBootstrapSessionHost()
+  let state = stateByHost.get(host)
+  if (!state) {
+    state = createChromeInstallSessionState()
+    stateByHost.set(host, state)
+  }
   return state
 }
 
-/** densable `Bmn`. */
+/** densable `Bmn` / `nO()`. */
 export function isClaudeInChromeWiredThisSession(): boolean {
-  return state.wiredThisSession
+  return getChromeInstallSessionState().wiredThisSession
 }
 
-/** densable `xTr` sets `gP().wiredThisSession = true`. */
+/** densable `xTr` / `f9r` sets `od().wiredThisSession = true`. */
 export function setClaudeInChromeWiredThisSession(wired: boolean): void {
-  state.wiredThisSession = wired
+  getChromeInstallSessionState().wiredThisSession = wired
 }
 
-/** densable `jmn`. */
+/** densable `jmn` / `v9r`. */
 export function clearClaudeInChromeWiredThisSession(): void {
-  state.wiredThisSession = false
+  getChromeInstallSessionState().wiredThisSession = false
 }
 
 /** densable `Nby`. */
 export function hasClaudeInChromeInstallUpsellLatch(): boolean {
-  return state.installUpsellResolution !== undefined
+  return getChromeInstallSessionState().installUpsellResolution !== undefined
 }
 
 /**
@@ -113,6 +126,7 @@ export function rememberResolvedChromeHost(
   toolUseId: string,
   host: ResolvedChromeHost,
 ): void {
+  const state = getChromeInstallSessionState()
   if (state.resolvedHostByToolUseId.size >= RESOLVED_HOST_MAP_CAP) {
     state.resolvedHostByToolUseId.clear()
   }
@@ -124,10 +138,11 @@ export function rememberLastExecutedTabUrl(
   sessionId: string,
   url: string,
 ): void {
-  state.lastExecutedTabUrlByScope.set(sessionId, url)
+  getChromeInstallSessionState().lastExecutedTabUrlByScope.set(sessionId, url)
 }
 
 export function resetChromeInstallSessionState(): void {
+  const state = getChromeInstallSessionState()
   state.wiredThisSession = false
   state.installUpsellResolution = undefined
   state.installUpsellBypassSuppressionCounted = false
@@ -150,6 +165,7 @@ export function resetChromeInstallSessionState(): void {
  * preferred id while the in-session pick stands drops preferredDeviceId.
  */
 export function setChromeBrowserHints(hints: ChromeBrowserHints): void {
+  const state = getChromeInstallSessionState()
   const lastSent = state.lastSentPreferredDeviceId
   const standing =
     state.browserHints !== undefined &&
@@ -169,17 +185,19 @@ export function setChromeBrowserHints(hints: ChromeBrowserHints): void {
 export function hintedPreferredDeviceId(
   fallback: () => string | undefined,
 ): string | undefined {
-  return state.browserHints?.preferredDeviceId ?? fallback()
+  return (
+    getChromeInstallSessionState().browserHints?.preferredDeviceId ?? fallback()
+  )
 }
 
 /** densable `iRr`. */
 export function hintedLocalDeviceIds(): Map<string, 'live'> | undefined {
-  const hints = state.browserHints
+  const hints = getChromeInstallSessionState().browserHints
   if (!hints) return undefined
   return new Map(hints.localDeviceIds.map(id => [id, 'live'] as const))
 }
 
 /** densable `aRr`. */
 export function hintedHostPlatform(): 'darwin' | 'win32' | 'linux' | undefined {
-  return state.browserHints?.hostPlatform
+  return getChromeInstallSessionState().browserHints?.hostPlatform
 }

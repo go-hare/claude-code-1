@@ -38,100 +38,114 @@ function mapUsageValues(
 
 /** Official re @178514241 */
 export class CostLedger {
-  #e = 0
-  #t = 0
-  #n = 0
-  #o = 0
-  #r = Date.now()
-  #i: number | undefined
-  #a = 0
-  #s = 0
-  #d = false
-  #l: Record<string, Record<string, unknown>> = usageBag()
-  #c: ((e: unknown) => void) | null = null
-  #p: ((e: unknown, t: unknown) => void) | null = null
-  #u: string | null = null
+  #totalCostUSD = 0
+  #totalAPIDuration = 0
+  #totalAPIDurationWithoutRetries = 0
+  #totalToolDuration = 0
+  #startTime = Date.now()
+  #logicalStartTime: number | undefined
+  #totalLinesAdded = 0
+  #totalLinesRemoved = 0
+  #hasUnknownModelCost = false
+  #modelUsage: Record<string, Record<string, unknown>> = usageBag()
+  #saver: ((row: unknown) => void) | null = null
+  #transcriptRecorder: ((a: unknown, b: unknown) => void) | null = null
+  #ownerSessionId: string | null = null
 
   totalCostUSD(): number {
-    return this.#e
+    return this.#totalCostUSD
   }
   totalAPIDuration(): number {
-    return this.#t
+    return this.#totalAPIDuration
   }
   totalAPIDurationWithoutRetries(): number {
-    return this.#n
+    return this.#totalAPIDurationWithoutRetries
   }
   totalToolDuration(): number {
-    return this.#o
+    return this.#totalToolDuration
   }
   totalDuration(): number {
-    return Math.max(0, Date.now() - this.#r)
+    return Math.max(0, Date.now() - this.#startTime)
   }
   sessionStartTime(): number {
-    return this.#i ?? this.#r
+    return this.#logicalStartTime ?? this.#startTime
   }
   totalLinesAdded(): number {
-    return this.#a
+    return this.#totalLinesAdded
   }
   totalLinesRemoved(): number {
-    return this.#s
+    return this.#totalLinesRemoved
   }
   hasUnknownModelCost(): boolean {
-    return this.#d
+    return this.#hasUnknownModelCost
   }
   modelUsage(): Record<string, Record<string, unknown>> {
-    return this.#l
+    return this.#modelUsage
   }
-  usageForModel(e: string): Record<string, unknown> | undefined {
-    return this.#l[e]
+  usageForModel(model: string): Record<string, unknown> | undefined {
+    return this.#modelUsage[model]
   }
   totalInputTokens(): number {
-    return sumUsageField(Object.values(this.#l), 'inputTokens')
+    return sumUsageField(Object.values(this.#modelUsage), 'inputTokens')
   }
   totalOutputTokens(): number {
-    return sumUsageField(Object.values(this.#l), 'outputTokens')
+    return sumUsageField(Object.values(this.#modelUsage), 'outputTokens')
   }
   totalCacheReadInputTokens(): number {
-    return sumUsageField(Object.values(this.#l), 'cacheReadInputTokens')
+    return sumUsageField(
+      Object.values(this.#modelUsage),
+      'cacheReadInputTokens',
+    )
   }
   totalCacheCreationInputTokens(): number {
-    return sumUsageField(Object.values(this.#l), 'cacheCreationInputTokens')
+    return sumUsageField(
+      Object.values(this.#modelUsage),
+      'cacheCreationInputTokens',
+    )
   }
   totalWebSearchRequests(): number {
-    return sumUsageField(Object.values(this.#l), 'webSearchRequests')
+    return sumUsageField(Object.values(this.#modelUsage), 'webSearchRequests')
   }
-  recordApiDuration(e: number, t: number): void {
-    this.#t += e
-    this.#n += t
+  recordApiDuration(
+    durationMs: number,
+    durationWithoutRetriesMs: number,
+  ): void {
+    this.#totalAPIDuration += durationMs
+    this.#totalAPIDurationWithoutRetries += durationWithoutRetriesMs
   }
-  recordCost(e: number, t: Record<string, unknown>, o: string): void {
-    this.#l[o] = t
-    this.#e += e
+  recordCost(
+    costUSD: number,
+    usage: Record<string, unknown>,
+    model: string,
+  ): void {
+    this.#modelUsage[model] = usage
+    this.#totalCostUSD += costUSD
   }
-  recordToolDuration(e: number): void {
-    this.#o += e
+  recordToolDuration(durationMs: number): void {
+    this.#totalToolDuration += durationMs
   }
-  recordLinesChanged(e: number, t: number): void {
-    this.#a += e
-    this.#s += t
+  recordLinesChanged(added: number, removed: number): void {
+    this.#totalLinesAdded += added
+    this.#totalLinesRemoved += removed
   }
   markUnknownModelCost(): void {
-    this.#d = true
+    this.#hasUnknownModelCost = true
   }
   zeroDurationsAndCostForTests(): void {
-    this.#t = 0
-    this.#n = 0
-    this.#e = 0
+    this.#totalAPIDuration = 0
+    this.#totalAPIDurationWithoutRetries = 0
+    this.#totalCostUSD = 0
   }
   restartClock(): void {
-    this.#r = Date.now()
+    this.#startTime = Date.now()
     this.anchorLogicalStart(undefined)
   }
-  anchorLogicalStart(e: number | undefined): void {
-    this.#i = e === undefined ? undefined : Math.min(e, this.#r)
+  anchorLogicalStart(startTime: number | undefined): void {
+    this.#logicalStartTime =
+      startTime === undefined ? undefined : Math.min(startTime, this.#startTime)
   }
   restore(
-    e: {
+    state: {
       totalCostUSD: number
       totalAPIDuration: number
       totalAPIDurationWithoutRetries: number
@@ -143,48 +157,52 @@ export class CostLedger {
       modelUsage?: Record<string, Record<string, unknown>>
       hasUnknownModelCost?: boolean
     },
-    S?: string | null,
+    ownerSessionId?: string | null,
   ): void {
-    this.#u = S ?? null
-    this.#e = e.totalCostUSD
-    this.#t = e.totalAPIDuration
-    this.#n = e.totalAPIDurationWithoutRetries
-    this.#o = e.totalToolDuration
-    this.#a = e.totalLinesAdded
-    this.#s = e.totalLinesRemoved
-    this.#d = e.hasUnknownModelCost ?? false
-    if (e.modelUsage) this.#l = usageBag(e.modelUsage)
-    if (e.lastDuration !== undefined) this.#r = Date.now() - e.lastDuration
-    this.anchorLogicalStart(e.startTime)
+    this.#ownerSessionId = ownerSessionId ?? null
+    this.#totalCostUSD = state.totalCostUSD
+    this.#totalAPIDuration = state.totalAPIDuration
+    this.#totalAPIDurationWithoutRetries = state.totalAPIDurationWithoutRetries
+    this.#totalToolDuration = state.totalToolDuration
+    this.#totalLinesAdded = state.totalLinesAdded
+    this.#totalLinesRemoved = state.totalLinesRemoved
+    this.#hasUnknownModelCost = state.hasUnknownModelCost ?? false
+    if (state.modelUsage) this.#modelUsage = usageBag(state.modelUsage)
+    if (state.lastDuration !== undefined)
+      this.#startTime = Date.now() - state.lastDuration
+    this.anchorLogicalStart(state.startTime)
   }
-  registerSaver(e: (row: unknown) => void): void {
-    this.#c = e
+  registerSaver(saver: (row: unknown) => void): void {
+    this.#saver = saver
   }
-  runSaver(e: unknown, t?: CostLedger): void {
-    ;(this.#c ?? (t ? t.#c : null))?.(e)
+  runSaver(row: unknown, fallback?: CostLedger): void {
+    ;(this.#saver ?? (fallback ? fallback.#saver : null))?.(row)
   }
-  registerTranscriptRecorder(e: (a: unknown, b: unknown) => void): void {
-    this.#p = e
+  registerTranscriptRecorder(recorder: (a: unknown, b: unknown) => void): void {
+    this.#transcriptRecorder = recorder
   }
-  runTranscriptRecorder(e: unknown, t: unknown, o?: CostLedger): void {
-    ;(this.#p ?? (o ? o.#p : null))?.(e, t)
+  runTranscriptRecorder(a: unknown, b: unknown, fallback?: CostLedger): void {
+    ;(
+      this.#transcriptRecorder ??
+      (fallback ? fallback.#transcriptRecorder : null)
+    )?.(a, b)
   }
   snapshot(): Record<string, unknown> {
     return {
-      ownerSessionId: this.#u,
-      totalCostUSD: this.#e,
-      totalAPIDuration: this.#t,
-      totalAPIDurationWithoutRetries: this.#n,
-      totalToolDuration: this.#o,
-      startTime: this.#r,
-      sessionLogicalStartTime: this.#i,
-      totalLinesAdded: this.#a,
-      totalLinesRemoved: this.#s,
-      hasUnknownModelCost: this.#d,
-      modelUsage: mapUsageValues(this.#l, row => ({ ...row })),
+      ownerSessionId: this.#ownerSessionId,
+      totalCostUSD: this.#totalCostUSD,
+      totalAPIDuration: this.#totalAPIDuration,
+      totalAPIDurationWithoutRetries: this.#totalAPIDurationWithoutRetries,
+      totalToolDuration: this.#totalToolDuration,
+      startTime: this.#startTime,
+      sessionLogicalStartTime: this.#logicalStartTime,
+      totalLinesAdded: this.#totalLinesAdded,
+      totalLinesRemoved: this.#totalLinesRemoved,
+      hasUnknownModelCost: this.#hasUnknownModelCost,
+      modelUsage: mapUsageValues(this.#modelUsage, row => ({ ...row })),
     }
   }
-  restoreSnapshot(e: {
+  restoreSnapshot(snap: {
     ownerSessionId: string | null
     totalCostUSD: number
     totalAPIDuration: number
@@ -197,42 +215,44 @@ export class CostLedger {
     hasUnknownModelCost: boolean
     modelUsage: Record<string, Record<string, unknown>>
   }): void {
-    this.#u = e.ownerSessionId
-    this.#e = e.totalCostUSD
-    this.#t = e.totalAPIDuration
-    this.#n = e.totalAPIDurationWithoutRetries
-    this.#o = e.totalToolDuration
-    this.#r = e.startTime
-    this.#i = e.sessionLogicalStartTime
-    this.#a = e.totalLinesAdded
-    this.#s = e.totalLinesRemoved
-    this.#d = e.hasUnknownModelCost
-    this.#l = usageBag(mapUsageValues(e.modelUsage, t => ({ ...t })))
+    this.#ownerSessionId = snap.ownerSessionId
+    this.#totalCostUSD = snap.totalCostUSD
+    this.#totalAPIDuration = snap.totalAPIDuration
+    this.#totalAPIDurationWithoutRetries = snap.totalAPIDurationWithoutRetries
+    this.#totalToolDuration = snap.totalToolDuration
+    this.#startTime = snap.startTime
+    this.#logicalStartTime = snap.sessionLogicalStartTime
+    this.#totalLinesAdded = snap.totalLinesAdded
+    this.#totalLinesRemoved = snap.totalLinesRemoved
+    this.#hasUnknownModelCost = snap.hasUnknownModelCost
+    this.#modelUsage = usageBag(
+      mapUsageValues(snap.modelUsage, row => ({ ...row })),
+    )
   }
-  claim(e: string): void {
-    this.#u ??= e
+  claim(sessionId: string): void {
+    this.#ownerSessionId ??= sessionId
   }
-  scopeTo(e: string): void {
-    this.#u = e
+  scopeTo(sessionId: string): void {
+    this.#ownerSessionId = sessionId
   }
   ownerSessionId(): string | null {
-    return this.#u
+    return this.#ownerSessionId
   }
-  belongsTo(e: string): boolean {
-    return this.#u === e
+  belongsTo(sessionId: string): boolean {
+    return this.#ownerSessionId === sessionId
   }
-  reset(e?: string | null): void {
-    this.#u = e ?? null
-    this.#e = 0
-    this.#t = 0
-    this.#n = 0
-    this.#o = 0
-    this.#r = Date.now()
+  reset(ownerSessionId?: string | null): void {
+    this.#ownerSessionId = ownerSessionId ?? null
+    this.#totalCostUSD = 0
+    this.#totalAPIDuration = 0
+    this.#totalAPIDurationWithoutRetries = 0
+    this.#totalToolDuration = 0
+    this.#startTime = Date.now()
     this.anchorLogicalStart(undefined)
-    this.#a = 0
-    this.#s = 0
-    this.#d = false
-    this.#l = usageBag()
+    this.#totalLinesAdded = 0
+    this.#totalLinesRemoved = 0
+    this.#hasUnknownModelCost = false
+    this.#modelUsage = usageBag()
   }
 }
 
@@ -266,6 +286,7 @@ export class SessionFlags {
     sessionId?: string | null
   } | null = null
   #x: string | null = null
+  #kairosActive = false
 
   onboardingShownThisSession(): boolean {
     return this.#e
@@ -429,6 +450,12 @@ export class SessionFlags {
   forgetPendingContextCompacted(): void {
     this.#S = undefined
   }
+  kairosActive(): boolean {
+    return this.#kairosActive
+  }
+  replaceKairosActive(e: boolean): void {
+    this.#kairosActive = e
+  }
   reset(): void {
     this.#m = false
     this.#f = false
@@ -454,6 +481,7 @@ export class SessionFlags {
     this.#y = null
     this.#x = null
     this.#S = undefined
+    this.#kairosActive = false
   }
 }
 
@@ -725,6 +753,8 @@ export class SessionOnceLatches {
     max: STREAM_FIRST_BYTE_ARMED_MAX,
   })
   skillHealthMap: unknown
+  /** densable `Oo().pinnedFeatureValues` @181542214 */
+  pinnedFeatureValues: Map<string, unknown> | undefined = undefined
   firedOnceKeys = new Set<string>()
   hasFired(e: string): boolean {
     return this.firedOnceKeys.has(e)
@@ -740,6 +770,36 @@ export class SessionOnceLatches {
   resetStreamNoEventsWarningLatch(): void {
     this.firedOnceKeys.delete('stream_no_events_fallback_warning')
   }
+  mainThreadTurn: {
+    slot: unknown
+    turnBegan: ReturnType<typeof createSignal>
+    turnEnded: ReturnType<typeof createSignal>
+  } = {
+    slot: undefined,
+    turnBegan: createSignal(),
+    turnEnded: createSignal(),
+  }
+  fastModeCooldownExpired = createSignal()
+  fastModeCooldown: {
+    runtimeState:
+      | { status: 'active' }
+      | {
+          status: 'cooldown'
+          resetAt: number
+          reason: 'rate_limit' | 'overloaded'
+        }
+    hasLoggedCooldownExpiry: boolean
+    cooldownTriggered: ReturnType<
+      typeof createSignal<
+        [resetAt: number, reason: 'rate_limit' | 'overloaded']
+      >
+    >
+  } = {
+    runtimeState: { status: 'active' },
+    hasLoggedCooldownExpiry: false,
+    cooldownTriggered: createSignal(),
+  }
+  sessionTitleChanged = createSignal()
 }
 
 /**
@@ -883,6 +943,12 @@ export class TurnBudget {
   #e = 0
   #t: number | null = null
   #n = 0
+  #turnHookDurationMs = 0
+  #turnHookCount = 0
+  #turnToolDurationMs = 0
+  #turnToolCount = 0
+  #turnClassifierDurationMs = 0
+  #turnClassifierCount = 0
   outputTokensAtTurnStart(): number {
     return this.#e
   }
@@ -900,10 +966,58 @@ export class TurnBudget {
   incrementContinuation(): void {
     this.#n++
   }
+  turnHookDurationMs(): number {
+    return this.#turnHookDurationMs
+  }
+  turnHookCount(): number {
+    return this.#turnHookCount
+  }
+  recordTurnHookDuration(duration: number): void {
+    this.#turnHookDurationMs += duration
+    this.#turnHookCount++
+  }
+  resetTurnHookDuration(): void {
+    this.#turnHookDurationMs = 0
+    this.#turnHookCount = 0
+  }
+  turnToolDurationMs(): number {
+    return this.#turnToolDurationMs
+  }
+  turnToolCount(): number {
+    return this.#turnToolCount
+  }
+  recordTurnToolDuration(duration: number): void {
+    this.#turnToolDurationMs += duration
+    this.#turnToolCount++
+  }
+  resetTurnToolDuration(): void {
+    this.#turnToolDurationMs = 0
+    this.#turnToolCount = 0
+  }
+  turnClassifierDurationMs(): number {
+    return this.#turnClassifierDurationMs
+  }
+  turnClassifierCount(): number {
+    return this.#turnClassifierCount
+  }
+  recordTurnClassifierDuration(duration: number): void {
+    this.#turnClassifierDurationMs += duration
+    this.#turnClassifierCount++
+  }
+  resetTurnClassifierDuration(): void {
+    this.#turnClassifierDurationMs = 0
+    this.#turnClassifierCount = 0
+  }
   reset(): void {
     this.#e = 0
     this.#t = null
     this.#n = 0
+    this.#turnHookDurationMs = 0
+    this.#turnHookCount = 0
+    this.#turnToolDurationMs = 0
+    this.#turnToolCount = 0
+    this.#turnClassifierDurationMs = 0
+    this.#turnClassifierCount = 0
   }
 }
 
@@ -1338,6 +1452,10 @@ export class ConversationLatches {
   }
   #t = new Map<unknown, unknown>()
   #n: unknown
+  #promptCache1hEligible: boolean | null = null
+  #afkModeHeaderLatched: boolean | null = null
+  #fastModeHeaderLatched: boolean | null = null
+  #cacheEditingHeaderLatched: boolean | null = null
   stickyBetas(): { sent: Set<unknown>; rejected: Set<unknown> } {
     return this.#e
   }
@@ -1353,10 +1471,44 @@ export class ConversationLatches {
   replaceAtisLatch(e: unknown): void {
     this.#n = e
   }
+  promptCache1hEligible(): boolean | null {
+    return this.#promptCache1hEligible
+  }
+  replacePromptCache1hEligible(e: boolean | null): void {
+    this.#promptCache1hEligible = e
+  }
+  afkModeHeaderLatched(): boolean | null {
+    return this.#afkModeHeaderLatched
+  }
+  replaceAfkModeHeaderLatched(e: boolean | null): void {
+    this.#afkModeHeaderLatched = e
+  }
+  fastModeHeaderLatched(): boolean | null {
+    return this.#fastModeHeaderLatched
+  }
+  replaceFastModeHeaderLatched(e: boolean | null): void {
+    this.#fastModeHeaderLatched = e
+  }
+  cacheEditingHeaderLatched(): boolean | null {
+    return this.#cacheEditingHeaderLatched
+  }
+  replaceCacheEditingHeaderLatched(e: boolean | null): void {
+    this.#cacheEditingHeaderLatched = e
+  }
+  clearBetaHeaderLatches(): void {
+    this.#afkModeHeaderLatched = null
+    this.#fastModeHeaderLatched = null
+    this.#cacheEditingHeaderLatched = null
+    this.unlatchStickyBetas()
+  }
   reset(): void {
     this.#e = { sent: new Set(), rejected: new Set() }
     this.#t = new Map()
     this.#n = undefined
+    this.#promptCache1hEligible = null
+    this.#afkModeHeaderLatched = null
+    this.#fastModeHeaderLatched = null
+    this.#cacheEditingHeaderLatched = null
   }
 }
 
@@ -1708,6 +1860,7 @@ export class SurfaceCapabilities {
   #s: SurfaceCaps = DEFAULT_SURFACE_CAPS
   #d = false
   #l = false
+  #replBridgeSessionId: string | undefined
   attacherCapsChanged = createSignal()
   rvSupervisorLinkChanged = createSignal()
   sdkDialogHostActive(): boolean {
@@ -1769,6 +1922,12 @@ export class SurfaceCapabilities {
     if (this.#d === e) return
     this.#d = e
   }
+  replBridgeSessionId(): string | undefined {
+    return this.#replBridgeSessionId
+  }
+  replaceReplBridgeSessionId(e: string | undefined): void {
+    this.#replBridgeSessionId = e
+  }
   mainLoopBusy(): boolean {
     return this.#l
   }
@@ -1784,6 +1943,7 @@ export class SurfaceCapabilities {
     this.#a = undefined
     this.#s = DEFAULT_SURFACE_CAPS
     this.#d = false
+    this.#replBridgeSessionId = undefined
     this.#l = false
     this.#i = false
     this.attacherCapsChanged.clear()

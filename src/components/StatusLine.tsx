@@ -370,7 +370,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   const additionalWorkingDirectories = useAppState(s => s.toolPermissionContext.additionalWorkingDirectories);
   const statusLineText = useAppState(s => s.statusLineText);
   const fastMode = useAppState(s => Boolean(s.fastMode));
-  const effortValue = useAppState(s => s.effortValue);
   const sessionEffort = useAppState(s => s.sessionEffort);
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
@@ -395,8 +394,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   mainLoopModelRef.current = mainLoopModel;
   const fastModeRef = useRef(fastMode);
   fastModeRef.current = fastMode;
-  const effortValueRef = useRef(effortValue);
-  effortValueRef.current = effortValue;
   const sessionEffortRef = useRef(sessionEffort);
   sessionEffortRef.current = sessionEffort;
   const settingsEffortTableRef = useRef(settingsEffortTable);
@@ -414,7 +411,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     vimMode: VimMode | undefined;
     mainLoopModel: ModelName;
     fastMode: boolean;
-    effortValue: EffortValue | undefined;
     sessionEffort: SessionEffortTag | undefined;
     settingsEffortTable: SettingsEffortTable | undefined;
     thinkingEnabled: boolean | undefined;
@@ -426,7 +422,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     vimMode,
     mainLoopModel,
     fastMode,
-    effortValue,
     sessionEffort,
     settingsEffortTable,
     thinkingEnabled,
@@ -479,7 +474,7 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
         mainLoopModelRef.current,
         vimModeRef.current,
         fastModeRef.current,
-        effortValueRef.current,
+        undefined,
         thinkingEnabledRef.current,
         prStatusRef.current,
         sessionEffortRef.current,
@@ -529,7 +524,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       vimMode !== previousStateRef.current.vimMode ||
       mainLoopModel !== previousStateRef.current.mainLoopModel ||
       fastMode !== previousStateRef.current.fastMode ||
-      effortValue !== previousStateRef.current.effortValue ||
       sessionEffort !== previousStateRef.current.sessionEffort ||
       settingsEffortTable !== previousStateRef.current.settingsEffortTable ||
       thinkingEnabled !== previousStateRef.current.thinkingEnabled ||
@@ -541,7 +535,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       previousStateRef.current.vimMode = vimMode;
       previousStateRef.current.mainLoopModel = mainLoopModel;
       previousStateRef.current.fastMode = fastMode;
-      previousStateRef.current.effortValue = effortValue;
       previousStateRef.current.sessionEffort = sessionEffort;
       previousStateRef.current.settingsEffortTable = settingsEffortTable;
       previousStateRef.current.thinkingEnabled = thinkingEnabled;
@@ -554,7 +547,6 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     vimMode,
     mainLoopModel,
     fastMode,
-    effortValue,
     sessionEffort,
     settingsEffortTable,
     thinkingEnabled,

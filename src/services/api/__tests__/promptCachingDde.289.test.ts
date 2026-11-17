@@ -37,7 +37,9 @@ describe('densable 2.1.289 Dde FABLE/MYTHOS', () => {
   })
 
   test('source: Dde arms FABLE then MYTHOS after OPUS', async () => {
-    const src = await Bun.file(new URL('../claude.ts', import.meta.url)).text()
+    const src = await Bun.file(
+      new URL('../claude/promptCaching.ts', import.meta.url),
+    ).text()
     const idx = src.indexOf('export function getPromptCachingEnabled')
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 1800)

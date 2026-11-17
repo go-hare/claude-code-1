@@ -1441,12 +1441,6 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           '@internal When false, the session recap (shown when you return after being away for 5+ minutes) is disabled. When absent or true, recap is enabled. Hidden from public SDK types until external launch.',
         ),
-      poorMode: z
-        .boolean()
-        .optional()
-        .describe(
-          'When true, poor mode is active — extract_memories and prompt_suggestion are disabled to save tokens.',
-        ),
       // densable `non_deferrable_builtins` / eGu — opt-out list for TX defer policy
       non_deferrable_builtins: z
         .array(z.string())

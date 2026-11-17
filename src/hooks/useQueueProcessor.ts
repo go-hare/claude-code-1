@@ -1,9 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
+import { useMessageQueue } from '../state/AppState.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
-import {
-  getCommandQueueSnapshot,
-  subscribeToCommandQueue,
-} from '../utils/messageQueueManager.js'
 import type { QueryGuard } from '../utils/QueryGuard.js'
 import { processQueueIfReady } from '../utils/queueProcessor.js'
 
@@ -40,9 +37,10 @@ export function useQueueProcessor({
   // Subscribe to the unified command queue via useSyncExternalStore.
   // This guarantees re-render when the store changes, bypassing
   // React context propagation delays that cause missed notifications in Ink.
+  const messageQueue = useMessageQueue()
   const queueSnapshot = useSyncExternalStore(
-    subscribeToCommandQueue,
-    getCommandQueueSnapshot,
+    messageQueue.subscribe,
+    messageQueue.getSnapshot,
   )
 
   useEffect(() => {

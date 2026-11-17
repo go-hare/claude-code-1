@@ -12,6 +12,7 @@ import React from 'react';
 import { callTui, type TuiRelaunchCarryInput } from '../commands/tui/index.js';
 import { useAppStateStore } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
+import { pdSessionEffort } from '../utils/effort.js';
 import { markFullscreenUpsellFullySeen, recordFullscreenUpsellImpression } from '../utils/fullscreenUpsellGate.js';
 import { ConfirmSelect } from './ConfirmSelect.js';
 
@@ -25,7 +26,11 @@ type Choice = 'accept' | 'decline';
 export function carryFromAppStore(store: {
   getState: () => {
     toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
+    sessionEffort?: Parameters<typeof pdSessionEffort>[0]['sessionEffort'];
     effortValue?: unknown;
+    settingsEffortTable?: Parameters<typeof pdSessionEffort>[0]['settingsEffortTable'];
+    mainLoopModel?: string | null;
+    mainLoopModelForSession?: string | null;
     tasks?: TuiRelaunchCarryInput['tasks'];
     messages?: TuiRelaunchCarryInput['messages'];
     proactivityLevel?: unknown;
@@ -43,7 +48,7 @@ export function carryFromAppStore(store: {
     }
     return {
       toolPermissionContext: state.toolPermissionContext,
-      effort: state.effortValue,
+      effort: pdSessionEffort(state as Parameters<typeof pdSessionEffort>[0]),
       tasks: state.tasks,
       messages: state.messages,
       proactivityLevel: state.proactivityLevel,

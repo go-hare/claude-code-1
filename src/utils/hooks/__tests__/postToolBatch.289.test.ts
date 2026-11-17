@@ -89,8 +89,11 @@ describe('densable 2.1.289 PostToolBatch registry', () => {
     expect(tool).toContain('refreshMcpClients?: () => MCPServerConnection[]')
     expect(tool).toContain('export function resolveMcpClients')
 
-    const repl = readFileSync(join(root, 'screens/REPL.tsx'), 'utf8')
-    expect(repl).toContain('refreshMcpClients: computeMcpClients')
+    const sessionCtx = readFileSync(
+      join(root, 'engine/createSessionToolUseContext.ts'),
+      'utf8',
+    )
+    expect(sessionCtx).toContain('refreshMcpClients: computeMcpClients')
     expect(query).toContain("hookEvent: 'PostToolBatch'")
   })
 

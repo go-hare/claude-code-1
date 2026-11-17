@@ -241,23 +241,11 @@ export function applySettingsChange(
       }
     }
 
-    const sessionEffortTag = prev.sessionEffort ?? INHERIT_SESSION_EFFORT
-    const compatEffortPatch: Partial<AppState> =
-      sessionEffortTag.kind === 'inherit'
-        ? {
-            effortValue: pdSessionEffort({
-              ...prev,
-              settingsEffortTable: nextSettingsEffortTable,
-            }),
-          }
-        : {}
-
     return {
       ...prev,
       settings: newSettings,
       settingsEffortTable: nextSettingsEffortTable,
       toolPermissionContext: newContext,
-      ...compatEffortPatch,
       ...ultracodePatch,
     }
   })

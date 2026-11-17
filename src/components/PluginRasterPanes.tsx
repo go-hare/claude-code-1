@@ -41,7 +41,12 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { AbovePromptLeftoverContext, dockLitStore, leftoverPluginBandBudget } from './FullscreenLayout.js';
+import {
+  AbovePromptLeftoverContext,
+  dockLitStore,
+  getDockLitStore,
+  leftoverPluginBandBudget,
+} from './FullscreenLayout.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { getRenderVersion, subscribeRenderInvalidation } from '../utils/render/invalidateAllRenders.js';
@@ -117,7 +122,7 @@ import { Markdown } from './Markdown.js';
 const HighlightedCode = BaseHighlightedCode as unknown as ComponentType<
   ComponentProps<typeof BaseHighlightedCode> & { startLine?: number; lineNumbers?: boolean }
 >;
-export { dockLitStore };
+export { dockLitStore, getDockLitStore };
 import { PluginImage, PluginRaster } from './PluginRaster.js';
 import { StructuredDiff } from './StructuredDiff.js';
 import { intersperse } from '../utils/array.js';
@@ -1467,9 +1472,10 @@ export function PluginDockGrip({
   );
   const isGripLit = !dialogOpen && lit;
   useEffect(() => {
-    dockLitStore.setState(() => isGripLit);
+    const store = getDockLitStore();
+    store.setState(() => isGripLit);
     return () => {
-      dockLitStore.setState(() => false);
+      store.setState(() => false);
     };
   }, [isGripLit]);
   const gripLit = isGripLit || (isFocused ?? panesFocused);

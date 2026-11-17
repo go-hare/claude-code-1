@@ -794,11 +794,7 @@ export async function* runAgent({
       }
     }
 
-    // Override effort level if agent defines one (sync both effortValue and sessionEffort)
-    const effortValue =
-      agentDefinition.effort !== undefined
-        ? agentDefinition.effort
-        : state.effortValue
+    // Override effort level if agent defines one
     const sessionEffort =
       agentDefinition.effort !== undefined
         ? levelSessionEffort(agentDefinition.effort)
@@ -806,7 +802,6 @@ export async function* runAgent({
 
     if (
       toolPermissionContext === state.toolPermissionContext &&
-      effortValue === state.effortValue &&
       sessionEffort === state.sessionEffort
     ) {
       return state
@@ -814,8 +809,7 @@ export async function* runAgent({
     return {
       ...state,
       toolPermissionContext,
-      effortValue,
-      ...(agentDefinition.effort !== undefined && { sessionEffort }),
+      sessionEffort,
     }
   }
 

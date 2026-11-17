@@ -39,6 +39,7 @@ import {
   shouldSkipFastModeNetworkErrors,
   shouldSkipFastModeOrgCheck,
 } from './residualMoreEnvGates.js'
+import { getSessionOnceLatches } from './sessionRoot.js'
 import {
   getInitialSettings,
   getSettingsForSource,
@@ -413,31 +414,34 @@ export type FastModeRuntimeState =
   | { status: 'active' }
   | { status: 'cooldown'; resetAt: number; reason: CooldownReason }
 
-let runtimeState: FastModeRuntimeState = { status: 'active' }
-let hasLoggedCooldownExpiry = false
-
 // --- Cooldown event listeners ---
 export type CooldownReason = 'rate_limit' | 'overloaded'
 
-const cooldownTriggered =
-  createSignal<[resetAt: number, reason: CooldownReason]>()
-const cooldownExpired = createSignal()
-export const onCooldownTriggered = cooldownTriggered.subscribe
-export const onCooldownExpired = cooldownExpired.subscribe
+export function onCooldownTriggered(
+  listener: (resetAt: number, reason: CooldownReason) => void,
+): () => void {
+  return getSessionOnceLatches().fastModeCooldown.cooldownTriggered.subscribe(
+    listener,
+  )
+}
+export function onCooldownExpired(listener: () => void): () => void {
+  return getSessionOnceLatches().fastModeCooldownExpired.subscribe(listener)
+}
 
 export function getFastModeRuntimeState(): FastModeRuntimeState {
+  const slot = getSessionOnceLatches().fastModeCooldown
   if (
-    runtimeState.status === 'cooldown' &&
-    Date.now() >= runtimeState.resetAt
+    slot.runtimeState.status === 'cooldown' &&
+    Date.now() >= slot.runtimeState.resetAt
   ) {
-    if (isFastModeEnabled() && !hasLoggedCooldownExpiry) {
+    if (isFastModeEnabled() && !slot.hasLoggedCooldownExpiry) {
       logForDebugging('Fast mode cooldown expired, re-enabling fast mode')
-      hasLoggedCooldownExpiry = true
-      cooldownExpired.emit()
+      slot.hasLoggedCooldownExpiry = true
+      getSessionOnceLatches().fastModeCooldownExpired.emit()
     }
-    runtimeState = { status: 'active' }
+    slot.runtimeState = { status: 'active' }
   }
-  return runtimeState
+  return slot.runtimeState
 }
 
 export function triggerFastModeCooldown(
@@ -447,8 +451,9 @@ export function triggerFastModeCooldown(
   if (!isFastModeEnabled()) {
     return
   }
-  runtimeState = { status: 'cooldown', resetAt: resetTimestamp, reason }
-  hasLoggedCooldownExpiry = false
+  const slot = getSessionOnceLatches().fastModeCooldown
+  slot.runtimeState = { status: 'cooldown', resetAt: resetTimestamp, reason }
+  slot.hasLoggedCooldownExpiry = false
   const cooldownDurationMs = resetTimestamp - Date.now()
   logForDebugging(
     `Fast mode cooldown triggered (${reason}), duration ${Math.round(cooldownDurationMs / 1000)}s`,
@@ -458,11 +463,11 @@ export function triggerFastModeCooldown(
     cooldown_reason:
       reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  cooldownTriggered.emit(resetTimestamp, reason)
+  slot.cooldownTriggered.emit(resetTimestamp, reason)
 }
 
 export function clearFastModeCooldown(): void {
-  runtimeState = { status: 'active' }
+  getSessionOnceLatches().fastModeCooldown.runtimeState = { status: 'active' }
 }
 
 /**

@@ -18,9 +18,8 @@ import { useEffect, useRef } from 'react'
 import type { RequestDialog } from '../dialog/requestDialog.js'
 import { peerInboundApprovalSpec } from '../dialog/specs/jsuKinds.js'
 import { useNotifications } from '../context/notifications.js'
-import { useAppStateStore } from '../state/AppState.js'
+import { useAppStateStore, useMessageQueue } from '../state/AppState.js'
 import { logForDebugging } from '../utils/debug.js'
-import { enqueue } from '../utils/messageQueueManager.js'
 import {
   buildHeldPeerMessageToast,
   buildPeerInboundHoldPreview,
@@ -43,6 +42,7 @@ export function usePeerInboundUdsDrain(
   options: UsePeerInboundUdsDrainOptions,
 ): void {
   const store = useAppStateStore()
+  const messageQueue = useMessageQueue()
   const { addNotification } = useNotifications()
   const requestDialogRef = useRef(options.requestDialog)
   requestDialogRef.current = options.requestDialog
@@ -91,7 +91,7 @@ export function usePeerInboundUdsDrain(
           typeof cmd.value === 'string' &&
           cmd.mode === 'prompt'
         ) {
-          enqueue({
+          messageQueue.enqueue({
             mode: 'prompt',
             value: cmd.value,
             uuid:
@@ -318,7 +318,7 @@ export function usePeerInboundUdsDrain(
         ) {
           continue
         }
-        enqueue(command)
+        messageQueue.enqueue(command)
       }
     }
 
@@ -353,7 +353,7 @@ export function usePeerInboundUdsDrain(
           })
           return
         }
-        enqueue({
+        messageQueue.enqueue({
           mode: 'prompt',
           value: text,
           uuid: randomUUID(),
@@ -388,5 +388,5 @@ export function usePeerInboundUdsDrain(
       }
       controllers.clear()
     }
-  }, [store, addNotification])
+  }, [store, addNotification, messageQueue])
 }

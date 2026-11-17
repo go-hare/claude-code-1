@@ -39,7 +39,7 @@ import {
 } from './processUserInput/promptSubmitWaits.js'
 import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPrompts.js'
 import { recordQueueOperation } from './sessionStorage.js'
-import { createSignal } from './signal.js'
+import { createSignal, type Signal } from './signal.js'
 import { recordHandbackDelivery } from './subagentHandback.js'
 import { getTurnAttributionKey } from './turnAttribution.js'
 
@@ -62,48 +62,797 @@ function logOperation(operation: QueueOperation, content?: string): void {
 }
 
 // ============================================================================
-// Unified command queue (module-level, independent of React state)
+// Unified command queue (instantiable MessageQueueInstance + default active)
 //
 // All commands — user input, task notifications, orphaned permissions — go
-// through this single queue. React components subscribe via
-// useSyncExternalStore (subscribeToCommandQueue / getCommandQueueSnapshot).
+// through a queue instance. React components subscribe via
+// useSyncExternalStore (queue.subscribe / queue.getSnapshot, or
+// subscribeToCommandQueue / getCommandQueueSnapshot).
 // Non-React code (print.ts streaming loop) reads directly via
-// getCommandQueue() / getCommandQueueLength().
+// getCommandQueue() / getCommandQueueLength() on the active instance.
 //
 // Priority determines dequeue order: 'now' > 'next' > 'later'.
 // Within the same priority, commands are processed FIFO.
 // ============================================================================
 
-const commandQueue: QueuedCommand[] = []
-/** Frozen snapshot — recreated on every mutation for useSyncExternalStore. */
-let snapshot: readonly QueuedCommand[] = Object.freeze([])
-const queueChanged = createSignal()
-/** densable `Ibe().commandsConsumed` / `$X`. */
-const commandsConsumed = createSignal<[QueuedCommand[]]>()
-/** densable `Ibe().commandsDiscarded` / `Ept`. */
-const commandsDiscarded = createSignal<[QueuedCommand[]]>()
-
-export const subscribeCommandsConsumed = commandsConsumed.subscribe
-export const subscribeCommandsDiscarded = commandsDiscarded.subscribe
-
-/**
- * Official Ntl `w` / Cuy — commands already dequeued but still executing.
- * Esc restore must see this so a queued turn is not treated as "user moved on".
- */
-let inFlightDrainBatch: QueuedCommand[] | null = null
-
-/**
- * densable print Kc cancel-pending (`he`/`ye`/`ke`/`Se`). Cap 256.
- * Never export minify he|ye|ke|Se.
- */
 const CANCEL_PENDING_CAP = 256
-const cancelPending = new Set<string>()
-const cancelPendingAcked = new Set<string>()
 
-function notifySubscribers(): void {
-  snapshot = Object.freeze([...commandQueue])
-  queueChanged.emit()
+/**
+ * Instantiable command queue (official `MessageQueueInstance` / `zVe` value).
+ * Encapsulates the queue array, frozen snapshot, change/event signals,
+ * in-flight drain batch, cancel-pending tracking, and fold-in-flight state.
+ */
+export class MessageQueueInstance {
+  private readonly commandQueue: QueuedCommand[] = []
+  /** Frozen snapshot — recreated on every mutation for useSyncExternalStore. */
+  private snapshot: readonly QueuedCommand[] = Object.freeze([])
+  private readonly queueChanged = createSignal()
+  /** densable `Ibe().commandsConsumed` / `$X`. */
+  private readonly commandsConsumed = createSignal<[QueuedCommand[]]>()
+  /** densable `Ibe().commandsDiscarded` / `Ept`. */
+  private readonly commandsDiscarded = createSignal<[QueuedCommand[]]>()
+
+  /**
+   * Official Ntl `w` / Cuy — commands already dequeued but still executing.
+   * Esc restore must see this so a queued turn is not treated as "user moved on".
+   */
+  private inFlightDrainBatch: QueuedCommand[] | null = null
+
+  /**
+   * densable print Kc cancel-pending (`he`/`ye`/`ke`/`Se`). Cap 256.
+   * Never export minify he|ye|ke|Se.
+   */
+  private readonly cancelPending = new Set<string>()
+  private readonly cancelPendingAcked = new Set<string>()
+
+  /**
+   * densable `ve` — uuids whose mid-turn fold is in flight. `yt` refuses these.
+   */
+  private readonly foldInFlight = new Set<string>()
+  /** densable `qe` — mid-turn fold suspended. `Ft` is `qe` (gold also ORs `Mr()`). */
+  private midTurnFoldSuspended = false
+
+  /**
+   * Subscribe to command queue changes.
+   * Compatible with React's useSyncExternalStore.
+   */
+  readonly subscribe = (listener: () => void): (() => void) =>
+    this.queueChanged.subscribe(listener)
+
+  readonly subscribeCommandsConsumed = (
+    listener: (commands: QueuedCommand[]) => void,
+  ): (() => void) => this.commandsConsumed.subscribe(listener)
+
+  readonly subscribeCommandsDiscarded = (
+    listener: (commands: QueuedCommand[]) => void,
+  ): (() => void) => this.commandsDiscarded.subscribe(listener)
+
+  /**
+   * Get current snapshot of the command queue.
+   * Compatible with React's useSyncExternalStore.
+   * Returns a frozen array that only changes reference on mutation.
+   */
+  readonly getSnapshot = (): readonly QueuedCommand[] => this.snapshot
+
+  private notifySubscribers(): void {
+    this.snapshot = Object.freeze([...this.commandQueue])
+    this.queueChanged.emit()
+  }
+
+  getCommands(): QueuedCommand[] {
+    return [...this.commandQueue]
+  }
+
+  getLength(): number {
+    return this.commandQueue.length
+  }
+
+  getMainThreadLength(): number {
+    let n = 0
+    for (const cmd of this.commandQueue) {
+      if (isMainThreadQueuedCommand(cmd)) n++
+    }
+    return n
+  }
+
+  hasCommands(): boolean {
+    return this.commandQueue.length > 0
+  }
+
+  hasEditableCommands(): boolean {
+    return this.commandQueue.some(isQueuedCommandEditable)
+  }
+
+  recheck(): void {
+    if (this.commandQueue.length > 0) {
+      this.notifySubscribers()
+    }
+  }
+
+  countQueuedPeerMessages(): number {
+    let n = 0
+    for (const cmd of this.commandQueue) {
+      if (isCrossSessionPeerOrigin(cmd.origin as PeerQueueOrigin | undefined)) {
+        n++
+      }
+    }
+    return n
+  }
+
+  private admitReportingCommand(
+    command: QueuedCommand,
+    receipt: 'coalesced' | 'immediate' = 'coalesced',
+  ): ReportingAdmissionResult {
+    const origin = command.origin as PeerQueueOrigin | undefined
+    if (!isCrossSessionPeerOrigin(origin)) {
+      return { admitted: true }
+    }
+
+    const resurrected =
+      (command as { admissionExempt?: string }).admissionExempt ===
+        'resurrected' || origin.admissionExempt === 'resurrected'
+    const ownTokens = getOwnHopTokens()
+    const guard = getPeerAdmissionGuard()
+
+    if (!resurrected && !isVerifiedPeerOrigin(origin)) {
+      const hop = guard.checkHopChain(origin.hopChain, ownTokens)
+      if (hop && !hop.admitted) {
+        reportPeerDrop({
+          reason: hop.reason,
+          from: origin.from,
+          name: origin.name,
+        })
+        if (receipt === 'coalesced') {
+          noteCoalescedPeerDropReceipt(command, hop.reason)
+        }
+        return { admitted: false, reason: hop.reason }
+      }
+    }
+
+    if (!resurrected && isVerifiedPeerOrigin(origin)) {
+      const body = peerCommandBody(command)
+      const admitted = guard.admit({
+        // Gold yr: Fr.from!=="unknown"?from:${Fr.from}:pid:${Fr.verifiedPeerPid}
+        senderKey:
+          origin.from !== 'unknown'
+            ? `from:${origin.from}`
+            : `pid:${origin.verifiedPeerPid}`,
+        body,
+        hopChain: origin.hopChain,
+        ownTokens,
+      })
+      if (!admitted.admitted) {
+        reportPeerDrop({
+          reason: admitted.reason,
+          from: origin.from,
+          name: origin.name,
+        })
+        if (receipt === 'coalesced') {
+          noteCoalescedPeerDropReceipt(command, admitted.reason)
+        }
+        return { admitted: false, reason: admitted.reason }
+      }
+    }
+
+    if (
+      this.countQueuedPeerMessages() >=
+      getPeerAdmissionLimits().maxQueuedPeerMessages
+    ) {
+      reportPeerDrop({
+        reason: 'queue-full',
+        from: origin.from,
+        name: origin.name,
+      })
+      if (receipt === 'coalesced') {
+        noteCoalescedPeerDropReceipt(command, 'queue-full')
+      }
+      return { admitted: false, reason: 'queue-full' }
+    }
+
+    return { admitted: true }
+  }
+
+  enqueueReportingAdmission(
+    command: QueuedCommand,
+    opts: EnqueueReportingAdmissionOpts = {},
+  ): ReportingAdmissionResult {
+    const admitted = this.admitReportingCommand(
+      command,
+      opts.receipt ?? 'coalesced',
+    )
+    if (!admitted.admitted) return admitted
+
+    const stamped = withMainThreadAgentId(stripPeerCommandHopChain(command))
+    const queued: QueuedCommand = {
+      ...stamped,
+      priority: stamped.priority ?? 'next',
+    }
+    if (opts.ahead) this.commandQueue.unshift(queued)
+    else this.commandQueue.push(queued)
+
+    const origin = command.origin as PeerQueueOrigin | undefined
+    if (
+      origin?.kind === 'peer' &&
+      origin.handback === true &&
+      origin.senderTaskId !== undefined &&
+      (command as { admissionExempt?: string }).admissionExempt !==
+        'resurrected'
+    ) {
+      recordHandbackDelivery(
+        origin.senderTaskId,
+        String(command.agentId ?? ''),
+        {
+          flagged: origin.flagged === true,
+        },
+      )
+    }
+
+    this.notifySubscribers()
+    if (!(command as { unlogged?: boolean }).unlogged) {
+      logOperation(
+        'enqueue',
+        typeof stamped.value === 'string' ? stamped.value : undefined,
+      )
+    }
+    return { admitted: true }
+  }
+
+  enqueue(command: QueuedCommand): void {
+    this.enqueueReportingAdmission(command)
+  }
+
+  registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
+    for (const cmd of commands) {
+      if (cmd.uuid !== undefined) this.foldInFlight.add(cmd.uuid)
+    }
+  }
+
+  unregisterFoldInFlight(commands: Array<{ uuid?: string }>): void {
+    for (const cmd of commands) {
+      if (cmd.uuid !== undefined) this.foldInFlight.delete(cmd.uuid)
+    }
+  }
+
+  isFoldInFlight(uuid: string): boolean {
+    return this.foldInFlight.has(uuid)
+  }
+
+  suspendMidTurnFold(): void {
+    if (this.midTurnFoldSuspended) return
+    this.midTurnFoldSuspended = true
+    this.notifySubscribers()
+  }
+
+  isMidTurnFoldSuspended(): boolean {
+    const { isShutdownCommitted } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./shutdownCommitted.js') as typeof import('./shutdownCommitted.js')
+    return this.midTurnFoldSuspended || isShutdownCommitted()
+  }
+
+  promoteToNow(uuid: string): boolean {
+    const cmd = this.commandQueue.find(row => row.uuid === uuid)
+    if (
+      cmd === undefined ||
+      cmd.priority === 'now' ||
+      this.foldInFlight.has(uuid)
+    ) {
+      return false
+    }
+    cmd.priority = 'now'
+    this.notifySubscribers()
+    return true
+  }
+
+  demoteFromNow(uuid: string, raisedFrom: QueuePriority): boolean {
+    const cmd = this.commandQueue.find(row => row.uuid === uuid)
+    if (cmd === undefined || cmd.priority !== 'now') return false
+    cmd.priority = raisedFrom
+    this.notifySubscribers()
+    return true
+  }
+
+  promoteMainThreadQueueToNow(): number {
+    let n = 0
+    for (const cmd of this.commandQueue) {
+      if (!isMainThreadQueuedCommand(cmd)) continue
+      if (cmd.uuid !== undefined) {
+        if (this.promoteToNow(cmd.uuid)) n++
+        continue
+      }
+      if (cmd.priority === 'now') continue
+      cmd.priority = 'now'
+      n++
+    }
+    if (n > 0) this.notifySubscribers()
+    return n
+  }
+
+  enqueuePendingNotification(
+    command: QueuedCommand,
+    opts?: { turnAttribution?: 'inherit' | 'none' },
+  ): void {
+    if (!this.admitReportingCommand(command).admitted) return
+
+    // densable Sn: cap task-notification strings via ap(..., Q8n) before push.
+    let queued = command
+    if (
+      command.mode === 'task-notification' &&
+      typeof command.value === 'string'
+    ) {
+      const capped = capTaskNotificationValue(command.value)
+      if (capped !== command.value) {
+        logForDebugging(
+          'enqueuePendingNotification: task-notification capped from ' +
+            `${command.value.length} to ${capped.length} chars`,
+          { level: 'warn' },
+        )
+        queued = { ...command, value: capped }
+      }
+    }
+    const inherit = opts?.turnAttribution === 'inherit'
+    if (inherit && queued.mode === 'task-notification') {
+      const origin = queued.origin
+      if (origin === undefined || origin.kind === 'task-notification') {
+        queued = {
+          ...queued,
+          origin: {
+            ...(origin ?? { kind: 'task-notification' }),
+            producer: 'session-task',
+          },
+        }
+      }
+    }
+    const inheritedKey =
+      queued.inheritedTurnAttributionKey ??
+      (inherit && queued.mode === 'task-notification'
+        ? getTurnAttributionKey()
+        : undefined)
+    const stamped = withMainThreadAgentId(stripPeerCommandHopChain(queued))
+    this.commandQueue.push({
+      ...stamped,
+      priority: stamped.priority ?? 'later',
+      ...(inheritedKey !== undefined
+        ? { inheritedTurnAttributionKey: inheritedKey }
+        : {}),
+    })
+    this.notifySubscribers()
+    if (!(command as { unlogged?: boolean }).unlogged) {
+      logOperation(
+        'enqueue',
+        typeof stamped.value === 'string' ? stamped.value : undefined,
+      )
+    }
+  }
+
+  dequeue(filter?: (cmd: QueuedCommand) => boolean): QueuedCommand | undefined {
+    if (this.commandQueue.length === 0) {
+      return undefined
+    }
+
+    // Find the first command with the highest priority (respecting filter)
+    let bestIdx = -1
+    let bestPriority = Infinity
+    for (let i = 0; i < this.commandQueue.length; i++) {
+      const cmd = this.commandQueue[i]!
+      if (filter && !filter(cmd)) continue
+      const priority = PRIORITY_ORDER[cmd.priority ?? 'next']
+      if (priority < bestPriority) {
+        bestIdx = i
+        bestPriority = priority
+      }
+    }
+
+    if (bestIdx === -1) return undefined
+
+    const [dequeued] = this.commandQueue.splice(bestIdx, 1)
+    this.notifySubscribers()
+    logOperation('dequeue')
+    return dequeued
+  }
+
+  dequeueAll(): QueuedCommand[] {
+    if (this.commandQueue.length === 0) {
+      return []
+    }
+
+    const commands = [...this.commandQueue]
+    this.commandQueue.length = 0
+    this.notifySubscribers()
+
+    for (const _cmd of commands) {
+      logOperation('dequeue')
+    }
+
+    return commands
+  }
+
+  peek(filter?: (cmd: QueuedCommand) => boolean): QueuedCommand | undefined {
+    if (this.commandQueue.length === 0) {
+      return undefined
+    }
+    let bestIdx = -1
+    let bestPriority = Infinity
+    for (let i = 0; i < this.commandQueue.length; i++) {
+      const cmd = this.commandQueue[i]!
+      if (filter && !filter(cmd)) continue
+      const priority = PRIORITY_ORDER[cmd.priority ?? 'next']
+      if (priority < bestPriority) {
+        bestIdx = i
+        bestPriority = priority
+      }
+    }
+    if (bestIdx === -1) return undefined
+    return this.commandQueue[bestIdx]
+  }
+
+  settleScreening(
+    uuid: string,
+    update:
+      | { dropped: true }
+      | {
+          promptSubmitted?: QueuedCommand['promptSubmitted']
+          drainOnly?: boolean
+        },
+  ): boolean {
+    const command = this.commandQueue.find(
+      cmd => cmd.uuid === uuid && cmd.screeningPending === true,
+    )
+    if (command === undefined) return false
+    if ('dropped' in update) {
+      this.remove([command])
+      return true
+    }
+    delete command.screeningPending
+    command.promptSubmitted = update.promptSubmitted
+    command.drainOnly = update.drainOnly
+    this.notifySubscribers()
+    return true
+  }
+
+  dequeueAllMatching(
+    predicate: (cmd: QueuedCommand) => boolean,
+  ): QueuedCommand[] {
+    const matched: QueuedCommand[] = []
+    const remaining: QueuedCommand[] = []
+    for (const cmd of this.commandQueue) {
+      if (predicate(cmd)) {
+        matched.push(cmd)
+      } else {
+        remaining.push(cmd)
+      }
+    }
+    if (matched.length === 0) {
+      return []
+    }
+    this.commandQueue.length = 0
+    this.commandQueue.push(...remaining)
+    this.notifySubscribers()
+    for (const _cmd of matched) {
+      logOperation('dequeue')
+    }
+    return matched
+  }
+
+  private spliceQueuedCommands(commandsToRemove: QueuedCommand[]): void {
+    if (commandsToRemove.length === 0) return
+    const before = this.commandQueue.length
+    for (let i = this.commandQueue.length - 1; i >= 0; i--) {
+      if (commandsToRemove.includes(this.commandQueue[i]!)) {
+        this.commandQueue.splice(i, 1)
+      }
+    }
+    if (this.commandQueue.length !== before) {
+      this.notifySubscribers()
+    }
+  }
+
+  remove(commandsToRemove: QueuedCommand[]): void {
+    if (commandsToRemove.length === 0) {
+      return
+    }
+
+    this.spliceQueuedCommands(commandsToRemove)
+    settlePromptSubmitWaitsRemoved(commandsToRemove)
+    failCommandRunWaits(commandsToRemove, COMMAND_REMOVED_BEFORE_RUN)
+    this.commandsDiscarded.emit(commandsToRemove)
+    for (const _cmd of commandsToRemove) {
+      logOperation('remove')
+    }
+  }
+
+  consume(
+    commandsToConsume: QueuedCommand[],
+    opts?: { reason?: string },
+  ): void {
+    if (commandsToConsume.length === 0) {
+      return
+    }
+    if (opts?.reason !== undefined) {
+      logForDebugging(`consume: ${opts.reason}`)
+    }
+
+    this.spliceQueuedCommands(commandsToConsume)
+    failCommandRunWaits(commandsToConsume, COMMAND_LEFT_QUEUE_AS_TEXT)
+    this.commandsConsumed.emit(commandsToConsume)
+    for (const _cmd of commandsToConsume) {
+      logOperation('remove')
+    }
+  }
+
+  removeByFilter(predicate: (cmd: QueuedCommand) => boolean): QueuedCommand[] {
+    const removed: QueuedCommand[] = []
+    for (let i = this.commandQueue.length - 1; i >= 0; i--) {
+      if (predicate(this.commandQueue[i]!)) {
+        removed.unshift(this.commandQueue.splice(i, 1)[0]!)
+      }
+    }
+
+    if (removed.length > 0) {
+      this.notifySubscribers()
+      settlePromptSubmitWaitsRemoved(removed)
+      failCommandRunWaits(removed, COMMAND_REMOVED_BEFORE_RUN)
+      this.commandsDiscarded.emit(removed)
+      for (const _cmd of removed) {
+        logOperation('remove')
+      }
+    }
+
+    return removed
+  }
+
+  clear(): void {
+    if (this.commandQueue.length === 0) {
+      return
+    }
+    const discarded = [...this.commandQueue]
+    settlePromptSubmitWaitsRemoved(discarded)
+    failCommandRunWaits(discarded, COMMAND_REMOVED_BEFORE_RUN)
+    this.commandsDiscarded.emit(discarded)
+    this.commandQueue.length = 0
+    this.notifySubscribers()
+  }
+
+  reset(): void {
+    this.commandQueue.length = 0
+    this.snapshot = Object.freeze([])
+    this.inFlightDrainBatch = null
+    this.cancelPending.clear()
+    this.cancelPendingAcked.clear()
+    this.foldInFlight.clear()
+    this.midTurnFoldSuspended = false
+    this.commandsConsumed.clear()
+    this.commandsDiscarded.clear()
+  }
+
+  markCancelPending(
+    uuid: string,
+    opts?: { terminalEmitted?: boolean },
+  ): boolean {
+    if (this.cancelPending.delete(uuid)) {
+      this.cancelPending.add(uuid)
+    } else {
+      if (
+        opts?.terminalEmitted !== true &&
+        this.cancelPending.size >= CANCEL_PENDING_CAP
+      ) {
+        let evict: string | undefined
+        for (const id of this.cancelPending) {
+          if (!this.cancelPendingAcked.has(id)) {
+            evict = id
+            break
+          }
+        }
+        if (evict !== undefined) this.cancelPending.delete(evict)
+      }
+      this.cancelPending.add(uuid)
+    }
+    if (opts?.terminalEmitted !== true) return false
+    if (this.cancelPendingAcked.has(uuid)) return false
+    this.cancelPendingAcked.add(uuid)
+    return true
+  }
+
+  consumeCancelPending(uuid: string): boolean {
+    return this.cancelPending.delete(uuid)
+  }
+
+  consumeCancelPendingAcked(uuid: string): boolean {
+    return this.cancelPendingAcked.delete(uuid)
+  }
+
+  hasCancelPendingAcked(uuid: string): boolean {
+    return this.cancelPendingAcked.has(uuid)
+  }
+
+  setInFlightDrainBatch(batch: QueuedCommand[]): void {
+    this.inFlightDrainBatch = batch
+  }
+
+  clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
+    if (batch === undefined || this.inFlightDrainBatch === batch) {
+      this.inFlightDrainBatch = null
+    }
+  }
+
+  someInFlightDrainCommand(pred?: (cmd: QueuedCommand) => boolean): boolean {
+    if (this.inFlightDrainBatch === null) return false
+    if (pred === undefined) return this.inFlightDrainBatch.length > 0
+    return this.inFlightDrainBatch.some(pred)
+  }
+
+  hasPoppableEditableCommands(inputEmpty: boolean): boolean {
+    return this.commandQueue.some(cmd =>
+      isPoppableEditableCommand(cmd, inputEmpty),
+    )
+  }
+
+  popAllEditable(
+    currentInput: string,
+    currentCursorOffset: number,
+  ): PopAllEditableResult | undefined {
+    if (this.commandQueue.length === 0) {
+      return undefined
+    }
+
+    const inputEmpty = currentInput === ''
+    const candidates = this.commandQueue.filter(cmd =>
+      isPoppableEditableCommand(cmd, inputEmpty),
+    )
+    if (candidates.length === 0) {
+      return undefined
+    }
+
+    // densable: Je=je.every(mode==="bash")?"bash":"prompt"
+    const mode: 'bash' | 'prompt' = candidates.every(cmd => cmd.mode === 'bash')
+      ? 'bash'
+      : 'prompt'
+    // densable: Ft=Je==="bash"?je:je.filter(mode!=="bash")
+    const editable =
+      mode === 'bash'
+        ? candidates
+        : candidates.filter(cmd => cmd.mode !== 'bash')
+    if (editable.length === 0) {
+      return undefined
+    }
+
+    // Extract text from queued commands (handles both strings and ContentBlockParam[])
+    const queuedTexts = editable.map(cmd => extractTextFromValue(cmd.value))
+    const newInput = [...queuedTexts, currentInput].filter(Boolean).join('\n')
+
+    // Calculate cursor offset: length of joined queued commands + 1 + current cursor offset
+    const cursorOffset = queuedTexts.join('\n').length + 1 + currentCursorOffset
+
+    // Extract images from queued commands
+    const images: PastedContent[] = []
+    let nextImageId = Date.now() // Use timestamp as base for unique IDs
+    for (const cmd of editable) {
+      // handlePromptSubmit queues images in pastedContents (value is a string).
+      // Preserve the original PastedContent id so imageStore lookups still work.
+      if (cmd.pastedContents) {
+        for (const content of Object.values(cmd.pastedContents)) {
+          if (content.type === 'image') {
+            images.push(content)
+          }
+        }
+      }
+      // Bridge/remote commands may embed images directly in ContentBlockParam[].
+      const cmdImages = extractImagesFromValue(cmd.value, nextImageId)
+      images.push(...cmdImages)
+      nextImageId += cmdImages.length
+    }
+
+    for (const command of editable) {
+      logOperation(
+        'popAll',
+        typeof command.value === 'string' ? command.value : undefined,
+      )
+    }
+
+    // densable: keep commands not in Ft (incl. bash left behind on prompt restore)
+    const popped = new Set(editable)
+    const remaining = this.commandQueue.filter(cmd => !popped.has(cmd))
+    this.commandQueue.length = 0
+    this.commandQueue.push(...remaining)
+    this.notifySubscribers()
+    settlePromptSubmitWaitsRemoved(editable)
+
+    const ideSelection = editable.findLast(
+      cmd => cmd.ideSelection !== undefined,
+    )?.ideSelection
+    return { text: newInput, cursorOffset, images, mode, ideSelection }
+  }
+
+  popEditableAt(
+    index: number,
+    currentInput: string,
+    currentCursorOffset: number,
+  ): PopEditableAtResult | undefined {
+    const cmd = this.commandQueue.filter(isQueuedCommandEditable)[index]
+    if (!cmd) {
+      return undefined
+    }
+    if (!isPoppableEditableCommand(cmd, currentInput === '')) {
+      return undefined
+    }
+
+    const text = extractTextFromValue(cmd.value)
+    const newInput = [text, currentInput].filter(Boolean).join('\n')
+    const cursorOffset = text.length + 1 + currentCursorOffset
+
+    const images: PastedContent[] = []
+    if (cmd.pastedContents) {
+      for (const content of Object.values(cmd.pastedContents)) {
+        if (content.type === 'image') {
+          images.push(content)
+        }
+      }
+    }
+    images.push(...extractImagesFromValue(cmd.value, Date.now()))
+
+    logOperation(
+      'popOne',
+      typeof cmd.value === 'string' ? cmd.value : undefined,
+    )
+
+    const gr = this.commandQueue.indexOf(cmd)
+    if (gr !== -1) {
+      this.commandQueue.splice(gr, 1)
+      this.notifySubscribers()
+      settlePromptSubmitWaitsRemoved([cmd])
+    }
+
+    return {
+      text: newInput,
+      cursorOffset,
+      images,
+      mode: cmd.mode === 'bash' ? 'bash' : 'prompt',
+      ideSelection: cmd.ideSelection,
+    }
+  }
+
+  getCommandsByMaxPriority(maxPriority: QueuePriority): QueuedCommand[] {
+    const threshold = PRIORITY_ORDER[maxPriority]
+    return this.commandQueue.filter(
+      cmd => PRIORITY_ORDER[cmd.priority ?? 'next'] <= threshold,
+    )
+  }
+
+  countRemainingWakePollEventsAfter(taken: readonly QueuedCommand[]): number {
+    const takenSet = new Set(taken)
+    const agentId = taken.find(cmd => cmd.mode === 'poll-event')?.agentId
+    return this.commandQueue.filter(
+      cmd =>
+        cmd.mode === 'poll-event' &&
+        cmd.pollEvent?.wake === true &&
+        !takenSet.has(cmd) &&
+        (agentId === undefined || cmd.agentId === agentId),
+    ).length
+  }
 }
+
+export { MessageQueueInstance as MessageQueueManager }
+
+export function createMessageQueue(): MessageQueueInstance {
+  return new MessageQueueInstance()
+}
+
+export const defaultQueue = createMessageQueue()
+let activeQueue: MessageQueueInstance = defaultQueue
+
+export function getActiveMessageQueue(): MessageQueueInstance {
+  return activeQueue
+}
+
+export function setActiveMessageQueue(queue: MessageQueueInstance): void {
+  activeQueue = queue
+}
+
+export const subscribeCommandsConsumed: Signal<[QueuedCommand[]]>['subscribe'] =
+  listener => activeQueue.subscribeCommandsConsumed(listener)
+export const subscribeCommandsDiscarded: Signal<
+  [QueuedCommand[]]
+>['subscribe'] = listener => activeQueue.subscribeCommandsDiscarded(listener)
 
 // ============================================================================
 // useSyncExternalStore interface
@@ -113,7 +862,8 @@ function notifySubscribers(): void {
  * Subscribe to command queue changes.
  * Compatible with React's useSyncExternalStore.
  */
-export const subscribeToCommandQueue = queueChanged.subscribe
+export const subscribeToCommandQueue: Signal['subscribe'] = listener =>
+  activeQueue.subscribe(listener)
 
 /**
  * Get current snapshot of the command queue.
@@ -121,7 +871,7 @@ export const subscribeToCommandQueue = queueChanged.subscribe
  * Returns a frozen array that only changes reference on mutation.
  */
 export function getCommandQueueSnapshot(): readonly QueuedCommand[] {
-  return snapshot
+  return activeQueue.getSnapshot()
 }
 
 // ============================================================================
@@ -133,7 +883,7 @@ export function getCommandQueueSnapshot(): readonly QueuedCommand[] {
  * Use for one-off reads where you need the actual commands.
  */
 export function getCommandQueue(): QueuedCommand[] {
-  return [...commandQueue]
+  return activeQueue.getCommands()
 }
 
 /**
@@ -141,7 +891,7 @@ export function getCommandQueue(): QueuedCommand[] {
  * densable j4i — full queue including nested/subagent-addressed entries.
  */
 export function getCommandQueueLength(): number {
-  return commandQueue.length
+  return activeQueue.getLength()
 }
 
 /**
@@ -152,18 +902,14 @@ export function getCommandQueueLength(): number {
  * getCommandQueueLength().
  */
 export function getMainThreadQueueLength(): number {
-  let n = 0
-  for (const cmd of commandQueue) {
-    if (isMainThreadQueuedCommand(cmd)) n++
-  }
-  return n
+  return activeQueue.getMainThreadLength()
 }
 
 /**
  * Check if there are commands in the queue.
  */
 export function hasCommandsInQueue(): boolean {
-  return commandQueue.length > 0
+  return activeQueue.hasCommands()
 }
 
 /**
@@ -174,7 +920,7 @@ export function hasCommandsInQueue(): boolean {
  * the rewind message selector (densable 2.1.216 #12).
  */
 export function hasEditableCommandsInQueue(): boolean {
-  return commandQueue.some(isQueuedCommandEditable)
+  return activeQueue.hasEditableCommands()
 }
 
 /**
@@ -183,9 +929,7 @@ export function hasEditableCommandsInQueue(): boolean {
  * are picked up by useSyncExternalStore consumers.
  */
 export function recheckCommandQueue(): void {
-  if (commandQueue.length > 0) {
-    notifySubscribers()
-  }
+  activeQueue.recheck()
 }
 
 // ============================================================================
@@ -350,13 +1094,7 @@ function isVerifiedPeerOrigin(origin: PeerQueueOrigin): boolean {
 
 /** densable Un — count of queued cross-session peer commands. */
 export function countQueuedPeerMessages(): number {
-  let n = 0
-  for (const cmd of commandQueue) {
-    if (isCrossSessionPeerOrigin(cmd.origin as PeerQueueOrigin | undefined)) {
-      n++
-    }
-  }
-  return n
+  return activeQueue.countQueuedPeerMessages()
 }
 
 function peerCommandBody(command: QueuedCommand): string {
@@ -411,83 +1149,6 @@ function noteCoalescedPeerDropReceipt(
 }
 
 /**
- * densable `yr` — admit cross-session peers via zo.checkHopChain / zo.admit /
- * maxQueuedPeerMessages. Non-peer and handback peers always admit.
- * Never export minify `yr`.
- */
-function admitReportingCommand(
-  command: QueuedCommand,
-  receipt: 'coalesced' | 'immediate' = 'coalesced',
-): ReportingAdmissionResult {
-  const origin = command.origin as PeerQueueOrigin | undefined
-  if (!isCrossSessionPeerOrigin(origin)) {
-    return { admitted: true }
-  }
-
-  const resurrected =
-    (command as { admissionExempt?: string }).admissionExempt ===
-      'resurrected' || origin.admissionExempt === 'resurrected'
-  const ownTokens = getOwnHopTokens()
-  const guard = getPeerAdmissionGuard()
-
-  if (!resurrected && !isVerifiedPeerOrigin(origin)) {
-    const hop = guard.checkHopChain(origin.hopChain, ownTokens)
-    if (hop && !hop.admitted) {
-      reportPeerDrop({
-        reason: hop.reason,
-        from: origin.from,
-        name: origin.name,
-      })
-      if (receipt === 'coalesced') {
-        noteCoalescedPeerDropReceipt(command, hop.reason)
-      }
-      return { admitted: false, reason: hop.reason }
-    }
-  }
-
-  if (!resurrected && isVerifiedPeerOrigin(origin)) {
-    const body = peerCommandBody(command)
-    const admitted = guard.admit({
-      // Gold yr: Fr.from!=="unknown"?from:${Fr.from}:pid:${Fr.verifiedPeerPid}
-      senderKey:
-        origin.from !== 'unknown'
-          ? `from:${origin.from}`
-          : `pid:${origin.verifiedPeerPid}`,
-      body,
-      hopChain: origin.hopChain,
-      ownTokens,
-    })
-    if (!admitted.admitted) {
-      reportPeerDrop({
-        reason: admitted.reason,
-        from: origin.from,
-        name: origin.name,
-      })
-      if (receipt === 'coalesced') {
-        noteCoalescedPeerDropReceipt(command, admitted.reason)
-      }
-      return { admitted: false, reason: admitted.reason }
-    }
-  }
-
-  if (
-    countQueuedPeerMessages() >= getPeerAdmissionLimits().maxQueuedPeerMessages
-  ) {
-    reportPeerDrop({
-      reason: 'queue-full',
-      from: origin.from,
-      name: origin.name,
-    })
-    if (receipt === 'coalesced') {
-      noteCoalescedPeerDropReceipt(command, 'queue-full')
-    }
-    return { admitted: false, reason: 'queue-full' }
-  }
-
-  return { admitted: true }
-}
-
-/**
  * densable `enqueueReportingAdmission` / `ds` — admit-then-push; on peer
  * handback origin call `recordHandbackDelivery` (m7n). Alias of gold `ds`.
  * Never export minify `ds`/`yr`.
@@ -496,37 +1157,7 @@ export function enqueueReportingAdmission(
   command: QueuedCommand,
   opts: EnqueueReportingAdmissionOpts = {},
 ): ReportingAdmissionResult {
-  const admitted = admitReportingCommand(command, opts.receipt ?? 'coalesced')
-  if (!admitted.admitted) return admitted
-
-  const stamped = withMainThreadAgentId(stripPeerCommandHopChain(command))
-  const queued: QueuedCommand = {
-    ...stamped,
-    priority: stamped.priority ?? 'next',
-  }
-  if (opts.ahead) commandQueue.unshift(queued)
-  else commandQueue.push(queued)
-
-  const origin = command.origin as PeerQueueOrigin | undefined
-  if (
-    origin?.kind === 'peer' &&
-    origin.handback === true &&
-    origin.senderTaskId !== undefined &&
-    (command as { admissionExempt?: string }).admissionExempt !== 'resurrected'
-  ) {
-    recordHandbackDelivery(origin.senderTaskId, String(command.agentId ?? ''), {
-      flagged: origin.flagged === true,
-    })
-  }
-
-  notifySubscribers()
-  if (!(command as { unlogged?: boolean }).unlogged) {
-    logOperation(
-      'enqueue',
-      typeof stamped.value === 'string' ? stamped.value : undefined,
-    )
-  }
-  return { admitted: true }
+  return activeQueue.enqueueReportingAdmission(command, opts)
 }
 
 /**
@@ -538,23 +1169,14 @@ export function enqueueReportingAdmission(
  * densable `xr` → `ds`: enqueue routes through enqueueReportingAdmission.
  */
 export function enqueue(command: QueuedCommand): void {
-  enqueueReportingAdmission(command)
+  activeQueue.enqueue(command)
 }
-
-/**
- * densable `ve` — uuids whose mid-turn fold is in flight. `yt` refuses these.
- */
-const foldInFlight = new Set<string>()
-/** densable `qe` — mid-turn fold suspended. `Ft` is `qe` (gold also ORs `Mr()`). */
-let midTurnFoldSuspended = false
 
 /**
  * densable `Te` — mark queued uuids as fold-in-flight.
  */
 export function registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
-  for (const cmd of commands) {
-    if (cmd.uuid !== undefined) foldInFlight.add(cmd.uuid)
-  }
+  activeQueue.registerFoldInFlight(commands)
 }
 
 /**
@@ -563,29 +1185,22 @@ export function registerFoldInFlight(commands: Array<{ uuid?: string }>): void {
 export function unregisterFoldInFlight(
   commands: Array<{ uuid?: string }>,
 ): void {
-  for (const cmd of commands) {
-    if (cmd.uuid !== undefined) foldInFlight.delete(cmd.uuid)
-  }
+  activeQueue.unregisterFoldInFlight(commands)
 }
 
 /** densable `Pe`. */
 export function isFoldInFlight(uuid: string): boolean {
-  return foldInFlight.has(uuid)
+  return activeQueue.isFoldInFlight(uuid)
 }
 
 /** densable `Ze`. */
 export function suspendMidTurnFold(): void {
-  if (midTurnFoldSuspended) return
-  midTurnFoldSuspended = true
-  notifySubscribers()
+  activeQueue.suspendMidTurnFold()
 }
 
 /** densable `Ft` — `qe || Mr()`. */
 export function isMidTurnFoldSuspended(): boolean {
-  const { isShutdownCommitted } =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('./shutdownCommitted.js') as typeof import('./shutdownCommitted.js')
-  return midTurnFoldSuspended || isShutdownCommitted()
+  return activeQueue.isMidTurnFoldSuspended()
 }
 
 /**
@@ -593,13 +1208,7 @@ export function isMidTurnFoldSuspended(): boolean {
  * False when missing, already now, or fold-in-flight.
  */
 export function promoteToNow(uuid: string): boolean {
-  const cmd = commandQueue.find(row => row.uuid === uuid)
-  if (cmd === undefined || cmd.priority === 'now' || foldInFlight.has(uuid)) {
-    return false
-  }
-  cmd.priority = 'now'
-  notifySubscribers()
-  return true
+  return activeQueue.promoteToNow(uuid)
 }
 
 /**
@@ -609,11 +1218,7 @@ export function demoteFromNow(
   uuid: string,
   raisedFrom: QueuePriority,
 ): boolean {
-  const cmd = commandQueue.find(row => row.uuid === uuid)
-  if (cmd === undefined || cmd.priority !== 'now') return false
-  cmd.priority = raisedFrom
-  notifySubscribers()
-  return true
+  return activeQueue.demoteFromNow(uuid, raisedFrom)
 }
 
 /**
@@ -621,19 +1226,7 @@ export function demoteFromNow(
  * REPL typed send-now still flushes the main-thread batch.
  */
 export function promoteMainThreadQueueToNow(): number {
-  let n = 0
-  for (const cmd of commandQueue) {
-    if (!isMainThreadQueuedCommand(cmd)) continue
-    if (cmd.uuid !== undefined) {
-      if (promoteToNow(cmd.uuid)) n++
-      continue
-    }
-    if (cmd.priority === 'now') continue
-    cmd.priority = 'now'
-    n++
-  }
-  if (n > 0) notifySubscribers()
-  return n
+  return activeQueue.promoteMainThreadQueueToNow()
 }
 
 /**
@@ -649,57 +1242,7 @@ export function enqueuePendingNotification(
   command: QueuedCommand,
   opts?: { turnAttribution?: 'inherit' | 'none' },
 ): void {
-  if (!admitReportingCommand(command).admitted) return
-
-  // densable Sn: cap task-notification strings via ap(..., Q8n) before push.
-  let queued = command
-  if (
-    command.mode === 'task-notification' &&
-    typeof command.value === 'string'
-  ) {
-    const capped = capTaskNotificationValue(command.value)
-    if (capped !== command.value) {
-      logForDebugging(
-        'enqueuePendingNotification: task-notification capped from ' +
-          `${command.value.length} to ${capped.length} chars`,
-        { level: 'warn' },
-      )
-      queued = { ...command, value: capped }
-    }
-  }
-  const inherit = opts?.turnAttribution === 'inherit'
-  if (inherit && queued.mode === 'task-notification') {
-    const origin = queued.origin
-    if (origin === undefined || origin.kind === 'task-notification') {
-      queued = {
-        ...queued,
-        origin: {
-          ...(origin ?? { kind: 'task-notification' }),
-          producer: 'session-task',
-        },
-      }
-    }
-  }
-  const inheritedKey =
-    queued.inheritedTurnAttributionKey ??
-    (inherit && queued.mode === 'task-notification'
-      ? getTurnAttributionKey()
-      : undefined)
-  const stamped = withMainThreadAgentId(stripPeerCommandHopChain(queued))
-  commandQueue.push({
-    ...stamped,
-    priority: stamped.priority ?? 'later',
-    ...(inheritedKey !== undefined
-      ? { inheritedTurnAttributionKey: inheritedKey }
-      : {}),
-  })
-  notifySubscribers()
-  if (!(command as { unlogged?: boolean }).unlogged) {
-    logOperation(
-      'enqueue',
-      typeof stamped.value === 'string' ? stamped.value : undefined,
-    )
-  }
+  activeQueue.enqueuePendingNotification(command, opts)
 }
 
 const PRIORITY_ORDER: Record<QueuePriority, number> = {
@@ -721,29 +1264,7 @@ const PRIORITY_ORDER: Record<QueuePriority, number> = {
 export function dequeue(
   filter?: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand | undefined {
-  if (commandQueue.length === 0) {
-    return undefined
-  }
-
-  // Find the first command with the highest priority (respecting filter)
-  let bestIdx = -1
-  let bestPriority = Infinity
-  for (let i = 0; i < commandQueue.length; i++) {
-    const cmd = commandQueue[i]!
-    if (filter && !filter(cmd)) continue
-    const priority = PRIORITY_ORDER[cmd.priority ?? 'next']
-    if (priority < bestPriority) {
-      bestIdx = i
-      bestPriority = priority
-    }
-  }
-
-  if (bestIdx === -1) return undefined
-
-  const [dequeued] = commandQueue.splice(bestIdx, 1)
-  notifySubscribers()
-  logOperation('dequeue')
-  return dequeued
+  return activeQueue.dequeue(filter)
 }
 
 /**
@@ -751,19 +1272,7 @@ export function dequeue(
  * Logs a dequeue operation for each command.
  */
 export function dequeueAll(): QueuedCommand[] {
-  if (commandQueue.length === 0) {
-    return []
-  }
-
-  const commands = [...commandQueue]
-  commandQueue.length = 0
-  notifySubscribers()
-
-  for (const _cmd of commands) {
-    logOperation('dequeue')
-  }
-
-  return commands
+  return activeQueue.dequeueAll()
 }
 
 /**
@@ -773,22 +1282,7 @@ export function dequeueAll(): QueuedCommand[] {
 export function peek(
   filter?: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand | undefined {
-  if (commandQueue.length === 0) {
-    return undefined
-  }
-  let bestIdx = -1
-  let bestPriority = Infinity
-  for (let i = 0; i < commandQueue.length; i++) {
-    const cmd = commandQueue[i]!
-    if (filter && !filter(cmd)) continue
-    const priority = PRIORITY_ORDER[cmd.priority ?? 'next']
-    if (priority < bestPriority) {
-      bestIdx = i
-      bestPriority = priority
-    }
-  }
-  if (bestIdx === -1) return undefined
-  return commandQueue[bestIdx]
+  return activeQueue.peek(filter)
 }
 
 /**
@@ -805,19 +1299,7 @@ export function settleScreening(
         drainOnly?: boolean
       },
 ): boolean {
-  const command = commandQueue.find(
-    cmd => cmd.uuid === uuid && cmd.screeningPending === true,
-  )
-  if (command === undefined) return false
-  if ('dropped' in update) {
-    remove([command])
-    return true
-  }
-  delete command.screeningPending
-  command.promptSubmitted = update.promptSubmitted
-  command.drainOnly = update.drainOnly
-  notifySubscribers()
-  return true
+  return activeQueue.settleScreening(uuid, update)
 }
 
 /**
@@ -827,38 +1309,7 @@ export function settleScreening(
 export function dequeueAllMatching(
   predicate: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand[] {
-  const matched: QueuedCommand[] = []
-  const remaining: QueuedCommand[] = []
-  for (const cmd of commandQueue) {
-    if (predicate(cmd)) {
-      matched.push(cmd)
-    } else {
-      remaining.push(cmd)
-    }
-  }
-  if (matched.length === 0) {
-    return []
-  }
-  commandQueue.length = 0
-  commandQueue.push(...remaining)
-  notifySubscribers()
-  for (const _cmd of matched) {
-    logOperation('dequeue')
-  }
-  return matched
-}
-
-function spliceQueuedCommands(commandsToRemove: QueuedCommand[]): void {
-  if (commandsToRemove.length === 0) return
-  const before = commandQueue.length
-  for (let i = commandQueue.length - 1; i >= 0; i--) {
-    if (commandsToRemove.includes(commandQueue[i]!)) {
-      commandQueue.splice(i, 1)
-    }
-  }
-  if (commandQueue.length !== before) {
-    notifySubscribers()
-  }
+  return activeQueue.dequeueAllMatching(predicate)
 }
 
 /**
@@ -867,17 +1318,7 @@ function spliceQueuedCommands(commandsToRemove: QueuedCommand[]): void {
  * queue (e.g. from getCommandsByMaxPriority).
  */
 export function remove(commandsToRemove: QueuedCommand[]): void {
-  if (commandsToRemove.length === 0) {
-    return
-  }
-
-  spliceQueuedCommands(commandsToRemove)
-  settlePromptSubmitWaitsRemoved(commandsToRemove)
-  failCommandRunWaits(commandsToRemove, COMMAND_REMOVED_BEFORE_RUN)
-  commandsDiscarded.emit(commandsToRemove)
-  for (const _cmd of commandsToRemove) {
-    logOperation('remove')
-  }
+  activeQueue.remove(commandsToRemove)
 }
 
 /**
@@ -889,19 +1330,7 @@ export function consume(
   commandsToConsume: QueuedCommand[],
   opts?: { reason?: string },
 ): void {
-  if (commandsToConsume.length === 0) {
-    return
-  }
-  if (opts?.reason !== undefined) {
-    logForDebugging(`consume: ${opts.reason}`)
-  }
-
-  spliceQueuedCommands(commandsToConsume)
-  failCommandRunWaits(commandsToConsume, COMMAND_LEFT_QUEUE_AS_TEXT)
-  commandsConsumed.emit(commandsToConsume)
-  for (const _cmd of commandsToConsume) {
-    logOperation('remove')
-  }
+  activeQueue.consume(commandsToConsume, opts)
 }
 
 /**
@@ -911,24 +1340,7 @@ export function consume(
 export function removeByFilter(
   predicate: (cmd: QueuedCommand) => boolean,
 ): QueuedCommand[] {
-  const removed: QueuedCommand[] = []
-  for (let i = commandQueue.length - 1; i >= 0; i--) {
-    if (predicate(commandQueue[i]!)) {
-      removed.unshift(commandQueue.splice(i, 1)[0]!)
-    }
-  }
-
-  if (removed.length > 0) {
-    notifySubscribers()
-    settlePromptSubmitWaitsRemoved(removed)
-    failCommandRunWaits(removed, COMMAND_REMOVED_BEFORE_RUN)
-    commandsDiscarded.emit(removed)
-    for (const _cmd of removed) {
-      logOperation('remove')
-    }
-  }
-
-  return removed
+  return activeQueue.removeByFilter(predicate)
 }
 
 /**
@@ -936,15 +1348,7 @@ export function removeByFilter(
  * Used by ESC cancellation to discard queued notifications.
  */
 export function clearCommandQueue(): void {
-  if (commandQueue.length === 0) {
-    return
-  }
-  const discarded = [...commandQueue]
-  settlePromptSubmitWaitsRemoved(discarded)
-  failCommandRunWaits(discarded, COMMAND_REMOVED_BEFORE_RUN)
-  commandsDiscarded.emit(discarded)
-  commandQueue.length = 0
-  notifySubscribers()
+  activeQueue.clear()
 }
 
 /**
@@ -952,18 +1356,12 @@ export function clearCommandQueue(): void {
  * Used for test cleanup.
  */
 export function resetCommandQueue(): void {
-  commandQueue.length = 0
-  snapshot = Object.freeze([])
-  inFlightDrainBatch = null
-  cancelPending.clear()
-  cancelPendingAcked.clear()
-  foldInFlight.clear()
-  midTurnFoldSuspended = false
+  activeQueue.reset()
+  activeQueue = defaultQueue
+  defaultQueue.reset()
   resetPromptSubmitWaits()
   resetCommandRunWaits()
   resetTurnHookQueuedPrompts()
-  commandsConsumed.clear()
-  commandsDiscarded.clear()
 }
 
 /**
@@ -974,43 +1372,22 @@ export function markCancelPending(
   uuid: string,
   opts?: { terminalEmitted?: boolean },
 ): boolean {
-  if (cancelPending.delete(uuid)) {
-    cancelPending.add(uuid)
-  } else {
-    if (
-      opts?.terminalEmitted !== true &&
-      cancelPending.size >= CANCEL_PENDING_CAP
-    ) {
-      let evict: string | undefined
-      for (const id of cancelPending) {
-        if (!cancelPendingAcked.has(id)) {
-          evict = id
-          break
-        }
-      }
-      if (evict !== undefined) cancelPending.delete(evict)
-    }
-    cancelPending.add(uuid)
-  }
-  if (opts?.terminalEmitted !== true) return false
-  if (cancelPendingAcked.has(uuid)) return false
-  cancelPendingAcked.add(uuid)
-  return true
+  return activeQueue.markCancelPending(uuid, opts)
 }
 
 /** densable `ye` — consume (delete) a pending cancel. */
 export function consumeCancelPending(uuid: string): boolean {
-  return cancelPending.delete(uuid)
+  return activeQueue.consumeCancelPending(uuid)
 }
 
 /** densable `ke` — consume the terminal-emitted ack. */
 export function consumeCancelPendingAcked(uuid: string): boolean {
-  return cancelPendingAcked.delete(uuid)
+  return activeQueue.consumeCancelPendingAcked(uuid)
 }
 
 /** densable `Se`. */
 export function hasCancelPendingAcked(uuid: string): boolean {
-  return cancelPendingAcked.has(uuid)
+  return activeQueue.hasCancelPendingAcked(uuid)
 }
 
 /**
@@ -1018,7 +1395,7 @@ export function hasCancelPendingAcked(uuid: string): boolean {
  * Cuy sets this synchronously after dequeue, before executeInput.
  */
 export function setInFlightDrainBatch(batch: QueuedCommand[]): void {
-  inFlightDrainBatch = batch
+  activeQueue.setInFlightDrainBatch(batch)
 }
 
 /**
@@ -1026,9 +1403,7 @@ export function setInFlightDrainBatch(batch: QueuedCommand[]): void {
  * or is the same reference currently held (a newer drain must not be wiped).
  */
 export function clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
-  if (batch === undefined || inFlightDrainBatch === batch) {
-    inFlightDrainBatch = null
-  }
+  activeQueue.clearInFlightDrainBatch(batch)
 }
 
 /**
@@ -1037,9 +1412,7 @@ export function clearInFlightDrainBatch(batch?: QueuedCommand[]): void {
 export function someInFlightDrainCommand(
   pred?: (cmd: QueuedCommand) => boolean,
 ): boolean {
-  if (inFlightDrainBatch === null) return false
-  if (pred === undefined) return inFlightDrainBatch.length > 0
-  return inFlightDrainBatch.some(pred)
+  return activeQueue.someInFlightDrainCommand(pred)
 }
 
 // ============================================================================
@@ -1201,7 +1574,7 @@ export function isPoppableEditableCommand(
 export function hasPoppableEditableCommandsInQueue(
   inputEmpty: boolean,
 ): boolean {
-  return commandQueue.some(cmd => isPoppableEditableCommand(cmd, inputEmpty))
+  return activeQueue.hasPoppableEditableCommands(inputEmpty)
 }
 
 /**
@@ -1214,74 +1587,7 @@ export function popAllEditable(
   currentInput: string,
   currentCursorOffset: number,
 ): PopAllEditableResult | undefined {
-  if (commandQueue.length === 0) {
-    return undefined
-  }
-
-  const inputEmpty = currentInput === ''
-  const candidates = commandQueue.filter(cmd =>
-    isPoppableEditableCommand(cmd, inputEmpty),
-  )
-  if (candidates.length === 0) {
-    return undefined
-  }
-
-  // densable: Je=je.every(mode==="bash")?"bash":"prompt"
-  const mode: 'bash' | 'prompt' = candidates.every(cmd => cmd.mode === 'bash')
-    ? 'bash'
-    : 'prompt'
-  // densable: Ft=Je==="bash"?je:je.filter(mode!=="bash")
-  const editable =
-    mode === 'bash' ? candidates : candidates.filter(cmd => cmd.mode !== 'bash')
-  if (editable.length === 0) {
-    return undefined
-  }
-
-  // Extract text from queued commands (handles both strings and ContentBlockParam[])
-  const queuedTexts = editable.map(cmd => extractTextFromValue(cmd.value))
-  const newInput = [...queuedTexts, currentInput].filter(Boolean).join('\n')
-
-  // Calculate cursor offset: length of joined queued commands + 1 + current cursor offset
-  const cursorOffset = queuedTexts.join('\n').length + 1 + currentCursorOffset
-
-  // Extract images from queued commands
-  const images: PastedContent[] = []
-  let nextImageId = Date.now() // Use timestamp as base for unique IDs
-  for (const cmd of editable) {
-    // handlePromptSubmit queues images in pastedContents (value is a string).
-    // Preserve the original PastedContent id so imageStore lookups still work.
-    if (cmd.pastedContents) {
-      for (const content of Object.values(cmd.pastedContents)) {
-        if (content.type === 'image') {
-          images.push(content)
-        }
-      }
-    }
-    // Bridge/remote commands may embed images directly in ContentBlockParam[].
-    const cmdImages = extractImagesFromValue(cmd.value, nextImageId)
-    images.push(...cmdImages)
-    nextImageId += cmdImages.length
-  }
-
-  for (const command of editable) {
-    logOperation(
-      'popAll',
-      typeof command.value === 'string' ? command.value : undefined,
-    )
-  }
-
-  // densable: keep commands not in Ft (incl. bash left behind on prompt restore)
-  const popped = new Set(editable)
-  const remaining = commandQueue.filter(cmd => !popped.has(cmd))
-  commandQueue.length = 0
-  commandQueue.push(...remaining)
-  notifySubscribers()
-  settlePromptSubmitWaitsRemoved(editable)
-
-  const ideSelection = editable.findLast(
-    cmd => cmd.ideSelection !== undefined,
-  )?.ideSelection
-  return { text: newInput, cursorOffset, images, mode, ideSelection }
+  return activeQueue.popAllEditable(currentInput, currentCursorOffset)
 }
 
 export type PopEditableAtResult = PopAllEditableResult
@@ -1296,44 +1602,7 @@ export function popEditableAt(
   currentInput: string,
   currentCursorOffset: number,
 ): PopEditableAtResult | undefined {
-  const cmd = commandQueue.filter(isQueuedCommandEditable)[index]
-  if (!cmd) {
-    return undefined
-  }
-  if (!isPoppableEditableCommand(cmd, currentInput === '')) {
-    return undefined
-  }
-
-  const text = extractTextFromValue(cmd.value)
-  const newInput = [text, currentInput].filter(Boolean).join('\n')
-  const cursorOffset = text.length + 1 + currentCursorOffset
-
-  const images: PastedContent[] = []
-  if (cmd.pastedContents) {
-    for (const content of Object.values(cmd.pastedContents)) {
-      if (content.type === 'image') {
-        images.push(content)
-      }
-    }
-  }
-  images.push(...extractImagesFromValue(cmd.value, Date.now()))
-
-  logOperation('popOne', typeof cmd.value === 'string' ? cmd.value : undefined)
-
-  const gr = commandQueue.indexOf(cmd)
-  if (gr !== -1) {
-    commandQueue.splice(gr, 1)
-    notifySubscribers()
-    settlePromptSubmitWaitsRemoved([cmd])
-  }
-
-  return {
-    text: newInput,
-    cursorOffset,
-    images,
-    mode: cmd.mode === 'bash' ? 'bash' : 'prompt',
-    ideSelection: cmd.ideSelection,
-  }
+  return activeQueue.popEditableAt(index, currentInput, currentCursorOffset)
 }
 
 /**
@@ -1392,10 +1661,7 @@ export function clampQueueEditIndex(
 export function getCommandsByMaxPriority(
   maxPriority: QueuePriority,
 ): QueuedCommand[] {
-  const threshold = PRIORITY_ORDER[maxPriority]
-  return commandQueue.filter(
-    cmd => PRIORITY_ORDER[cmd.priority ?? 'next'] <= threshold,
-  )
+  return activeQueue.getCommandsByMaxPriority(maxPriority)
 }
 
 /**
@@ -1405,15 +1671,7 @@ export function getCommandsByMaxPriority(
 export function countRemainingWakePollEventsAfter(
   taken: readonly QueuedCommand[],
 ): number {
-  const takenSet = new Set(taken)
-  const agentId = taken.find(cmd => cmd.mode === 'poll-event')?.agentId
-  return commandQueue.filter(
-    cmd =>
-      cmd.mode === 'poll-event' &&
-      cmd.pollEvent?.wake === true &&
-      !takenSet.has(cmd) &&
-      (agentId === undefined || cmd.agentId === agentId),
-  ).length
+  return activeQueue.countRemainingWakePollEventsAfter(taken)
 }
 
 /**

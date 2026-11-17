@@ -1422,7 +1422,7 @@ export const AgentTool = buildTool({
       const slotAppState = toolUseContext.getAppState();
       releaseConcurrencySlot = assertAndTakeConcurrencySlot({
         mainLoopModel: toolUseContext.options.mainLoopModel,
-        effortValue: pdSessionEffort(slotAppState, toolUseContext.options.mainLoopModel) ?? slotAppState.effortValue,
+        effortValue: pdSessionEffort(slotAppState, toolUseContext.options.mainLoopModel),
         ultracode: slotAppState.ultracode,
         taskRegistry: toolUseContext.taskRegistry,
         getAppState: toolUseContext.getAppState,

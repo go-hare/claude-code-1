@@ -11,7 +11,7 @@ import { isUsageCreditsHintEnabled } from 'src/services/rateLimitMessages.js';
 import { useAppState } from 'src/state/AppState.js';
 import { getOauthAccountInfo, getSubscriptionType, isClaudeAISubscriber } from 'src/utils/auth.js';
 import { hasClaudeAiBillingAccess } from 'src/utils/billing.js';
-import { type EffortValue, modelSupportsEffort, resolveAppliedEffort } from 'src/utils/effort.js';
+import { type EffortValue, modelSupportsEffort, pdSessionEffort, resolveAppliedEffort } from 'src/utils/effort.js';
 import { parseUserSpecifiedModel, renderModelName } from 'src/utils/model/model.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 
@@ -57,7 +57,7 @@ function getOverageModelHint(model: string): string | null {
 export function useRateLimitWarningNotification(model: string): void {
   const { addNotification } = useNotifications();
   const claudeAiLimits = useClaudeAiLimits();
-  const effortValue = useAppState(s => s.effortValue);
+  const effortValue = useAppState(s => pdSessionEffort(s, model));
   // claudeAiLimits reference is stable until statusListeners fire (API
   // response), so these skip the Intl formatting work on most REPL renders.
   const rateLimitWarning = useMemo(() => getRateLimitWarning(claudeAiLimits, model), [claudeAiLimits, model]);

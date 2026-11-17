@@ -16,6 +16,7 @@ import {
   EFFORT_LEVELS,
   getDisplayedEffortLevel,
   parseEffortValue,
+  pdSessionEffort,
 } from '../effort.js'
 import { isBareMode } from '../envUtils.js'
 import { isENOENT } from '../errors.js'
@@ -429,7 +430,10 @@ function createPluginCommand(
           (model === 'inherit' ? undefined : model) ??
           context.options?.mainLoopModel ??
           ''
-        const effectiveEffort = effort ?? context.getAppState?.()?.effortValue
+        const appState = context.getAppState?.()
+        const effectiveEffort =
+          effort ??
+          (appState ? pdSessionEffort(appState, effectiveModel) : undefined)
         finalContent = finalContent.replaceAll(
           '${CLAUDE_EFFORT}',
           getDisplayedEffortLevel(effectiveModel, effectiveEffort),

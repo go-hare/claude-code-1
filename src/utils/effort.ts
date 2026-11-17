@@ -307,7 +307,7 @@ export function getOrgOverrideStartupEffort(model: string): EffortLevel | null {
 /** densable te() — settings sources → Pd inherit table (`userSettings` → `legacyUserEffort`). */
 export function teSettingsEffortTable(
   sourcesOverride?: Array<{ source: string; settings: EffortSettingsSlice }>,
-): SettingsEffortTable | undefined {
+): SettingsEffortTable {
   try {
     const entries =
       sourcesOverride ??
@@ -410,7 +410,11 @@ export function teSettingsEffortTable(
       byModel,
     }
   } catch {
-    return undefined
+    return {
+      default: undefined,
+      legacyUserEffort: undefined,
+      byModel: {},
+    }
   }
 }
 

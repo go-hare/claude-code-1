@@ -4,12 +4,15 @@ import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { countPendingTurnDurationWork } from '../components/messages/SystemTextMessage.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
-import { useAppState, useAppStateStore } from '../state/AppState.js'
+import {
+  useAppState,
+  useAppStateStore,
+  useMessageQueue,
+} from '../state/AppState.js'
 import type { Message } from '../types/message.js'
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { hasPendingLoopWakeups } from '../utils/loopDynamic.js'
-import { getCommandQueue } from '../utils/messageQueueManager.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
 import { getPromptInputStoreValue } from '../utils/promptInputCursorStore.js'
 import { isAwaySummaryEnvEnabled } from '../utils/residualFinalEnvGates.js'
@@ -160,6 +163,7 @@ export function useAwaySummary(
   const generateRef = useRef<(() => Promise<void>) | null>(null)
   const armAwayTimerRef = useRef<(() => void) | null>(null)
   const store = useAppStateStore()
+  const messageQueue = useMessageQueue()
   const awaySummaryEnabled = useAppState(s => s.awaySummaryEnabled)
   const awaySummaryEnabledRef = useRef(awaySummaryEnabled)
 
@@ -200,7 +204,7 @@ export function useAwaySummary(
       pendingRef.current = false
       const { pendingAgents, pendingWorkflows } = countPendingTurnDurationWork({
         tasks: store.getState().tasks,
-        queuedCommands: getCommandQueue(),
+        queuedCommands: messageQueue.getCommands(),
       })
       if (
         !shouldGenerateAwaySummary({
@@ -304,7 +308,14 @@ export function useAwaySummary(
       generateRef.current = null
       armAwayTimerRef.current = null
     }
-  }, [gbEnabled, setMessages, awaySummaryEnabled, featureOn, store])
+  }, [
+    gbEnabled,
+    setMessages,
+    awaySummaryEnabled,
+    featureOn,
+    store,
+    messageQueue,
+  ])
 
   // densable setInputs: turn-end (#o false) → #P if still away.
   // unknown terminals KEEP idle-after-turn (gold #P fire is blurred-only).

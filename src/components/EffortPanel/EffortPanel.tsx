@@ -190,7 +190,7 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const { columns } = useTerminalSize();
 
   const resolvedSessionEffort = React.useMemo(
-    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model) ?? appStateEffort,
+    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model),
     [sessionEffort, appStateEffort, settingsEffortTable, model],
   );
   const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
@@ -261,7 +261,6 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
           ...prev,
           ...(hasEffortUpdate
             ? {
-                effortValue: nextEffort,
                 sessionEffort: explicitSessionEffort(nextEffort),
                 settingsEffortTable: teSettingsEffortTable(),
               }
@@ -472,7 +471,7 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const model = useMainLoopModel();
   const resolvedSessionEffort = React.useMemo(
-    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model) ?? appStateEffort,
+    () => pdSessionEffort({ sessionEffort, effortValue: appStateEffort, settingsEffortTable }, model),
     [sessionEffort, appStateEffort, settingsEffortTable, model],
   );
   const geometry = React.useMemo(() => getSliderGeometry(model), [model]);
@@ -514,7 +513,6 @@ function ScreenReaderEffortPanel({ appStateEffort, onDone }: Props): React.React
           ...prev,
           ...(result.effortUpdate!.ultracode === undefined
             ? {
-                effortValue: result.effortUpdate!.value,
                 sessionEffort: explicitSessionEffort(result.effortUpdate!.value),
               }
             : {}),

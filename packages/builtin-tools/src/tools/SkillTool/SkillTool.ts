@@ -1060,7 +1060,6 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
                 const appState = previousGetAppState()
                 return {
                   ...appState,
-                  effortValue: effort,
                   sessionEffort: levelSessionEffort(effort),
                 }
               },

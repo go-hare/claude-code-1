@@ -271,112 +271,79 @@ import type {
   ServerResource,
 } from './types.js'
 
-/**
- * Custom error class to indicate that an MCP tool call failed due to
- * authentication issues (e.g., expired OAuth token returning 401).
- * This error should be caught at the tool execution layer to update
- * the client's status to 'needs-auth'.
- */
-export class McpAuthError extends Error {
-  serverName: string
-  authErrorKind: 'token_expired' | 'insufficient_scope' | 'not_connected'
-  firstPartyBearer?: unknown
-  requestedScope?: string
-  constructor(
-    serverName: string,
-    message: string,
-    authErrorKind:
-      | 'token_expired'
-      | 'insufficient_scope'
-      | 'not_connected' = 'token_expired',
-    firstPartyBearer?: unknown,
-    requestedScope?: string,
-  ) {
-    super(message)
-    this.name = 'McpAuthError'
-    this.serverName = serverName
-    this.authErrorKind = authErrorKind
-    this.firstPartyBearer = firstPartyBearer
-    this.requestedScope = requestedScope
-  }
-}
+import {
+  DEFAULT_MCP_TOOL_TIMEOUT_MS,
+  extractToolUseId,
+  getMcpToolIdleTimeoutMs,
+  getMcpToolTimeoutMs,
+  inertReconnectShape,
+  inferCompactSchema,
+  isClaudeAiProxyListAuthError,
+  MAX_MCP_DESCRIPTION_LENGTH,
+  MCP_FETCH_CACHE_SIZE,
+  MCP_TOOL_CALL_INTERRUPTED,
+  type MCPResultType,
+  type MCPToolCallResult,
+  mcpToolInputToAutoClassifierInput,
+  processMCPResult,
+  throwIfMcpToolCallInterrupted,
+  type TransformedMCPResult,
+  transformMCPResult,
+  transformResultContent,
+} from './clientHelpers.js'
+import {
+  areMcpConfigsEqual,
+  ClaudeAiProxyBearerRejectedError,
+  clearMcpAuthCache,
+  connectAuthRejectedResult,
+  createClaudeAiProxyFetch,
+  createNodeWsClient,
+  getConnectionTimeoutMs,
+  getMcpServerConnectionBatchSize,
+  getRemoteMcpServerConnectionBatchSize,
+  getServerCacheKey,
+  handleRemoteAuthFailure,
+  isClaudeAiBearerRejectedError,
+  isIncludedMcpTool,
+  isLocalMcpServer,
+  isMcpAuthCached,
+  isMcpSessionExpiredError,
+  MCP_REQUEST_TIMEOUT_MS,
+  maybeConnectAuthHeaderRejection,
+  McpAuthError,
+  McpSessionExpiredError,
+  McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  mcpBaseUrlAnalytics,
+  processBatched,
+  resolveRemoteConnectAuth,
+  setMcpAuthCacheEntry,
+  wrapFetchWithTimeout,
+  wrapRemoteMcpFetch,
+  type WsClientLike,
+} from './connectionHelpers.js'
 
-/**
- * Thrown when an MCP session has expired and the connection cache has been cleared.
- * The caller should get a fresh client via ensureConnectedClient and retry.
- */
-class McpSessionExpiredError extends Error {
-  constructor(serverName: string) {
-    super(`MCP server "${serverName}" session expired`)
-    this.name = 'McpSessionExpiredError'
-  }
-}
-
-/**
- * Thrown when an MCP tool returns `isError: true`. Carries the result's `_meta`
- * so SDK consumers can still receive it — per the MCP spec, `_meta` is on the
- * base Result type and is valid on error results.
- */
-export class McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
-  constructor(
-    message: string,
-    telemetryMessage: string,
-    readonly mcpMeta?: { _meta?: Record<string, unknown> },
-  ) {
-    super(message, telemetryMessage)
-    this.name = 'McpToolCallError'
-  }
-}
-
-/**
- * Detects whether an error is an MCP "Session not found" error (HTTP 404 + JSON-RPC code -32001).
- * Per the MCP spec, servers return 404 when a session ID is no longer valid.
- * We check both signals to avoid false positives from generic 404s (wrong URL, server gone, etc.).
- */
-export const isMcpSessionExpiredError = isMcpSessionExpiredErrorFromPackage
-
-/**
- * Default timeout for MCP tool calls (effectively infinite - ~27.8 hours).
- * Hard wall-clock cap for the entire tool call (MCP_TOOL_TIMEOUT).
- */
-const DEFAULT_MCP_TOOL_TIMEOUT_MS = 100_000_000
-
-/**
- * Cap on MCP tool descriptions and server instructions sent to the model.
- * OpenAPI-generated MCP servers have been observed dumping 15-60KB of endpoint
- * docs into tool.description; this caps the p95 tail without losing the intent.
- */
-const MAX_MCP_DESCRIPTION_LENGTH = PKG_MAX_MCP_DESCRIPTION_LENGTH
-
-/**
- * Gets the hard wall-clock timeout for MCP tool calls in milliseconds.
- * Uses MCP_TOOL_TIMEOUT environment variable if set, otherwise defaults to ~27.8 hours.
- */
-function getMcpToolTimeoutMs(): number {
-  return (
-    parseInt(process.env.MCP_TOOL_TIMEOUT || '', 10) ||
-    DEFAULT_MCP_TOOL_TIMEOUT_MS
-  )
-}
-
-/**
- * Official 2.1.187 idle watchdog for remote MCP tools.
- * Returns null when disabled (0 / unset-after-disable).
- * Precedence: per-server `timeout` > CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT > 5 min.
- * Env densable via resolveMcpToolIdleTimeoutMs.
- */
-function getMcpToolIdleTimeoutMs(
-  serverConfig: { timeout?: number } | undefined,
-): number | null {
-  if (
-    serverConfig &&
-    typeof serverConfig.timeout === 'number' &&
-    Number.isFinite(serverConfig.timeout)
-  ) {
-    if (serverConfig.timeout <= 0) return null
-    return serverConfig.timeout
-  }
-  return resolveMcpToolIdleTimeoutMs()
+export {
+  areMcpConfigsEqual,
+  ClaudeAiProxyBearerRejectedError,
+  clearMcpAuthCache,
+  createClaudeAiProxyFetch,
+  getMcpServerConnectionBatchSize,
+  getServerCacheKey,
+  inertReconnectShape,
+  inferCompactSchema,
+  isClaudeAiBearerRejectedError,
+  isMcpSessionExpiredError,
+  MCP_TOOL_CALL_INTERRUPTED,
+  McpAuthError,
+  type MCPResultType,
+  McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  mcpToolInputToAutoClassifierInput,
+  processMCPResult,
+  throwIfMcpToolCallInterrupted,
+  type TransformedMCPResult,
+  transformMCPResult,
+  transformResultContent,
+  wrapFetchWithTimeout,
 }
 
 import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
@@ -408,485 +375,6 @@ import { dirname, join } from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
-
-const MCP_AUTH_CACHE_TTL_MS = 15 * 60 * 1000 // 15 min
-
-type McpAuthCacheData = Record<string, { timestamp: number }>
-
-function getMcpAuthCachePath(): string {
-  return join(getClaudeConfigHomeDir(), 'mcp-needs-auth-cache.json')
-}
-
-// Memoized so N concurrent isMcpAuthCached() calls during batched connection
-// share a single file read instead of N reads of the same file. Invalidated
-// on write (setMcpAuthCacheEntry) and clear (clearMcpAuthCache). Not using
-// lodash memoize because we need to null out the cache, not delete by key.
-let authCachePromise: Promise<McpAuthCacheData> | null = null
-
-function getMcpAuthCache(): Promise<McpAuthCacheData> {
-  if (!authCachePromise) {
-    authCachePromise = readFile(getMcpAuthCachePath(), 'utf-8')
-      .then(data => jsonParse(data) as McpAuthCacheData)
-      .catch(() => ({}))
-  }
-  return authCachePromise
-}
-
-async function isMcpAuthCached(serverId: string): Promise<boolean> {
-  const cache = await getMcpAuthCache()
-  const entry = cache[serverId]
-  if (!entry) {
-    return false
-  }
-  return Date.now() - entry.timestamp < MCP_AUTH_CACHE_TTL_MS
-}
-
-// Serialize cache writes through a promise chain to prevent concurrent
-// read-modify-write races when multiple servers return 401 in the same batch
-let writeChain = Promise.resolve()
-
-function setMcpAuthCacheEntry(serverId: string): void {
-  writeChain = writeChain
-    .then(async () => {
-      const cache = await getMcpAuthCache()
-      cache[serverId] = { timestamp: Date.now() }
-      const cachePath = getMcpAuthCachePath()
-      await mkdir(dirname(cachePath), { recursive: true })
-      await writeFile(cachePath, jsonStringify(cache))
-      // Invalidate the read cache so subsequent reads see the new entry.
-      // Safe because writeChain serializes writes: the next write's
-      // getMcpAuthCache() call will re-read the file with this entry present.
-      authCachePromise = null
-    })
-    .catch(() => {
-      // Best-effort cache write
-    })
-}
-
-export function clearMcpAuthCache(): void {
-  authCachePromise = null
-  void unlink(getMcpAuthCachePath()).catch(() => {
-    // Cache file may not exist
-  })
-}
-
-/**
- * Spread-ready analytics field for the server's base URL. Calls
- * getLoggingSafeMcpBaseUrl once (not twice like the inline ternary it replaces).
- * Typed as AnalyticsMetadata since the URL is query-stripped and safe to log.
- */
-function mcpBaseUrlAnalytics(serverRef: ScopedMcpServerConfig): {
-  mcpServerBaseUrl?: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-} {
-  const url = getLoggingSafeMcpBaseUrl(serverRef)
-  return url
-    ? {
-        mcpServerBaseUrl:
-          url as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      }
-    : {}
-}
-
-/**
- * Shared handler for sse/http/claudeai-proxy auth failures during connect:
- * emits tengu_mcp_server_needs_auth, caches the needs-auth entry, and returns
- * the needs-auth connection result.
- */
-function wrapRemoteMcpFetch(
-  authProvider: ClaudeAuthProvider | undefined,
-  firstPartyBag?: FirstPartyBearerBag,
-  serverRef?: object,
-): FetchLike {
-  const base = createFetchWithInit()
-  let fetch: FetchLike = authProvider
-    ? wrapFetchWithStepUpDetection(base, authProvider)
-    : base
-  // Gold: if(k) U=jZe(U,k); U=St(U,t); if(L) U=Gt(U,d).
-  // Gt = Hr — per-request Ukn/Bkn/jkn on cli-owned configs (not Bt).
-  fetch = wrapFetchWithTimeout(fetch)
-  if (firstPartyBag) {
-    fetch = wrapFirstPartyAutoAuthFetch(fetch, firstPartyBag) as FetchLike
-  }
-  if (serverRef && isCliOwnedConfig(serverRef)) {
-    fetch = wrapCliOwnedFetch(fetch as never, serverRef) as FetchLike
-  }
-  return fetch
-}
-
-function connectAuthRejectedResult(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-  transportType: 'sse' | 'http',
-  classified: ConnectAuthHeaderRejection | FirstPartyAuthRejection,
-): MCPServerConnection {
-  logEvent('tengu_mcp_server_connection_failed', {
-    transportType:
-      transportType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    errorCode:
-      classified.errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    ...mcpBaseUrlAnalytics(serverRef),
-  })
-  logMCPError(name, classified.message)
-  return {
-    name,
-    type: 'failed',
-    config: serverRef,
-    error: classified.message,
-    errorCode: classified.errorCode,
-    ...('displayDetail' in classified && classified.displayDetail !== undefined
-      ? { displayDetail: classified.displayDetail }
-      : {}),
-  }
-}
-
-function maybeConnectAuthHeaderRejection(
-  error: unknown,
-  flags: ConnectAuthFlags | undefined,
-): ConnectAuthHeaderRejection | undefined {
-  if (!flags) return undefined
-  return classifyConnectAuthHeaderRejection({
-    error,
-    statusCode: connectAuthStatusCode(error),
-    hasUserAuthHeader: flags.hasUserAuthHeader,
-    helperMintsAuthHeader: flags.helperMintsAuthHeader,
-  })
-}
-
-async function resolveRemoteConnectAuth(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-  combinedHeaders: Record<string, string>,
-): Promise<{
-  flags: ConnectAuthFlags
-  authProvider: ClaudeAuthProvider | undefined
-  useFirstPartyAuth: boolean
-}> {
-  const flags = resolveConnectAuthFlags(serverRef, combinedHeaders)
-  // Official `k=ce||re||L||me?void 0:new EFe`.
-  // ce/re = Authorization already set. me skip EFe stays Ste (sync bearer).
-  // L !me uses bOe (sync or async). L = o$+Jn+mn token || (Vx && e9), not jo.
-  const cliOwned =
-    getCliOwnedBearerProvider(serverRef) !== undefined ||
-    getCliOwnedAsyncBearerProvider(serverRef) !== undefined
-  const useFirstPartyAuth = await shouldUseFirstPartyAutoAuth({
-    type: serverRef.type,
-    url: 'url' in serverRef ? serverRef.url : undefined,
-    flags,
-    cliOwned,
-  })
-  if (useFirstPartyAuth) {
-    logEvent('tengu_mcp_first_party_auto_auth', {
-      transportType:
-        serverRef.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...mcpBaseUrlAnalytics(serverRef),
-    })
-  }
-  const skipOAuth =
-    shouldSkipOAuthAuthProvider(flags) ||
-    isCliOwnedBearerConfig(serverRef) ||
-    useFirstPartyAuth
-  const authProvider = skipOAuth
-    ? undefined
-    : new ClaudeAuthProvider(
-        name,
-        serverRef as
-          | import('./types.js').McpSSEServerConfig
-          | import('./types.js').McpHTTPServerConfig,
-      )
-  return { flags, authProvider, useFirstPartyAuth }
-}
-
-function handleRemoteAuthFailure(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-  transportType: 'sse' | 'http' | 'claudeai-proxy',
-): MCPServerConnection {
-  logEvent('tengu_mcp_server_needs_auth', {
-    transportType:
-      transportType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    ...mcpBaseUrlAnalytics(serverRef),
-  })
-  const label: Record<typeof transportType, string> = {
-    sse: 'SSE',
-    http: 'HTTP',
-    'claudeai-proxy': 'claude.ai proxy',
-  }
-  logMCPDebug(
-    name,
-    `Authentication required for ${label[transportType]} server`,
-  )
-  setMcpAuthCacheEntry(name)
-  return { name, type: 'needs-auth', config: serverRef }
-}
-
-/**
- * densable LOs / ClaudeAiProxyBearerRejectedError — session token rejected by
- * claude.ai proxy after refresh attempt. Distinct from generic 401 so tools/list
- * can set discoveryBearerRejected and UI can prompt `/login` without flipping
- * the client to needs-auth.
- */
-export class ClaudeAiProxyBearerRejectedError extends Error {
-  code = 'CLAUDEAI_BEARER_REJECTED' as const
-  reasonCode = 'claudeai_bearer_rejected' as const
-  constructor() {
-    super(
-      'claude.ai rejected the session token — it may lack connector scopes or be invalid. Run /login.',
-    )
-    this.name = 'ClaudeAiProxyBearerRejectedError'
-  }
-}
-
-/** densable kXe — Error with code CLAUDEAI_BEARER_REJECTED. */
-export function isClaudeAiBearerRejectedError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'CLAUDEAI_BEARER_REJECTED'
-  )
-}
-
-/**
- * Fetch wrapper for claude.ai proxy connections. Attaches the OAuth bearer
- * token and retries once on 401 via handleOAuth401Error (force-refresh).
- *
- * densable Xmd: after 401 + !tokenChanged + token still same → throw
- * ClaudeAiProxyBearerRejectedError (not return 401). That surfaces
- * discoveryBearerRejected on tools/list while keeping the client connected.
- *
- * The Anthropic API path has this retry (withRetry.ts, grove.ts) to handle
- * memoize-cache staleness and clock drift. Without the same here, a single
- * stale token mass-401s every claude.ai connector and sticks them all in the
- * 15-min needs-auth cache.
- */
-export function createClaudeAiProxyFetch(innerFetch: FetchLike): FetchLike {
-  return async (url, init) => {
-    const doRequest = async () => {
-      await checkAndRefreshOAuthTokenIfNeeded()
-      const currentTokens = getClaudeAIOAuthTokens()
-      if (!currentTokens) {
-        throw new Error('No claude.ai OAuth token available')
-      }
-      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-      const headers = new Headers(init?.headers)
-      headers.set('Authorization', `Bearer ${currentTokens.accessToken}`)
-      const response = await innerFetch(url, { ...init, headers })
-      // Return the exact token that was sent. Reading getClaudeAIOAuthTokens()
-      // again after the request is wrong under concurrent 401s: another
-      // connector's handleOAuth401Error clears the memoize cache, so we'd read
-      // the NEW token from keychain, pass it to handleOAuth401Error, which
-      // finds same-as-keychain → returns false → skips retry. Same pattern as
-      // bridgeApi.ts withOAuthRetry (token passed as fn param).
-      return { response, sentToken: currentTokens.accessToken }
-    }
-
-    const { response, sentToken } = await doRequest()
-    if (response.status !== 401) {
-      return response
-    }
-    // densable: proxy-classified error code → return 401 (not bearer-reject throw)
-    const proxyErrorCode = response.headers.get('X-Mcp-Error-Code') ?? undefined
-    if (proxyErrorCode) {
-      logEvent('tengu_mcp_claudeai_proxy_401', {
-        tokenChanged:
-          false as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        proxyErrorCode:
-          proxyErrorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      return response
-    }
-    // handleOAuth401Error returns true only if the token actually changed
-    // (keychain had a newer one, or force-refresh succeeded). Gate retry on
-    // that — otherwise we double round-trip time for every connector whose
-    // downstream service genuinely needs auth (the common case: 30+ servers
-    // with "MCP server requires authentication but no OAuth token configured").
-    const tokenChanged = await handleOAuth401Error(sentToken).catch(() => false)
-    logEvent('tengu_mcp_claudeai_proxy_401', {
-      tokenChanged:
-        tokenChanged as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
-    if (!tokenChanged) {
-      // densable: ELOCKED contention check — if token still same, throw LOs
-      const now = getClaudeAIOAuthTokens()?.accessToken
-      if (!now || now === sentToken) {
-        throw new ClaudeAiProxyBearerRejectedError()
-      }
-    }
-    try {
-      return (await doRequest()).response
-    } catch (error) {
-      // densable: retry itself failed — rethrow bearer reject; else return 401
-      if (isClaudeAiBearerRejectedError(error)) throw error
-      // Retry itself failed (network error). Return the original 401 so the
-      // outer handler can classify it.
-      return response
-    }
-  }
-}
-
-// Minimal interface for WebSocket instances passed to mcpWebSocketTransport
-type WsClientLike = {
-  readonly readyState: number
-  close(): void
-  send(data: string): void
-}
-
-/**
- * Create a ws.WebSocket client with the MCP protocol.
- * Bun's ws shim types lack the 3-arg constructor (url, protocols, options)
- * that the real ws package supports, so we cast the constructor here.
- */
-async function createNodeWsClient(
-  url: string,
-  options: Record<string, unknown>,
-): Promise<WsClientLike> {
-  const wsModule = await import('ws')
-  const WS = wsModule.default as unknown as new (
-    url: string,
-    protocols: string[],
-    options: Record<string, unknown>,
-  ) => WsClientLike
-  return new WS(url, ['mcp'], options)
-}
-
-const IMAGE_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-])
-
-/** densable y0 — outer MCP connection race (MCP_TIMEOUT, default 30s). */
-function getConnectionTimeoutMs(): number {
-  return getMcpTimeoutMs()
-}
-
-/**
- * Default timeout for individual MCP requests (auth, tool calls, etc.)
- */
-const MCP_REQUEST_TIMEOUT_MS = 60000
-
-/**
- * MCP Streamable HTTP spec requires clients to advertise acceptance of both
- * JSON and SSE on every POST. Servers that enforce this strictly reject
- * requests without it (HTTP 406).
- * https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#sending-messages-to-the-server
- */
-const MCP_STREAMABLE_HTTP_ACCEPT = 'application/json, text/event-stream'
-
-/**
- * Wraps a fetch function to apply a fresh timeout signal to each request.
- * This avoids the bug where a single AbortSignal.timeout() created at connection
- * time becomes stale after 60 seconds, causing all subsequent requests to fail
- * immediately with "The operation timed out." Uses a 60-second timeout.
- *
- * Also ensures the Accept header required by the MCP Streamable HTTP spec is
- * present on POSTs. The MCP SDK sets this inside StreamableHTTPClientTransport.send(),
- * but it is attached to a Headers instance that passes through an object spread here,
- * and some runtimes/agents have been observed dropping it before it reaches the wire.
- * See https://github.com/anthropics/claude-agent-sdk-typescript/issues/202.
- * Normalizing here (the last wrapper before fetch()) guarantees it is sent.
- *
- * GET requests are excluded from the timeout since, for MCP transports, they are
- * long-lived SSE streams meant to stay open indefinitely. (Auth-related GETs use
- * a separate fetch wrapper with its own timeout in auth.ts.)
- *
- * @param baseFetch - The fetch function to wrap
- */
-export function wrapFetchWithTimeout(baseFetch: FetchLike): FetchLike {
-  return async (url: string | URL, init?: RequestInit) => {
-    const method = (init?.method ?? 'GET').toUpperCase()
-
-    // Skip timeout for GET requests - in MCP transports, these are long-lived SSE streams.
-    // (OAuth discovery GETs in auth.ts use a separate createAuthFetch() with its own timeout.)
-    if (method === 'GET') {
-      return baseFetch(url, init)
-    }
-
-    // Normalize headers and guarantee the Streamable-HTTP Accept value. new Headers()
-    // accepts HeadersInit | undefined and copies from plain objects, tuple arrays,
-    // and existing Headers instances — so whatever shape the SDK handed us, the
-    // Accept value survives the spread below as an own property of a concrete object.
-    // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-    const headers = new Headers(init?.headers)
-    if (!headers.has('accept')) {
-      headers.set('accept', MCP_STREAMABLE_HTTP_ACCEPT)
-    }
-
-    // Use setTimeout instead of AbortSignal.timeout() so we can clearTimeout on
-    // completion. AbortSignal.timeout's internal timer is only released when the
-    // signal is GC'd, which in Bun is lazy — ~2.4KB of native memory per request
-    // lingers for the full 60s even when the request completes in milliseconds.
-    const controller = new AbortController()
-    const timer = setTimeout(
-      c =>
-        c.abort(new DOMException('The operation timed out.', 'TimeoutError')),
-      MCP_REQUEST_TIMEOUT_MS,
-      controller,
-    )
-    timer.unref?.()
-
-    const parentSignal = init?.signal
-    const abort = () => controller.abort(parentSignal?.reason)
-    parentSignal?.addEventListener('abort', abort)
-    if (parentSignal?.aborted) {
-      controller.abort(parentSignal.reason)
-    }
-
-    const cleanup = () => {
-      clearTimeout(timer)
-      parentSignal?.removeEventListener('abort', abort)
-    }
-
-    try {
-      const response = await baseFetch(url, {
-        ...init,
-        headers,
-        signal: controller.signal,
-      })
-      cleanup()
-      return response
-    } catch (error) {
-      cleanup()
-      throw error
-    }
-  }
-}
-
-export function getMcpServerConnectionBatchSize(): number {
-  return parseInt(process.env.MCP_SERVER_CONNECTION_BATCH_SIZE || '', 10) || 3
-}
-
-function getRemoteMcpServerConnectionBatchSize(): number {
-  return (
-    parseInt(process.env.MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE || '', 10) ||
-    20
-  )
-}
-
-function isLocalMcpServer(config: ScopedMcpServerConfig): boolean {
-  return !config.type || config.type === 'stdio' || config.type === 'sdk'
-}
-
-// For the IDE MCP servers, we only include specific tools
-const ALLOWED_IDE_TOOLS = ['mcp__ide__executeCode', 'mcp__ide__getDiagnostics']
-function isIncludedMcpTool(tool: Tool): boolean {
-  return (
-    !tool.name.startsWith('mcp__ide__') || ALLOWED_IDE_TOOLS.includes(tool.name)
-  )
-}
-
-/**
- * Generates the cache key for a server connection
- * @param name Server name
- * @param serverRef Server configuration
- * @returns Cache key string
- */
-export function getServerCacheKey(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-): string {
-  return `${name}-${jsonStringify(serverRef)}`
-}
 
 /**
  * TODO (ollie): The memoization here increases complexity by a lot, and im not sure it really improves performance
@@ -3106,39 +2594,6 @@ registerEnsureConnectedClient(ensureConnectedClient)
  * Compares two MCP server configurations to determine if they are equivalent.
  * Used to detect when a server needs to be reconnected due to config changes.
  */
-export function areMcpConfigsEqual(
-  a: ScopedMcpServerConfig,
-  b: ScopedMcpServerConfig,
-): boolean {
-  // Quick type check first
-  if (a.type !== b.type) return false
-
-  // Compare by serializing - this handles all config variations
-  // We exclude 'scope' from comparison since it's metadata, not connection config
-  const { scope: _scopeA, ...configA } = a
-  const { scope: _scopeB, ...configB } = b
-  return jsonStringify(configA) === jsonStringify(configB)
-}
-
-// Max cache size for fetch* caches. Keyed by server name (stable across
-// reconnects), bounded to prevent unbounded growth with many MCP servers.
-const MCP_FETCH_CACHE_SIZE = 20
-
-/**
- * Encode MCP tool input for the auto-mode security classifier.
- * Exported so the auto-mode eval scripts can mirror production encoding
- * for `mcp__*` tool stubs without duplicating this logic.
- */
-export function mcpToolInputToAutoClassifierInput(
-  input: Record<string, unknown>,
-  toolName: string,
-): string {
-  const keys = Object.keys(input)
-  return keys.length > 0
-    ? keys.map(k => `${k}=${String(input[k])}`).join(' ')
-    : toolName
-}
-
 export const fetchToolsForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<Tool[]> => {
     if (client.type !== 'connected') return []
@@ -3773,25 +3228,6 @@ export const fetchToolsForClient = memoizeWithLRU(
  * densable fcn / isListAuthError — 401/403 on list that is *not* a
  * CLAUDEAI_BEARER_REJECTED throw (those stay connected + /login).
  */
-function isClaudeAiProxyListAuthError(error: unknown): boolean {
-  if (isClaudeAiBearerRejectedError(error)) return false
-  if (error instanceof UnauthorizedError) return true
-  if (error instanceof Error) {
-    const status =
-      'status' in error &&
-      typeof (error as { status?: unknown }).status === 'number'
-        ? (error as { status: number }).status
-        : 'code' in error &&
-            typeof (error as { code?: unknown }).code === 'number'
-          ? (error as { code: number }).code
-          : undefined
-    if (status === 401 || status === 403) return true
-    // StreamableHTTPError / message-embedded status
-    if (/\b40[13]\b/.test(error.message)) return true
-  }
-  return false
-}
-
 export const fetchResourcesForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<ServerResource[]> => {
     if (client.type !== 'connected') return []
@@ -3942,33 +3378,6 @@ export async function callIdeRpc(
  * @param config Server configuration
  * @returns Object containing the client connection and its resources
  */
-/** Official `i2t` — reconnect aborted because account identity moved. */
-export function inertReconnectShape(
-  name: string,
-  config: ScopedMcpServerConfig,
-): {
-  client: MCPServerConnection
-  tools: Tool[]
-  commands: Command[]
-} {
-  logEvent('mcp_reconnect', {
-    result:
-      'mcp_reconnect_identity_changed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-  })
-  return {
-    client: {
-      name,
-      type: 'failed',
-      config,
-      error:
-        'Reconnect cancelled: the account changed while connecting. Choose Reconnect again.',
-      errorCode: 'IDENTITY_CHANGED',
-    },
-    tools: [],
-    commands: [],
-  }
-}
-
 export async function reconnectMcpServerImpl(
   name: string,
   config: ScopedMcpServerConfig,
@@ -4101,20 +3510,6 @@ export async function reconnectMcpServerImpl(
       commands: [],
     }
   }
-}
-
-// Replaced 2026-03: previous implementation ran fixed-size sequential batches
-// (await batch 1 fully, then start batch 2). That meant one slow server in
-// batch N held up ALL servers in batch N+1, even if the other 19 slots were
-// idle. pMap frees each slot as soon as its server completes, so a single
-// slow server only occupies one slot instead of blocking an entire batch
-// boundary. Same concurrency ceiling, same results, better scheduling.
-async function processBatched<T>(
-  items: T[],
-  concurrency: number,
-  processor: (item: T) => Promise<void>,
-): Promise<void> {
-  await pMap(items, processor, { concurrency })
 }
 
 export async function getMcpToolsCommandsAndResources(
@@ -4378,438 +3773,6 @@ export function prefetchAllMcpResources(
       })
     })
   })
-}
-
-/**
- * Transform result content from an MCP tool or MCP prompt into message blocks
- */
-export async function transformResultContent(
-  resultContent: PromptMessage['content'],
-  serverName: string,
-  limits?: ImageLimits,
-  includeMeta = false,
-): Promise<Array<ContentBlockParam>> {
-  switch (resultContent.type) {
-    case 'text': {
-      const block: ContentBlockParam = {
-        type: 'text',
-        text: resultContent.text,
-      }
-      if (includeMeta) {
-        const meta = resultContent._meta
-        if (meta) {
-          ;(block as { _meta?: unknown })._meta = meta
-        }
-      }
-      return [block]
-    }
-    case 'audio': {
-      const audioData = resultContent as {
-        type: 'audio'
-        data: string
-        mimeType?: string
-      }
-      return await persistBlobToTextBlock(
-        Buffer.from(audioData.data, 'base64'),
-        audioData.mimeType,
-        serverName,
-        `[Audio from ${serverName}] `,
-      )
-    }
-    case 'image': {
-      // Resize and compress image data, enforcing API dimension limits
-      const imageBuffer = Buffer.from(String(resultContent.data), 'base64')
-      const ext = resultContent.mimeType?.split('/')[1] || 'png'
-      const resized = await maybeResizeAndDownsampleImageBuffer(
-        imageBuffer,
-        imageBuffer.length,
-        ext,
-        limits,
-      )
-      return [
-        {
-          type: 'image',
-          source: {
-            data: resized.buffer.toString('base64'),
-            media_type:
-              `image/${resized.mediaType}` as Base64ImageSource['media_type'],
-            type: 'base64',
-          },
-        },
-      ]
-    }
-    case 'resource': {
-      const resource = resultContent.resource
-      const prefix = `[Resource from ${serverName} at ${resource.uri}] `
-
-      if ('text' in resource) {
-        return [
-          {
-            type: 'text',
-            text: `${prefix}${resource.text}`,
-          },
-        ]
-      } else if ('blob' in resource) {
-        const isImage = IMAGE_MIME_TYPES.has(resource.mimeType ?? '')
-
-        if (isImage) {
-          // Resize and compress image blob, enforcing API dimension limits
-          const imageBuffer = Buffer.from(resource.blob, 'base64')
-          const ext = resource.mimeType?.split('/')[1] || 'png'
-          const resized = await maybeResizeAndDownsampleImageBuffer(
-            imageBuffer,
-            imageBuffer.length,
-            ext,
-            limits,
-          )
-          const content: MessageParam['content'] = []
-          if (prefix) {
-            content.push({
-              type: 'text',
-              text: prefix,
-            })
-          }
-          content.push({
-            type: 'image',
-            source: {
-              data: resized.buffer.toString('base64'),
-              media_type:
-                `image/${resized.mediaType}` as Base64ImageSource['media_type'],
-              type: 'base64',
-            },
-          })
-          return content
-        } else {
-          return await persistBlobToTextBlock(
-            Buffer.from(resource.blob, 'base64'),
-            resource.mimeType,
-            serverName,
-            prefix,
-          )
-        }
-      }
-      return []
-    }
-    case 'resource_link': {
-      const resourceLink = resultContent as ResourceLink
-      let text = `[Resource link: ${resourceLink.name}] ${resourceLink.uri}`
-      if (resourceLink.description) {
-        text += ` (${resourceLink.description})`
-      }
-      return [
-        {
-          type: 'text',
-          text,
-        },
-      ]
-    }
-    default:
-      return []
-  }
-}
-
-/**
- * Decode base64 binary content, write it to disk with the proper extension,
- * and return a small text block with the file path. Replaces the old behavior
- * of dumping raw base64 into the context.
- */
-async function persistBlobToTextBlock(
-  bytes: Buffer,
-  mimeType: string | undefined,
-  serverName: string,
-  sourceDescription: string,
-): Promise<Array<ContentBlockParam>> {
-  const persistId = `mcp-${normalizeNameForMCP(serverName)}-blob-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const result = await persistBinaryContent(bytes, mimeType, persistId)
-
-  if ('error' in result) {
-    return [
-      {
-        type: 'text',
-        text: `${sourceDescription}Binary content (${mimeType || 'unknown type'}, ${bytes.length} bytes) could not be saved to disk: ${result.error}`,
-      },
-    ]
-  }
-
-  return [
-    {
-      type: 'text',
-      text: getBinaryBlobSavedMessage(
-        result.filepath,
-        mimeType,
-        result.size,
-        sourceDescription,
-      ),
-    },
-  ]
-}
-
-/**
- * Processes MCP tool result into a normalized format.
- */
-export type MCPResultType = 'toolResult' | 'structuredContent' | 'contentArray'
-
-export type TransformedMCPResult = {
-  content: MCPToolResult
-  type: MCPResultType
-  schema?: string
-}
-
-/**
- * Generates a compact, jq-friendly type signature for a value.
- * e.g. "{title: string, items: [{id: number, name: string}]}"
- */
-export function inferCompactSchema(value: unknown, depth = 2): string {
-  if (value === null) return 'null'
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]'
-    return `[${inferCompactSchema(value[0], depth - 1)}]`
-  }
-  if (typeof value === 'object') {
-    if (depth <= 0) return '{...}'
-    const entries = Object.entries(value).slice(0, 10)
-    const props = entries.map(
-      ([k, v]) => `${k}: ${inferCompactSchema(v, depth - 1)}`,
-    )
-    const suffix = Object.keys(value).length > 10 ? ', ...' : ''
-    return `{${props.join(', ')}${suffix}}`
-  }
-  return typeof value
-}
-
-export async function transformMCPResult(
-  result: unknown,
-  tool: string, // Tool name for validation (e.g., "search")
-  name: string, // Server name for transformation (e.g., "slack")
-  limits?: ImageLimits, // Image processing limits, plumbed to transformResultContent
-): Promise<TransformedMCPResult> {
-  if (result && typeof result === 'object') {
-    if ('toolResult' in result) {
-      return {
-        content: String(result.toolResult),
-        type: 'toolResult',
-      }
-    }
-
-    if (
-      'structuredContent' in result &&
-      result.structuredContent !== undefined
-    ) {
-      return {
-        content: jsonStringify(result.structuredContent),
-        type: 'structuredContent',
-        schema: inferCompactSchema(result.structuredContent),
-      }
-    }
-
-    if ('content' in result && Array.isArray(result.content)) {
-      const transformedContent = (
-        await Promise.all(
-          result.content.map(item =>
-            transformResultContent(item, name, limits, true),
-          ),
-        )
-      ).flat()
-      return {
-        content: transformedContent,
-        type: 'contentArray',
-        schema: inferCompactSchema(transformedContent),
-      }
-    }
-  }
-
-  const errorMessage = `MCP server "${name}" tool "${tool}": unexpected response format`
-  logMCPError(name, errorMessage)
-  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-    errorMessage,
-    'MCP tool unexpected response format',
-  )
-}
-
-/**
- * Check if MCP content contains any image blocks.
- * Used to decide whether to persist to file (images should use truncation instead
- * to preserve image compression and viewability).
- */
-function contentContainsImages(content: MCPToolResult): boolean {
-  if (!content || typeof content === 'string') {
-    return false
-  }
-  return content.some(block => block.type === 'image')
-}
-
-export async function processMCPResult(
-  result: unknown,
-  tool: string, // Tool name for validation (e.g., "search")
-  name: string, // Server name for IDE check and transformation (e.g., "slack")
-  limits?: ImageLimits, // Image processing limits, plumbed to transformMCPResult
-  skipLargeOutput = false, // If true, skip large-output handling for non-image content
-): Promise<MCPToolResult> {
-  const { content, type, schema } = await transformMCPResult(
-    result,
-    tool,
-    name,
-    limits,
-  )
-
-  // IDE tools are not going to the model directly, so we don't need to
-  // handle large output.
-  if (name === 'ide') {
-    return content
-  }
-
-  // Caller opted out of large-output handling (e.g., result already truncated
-  // upstream); only continue if the content has images that may need handling.
-  if (skipLargeOutput && !contentContainsImages(content)) {
-    return content
-  }
-
-  // Check if content needs truncation (i.e., is too large)
-  if (!(await mcpContentNeedsTruncation(content))) {
-    return content
-  }
-
-  const sizeEstimateTokens = getContentSizeEstimate(content)
-
-  // If large output files feature is disabled, fall back to old truncation behavior
-  if (isEnvDefinedFalsy(process.env.ENABLE_MCP_LARGE_OUTPUT_FILES)) {
-    logEvent('tengu_mcp_large_result_handled', {
-      outcome: 'truncated',
-      reason: 'env_disabled',
-      sizeEstimateTokens,
-    } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-    return await truncateMcpContentIfNeeded(content)
-  }
-
-  // Save large output to file and return instructions for reading it
-  // Content is guaranteed to exist at this point (we checked mcpContentNeedsTruncation)
-  if (!content) {
-    return content
-  }
-
-  // If content contains images, fall back to truncation - persisting images as JSON
-  // defeats the image compression logic and makes them non-viewable
-  if (contentContainsImages(content)) {
-    logEvent('tengu_mcp_large_result_handled', {
-      outcome: 'truncated',
-      reason: 'contains_images',
-      sizeEstimateTokens,
-    } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-    return await truncateMcpContentIfNeeded(content)
-  }
-
-  // Generate a unique ID for the persisted file (server__tool-timestamp)
-  const timestamp = Date.now()
-  const persistId = `mcp-${normalizeNameForMCP(name)}-${normalizeNameForMCP(tool)}-${timestamp}`
-  // When the large-string format gate is on, unwrap a single bare text block
-  // (no annotations, no _meta) into raw text so the model gets plain text in
-  // the persisted file instead of a JSON-wrapped block. The `_meta` check is
-  // why transformResultContent preserves _meta on text blocks.
-  const unwrappedText = unwrapSingleTextBlock(content)
-  const contentStr =
-    typeof content === 'string'
-      ? content
-      : (unwrappedText ?? jsonStringify(content, null, 2))
-  const persistResult = await persistToolResult(contentStr, persistId)
-
-  if (isPersistError(persistResult)) {
-    // If file save failed, fall back to returning truncated content info
-    const contentLength = contentStr.length
-    logEvent('tengu_mcp_large_result_handled', {
-      outcome: 'truncated',
-      reason: 'persist_failed',
-      sizeEstimateTokens,
-    } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-    return `Error: result (${contentLength.toLocaleString()} characters) exceeds maximum allowed tokens. Failed to save output to file: ${persistResult.error}. If this MCP server provides pagination or filtering tools, use them to retrieve specific portions of the data.`
-  }
-
-  logEvent('tengu_mcp_large_result_handled', {
-    outcome: 'persisted',
-    reason: 'file_saved',
-    sizeEstimateTokens,
-    persistedSizeChars: persistResult.originalSize,
-  } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-
-  const formatDescription =
-    unwrappedText !== undefined
-      ? getFormatDescription('toolResult')
-      : getFormatDescription(type, schema)
-  return getLargeOutputInstructions(
-    persistResult.filepath,
-    persistResult.originalSize,
-    formatDescription,
-  )
-}
-
-/**
- * Returns true when the large-string output format is enabled (matches
- * binary's `sf8()`). When enabled, processMCPResult unwraps a single bare
- * text block to raw text for persistence instead of JSON-wrapping it.
- *
- * Gating sources, in order:
- *   1. MCP_TRUNCATION_PROMPT_OVERRIDE env var (anything except "legacy" enables)
- *   2. Statsig gate `tengu_mcp_subagent_prompt`
- */
-function isLargeStringFormatEnabled(): boolean {
-  const override = process.env.MCP_TRUNCATION_PROMPT_OVERRIDE
-  if (override) return override !== 'legacy'
-  return checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
-    'tengu_mcp_subagent_prompt',
-  )
-}
-
-/**
- * Unwraps a single bare text content block to its raw text when the
- * large-string format gate is on. Returns undefined when the gate is off,
- * the content is not an array, the array doesn't contain exactly one text
- * block, or the block carries annotations or _meta. Matches binary mg5's
- * `M=...` computation.
- */
-function unwrapSingleTextBlock(content: MCPToolResult): string | undefined {
-  if (!isLargeStringFormatEnabled()) return undefined
-  if (!Array.isArray(content) || content.length !== 1) return undefined
-  const block = content[0]
-  if (!block || block.type !== 'text') return undefined
-  if ('annotations' in block || '_meta' in block) return undefined
-  return block.text
-}
-
-/**
- * Call an MCP tool, handling UrlElicitationRequiredError (-32042) by
- * displaying the URL elicitation to the user, waiting for the completion
- * notification, and retrying the tool call.
- */
-type MCPToolCallResult = {
-  content: MCPToolResult
-  interrupted?: boolean
-  isError?: boolean
-  _meta?: Record<string, unknown>
-  structuredContent?: Record<string, unknown>
-}
-
-/**
- * densable `Q6` — explicit interrupt text for an aborted MCP `tools/call`.
- * Official: abort used to return empty content → Dyo filled
- * `(${name} completed with no output)`.
- */
-export const MCP_TOOL_CALL_INTERRUPTED =
-  'The tool call was interrupted before a result was received. It may or may not have completed on the server — verify before assuming it succeeded, and retry if needed.'
-
-/**
- * densable MCP `call`: `if(Ae.interrupted)throw new Rn(Q6)`.
- * `Rn` in that module is the interrupt Error (`instanceof` → OLr "interrupted").
- */
-export function throwIfMcpToolCallInterrupted(
-  result: { interrupted?: boolean } | object,
-): void {
-  if (
-    result &&
-    typeof result === 'object' &&
-    'interrupted' in result &&
-    result.interrupted
-  ) {
-    throw new AbortError(MCP_TOOL_CALL_INTERRUPTED)
-  }
 }
 
 /** @internal Exported for testing. */
@@ -5416,20 +4379,6 @@ async function callMCPTool({
     }
     transportState?.activeCallWatchdogs.delete(callWatchdog)
   }
-}
-
-function extractToolUseId(message: AssistantMessage): string | undefined {
-  const firstBlock = (
-    message.message.content as ContentBlockParam[] | undefined
-  )?.[0]
-  if (
-    !firstBlock ||
-    typeof firstBlock === 'string' ||
-    firstBlock.type !== 'tool_use'
-  ) {
-    return undefined
-  }
-  return firstBlock.id
 }
 
 /**

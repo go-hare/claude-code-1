@@ -1,7 +1,7 @@
 /**
  * densable `UPt` / `lb` — session-scoped detached tool_call registry for gVn/el.
  */
-import { getBootstrapSession } from './sessionRoot.js'
+import { getBootstrapSession, getBootstrapSessionHost } from './sessionRoot.js'
 import type { Tool } from '../Tool.js'
 import type { Message } from '../types/message.js'
 import { removeByFilter } from './messageQueueManager.js'
@@ -41,13 +41,31 @@ class SessionDetachedToolCallStore {
   emit(): void {
     this.snapshot = new Map(this.snapshot)
     for (const l of this.listeners) l()
-    for (const l of globalListeners) l()
+    for (const l of getHostState().globalListeners) l()
   }
 }
 
-const storesBySessionRoot = new WeakMap<object, SessionDetachedToolCallStore>()
-const ownerRootByToolUseId = new Map<string, WeakRef<object>>()
-const globalListeners = new Set<Listener>()
+type DetachedToolCallHostState = {
+  storesBySessionRoot: WeakMap<object, SessionDetachedToolCallStore>
+  ownerRootByToolUseId: Map<string, WeakRef<object>>
+  globalListeners: Set<Listener>
+}
+
+const stateByHost = new WeakMap<object, DetachedToolCallHostState>()
+
+function getHostState(): DetachedToolCallHostState {
+  const host = getBootstrapSessionHost()
+  let state = stateByHost.get(host)
+  if (!state) {
+    state = {
+      storesBySessionRoot: new WeakMap(),
+      ownerRootByToolUseId: new Map(),
+      globalListeners: new Set(),
+    }
+    stateByHost.set(host, state)
+  }
+  return state
+}
 
 function resolveSessionRoot(session?: DetachedSessionArg): object {
   if (
@@ -64,6 +82,7 @@ function resolveSessionRoot(session?: DetachedSessionArg): object {
 }
 
 function storeForRoot(root: object): SessionDetachedToolCallStore {
+  const { storesBySessionRoot } = getHostState()
   let store = storesBySessionRoot.get(root)
   if (!store) {
     store = new SessionDetachedToolCallStore(root)
@@ -93,7 +112,7 @@ function storeForIdOrSession(
   ) {
     return defaultStore
   }
-  const ownerRoot = ownerRootByToolUseId.get(id)?.deref()
+  const ownerRoot = getHostState().ownerRootByToolUseId.get(id)?.deref()
   if (ownerRoot !== undefined) {
     return storeForRoot(ownerRoot)
   }
@@ -101,7 +120,7 @@ function storeForIdOrSession(
 }
 
 function trackOwnerRoot(id: string, store: SessionDetachedToolCallStore): void {
-  ownerRootByToolUseId.set(id, new WeakRef(store.root))
+  getHostState().ownerRootByToolUseId.set(id, new WeakRef(store.root))
 }
 
 function releaseOwnerRootIfIdle(
@@ -113,7 +132,7 @@ function releaseOwnerRootIfIdle(
     !store.letGoIds.has(id) &&
     !store.abortById.has(id)
   ) {
-    ownerRootByToolUseId.delete(id)
+    getHostState().ownerRootByToolUseId.delete(id)
   }
 }
 
@@ -128,6 +147,7 @@ export function subscribeDetachedToolCalls(
       store.listeners.delete(listener)
     }
   }
+  const { globalListeners } = getHostState()
   globalListeners.add(listener)
   return () => {
     globalListeners.delete(listener)

@@ -23,7 +23,13 @@ import type { ConfirmWithUserResult } from '../permissions/confirmWithUser.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { errorMessage, isENOENT } from '../errors.js'
-import { createSignal } from '../signal.js'
+import {
+  bindMainThreadTurn,
+  getMainThreadTurn,
+  releaseMainThreadTurn,
+  subscribeMainThreadTurnBegin,
+  subscribeMainThreadTurnEnd,
+} from '../mainThreadTurn.js'
 
 function asMeta(
   value: string,
@@ -257,62 +263,18 @@ type LeftoverTurnSlot = {
   cancel: () => void
 }
 
-/**
- * densable dRt / ZO / g_e — one current turn. Nested bind overwrites.
- * bind takes caller turnId (gold does not return id). release only if
- * turnId matches. Never export minify `dRt`/`ZO`/`g_e`/`Sss`/`yHr`/`adn`.
- */
-function leftoverTurnSlot(): {
-  bind: (opts: {
-    turnId: number
-    started?: Promise<void>
-    startedBy: string
-    abort: () => void
-  }) => void
-  release: (turnId: number) => boolean
-  current: () => LeftoverTurnSlot | undefined
-} {
-  let current: LeftoverTurnSlot | undefined
-  return {
-    bind(opts) {
-      let cancelled = false
-      current = {
-        turnId: opts.turnId,
-        started: opts.started ?? Promise.resolve(),
-        isPersonStarted: opts.startedBy === 'person',
-        cancelled: () => cancelled,
-        cancel: () => {
-          if (cancelled) return
-          cancelled = true
-          opts.abort()
-        },
-      }
-    },
-    release(turnId) {
-      if (current?.turnId !== turnId) return false
-      current = undefined
-      return true
-    },
-    current: () => current,
-  }
-}
-
-const leftoverZO = leftoverTurnSlot()
-const leftoverTurnBegin = createSignal()
-const leftoverTurnEnd = createSignal()
-
 const leftoverDevModsTurn = {
   isRunning(): boolean {
-    return leftoverZO.current() !== undefined
+    return getMainThreadTurn() !== undefined
   },
   isPersonTurn(): boolean {
-    return leftoverZO.current()?.isPersonStarted === true
+    return getMainThreadTurn()?.isPersonStarted === true
   },
   onBegin(fn: () => void): () => void {
-    return leftoverTurnBegin.subscribe(fn)
+    return subscribeMainThreadTurnBegin(fn)
   },
   onEnd(fn: () => void): () => void {
-    return leftoverTurnEnd.subscribe(fn)
+    return subscribeMainThreadTurnEnd(fn)
   },
 }
 
@@ -472,7 +434,7 @@ export function isDevModsPersonTurn(
 }
 
 let leftoverTurnSeq = 0
-let leftoverBoundTurnId: number | undefined
+let leftoverBoundTurnId: string | undefined
 
 export function markPluginDevModsTurnRunning(
   running: boolean,
@@ -480,21 +442,20 @@ export function markPluginDevModsTurnRunning(
 ): void {
   if (running) {
     leftoverTurnSeq += 1
-    const seq = leftoverTurnSeq
-    leftoverBoundTurnId = seq
-    leftoverZO.bind({
-      turnId: seq,
+    const turnId = `dev-mods-${leftoverTurnSeq}`
+    leftoverBoundTurnId = turnId
+    bindMainThreadTurn({
+      turnId,
       started: Promise.resolve(),
       startedBy: person ? 'person' : 'system',
       abort: () => {},
     })
-    leftoverTurnBegin.emit()
     return
   }
   // densable yHr(turnId) — release only the bound id, not whatever is current.
   const turnId = leftoverBoundTurnId
   leftoverBoundTurnId = undefined
-  if (turnId !== undefined && leftoverZO.release(turnId)) leftoverTurnEnd.emit()
+  if (turnId !== undefined) releaseMainThreadTurn(turnId)
 }
 
 /** densable Sss / yHr — bind turnId, release only that id. */
@@ -503,18 +464,17 @@ export function trackPluginDevModsTurn(opts?: {
   abort?: () => void
 }): Disposable {
   leftoverTurnSeq += 1
-  const seq = leftoverTurnSeq
+  const turnId = `dev-mods-${leftoverTurnSeq}`
   const person = opts?.person === true
-  leftoverZO.bind({
-    turnId: seq,
+  bindMainThreadTurn({
+    turnId,
     started: Promise.resolve(),
     startedBy: person ? 'person' : 'system',
     abort: opts?.abort ?? (() => {}),
   })
-  leftoverTurnBegin.emit()
   return {
     [Symbol.dispose]() {
-      if (leftoverZO.release(seq)) leftoverTurnEnd.emit()
+      releaseMainThreadTurn(turnId)
     },
   }
 }

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Box, Dialog, Text, useInput } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
+import { pdSessionEffort } from '../../utils/effort.js';
 import { callTui, type TuiRelaunchCarryInput } from './index.js';
 
 type TuiAction = {
@@ -16,7 +17,11 @@ function carryFromContext(context: unknown): TuiRelaunchCarryInput | undefined {
     const ctx = context as {
       getAppState?: () => {
         toolPermissionContext?: TuiRelaunchCarryInput['toolPermissionContext'];
+        sessionEffort?: Parameters<typeof pdSessionEffort>[0]['sessionEffort'];
         effortValue?: unknown;
+        settingsEffortTable?: Parameters<typeof pdSessionEffort>[0]['settingsEffortTable'];
+        mainLoopModel?: string | null;
+        mainLoopModelForSession?: string | null;
         tasks?: TuiRelaunchCarryInput['tasks'];
         messages?: TuiRelaunchCarryInput['messages'];
         proactivityLevel?: unknown;
@@ -39,7 +44,7 @@ function carryFromContext(context: unknown): TuiRelaunchCarryInput | undefined {
     }
     return {
       toolPermissionContext: state?.toolPermissionContext,
-      effort: state?.effortValue,
+      effort: state ? pdSessionEffort(state as Parameters<typeof pdSessionEffort>[0]) : undefined,
       tasks: state?.tasks,
       messages,
       getProactivityLevel: ctx.getProactivityLevel,

@@ -27,10 +27,9 @@ import type {
 } from '../../types/message.js';
 import type { QueuedCommand } from '../../types/textInputTypes.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';
-import { getCommandQueue } from '../../utils/messageQueueManager.js';
 import { formatTurnDoneAt } from '../../utils/timeFormat.js';
 import { getGlobalConfig } from '../../utils/config.js';
-import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
+import { useAppStateMaybeOutsideOfProvider, useMessageQueue } from '../../state/AppState.js';
 import { getPillLabel } from '../../tasks/pillLabel.js';
 import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
@@ -471,11 +470,12 @@ function TurnDurationMessage({
   const displayDurationMs =
     typeof rendered.props.durationMs === 'number' ? rendered.props.durationMs : message.durationMs;
   const liveTasks = useAppStateMaybeOutsideOfProvider(s => s.tasks);
+  const messageQueue = useMessageQueue();
   // densable 2.1.289 vg (@207720380): check live pending status on mount via useState initializer.
   const [mountSnapshot] = useState(() => {
     const live = countPendingTurnDurationWork({
       tasks: liveTasks ?? {},
-      queuedCommands: getCommandQueue(),
+      queuedCommands: messageQueue.getCommands(),
     });
     const rawTimestamp = message.timestamp;
     const timestampDate =
