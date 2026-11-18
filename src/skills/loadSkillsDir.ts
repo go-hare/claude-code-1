@@ -1190,6 +1190,7 @@ export { transformSkillFiles }
 
 // State for dynamically discovered skills
 const dynamicSkillDirs = new Set<string>()
+const deferredSkillDirs = new Map<string, string>()
 const dynamicSkills = new Map<string, Command>()
 
 // --- Conditional skills (path-filtered) ---
@@ -1229,9 +1230,36 @@ export function onDynamicSkillsLoaded(callback: () => void): () => void {
  * @param cwd Current working directory (upper bound for discovery)
  * @returns Array of newly discovered skill directories, sorted deepest first
  */
+/**
+ * Gold `B5n(e, n, r)` (#1319): verify `dir` is in the same git `workTree` and
+ * return `git check-ignore` exit code (1 = not ignored, 0 = ignored,
+ * 128/undefined = unconfirmed).
+ */
+async function checkGitIgnoreInWorkTree(
+  dir: string,
+  workTree: string,
+  cwd: string,
+): Promise<number | undefined> {
+  const { findGitRoot } = await import('../utils/git.js')
+  if (findGitRoot(dir) !== workTree) {
+    return undefined
+  }
+  const { execFileNoThrowWithCwd } = await import('../utils/execFileNoThrow.js')
+  const { code } = await execFileNoThrowWithCwd(
+    'git',
+    ['check-ignore', '--', dir],
+    {
+      preserveOutputOnError: false,
+      cwd,
+    },
+  )
+  return code
+}
+
 export async function discoverSkillDirsForPaths(
   filePaths: string[],
   cwd: string,
+  trustedCwdInfo?: { cwd: string; workTree: string },
 ): Promise<string[]> {
   const fs = getFsImplementation()
   const resolvedCwd = cwd.endsWith(pathSep) ? cwd.slice(0, -1) : cwd
@@ -1246,6 +1274,11 @@ export async function discoverSkillDirsForPaths(
     // Use prefix+separator check to avoid matching /project-backup when cwd is /project
     while (currentDir.startsWith(resolvedCwd + pathSep)) {
       const skillDir = join(currentDir, '.claude', 'skills')
+      const deferredAt = deferredSkillDirs.get(skillDir)
+      if (deferredAt !== undefined && deferredAt !== resolvedCwd) {
+        deferredSkillDirs.delete(skillDir)
+        dynamicSkillDirs.delete(skillDir)
+      }
 
       // Skip if we've already checked this path (hit or miss) — avoids
       // repeating the same failed stat on every Read/Write/Edit call when
@@ -1256,11 +1289,31 @@ export async function discoverSkillDirsForPaths(
           await fs.stat(skillDir)
           // Skills dir exists. Before loading, check if the containing dir
           // is gitignored — blocks e.g. node_modules/pkg/.claude/skills from
-          // loading silently. `git check-ignore` handles nested .gitignore,
-          // .git/info/exclude, and global gitignore. Fails open outside a
-          // git repo (exit 128 → false); the invocation-time trust dialog
-          // is the actual security boundary.
-          if (await isPathGitignored(currentDir, resolvedCwd)) {
+          // loading silently.
+          const isWithinTrustedCwd =
+            trustedCwdInfo === undefined ||
+            currentDir.startsWith(trustedCwdInfo.cwd + pathSep)
+          if (!isWithinTrustedCwd) {
+            const exitCode = await checkGitIgnoreInWorkTree(
+              currentDir,
+              trustedCwdInfo.workTree,
+              resolvedCwd,
+            )
+            if (exitCode !== 1) {
+              if (exitCode !== 0) {
+                deferredSkillDirs.set(skillDir, resolvedCwd)
+              }
+              logForDebugging(
+                `[skills] Skipped gitignored or unconfirmed skills dir: ${skillDir}`,
+              )
+              continue
+            }
+          } else if (
+            await isPathGitignored(
+              currentDir,
+              trustedCwdInfo?.cwd ?? resolvedCwd,
+            )
+          ) {
             logForDebugging(
               `[skills] Skipped gitignored skills dir: ${skillDir}`,
             )
@@ -1491,8 +1544,50 @@ export function activateConditionalSkillsForPaths(
 /**
  * Clears dynamic skill state (for testing).
  */
+export async function discoverAndActivateSkillsForFilePath(
+  filePath: string,
+  outDirs?: string[],
+): Promise<void> {
+  const originalCwd = getOriginalCwd()
+  const currentCwd = getCwd()
+  const { findGitRoot } = await import('../utils/git.js')
+  const normalizedOrig = originalCwd.endsWith(pathSep)
+    ? originalCwd.slice(0, -1)
+    : originalCwd
+  const origWorkTree =
+    originalCwd !== currentCwd &&
+    (currentCwd === normalizedOrig ||
+      currentCwd.startsWith(normalizedOrig + pathSep))
+      ? findGitRoot(originalCwd)
+      : null
+  const trustedCwdInfo =
+    origWorkTree !== null && findGitRoot(currentCwd) === origWorkTree
+      ? { cwd: originalCwd, workTree: origWorkTree }
+      : undefined
+  const effectiveCwd = trustedCwdInfo === undefined ? originalCwd : currentCwd
+  const newDirs = await discoverSkillDirsForPaths(
+    [filePath],
+    effectiveCwd,
+    trustedCwdInfo,
+  )
+  if (newDirs.length > 0) {
+    if (outDirs) {
+      for (const d of newDirs) {
+        if (!outDirs.includes(d)) outDirs.push(d)
+      }
+    }
+    void addSkillDirectories(newDirs)
+      .then(() => {
+        activateConditionalSkillsForPaths([filePath], effectiveCwd)
+      })
+      .catch(() => {})
+  }
+  activateConditionalSkillsForPaths([filePath], effectiveCwd)
+}
+
 export function clearDynamicSkills(): void {
   dynamicSkillDirs.clear()
+  deferredSkillDirs.clear()
   dynamicSkills.clear()
   conditionalSkills.clear()
   activatedConditionalSkillNames.clear()
@@ -1583,3 +1678,12 @@ registerMCPSkillBuilders({
   createSkillCommand,
   parseSkillFrontmatterFields,
 })
+
+export {
+  checkSyncReuseWithinMs,
+  DEFAULT_SYNC_REUSE_WITHIN_MS,
+  readSyncReuseStamp,
+  resolveSyncReuseWithinMs,
+  settleSyncReuseStamp,
+  SYNC_REUSE_STAMP_FILENAME,
+} from '../utils/accountSkillsSyncVeto.js'

@@ -270,6 +270,7 @@ export function logAPIError({
   fastMode,
   previousRequestId,
   promptTooLongIsHandled,
+  effort,
 }: {
   error: unknown
   model: string
@@ -295,6 +296,7 @@ export function logAPIError({
    * classifyAPIError is prompt_too_long (official O = S && x==="prompt_too_long").
    */
   promptTooLongIsHandled?: boolean
+  effort?: string
 }): void {
   const gateway = detectGateway({
     headers:
@@ -415,6 +417,7 @@ export function logAPIError({
     error: errStr,
     attempt,
     requestId: requestId ?? undefined,
+    effort,
   })
 
   // Log first error for teleported sessions (reliability tracking)
@@ -640,6 +643,7 @@ export function logAPISuccessAndDuration({
   fastMode,
   previousRequestId,
   betas,
+  effort,
 }: {
   model: string
   preNormalizedModel: string
@@ -675,6 +679,7 @@ export function logAPISuccessAndDuration({
   /** Request ID from the previous API call in this session */
   previousRequestId?: string | null
   betas?: string[]
+  effort?: string
 }): void {
   const gateway = detectGateway({
     headers,
@@ -873,6 +878,7 @@ export function logAPISuccessAndDuration({
     attemptStartTimes,
     requestId: requestId ?? undefined,
     stopReason: stopReason ?? undefined,
+    effort,
   })
 
   // Log first successful message for teleported sessions (reliability tracking)

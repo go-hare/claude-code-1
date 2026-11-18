@@ -121,6 +121,10 @@ import {
   maybeResizeAndDownsampleImageBuffer,
 } from '../../utils/imageResizer.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
+import {
+  isFixedUrlOfficialMarketplacePluginMcp,
+  markMcpServerLoggable,
+} from '../../utils/mcpUsageAttribution.js'
 import { mcpInfoSource } from '../../utils/plugins/toolDescribe.js'
 import {
   getBinaryBlobSavedMessage,
@@ -210,7 +214,9 @@ import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpe
 import { sleep } from '../../utils/sleep.js'
 import {
   ClaudeAuthProvider,
+  dialWithSignedOutFallback,
   hasMcpDiscoveryButNoToken,
+  markStoredTokenRejectedForRedial,
   serverHasStoredRefreshToken,
   wrapFetchWithStepUpDetection,
 } from './auth.js'
@@ -278,6 +284,7 @@ import {
 } from './mcpFirstPartyAutoAuth.js'
 import type {
   ConnectedMCPServer,
+  McpCallWatchdog,
   MCPServerConnection,
   McpSdkServerConfig,
   McpStdioServerConfig,
@@ -1627,7 +1634,9 @@ const connectToServerMemo = memoize(
             }
           }
           if (error instanceof UnauthorizedError) {
-            return handleRemoteAuthFailure(name, serverRef, 'sse')
+            return markStoredTokenRejectedForRedial(name, serverRef, () =>
+              handleRemoteAuthFailure(name, serverRef, 'sse'),
+            )
           }
         } else if (serverRef.type === 'http' && error instanceof Error) {
           const errorObj = error as Error & {
@@ -1671,7 +1680,9 @@ const connectToServerMemo = memoize(
             }
           }
           if (error instanceof UnauthorizedError) {
-            return handleRemoteAuthFailure(name, serverRef, 'http')
+            return markStoredTokenRejectedForRedial(name, serverRef, () =>
+              handleRemoteAuthFailure(name, serverRef, 'http'),
+            )
           }
         } else if (
           serverRef.type === 'claudeai-proxy' &&
@@ -2930,6 +2941,9 @@ export const fetchToolsForClient = memoizeWithLRU(
                 // (cleared after one attributed main/subagent request).
                 context.options.activeMcpServer = client.name
                 context.options.activeMcpTool = tool.name
+                if (isFixedUrlOfficialMarketplacePluginMcp(client.config)) {
+                  markMcpServerLoggable(client.name)
+                }
 
                 const toolUseId = extractToolUseId(parentMessage)
                 const meta = toolUseId
@@ -3554,7 +3568,15 @@ export async function reconnectMcpServerImpl(
       }
       return inertReconnectShape(name, config)
     }
-    let client = await connectToServer(name, config)
+    let client = await dialWithSignedOutFallback(
+      () => {
+        connectToServer.cache.delete(getServerCacheKey(name, config))
+        return connectToServer(name, config)
+      },
+      () => !identityMoved(),
+      name,
+      config,
+    )
     // Official HWt: needs-auth → one cache-clear retry.
     if (client.type === 'needs-auth') {
       logMCPDebug(
@@ -4242,6 +4264,19 @@ export async function callMCPToolWithUrlElicitationRetry({
   }
 }
 
+export const MCP_QUESTION_UNANSWERED_MESSAGE =
+  "The server asked the user a question, and no answer came before the time limit. Do not call this tool again in this turn. Tell the user that the server's question got no answer, and wait for their reply."
+
+export function formatMcpToolTimeoutMessage(
+  serverName: string,
+  toolName: string,
+  timeoutMs: number,
+  hasOpenQuestions: boolean,
+): string {
+  const base = `MCP server "${serverName}" tool "${toolName}" timed out after ${Math.floor(timeoutMs / 1000)}s`
+  return hasOpenQuestions ? `${base}. ${MCP_QUESTION_UNANSWERED_MESSAGE}` : base
+}
+
 async function callMCPTool({
   client: { client, name, config, transportErrorState },
   tool,
@@ -4266,7 +4301,7 @@ async function callMCPTool({
   let idleTimeoutId: NodeJS.Timeout | undefined
   let armIdleWatchdog: (() => void) | undefined
   // Official S={armedAt:0} registered on transportErrorState for mid-call drop.
-  const callWatchdog = { armedAt: 0 }
+  const callWatchdog: McpCallWatchdog = { armedAt: 0, openQuestions: 0 }
   const transportState = transportErrorState
   transportState?.activeCallWatchdogs.add(callWatchdog)
   let rejectTransportDrop: ((err: Error) => void) | undefined
@@ -4338,10 +4373,15 @@ async function callMCPTool({
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
-        (reject, name, tool, timeoutMs) => {
+        (reject, name, tool, timeoutMs, watchdog) => {
           reject(
             new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-              `MCP server "${name}" tool "${tool}" timed out after ${Math.floor(timeoutMs / 1000)}s`,
+              formatMcpToolTimeoutMessage(
+                name,
+                tool,
+                timeoutMs,
+                (watchdog.openQuestions ?? 0) > 0,
+              ),
               'MCP tool timeout',
             ),
           )
@@ -4351,6 +4391,7 @@ async function callMCPTool({
         name,
         tool,
         timeoutMs,
+        callWatchdog,
       )
     })
 

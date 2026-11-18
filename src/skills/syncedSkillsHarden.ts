@@ -15,6 +15,7 @@
 
 import { getCommandName } from '../types/command.js'
 import type { Command } from '../types/command.js'
+import { AbortError } from '../utils/errors.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 
 export const CLAUDE_AI_SYNC_LABEL = 'claude.ai sync'
@@ -261,4 +262,105 @@ export function applySyncedSkillShadowFilter(commands: Command[]): Command[] {
     }
   }
   return out
+}
+
+export type PendingSkillDownloadOutcome =
+  | { ok: true }
+  | { ok: false; reason: string }
+
+type PendingSkillDownloadEntry = {
+  promise: Promise<PendingSkillDownloadOutcome>
+  resolve: (outcome: PendingSkillDownloadOutcome) => void
+  start?: (signal?: AbortSignal) => void
+  controller: AbortController
+}
+
+const pendingSkillDownloads = new Map<string, PendingSkillDownloadEntry>()
+
+/**
+ * Official nGi (#1226) — register a pending skill download with an AbortController
+ * so callers can cancel/race against an AbortSignal.
+ */
+export function registerPendingSkillDownload(
+  skillName: string,
+  start?: (signal?: AbortSignal) => void,
+): (outcome: PendingSkillDownloadOutcome) => void {
+  let resolve!: (outcome: PendingSkillDownloadOutcome) => void
+  const promise = new Promise<PendingSkillDownloadOutcome>(r => {
+    resolve = r
+  })
+  const controller = new AbortController()
+  pendingSkillDownloads.set(skillName, {
+    promise,
+    resolve,
+    start,
+    controller,
+  })
+  return outcome => {
+    pendingSkillDownloads.delete(skillName)
+    resolve(outcome)
+  }
+}
+
+/**
+ * Official tFe + ir(tFe(e), signal, () => new AbortError) (#1226) —
+ * start (if deferred) and await a pending skill download, cancelling via
+ * AbortController if `signal` aborts.
+ */
+export function awaitPendingSkillDownload(
+  skillName: string,
+  signal?: AbortSignal,
+): Promise<PendingSkillDownloadOutcome> {
+  if (signal?.aborted) {
+    const entry = pendingSkillDownloads.get(skillName)
+    if (entry) {
+      entry.start = undefined
+      entry.controller.abort(signal.reason)
+    }
+    return Promise.reject(new AbortError('Skill download aborted'))
+  }
+  const entry = pendingSkillDownloads.get(skillName)
+  if (!entry) {
+    return Promise.resolve({ ok: true })
+  }
+  const start = entry.start
+  entry.start = undefined
+  if (start !== undefined) {
+    try {
+      start(entry.controller.signal)
+    } catch {
+      entry.resolve({ ok: false, reason: 'download could not start' })
+    }
+  }
+  if (!signal) {
+    return entry.promise
+  }
+  return new Promise<PendingSkillDownloadOutcome>((resolve, reject) => {
+    const onAbort = () => {
+      entry.controller.abort(signal.reason)
+      reject(new AbortError('Skill download aborted'))
+    }
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    entry.promise.then(
+      outcome => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(outcome)
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
+}
+
+export function clearPendingSkillDownloads(): void {
+  for (const entry of pendingSkillDownloads.values()) {
+    entry.controller.abort()
+  }
+  pendingSkillDownloads.clear()
 }

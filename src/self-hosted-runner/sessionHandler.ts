@@ -119,6 +119,9 @@ import {
   fetchPriorOutcomeBranch,
   mapOutcomeBranchLists,
   FetchRefNotFoundError,
+  FetchThrottledError,
+  REPOSITORY_THROTTLE_LABELS,
+  RepositoryAccessError,
   mapPushTargetsFromRemote,
   prepareSources,
   prepClonePhaseEvent,
@@ -1111,6 +1114,8 @@ export async function handleSession(
       const preparedSources: MappedCheckoutSource[] = []
       const preparedUrls: string[] = []
       const preparedPaths: string[] = []
+      let lastSkippedError: unknown
+      let lastThrottledError: unknown
 
       for (const src of mapped) {
         if (!isCheckoutHookSourceType(src.type)) continue
@@ -1309,10 +1314,38 @@ export async function handleSession(
             )
             continue
           }
+          if (
+            !isWorkRepo &&
+            (err instanceof RepositoryAccessError ||
+              err instanceof FetchThrottledError) &&
+            err.throttle !== undefined &&
+            !signal.aborted
+          ) {
+            lastSkippedError ??= err
+            lastThrottledError ??= err
+            onDebug(
+              `[runner:warn] could not read context source ${src.repo} (told to try again later: ${REPOSITORY_THROTTLE_LABELS[err.throttle]}); not a work repo (no push_targets entry), skipping it: ${msg}`,
+            )
+            await postStep(
+              'clone',
+              'completed',
+              `Skipped ${src.repo} — after several tries this runner was still told to try again later; a rate limit is the usual cause. This session runs without it. It is tried again the next time this session starts.`,
+              {
+                step_detail: src.repo,
+                skip_kind: 'context_source_throttled',
+                skip_reason: err.throttle,
+              },
+            )
+            continue
+          }
           if (checkoutHookPath) opts.onSessionStartHookError?.()
           exitBeforeInit(true)
           throw err
         }
+      }
+
+      if (preparedPaths.length === 0 && lastSkippedError !== undefined) {
+        throw lastThrottledError ?? lastSkippedError
       }
 
       await postStep('clone', 'completed', 'Finished preparing sources')

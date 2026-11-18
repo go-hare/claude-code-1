@@ -20,6 +20,7 @@ import {
   SandboxRuntimeConfigSchema,
   SandboxViolationStore,
 } from '@anthropic-ai/sandbox-runtime'
+import { spawnSync } from 'child_process'
 import {
   closeSync,
   existsSync,
@@ -48,6 +49,7 @@ import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { expandPath } from '../path.js'
+import { settingsHaveBlockReadsOutsideWorkingDirectories } from '../permissions/outsideReads.js'
 import { isWorktreePathNetworkRelativeToCwd } from '../worktree.js'
 import {
   gitAdminHopUnsafe,
@@ -1370,6 +1372,101 @@ export function convertToSandboxRuntimeConfig(
     denyWrite.push(...expanded)
   }
 
+  // #1272 SEA: apply permissions.blockReadsOutsideWorkingDirectories to sandbox
+  // denyRead / allowRead unless allowManagedReadPathsOnly is enabled.
+  const allowManagedReadPathsOnly = SETTING_SOURCES.some(
+    source =>
+      isSettingSourceEnabled(source) &&
+      getSettingsForSource(source)?.sandbox?.filesystem
+        ?.allowManagedReadPathsOnly === true,
+  )
+  if (
+    settingsHaveBlockReadsOutsideWorkingDirectories() &&
+    !allowManagedReadPathsOnly
+  ) {
+    const workingDirs = [originalCwd]
+    for (const source of SETTING_SOURCES) {
+      if (!isSettingSourceEnabled(source)) continue
+      const dirs =
+        getSettingsForSource(source)?.permissions?.additionalDirectories
+      if (!dirs) continue
+      for (const d of dirs) {
+        workingDirs.push(expandPath(d))
+      }
+    }
+    const nonGlobWorkingDirs = workingDirs.filter(p => !/[*?[\]]/.test(p))
+    const inlinePluginRoots = getInlinePluginRoots(originalCwd)
+    const inlinePluginRootSet = new Set(inlinePluginRoots)
+
+    // Prevent `bwrap: Can't create file` when a `--plugin-dir` folder is also
+    // an added directory (`additionalDirectories`): keep it in `allowRead` and
+    // `denyWrite`, not `allowWrite`.
+    for (let i = allowWrite.length - 1; i >= 0; i--) {
+      const w = allowWrite[i]
+      if (
+        w !== undefined &&
+        inlinePluginRootSet.has(w) &&
+        !isPathEqualOrUnder(w, originalCwd)
+      ) {
+        allowWrite.splice(i, 1)
+      }
+    }
+
+    const fenceRoots = [
+      '~/',
+      '/home/',
+      '/Users/',
+      '/root/',
+      '/mnt/',
+      '/media/',
+      '/run/media/',
+      '/Volumes/',
+      '/srv/',
+    ]
+    for (const rawRoot of fenceRoots) {
+      const resolvedRoot = expandPath(rawRoot)
+      if (nonGlobWorkingDirs.some(wd => isPathEqualOrUnder(resolvedRoot, wd))) {
+        continue
+      }
+      denyRead.push(resolvedRoot)
+    }
+
+    const claudeDir = getClaudeConfigHomeDir()
+    const reopenCandidates = [
+      ...nonGlobWorkingDirs,
+      ...inlinePluginRoots.filter(p => !/[*?[\]]/.test(p)),
+      ...inlinePluginRoots.flatMap(p => {
+        try {
+          const real = realpathSync(p)
+          return real !== p && !/[*?[\]]/.test(real) ? [real] : []
+        } catch {
+          return []
+        }
+      }),
+      claudeDir,
+      join(claudeDir, 'shell-snapshots'),
+      join(claudeDir, 'session-env'),
+      join(claudeDir, 'skills'),
+      join(claudeDir, 'plugins'),
+      join(claudeDir, 'rules'),
+      join(claudeDir, 'agents'),
+      join(claudeDir, 'commands'),
+    ]
+    const existingDenies = [...denyRead]
+    for (const candidate of reopenCandidates) {
+      if (
+        existingDenies.some(
+          d => !/[*?[\]]/.test(d) && isPathEqualOrUnder(candidate, d),
+        )
+      ) {
+        continue
+      }
+      if (!allowRead.includes(candidate)) {
+        allowRead.push(candidate)
+      }
+    }
+  }
+
   // densable Xot()==="relaxed": attach filesystem.disabled + keep full path lists
   // on getConfig(). sandbox-runtime@0.0.70 honors filesystem.disabled natively
   // (Gvg empty / Wvg allowOnly['/'] / Bou skip FS mounts). OUTER getFs* still
@@ -1678,12 +1775,132 @@ export function detectWorktreeMainRepoPath(cwd: string): string | null {
  * Check if dependencies are available (memoized)
  * Returns { errors, warnings } - errors mean sandbox cannot run
  */
+const APPARMOR_USERNS_RESTRICT_PATH =
+  '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+const APPARMOR_USERNS_ERROR_RE =
+  /setting up uid map: Permission denied|Failed RTM_NEWADDR/
+const APPARMOR_BWRAP_TRIAL_ARGS = [
+  '--unshare-user',
+  '--unshare-net',
+  '--dev-bind',
+  '/',
+  '/',
+  '/bin/true',
+]
+const APPARMOR_BWRAP_TRIAL_TIMEOUT_MS = 2000
+
+export type AppArmorProbeDeps = {
+  readRestrictionSwitch: () => string | undefined
+  resolveBubblewrap: () => string | null
+  tryBubblewrap: (bwrapPath: string) => {
+    ran: boolean
+    exitCode: number | null
+    stderr: string
+  }
+}
+
+function defaultResolveBubblewrap(): string | null {
+  try {
+    const custom = getSettings_DEPRECATED()?.sandbox?.bwrapPath
+    if (custom) return expandPath(custom)
+  } catch {
+    // ignore settings read error
+  }
+  return 'bwrap'
+}
+
+function defaultTryBubblewrap(bwrapPath: string): {
+  ran: boolean
+  exitCode: number | null
+  stderr: string
+} {
+  try {
+    const res = spawnSync(bwrapPath, APPARMOR_BWRAP_TRIAL_ARGS, {
+      cwd: '/',
+      env: {
+        PATH: '/usr/bin:/bin',
+        USER_TYPE: 'external',
+        NODE_ENV: 'production',
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      timeout: APPARMOR_BWRAP_TRIAL_TIMEOUT_MS,
+      encoding: 'utf8',
+    })
+    return {
+      ran:
+        res.error === undefined &&
+        res.signal === null &&
+        typeof res.status === 'number',
+      exitCode: res.status ?? null,
+      stderr: typeof res.stderr === 'string' ? res.stderr : '',
+    }
+  } catch {
+    return { ran: false, exitCode: null, stderr: '' }
+  }
+}
+
+/**
+ * Official 325 `$W` (#1207): detect Ubuntu AppArmor unprivileged userns restriction
+ * blocking `bwrap` and return an actionable remediation message.
+ */
+export function detectLinuxAppArmorUsernsRestriction(
+  deps: AppArmorProbeDeps = {
+    readRestrictionSwitch: () => {
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- sync dependency probe
+        return readFileSync(APPARMOR_USERNS_RESTRICT_PATH, 'utf8')
+      } catch {
+        return undefined
+      }
+    },
+    resolveBubblewrap: defaultResolveBubblewrap,
+    tryBubblewrap: defaultTryBubblewrap,
+  },
+): string | undefined {
+  try {
+    if (deps.readRestrictionSwitch()?.trim() !== '1') return undefined
+    const bwrapPath = deps.resolveBubblewrap()
+    if (bwrapPath === null) return undefined
+    const trial = deps.tryBubblewrap(bwrapPath)
+    if (!trial.ran || trial.exitCode === 0) return undefined
+    logForDebugging(
+      `[sandbox] kernel.apparmor_restrict_unprivileged_userns=1 and the bubblewrap trial (${bwrapPath} ${APPARMOR_BWRAP_TRIAL_ARGS.join(' ')}) exited ${trial.exitCode}: ${trial.stderr.trim()}`,
+      { level: 'warn' },
+    )
+    if (!APPARMOR_USERNS_ERROR_RE.test(trial.stderr)) return undefined
+    const matchingLine = trial.stderr
+      .split('\n')
+      .map(line => line.trim().replace(/^bwrap: /, ''))
+      .find(line => APPARMOR_USERNS_ERROR_RE.test(line))
+      ?.slice(0, 80)
+    return `Ubuntu's AppArmor restriction on user namespaces stops bubblewrap here ("${matchingLine ?? ''}"). Add bubblewrap's AppArmor profile from https://code.claude.com/docs/en/sandboxing, or run \`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\` (holds until reboot), then restart Claude Code`
+  } catch (err) {
+    logForDebugging(
+      `[sandbox] the AppArmor user-namespace check could not be made: ${err}`,
+      { level: 'warn' },
+    )
+    return undefined
+  }
+}
+
 const checkDependencies = memoize((): SandboxDependencyCheck => {
   const { rgPath, rgArgs } = ripgrepCommand()
-  return BaseSandboxManager.checkDependencies({
+  const base = BaseSandboxManager.checkDependencies({
     command: rgPath,
     args: rgArgs,
   })
+  const platform = getPlatform()
+  if (
+    (platform === 'linux' || platform === 'wsl') &&
+    base.errors.length === 0 &&
+    initializationPromise === undefined
+  ) {
+    const appArmorError = detectLinuxAppArmorUsernsRestriction()
+    if (appArmorError !== undefined) {
+      return { ...base, errors: [appArmorError] }
+    }
+  }
+  return base
 })
 
 function getSandboxEnabledSetting(): boolean {

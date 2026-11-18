@@ -33,6 +33,7 @@ import {
   checkRuleBasedPermissions,
   evaluatePermissionWithToolCheck,
   hasEvaluatedToolCheckForCall,
+  isCoworkCloudAutoHookAllowBlocked,
 } from '../../utils/permissions/permissions.js'
 import {
   accountMemoryHookRewriteDenied,
@@ -991,6 +992,21 @@ export async function* runPreToolUseHooks(
         }
         // densable QLn — confined child ignores PreToolUse allow grants
         stripEvalConfinedHookAllow(result, `PreToolUse:${tool.name}`)
+        // Official 325 (#1442) — Cowork cloud auto mode blocks PreToolUse allow
+        // for Bash, PowerShell, Agent, and mcp__ tools.
+        if (
+          result.permissionBehavior === 'allow' &&
+          isCoworkCloudAutoHookAllowBlocked(
+            tool.name,
+            appState.toolPermissionContext.mode,
+          )
+        ) {
+          logEvent('tengu_auto_mode_permission_request_allow_ignored', {})
+          logForDebugging(
+            `PreToolUse:${tool.name} permissionDecision=allow ignored: while auto mode is on (also behind plan mode) a hook cannot approve ${tool.name}`,
+          )
+          result.permissionBehavior = undefined
+        }
         // Check for hook-defined permission behavior
         if (result.permissionBehavior !== undefined) {
           logForDebugging(

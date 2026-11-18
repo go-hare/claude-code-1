@@ -98,7 +98,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
   usePermissionRequestLogging(toolUseConfirm, unaryEvent);
 
   const symlinkTarget = useMemo(() => {
-    if (!path || operationType === 'read') {
+    if (!path) {
       return null;
     }
     const expandedPath = expandPath(path);
@@ -108,7 +108,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
       return resolvedPath;
     }
     return null;
-  }, [path, operationType]);
+  }, [path]);
 
   const offersBlockOutsideReads =
     toolUseConfirm.permissionResult.behavior === 'ask' &&
@@ -222,7 +222,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     <Box paddingX={1} marginBottom={1}>
       <Text color="warning">
         {isSymlinkOutsideCwd
-          ? `This will modify ${toTildePath(symlinkTarget)} (outside working directory) via a symlink`
+          ? `This will ${operationType === 'read' ? 'read' : 'modify'} ${toTildePath(symlinkTarget)} (outside working directory) via a symlink`
           : `Symlink target: ${toTildePath(symlinkTarget)}`}
       </Text>
     </Box>

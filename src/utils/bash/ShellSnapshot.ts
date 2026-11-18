@@ -279,6 +279,29 @@ export function createFindGrepShellIntegration(): string | null {
   ].join('\n')
 }
 
+/**
+ * Official 325 `Fls` / `R6n` / `$ls` / `Bls` / `T6n` (#1440):
+ * clear inherited `which` and `unsetenv` aliases/functions and strip exported
+ * `BASH_FUNC_which*` / `BASH_FUNC_unsetenv*` env entries so `which` resolves to
+ * the system command or zsh builtin.
+ */
+export const CLEAR_BUILTIN_CMD_NAMES = ['unsetenv', 'which'] as const
+
+export function buildClearAliasAndFunctionCommand(name: string): string {
+  return `{ \\builtin unalias -- '${name}'; \\builtin unset -f -- '${name}'; } >/dev/null 2>&1 || true`
+}
+
+export const CLEAR_WHICH_COMMAND = buildClearAliasAndFunctionCommand('which')
+export const CLEAR_UNSETENV_COMMAND =
+  buildClearAliasAndFunctionCommand('unsetenv')
+
+export const STRIPPED_EXPORTED_FUNC_ENV_KEYS: readonly string[] =
+  CLEAR_BUILTIN_CMD_NAMES.flatMap(name => [
+    `BASH_FUNC_${name}%%`,
+    `BASH_FUNC_${name}()`,
+    `__BASH_FUNC<${name}>()`,
+  ])
+
 function getConfigFile(shellPath: string): string {
   const fileName = shellPath.includes('zsh')
     ? '.zshrc'
@@ -615,6 +638,8 @@ export async function getSnapshotScript(
       # which can cause unexpected behavior when functions use commands that conflict with aliases
       echo "# Unset all aliases to avoid conflicts with functions" >> "$SNAPSHOT_FILE"
       echo "unalias -a 2>/dev/null || true" >> "$SNAPSHOT_FILE"
+      echo ${quote([CLEAR_WHICH_COMMAND])} >> "$SNAPSHOT_FILE"
+      echo ${quote([CLEAR_UNSETENV_COMMAND])} >> "$SNAPSHOT_FILE"
 
       ${userContent}
 

@@ -114,6 +114,37 @@ export function isFoundryCapabilitySupported(
 }
 
 /**
+ * densable 2.1.314 bCa — Microsoft Foundry 404 DeploymentNotFound error.
+ */
+export function isFoundryDeploymentNotFoundError(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 404) return false
+  const errObj = error.error
+  if (typeof errObj !== 'object' || errObj === null) return false
+  const inner = (errObj as { error?: { code?: unknown } }).error
+  return inner?.code === 'DeploymentNotFound'
+}
+
+/**
+ * densable 2.1.314 — resolve older same-family fallback model when Foundry
+ * has no deployment for the requested model.
+ */
+export function resolveFoundryFamilyFallbackModel(
+  model: string,
+): string | undefined {
+  const { DENSABLE_EHL_CATALOG } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/densableEhlCatalog.219.js') as typeof import('./model/densableEhlCatalog.219.js')
+  const canonical = getCanonicalName(model).replace(/\[1m\]$/i, '')
+  const entry = DENSABLE_EHL_CATALOG.models.find(e => e.id === canonical)
+  const fallback =
+    entry && 'fallback_3p' in entry ? entry.fallback_3p : undefined
+  if (!fallback || fallback === model || fallback === canonical) {
+    return undefined
+  }
+  return fallback
+}
+
+/**
  * densable `dns` — extract unsupported capabilities from a Foundry 400 APIError.
  */
 export function extractFoundryUnsupportedFromError(

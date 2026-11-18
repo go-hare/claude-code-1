@@ -1,6 +1,7 @@
 import { z } from 'zod/v4'
 import { ensureConnectedClient } from 'src/services/mcp/client.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import { AbortError } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import {
   getBinaryBlobSavedMessage,
@@ -68,7 +69,7 @@ export const ReadMcpResourceTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  async call(input, { options: { mcpClients } }) {
+  async call(input, { abortController, options: { mcpClients } }) {
     const { server: serverName, uri } = input
 
     const client = mcpClients.find(client => client.name === serverName)
@@ -87,9 +88,22 @@ export const ReadMcpResourceTool = buildTool({
       throw new Error(`Server "${serverName}" does not support resources`)
     }
 
-    const connectedClient = await ensureConnectedClient(client)
-    // densable/v2: Client.readResource(params)
-    const result = await connectedClient.client.readResource({ uri })
+    const connectedClient = await ensureConnectedClient(client, {
+      signal: abortController.signal,
+      context: 'MCP resource read',
+    })
+    let result
+    try {
+      result = await connectedClient.client.readResource(
+        { uri },
+        { signal: abortController.signal },
+      )
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        throw new AbortError()
+      }
+      throw error
+    }
 
     // Intercept any blob fields: decode, write raw bytes to disk with a
     // mime-derived extension, and replace with a path. Otherwise the base64

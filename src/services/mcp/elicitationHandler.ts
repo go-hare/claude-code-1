@@ -264,7 +264,24 @@ export function registerElicitationHandler(
   setAppState: (f: (prevState: AppState) => AppState) => void,
   dialogStore?: DialogStore | null,
   requestDialog?: RequestDialog | null,
+  transportErrorState?: {
+    activeCallWatchdogs: Set<{ openQuestions?: number }>
+  },
 ): void {
+  const trackOpenQuestion = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const watchdogs = [...(transportErrorState?.activeCallWatchdogs ?? [])]
+    const single = watchdogs.length === 1 ? watchdogs[0] : undefined
+    if (single !== undefined) {
+      single.openQuestions = (single.openQuestions ?? 0) + 1
+    }
+    try {
+      return await fn()
+    } finally {
+      if (single !== undefined) {
+        single.openQuestions = Math.max(0, (single.openQuestions ?? 1) - 1)
+      }
+    }
+  }
   // Register the elicitation request handler.
   // Wrapped in try/catch because setRequestHandler throws if the client wasn't
   // created with elicitation capability declared.
@@ -275,7 +292,9 @@ export function registerElicitationHandler(
         requestDialog,
       })
       client.setRequestHandler('elicitation/create', async (request, ctx) =>
-        leftoverHost.handle(request, { signal: ctx.mcpReq.signal }),
+        trackOpenQuestion(() =>
+          leftoverHost.handle(request, { signal: ctx.mcpReq.signal }),
+        ),
       )
       client.setNotificationHandler(
         'notifications/elicitation/complete',
@@ -320,103 +339,105 @@ export function registerElicitationHandler(
     }
     // densable: setRequestHandler("elicitation/create", ...)
     // v2 BaseContext: signal/id live on ctx.mcpReq (not top-level extra).
-    client.setRequestHandler('elicitation/create', async (request, ctx) => {
-      logMCPDebug(
-        serverName,
-        `Received elicitation request: ${jsonStringify(request)}`,
-      )
-
-      const mode = getElicitationMode(request.params)
-      const signal = ctx.mcpReq.signal
-      const requestId = ctx.mcpReq.id
-
-      logEvent('tengu_mcp_elicitation_shown', {
-        mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-
-      try {
-        // Run elicitation hooks first - they can provide a response programmatically
-        const hookResponse = await runElicitationHooks(
-          serverName,
-          request.params,
-          signal,
-        )
-        if (hookResponse) {
-          logMCPDebug(
-            serverName,
-            `Elicitation resolved by hook: ${jsonStringify(hookResponse)}`,
-          )
-          logEvent('tengu_mcp_elicitation_response', {
-            mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            action:
-              hookResponse.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          })
-          return hookResponse
-        }
-
-        const elicitationId =
-          mode === 'url' && 'elicitationId' in request.params
-            ? (request.params.elicitationId as string | undefined)
-            : undefined
-
-        const response = new Promise<ElicitResult>(resolve => {
-          const onAbort = () => {
-            resolve({ action: 'cancel' })
-          }
-
-          if (signal.aborted) {
-            onAbort()
-            return
-          }
-
-          const waitingState: ElicitationWaitingState | undefined =
-            elicitationId ? { actionLabel: 'Skip confirmation' } : undefined
-
-          setAppState(prev => ({
-            ...prev,
-            elicitation: {
-              queue: [
-                ...prev.elicitation.queue,
-                {
-                  serverName,
-                  requestId,
-                  params: request.params,
-                  signal,
-                  waitingState,
-                  respond: (result: ElicitResult) => {
-                    signal.removeEventListener('abort', onAbort)
-                    logEvent('tengu_mcp_elicitation_response', {
-                      mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                      action:
-                        result.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                    })
-                    resolve(result)
-                  },
-                },
-              ],
-            },
-          }))
-
-          signal.addEventListener('abort', onAbort, { once: true })
-        })
-        const rawResult = await response
+    client.setRequestHandler('elicitation/create', async (request, ctx) =>
+      trackOpenQuestion(async () => {
         logMCPDebug(
           serverName,
-          `Elicitation response: ${jsonStringify(rawResult)}`,
+          `Received elicitation request: ${jsonStringify(request)}`,
         )
-        const result = await runElicitationResultHooks(
-          serverName,
-          rawResult,
-          signal,
-          mode,
-          elicitationId,
-        )
-        return result
-      } catch (error) {
-        logMCPError(serverName, `Elicitation error: ${error}`)
-        return { action: 'cancel' as const }
-      }
-    })
+
+        const mode = getElicitationMode(request.params)
+        const signal = ctx.mcpReq.signal
+        const requestId = ctx.mcpReq.id
+
+        logEvent('tengu_mcp_elicitation_shown', {
+          mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+
+        try {
+          // Run elicitation hooks first - they can provide a response programmatically
+          const hookResponse = await runElicitationHooks(
+            serverName,
+            request.params,
+            signal,
+          )
+          if (hookResponse) {
+            logMCPDebug(
+              serverName,
+              `Elicitation resolved by hook: ${jsonStringify(hookResponse)}`,
+            )
+            logEvent('tengu_mcp_elicitation_response', {
+              mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              action:
+                hookResponse.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            })
+            return hookResponse
+          }
+
+          const elicitationId =
+            mode === 'url' && 'elicitationId' in request.params
+              ? (request.params.elicitationId as string | undefined)
+              : undefined
+
+          const response = new Promise<ElicitResult>(resolve => {
+            const onAbort = () => {
+              resolve({ action: 'cancel' })
+            }
+
+            if (signal.aborted) {
+              onAbort()
+              return
+            }
+
+            const waitingState: ElicitationWaitingState | undefined =
+              elicitationId ? { actionLabel: 'Skip confirmation' } : undefined
+
+            setAppState(prev => ({
+              ...prev,
+              elicitation: {
+                queue: [
+                  ...prev.elicitation.queue,
+                  {
+                    serverName,
+                    requestId,
+                    params: request.params,
+                    signal,
+                    waitingState,
+                    respond: (result: ElicitResult) => {
+                      signal.removeEventListener('abort', onAbort)
+                      logEvent('tengu_mcp_elicitation_response', {
+                        mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                        action:
+                          result.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                      })
+                      resolve(result)
+                    },
+                  },
+                ],
+              },
+            }))
+
+            signal.addEventListener('abort', onAbort, { once: true })
+          })
+          const rawResult = await response
+          logMCPDebug(
+            serverName,
+            `Elicitation response: ${jsonStringify(rawResult)}`,
+          )
+          const result = await runElicitationResultHooks(
+            serverName,
+            rawResult,
+            signal,
+            mode,
+            elicitationId,
+          )
+          return result
+        } catch (error) {
+          logMCPError(serverName, `Elicitation error: ${error}`)
+          return { action: 'cancel' as const }
+        }
+      }),
+    )
 
     // Register handler for elicitation completion notifications (URL mode).
     // Sets `completed: true` on the matching queue event; the dialog reacts to this flag.

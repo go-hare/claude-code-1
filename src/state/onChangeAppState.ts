@@ -17,8 +17,14 @@ import {
   notifyInternalMetadataChanged,
   notifyPermissionModeChanged,
   notifySessionMetadataChanged,
+  notifyUltracodeActive,
   type SessionExternalMetadata,
 } from '../utils/sessionState.js'
+import { isUltracodeModeActive, pdSessionEffort } from '../utils/effort.js'
+import {
+  getMainLoopModel,
+  getRuntimeMainLoopModel,
+} from '../utils/model/model.js'
 import { isObserverAgentTask } from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { TaskState } from '../tasks/types.js'
 import type { AppState, SessionAppState, UIAppState } from './AppStateStore.js'
@@ -266,6 +272,27 @@ export function onChangeAppState({
   // model override in memory via setMainLoopModelOverride.
   if (newState.mainLoopModel !== oldState.mainLoopModel) {
     setMainLoopModelOverride(newState.mainLoopModel)
+  }
+
+  if (
+    newState.ultracode !== oldState.ultracode ||
+    newState.sessionEffort !== oldState.sessionEffort ||
+    newState.mainLoopModel !== oldState.mainLoopModel ||
+    newState.toolPermissionContext.mode !== oldState.toolPermissionContext.mode
+  ) {
+    const runtimeModel = getRuntimeMainLoopModel({
+      permissionMode: newState.toolPermissionContext.mode,
+      mainLoopModel: newState.mainLoopModel ?? getMainLoopModel(),
+    })
+    const effortValue = pdSessionEffort({
+      sessionEffort: newState.sessionEffort,
+      settingsEffortTable: newState.settingsEffortTable,
+      mainLoopModel: newState.mainLoopModel,
+      mainLoopModelForSession: newState.mainLoopModelForSession,
+    })
+    notifyUltracodeActive(
+      isUltracodeModeActive(runtimeModel, effortValue, newState.ultracode),
+    )
   }
 
   // expandedView → persist as showExpandedTodos + showSpinnerTree for backwards compat

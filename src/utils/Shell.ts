@@ -20,8 +20,13 @@ import {
 import { generateTaskId } from '../Task.js'
 import {
   appendPluginBinPathsToPath,
+  CLEAR_UNSETENV_COMMAND,
+  CLEAR_WHICH_COMMAND,
   getCapturedShellExports,
+  STRIPPED_EXPORTED_FUNC_ENV_KEYS,
 } from './bash/ShellSnapshot.js'
+import { buildMacOsGitGrepCLocaleWrapper } from './bash/gitGrepLocale.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   checkAgentWorktreeCwdEscape,
   checkAgentWorktreeGoneRecovery,
@@ -337,6 +342,12 @@ export function buildShellSpawnEnv({
     CLAUDE_PID: String(process.pid),
     ...envOverrides,
   }
+  // #1440 (official T6n / x6n): strip exported which/unsetenv functions when tengu_swirling_koala is on
+  if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_swirling_koala', true)) {
+    for (const key of STRIPPED_EXPORTED_FUNC_ENV_KEYS) {
+      delete env[key]
+    }
+  }
   if (spawnEnvPluginBinPaths.length > 0) {
     const pathKey =
       Object.keys(env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH'
@@ -455,6 +466,18 @@ export async function exec(
     })
 
   let commandString = builtCommand
+  if (shellType === 'bash' && !process.env.CLAUDE_CODE_SHELL_PREFIX) {
+    const preludeParts: string[] = []
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_swirling_koala', true)) {
+      preludeParts.push(CLEAR_WHICH_COMMAND)
+    }
+    preludeParts.push(CLEAR_UNSETENV_COMMAND)
+    const gitGrepWrapper = await buildMacOsGitGrepCLocaleWrapper(command)
+    if (gitGrepWrapper !== null) {
+      preludeParts.push(gitGrepWrapper)
+    }
+    commandString = `${preludeParts.join(' && ')} && ${commandString}`
+  }
 
   let cwd = pwd()
 

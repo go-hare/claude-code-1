@@ -21,6 +21,7 @@ import {
   executeReplace,
   executeToggleCase,
   executeVisualOp,
+  executeVisualPaste,
   executeX,
   type OperatorContext,
 } from './operators.js'
@@ -654,6 +655,15 @@ function handleVisualInput(
   if (input === 'x' || input === 'X') {
     return {
       execute: () => executeVisualOp('delete', anchor, ctx, linewise),
+      exitVisual: true,
+    }
+  }
+  if (input === 'p' || input === 'P') {
+    if (!ctx.getRegister()) {
+      return { next: { type: 'idle' } }
+    }
+    return {
+      execute: () => executeVisualPaste(anchor, ctx, linewise),
       exitVisual: true,
     }
   }

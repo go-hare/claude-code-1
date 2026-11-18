@@ -709,6 +709,7 @@ export type PortableTaskLike = {
   transcriptDir?: string
   parentAgentId?: string
   spawnDepth?: number
+  forkedSkillName?: string
   abortController?: { abort?: (reason?: unknown) => void } | null
   /** densable task.frameLive — Artifact comment monitor slug on the task. */
   frameLive?: { slug?: string; title?: string }
@@ -1264,6 +1265,11 @@ export function collectPortableCheckpoint(input: {
         spawnDepth: t.spawnDepth,
         startTime: t.startTime,
         parentAgentId: t.parentAgentId,
+        ...(typeof t.forkedSkillName === 'string' &&
+        t.forkedSkillName.length >= 1 &&
+        t.forkedSkillName.length <= 256
+          ? { forkedSkillName: t.forkedSkillName }
+          : {}),
         ...(transcriptPath ? { transcriptPath } : {}),
       })
       agentIds.push(agentId)
@@ -2163,7 +2169,9 @@ function asAdoptedAgentEntry(raw: unknown): AdoptedAgentEntry | null {
     ...(typeof r.parentAgentId === 'string'
       ? { parentAgentId: r.parentAgentId }
       : {}),
-    ...(typeof r.forkedSkillName === 'string'
+    ...(typeof r.forkedSkillName === 'string' &&
+    r.forkedSkillName.length >= 1 &&
+    r.forkedSkillName.length <= 256
       ? { forkedSkillName: r.forkedSkillName }
       : {}),
   }
@@ -2382,6 +2390,47 @@ export async function rehydrateAdoptedAgents(
   }
 
   return { adopted, skipped, adoptedAgentIds, adoptedEntries }
+}
+
+/**
+ * #1258: Check whether a forked skill (e.g. `/code-review`) already has an
+ * adopted or completed sub-agent entry in `tasks` after a cloud/bg session
+ * restart, so callers can intercept a duplicate re-run.
+ */
+export function hasCompletedAdoptedForkedSkill(
+  tasks: Record<string, unknown> | undefined,
+  skillName: string,
+): boolean {
+  if (!tasks || !skillName) return false
+  for (const task of Object.values(tasks)) {
+    if (!task || typeof task !== 'object') continue
+    const t = task as {
+      type?: string
+      status?: string
+      forkedSkillName?: string
+    }
+    if (
+      t.type === 'local_agent' &&
+      t.status === 'completed' &&
+      t.forkedSkillName === skillName
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export function shouldBlockForkedSkillRerun(
+  tasks: Record<string, unknown> | undefined,
+  skillName: string,
+): { blocked: boolean; reason?: string } {
+  if (hasCompletedAdoptedForkedSkill(tasks, skillName)) {
+    return {
+      blocked: true,
+      reason: `Forked skill /${skillName} already completed before restart; skipping duplicate re-run.`,
+    }
+  }
+  return { blocked: false }
 }
 
 // ── Official o4d / ess workflow rehydrate ─────────────────────────────────

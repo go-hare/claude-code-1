@@ -28,6 +28,8 @@ const tasksUpdated = createSignal()
  * (matching where tmux/iTerm2 teammates look), not under the session ID.
  */
 let leaderTeamName: string | undefined
+let sessionTaskListId: string | undefined
+let ownTaskListId: string | undefined
 
 /**
  * Sets the leader's team name for task list resolution.
@@ -49,6 +51,103 @@ export function clearLeaderTeamName(): void {
   if (leaderTeamName === undefined) return
   leaderTeamName = undefined
   notifyTasksUpdated()
+}
+
+/**
+ * Sets or clears the session-scoped task list ID (e.g. restored on resume/clear).
+ */
+export function setSessionTaskListId(listId: string | undefined): void {
+  if (sessionTaskListId === listId) return
+  sessionTaskListId = listId
+  notifyTasksUpdated()
+}
+
+export function getSessionTaskListId(): string | undefined {
+  return sessionTaskListId
+}
+
+/**
+ * Sets or clears the session's own task list ID override (gold `ownTaskListId`).
+ */
+export function setOwnTaskListId(listId: string | undefined): void {
+  if (ownTaskListId === listId) return
+  ownTaskListId = listId
+  notifyTasksUpdated()
+}
+
+export function getOwnTaskListId(
+  fallbackSessionId: string = getSessionId(),
+): string {
+  return ownTaskListId ?? fallbackSessionId
+}
+
+export function resetTaskListState(): void {
+  if (
+    leaderTeamName === undefined &&
+    sessionTaskListId === undefined &&
+    ownTaskListId === undefined
+  ) {
+    return
+  }
+  leaderTeamName = undefined
+  sessionTaskListId = undefined
+  ownTaskListId = undefined
+  notifyTasksUpdated()
+}
+
+/** Official `Cxo` (#1252) — persisted session task list pointer filename. */
+export const SESSION_TASK_LIST_FILE = '.session-task-list'
+const VALID_SESSION_TASK_LIST_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/
+
+/**
+ * Persist the active team/session task list ID under the session's team task
+ * folder so `--resume`/`--continue`/`/clear` can restore it (#1252).
+ */
+export async function persistSessionTaskListId(
+  sessionId: string = getSessionId(),
+): Promise<void> {
+  const activeListId = sessionTaskListId ?? leaderTeamName
+  if (!activeListId || process.env.CLAUDE_CODE_TASK_LIST_ID) return
+  if (!VALID_SESSION_TASK_LIST_ID_RE.test(activeListId)) return
+  try {
+    const teamTasksDir = getTasksDir(`session-${sessionId.slice(0, 8)}`)
+    await mkdir(teamTasksDir, { recursive: true })
+    await writeFile(
+      join(teamTasksDir, SESSION_TASK_LIST_FILE),
+      activeListId,
+      'utf-8',
+    )
+  } catch (error) {
+    logForDebugging(
+      `[sessionTeam] Could not persist session task list ID: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+  }
+}
+
+/**
+ * Restore a previously persisted team/session task list ID on `--resume` /
+ * `--continue` / `--session-id` (#1252).
+ */
+export async function restoreSessionTaskListId(
+  sessionId: string = getSessionId(),
+): Promise<string | undefined> {
+  if (process.env.CLAUDE_CODE_TASK_LIST_ID) {
+    return process.env.CLAUDE_CODE_TASK_LIST_ID
+  }
+  try {
+    const teamTasksDir = getTasksDir(`session-${sessionId.slice(0, 8)}`)
+    const saved = (
+      await readFile(join(teamTasksDir, SESSION_TASK_LIST_FILE), 'utf-8')
+    ).trim()
+    if (VALID_SESSION_TASK_LIST_ID_RE.test(saved)) {
+      setSessionTaskListId(saved)
+      return saved
+    }
+  } catch {
+    // No persisted pointer file — normal for sessions without a team task list.
+  }
+  return undefined
 }
 
 /**
@@ -389,13 +488,18 @@ export function getTaskListId(): string {
   if (process.env.CLAUDE_CODE_TASK_LIST_ID) {
     return process.env.CLAUDE_CODE_TASK_LIST_ID
   }
-  // In-process teammates use the leader's team name so they share the same
-  // task list that tmux/iTerm2 teammates also resolve to.
+  // In-process teammates use the leader's team name (unless sessionListId overrides it)
+  // so teammates share the same task list that tmux/iTerm2 teammates also resolve to.
   const teammateCtx = getTeammateContext()
   if (teammateCtx) {
-    return teammateCtx.teamName
+    return sessionTaskListId ?? teammateCtx.teamName
   }
-  return getTeamName() || leaderTeamName || getSessionId()
+  return (
+    getTeamName() ||
+    sessionTaskListId ||
+    leaderTeamName ||
+    getOwnTaskListId(getSessionId())
+  )
 }
 
 /**

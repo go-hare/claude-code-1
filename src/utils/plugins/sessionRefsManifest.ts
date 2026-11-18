@@ -37,6 +37,8 @@ export type SessionRefsEntry = {
   description: string
   version: string
   directory: string
+  marketplaceName?: string
+  isOfficial?: boolean
 }
 
 export type SkillManifestFailReason =
@@ -57,28 +59,36 @@ export type SkillManifestGsResult =
 
 export type SkillManifestGsGet = () => Promise<SkillManifestGsResult>
 
-const sessionRefsEntrySchema = z.object({
-  id: z
-    .string()
-    .nullish()
-    .transform(v => v ?? ''),
-  name: z
-    .string()
-    .nullish()
-    .transform(v => v ?? ''),
-  description: z
-    .string()
-    .nullish()
-    .transform(v => v ?? ''),
-  version: z
-    .string()
-    .nullish()
-    .transform(v => v ?? ''),
-  directory: z
-    .string()
-    .nullish()
-    .transform(v => v ?? ''),
-})
+const sessionRefsEntrySchema = z
+  .object({
+    id: z
+      .string()
+      .nullish()
+      .transform(v => v ?? ''),
+    name: z
+      .string()
+      .nullish()
+      .transform(v => v ?? ''),
+    description: z
+      .string()
+      .nullish()
+      .transform(v => v ?? ''),
+    version: z
+      .string()
+      .nullish()
+      .transform(v => v ?? ''),
+    directory: z
+      .string()
+      .nullish()
+      .transform(v => v ?? ''),
+    marketplace_name: z.string().nullish().catch(undefined),
+    is_official: z.boolean().nullish().catch(undefined),
+  })
+  .transform(({ marketplace_name, is_official, ...rest }) => ({
+    ...rest,
+    ...(marketplace_name ? { marketplaceName: marketplace_name } : {}),
+    ...(is_official === true ? { isOfficial: true } : {}),
+  }))
 
 const sessionRefsKindArraySchema = z
   .array(sessionRefsEntrySchema)
@@ -95,7 +105,7 @@ export const sessionRefsManifestSchema = z
 
 export type ListSessionRefsEntriesResult =
   | { success: true; entries: SessionRefsEntry[] }
-  | { success: false; error: string }
+  | { success: false; error: string; kind?: 'manifest' }
 
 async function defaultSkillManifestGsGet(): Promise<SkillManifestGsResult> {
   if (!getSessionIngressAuthToken()) {
@@ -176,10 +186,15 @@ export async function fetchSkillManifestWithRetry(): Promise<SkillManifestFetch>
   return fetchSkillManifestOnce()
 }
 
-/** leftover 239 dCh */
+/** leftover 239 dCh + official 325 nn (#1369 startupResponse pinning) */
 export class SessionRefsStore {
   inflight: Promise<SkillManifestFetch> | null = null
   featureEventReported = new Set<SessionRefsKind>()
+  startupResponse: Promise<SkillManifestFetch> | null = null
+  /** Official 2.1.325 #1369 — tracks whether the pinned plugin manifest list failed. */
+  isPinnedPluginListFailed = false
+  /** Official 2.1.325 #1369 — pinned pluginId → name map from last successful list. */
+  pinnedPluginNames: Map<string, string> | undefined = undefined
 
   fetch(): Promise<SkillManifestFetch> {
     if (!this.inflight) {
@@ -193,10 +208,12 @@ export class SessionRefsStore {
 
   discardInflight(): void {
     this.inflight = null
+    this.startupResponse = null
   }
 
   async listEntries(
     kind: SessionRefsKind,
+    options?: { startup?: boolean },
   ): Promise<ListSessionRefsEntriesResult> {
     const feature =
       kind === 'skills'
@@ -204,8 +221,13 @@ export class SessionRefsStore {
         : 'sync_session_refs_plugins'
     const first = !this.featureEventReported.has(kind)
     this.featureEventReported.add(kind)
-    const result = await this.fetch()
+    const result = await (options?.startup
+      ? (this.startupResponse ??= this.fetch())
+      : this.fetch())
     if (!result.ok) {
+      if (kind === 'plugins') {
+        this.isPinnedPluginListFailed = true
+      }
       logEvent(
         kind === 'skills'
           ? 'tengu_skills_sync_manifest_failed'
@@ -215,13 +237,122 @@ export class SessionRefsStore {
       if (first) {
         logForDebugging(`${feature} ${result.reason}`, { level: 'warn' })
       }
-      return { success: false, error: `manifest ${result.reason}` }
+      return {
+        success: false,
+        error: `manifest ${result.reason}`,
+        kind: 'manifest',
+      }
+    }
+    if (kind === 'plugins') {
+      this.isPinnedPluginListFailed = false
+      this.pinnedPluginNames = new Map(
+        result.plugins.map(entry => [entry.id, entry.name]),
+      )
     }
     if (first) {
       logForDebugging(feature)
     }
     return { success: true, entries: result[kind] }
   }
+
+  /**
+   * Official 2.1.325 #1369 (@289513085) — allow plugin if its name matches the
+   * pinned list, or if the pinned list fetch failed and the plugin is NOT
+   * `viaCodeRail`.
+   */
+  isPluginAllowedByPinnedList(plugin: {
+    pluginId: string
+    name: string
+    viaCodeRail?: boolean
+  }): boolean {
+    if (this.pinnedPluginNames?.get(plugin.pluginId) === plugin.name) {
+      return true
+    }
+    return this.isPinnedPluginListFailed === true && plugin.viaCodeRail !== true
+  }
+}
+
+/** Official 2.1.325 `eA` (#1369) — unloadable guard isolation reason. */
+export const UNLOADABLE_GUARD_REASON =
+  'a PreToolUse/PermissionRequest hook that cannot be loaded may be what guards the permissions declared beside it, so nothing it sits in is applied until the entry is fixed or removed'
+
+const GUARD_HOOK_EVENTS = new Set(['PreToolUse', 'PermissionRequest'])
+
+function containsGuardHookShape(val: unknown, depth = 0): boolean {
+  if (depth > 3 || val === null || typeof val !== 'object') return false
+  if (Array.isArray(val)) {
+    return val.some(item => containsGuardHookShape(item, depth + 1))
+  }
+  const obj = val as Record<string, unknown>
+  if (typeof obj.matcher === 'string' && Array.isArray(obj.hooks)) {
+    return true
+  }
+  return Object.values(obj).some(v => containsGuardHookShape(v, depth + 1))
+}
+
+/**
+ * Official 2.1.325 `tDe` (#1369) — inspect plugin/settings `hooks` object for
+ * unloadable `PreToolUse` / `PermissionRequest` guard hooks. When
+ * `unloadableGuards.length > 0`, callers must quarantine the entire entry.
+ */
+export function inspectPluginHooksUnloadableGuards(
+  hooks: unknown,
+  knownEvents?: ReadonlySet<string>,
+): { notes: string[]; unloadableGuards: string[] } {
+  if (Array.isArray(hooks)) {
+    return {
+      notes: [],
+      unloadableGuards: [
+        'hooks: must be an object mapping event names to matcher arrays; received an array of matchers',
+      ],
+    }
+  }
+  if (!hooks || typeof hooks !== 'object') {
+    return { notes: [], unloadableGuards: [] }
+  }
+  const notes: string[] = []
+  const unloadableGuards: string[] = []
+  for (const [eventName, matchers] of Object.entries(
+    hooks as Record<string, unknown>,
+  )) {
+    const isKnown = knownEvents ? knownEvents.has(eventName) : true
+    if (!isKnown) {
+      if (containsGuardHookShape(matchers)) {
+        unloadableGuards.push(
+          `hooks.${eventName}: not a hook event, but it holds PreToolUse/PermissionRequest hooks`,
+        )
+      } else {
+        notes.push(`hooks.${eventName}: unknown hook event; entry ignored`)
+      }
+      continue
+    }
+    if (!Array.isArray(matchers)) {
+      if (GUARD_HOOK_EVENTS.has(eventName)) {
+        unloadableGuards.push(
+          `hooks.${eventName}: expected an array of hook matchers`,
+        )
+      } else {
+        notes.push(`hooks.${eventName}: expected an array of hook matchers`)
+      }
+      continue
+    }
+    if (GUARD_HOOK_EVENTS.has(eventName)) {
+      for (let i = 0; i < matchers.length; i++) {
+        const entry = matchers[i]
+        if (
+          !entry ||
+          typeof entry !== 'object' ||
+          Array.isArray(entry) ||
+          !Array.isArray((entry as Record<string, unknown>).hooks)
+        ) {
+          unloadableGuards.push(
+            `hooks.${eventName}[${i}]: invalid guard hook matcher entry`,
+          )
+        }
+      }
+    }
+  }
+  return { notes, unloadableGuards }
 }
 
 /** leftover 239 Uln — process singleton (leftover has no session-host object). */
@@ -234,5 +365,7 @@ export function getSessionRefsStore(): SessionRefsStore {
 export function resetSessionRefsStoreForTests(): void {
   Uln.discardInflight()
   Uln.featureEventReported.clear()
+  Uln.isPinnedPluginListFailed = false
+  Uln.pinnedPluginNames = undefined
   setSkillManifestGsGetForTests(null)
 }

@@ -6,6 +6,7 @@ import { errorMessage } from '../utils/errors.js'
 import { isCcrV2EnvEnabled } from '../utils/residualFinalEnvGates.js'
 import {
   CCR_BYOC_BETA,
+  getAnthropicClientPlatform,
   getOAuthHeaders,
   prepareApiRequest,
 } from '../utils/teleport/api.js'
@@ -387,6 +388,7 @@ export async function postInterClaudeMessage(
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'anthropic-version': '2023-06-01',
+          'anthropic-client-platform': getAnthropicClientPlatform(),
         },
         timeout: 10_000,
         validateStatus: (s: number) => s < 500,

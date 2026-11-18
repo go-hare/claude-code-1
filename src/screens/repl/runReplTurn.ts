@@ -83,6 +83,11 @@ import {
   type StreamingToolUse,
 } from '../../utils/messages.js'
 import { resolveModelFacts } from '../../utils/model/modelFacts.js'
+import { tokenCountWithEstimation } from '../../utils/tokens.js'
+import {
+  getIdleCompactionRunner,
+  IDLE_COMPACT_SUMMARIZED_MESSAGE,
+} from './idleCompaction.js'
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
 import { checkAndDisableAutoModeIfNeeded } from '../../utils/permissions/bypassPermissionsKillswitch.js'
 import {
@@ -104,9 +109,8 @@ import {
 } from '../../utils/sessionStorage.js'
 import {
   generateSessionTitle,
-  isSyntheticSessionTitleText,
+  resolveSessionTitleInput,
 } from '../../utils/sessionTitle.js'
-import { startsWithRegisteredSlashCommand } from '../../utils/slashCommandParsing.js'
 import type { Stream } from '../../utils/stream.js'
 import { setMemberActive } from '../../utils/swarm/teamHelpers.js'
 import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.js'
@@ -539,6 +543,68 @@ export type RunReplTurnArgs = {
   additionalDisallowedTools?: string[]
 }
 
+export const UNUSABLE_TITLE_RETRIES = 2
+
+export type TitleFallback = {
+  text: string
+  unusableRepliesLeft: number
+}
+
+export type TitleOutcome =
+  | { kind: 'titled'; title: string }
+  | { kind: 'failed' }
+  | { kind: 'unusable' }
+
+/**
+ * Gold `nyr` — select title candidate for Haiku session naming:
+ * substantive prose resets the retry budget to 2; otherwise keep the
+ * prior `fallback` across non-substantive follow-ups or auto-continuations.
+ */
+export function resolveTitleCandidate({
+  prose,
+  isContinuationTurn,
+  fallback,
+  isSubstantive = true,
+}: {
+  prose: string | null
+  isContinuationTurn: boolean
+  fallback: TitleFallback | undefined
+  isSubstantive?: boolean
+}): TitleFallback | undefined {
+  if (prose !== null && isSubstantive) {
+    return { text: prose, unusableRepliesLeft: UNUSABLE_TITLE_RETRIES }
+  }
+  if (fallback && (prose !== null || isContinuationTurn)) {
+    return fallback
+  }
+  return undefined
+}
+
+/**
+ * Gold `ryr` — advance `TitleFallback` after a titling attempt:
+ * - `titled`: clear fallback
+ * - `failed`: preserve fallback unchanged (e.g. usage limit / network error)
+ * - `unusable`: decrement `unusableRepliesLeft` until 1, then drop
+ */
+export function advanceTitleFallback(
+  fallback: TitleFallback,
+  outcome: TitleOutcome,
+): TitleFallback | undefined {
+  switch (outcome.kind) {
+    case 'titled':
+      return undefined
+    case 'failed':
+      return fallback
+    case 'unusable':
+      return fallback.unusableRepliesLeft > 1
+        ? {
+            text: fallback.text,
+            unusableRepliesLeft: fallback.unusableRepliesLeft - 1,
+          }
+        : undefined
+  }
+}
+
 export type RunReplTurnDeps = {
   store: AppStateStore
   queryGuard: QueryGuard
@@ -548,6 +614,7 @@ export type RunReplTurnDeps = {
   sessionAiTitle: string | undefined
   agentTitle: string | undefined
   haikuTitleAttemptedRef: { current: boolean }
+  titleFallbackRef?: { current: TitleFallback | undefined }
   setHaikuTitle: (title: string) => void
   commands: Command[]
   setConversationId: (id: UUID) => void
@@ -634,6 +701,7 @@ async function executeReplTurnImpl(
     sessionAiTitle,
     agentTitle,
     haikuTitleAttemptedRef,
+    titleFallbackRef,
     setHaikuTitle,
     commands,
     setConversationId,
@@ -690,28 +758,64 @@ async function executeReplTurnImpl(
     const firstUserMessage = newMessages.find(
       m => m.type === 'user' && !m.isMeta,
     )
-    const text =
+    const rawText =
       firstUserMessage?.type === 'user'
         ? getContentText(
             firstUserMessage.message!.content as string | ContentBlockParam[],
           )
         : null
-    const isRegisteredSlash =
-      text != null &&
-      startsWithRegisteredSlashCommand(text, name => hasCommand(name, commands))
-    if (text && !isSyntheticSessionTitleText(text) && !isRegisteredSlash) {
+    const prose = rawText
+      ? resolveSessionTitleInput({ text: rawText, commands })
+      : null
+    const isContinuationTurn = newMessages.some(
+      m =>
+        m.type === 'user' &&
+        (m as { origin?: { kind?: string } }).origin?.kind ===
+          'auto-continuation',
+    )
+    const candidate = resolveTitleCandidate({
+      prose,
+      isContinuationTurn,
+      fallback: titleFallbackRef?.current,
+      isSubstantive: prose !== null,
+    })
+    if (candidate) {
       haikuTitleAttemptedRef.current = true
+      if (titleFallbackRef) {
+        titleFallbackRef.current = candidate
+      }
       const titleSessionId = getSessionId()
-      void generateSessionTitle(text, new AbortController().signal).then(
+      void generateSessionTitle(
+        candidate.text,
+        new AbortController().signal,
+      ).then(
         title => {
           if (titleSessionId !== getSessionId()) return
           if (title) {
+            if (titleFallbackRef) {
+              titleFallbackRef.current = advanceTitleFallback(candidate, {
+                kind: 'titled',
+                title,
+              })
+            }
             setHaikuTitle(title)
             saveAiGeneratedTitle(titleSessionId as UUID, title)
             getReplBridgeHandle()?.adoptLocalAiTitle?.()
-          } else haikuTitleAttemptedRef.current = false
+          } else {
+            if (titleFallbackRef) {
+              titleFallbackRef.current = advanceTitleFallback(candidate, {
+                kind: 'unusable',
+              })
+            }
+            haikuTitleAttemptedRef.current = false
+          }
         },
         () => {
+          if (titleFallbackRef) {
+            titleFallbackRef.current = advanceTitleFallback(candidate, {
+              kind: 'failed',
+            })
+          }
           haikuTitleAttemptedRef.current = false
         },
       )
@@ -1213,10 +1317,36 @@ export async function runReplTurn(
       }
     }
 
+    const idleRunner = getIdleCompactionRunner()
+    idleRunner.clear()
+    const heldSummary = idleRunner.consumeHeldSummary() as MessageType[] | null
+    let effectiveLatestMessages = latestMessages
+    if (heldSummary && heldSummary.length > 0) {
+      const injected = [
+        ...heldSummary,
+        createSystemMessage(IDLE_COMPACT_SUMMARIZED_MESSAGE, 'info'),
+      ]
+      setMessages(oldMessages => [...injected, ...oldMessages])
+      effectiveLatestMessages = [...injected, ...latestMessages]
+    }
+    const lastPrevMsg = latestMessages.at(-1)
+    const lastPrevTs =
+      lastPrevMsg &&
+      'timestamp' in lastPrevMsg &&
+      typeof lastPrevMsg.timestamp === 'string'
+        ? Date.parse(lastPrevMsg.timestamp)
+        : undefined
+    idleRunner.consumeReturnAfterIdle(
+      lastPrevTs !== undefined && !Number.isNaN(lastPrevTs)
+        ? lastPrevTs
+        : undefined,
+      tokenCountWithEstimation(effectiveLatestMessages),
+    )
+
     try {
       await executeReplTurnImpl(
         deps,
-        latestMessages,
+        effectiveLatestMessages,
         newMessages,
         abortController,
         shouldQuery,
@@ -1238,9 +1368,22 @@ export async function runReplTurn(
     }
   } finally {
     if (queryGuard.end(thisGeneration)) {
+      const turnEndMs = Date.now()
       setMainLoopBusy(false)
-      setLastQueryCompletionTime(Date.now())
+      setLastQueryCompletionTime(turnEndMs)
       resetLoadingState()
+      const idleRunner = getIdleCompactionRunner()
+      idleRunner.recordTurnEnd(
+        abortController.signal.aborted ? 'aborted' : 'completed',
+      )
+      idleRunner.arm(
+        turnEndMs,
+        () => (messagesRef.current.length > 0 ? messagesRef.current : null),
+        {
+          isInteractive: true,
+          getContextTokens: () => tokenCountWithEstimation(messagesRef.current),
+        },
+      )
 
       await mrOnTurnComplete(
         messagesRef.current,

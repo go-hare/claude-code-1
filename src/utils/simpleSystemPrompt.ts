@@ -38,15 +38,27 @@ export function isDenseDefaultSystemPromptModel(
   if (/-eap($|\[)/i.test(model)) return false
   // lean_prompt capability / mythos → neh false (simple ON)
   if (model === 'claude-mythos-5') return false
+  let canonical = model.toLowerCase()
+  try {
+    const { getCanonicalName } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/model.js') as typeof import('./model/model.js')
+    canonical = getCanonicalName(model).toLowerCase()
+  } catch {
+    // fallback if model.ts unavailable
+  }
   if (
-    model.includes('claude-3-') ||
-    model.includes('haiku') ||
-    model.includes('sonnet') ||
-    KNOWN_NEH_EXACT.has(model)
+    canonical === 'sonnet' ||
+    canonical === 'haiku' ||
+    canonical.startsWith('claude-3-') ||
+    canonical.startsWith('claude-haiku-') ||
+    canonical.startsWith('claude-sonnet-') ||
+    KNOWN_NEH_EXACT.has(canonical)
   ) {
     return true
   }
-  // Unknown models: official falls back to !rm(); densable default denser-off.
+  // Unknown models (e.g. unrecognized Bedrock ARNs / custom deployments):
+  // simple system prompt ON by default.
   return false
 }
 

@@ -1,5 +1,7 @@
 import { feature } from 'bun:bundle';
+import { isAbsolute, relative, resolve } from 'path';
 import * as React from 'react';
+import { isTerminalTaskStatus, type TaskStateBase } from 'src/Task.js';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
@@ -416,6 +418,65 @@ import type { AgentToolProgress, ShellProgress } from 'src/types/tools.js';
 // AgentTool forwards both its own progress events and shell progress
 // events from the sub-agent so the SDK receives tool_progress updates during bash/powershell runs.
 export type Progress = AgentToolProgress | ShellProgress;
+
+function isPathWithinDir(candidatePath: string, rootDir: string): boolean {
+  const rel = relative(resolve(rootDir), resolve(candidatePath));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function isTaskHoldingWorktree(task: TaskStateBase, allTasks: Record<string, TaskStateBase>): boolean {
+  if (!isTerminalTaskStatus(task.status)) return true;
+  if (
+    isLocalAgentTask(task) &&
+    task.isBackgrounded &&
+    task.status === 'completed' &&
+    (task.keepaliveReasons?.size ?? 0) > 0
+  ) {
+    return true;
+  }
+  if (isLocalAgentTask(task)) {
+    for (const reason of task.keepaliveReasons ?? []) {
+      if (reason.startsWith('agent:')) return true;
+      if (
+        task.isBackgrounded &&
+        (reason.startsWith('workflow:') || reason.startsWith('bash:') || reason.startsWith('monitor:'))
+      ) {
+        return true;
+      }
+    }
+  }
+  return Object.values(allTasks).some(
+    other => !isTerminalTaskStatus(other.status) && 'parentAgentId' in other && other.parentAgentId === task.id,
+  );
+}
+
+/**
+ * SEA `Yn` + `Zt` (@298087000): find any live or keepalive-parked task whose
+ * `cwd` is inside `worktreePaths` so a parent subagent finishing does not
+ * remove an isolated worktree while a background child task still uses it.
+ */
+export function findWorktreeOccupant(
+  allTasks: Record<string, TaskStateBase>,
+  worktreePaths: string[],
+  excludeAgentId?: string,
+): TaskStateBase | undefined {
+  for (const task of Object.values(allTasks)) {
+    const cwd = 'cwd' in task && typeof task.cwd === 'string' ? task.cwd : undefined;
+    if (cwd === undefined) continue;
+    if (!worktreePaths.some(p => isPathWithinDir(cwd, p))) continue;
+    if (!isTerminalTaskStatus(task.status)) return task;
+  }
+  if (excludeAgentId !== undefined) {
+    for (const task of Object.values(allTasks)) {
+      if (task.id === excludeAgentId) continue;
+      const cwd = 'cwd' in task && typeof task.cwd === 'string' ? task.cwd : undefined;
+      if (cwd === undefined) continue;
+      if (!worktreePaths.some(p => isPathWithinDir(cwd, p))) continue;
+      if (isTaskHoldingWorktree(task, allTasks)) return task;
+    }
+  }
+  return undefined;
+}
 
 export const AgentTool = buildTool({
   async prompt({
@@ -1402,7 +1463,22 @@ export const AgentTool = buildTool({
         return { worktreePath };
       }
       if (headCommit) {
+        const getTasks = () => toolUseContext.taskRegistry?.all() ?? toolUseContext.getAppState().tasks ?? {};
+        const occupantBefore = findWorktreeOccupant(getTasks(), [worktreePath], earlyAgentId);
         const changed = await hasWorktreeChanges(worktreePath, headCommit);
+        const occupant = occupantBefore ?? findWorktreeOccupant(getTasks(), [worktreePath], earlyAgentId);
+        if (occupant) {
+          logForDebugging(
+            `Agent worktree ${worktreePath} is still the working directory of ${occupant.type} task ${occupant.id}; kept`,
+          );
+          logEvent('tengu_agent_worktree_kept', {
+            reason: (isTerminalTaskStatus(occupant.status)
+              ? 'parked_task'
+              : 'live_task') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            changed,
+          });
+          return { worktreePath, worktreeBranch };
+        }
         if (!changed) {
           await removeAgentWorktree(worktreePath, worktreeBranch, gitRoot, false, 'agent_tool');
           // Clear worktreePath from metadata so resume doesn't try to use

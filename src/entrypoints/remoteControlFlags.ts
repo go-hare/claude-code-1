@@ -103,10 +103,28 @@ export function rootOptionsRefusedMessage(flags: readonly string[]): string {
   const permissionHint = flags.includes('--permission-mode')
     ? ' Set the permission mode with `claude remote-control --permission-mode <mode>`.'
     : ''
+  const settingsHint = flags.includes('--settings')
+    ? ' Pass settings with `claude remote-control --settings <file>`.'
+    : ''
   return (
     `Error: ${listed} before \`remote-control\` ${isAre} not carried over to the sessions Remote Control starts, so Remote Control refuses to start rather than drop ${itThem} \u2014 remove ${itThem}, and give Remote Control's own options after the verb (see \`claude remote-control --help\`).` +
-    permissionHint
+    permissionHint +
+    settingsHint
   )
+}
+
+/**
+ * Gold `UZo` @311914537 — whether interactive workspace trust prompt can run
+ * (requires TTY stdin/stdout, not bare mode, and CI env not truthy).
+ */
+export async function canPromptForRemoteControlTrust(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
+    return false
+  }
+  const { isBareMode, isEnvTruthy } = await import('../utils/envUtils.js')
+  return !isBareMode() && !isEnvTruthy(env.CI)
 }
 
 /** Gold `m` @191863334 */
@@ -176,6 +194,72 @@ export async function startRemoteControl(
   await bridgeMain(args)
 }
 
+/**
+ * Gold `Qqa` + `UZo` (#1367) — verify or interactively prompt for workspace
+ * trust before launching `claude remote-control`.
+ */
+export async function ensureRemoteControlTrust(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const {
+    enableConfigs,
+    checkHasTrustDialogAccepted,
+    saveCurrentProjectConfig,
+  } = await import('../utils/config.js')
+  const { getCwd } = await import('../utils/cwd.js')
+  const { homedir } = await import('os')
+  const { exitWithError } = await import('../utils/process.js')
+  const { resolve } = await import('path')
+
+  enableConfigs()
+  if (checkHasTrustDialogAccepted()) {
+    return
+  }
+
+  const dir = getCwd()
+  const isHomeDir = resolve(dir) === resolve(homedir())
+  const unattendedMsg = isHomeDir
+    ? `Error: Workspace not trusted. ${dir} is your home directory, and for security home-directory trust is never saved, so running \`claude\` here first won't help. Run \`claude remote-control\` from a project directory instead (run \`claude\` there once to accept the trust dialog).`
+    : `Error: Workspace not trusted. Please run \`claude\` in ${dir} first to review and accept the workspace trust dialog.`
+
+  const canPrompt = await canPromptForRemoteControlTrust(env)
+  if (!canPrompt) {
+    exitWithError(unattendedMsg)
+  }
+
+  process.stdout.write(
+    `\nQuick safety check: is this a project you created or one you trust?\n  ${dir}\n`,
+  )
+  if (isHomeDir) {
+    process.stdout.write(
+      'This is your home directory, so trust lasts for this run only and is not saved.\n',
+    )
+  }
+  const { createInterface } = await import('readline/promises')
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+  let answer = ''
+  try {
+    answer = await rl.question(`Trust ${dir}? [y/N] `)
+  } finally {
+    rl.close()
+  }
+  const normalized = answer.trim().toLowerCase()
+  if (normalized !== 'y' && normalized !== 'yes') {
+    exitWithError(
+      `Remote Control did not start: ${dir} is not trusted. Run \`claude remote-control\` again to trust it.`,
+    )
+  }
+  if (!isHomeDir) {
+    saveCurrentProjectConfig(current => ({
+      ...current,
+      hasTrustDialogAccepted: true,
+    }))
+  }
+}
+
 /** Gold `R` @191864989 */
 export async function enterRemoteControl(
   args: string[],
@@ -189,5 +273,6 @@ export async function enterRemoteControl(
   }
   const local = await refuseRemoteControlLocally()
   const ineligible = await refuseRemoteControlIneligible(local)
+  await ensureRemoteControlTrust()
   await startRemoteControl(ineligible, args, storage, extra)
 }

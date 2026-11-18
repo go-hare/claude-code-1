@@ -13,6 +13,10 @@
  */
 
 import { z } from 'zod'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getAPIProvider } from './model/providers.js'
 import {
@@ -28,7 +32,6 @@ import {
 } from './printRequestDialog.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../Tool.js'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
 
 export function isRefusalFallbackEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -1002,6 +1005,49 @@ export function isSameRefusalFallbackModel(a: string, b: string): boolean {
  *   o !== void 0 && !inCascadeEpisode && !epr(current,o) && dkd() && !stickyRejected
  * mode: skd(...) ? "default" : "explicit" (skd inject via serverLaneModeDefault).
  */
+/**
+ * densable 2.1.312 Yp — resolve 3P / unrecognized model refusal fallback target.
+ * Checks ANTHROPIC_DEFAULT_OPUS_MODEL (when its canonical family is opus or
+ * non-claude-*), else returns 'claude-opus-4-8'.
+ */
+export function resolve3PRefusalFallbackTarget(
+  targetCanonical = 'claude-opus-4-8',
+): string {
+  const envOpus = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL?.trim()
+  if (envOpus) {
+    const { getCanonicalName } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./model/model.js') as typeof import('./model/model.js')
+    const canonical = getCanonicalName(envOpus)
+    if (!canonical.startsWith('claude-') || canonical.includes('opus')) {
+      return envOpus
+    }
+    return targetCanonical
+  }
+  return targetCanonical
+}
+
+/**
+ * densable 2.1.312 jp — default refusal fallback model for 3P / unrecognized
+ * deployment names when no 1P catalog override applies.
+ */
+export function resolveDefaultRefusalFallbackModel(
+  currentModel: string,
+): string | undefined {
+  if (!isRefusalFallbackEnabled()) return undefined
+  if (getAPIProvider() !== 'firstParty') {
+    return resolve3PRefusalFallbackTarget('claude-opus-4-8')
+  }
+  const { getCanonicalName } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+  const canonical = getCanonicalName(currentModel)
+  if (!canonical.startsWith('claude-')) {
+    return 'claude-opus-4-8'
+  }
+  return undefined
+}
+
 export function planRefusalFallbackArm(input: {
   currentModel: string
   alreadyUsed?: boolean
@@ -1051,7 +1097,11 @@ export function planRefusalFallbackArm(input: {
     consumerLacksDialogCapability: input.consumerLacksDialogCapability,
     switchModelsOnFlag,
   })
-  const resolvedArmed = input.resolveArmedFallbackModel?.(input.currentModel)
+  const resolvedArmed =
+    input.resolveArmedFallbackModel?.(input.currentModel) ??
+    (getAPIProvider() !== 'firstParty'
+      ? resolveDefaultRefusalFallbackModel(input.currentModel)
+      : undefined)
   // Official: o = !alreadyUsed && !declined && Bie && !LXl ? EXl : void 0
   const visibleModel =
     !input.alreadyUsed && !input.declined && enabled && !stuck
@@ -2837,4 +2887,291 @@ export function formatCyberSafeguardDefenseAccessNote(
     return ` Defense Access in the Cyber Verification Program reduces these interruptions: ${CYBER_SAFEGUARDS_LEARN_MORE_URL}`
   }
   return ''
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.325 (#1392): --resume / rewind unrecognized-model restoration
+// ---------------------------------------------------------------------------
+
+export type ResumeTranscriptEntry = {
+  type?: string
+  subtype?: string
+  isMeta?: boolean
+  inPlaceOfModel?: string
+  fallbackModel?: string
+  neutralizedByFork?: boolean
+  apiRefusalCategory?: string
+  sawCyberRefusal?: boolean
+  requestId?: string | null
+  modelId?: string
+  message?: {
+    model?: string
+  }
+}
+
+export type ResumeRestoreModelPick =
+  | { kind: 'ok'; model: string }
+  | {
+      kind: 'declined'
+      model: string
+      reason: 'unknown_family' | 'not_allowed' | 'retired'
+    }
+  | { kind: 'none' }
+
+/**
+ * Gold `vXt` @299216693 — mark any `model_refusal_fallback` system entries
+ * as `neutralizedByFork = true` when forking a transcript.
+ */
+export function neutralizeRefusalFallbackForFork(
+  entries: ResumeTranscriptEntry[],
+): void {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (
+      entry?.type === 'system' &&
+      entry.subtype === 'model_refusal_fallback'
+    ) {
+      entry.neutralizedByFork = true
+    }
+    if (entry?.type === 'user') {
+      delete (entry as { turnAttributionKey?: unknown }).turnAttributionKey
+    }
+  }
+}
+
+/**
+ * Gold `j` @299215095 — pick the model to restore on `--resume`/rewind,
+ * preferring `inPlaceOfModel` when present, recognizing models that match the
+ * user's configured/session model even if not in the built-in catalog, and
+ * falling back to the latest `modelId` system entry when unrecognized.
+ */
+export function pickResumeRestoreModel(
+  entries: readonly ResumeTranscriptEntry[],
+  opts?: {
+    configuredModel?: string
+    knownModels?: readonly string[]
+    isModelAllowed?: (model: string) => boolean
+    isModelRetired?: (model: string) => boolean
+  },
+): ResumeRestoreModelPick {
+  const { getCanonicalName, parseUserSpecifiedModel } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+
+  const knownSet = new Set(
+    (opts?.knownModels ?? []).map(m => getCanonicalName(m)),
+  )
+  const parsedConfigured = opts?.configuredModel
+    ? parseUserSpecifiedModel(opts.configuredModel)
+    : undefined
+  const configuredStripped = parsedConfigured
+    ? parsedConfigured.replace(/\[1m\]$/i, '')
+    : undefined
+
+  let fallbackSystemModelId: string | undefined
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (
+      typeof entry?.modelId === 'string' &&
+      fallbackSystemModelId === undefined
+    ) {
+      fallbackSystemModelId = entry.modelId
+    }
+  }
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (
+      entry?.type !== 'assistant' ||
+      entry.isMeta ||
+      typeof entry.message?.model !== 'string' ||
+      entry.message.model === '<synthetic>'
+    ) {
+      continue
+    }
+    const rawModel =
+      typeof entry.inPlaceOfModel === 'string'
+        ? entry.inPlaceOfModel
+        : entry.message.model
+    const canonical = getCanonicalName(rawModel)
+    const stripped = rawModel.replace(/\[1m\]$/i, '')
+    const isKnown =
+      knownSet.has(canonical) ||
+      canonical.startsWith('claude-') ||
+      (configuredStripped !== undefined && stripped === configuredStripped)
+
+    const resolvedModel =
+      isKnown || fallbackSystemModelId === undefined
+        ? rawModel
+        : fallbackSystemModelId.replace(/\[1m\]$/i, '')
+    const resolvedCanonical = getCanonicalName(resolvedModel)
+    const resolvedKnown =
+      isKnown ||
+      resolvedCanonical.startsWith('claude-') ||
+      knownSet.has(resolvedCanonical)
+
+    if (!resolvedKnown) {
+      return {
+        kind: 'declined',
+        model: resolvedModel,
+        reason: 'unknown_family',
+      }
+    }
+    if (opts?.isModelAllowed && !opts.isModelAllowed(resolvedModel)) {
+      return { kind: 'declined', model: resolvedModel, reason: 'not_allowed' }
+    }
+    if (opts?.isModelRetired && opts.isModelRetired(resolvedModel)) {
+      return { kind: 'declined', model: resolvedModel, reason: 'retired' }
+    }
+    return { kind: 'ok', model: resolvedModel }
+  }
+
+  return { kind: 'none' }
+}
+
+/**
+ * Gold `mfi` @278130750 — update `previousOverride` on an active refusal
+ * fallback latch when session/agent model changes underneath it.
+ */
+export function updateRefusalFallbackLatchPreviousOverride(
+  previousOverride: string | undefined,
+): void {
+  const { getRefusalFallbackModelLatch, setRefusalFallbackModelLatch } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+  const latch = getRefusalFallbackModelLatch()
+  if (latch) {
+    setRefusalFallbackModelLatch({ ...latch, previousOverride })
+  }
+}
+
+function findLastRefusalFallbackEntry(
+  entries: readonly ResumeTranscriptEntry[],
+): ResumeTranscriptEntry | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (
+      entry?.type === 'system' &&
+      entry.subtype === 'model_refusal_fallback'
+    ) {
+      return entry
+    }
+  }
+  return undefined
+}
+
+/**
+ * Official `uJe` (#1392): on non-fork resume, re-arm cyber refusal header
+ * state if any non-neutralized `model_refusal_fallback` entry recorded a cyber
+ * refusal.
+ */
+export function rearmCyberRefusalOnResume(
+  entries: readonly ResumeTranscriptEntry[],
+  isFork: boolean,
+): string | undefined {
+  if (isFork) return undefined
+  const cyberEntries = entries.filter(
+    e =>
+      e?.type === 'system' &&
+      e.subtype === 'model_refusal_fallback' &&
+      (e.apiRefusalCategory === 'cyber' || e.sawCyberRefusal === true) &&
+      e.neutralizedByFork !== true,
+  )
+  if (cyberEntries.length === 0) return undefined
+  const reqId =
+    cyberEntries.find(
+      e => e.apiRefusalCategory === 'cyber' && e.requestId != null,
+    )?.requestId ?? undefined
+  logEvent('tengu_refusal_fallback_resume_latch', {
+    action:
+      'header_rearmed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  return reqId
+}
+
+/**
+ * Official `cJe` (#1392): given a candidate restored model, skip restoring if
+ * `--fork-session` matches the refusal fallback model, or latch it on normal resume.
+ */
+export function resolveResumeRefusalFallbackModel(
+  entries: readonly ResumeTranscriptEntry[],
+  candidateModel: string,
+  isFork: boolean,
+): string | undefined {
+  const { getCanonicalName } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+  const getCanonicalModelFamily = (canonical: string): string => {
+    const lower = canonical.toLowerCase()
+    if (lower.includes('opus')) return 'opus'
+    if (lower.includes('sonnet')) return 'sonnet'
+    if (lower.includes('haiku')) return 'haiku'
+    return lower
+  }
+  const lastFallback = findLastRefusalFallbackEntry(entries)
+  const fallbackModel = lastFallback?.fallbackModel
+  const matchesFallback =
+    typeof fallbackModel === 'string' &&
+    (getCanonicalName(fallbackModel) === getCanonicalName(candidateModel) ||
+      getCanonicalModelFamily(getCanonicalName(fallbackModel)) ===
+        getCanonicalModelFamily(getCanonicalName(candidateModel)))
+
+  if (!matchesFallback) {
+    logEvent('tengu_resume_model_restore', {
+      outcome:
+        'restored' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return candidateModel
+  }
+  if (isFork) {
+    logEvent('tengu_refusal_fallback_resume_latch', {
+      action:
+        'fork_skip_restore' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    logEvent('tengu_resume_model_restore', {
+      outcome:
+        'skipped_fork_fallback' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return undefined
+  }
+  logEvent('tengu_refusal_fallback_resume_latch', {
+    action:
+      'model_latch_only' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  return candidateModel
+}
+
+/**
+ * Official #1392 resume/rewind model restoration entry point:
+ * neutralizes refusal fallback entries on fork, rearms cyber refusal header
+ * on non-fork resume, picks the restored model, and applies fork-fallback skip.
+ */
+export function restoreModelOnResume(
+  entries: ResumeTranscriptEntry[],
+  opts: {
+    isFork: boolean
+    configuredModel?: string
+    knownModels?: readonly string[]
+    isModelAllowed?: (model: string) => boolean
+    isModelRetired?: (model: string) => boolean
+  },
+): {
+  model: string | undefined
+  pick: ResumeRestoreModelPick
+  rearmedCyberRequestId: string | undefined
+} {
+  if (opts.isFork) {
+    neutralizeRefusalFallbackForFork(entries)
+  }
+  const rearmedCyberRequestId = rearmCyberRefusalOnResume(entries, opts.isFork)
+  const pick = pickResumeRestoreModel(entries, opts)
+  if (pick.kind !== 'ok') {
+    return { model: undefined, pick, rearmedCyberRequestId }
+  }
+  const model = resolveResumeRefusalFallbackModel(
+    entries,
+    pick.model,
+    opts.isFork,
+  )
+  return { model, pick, rearmedCyberRequestId }
 }

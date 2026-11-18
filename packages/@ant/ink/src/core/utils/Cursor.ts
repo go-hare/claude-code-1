@@ -743,14 +743,7 @@ export class Cursor {
       this.placeholderStartingAt(this.offset) ??
       this.placeholderContaining(this.offset)
     if (chip) {
-      let after = chip.end
-      while (
-        after < this.text.length &&
-        WHITESPACE_REGEX.test(this.graphemeAt(after))
-      ) {
-        after = this.measuredText.nextOffset(after)
-      }
-      return new Cursor(this.measuredText, after)
+      return new Cursor(this.measuredText, this.skipBlanks(chip.end))
     }
 
     let pos = this.offset
@@ -761,7 +754,9 @@ export class Cursor {
       return this
     }
 
-    if (isVimWordChar(currentGrapheme)) {
+    if (this.isOnEmptyLine(pos)) {
+      pos = advance(pos)
+    } else if (isVimWordChar(currentGrapheme)) {
       while (pos < this.text.length && isVimWordChar(this.graphemeAt(pos))) {
         pos = advance(pos)
       }
@@ -771,14 +766,29 @@ export class Cursor {
       }
     }
 
-    while (
-      pos < this.text.length &&
-      WHITESPACE_REGEX.test(this.graphemeAt(pos))
-    ) {
-      pos = advance(pos)
-    }
+    return new Cursor(
+      this.measuredText,
+      this.snapOutOfPlaceholder(this.skipBlanks(pos), 'end'),
+    )
+  }
 
-    return new Cursor(this.measuredText, this.snapOutOfPlaceholder(pos, 'end'))
+  private skipBlanks(pos: number): number {
+    let p = pos
+    while (
+      p < this.text.length &&
+      WHITESPACE_REGEX.test(this.graphemeAt(p)) &&
+      !this.isOnEmptyLine(p)
+    ) {
+      p = this.measuredText.nextOffset(p)
+    }
+    return p
+  }
+
+  isOnEmptyLine(offset: number): boolean {
+    return (
+      this.text[offset] === '\n' &&
+      (offset === 0 || this.text[offset - 1] === '\n')
+    )
   }
 
   endOfVimWord(): Cursor {
@@ -888,12 +898,20 @@ export class Cursor {
   nextWORD(): Cursor {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let nextCursor: Cursor = this
-    // If we're on a non-whitespace character, move to the next whitespace
-    while (!nextCursor.isOverWhitespace() && !nextCursor.isAtEnd()) {
+    if (this.isOnEmptyLine(this.offset)) {
       nextCursor = nextCursor.right()
+    } else {
+      // If we're on a non-whitespace character, move to the next whitespace
+      while (!nextCursor.isOverWhitespace() && !nextCursor.isAtEnd()) {
+        nextCursor = nextCursor.right()
+      }
     }
-    // now move to the next non-whitespace character
-    while (nextCursor.isOverWhitespace() && !nextCursor.isAtEnd()) {
+    // now move to the next non-whitespace character (stopping on empty lines)
+    while (
+      nextCursor.isOverWhitespace() &&
+      !nextCursor.isAtEnd() &&
+      !this.isOnEmptyLine(nextCursor.offset)
+    ) {
       nextCursor = nextCursor.right()
     }
     return nextCursor

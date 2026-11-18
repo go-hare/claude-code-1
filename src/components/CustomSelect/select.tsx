@@ -23,6 +23,7 @@ import {
   type ClickEvent,
   type DOMElement,
   type MouseActionEvent,
+  type PasteEvent,
   type KeyboardEvent,
   type WheelEvent,
   hitTest,
@@ -32,6 +33,7 @@ import {
   useOptionalKeybindingContext,
 } from '@anthropic/ink';
 import { getGlobalConfig } from '../../utils/config.js';
+import { getPlatform } from '../../utils/platform.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import {
   AbovePromptLeftoverContext,
@@ -173,6 +175,59 @@ function LeftoverIheHoverTrack({
 
 /** densable inner `oo` GXt + spareLines `le` + je placement. */
 const LEFTOVER_SCROLLBAR_ARROWS_MIN = 5;
+const POINTER_CLICK_TOLERANCE = 1;
+
+function withinPointerTolerance(start: { col: number; row: number }, end: { col: number; row: number }): boolean {
+  return (
+    Math.abs(end.col - start.col) <= POINTER_CLICK_TOLERANCE && Math.abs(end.row - start.row) <= POINTER_CLICK_TOLERANCE
+  );
+}
+
+export function hasPastePayload(event: PasteEvent, canPaste?: () => boolean): boolean {
+  if (event.defaultPrevented) return false;
+  const text = event.rawEndedWithFocusTail ? event.text.replace(/\[[IO]$/, '') : event.text;
+  const platform = getPlatform();
+  const isClipboardImagePaste = event.rawEmpty && (platform === 'macos' || platform === 'wsl');
+  return (text !== '' || isClipboardImagePaste) && canPaste?.() !== false;
+}
+
+export function usePasteFromOtherRows<T>({
+  options,
+  focusedValue,
+  focusOption,
+  canPaste,
+}: {
+  options: OptionWithDescription<T>[];
+  focusedValue: T | undefined;
+  focusOption: (value: T | undefined) => void;
+  canPaste?: () => boolean;
+}): ((event: PasteEvent) => void) | undefined {
+  const { dispatchPasteEvent } = useApp();
+  const [pendingPastes, setPendingPastes] = useState<string[]>([]);
+  const target = options.find(
+    (opt): opt is Extract<OptionWithDescription<T>, { type: 'input' }> =>
+      opt.type === 'input' && opt.takesPasteFromOtherRows === true && opt.disabled !== true,
+  );
+  const isTargetFocused = target !== undefined && focusedValue === target.value;
+
+  useEffect(() => {
+    if (pendingPastes.length === 0) return;
+    setPendingPastes([]);
+    if (isTargetFocused && dispatchPasteEvent) {
+      for (const text of pendingPastes) {
+        dispatchPasteEvent(text);
+      }
+    }
+  }, [pendingPastes, isTargetFocused, dispatchPasteEvent]);
+
+  if (!target) return undefined;
+  return (event: PasteEvent) => {
+    if (focusedValue === target.value || !hasPastePayload(event, canPaste)) return;
+    event.preventDefault();
+    setPendingPastes(prev => [...prev, event.text]);
+    focusOption(target.value);
+  };
+}
 
 export function LeftoverScrollbar({
   offset,
@@ -194,6 +249,7 @@ export function LeftoverScrollbar({
   onScrollBy?: (delta: number) => void;
 }): React.ReactNode {
   const grabRef = useRef<LeftoverScrollGrab | null>(null);
+  const jumpRef = useRef<{ col: number; row: number } | null>(null);
   const [thumbHover, setThumbHover] = useState(false);
   const [dragging, setDragging] = useState(false);
   const trackH = height === undefined ? visible : height;
@@ -222,8 +278,45 @@ export function LeftoverScrollbar({
         onPointer={
           pointerOn
             ? (event: MouseActionEvent) => {
-                if (event.type === 'mousedown') setDragging(true);
-                if (event.type === 'mouseup') setDragging(false);
+                if (event.type === 'mousedown' && event.button === 0) {
+                  setDragging(true);
+                  const onThumb = event.localRow >= top && event.localRow < top + size;
+                  if (!onThumb) {
+                    jumpRef.current = { col: event.col, row: event.row };
+                    grabRef.current = {
+                      trackRow: event.row - event.localRow,
+                      visible,
+                      total,
+                      height: innerH,
+                      grab: Math.floor(size / 2),
+                      asked: offset,
+                    };
+                    return;
+                  }
+                  jumpRef.current = null;
+                } else if (event.type === 'mousedrag') {
+                  if (jumpRef.current !== null) {
+                    if (Math.abs(event.row - jumpRef.current.row) <= POINTER_CLICK_TOLERANCE) {
+                      return;
+                    }
+                    jumpRef.current = null;
+                  }
+                } else if (event.type === 'mouseup') {
+                  setDragging(false);
+                  const pendingJump = jumpRef.current;
+                  jumpRef.current = null;
+                  if (pendingJump !== null && withinPointerTolerance(pendingJump, event)) {
+                    const jumped = leftoverScrollbarPointer(
+                      { ...event, type: 'mousedown', button: 0 } as MouseActionEvent,
+                      { top, size },
+                      { visible, total, height: innerH, offset },
+                      null,
+                    );
+                    grabRef.current = null;
+                    if (jumped.scrollTo !== undefined) onScrollTo?.(jumped.scrollTo);
+                    return;
+                  }
+                }
                 const next = leftoverScrollbarPointer(
                   event,
                   { top, size },
@@ -270,12 +363,13 @@ export function FePress({
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [repeatRow, setRepeatRow] = useState<number | null>(null);
+  const holdRef = useRef<{ col: number; row: number; hasActed: boolean } | null>(null);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startHold = (row: number) => {
+  const startHold = (col: number, row: number) => {
+    holdRef.current = { col, row, hasActed: false };
     setPressed(true);
     setRepeatRow(row);
-    onPress?.();
   };
   useEffect(() => {
     return () => {
@@ -286,6 +380,7 @@ export function FePress({
   const armed = onPress !== undefined;
   useEffect(() => {
     if (armed) return;
+    holdRef.current = null;
     if (hovered) setHovered(false);
     if (pressed) setPressed(false);
     if (repeatRow !== null) setRepeatRow(null);
@@ -293,6 +388,7 @@ export function FePress({
   useEffect(() => {
     if (repeatRow === null || !armed) return;
     const tick = () => {
+      if (holdRef.current) holdRef.current.hasActed = true;
       onPress?.();
       repeatTimer.current = setTimeout(tick, LEFTOVER_FE_REPEAT_MS);
     };
@@ -314,10 +410,15 @@ export function FePress({
   };
   const onPointer = (event: MouseActionEvent) => {
     if (event.type === 'mousedown' && event.button === 0) {
-      startHold(event.row);
+      startHold(event.col, event.row);
     } else if (event.type === 'mouseup') {
+      const hold = holdRef.current;
+      holdRef.current = null;
       setPressed(false);
       setRepeatRow(null);
+      if (hold !== null && !hold.hasActed && withinPointerTolerance(hold, event)) {
+        onPress?.();
+      }
     }
   };
   // densable `she(o="tint")` — `me.level===0?"inverse":o`. Gold `$R` is
@@ -420,6 +521,7 @@ function leftoverListFrame({
   shouldDropWheel,
   scrollViewport,
   onKeyDown,
+  onPaste,
   windowStart,
   focusOn,
   screenReader,
@@ -451,6 +553,7 @@ function leftoverListFrame({
   shouldDropWheel: () => boolean;
   scrollViewport: (delta: number) => boolean;
   onKeyDown?: (event: KeyboardEvent) => void;
+  onPaste?: (event: PasteEvent) => void;
   windowStart: number;
   focusOn: boolean;
   screenReader: boolean;
@@ -474,6 +577,7 @@ function leftoverListFrame({
       shouldDropWheel,
       scrollViewport,
       focusOn,
+      onPaste,
       children,
     });
   }
@@ -500,6 +604,7 @@ function leftoverListFrame({
     shouldDropWheel,
     scrollViewport,
     onKeyDown,
+    onPaste,
     windowStart,
     focusOn,
     screenReader,
@@ -520,6 +625,7 @@ function leftoverDollarWt({
   shouldDropWheel,
   scrollViewport,
   focusOn,
+  onPaste,
   children,
 }: {
   hostRef: React.RefObject<DOMElement | null>;
@@ -532,6 +638,7 @@ function leftoverDollarWt({
   shouldDropWheel: () => boolean;
   scrollViewport: (delta: number) => boolean;
   focusOn: boolean;
+  onPaste?: (event: PasteEvent) => void;
   children: React.ReactNode;
 }): React.ReactNode {
   useFocusReclaim(hostRef, focusOn);
@@ -559,7 +666,7 @@ function leftoverDollarWt({
   return (
     <LeftoverIheWindowContext value={leftoverIheValue}>
       <LeftoverNnDtContext value={nnDt}>
-        <Box ref={hostRef} flexDirection="column" alignItems="stretch">
+        <Box ref={hostRef} flexDirection="column" alignItems="stretch" onPaste={onPaste}>
           {optionCount === 0 ? (
             emptyMessage != null ? (
               <Text dimColor>{emptyMessage}</Text>
@@ -602,6 +709,7 @@ function leftoverLoFrame({
   shouldDropWheel,
   scrollViewport,
   onKeyDown,
+  onPaste,
   windowStart,
   focusOn,
   screenReader,
@@ -631,6 +739,7 @@ function leftoverLoFrame({
   shouldDropWheel: () => boolean;
   scrollViewport: (delta: number) => boolean;
   onKeyDown?: (event: KeyboardEvent) => void;
+  onPaste?: (event: PasteEvent) => void;
   windowStart: number;
   focusOn: boolean;
   screenReader: boolean;
@@ -663,7 +772,14 @@ function leftoverLoFrame({
     <LeftoverIheWindowContext value={leftoverIheValue}>
       <LeftoverNnDtContext value={nnDt}>
         <LeftoverJeDropsContext value={dropsClick}>
-          <Box ref={hostRef} flexDirection="column" tabIndex={0} onKeyDown={onKeyDown} onWheel={leftoverFttWheel}>
+          <Box
+            ref={hostRef}
+            flexDirection="column"
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onWheel={leftoverFttWheel}
+          >
             {node}
           </Box>
         </LeftoverJeDropsContext>
@@ -842,6 +958,7 @@ export type OptionWithDescription<T = string> =
        * This prevents cursor position bugs when the input value updates asynchronously.
        */
       resetCursorOnUpdate?: boolean;
+      takesPasteFromOtherRows?: boolean;
     });
 
 export type SelectProps<T> = {
@@ -1346,6 +1463,17 @@ export function Select<T>({
   const [leftoverG5Typed, setLeftoverG5Typed] = useState('');
   const [leftoverG5Error, setLeftoverG5Error] = useState<string | null>(null);
   const [leftoverG5ArrowNav, setLeftoverG5ArrowNav] = useState(false);
+  const [srInputOptionValue, setSrInputOptionValue] = useState<T | null>(null);
+  const srInputOption =
+    srInputOptionValue !== null
+      ? options.find(
+          (opt): opt is Extract<OptionWithDescription<T>, { type: 'input' }> =>
+            opt.type === 'input' && opt.value === srInputOptionValue,
+        )
+      : undefined;
+  const srInputIndex = srInputOption
+    ? options.filter(opt => opt.heading !== true).findIndex(opt => opt.value === srInputOption.value) + 1
+    : undefined;
   const leftoverG5CursorActive = leftoverG5PromptCursorOn(isDisabled, disableSelection === true, leftoverG5ArrowNav);
   const leftoverPin = () => {
     const typed = leftoverG5FocusTyped(options, state.focusedValue);
@@ -1366,7 +1494,9 @@ export function Select<T>({
   const leftoverArrowNav = leftoverG5Dze(arrowNav);
   const leftoverShowPrompt = leftoverG5ShowPrompt(disableSelection === true, isDisabled, hidePromptWhileDisabled);
   const leftoverG5Text = leftoverSrRadio
-    ? `${leftoverG5Prompt(leftoverG5Nav, onCancel !== undefined, leftoverArrowNav)}${leftoverG5Typed ? `: ${leftoverG5Typed}` : ''}${leftoverG5Error ? `\n${leftoverG5Error}` : ''}`
+    ? srInputOption
+      ? `Enter text for option ${srInputIndex} (${getTextContent(srInputOption.label)}), or Escape for the list: ${leftoverG5Typed}`
+      : `${leftoverG5Prompt(leftoverG5Nav, onCancel !== undefined, leftoverArrowNav)}${leftoverG5Typed ? `: ${leftoverG5Typed}` : ''}${leftoverG5Error ? `\n${leftoverG5Error}` : ''}`
     : undefined;
   const leftoverClip = (option: OptionWithDescription<T>, node: React.ReactNode) => {
     // Gold `Oo` = `lines??1`. Resume `je` is option count — do not clip
@@ -1432,15 +1562,19 @@ export function Select<T>({
     leftoverPin();
     const items = options.filter(option => option.heading !== true);
     const focused = items.find(option => option.type === 'input' && option.value === state.focusedValue);
-    if (focused?.type === 'input') {
-      if (typed === '') {
-        setLeftoverG5Error(leftoverG5EmptyInput());
+    if (focused?.type === 'input' || srInputOption) {
+      const activeInput = srInputOption ?? focused;
+      if (activeInput?.type === 'input') {
+        if (typed === '' && !srInputOption) {
+          setLeftoverG5Error(leftoverG5EmptyInput());
+          return;
+        }
+        setSrInputOptionValue(null);
+        onChange?.(activeInput.value);
+        setLeftoverG5Typed('');
+        setLeftoverG5Error(null);
         return;
       }
-      onChange?.(focused.value);
-      setLeftoverG5Typed('');
-      setLeftoverG5Error(null);
-      return;
     }
     const idx = leftoverG5ParseIndex(typed, leftoverG5Nav);
     if (idx === null) {
@@ -1453,8 +1587,11 @@ export function Select<T>({
       return;
     }
     if (option?.type === 'input') {
+      const initial = option.initialValue ?? '';
+      setSrInputOptionValue(option.value);
+      setLeftoverG5Typed(initial);
+      option.onChange(initial);
       state.focusOption(option.value);
-      setLeftoverG5Typed(option.initialValue ?? '');
       setLeftoverG5Error(null);
       return;
     }
@@ -1489,12 +1626,25 @@ export function Select<T>({
       if (event.ctrl || event.meta) return;
       if (event.key === 'escape') {
         event.preventDefault();
+        if (srInputOption) {
+          srInputOption.onChange(srInputOption.initialValue ?? '');
+          setSrInputOptionValue(null);
+          setLeftoverG5Typed('');
+          setLeftoverG5Error(null);
+          const firstNav = options.find(opt => opt.heading !== true && !opt.disabled) ?? options[0];
+          if (firstNav) state.focusOption(firstNav.value);
+          return;
+        }
         onCancel?.();
         return;
       }
       if (event.key === 'return') {
         event.preventDefault();
         if (leftoverG5Refuse(refuseInput)) return;
+        if (srInputOption) {
+          leftoverG5Commit(leftoverG5Typed);
+          return;
+        }
         const kind = leftoverG5SubmitKind(leftoverG5Typed, leftoverG5ArrowNav);
         if (kind === 'typed') leftoverG5Commit(leftoverG5Typed);
         else if (kind === 'focus') {
@@ -1505,8 +1655,22 @@ export function Select<T>({
       }
       if (event.key === 'backspace' || event.key === 'delete') {
         event.preventDefault();
-        setLeftoverG5Typed(prev => prev.slice(0, -1));
+        const next = leftoverG5Typed.slice(0, -1);
+        if (srInputOption) {
+          srInputOption.onChange(next);
+        }
+        setLeftoverG5Typed(next);
         setLeftoverG5Error(null);
+        return;
+      }
+      if (srInputOption) {
+        if ((event.key.length === 1 || event.key === 'space') && !event.ctrl && !event.meta) {
+          event.preventDefault();
+          const ch = event.key === 'space' ? ' ' : event.key;
+          const next = leftoverG5Typed + ch;
+          srInputOption.onChange(next);
+          setLeftoverG5Typed(next);
+        }
         return;
       }
       if (leftoverArrowNav && (event.name === 'up' || event.name === 'down')) {
@@ -1559,6 +1723,12 @@ export function Select<T>({
       }
     };
   };
+
+  const handlePasteFromOtherRows = usePasteFromOtherRows({
+    options,
+    focusedValue: state.focusedValue,
+    focusOption: state.focusOption,
+  });
 
   useSelectInput({
     isDisabled,
@@ -1635,6 +1805,7 @@ export function Select<T>({
       shouldDropWheel: leftoverShouldDropWheel,
       scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
+      onPaste: handlePasteFromOtherRows,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,
@@ -1806,6 +1977,7 @@ export function Select<T>({
       shouldDropWheel: leftoverShouldDropWheel,
       scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
+      onPaste: handlePasteFromOtherRows,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,
@@ -2042,6 +2214,7 @@ export function Select<T>({
       shouldDropWheel: leftoverShouldDropWheel,
       scrollViewport: state.scrollViewport,
       onKeyDown: leftoverBindKeyDown,
+      onPaste: handlePasteFromOtherRows,
       windowStart: state.visibleFromIndex,
       focusOn: leftoverFocusOn,
       screenReader: leftoverScreenReader,

@@ -346,6 +346,7 @@ export type McpJsonConfig = z.infer<ReturnType<typeof McpJsonConfigSchema>>
  */
 export type McpCallWatchdog = {
   armedAt: number
+  openQuestions?: number
 }
 
 export type McpTransportErrorState = {

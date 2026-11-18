@@ -79,6 +79,7 @@ import { placementFromAttachedSurfaces } from './surfaceViewportClients.js'
 import { SURFACE_LIMITS } from './functionHooksSurfaceRuntime.js'
 import { createStore } from '../../state/store.js'
 import { isBareMode } from '../envUtils.js'
+import { isProjectScopeBlockedEnvVar } from '../managedEnvConstants.js'
 import { isPluginFsNetworkOrDevicePath } from '../path.js'
 import {
   BUILTIN_MARKETPLACE_NAME,
@@ -6448,6 +6449,16 @@ async function handleHostOpInner(
     }
     if (value !== undefined && typeof value !== 'string') {
       hostCheck(op, 'takes value as a string or undefined to unset', plugin)
+    }
+    if (isProjectScopeBlockedEnvVar(name, value)) {
+      const msg = `${name} is unchanged: only the environment Claude Code starts with, or Claude Code itself, may give it this value (host rule)`
+      logForDebugging(
+        `${plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''}$.env.set: ${msg}`,
+        { level: 'warn' },
+      )
+      throw new Error(
+        `${plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''}$.env.set: ${msg}`,
+      )
     }
     const mod = plugin
       ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')

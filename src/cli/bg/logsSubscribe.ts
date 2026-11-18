@@ -41,7 +41,12 @@ function xc(): string {
 }
 
 export function stalledSubscribeMessage(): string {
-  return `${xc()} did not respond \u2014 it may be stalled${daemonSubcommandHint('restart')}`
+  const base = `${xc()} did not respond \u2014 it may be stalled`
+  if (feature('DAEMON')) {
+    return `${base}${daemonSubcommandHint('restart')}`
+  }
+  const hint = daemonSubcommandHint('stop --any')
+  return hint ? `${base}${hint} (ends background sessions)` : base
 }
 
 /**

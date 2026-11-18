@@ -25,7 +25,10 @@ import { readFileSyncWithMetadata } from 'src/utils/fileRead.js'
 import { safeParseJSON } from 'src/utils/json.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { parseCellId } from 'src/utils/notebook.js'
-import { checkWritePermissionForTool } from 'src/utils/permissions/filesystem.js'
+import {
+  checkBlockWritesOutsideWorkingDirectories,
+  checkWritePermissionForTool,
+} from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from './constants.js'
@@ -363,6 +366,13 @@ export const NotebookEditTool = buildTool({
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path)
+    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
+      fullPath,
+      toolUseContext.getAppState().toolPermissionContext,
+    )
+    if (outsideWriteBlock !== undefined) {
+      throw new Error(outsideWriteBlock)
+    }
     const approved = takeApprovedFileToolPath(
       fullPath,
       toolUseContext.toolUseId,

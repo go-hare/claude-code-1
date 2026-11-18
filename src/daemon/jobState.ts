@@ -725,3 +725,59 @@ export function writeA8qJobState(opts: {
   writeBgJobState(short, state)
   return { short, jobDir }
 }
+
+/**
+ * Official 2.1.325 `CLASSIFIER_HAND_OFF_ADDENDUM` (#1325) — distinguishes
+ * "handed over for the user's own merge or review" (done) from tails that
+ * still await a user answer, go-ahead, or follow-up agent work (blocked).
+ */
+export const CLASSIFIER_HAND_OFF_ADDENDUM = `HANDED OVER FOR THE USER'S OWN MERGE OR REVIEW
+
+One exception to the user-addressed gate above; every other tail is judged exactly as before. When a PR, branch or release is finished and the tail only says that the next step is the user's own ("ready for you to merge", "waiting on you to merge", "awaiting your merge", "needs your review", "merging is your call", "over to you"), no reply would set the agent going again: that is "done", with the step in output.result and no needs. So is a later report that nothing has changed on it.
+
+Not an exception, so still judged as above: the tail asks the user a question, or for a go-ahead, choice, value or access; the step is one the work needs before it is complete ("run the backfill", "grant push access", "review the plan before I build it"); or the agent says what it will do or check afterwards.
+
+"Nothing new on PR #212: it is still green, approved and free of conflicts, waiting on you to merge. Check-ins have stopped; a message from you will bring me back."
+\u2192 {"state":"done","detail":"PR #212 green and approved; ready to merge","tempo":"idle","output":{"result":"PR #212 is green, approved and conflict-free; merge it when ready"}}
+  (finished, and the merge is the user's own step \u2192 done)
+
+"PR #212 is green and approved. Want me to merge it, or will you?"
+\u2192 {"state":"blocked","detail":"PR #212 green and approved; awaiting who merges","tempo":"blocked","needs":"want me to merge it, or will you?","output":{}}
+  (a question to the user \u2192 blocked, as above)
+
+"PR #212 is waiting on you to merge. Once it is in, tell me and I will rebase #213 onto it."
+\u2192 {"state":"blocked","detail":"PR #212 awaits merge; #213 rebase follows","tempo":"blocked","needs":"merge PR #212 and tell me","output":{}}
+  (the agent has more to do once the user acts \u2192 blocked, as above)
+
+"Nothing new on PR #212: still green, approved and ready for you to merge. The two decisions from my last message are still open."
+\u2192 {"state":"blocked","detail":"PR #212 ready to merge; two decisions open","tempo":"blocked","needs":"the two decisions from the last message","output":{}}
+  (an earlier question still waits for an answer \u2192 blocked, as above)`
+
+const HAND_OFF_MERGE_OR_REVIEW_RE =
+  /\b(?:ready for you to (?:merge|review)|waiting on you to (?:merge|review)|awaiting your (?:merge|review)|needs your (?:review|merge)|merging is your call|over to you)\b/i
+
+const HAND_OFF_CONTINUES_OR_ASKS_RE =
+  /\?|\b(?:once it is|tell me and i will|afterwards|still open|before i build|run the backfill|grant push access|want me to)\b/i
+
+/**
+ * Classify a tail containing "waiting on you" / merge-or-review hand-off copy.
+ * Returns `'done'` only when the next step is purely the user's own merge or
+ * review with no open questions or promised follow-up work; otherwise `'blocked'`
+ * when user-addressed, or `null` when no hand-off/waiting phrase is present.
+ */
+export function classifyWaitingOnYouContext(
+  text: string | undefined,
+): 'done' | 'blocked' | null {
+  if (!text) return null
+  const hasHandOff = HAND_OFF_MERGE_OR_REVIEW_RE.test(text)
+  const hasWaitingOnYou = /\bwaiting on you\b/i.test(text)
+  if (!hasHandOff && !hasWaitingOnYou) return null
+  if (HAND_OFF_CONTINUES_OR_ASKS_RE.test(text)) return 'blocked'
+  return hasHandOff ? 'done' : 'blocked'
+}
+
+export function isHandedOverForUserMergeOrReview(
+  text: string | undefined,
+): boolean {
+  return classifyWaitingOnYouContext(text) === 'done'
+}

@@ -101,7 +101,9 @@ export async function execAgentHook(
     )
 
     // Setup timeout and combine with parent signal
-    const hookTimeoutMs = hook.timeout ? hook.timeout * 1000 : 60000
+    const hookTimeoutMs = hook.timeout
+      ? Math.max(hook.timeout, 1) * 1000
+      : 60000
     const hookAbortController = createAbortController()
 
     // Combine parent signal with timeout, and have it abort our controller

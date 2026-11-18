@@ -28,7 +28,13 @@
 import { feature } from 'bun:bundle'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
-import { Lexer } from 'marked'
+import {
+  Lexer,
+  Tokenizer,
+  type Token,
+  type Tokens,
+  type TokensList,
+} from 'marked'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from './permissions/outsideReads.js'
 import {
@@ -291,6 +297,69 @@ function parseFrontmatterPaths(rawContent: string): {
  * Unclosed comments (`<!--` with no matching `-->`) are left in place so a
  * typo doesn't silently swallow the rest of the file.
  */
+const SETEXT_UNDERLINE_LINE_RE = /^ {0,3}(?:=+|-+) *$/
+const SETEXT_UNDERLINE_ANY_RE = /^ {0,3}(?:=+|-+) *$/m
+const SETEXT_PARAGRAPH_STOP_RE =
+  /^(?:\s*$|(?:[*+-]|\d{1,9}[.)]) |(?: {4}| {0,3}\t)| {0,3}(?:`{3,}|~{3,})| {0,3}>| {0,3}#{1,6}| {0,3}<[^\n>]+>$|.*[\u2028\u2029])/
+
+class MemoryMarkdownTokenizer extends Tokenizer {
+  lexed: Array<{ text: string; inReach: Set<number> }> = []
+
+  override lheading(src: string): Tokens.Heading | undefined {
+    const current = this.lexed.at(-1)
+    if (
+      current !== undefined &&
+      !current.inReach.has(src.length) &&
+      (current.text.at(-src.length - 1) ?? '\n') === '\n'
+    ) {
+      return undefined
+    }
+    return super.lheading(src)
+  }
+}
+
+class MemoryMarkdownLexer extends Lexer {
+  #tokenizer: MemoryMarkdownTokenizer
+
+  constructor() {
+    const tokenizer = new MemoryMarkdownTokenizer()
+    super({ gfm: false, tokenizer })
+    this.#tokenizer = tokenizer
+  }
+
+  override blockTokens(
+    src: string,
+    tokens: Token[] = [],
+    top = false,
+  ): TokensList {
+    const inReach = new Set<number>()
+    let lineEnd = SETEXT_UNDERLINE_ANY_RE.test(src) ? src.length : -1
+    let reachable = false
+    while (lineEnd >= 0) {
+      const lineStart =
+        lineEnd === 0 ? 0 : src.lastIndexOf('\n', lineEnd - 1) + 1
+      const line = src.slice(lineStart, lineEnd)
+      if (reachable) {
+        inReach.add(src.length - lineStart)
+      }
+      reachable =
+        SETEXT_UNDERLINE_LINE_RE.test(line) ||
+        (reachable && !SETEXT_PARAGRAPH_STOP_RE.test(line))
+      lineEnd = lineStart - 1
+    }
+    this.#tokenizer.lexed.push({ text: src, inReach })
+    try {
+      return super.blockTokens(src, tokens as TokensList, top) as TokensList
+    } finally {
+      this.#tokenizer.lexed.pop()
+    }
+  }
+}
+
+export function lexMemoryMarkdown(content: string): ReturnType<Lexer['lex']> {
+  return new MemoryMarkdownLexer().lex(content)
+}
+
 export function stripHtmlComments(content: string): {
   content: string
   stripped: boolean
@@ -299,7 +368,7 @@ export function stripHtmlComments(content: string): {
     return { content, stripped: false }
   }
   // gfm:false is fine here — html-block detection is a CommonMark rule.
-  return stripHtmlCommentsFromTokens(new Lexer({ gfm: false }).lex(content))
+  return stripHtmlCommentsFromTokens(lexMemoryMarkdown(content))
 }
 
 function stripHtmlCommentsFromTokens(tokens: ReturnType<Lexer['lex']>): {
@@ -364,7 +433,7 @@ function parseMemoryFileContent(
   const hasComment = withoutFrontmatter.includes('<!--')
   const tokens =
     hasComment || includeBasePath !== undefined
-      ? new Lexer({ gfm: false }).lex(withoutFrontmatter)
+      ? lexMemoryMarkdown(withoutFrontmatter)
       : undefined
 
   // Only rebuild via tokens when a comment actually needs stripping —

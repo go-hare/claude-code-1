@@ -83,7 +83,7 @@ export function outsideReadsExplainer(sandboxFenced: boolean): string {
     'Auto mode and the sandbox read outside the working directories without asking. Yes or No answers for this read; the rest is for later reads. Block: the file tools refuse reads outside the working directories in every project. ' +
     (sandboxFenced
       ? 'Sandboxed commands lose your home directory (SSH keys, home-installed tools) until you re-open paths with sandbox.filesystem.allowRead.'
-      : 'Sandboxed commands are not changed on this machine (the sandbox is off, its filesystem rules are relaxed, a managed read-path lock is on, or the working directory name has glob characters).') +
+      : "The sandbox doesn't enforce it on this machine (off, filesystem rules relaxed, managed read-path lock on, or working directory name has glob characters). Auto mode asks before each shell command it can't check.") +
     ' To undo, remove permissions.blockReadsOutsideWorkingDirectories from your user settings; file tools follow next session, sandboxed commands at once.'
   )
 }

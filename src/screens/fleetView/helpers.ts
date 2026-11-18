@@ -1974,6 +1974,7 @@ export function buildFleetFooterHints(input: {
   pinned?: boolean
   openSlots: number
   exitArmed: boolean
+  exitArmedKind?: 'Ctrl-C' | 'Ctrl-D'
   runningCount: number
   helpOpen: boolean
   /**
@@ -2030,12 +2031,13 @@ export function buildFleetFooterHints(input: {
     return parts.join(' · ')
   }
   if (input.exitArmed) {
-    // densable Mt: only Ctrl+C double-press arms exit (CJ); Esc is cascade + Tt.
     const keep =
       input.runningCount > 0
         ? ` · ${input.runningCount} agent${input.runningCount === 1 ? '' : 's'} will keep running`
         : ''
-    return `Press Ctrl-C again to exit${keep}`
+    return input.exitArmedKind === 'Ctrl-D'
+      ? `Press Ctrl-D again to exit${keep}`
+      : `Press Ctrl-C again to exit${keep}`
   }
   if (input.viewMode === 'rename') {
     return 'enter to save · esc to cancel'

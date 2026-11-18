@@ -3,11 +3,184 @@ import { useEffect, useRef } from 'react'
 import { useAppState } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js'
+import { findLastCompactBoundaryIndex } from '../utils/messages.js'
 import {
   cleanMessagesForLogging,
   isChainParticipant,
+  isLoggableMessage,
   recordTranscript,
 } from '../utils/sessionStorage.js'
+
+export type TranscriptWriter = typeof recordTranscript
+
+type ParentWaitState = {
+  next?: {
+    messages: Message[]
+    ignore: boolean
+    teamName?: string
+    selfAgentName?: string
+  }
+}
+
+/**
+ * Gold `MDe` state machine: tracks `holdFloor` across `ignore` (resume)
+ * periods, `lastTailUuid` + `lastLoggable` for `isNonLoggableTailIntact`,
+ * and `parentWait` serialization across full-array/compaction writes.
+ */
+export class TranscriptLogger {
+  lastRecordedLength = 0
+  lastParentUuid: UUID | undefined = undefined
+  firstMessageUuid: UUID | undefined = undefined
+  lastTailUuid: UUID | undefined = undefined
+  lastLoggable: { index: number; uuid: UUID } | undefined = undefined
+  callSequence = 0
+  holdFloor = 0
+  parentWait: ParentWaitState | undefined = undefined
+  private readonly writeTranscript: TranscriptWriter
+
+  constructor(writeTranscript: TranscriptWriter = recordTranscript) {
+    this.writeTranscript = writeTranscript
+  }
+
+  write(
+    messages: Message[],
+    opts: {
+      ignore?: boolean
+      teamName?: string
+      selfAgentName?: string
+    } = {},
+  ): Promise<void> | undefined {
+    const { ignore = false, teamName, selfAgentName } = opts
+    if (ignore) {
+      this.holdFloor = messages.length
+      return
+    }
+    if (this.parentWait !== undefined) {
+      this.parentWait.next = { messages, ignore, teamName, selfAgentName }
+      return
+    }
+
+    const currentFirstUuid = messages[0]?.uuid as UUID | undefined
+    const prevLength = this.lastRecordedLength
+    const wasFirstRender = this.firstMessageUuid === undefined
+    const prevTail = messages[prevLength - 1]
+    const tailIntact =
+      prevLength === 0 ||
+      (prevTail !== undefined &&
+        prevTail.uuid === this.lastTailUuid &&
+        !isLoggableMessage(prevTail)) ||
+      this.isNonLoggableTailIntact(messages, prevLength)
+
+    const isIncremental =
+      currentFirstUuid !== undefined &&
+      !wasFirstRender &&
+      currentFirstUuid === this.firstMessageUuid &&
+      prevLength <= messages.length &&
+      tailIntact
+    const isSameHeadShrink =
+      currentFirstUuid !== undefined &&
+      !wasFirstRender &&
+      currentFirstUuid === this.firstMessageUuid &&
+      prevLength > messages.length
+
+    const startIndex = isIncremental ? prevLength : 0
+    const floorIndex =
+      isIncremental || wasFirstRender
+        ? this.holdFloor
+        : findLastCompactBoundaryIndex(messages)
+    const effectiveStart = Math.max(startIndex, floorIndex)
+
+    if (!isIncremental) {
+      this.holdFloor = messages.length
+    }
+    this.lastTailUuid = messages[messages.length - 1]?.uuid as UUID | undefined
+
+    let g = messages.length - 1
+    while (g >= effectiveStart && !isLoggableMessage(messages[g]!)) {
+      g--
+    }
+    if (g >= effectiveStart) {
+      this.lastLoggable = {
+        index: g,
+        uuid: messages[g]!.uuid as UUID,
+      }
+    } else if (!isIncremental) {
+      this.lastLoggable = undefined
+    }
+
+    if (messages.length <= effectiveStart) {
+      return
+    }
+
+    const slice =
+      effectiveStart === 0 ? messages : messages.slice(effectiveStart)
+    const parentHint = isIncremental ? this.lastParentUuid : undefined
+    const canSyncWalk = isIncremental || wasFirstRender || isSameHeadShrink
+    const waitState: ParentWaitState | undefined = canSyncWalk ? undefined : {}
+
+    const seq = ++this.callSequence
+    const promise = this.writeTranscript(
+      slice,
+      isAgentSwarmsEnabled()
+        ? {
+            teamName,
+            agentName: selfAgentName,
+          }
+        : {},
+      parentHint,
+      messages,
+    ).then(
+      lastRecordedUuid => {
+        if (seq === this.callSequence && lastRecordedUuid && !canSyncWalk) {
+          this.lastParentUuid = lastRecordedUuid as UUID
+        }
+        this.endParentWait(waitState)
+      },
+      () => {
+        this.endParentWait(waitState)
+      },
+    )
+
+    this.parentWait = waitState
+    if (canSyncWalk) {
+      const last = cleanMessagesForLogging(slice, messages).findLast(
+        m => isChainParticipant(m) && isLoggableMessage(m),
+      )
+      if (last) {
+        this.lastParentUuid = last.uuid as UUID
+      }
+    }
+    this.lastRecordedLength = messages.length
+    this.firstMessageUuid = currentFirstUuid
+    return promise
+  }
+
+  private endParentWait(waitState: ParentWaitState | undefined): void {
+    if (waitState === undefined || this.parentWait !== waitState) return
+    this.parentWait = undefined
+    const next = waitState.next
+    if (next === undefined) return
+    void this.write(next.messages, {
+      ignore: next.ignore,
+      teamName: next.teamName,
+      selfAgentName: next.selfAgentName,
+    })
+  }
+
+  isNonLoggableTailIntact(messages: Message[], prevLength: number): boolean {
+    const last = this.lastLoggable
+    if (last !== undefined && messages[last.index]?.uuid !== last.uuid) {
+      return false
+    }
+    for (let i = last === undefined ? 0 : last.index + 1; i < prevLength; i++) {
+      const m = messages[i]
+      if (m === undefined || isLoggableMessage(m)) {
+        return false
+      }
+    }
+    return true
+  }
+}
 
 /**
  * Hook that logs messages to the transcript
@@ -18,102 +191,16 @@ import {
  */
 export function useLogMessages(messages: Message[], ignore: boolean = false) {
   const teamContext = useAppState(s => s.teamContext)
-
-  // messages is append-only between compactions, so track where we left off
-  // and only pass the new tail to recordTranscript. Avoids O(n) filter+scan
-  // on every setMessages (~20x/turn, so n=3000 was ~120k wasted iterations).
-  const lastRecordedLengthRef = useRef(0)
-  const lastParentUuidRef = useRef<UUID | undefined>(undefined)
-  // First-uuid change = compaction or /clear rebuilt the array; length alone
-  // can't detect this since post-compact [CB,summary,...keep,new] may be longer.
-  const firstMessageUuidRef = useRef<UUID | undefined>(undefined)
-  // Guard against stale async .then() overwriting a fresher sync update when
-  // an incremental render fires before the compaction .then() resolves.
-  const callSeqRef = useRef(0)
+  const loggerRef = useRef<TranscriptLogger | null>(null)
+  if (loggerRef.current === null) {
+    loggerRef.current = new TranscriptLogger()
+  }
 
   useEffect(() => {
-    if (ignore) return
-
-    const currentFirstUuid = messages[0]?.uuid as UUID | undefined
-    const prevLength = lastRecordedLengthRef.current
-
-    // First-render: firstMessageUuidRef is undefined. Compaction: first uuid changes.
-    // Both are !isIncremental, but first-render sync-walk is safe (no messagesToKeep).
-    const wasFirstRender = firstMessageUuidRef.current === undefined
-    const isIncremental =
-      currentFirstUuid !== undefined &&
-      !wasFirstRender &&
-      currentFirstUuid === firstMessageUuidRef.current &&
-      prevLength <= messages.length
-    // Same-head shrink: tombstone filter, rewind, snip, partial-compact.
-    // Distinguished from compaction (first uuid changes) because the tail
-    // is either an existing on-disk message or a fresh message that this
-    // same effect's recordTranscript(fullArray) will write — see sync-walk
-    // guard below.
-    const isSameHeadShrink =
-      currentFirstUuid !== undefined &&
-      !wasFirstRender &&
-      currentFirstUuid === firstMessageUuidRef.current &&
-      prevLength > messages.length
-
-    const startIndex = isIncremental ? prevLength : 0
-    if (startIndex === messages.length) return
-
-    // Full array on first call + after compaction: recordTranscript's own
-    // O(n) dedup loop handles messagesToKeep interleaving correctly there.
-    const slice = startIndex === 0 ? messages : messages.slice(startIndex)
-    const parentHint = isIncremental ? lastParentUuidRef.current : undefined
-
-    // Fire and forget - we don't want to block the UI.
-    const seq = ++callSeqRef.current
-    void recordTranscript(
-      slice,
-      isAgentSwarmsEnabled()
-        ? {
-            teamName: teamContext?.teamName,
-            agentName: teamContext?.selfAgentName,
-          }
-        : {},
-      parentHint,
-      messages,
-    ).then(lastRecordedUuid => {
-      // For compaction/full array case (!isIncremental): use the async return
-      // value. After compaction, messagesToKeep in the array are skipped
-      // (already in transcript), so the sync loop would find a wrong UUID.
-      // Skip if a newer effect already ran (stale closure would overwrite the
-      // fresher sync update from the subsequent incremental render).
-      if (seq !== callSeqRef.current) return
-      if (lastRecordedUuid && !isIncremental) {
-        lastParentUuidRef.current = lastRecordedUuid
-      }
+    void loggerRef.current?.write(messages, {
+      ignore,
+      teamName: teamContext?.teamName,
+      selfAgentName: teamContext?.selfAgentName,
     })
-
-    // Sync-walk safe for: incremental (pure new-tail slice), first-render
-    // (no messagesToKeep interleaving), and same-head shrink. Shrink is the
-    // subtle one: the picked uuid is either already on disk (tombstone/rewind
-    // — survivors were written before) or is being written by THIS effect's
-    // recordTranscript(fullArray) call (snip boundary / partial-compact tail
-    // — enqueueWrite ordering guarantees it lands before any later write that
-    // chains to it). Without this, the ref stays stale at a tombstoned uuid:
-    // the async .then() correction is raced out by the next effect's seq bump
-    // on large sessions where recordTranscript(fullArray) is slow. Only the
-    // compaction case (first uuid changed) remains unsafe — tail may be
-    // messagesToKeep whose last-actually-recorded uuid differs.
-    if (isIncremental || wasFirstRender || isSameHeadShrink) {
-      // Match EXACTLY what recordTranscript persists: cleanMessagesForLogging
-      // applies both the isLoggableMessage filter and (for external users) the
-      // REPL-strip + isVirtual-promote transform. Using the raw predicate here
-      // would pick a UUID that the transform drops, leaving the parent hint
-      // pointing at a message that never reached disk. Pass full messages as
-      // replId context — REPL tool_use and its tool_result land in separate
-      // render cycles, so the slice alone can't pair them.
-      const last = cleanMessagesForLogging(slice, messages).findLast(
-        isChainParticipant,
-      )
-      if (last) lastParentUuidRef.current = last.uuid as UUID
-    }
-
-    lastRecordedLengthRef.current = messages.length
-    firstMessageUuidRef.current = currentFirstUuid
   }, [messages, ignore, teamContext?.teamName, teamContext?.selfAgentName])
 }

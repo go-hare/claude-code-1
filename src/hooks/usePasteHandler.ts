@@ -48,6 +48,44 @@ type PasteHandlerProps = {
  * Fork hardening: pastePending must never stick forever — that silently
  * swallows every subsequent Enter (onSubmit never runs).
  */
+const SPACE_BEFORE_PATH_RE = / (?=["']?(?:\/|[A-Za-z]:\\))/
+const UNQUOTED_PATH_RE =
+  /^(?:\/(?!\/)[^ \r\\/]*(?:\\.[^ \r\\/]*)*\/|[A-Za-z]:\\|\\\\)[^\r]*$/
+const QUOTED_PATH_RE = /^(["'])(?:\/[^/\r]+\/|[A-Za-z]:\\|\\\\)[^\r]*\1$/
+const UNESCAPED_SPACE_RE = /[^\\] /
+
+export function splitPastedLinesForImages(pastedText: string): {
+  lines: string[]
+  imagePaths: string[]
+} {
+  const lines: string[] = []
+  const imagePaths: string[] = []
+  for (const rawLine of pastedText.split('\n')) {
+    const parts = rawLine.split(SPACE_BEFORE_PATH_RE).filter(p => p.trim())
+    if (
+      parts.length > 1 &&
+      !parts.every(part => {
+        const trimmed = part.trim()
+        return (
+          QUOTED_PATH_RE.test(trimmed) ||
+          (UNQUOTED_PATH_RE.test(trimmed) &&
+            (!UNESCAPED_SPACE_RE.test(trimmed) || isImageFilePath(trimmed)))
+        )
+      })
+    ) {
+      lines.push(rawLine)
+      continue
+    }
+    for (const part of parts) {
+      lines.push(part)
+      if (isImageFilePath(part)) {
+        imagePaths.push(part)
+      }
+    }
+  }
+  return { lines, imagePaths }
+}
+
 export function usePasteHandler({
   onPaste,
   handleKeyDown: innerHandleKeyDown,
@@ -235,11 +273,7 @@ export function usePasteHandler({
           return
         }
 
-        const lines = pastedText
-          .split(/ (?=\/|[A-Za-z]:\\)/)
-          .flatMap(part => part.split('\n'))
-          .filter(line => line.trim())
-        const imagePaths = lines.filter(line => isImageFilePath(line))
+        const { lines, imagePaths } = splitPastedLinesForImages(pastedText)
 
         if (onImagePaste && imagePaths.length > 0) {
           const isTempScreenshot =

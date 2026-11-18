@@ -424,6 +424,52 @@ export {
   type RunAgentSpinnerMode,
 } from './spinnerModeEvent.js'
 
+/**
+ * SEA `oa` (@297880000): memoized subagent tool-pool refresher. When parent
+ * tools or `appState.mcp.tools` change (e.g. an MCP server finishes connecting
+ * after the subagent started), resolves newly added MCP tools against the
+ * subagent's tool allowlist/denylist and appends them to the subagent's pool.
+ */
+export function createSubagentRefreshTools(
+  initialTools: Tools,
+  getMcpTools: () => Tools,
+  getParentTools: () => Tools,
+  resolveNewTools: (candidates: Tools) => Tools,
+): () => Tools {
+  let current = initialTools
+  let lastMcpTools: Tools | undefined
+  let lastParentTools: Tools | undefined
+  return () => {
+    try {
+      const mcpTools = getMcpTools()
+      const parentTools = getParentTools()
+      if (mcpTools !== lastMcpTools || parentTools !== lastParentTools) {
+        const candidates = [
+          ...mcpTools,
+          ...parentTools.filter(t => t.isMcp === true),
+        ]
+        const existingNames = new Set(current.map(t => t.name))
+        const newNames = new Set(
+          candidates.map(t => t.name).filter(name => !existingNames.has(name)),
+        )
+        if (newNames.size > 0) {
+          const permitted = resolveNewTools(candidates).filter(t =>
+            newNames.has(t.name),
+          )
+          if (permitted.length > 0) {
+            current = [...current, ...permitted]
+          }
+        }
+        lastMcpTools = mcpTools
+        lastParentTools = parentTools
+      }
+    } catch (err) {
+      logForDebugging(`createSubagentRefreshTools failed: ${err}`)
+    }
+    return current
+  }
+}
+
 export async function* runAgent({
   agentDefinition,
   promptMessages,
@@ -1197,6 +1243,11 @@ export async function* runAgent({
     }
   }
 
+  const parentMcpClientSet = new Set(toolUseContext.options.mcpClients)
+  const agentMcpClients = mergedMcpClients.filter(
+    client => !parentMcpClientSet.has(client),
+  )
+
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {
     isNonInteractiveSession: useExactTools
@@ -1209,6 +1260,23 @@ export async function* runAgent({
     appendSubagentSystemPrompt:
       toolUseContext.options.appendSubagentSystemPrompt,
     tools: allTools,
+    ...(!useExactTools && {
+      refreshTools: createSubagentRefreshTools(
+        allTools,
+        () => toolUseContext.getAppState().mcp.tools,
+        () =>
+          toolUseContext.options.refreshTools?.() ??
+          toolUseContext.options.tools,
+        candidates =>
+          resolveAgentTools(
+            agentDefinition,
+            candidates,
+            isAsync,
+            false,
+            isObserverAgent,
+          ).resolvedTools,
+      ),
+    }),
     commands: [],
     debug: toolUseContext.options.debug,
     verbose: toolUseContext.options.verbose,
@@ -1223,6 +1291,14 @@ export async function* runAgent({
     // depth-2+ AgentTool also reforward text when the flag is set.
     forwardSubagentText: toolUseContext.options.forwardSubagentText,
     mcpClients: mergedMcpClients,
+    ...(toolUseContext.options.refreshMcpClients && {
+      refreshMcpClients: () => {
+        const latest = toolUseContext.options.refreshMcpClients!()
+        return agentMcpClients.length > 0
+          ? [...latest, ...agentMcpClients]
+          : latest
+      },
+    }),
     mcpResources: toolUseContext.options.mcpResources,
     agentDefinitions: toolUseContext.options.agentDefinitions,
     // Fork children (useExactTools path) need querySource on context.options
@@ -1395,6 +1471,22 @@ export async function* runAgent({
         yield message
         continue
       }
+      if (
+        (message.type === 'attachment' &&
+          message.attachment !== null &&
+          typeof message.attachment === 'object' &&
+          'hookEvent' in message.attachment &&
+          message.attachment.hookEvent === 'SubagentStop') ||
+        (message.type === 'progress' &&
+          message.data !== null &&
+          typeof message.data === 'object' &&
+          'type' in message.data &&
+          message.data.type === 'hook_progress' &&
+          'hookEvent' in message.data &&
+          message.data.hookEvent === 'SubagentStop')
+      ) {
+        queryCompleted = true
+      }
       // Forward subagent API request starts to parent's metrics display
       // so TTFT/OTPS update during subagent execution.
       if (message.type === 'stream_event') {
@@ -1566,11 +1658,24 @@ export async function* runAgent({
         )
       }
     }
-    // densable kbe — drop delivery-map row so a later spawn of this id is clean
+    // densable kbe (#1235) — drop delivery-map row only when agent is not
+    // holding live agent: or handback wait-kids (e.g. bash: own shell in auto mode).
     try {
       const { clearHandbackDelivery } =
         require('src/utils/subagentHandback.js') as typeof import('src/utils/subagentHandback.js')
-      clearHandbackDelivery(agentId)
+      const { hasHandbackWaitKids, hasLiveAgentKeepaliveChildren } =
+        require('src/utils/task/framework.js') as typeof import('src/utils/task/framework.js')
+      const { createTaskRegistry } =
+        require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+      const registry =
+        toolUseContext.taskRegistry ??
+        createTaskRegistry(toolUseContext.getAppState, rootSetAppState)
+      if (
+        !hasLiveAgentKeepaliveChildren(agentId, registry) &&
+        !hasHandbackWaitKids(agentId, registry)
+      ) {
+        clearHandbackDelivery(agentId)
+      }
     } catch {
       // optional
     }

@@ -5,12 +5,15 @@
  * nested symlink / stray file refuses the round.
  */
 
+import { createHash } from 'crypto'
+import type { Dirent } from 'fs'
 import {
   lstat,
   mkdir,
   mkdtemp,
   readdir,
   rename,
+  rm,
   rmdir,
   stat,
 } from 'fs/promises'
@@ -209,6 +212,179 @@ export async function auditSyncedRoot(
   }
 }
 
+const MAX_TRASH_PER_KEY = 3
+export const MAX_SYNCED_TRASH_ENTRIES = 1024
+const TRASH_PROTECT_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const TRASH_ENTRY_RE = /^(\d+)-\d+-(?:([0-9a-f]{32})-)?[^-]+$/
+
+type TrashEntryRecord = {
+  entry: Dirent<string>
+  movedAtMs: number
+  justMoved: boolean
+}
+
+type TrashPruneQueueState = {
+  running: Promise<{ removed: number; errors: number }>
+  queued?: {
+    justMoved: Set<string>
+    countsUntagged: boolean
+    outcome: Promise<{ removed: number; errors: number }>
+  }
+}
+
+const trashPruneQueues = new Map<string, TrashPruneQueueState>()
+
+function hashTrashKey(relPath: string): string {
+  return createHash('sha256').update(relPath).digest('hex').slice(0, 32)
+}
+
+function makeTrashBatchPrefix(relPath: string): string {
+  return `${Date.now()}-${process.pid}-${hashTrashKey(relPath)}-`
+}
+
+function isWithinProtectAge(movedAtMs: number, nowMs = Date.now()): boolean {
+  return movedAtMs > 0 && nowMs - movedAtMs < TRASH_PROTECT_AGE_MS
+}
+
+function compareTrashEntriesNewestFirst(
+  a: TrashEntryRecord,
+  b: TrashEntryRecord,
+): number {
+  return b.movedAtMs - a.movedAtMs
+}
+
+/**
+ * Gold `Imo` / `hQo` (#1419): bound `~/.claude/skills/.trash` and
+ * `~/.claude/plugins/.trash` to ~1024 entries regardless of `cleanupPeriodDays`.
+ */
+export function pruneSyncedTrash(
+  trashRoot: string,
+  justMovedName?: string,
+  maxEntries = MAX_SYNCED_TRASH_ENTRIES,
+): Promise<{ removed: number; errors: number }> {
+  const state: TrashPruneQueueState = trashPruneQueues.get(trashRoot) ?? {
+    running: Promise.resolve({ removed: 0, errors: 0 }),
+  }
+  trashPruneQueues.set(trashRoot, state)
+  const queued = state.queued ?? {
+    justMoved: new Set<string>(),
+    countsUntagged: false,
+    outcome: state.running.then(() => {
+      state.queued = undefined
+      state.running = runPruneSyncedTrash(trashRoot, queued, maxEntries)
+      return state.running
+    }),
+  }
+  state.queued = queued
+  if (justMovedName === undefined) {
+    queued.countsUntagged = true
+  } else {
+    queued.justMoved.add(justMovedName)
+  }
+  return queued.outcome
+}
+
+async function runPruneSyncedTrash(
+  trashRoot: string,
+  opts: { justMoved: Set<string>; countsUntagged: boolean },
+  maxEntries: number,
+): Promise<{ removed: number; errors: number }> {
+  const outcome = { removed: 0, errors: 0 }
+  try {
+    const entries = await readdir(trashRoot, { withFileTypes: true })
+    const byKey = new Map<string, TrashEntryRecord[]>()
+    for (const entry of entries) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+      const m = TRASH_ENTRY_RE.exec(entry.name)
+      if (m === null) continue
+      const key = m[2]
+      if (key !== undefined || opts.countsUntagged) {
+        const groupKey = key ?? entry.name
+        const list = byKey.get(groupKey) ?? []
+        list.push({
+          entry,
+          movedAtMs: Number(m[1] ?? 0),
+          justMoved: opts.justMoved.has(entry.name),
+        })
+        byKey.set(groupKey, list)
+      }
+    }
+
+    const retained: TrashEntryRecord[] = []
+    const overflow: TrashEntryRecord[] = []
+    const nowMs = Date.now()
+
+    for (const group of byKey.values()) {
+      const candidates: TrashEntryRecord[] = []
+      let keptForKey = 0
+      for (const rec of group.toSorted(compareTrashEntriesNewestFirst)) {
+        const entryPath = join(trashRoot, rec.entry.name)
+        try {
+          if (keptForKey >= MAX_TRASH_PER_KEY) {
+            if (isWithinProtectAge(rec.movedAtMs, nowMs)) {
+              candidates.push(rec)
+            } else {
+              await rm(entryPath, { recursive: true, force: true })
+              outcome.removed++
+            }
+            continue
+          }
+          if (group.length > MAX_TRASH_PER_KEY) {
+            if (!rec.entry.isDirectory()) continue
+            const inner = await readdir(entryPath)
+            if (inner.length === 0) continue
+          }
+          keptForKey++
+          if (keptForKey === 1) {
+            retained.push(rec)
+          } else {
+            candidates.push(rec)
+          }
+        } catch {
+          outcome.errors++
+        }
+      }
+      const newestProtected = candidates.findLast(rec =>
+        isWithinProtectAge(rec.movedAtMs, nowMs),
+      )
+      for (const rec of candidates) {
+        if (rec === newestProtected) {
+          retained.push(rec)
+        } else {
+          overflow.push(rec)
+        }
+      }
+    }
+
+    let excess = Math.max(0, retained.length + overflow.length - maxEntries)
+    const evictableRetained = retained.filter(
+      rec => !rec.justMoved && !isWithinProtectAge(rec.movedAtMs, nowMs),
+    )
+    const evictOrder = [
+      ...overflow.toSorted(compareTrashEntriesNewestFirst).toReversed(),
+      ...evictableRetained
+        .toSorted(compareTrashEntriesNewestFirst)
+        .toReversed(),
+    ]
+    for (const rec of evictOrder) {
+      if (excess === 0) break
+      try {
+        await rm(join(trashRoot, rec.entry.name), {
+          recursive: true,
+          force: true,
+        })
+        outcome.removed++
+        excess--
+      } catch {
+        outcome.errors++
+      }
+    }
+  } catch {
+    outcome.errors++
+  }
+  return outcome
+}
+
 /** densable `$ln`. */
 export async function moveSyncedDirToTrash(opts: {
   dir: string
@@ -238,8 +414,10 @@ export async function moveSyncedDirToTrash(opts: {
       case 'real':
         break
     }
-    batch = await mkdtemp(join(opts.trashRoot, `${Date.now()}-${process.pid}-`))
+    const relKey = relative(opts.configHome, opts.dir)
+    batch = await mkdtemp(join(opts.trashRoot, makeTrashBatchPrefix(relKey)))
     await rename(opts.dir, join(batch, basename(opts.dir)))
+    void pruneSyncedTrash(opts.trashRoot, basename(batch))
     return true
   } catch (err) {
     if (batch !== undefined) await rmdir(batch).catch(() => {})

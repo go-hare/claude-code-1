@@ -479,8 +479,16 @@ export function getDefaultMainLoopModel(): ModelName {
  * 'us.anthropic.claude-opus-4-6-v1:0'). Does not touch settings, so safe at
  * module top-level (see MODEL_COSTS in modelCost.ts).
  */
+/**
+ * densable 2.1.314 uer — normalize dot-spelled model versions like
+ * `claude-opus-4.8` to `claude-opus-4-8` before canonical matching.
+ */
+export function normalizeDotVersionedModelName(name: string): string {
+  return name.replace(/(claude-(?:[a-z]+-)?\d{1,2})\.(?=\d)/g, '$1-')
+}
+
 export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
-  name = name.toLowerCase()
+  name = normalizeDotVersionedModelName(name.toLowerCase())
   // densable ix(e): more-specific 5-1/5-5 before unsuffixed family
   if (name.includes('claude-fable-5-1')) {
     return 'claude-fable-5-1'
@@ -691,17 +699,14 @@ export function renderModelSetting(setting: ModelName | ModelAlias): string {
 export function getPublicModelDisplayName(model: ModelName): string | null {
   switch (model) {
     case getModelStrings().opus5:
-      return 'Opus 5'
     case getModelStrings().opus5 + '[1m]':
-      return 'Opus (1M context)'
+      return 'Opus 5'
     case getModelStrings().opus48:
-      return 'Opus 4.8'
     case getModelStrings().opus48 + '[1m]':
-      return 'Opus 4.8 (1M context)'
+      return 'Opus 4.8'
     case getModelStrings().opus47:
-      return 'Opus 4.7'
     case getModelStrings().opus47 + '[1m]':
-      return 'Opus 4.7 (1M context)'
+      return 'Opus 4.7'
     case getModelStrings().opus46:
       return 'Opus 4.6'
     case getModelStrings().opus46 + '[1m]':
@@ -712,13 +717,11 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Opus 4.1'
     case getModelStrings().opus40:
       return 'Opus 4'
-    case getModelStrings().sonnet55 + '[1m]':
-      return 'Sonnet 5.5 (1M context)'
     case getModelStrings().sonnet55:
+    case getModelStrings().sonnet55 + '[1m]':
       return 'Sonnet 5.5'
-    case getModelStrings().sonnet5 + '[1m]':
-      return 'Sonnet 5 (1M context)'
     case getModelStrings().sonnet5:
+    case getModelStrings().sonnet5 + '[1m]':
       return 'Sonnet 5'
     case getModelStrings().sonnet46 + '[1m]':
       return 'Sonnet 4.6 (1M context)'
@@ -736,18 +739,16 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Sonnet 3.7'
     case getModelStrings().sonnet35:
       return 'Sonnet 3.5'
-    case getModelStrings().haiku55 + '[1m]':
-      return 'Haiku 5.5 (1M context)'
     case getModelStrings().haiku55:
+    case getModelStrings().haiku55 + '[1m]':
       return 'Haiku 5.5'
     case getModelStrings().haiku45:
       return 'Haiku 4.5'
     case getModelStrings().haiku35:
       return 'Haiku 3.5'
     case getModelStrings().fable5:
-      return 'Fable 5'
     case getModelStrings().fable5 + '[1m]':
-      return 'Fable 5 (1M context)'
+      return 'Fable 5'
     default:
       return null
   }
@@ -766,8 +767,45 @@ function maskModelCodename(baseName: string): string {
  * densable $o/Jb path: `[1m]` on the source id must survive display.
  * Catalog marketing "(1M context)" is not a substitute for the suffix.
  */
+/**
+ * densable 2.1.311 (#1291) — models where `[1m]` suffix has no effect
+ * (either native 1M or 200k-only without 1M beta support).
+ */
+const MODELS_WITHOUT_1M_SUFFIX_EFFECT = new Set([
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-opus-5',
+  'claude-opus-5-5',
+  'claude-sonnet-5',
+  'claude-sonnet-5-5',
+  'claude-fable-5',
+  'claude-fable-5-1',
+  'claude-fable-5-2',
+  'claude-haiku-4-5',
+  'claude-haiku-5-5',
+  'claude-opus-4-0',
+  'claude-opus-4-1',
+  'claude-opus-4-5',
+  'claude-3-7-sonnet',
+  'claude-3-5-sonnet',
+  'claude-3-5-haiku',
+  'claude-3-opus',
+  'claude-3-sonnet',
+  'claude-3-haiku',
+])
+
+export function modelSupports1mSuffixEffect(model: string): boolean {
+  const base = model.replace(/(\[1m\])+$/i, '').trim()
+  const canonical = firstPartyNameToCanonical(base)
+  return !MODELS_WITHOUT_1M_SUFFIX_EFFECT.has(canonical)
+}
+
 function keep1mSuffix(display: string, source: string): string {
-  if (!/\[1m\]/i.test(source) || /\[1m\]/i.test(display)) {
+  if (
+    !/\[1m\]/i.test(source) ||
+    /\[1m\]/i.test(display) ||
+    !modelSupports1mSuffixEffect(source)
+  ) {
     return display
   }
   return `${display.replace(/\s*\((?:with )?1M context\)/gi, '').trim()}[1m]`
@@ -850,22 +888,30 @@ export function parseUserSpecifiedModel(
           !has1mContext(resolved)
         return resolved + (append1m ? '[1m]' : '')
       }
-      case 'opusplan':
-        return has1mTag
-          ? with1mSuffix(getDefaultSonnetModel())
-          : getDefaultSonnetModel() // Sonnet is default, Opus in plan mode
-      case 'sonnet':
-        return has1mTag
-          ? with1mSuffix(getDefaultSonnetModel())
-          : getDefaultSonnetModel()
-      case 'haiku':
-        return has1mTag
-          ? with1mSuffix(getDefaultHaikuModel())
-          : getDefaultHaikuModel()
-      case 'opus':
-        return has1mTag
-          ? with1mSuffix(getDefaultOpusModel())
-          : getDefaultOpusModel()
+      case 'opusplan': {
+        const resolved = getDefaultSonnetModel()
+        return has1mTag && modelSupports1mSuffixEffect(resolved)
+          ? with1mSuffix(resolved)
+          : resolved // Sonnet is default, Opus in plan mode
+      }
+      case 'sonnet': {
+        const resolved = getDefaultSonnetModel()
+        return has1mTag && modelSupports1mSuffixEffect(resolved)
+          ? with1mSuffix(resolved)
+          : resolved
+      }
+      case 'haiku': {
+        const resolved = getDefaultHaikuModel()
+        return has1mTag && modelSupports1mSuffixEffect(resolved)
+          ? with1mSuffix(resolved)
+          : resolved
+      }
+      case 'opus': {
+        const resolved = getDefaultOpusModel()
+        return has1mTag && modelSupports1mSuffixEffect(resolved)
+          ? with1mSuffix(resolved)
+          : resolved
+      }
       case 'best':
         return getBestModel()
       default:

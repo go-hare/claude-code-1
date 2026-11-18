@@ -20,7 +20,11 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
-import { ClaudeAuthProvider, wrapFetchWithStepUpDetection } from './auth.js'
+import {
+  ClaudeAuthProvider,
+  dialedWithoutOAuth,
+  wrapFetchWithStepUpDetection,
+} from './auth.js'
 import {
   getCliOwnedAsyncBearerProvider,
   getCliOwnedBearerProvider,
@@ -340,6 +344,7 @@ export async function resolveRemoteConnectAuth(
     })
   }
   const skipOAuth =
+    ('url' in serverRef && dialedWithoutOAuth.get(name) === serverRef.url) ||
     shouldSkipOAuthAuthProvider(flags) ||
     isCliOwnedBearerConfig(serverRef) ||
     useFirstPartyAuth

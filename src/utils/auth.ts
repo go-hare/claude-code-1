@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import { exec } from 'child_process'
 import { execa } from 'execa'
-import { mkdir, stat } from 'fs/promises'
+import { mkdir, rm, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { join, resolve } from 'path'
 import { CLAUDE_AI_PROFILE_SCOPE } from 'src/constants/oauth.js'
@@ -517,7 +517,17 @@ export function getConfiguredApiKeyHelper(): string | undefined {
     return getSettingsForSource('flagSettings')?.apiKeyHelper
   }
   const mergedSettings = getSettings_DEPRECATED() || {}
-  return mergedSettings.apiKeyHelper
+  if (mergedSettings.apiKeyHelper) {
+    return mergedSettings.apiKeyHelper
+  }
+  try {
+    const { resolveRemoteHelperTier } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/remoteSettingsState.js') as typeof import('./settings/remoteSettingsState.js')
+    return resolveRemoteHelperTier()?.apiKeyHelper
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -1590,6 +1600,14 @@ export function saveOAuthTokensIfNeeded(tokens: OAuthTokens): {
       // stored subscription with null — fall back to the existing value.
       subscriptionType:
         tokens.subscriptionType ?? existingOauth?.subscriptionType ?? null,
+      subscriptionTypeSource:
+        tokens.subscriptionTypeSource ??
+        existingOauth?.subscriptionTypeSource ??
+        undefined,
+      subscriptionTypeVerifiedAt:
+        tokens.subscriptionTypeVerifiedAt ??
+        existingOauth?.subscriptionTypeVerifiedAt ??
+        undefined,
       rateLimitTier:
         tokens.rateLimitTier ?? existingOauth?.rateLimitTier ?? null,
     }
@@ -2378,11 +2396,100 @@ export async function isOAuthRefreshDead(
   }
 }
 
+const ALIVE_HOLDER_WAIT_MS = 7500
+const OAUTH_REFRESH_LOCK_FILENAME = '.oauth_refresh.lock'
+
+export type OAuthRefreshLockSnapshot = {
+  contendedLock: 'current' | 'legacy'
+  lockAgeMs: number | undefined
+  mtimeMs: number | undefined
+}
+
+export function getOAuthRefreshLockOptions(claudeDir: string) {
+  return {
+    lockfilePath: join(claudeDir, OAUTH_REFRESH_LOCK_FILENAME),
+    realpath: false as const,
+    stale: 60_000,
+    update: 5_000,
+    onCompromised: (err: Error) => {
+      logForDebugging(`OAuth refresh lock compromised: ${err.message}`, {
+        level: 'error',
+      })
+    },
+  }
+}
+
+export async function inspectOAuthRefreshLock(
+  err: unknown,
+  claudeDir: string,
+): Promise<OAuthRefreshLockSnapshot> {
+  const rawFile =
+    typeof err === 'object' &&
+    err !== null &&
+    'file' in err &&
+    typeof (err as { file?: unknown }).file === 'string'
+      ? (err as { file: string }).file
+      : undefined
+  const isCurrent =
+    rawFile === undefined || resolve(rawFile) === resolve(claudeDir)
+  const targetPath = isCurrent
+    ? join(claudeDir, OAUTH_REFRESH_LOCK_FILENAME)
+    : rawFile
+  let mtimeMs: number | undefined
+  let lockAgeMs: number | undefined
+  try {
+    const s = await stat(targetPath)
+    mtimeMs = s.mtimeMs
+    lockAgeMs = Math.max(0, Math.round(Date.now() - s.mtimeMs))
+  } catch {
+    lockAgeMs = undefined
+  }
+  return {
+    contendedLock: isCurrent ? 'current' : 'legacy',
+    lockAgeMs,
+    mtimeMs,
+  }
+}
+
+export function isSameOAuthRefreshLockSnapshot(
+  a: OAuthRefreshLockSnapshot,
+  b: OAuthRefreshLockSnapshot,
+): boolean {
+  return (
+    a.mtimeMs !== undefined &&
+    b.mtimeMs !== undefined &&
+    a.contendedLock === b.contendedLock &&
+    a.mtimeMs === b.mtimeMs
+  )
+}
+
+async function tryTakeOverDeadOAuthRefreshLock(
+  lockfilePath: string,
+  watchedMtimeMs: number,
+): Promise<'taken_over' | 'lock_changed' | 'failed'> {
+  try {
+    const current = await stat(lockfilePath)
+    if (current.mtimeMs !== watchedMtimeMs) {
+      return 'lock_changed'
+    }
+    await rm(lockfilePath, { recursive: true, force: true })
+    return 'taken_over'
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ENOENT') {
+      return 'lock_changed'
+    }
+    return 'failed'
+  }
+}
+
 async function checkAndRefreshOAuthTokenIfNeededImpl(
   retryCount: number,
   force: boolean,
   credentials?: unknown,
   storageV5?: unknown,
+  totalWaitMs = 0,
+  firstObservedLock?: OAuthRefreshLockSnapshot,
+  takenOver = false,
 ): Promise<boolean> {
   void storageV5
   const MAX_RETRIES = 5
@@ -2458,29 +2565,80 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
 
   let release
   const releaseHold = beginOAuthRefreshLockHold()
+  const lockOpts = getOAuthRefreshLockOptions(claudeDir)
   try {
     logEvent('tengu_oauth_token_refresh_lock_acquiring', {})
-    release = await lockfile.lock(claudeDir)
+    release = await lockfile.lock(claudeDir, lockOpts)
     logEvent('tengu_oauth_token_refresh_lock_acquired', {})
   } catch (err) {
     releaseHold()
     if ((err as { code?: string }).code === 'ELOCKED') {
+      const observed =
+        firstObservedLock ?? (await inspectOAuthRefreshLock(err, claudeDir))
       // Another process has the lock, let's retry if we haven't exceeded max retries
       if (retryCount < MAX_RETRIES) {
         logEvent('tengu_oauth_token_refresh_lock_retry', {
           retryCount: retryCount + 1,
         })
-        // Wait a bit before retrying
-        await sleep(1000 + Math.random() * 1000)
+        const waitMs = 1000 + Math.random() * 1000
+        await sleep(waitMs)
         return checkAndRefreshOAuthTokenIfNeededImpl(
           retryCount + 1,
           force,
           credentials,
           storageV5,
+          totalWaitMs + waitMs,
+          observed,
+          takenOver,
         )
+      }
+      // densable 2.1.314 (#1366): wait up to ALIVE_HOLDER_WAIT_MS (7.5s) to
+      // distinguish an alive holder updating lock mtime from a dead holder.
+      let latest = await inspectOAuthRefreshLock(err, claudeDir)
+      if (
+        isSameOAuthRefreshLockSnapshot(observed, latest) &&
+        totalWaitMs < ALIVE_HOLDER_WAIT_MS
+      ) {
+        await sleep(ALIVE_HOLDER_WAIT_MS - totalWaitMs)
+        latest = await inspectOAuthRefreshLock(err, claudeDir)
+      }
+      const holderAlive = !isSameOAuthRefreshLockSnapshot(observed, latest)
+      if (
+        !holderAlive &&
+        !takenOver &&
+        latest.contendedLock === 'current' &&
+        latest.mtimeMs !== undefined
+      ) {
+        const takeoverOutcome = await tryTakeOverDeadOAuthRefreshLock(
+          lockOpts.lockfilePath,
+          latest.mtimeMs,
+        )
+        logEvent('tengu_oauth_token_refresh_lock_dead_holder_takeover', {
+          outcome:
+            takeoverOutcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          lockAgeMs: latest.lockAgeMs,
+        })
+        if (
+          takeoverOutcome === 'taken_over' ||
+          takeoverOutcome === 'lock_changed'
+        ) {
+          return checkAndRefreshOAuthTokenIfNeededImpl(
+            0,
+            force,
+            credentials,
+            storageV5,
+            0,
+            undefined,
+            true,
+          )
+        }
       }
       logEvent('tengu_oauth_token_refresh_lock_retry_limit_reached', {
         maxRetries: MAX_RETRIES,
+        contendedLock:
+          latest.contendedLock as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        lockAgeMs: latest.lockAgeMs,
+        holderAlive,
       })
       // densable 2.1.248 vp → "lock_timeout"; leftover boolean API throws Zye
       throw new OAuthRefreshLockTimeoutError()
@@ -3620,4 +3778,66 @@ export class OAuthRefreshDiskFullError extends Error {
     )
     this.name = 'OAuthRefreshDiskFullError'
   }
+}
+
+const PRO_MAX_STARTUP_CACHE_GRACE_HOURS = 1
+const MAX_CLOCK_SKEW_MS = 600_000
+
+/**
+ * Official `Ejo` (#1274): extract `subscriptionTypeVerifiedAt` when the
+ * stored subscription type came from a profile fetch.
+ */
+export function getSubscriptionTypeVerifiedAt(
+  tokens: OAuthTokens | null | undefined,
+): number | null | undefined {
+  if (!tokens || tokens.subscriptionTypeSource !== 'profile') {
+    return undefined
+  }
+  return typeof tokens.subscriptionTypeVerifiedAt === 'number'
+    ? tokens.subscriptionTypeVerifiedAt
+    : null
+}
+
+/**
+ * Official `Gjo` / `u3r` (#1274): keep a profile-verified subscription tier
+ * while within `graceTtlHours` (default 1 hour for Pro/Max startup skip).
+ */
+export function resolveGracefulSubscriptionType(
+  tier: string | null,
+  verifiedAtMs: number | null | undefined,
+  graceTtlHours: number = PRO_MAX_STARTUP_CACHE_GRACE_HOURS,
+  nowMs: number = Date.now(),
+): string | null {
+  if (tier === null || verifiedAtMs === undefined) {
+    return tier
+  }
+  if (verifiedAtMs === null) {
+    return null
+  }
+  return verifiedAtMs - nowMs <= MAX_CLOCK_SKEW_MS &&
+    nowMs - verifiedAtMs <= graceTtlHours * 3_600_000
+    ? tier
+    : null
+}
+
+/**
+ * Official #1274: Pro/Max accounts skip the two startup policy/settings
+ * network fetches when their subscription tier is freshly verified (within
+ * 1 hour) or stamped at sign-in.
+ */
+export function shouldSkipPolicyLimitsForProMaxStartup(
+  tokens: OAuthTokens | null | undefined = getClaudeAIOAuthTokens(),
+  graceTtlHours: number = PRO_MAX_STARTUP_CACHE_GRACE_HOURS,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!tokens?.accessToken) {
+    return false
+  }
+  const effectiveTier = resolveGracefulSubscriptionType(
+    tokens.subscriptionType ?? null,
+    getSubscriptionTypeVerifiedAt(tokens),
+    graceTtlHours,
+    nowMs,
+  )
+  return effectiveTier === 'pro' || effectiveTier === 'max'
 }

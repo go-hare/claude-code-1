@@ -74,6 +74,7 @@ import {
   getTokenCountFromUsage,
 } from '../../utils/tokens.js'
 import { createAbortController } from '../abortController.js'
+import { isEnvTruthy } from '../envUtils.js'
 import { type AgentContext, runWithAgentContext } from '../agentContext.js'
 import {
   markAutonomyRunCompleted,
@@ -1232,8 +1233,9 @@ export async function runInProcessTeammate(
       let contextMessages = allMessages
       const tokenCount = tokenCountWithEstimation(allMessages)
       if (
+        !isEnvTruthy(process.env.DISABLE_COMPACT) &&
         tokenCount >
-        getAutoCompactThreshold(toolUseContext.options.mainLoopModel)
+          getAutoCompactThreshold(toolUseContext.options.mainLoopModel)
       ) {
         logForDebugging(
           `[inProcessRunner] ${identity.agentId} compacting history (${tokenCount} tokens)`,

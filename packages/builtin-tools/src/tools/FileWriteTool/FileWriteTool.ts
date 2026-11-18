@@ -52,6 +52,7 @@ import { expandPath } from 'src/utils/path.js'
 import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
+  checkBlockWritesOutsideWorkingDirectories,
   checkWritePermissionForTool,
   matchingRuleForInput,
   matchesPathRule,
@@ -59,6 +60,7 @@ import {
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.js'
 import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.js'
+import { getFastPatchFromContents } from '../FileEditTool/utils.js'
 import {
   FILE_READ_DENY_CANNOT_WRITE,
   isPathCoveredByReadDenyRule,
@@ -75,6 +77,47 @@ import {
   renderToolUseRejectedMessage,
   userFacingName,
 } from './UI.js'
+
+// SEA #1318 (`eei`, `gIa`, `_Ia` @281327668): prevent Write from overwriting a large
+// CLAUDE.md, rules file, or @-included file after seeing only its start.
+const WRITE_START_ONLY_FILE_MESSAGE =
+  'You were given only the start of this file, and nothing shows that you have since read all of it in one call, so a Write could lose the rest. To change part of it, use Edit. To replace it whole, first Read it in one call with no offset or limit. If Read returns only a page or says the file is too large, Read it again with allow_large: true. If even that cannot return all of it, use Edit.'
+
+const WRITE_START_ONLY_KNOWN_MESSAGE =
+  "Only the start of this file was given in this session, so a Write could lose the rest. Nothing was written. To change it, use Edit. If Edit says that the path is a link, use it on the link's target."
+
+const WRITE_START_ONLY_UNKNOWN_MESSAGE =
+  'Nothing was written. Only the start of a file was given in this session, and it could not be checked that this path is a different file. To change this file, use Edit.'
+
+type StartOnlyContext = {
+  readFileState?: {
+    holdsOnlyStartOf?: (filePath: string) => boolean
+  }
+  startOnlyFiles?: 'unreadable' | readonly string[]
+}
+
+async function checkWriteStartOnlyFile(
+  fullFilePath: string,
+  context: StartOnlyContext,
+): Promise<{ message: string; errorCode: 19 | 20 } | undefined> {
+  if (context.readFileState?.holdsOnlyStartOf?.(fullFilePath)) {
+    return { message: WRITE_START_ONLY_FILE_MESSAGE, errorCode: 19 }
+  }
+  const startOnlyFiles = context.startOnlyFiles
+  if (startOnlyFiles === undefined) {
+    return undefined
+  }
+  if (startOnlyFiles === 'unreadable') {
+    return { message: WRITE_START_ONLY_UNKNOWN_MESSAGE, errorCode: 20 }
+  }
+  const normalizedTarget = fullFilePath.normalize('NFC')
+  const matched = startOnlyFiles.some(
+    p => p.normalize('NFC') === normalizedTarget,
+  )
+  return matched
+    ? { message: WRITE_START_ONLY_KNOWN_MESSAGE, errorCode: 20 }
+    : undefined
+}
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -458,6 +501,18 @@ export const FileWriteTool = buildTool({
       throw e
     }
 
+    const startOnlyRefusal = await checkWriteStartOnlyFile(
+      fullFilePath,
+      toolUseContext as StartOnlyContext,
+    )
+    if (startOnlyRefusal !== undefined) {
+      return {
+        result: false,
+        message: startOnlyRefusal.message,
+        errorCode: startOnlyRefusal.errorCode,
+      }
+    }
+
     // densable 2.1.228 #17 Write: existing file requires prior non-partial read
     // (errorCode 2) unless guardSkipped (non-legacy model + Read auto-allow).
     // stale mtime uses HOe+xOe content equality bypass (errorCode 3).
@@ -536,6 +591,14 @@ export const FileWriteTool = buildTool({
     } = toolUseContext
     const fullFilePath = expandPath(file_path)
 
+    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
+      fullFilePath,
+      toolUseContext.getAppState().toolPermissionContext,
+    )
+    if (outsideWriteBlock !== undefined) {
+      throw new Error(outsideWriteBlock)
+    }
+
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     const cwd = getCwd()
     const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)
@@ -587,6 +650,13 @@ export const FileWriteTool = buildTool({
       }
 
       if (meta !== null) {
+        const startOnlyRefusal = await checkWriteStartOnlyFile(
+          fullFilePath,
+          toolUseContext as StartOnlyContext,
+        )
+        if (startOnlyRefusal !== undefined) {
+          throw new Error(startOnlyRefusal.message)
+        }
         const lastWriteTime = getFileModificationTime(fullFilePath)
         const lastRead = readFileState.get(fullFilePath)
         // densable 2.1.228 #17 call-path: missing/partial may pass when the same
@@ -708,16 +778,10 @@ export const FileWriteTool = buildTool({
       // densable `_`: length>TB → empty patch + null originalFile (still wrote)
       const patch = omitLargeOld
         ? []
-        : getPatchForDisplay({
-            filePath: file_path,
-            fileContents: oldContent,
-            edits: [
-              {
-                old_string: oldContent,
-                new_string: contentToWrite,
-                replace_all: false,
-              },
-            ],
+        : getFastPatchFromContents({
+            oldContent,
+            newContent: contentToWrite,
+            convertTabs: true,
           })
 
       const data = {
@@ -731,7 +795,10 @@ export const FileWriteTool = buildTool({
         ...(gitDiff && { gitDiff }),
       }
       // densable wme(v, model, _?t, _?h)
-      if (omitLargeOld) {
+      if (
+        omitLargeOld ||
+        (patch.length === 0 && oldContent !== contentToWrite)
+      ) {
         countLinesChanged([], contentToWrite, oldContent)
       } else {
         countLinesChanged(patch)

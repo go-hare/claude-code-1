@@ -46,7 +46,11 @@ import {
   getScratchpadDir,
 } from '../utils/permissions/filesystem.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
-import { join as pathJoin } from 'path'
+import { basename as pathBasename, join as pathJoin } from 'path'
+import { whichSync } from '../utils/which.js'
+import { isPowerShellToolEnabled } from '../utils/shell/shellToolUtils.js'
+import { findGitBashPathOrNull } from '../utils/windowsPaths.js'
+import { getPlatform } from '../utils/platform.js'
 import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -1308,7 +1312,47 @@ function getKnowledgeCutoff(modelId: string): string | null {
   return null
 }
 
-function getShellInfoLine(): string {
+function isSupportedPosixShellPath(
+  shellPath: string | undefined,
+): shellPath is string {
+  return Boolean(
+    shellPath && (shellPath.includes('bash') || shellPath.includes('zsh')),
+  )
+}
+
+export function findSuitableShellSync(): string | undefined {
+  if (getPlatform() === 'windows') return undefined
+  const envShell = process.env.SHELL
+  const shellOverride = process.env.CLAUDE_CODE_SHELL
+  const preferBash = envShell?.includes('bash')
+  const [zshPath, bashPath] = [whichSync('zsh'), whichSync('bash')]
+  const [firstPath, secondPath] = preferBash
+    ? [bashPath, zshPath]
+    : [zshPath, bashPath]
+  const [firstShell, secondShell] = preferBash
+    ? ['bash', 'zsh']
+    : ['zsh', 'bash']
+  const shellPaths = ['/bin', '/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']
+  const candidates = [
+    isSupportedPosixShellPath(shellOverride) ? shellOverride : null,
+    isSupportedPosixShellPath(envShell) ? envShell : null,
+    firstPath,
+    ...[firstShell, secondShell].flatMap(shell =>
+      shellPaths.map(dir => `${dir}/${shell}`),
+    ),
+    secondPath,
+  ].filter((c): c is string => Boolean(c))
+
+  return candidates.find(candidate => {
+    try {
+      return whichSync(candidate) !== null
+    } catch {
+      return false
+    }
+  })
+}
+
+export function getShellDescription(): string {
   const shell = process.env.SHELL || 'unknown'
   const shellName = shell.includes('zsh')
     ? 'zsh'
@@ -1316,9 +1360,27 @@ function getShellInfoLine(): string {
       ? 'bash'
       : shell
   if (env.platform === 'win32') {
-    return `Shell: ${shellName} (use Unix shell syntax, not Windows — e.g., /dev/null not NUL, forward slashes in paths)`
+    if (findGitBashPathOrNull() === null) {
+      return 'PowerShell'
+    }
+    if (isPowerShellToolEnabled()) {
+      return 'PowerShell (primary); Bash tool also available for POSIX scripts — each takes its own syntax.'
+    }
+    return shellName
   }
-  return `Shell: ${shellName}`
+  const resolved = findSuitableShellSync()
+  if (resolved === undefined) {
+    return shellName
+  }
+  const resolvedName = pathBasename(resolved)
+  if (!process.env.SHELL || pathBasename(process.env.SHELL) === resolvedName) {
+    return resolvedName
+  }
+  return `${resolvedName} (login shell: ${pathBasename(process.env.SHELL)})`
+}
+
+export function getShellInfoLine(): string {
+  return `Shell: ${getShellDescription()}`
 }
 
 export function getUnameSR(): string {

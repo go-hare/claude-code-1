@@ -251,6 +251,14 @@ export function formatGatewayTlsCertHint(err: unknown): string | null {
   ) {
     return null
   }
+  if (code === 'UNABLE_TO_GET_ISSUER_CERT') {
+    return (
+      'Unable to connect to gateway: SSL certificate verification failed (UNABLE_TO_GET_ISSUER_CERT). ' +
+      'The certificates this computer trusts include a CA certificate whose own issuer is missing, ' +
+      'often a leftover from a renewal: remove it from the system certificate store or the ' +
+      'NODE_EXTRA_CA_CERTS file, or add its issuer there.'
+    )
+  }
   return (
     "Could not verify the gateway's TLS certificate. If your gateway uses a private CA or self-signed certificate: Claude Code reads your OS trust " +
     'store by default on the native binary and Node ≥22.15, so if the CA is ' +

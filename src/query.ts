@@ -228,6 +228,7 @@ const taskSummaryModule = feature('BG_SESSIONS')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 import {
+  MALFORMED_TOOL_USE_RETRY_PROMPT,
   MAX_OUTPUT_TOKENS_RECOVERY_LIMIT,
   announceOutputLimitRecovery,
   collectPostToolBatchCalls,
@@ -236,9 +237,12 @@ import {
   isWithheldMaxOutputTokens,
   maybeHandbackBounce,
   maybeSkillInlineCommandHandoffNotRun,
+  resolveRefusalFallbackCandidate,
   truncatedRecoveryCopy,
   yieldMissingToolResultBlocks,
 } from './query/queryHelpers.js'
+import { runPostCompactCleanup } from './services/compact/postCompactCleanup.js'
+import { getContextWindowForModel } from './utils/context.js'
 import {
   getQueryFunctionHooks,
   streamTurnStepWithHooks,
@@ -817,8 +821,8 @@ async function* queryLoop(
 > {
   // Immutable params — gold does not rebuild systemPrompt after refreshTools.
   const { systemPrompt } = params
+  let { userContext } = params
   const {
-    userContext,
     systemContext,
     canUseTool,
     fallbackModel,
@@ -1534,6 +1538,7 @@ async function* queryLoop(
       }
 
       const assistantMessages: AssistantMessage[] = []
+      let withheldLongContextRefusal: AssistantMessage | undefined
       const toolResults: (UserMessage | AttachmentMessage)[] = []
       // @see https://docs.claude.com/en/docs/build-with-claude/tool-use
       // Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
@@ -1857,6 +1862,18 @@ async function* queryLoop(
             messagesForQuery = buildPostCompactMessages(
               predictiveResult.compactionResult,
             )
+            // v2.1.311 (#1230): refresh userContext after auto-compact cleared caches
+            try {
+              const refreshed = await getUserContext()
+              if (
+                Object.keys(refreshed).length > 0 ||
+                Object.keys(userContext).length > 0
+              ) {
+                userContext = refreshed
+              }
+            } catch {
+              // Keep existing userContext if refresh fails
+            }
             snipTokensFreed = 0
             tracking = tracking
               ? {
@@ -2087,23 +2104,11 @@ async function* queryLoop(
                       switchModelsOnFlag: getSwitchModelsOnFlag(),
                       preferenceQuestionPending:
                         refusalFallbackPreferencePending,
-                      resolveArmedFallbackModel: () => {
-                        // densable y$c arm → _$c: when entitlement overlay is
-                        // unavailable and target is opus-5, substitute opus-4-8.
-                        const raw =
-                          fallbackModel && fallbackModel !== currentModel
-                            ? fallbackModel
-                            : undefined
-                        if (raw === undefined) return undefined
-                        try {
-                          // eslint-disable-next-line @typescript-eslint/no-require-imports
-                          const { applyEntitlementBlindFallbackTarget } =
-                            require('./utils/model/entitlementOverlay.js') as typeof import('./utils/model/entitlementOverlay.js')
-                          return applyEntitlementBlindFallbackTarget(raw)
-                        } catch {
-                          return raw
-                        }
-                      },
+                      resolveArmedFallbackModel: () =>
+                        resolveRefusalFallbackCandidate({
+                          currentModel,
+                          fallbackModel,
+                        }),
                     })
                     const silentRearm = resolveSilentRearmModel({
                       currentModel,
@@ -2708,6 +2713,17 @@ async function* queryLoop(
                 reactiveCompact?.isWithheldPromptTooLong(message as Message)
               ) {
                 withholdPtl = true
+              }
+              if (
+                !needsFollowUp &&
+                reactiveCompact?.isEligibleForLongContextRefusalCompact(
+                  message as Message,
+                  getContextWindowForModel(currentModel),
+                  querySource,
+                )
+              ) {
+                withholdPtl = true
+                withheldLongContextRefusal = message as AssistantMessage
               }
               const { withheld, replay: withheldMediaReplay } =
                 applyStreamMediaReplay(withheldMediaBuffer, message, {
@@ -3406,7 +3422,11 @@ async function* queryLoop(
         // (full summary). Single-shot on each — if a retry still 413's,
         // the next stage handles it or the error surfaces.
         // densable cup: e?.type==="assistant" && e8e(e) — optional outer.
+        const isWithheldLongContext =
+          withheldLongContextRefusal !== undefined &&
+          lastMessage === withheldLongContextRefusal
         const isWithheld413 =
+          isWithheldLongContext ||
           reactiveCompact?.isWithheldPromptTooLong(lastMessage) === true ||
           (reactiveCompact == null &&
             lastMessage?.type === 'assistant' &&
@@ -3464,6 +3484,12 @@ async function* queryLoop(
             !hasAttemptedReactiveCompact &&
             reactiveBreaker.action === 'trip'
           ) {
+            if (isWithheldLongContext && lastMessage) {
+              yield lastMessage
+              void executeStopFailureHooks(lastMessage, toolUseContext)
+              yield* leftoverDrainSpinnerModes()
+              return { reason: 'model_error' }
+            }
             yield createAssistantAPIErrorMessage({
               content: AUTOCOMPACT_THRASHING_MESSAGE,
               error: 'invalid_request',
@@ -3502,6 +3528,20 @@ async function* queryLoop(
             }
 
             const postCompactMessages = buildPostCompactMessages(compacted)
+            // v2.1.311 (#1230): clear memory/userContext caches and refresh
+            // userContext so edited MEMORY.md / CLAUDE.md are seen post-compact.
+            runPostCompactCleanup(querySource)
+            try {
+              const refreshed = await getUserContext()
+              if (
+                Object.keys(refreshed).length > 0 ||
+                Object.keys(userContext).length > 0
+              ) {
+                userContext = refreshed
+              }
+            } catch {
+              // Keep existing userContext if refresh fails
+            }
             for (const msg of postCompactMessages) {
               yield msg
             }
@@ -3579,7 +3619,13 @@ async function* queryLoop(
           yield surfaced
           void executeStopFailureHooks(surfaced, toolUseContext)
           yield* leftoverDrainSpinnerModes()
-          return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
+          return {
+            reason: isWithheldMedia
+              ? 'image_error'
+              : isWithheldLongContext
+                ? 'model_error'
+                : 'prompt_too_long',
+          }
         } else if (
           feature('CONTEXT_COLLAPSE') &&
           isWithheld413 &&
@@ -3771,11 +3817,19 @@ async function* queryLoop(
             for (const msg of assistantMessages) {
               yield { type: 'tombstone' as const, message: msg }
             }
-            const retryMessage = createUserMessage({
+            const retryMessage: UserMessage & {
+              retractedMessageUuids?: string[]
+              retractedWireUuids?: string[]
+            } = createUserMessage({
               content: malformedToolUse.prompt,
               isMeta: true,
               turnCompanion: true,
             })
+            const retractedUuids = assistantMessages.map(m => m.uuid)
+            retryMessage.retractedMessageUuids = retractedUuids
+            if (!toolUseContext.agentId) {
+              retryMessage.retractedWireUuids = retractedUuids
+            }
             yield retryMessage
             state = {
               messages: [...messagesForQuery, retryMessage],
@@ -3796,10 +3850,30 @@ async function* queryLoop(
             continue
           }
           if (malformedToolUse.action === 'exhausted') {
-            const exhaustedMessage = createAssistantAPIErrorMessage({
+            // v2.1.314 (#1374): retract the last broken reply and its retry
+            // prompts so they do not stay in the conversation after giving up.
+            const retractedUuids: string[] = []
+            for (const msg of messagesForQuery) {
+              if (
+                msg.type === 'user' &&
+                msg.isMeta === true &&
+                msg.message?.content === MALFORMED_TOOL_USE_RETRY_PROMPT
+              ) {
+                retractedUuids.push(msg.uuid)
+                yield { type: 'tombstone' as const, message: msg }
+              }
+            }
+            for (const msg of assistantMessages) {
+              retractedUuids.push(msg.uuid)
+              yield { type: 'tombstone' as const, message: msg }
+            }
+            const exhaustedMessage: AssistantMessage & {
+              retractedMessageUuids?: string[]
+            } = createAssistantAPIErrorMessage({
               content: malformedToolUse.text,
               apiError: 'malformed_tool_use_exhausted',
             })
+            exhaustedMessage.retractedMessageUuids = retractedUuids
             yield exhaustedMessage
             // densable: x0e(Li,ct), OS(ct,A,Li)
             void executeStopFailureHooks(exhaustedMessage, toolUseContext)
@@ -4701,6 +4775,59 @@ async function* queryLoop(
           const { clearGoalIdleCheckinCount } =
             require('./services/goal/goalIdleCheckin.js') as typeof import('./services/goal/goalIdleCheckin.js')
           clearGoalIdleCheckinCount(toolUseContext.setAppState)
+        }
+        // Gold `Wu` (#1287): mid-turn typed `ultrathink` boosts turn effort to xhigh.
+        {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const { isTypedUltrathinkPrompt } =
+            require('./utils/attachments.js') as typeof import('./utils/attachments.js')
+          const { canBoostTurnToXhigh } =
+            require('./utils/effort.js') as typeof import('./utils/effort.js')
+          const { applyContextLayers, getEffortValueFromLayers } =
+            require('./engine/permissionLayerReaders.js') as typeof import('./engine/permissionLayerReaders.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          const model = updatedToolUseContext.options.mainLoopModel
+          const appEffort = getEffortValueFromLayers(updatedToolUseContext)
+          if (
+            claimedConsumedCommands.some(
+              cmd =>
+                cmd.mode === 'prompt' &&
+                !cmd.isMeta &&
+                (cmd as { shouldQuery?: boolean }).shouldQuery !== false &&
+                isHumanLikeOrigin(cmd.origin) &&
+                isTypedUltrathinkPrompt({
+                  composerEnter: cmd.composerEnter,
+                  preExpansionInput: cmd.preExpansionValue,
+                  localStdinOrigin: cmd.localStdinOrigin,
+                  input: typeof cmd.value === 'string' ? cmd.value : '',
+                }) &&
+                canBoostTurnToXhigh(model, appEffort),
+            )
+          ) {
+            logEvent('tengu_ultrathink', {})
+            try {
+              /* eslint-disable @typescript-eslint/no-require-imports */
+              const { leftoverIhrPhn } =
+                require('./utils/collapseReadSearch.js') as typeof import('./utils/collapseReadSearch.js')
+              const { getMainThreadAgentId } =
+                require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+              /* eslint-enable @typescript-eslint/no-require-imports */
+              leftoverIhrPhn(
+                updatedToolUseContext.agentId ?? getMainThreadAgentId(),
+              ).setTurnEffort('xhigh')
+            } catch {
+              // isolation — optional
+            }
+            updatedToolUseContext = applyContextLayers(updatedToolUseContext, [
+              { kind: 'effort', effort: 'xhigh' },
+            ])
+            const reminder = createAttachmentMessage({
+              type: 'ultrathink_effort',
+              level: 'xhigh',
+            })
+            yield reminder
+            toolResults.push(reminder)
+          }
         }
       }
 

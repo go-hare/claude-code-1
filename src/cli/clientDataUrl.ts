@@ -7,14 +7,15 @@
  * Does not land --cloud/--environment apply.
  */
 import axios from 'axios'
-import { createHash } from 'crypto'
-import { mkdir, open } from 'fs/promises'
+import { createHash, createPublicKey } from 'crypto'
+import { mkdir, open, readFile } from 'fs/promises'
 import { join } from 'path'
+import { fileURLToPath } from 'url'
 import { stripVTControlCharacters } from 'util'
 import { z } from 'zod/v4'
 import { logForDebugging } from '../utils/debug.js'
 import { classifyAxiosError, isENOENT } from '../utils/errors.js'
-import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { getClaudeConfigHomeDir, isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { safeParseJSON } from '../utils/json.js'
 import { lazySchema } from '../utils/lazySchema.js'
 import { logError } from '../utils/log.js'
@@ -949,4 +950,423 @@ export function coverLoadedClientDataDocument(
   if (loadedDocument === undefined) return
   const detail = coverClientDataDocument(loadedDocument, model)
   return detail === undefined ? undefined : formatClientDataUrlError(detail)
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.325 (#1295): CLAUDE_CODE_MODEL_CATALOG / publishedCatalog
+// ---------------------------------------------------------------------------
+
+export const MODEL_CATALOG_DEFAULT_URL =
+  'https://downloads.claude.ai/model-catalog/v1/catalog.json'
+export const MODEL_CATALOG_SIGNING_CONTEXT = 'claude-code-model-catalog-v1\0'
+const MIN_RSA_MODULUS_BITS = 2048
+const MANAGED_CATALOG_KEY_ID = 'managed-model-catalog-public-key'
+
+export type PublishedCatalogSourceKind = 'hosted' | 'custom_url' | 'file'
+
+export type PublishedCatalogTrust =
+  | { kind: 'compiled_roots'; roots: typeof CLIENT_DATA_COMPILED_ROOTS }
+  | {
+      kind: 'managed_key'
+      roots: Array<{ id: string; spkiBase64: string }>
+    }
+  | { kind: 'untrusted'; reason: 'invalid_public_key' }
+
+export type PublishedCatalogSource = {
+  kind: PublishedCatalogSourceKind
+  url: string
+  trust: PublishedCatalogTrust
+  cacheKey: string
+}
+
+export type PublishedCatalogFetchResult =
+  | {
+      status: 'ok'
+      documentBytes: Uint8Array
+      sidecar: unknown
+      hasSidecar: boolean
+      sidecarHttpStatus: number | undefined
+      etag: string | undefined
+      httpStatus: number | undefined
+    }
+  | { status: 'not_modified'; httpStatus: number }
+  | { status: 'error'; reason: ClientDataFailure; httpStatus?: number }
+
+/** Gold `ws(process.env.CLAUDE_CODE_MODEL_CATALOG)` — env off check. */
+export function isPublishedCatalogEnvOff(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvDefinedFalsy(env.CLAUDE_CODE_MODEL_CATALOG)
+}
+
+function classifyCatalogUrlKind(
+  parsed: URL,
+): PublishedCatalogSourceKind | undefined {
+  if (parsed.protocol === 'file:') {
+    return parsed.hostname === '' || parsed.hostname === 'localhost'
+      ? 'file'
+      : undefined
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return undefined
+  }
+  return parsed.toString() === MODEL_CATALOG_DEFAULT_URL
+    ? 'hosted'
+    : 'custom_url'
+}
+
+function isLoopbackOrMetadataHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host === '169.254.169.254' ||
+    host === 'metadata.google.internal'
+  )
+}
+
+function parseSpkiRsaPem(
+  pem: string,
+): { ok: true; der: Uint8Array } | { ok: false; reason: string } {
+  const match =
+    /^-----BEGIN PUBLIC KEY-----([\s\S]*?)-----END PUBLIC KEY-----$/.exec(
+      pem.trim(),
+    )
+  if (!match || match[1] === undefined) {
+    return { ok: false, reason: 'not_spki_pem' }
+  }
+  const b64 = match[1].replace(/\s+/g, '')
+  if (b64.length === 0 || !/^[A-Za-z0-9+/]+=*$/.test(b64)) {
+    return { ok: false, reason: 'not_spki_pem' }
+  }
+  const derBuf = Buffer.from(b64, 'base64')
+  if (derBuf.length === 0 || derBuf.toString('base64') !== b64) {
+    return { ok: false, reason: 'not_spki_pem' }
+  }
+  try {
+    const keyObj = createPublicKey({ key: derBuf, format: 'der', type: 'spki' })
+    if (keyObj.asymmetricKeyType !== 'rsa') {
+      return { ok: false, reason: 'not_rsa' }
+    }
+    const modulusLength = keyObj.asymmetricKeyDetails?.modulusLength
+    if (modulusLength === undefined || modulusLength < MIN_RSA_MODULUS_BITS) {
+      return { ok: false, reason: 'modulus_too_short' }
+    }
+    return { ok: true, der: new Uint8Array(derBuf) }
+  } catch {
+    return { ok: false, reason: 'not_spki_pem' }
+  }
+}
+
+/**
+ * Gold `ggt` @299166497 — resolve published catalog source URL, trust roots, and cacheKey.
+ */
+export function resolvePublishedCatalogSource(opts?: {
+  ignoreEnvUrl?: boolean
+  managedUrl?: string
+  managedPublicKey?: string
+  env?: NodeJS.ProcessEnv
+}):
+  | { ok: true; source: PublishedCatalogSource }
+  | { ok: false; reason: 'invalid_url' } {
+  const env = opts?.env ?? process.env
+  const envUrl = env.CLAUDE_CODE_MODEL_CATALOG_URL?.trim() || undefined
+  const rawUrl =
+    (opts?.ignoreEnvUrl ? opts.managedUrl : (opts?.managedUrl ?? envUrl)) ??
+    MODEL_CATALOG_DEFAULT_URL
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    logForDebugging(
+      '[publishedCatalog] configured catalog URL is not a URL; published path off',
+    )
+    return { ok: false, reason: 'invalid_url' }
+  }
+
+  const kind = classifyCatalogUrlKind(parsed)
+  if (kind === undefined) {
+    logForDebugging(
+      `[publishedCatalog] configured catalog URL has unsupported scheme ${parsed.protocol}; published path off`,
+    )
+    return { ok: false, reason: 'invalid_url' }
+  }
+
+  if (kind !== 'file' && isLoopbackOrMetadataHost(parsed.hostname)) {
+    logForDebugging(
+      '[publishedCatalog] configured catalog URL names a loopback or metadata host; published path off',
+    )
+    return { ok: false, reason: 'invalid_url' }
+  }
+
+  let trust: PublishedCatalogTrust
+  if (kind === 'hosted' || opts?.managedPublicKey === undefined) {
+    trust = { kind: 'compiled_roots', roots: CLIENT_DATA_COMPILED_ROOTS }
+  } else if (opts.managedUrl === undefined) {
+    logForDebugging(
+      '[publishedCatalog] a managed catalog public key is set but no managed catalog URL is; the env-named URL verifies against the compiled roots only',
+    )
+    trust = { kind: 'compiled_roots', roots: CLIENT_DATA_COMPILED_ROOTS }
+  } else {
+    const parsedKey = parseSpkiRsaPem(opts.managedPublicKey)
+    if (!parsedKey.ok) {
+      logForDebugging(
+        `[publishedCatalog] the managed catalog public key is not a PEM SPKI RSA public key of at least ${MIN_RSA_MODULUS_BITS} bits (${parsedKey.reason}); custom source refused`,
+      )
+      trust = { kind: 'untrusted', reason: 'invalid_public_key' }
+    } else {
+      trust = {
+        kind: 'managed_key',
+        roots: [
+          ...CLIENT_DATA_COMPILED_ROOTS,
+          {
+            id: MANAGED_CATALOG_KEY_ID,
+            spkiBase64: Buffer.from(parsedKey.der).toString('base64'),
+          },
+        ],
+      }
+    }
+  }
+
+  const url = parsed.toString()
+  const cacheKey = createHash('sha256').update(url).digest('hex').slice(0, 32)
+  return { ok: true, source: { kind, url, trust, cacheKey } }
+}
+
+/**
+ * Gold `vvr` @299168080 — fetch published catalog document + `.raw-sig.json` sidecar
+ * from `file://` or HTTP(S) with optional ETag / noCache headers.
+ */
+export async function fetchPublishedCatalog(
+  source: Pick<PublishedCatalogSource, 'kind' | 'url'>,
+  opts?: { etag?: string; noCache?: boolean },
+): Promise<PublishedCatalogFetchResult> {
+  if (source.kind === 'file') {
+    const filePath = fileURLToPath(source.url)
+    let bytes: Buffer
+    try {
+      bytes = await readFile(filePath)
+    } catch (error) {
+      logForDebugging(
+        `[publishedCatalog] file read failed${isENOENT(error) ? ' (no such file)' : ''}`,
+      )
+      return { status: 'error', reason: 'read_failed' }
+    }
+    if (bytes.length > MAX_DOCUMENT_BYTES) {
+      return { status: 'error', reason: 'too_large' }
+    }
+    let sidecar: unknown
+    let hasSidecar = false
+    try {
+      const sidecarBytes = await readFile(`${filePath}${SIDECAR_SUFFIX}`)
+      if (sidecarBytes.length <= MAX_SIDECAR_BYTES) {
+        hasSidecar = true
+        sidecar = safeParseJSON(sidecarBytes.toString('utf8'), false)
+      }
+    } catch (error) {
+      if (!isENOENT(error)) {
+        logForDebugging('[publishedCatalog] sidecar read failed')
+      }
+    }
+    logForDebugging(
+      `[publishedCatalog] file read ok: ${bytes.length} bytes${hasSidecar ? ', sidecar present' : ', no sidecar'}`,
+    )
+    return {
+      status: 'ok',
+      documentBytes: new Uint8Array(bytes),
+      sidecar,
+      hasSidecar,
+      sidecarHttpStatus: undefined,
+      etag: undefined,
+      httpStatus: undefined,
+    }
+  }
+
+  try {
+    const beforeRedirect = pinDownloadsRedirect(source.url)
+    const headers: Record<string, string> = {
+      ...(opts?.noCache
+        ? { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
+        : {}),
+      ...(opts?.etag !== undefined ? { 'If-None-Match': opts.etag } : {}),
+    }
+    const response = await axios.get<ArrayBuffer>(source.url, {
+      responseType: 'arraybuffer',
+      timeout: FETCH_TIMEOUT_MS,
+      maxContentLength: MAX_DOCUMENT_BYTES,
+      maxBodyLength: MAX_DOCUMENT_BYTES,
+      validateStatus: () => true,
+      beforeRedirect,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    })
+    const httpStatus = response.status
+    if (httpStatus === 304 && opts?.etag !== undefined) {
+      logForDebugging('[publishedCatalog] fetch: not modified')
+      return { status: 'not_modified', httpStatus }
+    }
+    if (httpStatus < 200 || httpStatus >= 300) {
+      logForDebugging(`[publishedCatalog] fetch: HTTP ${httpStatus}`)
+      return { status: 'error', reason: 'http_status', httpStatus }
+    }
+    const documentBytes = toBytes(response.data)
+    if (documentBytes.length > MAX_DOCUMENT_BYTES) {
+      return { status: 'error', reason: 'too_large', httpStatus }
+    }
+    const sidecarUrl = sidecarUrlFor(source.url)
+    const sidecarResponse = await axios.get<ArrayBuffer>(sidecarUrl, {
+      responseType: 'arraybuffer',
+      timeout: FETCH_TIMEOUT_MS,
+      maxContentLength: MAX_SIDECAR_BYTES,
+      maxBodyLength: MAX_SIDECAR_BYTES,
+      validateStatus: () => true,
+      beforeRedirect,
+      ...(opts?.noCache
+        ? { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
+        : {}),
+    })
+    let sidecar: unknown
+    let hasSidecar = false
+    if (sidecarResponse.status >= 200 && sidecarResponse.status < 300) {
+      const sidecarBytes = toBytes(sidecarResponse.data)
+      if (sidecarBytes.length <= MAX_SIDECAR_BYTES) {
+        hasSidecar = true
+        sidecar = safeParseJSON(
+          Buffer.from(sidecarBytes).toString('utf8'),
+          false,
+        )
+      }
+    } else {
+      logForDebugging(
+        `[publishedCatalog] sidecar fetch: HTTP ${sidecarResponse.status}`,
+      )
+    }
+    const rawEtag = response.headers?.etag
+    const etag = typeof rawEtag === 'string' && rawEtag ? rawEtag : undefined
+    logForDebugging(
+      `[publishedCatalog] fetch ok: ${documentBytes.length} bytes${hasSidecar ? ', sidecar present' : ', no sidecar'}`,
+    )
+    return {
+      status: 'ok',
+      documentBytes,
+      sidecar,
+      hasSidecar,
+      sidecarHttpStatus: sidecarResponse.status,
+      etag,
+      httpStatus,
+    }
+  } catch (error) {
+    const { kind, status } = classifyAxiosError(error)
+    logForDebugging(
+      `[publishedCatalog] fetch failed: ${kind}${status !== undefined ? ` ${status}` : ''}`,
+    )
+    switch (kind) {
+      case 'timeout':
+        return { status: 'error', reason: 'timeout' }
+      case 'network':
+        return { status: 'error', reason: 'network' }
+      case 'auth':
+      case 'http':
+        return status === undefined
+          ? { status: 'error', reason: 'network' }
+          : { status: 'error', reason: 'http_status', httpStatus: status }
+      default:
+        return { status: 'error', reason: 'exception' }
+    }
+  }
+}
+
+/**
+ * Gold `_tn` @299171341 — verify published catalog RSA-SHA512 signature
+ * under `claude-code-model-catalog-v1\0`.
+ */
+export async function verifyPublishedCatalogSignature(opts: {
+  documentBytes: Uint8Array
+  sidecar: unknown
+  roots?: readonly { id: string; spkiBase64: string }[]
+  context?: string
+}): Promise<
+  | { ok: true; rootId: string }
+  | {
+      ok: false
+      reason:
+        | 'sidecar_invalid'
+        | 'unknown_key'
+        | 'key_unusable'
+        | 'bad_signature'
+    }
+> {
+  return verifyClientDataSignature({
+    documentBytes: opts.documentBytes,
+    sidecar: opts.sidecar,
+    roots: opts.roots ?? CLIENT_DATA_COMPILED_ROOTS,
+    context: opts.context ?? MODEL_CATALOG_SIGNING_CONTEXT,
+  })
+}
+
+export type PublishedCatalogLoadResult =
+  | {
+      ok: true
+      document: unknown
+      source: PublishedCatalogSource
+      rootId: string
+      etag?: string
+    }
+  | { ok: false; reason: string }
+
+/**
+ * Resolve, fetch, and signature-verify the published model catalog (#1295).
+ */
+export async function loadAndVerifyPublishedCatalog(opts?: {
+  env?: NodeJS.ProcessEnv
+  managedUrl?: string
+  managedPublicKeyPem?: string
+  ignoreEnvUrl?: boolean
+  ifNoneMatch?: string
+  timeoutMs?: number
+  signal?: AbortSignal
+}): Promise<PublishedCatalogLoadResult> {
+  const resolved = resolvePublishedCatalogSource(opts)
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason }
+  }
+  const { source } = resolved
+  const fetched = await fetchPublishedCatalog(source, {
+    etag: opts?.ifNoneMatch,
+  })
+  if (fetched.status === 'not_modified') {
+    return { ok: false, reason: 'not_modified' }
+  }
+  if (fetched.status !== 'ok') {
+    return { ok: false, reason: fetched.reason }
+  }
+  if (!fetched.hasSidecar || fetched.sidecar === undefined) {
+    return { ok: false, reason: 'missing_sidecar' }
+  }
+  if (source.trust.kind === 'untrusted') {
+    return { ok: false, reason: source.trust.reason }
+  }
+  const sig = await verifyPublishedCatalogSignature({
+    documentBytes: fetched.documentBytes,
+    sidecar: fetched.sidecar,
+    roots: source.trust.roots,
+  })
+  if (!sig.ok) {
+    return { ok: false, reason: sig.reason }
+  }
+  const parsed = safeParseJSON(
+    Buffer.from(fetched.documentBytes).toString('utf8'),
+  )
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, reason: 'invalid_json' }
+  }
+  return {
+    ok: true,
+    document: parsed,
+    source,
+    rootId: sig.rootId,
+    etag: fetched.etag,
+  }
 }

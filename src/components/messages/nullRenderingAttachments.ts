@@ -66,6 +66,8 @@ const NULL_RENDERING_TYPES = [
   'thinking_stripped',
   // densable advisor_stripped — compact KEEP / retry marker; UI null
   'advisor_stripped',
+  // densable tool_results_cut (#1422) — model/compact marker; UI null
+  'tool_results_cut',
 ] as const satisfies readonly Attachment['type'][]
 
 export type NullRenderingAttachmentType = (typeof NULL_RENDERING_TYPES)[number]

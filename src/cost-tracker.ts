@@ -42,6 +42,7 @@ import {
   getModelMaxOutputTokens,
 } from './utils/context.js'
 import { isFastModeEnabled } from './utils/fastMode.js'
+import { redactMcpServerNameForOtel } from './utils/mcpUsageAttribution.js'
 import { formatDuration, formatNumber } from './utils/format.js'
 import type { FpsMetrics } from './utils/fpsTracker.js'
 import { getCanonicalName } from './utils/model/model.js'
@@ -325,7 +326,9 @@ export function addToTotalSessionCost(
   const mcpAttrs =
     attribution?.activeMcpServer !== undefined
       ? {
-          'mcp_server.name': attribution.activeMcpServer,
+          'mcp_server.name': redactMcpServerNameForOtel(
+            attribution.activeMcpServer,
+          ),
           ...(attribution.activeMcpTool !== undefined
             ? { 'mcp_tool.name': attribution.activeMcpTool }
             : {}),

@@ -360,6 +360,13 @@ export function hasCompactSummaryTag(summary: string): boolean {
   )
 }
 
+/** v2.1.311 (#1279): SEA P9 — true when an unclosed <summary> tag starts a line. */
+export function hasUnclosedCompactSummaryTag(summary: string): boolean {
+  return /^[ \t]*<summary>/m.test(
+    summary.replace(/<analysis>[\s\S]*?<\/analysis>/, ''),
+  )
+}
+
 const VALID_SUMMARY_TOOL_NAME_RE = /^[A-Za-z0-9_.:-]{1,256}$/
 const UNREADABLE_SUMMARY_TOOL_NAME = 'unreadable-tools-used-before-summary'
 export const TOOLS_USED_BEFORE_SUMMARY_TAG = 'tools-used-before-summary'

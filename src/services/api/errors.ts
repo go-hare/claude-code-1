@@ -24,6 +24,7 @@ import {
   getAnthropicApiKeyWithSource,
   getClaudeAIOAuthTokens,
   getOauthAccountInfo,
+  getSubscriptionType,
   isClaudeAISubscriber,
 } from 'src/utils/auth.js'
 import {
@@ -35,7 +36,11 @@ import {
   isNonCustomOpusModel,
 } from 'src/utils/model/model.js'
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
-import { getAPIProvider } from 'src/utils/model/providers.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from 'src/utils/model/providers.js'
+import { shouldBypassProxy } from 'src/utils/proxy.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import {
   API_PDF_MAX_PAGES,
@@ -277,9 +282,25 @@ function isDirectPromptTooLongMessage(lower: string): boolean {
   )
 }
 
+/**
+ * densable 2.1.314 jOr — Bedrock "400 Input is too long." (or JSON {"message":"Input is too long."})
+ * without policy_blocked.
+ */
+export function isBedrockInputTooLongMessage(raw: string): boolean {
+  const trimmed = raw.trim().replace(/^400 /, '')
+  if (trimmed.startsWith('{')) {
+    return (
+      /"message":\s*"input is too long\.?"/i.test(trimmed) &&
+      !trimmed.includes('"policy_blocked"')
+    )
+  }
+  return /^input is too long\.?$/i.test(trimmed)
+}
+
 export function isPromptTooLongErrorMessage(raw: string): boolean {
   const lower = raw.toLowerCase()
   if (isDirectPromptTooLongMessage(lower)) return true
+  if (isBedrockInputTooLongMessage(raw)) return true
   if (PROMPT_TOO_LONG_EXCLUSIONS.some(ex => lower.includes(ex))) return false
   // densable z$r: "input length and `max_tokens` exceed context limit"
   if (
@@ -535,8 +556,11 @@ export function getImageTooLargeErrorMessage(): string {
 export function getRequestTooLargeErrorMessage(): string {
   return formatGenericRequestTooLargeMessage(getIsNonInteractiveSession())
 }
+export const OAUTH_SUBSCRIPTION_BILLING_ERROR_MESSAGE =
+  "Claude Code can't use your Claude subscription, usually because a payment is past due · Pay or renew at https://claude.ai/settings/billing (if you just paid, try again shortly), or use an Anthropic API key instead"
+
 export const OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE =
-  'Your account does not have access to Claude Code. Please run /login.'
+  'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access'
 
 export function getTokenRevokedErrorMessage(): string {
   return getIsNonInteractiveSession()
@@ -545,9 +569,11 @@ export function getTokenRevokedErrorMessage(): string {
 }
 
 export function getOauthOrgNotAllowedErrorMessage(): string {
-  return getIsNonInteractiveSession()
-    ? 'Your organization does not have access to Claude. Please login again or contact your administrator.'
-    : OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE
+  const subscriptionType = getSubscriptionType()
+  if (subscriptionType === 'pro' || subscriptionType === 'max') {
+    return OAUTH_SUBSCRIPTION_BILLING_ERROR_MESSAGE
+  }
+  return OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE
 }
 
 /**
@@ -1728,8 +1754,40 @@ function buildAssistantMessageFromError(
 
   // Connection errors (non-timeout) — use formatAPIError for detailed messages
   if (error instanceof APIConnectionError) {
+    const formatted = formatAPIError(error)
+    const code = extractConnectionErrorDetails(error)?.code
+    let hint = ''
+    if (
+      code !== undefined &&
+      formatted === `Connection dropped (${code})` &&
+      !isCCRMode() &&
+      getAPIProvider() === 'firstParty' &&
+      process.env.ANTHROPIC_UNIX_SOCKET === undefined
+    ) {
+      const proxySource = [
+        'https_proxy',
+        'HTTPS_PROXY',
+        'http_proxy',
+        'HTTP_PROXY',
+      ].find(key => Boolean(process.env[key]))
+      const baseUrl =
+        process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
+      const hasCustomGateway =
+        Boolean(process.env.ANTHROPIC_BASE_URL) &&
+        !isFirstPartyAnthropicBaseUrl()
+      const checkTargets = [
+        ...(proxySource && !shouldBypassProxy(baseUrl)
+          ? [`the proxy set in ${proxySource}`]
+          : []),
+        ...(hasCustomGateway ? ['the gateway set in ANTHROPIC_BASE_URL'] : []),
+      ]
+      hint =
+        checkTargets.length > 0
+          ? `. Check ${checkTargets.join(' and ')}, then try again.`
+          : '. A VPN, firewall, or security software can cause this. Check those or switch networks, then try again.'
+    }
     return createAssistantAPIErrorMessage({
-      content: `${API_ERROR_MESSAGE_PREFIX}: ${formatAPIError(error)}`,
+      content: `${API_ERROR_MESSAGE_PREFIX}: ${formatted}${hint}`,
       error: 'unknown',
     })
   }
@@ -1839,9 +1897,10 @@ export function classifyAPIError(error: unknown): string {
   // Prompt/content size errors
   if (
     error instanceof Error &&
-    error.message
+    (error.message
       .toLowerCase()
-      .includes(PROMPT_TOO_LONG_ERROR_MESSAGE.toLowerCase())
+      .includes(PROMPT_TOO_LONG_ERROR_MESSAGE.toLowerCase()) ||
+      isBedrockInputTooLongMessage(error.message))
   ) {
     return 'prompt_too_long'
   }

@@ -120,6 +120,7 @@ import {
 } from '../api/claude.js'
 import {
   getPromptTooLongTokenGap,
+  isMediaSizeErrorMessage,
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   startsWithApiErrorPrefix,
 } from '../api/errors.js'
@@ -133,11 +134,15 @@ import {
 import { groupMessagesByApiRound } from './grouping.js'
 import {
   collectToolNamesUsedBeforeCompact,
+  COMPACT_REPLY_INSTRUCTIONS_TRAILER,
   getCompactPrompt,
   appendKeptMessagesCompactNote,
   getCompactUserSummaryMessage,
   getPartialCompactPrompt,
+  hasCompactSummaryTag,
+  hasUnclosedCompactSummaryTag,
 } from './prompt.js'
+import { isLongContextCreditsRequiredMessage } from './reactiveCompact.js'
 
 export const POST_COMPACT_MAX_FILES_TO_RESTORE = 5
 export const POST_COMPACT_TOKEN_BUDGET = 50_000
@@ -546,6 +551,90 @@ export function truncateHeadForPTLRetry(
   return sliced
 }
 
+const COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER =
+  '[Old tool result content cleared]'
+const COMPACT_LEAVE_OUT_GAP_MULTIPLIER = 1.1
+const COMPACT_LEAVE_OUT_FRACTION = 0.5
+
+/**
+ * Gold `NIn` / `EFt` (#1200): leave out the largest `tool_result` payloads
+ * from a summary request when there are too few API-round groups (< 3) for
+ * head truncation to make progress.
+ */
+export function leaveOutToolResultsForPTLRetry(
+  messages: Message[],
+  tokenGap?: number,
+  leaveAll = false,
+): Message[] | null {
+  type Candidate = { id: string; tokens: number }
+  const candidates: Candidate[] = []
+  for (const msg of messages) {
+    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) continue
+    for (const block of msg.message.content) {
+      if (
+        typeof block !== 'object' ||
+        block === null ||
+        block.type !== 'tool_result'
+      ) {
+        continue
+      }
+      if (block.content === COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER) continue
+      const tokens = roughTokenCountEstimationForMessages([msg])
+      const rawLen =
+        typeof block.content === 'string'
+          ? block.content.length
+          : JSON.stringify(block.content ?? '').length
+      const est = Math.max(1, Math.min(tokens, Math.ceil(rawLen / 4)))
+      candidates.push({ id: block.tool_use_id, tokens: est })
+    }
+  }
+  if (candidates.length === 0) return null
+  const totalTokens = candidates.reduce((acc, c) => acc + c.tokens, 0)
+  const targetTokens = leaveAll
+    ? Infinity
+    : tokenGap !== undefined
+      ? tokenGap * COMPACT_LEAVE_OUT_GAP_MULTIPLIER
+      : totalTokens * COMPACT_LEAVE_OUT_FRACTION
+
+  const sorted = [...candidates].sort((a, b) => b.tokens - a.tokens)
+  const toClear = new Set<string>()
+  let clearedTokens = 0
+  for (const c of sorted) {
+    if (clearedTokens >= targetTokens) break
+    toClear.add(c.id)
+    clearedTokens += c.tokens
+  }
+  if (toClear.size === 0) return null
+
+  let anyChanged = false
+  const next = messages.map(msg => {
+    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) return msg
+    let msgChanged = false
+    const nextContent = msg.message.content.map(block => {
+      if (
+        typeof block !== 'object' ||
+        block === null ||
+        block.type !== 'tool_result' ||
+        !toClear.has(block.tool_use_id)
+      ) {
+        return block
+      }
+      if (block.content === COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER) {
+        return block
+      }
+      msgChanged = true
+      return {
+        ...block,
+        content: COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER,
+      }
+    })
+    if (!msgChanged) return msg
+    anyChanged = true
+    return { ...msg, message: { ...msg.message, content: nextContent } }
+  })
+  return anyChanged ? next : null
+}
+
 export const ERROR_MESSAGE_PROMPT_TOO_LONG =
   'Conversation too long to summarize. Try /compact to manually clear conversation history, or start a new session with /clear.'
 export const ERROR_MESSAGE_USER_ABORT = 'API Error: Request was aborted.'
@@ -848,7 +937,7 @@ export async function compactConversation(
     )
 
     const compactPrompt = getCompactPrompt(customInstructions)
-    const summaryRequest = createUserMessage({
+    let summaryRequest = createUserMessage({
       content: compactPrompt,
     })
 
@@ -857,6 +946,7 @@ export async function compactConversation(
     let summaryResponse: AssistantMessage
     let summary: string | null
     let ptlAttempts = 0
+    let summaryBlockRetried = false
     for (;;) {
       const streamResult = await streamCompactSummary({
         messages: messagesToSummarize,
@@ -869,45 +959,102 @@ export async function compactConversation(
         // Once head truncation triggers (ptlAttempts > 0), the prompt-cache
         // prefix is already broken — enable stripNonEssential so retry skips
         // the doomed cache-sharing fork and strips thinking/tool payloads.
-        stripNonEssential: stripNonEssential || ptlAttempts > 0,
+        stripNonEssential:
+          stripNonEssential || ptlAttempts > 0 || summaryBlockRetried,
       })
       summaryResponse = streamResult.response
       summary = getAssistantMessageText(summaryResponse)
-      if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
-
-      // CC-1180: compact request itself hit prompt-too-long. Truncate the
-      // oldest API-round groups and retry rather than leaving the user stuck.
-      ptlAttempts++
-      const truncated =
-        ptlAttempts <= MAX_PTL_RETRIES
-          ? truncateHeadForPTLRetry(
+      const isPtlOrCredits =
+        summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE) ||
+        isLongContextCreditsRequiredMessage(summaryResponse)
+      // v2.1.310 (#1200): SEA Xft — if request is refused for size even after
+      // media stripping (e.g. dense base64/SVG text), fall through to head truncation.
+      const isDenseSizeRefusal =
+        streamResult.mediaStripped && isMediaSizeErrorMessage(summaryResponse)
+      if (isPtlOrCredits || isDenseSizeRefusal) {
+        // CC-1180 + v2.1.325 (#1200): SEA Xft/NIn — when < 3 groups, try
+        // leaving out largest tool results first; otherwise truncate head.
+        ptlAttempts++
+        const canLeaveOut =
+          ptlAttempts <= MAX_PTL_RETRIES &&
+          groupMessagesByApiRound(messagesToSummarize).length < 3
+        const leftOut = canLeaveOut
+          ? leaveOutToolResultsForPTLRetry(
               messagesToSummarize,
-              summaryResponse,
-              streamResult.mediaStripped,
+              getPromptTooLongTokenGap(summaryResponse),
+              ptlAttempts >= MAX_PTL_RETRIES,
             )
           : null
-      if (!truncated) {
-        logEvent('tengu_compact_failed', {
-          reason:
-            'prompt_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          preCompactTokenCount,
-          promptCacheSharingEnabled,
-          ptlAttempts,
+        const truncated =
+          leftOut ??
+          (ptlAttempts <= MAX_PTL_RETRIES
+            ? truncateHeadForPTLRetry(
+                messagesToSummarize,
+                summaryResponse,
+                streamResult.mediaStripped,
+              )
+            : null)
+        if (!truncated) {
+          logEvent('tengu_compact_failed', {
+            reason:
+              'prompt_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            preCompactTokenCount,
+            promptCacheSharingEnabled,
+            ptlAttempts,
+          })
+          throw new Error(ERROR_MESSAGE_PROMPT_TOO_LONG)
+        }
+        logEvent('tengu_compact_ptl_retry', {
+          attempt: ptlAttempts,
+          droppedMessages: messagesToSummarize.length - truncated.length,
+          remainingMessages: truncated.length,
         })
-        throw new Error(ERROR_MESSAGE_PROMPT_TOO_LONG)
+        messagesToSummarize = truncated
+        // The forked-agent path reads from cacheSafeParams.forkContextMessages,
+        // not the messages param — thread the truncated set through both paths.
+        retryCacheSafeParams = {
+          ...retryCacheSafeParams,
+          forkContextMessages: truncated,
+        }
+        continue
       }
-      logEvent('tengu_compact_ptl_retry', {
-        attempt: ptlAttempts,
-        droppedMessages: messagesToSummarize.length - truncated.length,
-        remainingMessages: truncated.length,
-      })
-      messagesToSummarize = truncated
-      // The forked-agent path reads from cacheSafeParams.forkContextMessages,
-      // not the messages param — thread the truncated set through both paths.
-      retryCacheSafeParams = {
-        ...retryCacheSafeParams,
-        forkContextMessages: truncated,
+
+      // v2.1.311 (#1279): when the reply has no <summary> block, ask once more
+      // with COMPACT_REPLY_INSTRUCTIONS_TRAILER (SEA RIn) before giving up.
+      if (
+        summary &&
+        !startsWithApiErrorPrefix(summary) &&
+        !hasCompactSummaryTag(summary) &&
+        !hasUnclosedCompactSummaryTag(summary)
+      ) {
+        if (
+          !summaryBlockRetried &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_dapper_fountain', true)
+        ) {
+          summaryBlockRetried = true
+          summaryRequest = createUserMessage({
+            content: compactPrompt + COMPACT_REPLY_INSTRUCTIONS_TRAILER,
+          })
+          logForDebugging(
+            'Compact: the reply has no <summary> block, asking for the summary once more',
+            { level: 'info' },
+          )
+          continue
+        }
+        if (summaryBlockRetried) {
+          logEvent('tengu_compact_failed', {
+            reason:
+              'no_summary_block' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            preCompactTokenCount,
+            promptCacheSharingEnabled,
+          })
+          throw new Error(
+            "Failed to generate conversation summary - the model's reply has no <summary> block",
+          )
+        }
       }
+
+      break
     }
 
     if (!summary) {

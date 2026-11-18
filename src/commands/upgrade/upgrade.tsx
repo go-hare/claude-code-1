@@ -3,7 +3,7 @@ import type { LocalJSXCommandContext } from '../../commands.js';
 import { getOauthProfileFromOauthToken } from '../../services/oauth/getOauthProfile.js';
 import { isUsageCreditsHintEnabled } from '../../services/rateLimitMessages.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { getClaudeAIOAuthTokens, isClaudeAISubscriber } from '../../utils/auth.js';
+import { getClaudeAIOAuthTokens, getOauthAccountInfo, isClaudeAISubscriber } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';
 import { logError } from '../../utils/log.js';
 import { Login } from '../login/login.js';
@@ -43,6 +43,24 @@ export async function call(
         );
         return null;
       }
+    }
+
+    const billingType = getOauthAccountInfo()?.billingType;
+    if (
+      isClaudeAISubscriber() &&
+      (billingType === 'apple_subscription' || billingType === 'google_play_subscription')
+    ) {
+      const usageCreditsCommand = isUsageCreditsHintEnabled() ? '/usage-credits' : undefined;
+      const baseMessage =
+        billingType === 'apple_subscription'
+          ? 'Your plan is billed through the App Store. To change it, open Claude for iOS and go to Settings → Billing. After you change it, run /login here so the new plan takes effect.'
+          : 'Your plan is billed through Google Play. To change it, open Claude for Android and go to Settings. After you change it, run /login here so the new plan takes effect.';
+      setTimeout(
+        onDone,
+        0,
+        usageCreditsCommand ? `${baseMessage} For additional usage now, run ${usageCreditsCommand}.` : baseMessage,
+      );
+      return null;
     }
 
     await openBrowser(url);

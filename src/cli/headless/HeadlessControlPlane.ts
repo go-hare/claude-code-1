@@ -953,6 +953,18 @@ export class HeadlessControlPlane {
       )
       .then(async tokens => {
         await installOAuthTokens(tokens)
+        // Official 2.1.325 `Gm` (#1317): refresh organization policy limits
+        // after SDK/VS Code `claude_authenticate` login (remote managed
+        // settings cache is product-cut per settings.ts:186).
+        const { refreshPolicyLimits } = await import(
+          'src/services/policyLimits/index.js'
+        )
+        void refreshPolicyLimits().catch(err =>
+          logForDebugging(
+            `claude_authenticate: the policy refresh threw (${errorMessage(err)})`,
+            { level: 'error' },
+          ),
+        )
         const connectorMounted = opts.headlessMcpIdentityBoundary.refresh()
         if (connectorMounted) {
           await Promise.race([

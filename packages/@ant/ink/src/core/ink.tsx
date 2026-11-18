@@ -7,6 +7,7 @@ import { ConcurrentRoot } from 'react-reconciler/constants.js';
 import { onExit } from 'signal-exit';
 import Yoga, { getYogaCounters } from './yoga-layout/index.js';
 import { TerminalImages } from './terminalImages.js';
+import { isTmuxPaneFresh, Jk } from './terminalCapabilities.js';
 import { format } from 'util';
 import { colorize } from './colorize.js';
 import AccessibilityContext from '../components/AccessibilityContext.js';
@@ -1963,13 +1964,31 @@ export default class Ink {
     if (hasDiff) {
       this.maybeProactiveAtlasReset(optimized);
     }
-    // Official 2.1.305 (#1054): emit iTerm2 inline images (OSC 1337) for placeholder cells.
-    const itermSeq = this.terminalImages.placeIterm(frame.screen, prevFrame.screen, (col, row) => {
-      if (col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows) {
-        return undefined;
-      }
-      return `\x1b[${row + 1};${col + 1}H`;
-    });
+    // Official 2.1.305 (#1054) + 2.1.310 (#1206): emit iTerm2 inline images (OSC 1337)
+    // with tmux DCS passthrough + pane-relative placement when inside tmux.
+    const tmuxHost = Jk();
+    const tmuxPane = tmuxHost.tmuxPane;
+    const isTmux = Boolean(process.env.TMUX);
+    this.terminalImages.isTmuxPassthrough = Boolean(tmuxPane && tmuxPane.passthrough !== 'off');
+    const allowDraw = isTmuxPaneFresh(isTmux, tmuxHost.tmuxPaneAnsweredAt, performance.now());
+    const tmuxMoveTo = tmuxPane
+      ? (col: number, row: number) =>
+          col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows
+            ? undefined
+            : { row: tmuxPane.top + row + 1, column: tmuxPane.left + col + 1 }
+      : undefined;
+    const itermSeq = this.terminalImages.placeIterm(
+      frame.screen,
+      prevFrame.screen,
+      (col, row) => {
+        if (col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows) {
+          return undefined;
+        }
+        return `\x1b[${row + 1};${col + 1}H`;
+      },
+      tmuxMoveTo,
+      allowDraw,
+    );
     if (itermSeq !== '') {
       optimized.push({ type: 'stdout', content: itermSeq });
     }

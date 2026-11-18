@@ -288,6 +288,8 @@ export const CANCEL_MESSAGE =
   "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed."
 export const REJECT_MESSAGE =
   "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+/** v2.1.314 (#1399): SEA fbn — stopped-while-running correction for remote-cancel */
+export const STOPPED_WHILE_RUNNING_REJECT_MESSAGE = `${REJECT_MESSAGE} Correction to the text above: this call was stopped while running, not refused before it ran. It may have run in part or in full, and its changes may have been written. No permission prompt was involved. Work it started elsewhere (a remote command, a background process) may still be running, so check before starting the same work again. The instruction to stop and wait still stands.`
 export const REJECT_MESSAGE_WITH_REASON_PREFIX =
   "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\n"
 export const SUBAGENT_REJECT_MESSAGE =
@@ -602,6 +604,9 @@ export const SYNTHETIC_MESSAGES = new Set([
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   CANCEL_MESSAGE,
   REJECT_MESSAGE,
+  REJECT_MESSAGE + MEMORY_CORRECTION_HINT,
+  STOPPED_WHILE_RUNNING_REJECT_MESSAGE,
+  STOPPED_WHILE_RUNNING_REJECT_MESSAGE + MEMORY_CORRECTION_HINT,
   NO_RESPONSE_REQUESTED,
 ])
 
@@ -7019,14 +7024,34 @@ export function createSystemMessage(
   }
 }
 
+/**
+ * Gold `Mtn` (#1426): lead-in text for `permission_retry` system messages.
+ */
+export function formatPermissionRetryPrefix(
+  heardAtNextPrompt?: boolean,
+): string {
+  return heardAtNextPrompt
+    ? 'At your next prompt, Claude will be told it may retry'
+    : 'Told Claude it may retry'
+}
+
+/**
+ * Gold `Dtn` (#1426): trailing explanation for `permission_retry` system messages.
+ */
+export function formatPermissionRetrySuffix(commandCount: number): string {
+  return `Auto mode checks ${commandCount === 1 ? 'it' : 'them'} again; this adds no rule.`
+}
+
 export function createPermissionRetryMessage(
   commands: string[],
+  heardAtNextPrompt = false,
 ): SystemPermissionRetryMessage {
   return {
     type: 'system',
     subtype: 'permission_retry',
-    content: `Allowed ${commands.join(', ')}`,
+    content: `${formatPermissionRetryPrefix(heardAtNextPrompt)} ${commands.join(', ')}. ${formatPermissionRetrySuffix(commands.length)}`,
     commands,
+    heardAtNextPrompt,
     level: 'info',
     isMeta: false,
     timestamp: new Date().toISOString(),

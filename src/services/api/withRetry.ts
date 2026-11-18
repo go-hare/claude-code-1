@@ -17,6 +17,7 @@ import { createSystemAPIErrorMessage } from 'src/utils/messages.js'
 import {
   getAPIProvider,
   getAPIProviderForStatsig,
+  isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getDensableCatalogModel } from 'src/utils/model/modelCatalogCapabilities.js'
 import {
@@ -1430,6 +1431,24 @@ export function shouldRetry(error: APIError): boolean {
   if (
     isNonRetryableCreditsRequired(error) ||
     isSpendLimitOrOutOfCreditsError(error)
+  ) {
+    return false
+  }
+
+  // densable 2.1.311 vns: respect explicit x-should-retry: false on 429, 529,
+  // or first-party 503 (unless overage-disabled-reason is fetch_error) even
+  // when persistent retry / CLAUDE_CODE_RETRY_WATCHDOG is enabled.
+  if (
+    isTransientCapacityError(error) &&
+    error.headers?.get('x-should-retry') === 'false' &&
+    (error.status === 429 ||
+      error.status === 529 ||
+      (error.status === 503 &&
+        getAPIProvider() === 'firstParty' &&
+        isFirstPartyAnthropicBaseUrl())) &&
+    error.headers?.get(
+      'anthropic-ratelimit-unified-overage-disabled-reason',
+    ) !== 'fetch_error'
   ) {
     return false
   }

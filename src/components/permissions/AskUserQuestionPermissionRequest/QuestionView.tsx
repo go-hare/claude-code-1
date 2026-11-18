@@ -12,6 +12,7 @@ import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
+import { updateLastInteractionTime } from '../../../bootstrap/state.js';
 import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
 import { FilePathLink } from '../../FilePathLink.js';
@@ -53,6 +54,7 @@ type Props = {
     sourcePath?: string,
   ) => void;
   onRemoveImage?: (id: number) => void;
+  onExternalEditorClose?: () => void;
 };
 
 export function QuestionView({
@@ -79,6 +81,7 @@ export function QuestionView({
   onImagePaste,
   pastedContents,
   onRemoveImage,
+  onExternalEditorClose,
 }: Props): React.ReactNode {
   const isInPlanMode = useAppState(s => s.toolPermissionContext.mode) === 'plan';
   const isScreenReader = isScreenReaderModeEnabled();
@@ -166,16 +169,21 @@ export function QuestionView({
 
   const handleOpenEditor = useCallback(
     async (currentValue: string, setValue: (value: string) => void) => {
-      const result = await editPromptInEditor(currentValue);
+      try {
+        const result = editPromptInEditor(currentValue);
 
-      if (result.content !== null && result.content !== currentValue) {
-        // Update the Select's internal state for immediate UI update
-        setValue(result.content);
-        // Also update the question state for persistence
-        onUpdateQuestionState(questionText, { textInputValue: result.content }, question.multiSelect ?? false);
+        if (result.content !== null && result.content !== currentValue) {
+          // Update the Select's internal state for immediate UI update
+          setValue(result.content);
+          // Also update the question state for persistence
+          onUpdateQuestionState(questionText, { textInputValue: result.content }, question.multiSelect ?? false);
+        }
+      } finally {
+        updateLastInteractionTime(true);
+        onExternalEditorClose?.();
       }
     },
-    [questionText, onUpdateQuestionState, question.multiSelect],
+    [questionText, onUpdateQuestionState, question.multiSelect, onExternalEditorClose],
   );
 
   const otherOption: OptionWithDescription<string> = {
@@ -184,6 +192,7 @@ export function QuestionView({
     label: 'Other',
     placeholder: question.multiSelect ? 'Type something' : 'Type something.',
     initialValue: questionState?.textInputValue ?? '',
+    takesPasteFromOtherRows: true,
     onChange: (value: string) => {
       latestOtherInputRef.current = { question: questionText, value };
       onUpdateQuestionState(questionText, { textInputValue: value }, question.multiSelect ?? false);
@@ -224,6 +233,7 @@ export function QuestionView({
         onTabPrev={onTabPrev}
         onTabNext={onTabNext}
         onRespondToClaude={onRespondToClaude}
+        onExternalEditorClose={onExternalEditorClose}
       />
     );
   }

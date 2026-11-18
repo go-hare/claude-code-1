@@ -1,11 +1,18 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js';
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js';
+import { checkHasTrustDialogAccepted } from '../../utils/config.js';
+import { getCwd } from '../../utils/cwd.js';
 import {
   checkOverageGate,
   isUltrareviewOverageConfirmed,
   launchRemoteReview,
   markUltrareviewOverageConfirmed,
 } from './reviewRemote.js';
+import { shouldRunUltrareviewTrustCheck } from './ultrareviewHeadless.js';
 import { UltrareviewOverageDialog } from './UltrareviewOverageDialog.js';
 
 function contentBlocksToString(blocks: ContentBlockParam[]): string {
@@ -42,7 +49,29 @@ async function launchAndDone(
   }
 }
 
+export function checkInteractiveUltrareviewWorkspaceTrust(opts?: {
+  isTrusted?: () => boolean;
+  shouldCheck?: () => boolean;
+  cwd?: string;
+}): string | null {
+  const isTrusted = opts?.isTrusted ?? checkHasTrustDialogAccepted;
+  const shouldCheck = opts?.shouldCheck ?? shouldRunUltrareviewTrustCheck;
+  if (!isTrusted() && shouldCheck()) {
+    logEvent('cli_ultrareview_workspace_trust', {
+      trust_source: 'cannot_ask_in_session' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    return `Ultrareview did not start: ${opts?.cwd ?? getCwd()} is not trusted, and this session started without asking whether you trust it. Run /ultrareview in a \`claude\` session where you have accepted the workspace trust dialog for that folder.`;
+  }
+  return null;
+}
+
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
+  const trustError = checkInteractiveUltrareviewWorkspaceTrust();
+  if (trustError !== null) {
+    onDone(trustError, { display: 'system' });
+    return null;
+  }
+
   // densable isUltrareviewOverageConfirmed from AppState (reset on /clear)
   const gate = await checkOverageGate({
     overageConfirmed: isUltrareviewOverageConfirmed(context),

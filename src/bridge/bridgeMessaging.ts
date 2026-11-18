@@ -113,6 +113,16 @@ export function isEligibleBridgeMessage(m: Message): boolean {
   if ((m.type === 'user' || m.type === 'assistant') && m.isVirtual) {
     return false
   }
+  const hintMeta = m as {
+    displayTextIsHintOnly?: boolean
+    localCommandOutput?: string
+  }
+  if (
+    hintMeta.displayTextIsHintOnly === true ||
+    hintMeta.localCommandOutput === 'terminal-hint'
+  ) {
+    return false
+  }
   if (m.type === 'attachment') {
     const attachment = m.attachment as
       | {
@@ -339,6 +349,80 @@ export function handleIngressMessage(
 
 // ─── Server-initiated control requests ───────────────────────────────────────
 
+export type SetModelVerdict =
+  | { ok: true; model?: string; notices?: string[] }
+  | { ok: false; error: string; code?: string; model?: string }
+
+const KNOWN_SET_MODEL_ERROR_CODES = new Set([
+  'internal_error',
+  'invalid_model',
+  'model_unavailable',
+  'not_allowed',
+])
+
+function isPromiseLike<T>(v: unknown): v is PromiseLike<T> {
+  return (
+    (typeof v === 'object' || typeof v === 'function') &&
+    v !== null &&
+    'then' in v &&
+    typeof (v as { then?: unknown }).then === 'function'
+  )
+}
+
+export async function resolveAsyncSetModelVerdict(opts: {
+  verdict: PromiseLike<SetModelVerdict | void>
+  respond: (
+    payload:
+      | { subtype: 'success'; response?: { model: string } }
+      | {
+          subtype: 'error'
+          error: string
+          error_code?: string
+          model?: string
+        },
+  ) => void
+  inform: (notices: string[]) => void
+}): Promise<void> {
+  let resolved: SetModelVerdict
+  try {
+    resolved = (await opts.verdict) ?? { ok: true }
+  } catch (err) {
+    logForDebugging(
+      `[bridge:repl] set_model verdict rejected: ${errorMessage(err)}`,
+      { level: 'error' },
+    )
+    opts.respond({
+      subtype: 'error',
+      error: 'set_model failed',
+      error_code: 'internal_error',
+    })
+    return
+  }
+  const model = typeof resolved.model === 'string' ? resolved.model : undefined
+  if (resolved.ok) {
+    if (Array.isArray(resolved.notices)) {
+      opts.inform(resolved.notices.filter(n => typeof n === 'string'))
+    }
+    opts.respond(
+      model === undefined
+        ? { subtype: 'success' }
+        : { subtype: 'success', response: { model } },
+    )
+    return
+  }
+  const code =
+    typeof resolved.code === 'string' &&
+    KNOWN_SET_MODEL_ERROR_CODES.has(resolved.code)
+      ? resolved.code
+      : undefined
+  opts.respond({
+    subtype: 'error',
+    error: resolved.error,
+    ...(code !== undefined ? { error_code: code } : {}),
+    ...(model !== undefined ? { model } : {}),
+  })
+}
+
 export type ServerControlRequestHandlers = {
   transport: ReplBridgeTransport | null
   sessionId: string
@@ -357,16 +441,11 @@ export type ServerControlRequestHandlers = {
    * stopTask(..., source:"user"). Async; UHr writes the control_response.
    */
   onStopTask?: (taskId: string) => Promise<unknown>
-  /**
-   * densable 2.1.238 Zkd `p?.(e.request.model??void 0)`.
-   * Return `{ok:false}` to emit an error control_response; void / `{ok:true}`
-   * is success (`if (M && !M.ok)`).
-   */
   onSetModel?: (
     model: string | undefined,
     // Load-bearing void: narrowing to `undefined` rejects `() => {}` implementors.
     // biome-ignore lint/suspicious/noConfusingVoidType: see above
-  ) => void | { ok: true } | { ok: false; error: string }
+  ) => void | SetModelVerdict | Promise<SetModelVerdict | void>
   onSetMaxThinkingTokens?: (maxTokens: number | null) => void
   onSetPermissionMode?: (
     mode: PermissionMode,
@@ -669,9 +748,61 @@ export function handleServerControlRequest(
         }
         break
       }
+      const onlyIfCurrent = req.only_if_model_is_current
+      if (onlyIfCurrent !== undefined && onlyIfCurrent !== false) {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'only_if_model_is_current_unserved' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error:
+              'set_model: Remote Control does not implement only_if_model_is_current. The request changed nothing.',
+          },
+        }
+        break
+      }
       const verdict = onSetModel?.(
         typeof requested === 'string' ? requested : undefined,
       )
+      if (isPromiseLike<SetModelVerdict | void>(verdict)) {
+        void resolveAsyncSetModelVerdict({
+          verdict,
+          respond: payload => {
+            const event = {
+              type: 'control_response' as const,
+              response: {
+                ...payload,
+                request_id: request.request_id,
+              },
+              session_id: sessionId,
+            } as unknown as Parameters<ReplBridgeTransport['write']>[0]
+            void transport.write(event)
+            logForDebugging(
+              `[bridge:repl] Sent control_response for set_model request_id=${request.request_id} result=${payload.subtype}`,
+            )
+          },
+          inform: notices => {
+            for (const content of notices) {
+              const notice = {
+                type: 'system',
+                subtype: 'informational',
+                content,
+                level: 'notice',
+                uuid: randomUUID(),
+                session_id: sessionId,
+              } as unknown as Parameters<ReplBridgeTransport['write']>[0]
+              void transport.write(notice)
+            }
+          },
+        })
+        return
+      }
       if (verdict && !verdict.ok) {
         response = {
           type: 'control_response',

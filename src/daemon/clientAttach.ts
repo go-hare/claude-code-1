@@ -14,7 +14,7 @@
 
 import { connect, type Socket } from 'net'
 import { randomUUID } from 'crypto'
-import { Yot } from '@anthropic/ink'
+import { supportsHyperlinks, Yot } from '@anthropic/ink'
 import { getControlSocketPath } from './controlSocket.js'
 import { createDecModeTracker } from './bgWorker.js'
 import { jsonStringify, jsonParse } from '../utils/slowOperations.js'
@@ -711,6 +711,7 @@ function getTerminalCaps(): Record<string, unknown> {
     ssh: !!process.env.SSH_CONNECTION || !!process.env.SSH_CLIENT,
     wtSession: !!process.env.WT_SESSION,
     isVscodeTerm: process.env.TERM_PROGRAM === 'vscode',
+    hyperlinks: supportsHyperlinks(),
     browser: process.env.BROWSER ?? null,
     editor: process.env.VISUAL?.trim() || process.env.EDITOR?.trim() || null,
   }

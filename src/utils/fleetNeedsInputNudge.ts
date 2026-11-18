@@ -15,10 +15,19 @@
 import { feature } from 'bun:bundle'
 import { getSessionId } from '../bootstrap/state.js'
 import {
+  CLASSIFIER_HAND_OFF_ADDENDUM,
+  classifyWaitingOnYouContext,
   EMPTY_PROMPT_NEEDS,
+  isHandedOverForUserMergeOrReview,
   listAllJobs,
   type BgJobState,
 } from '../daemon/jobState.js'
+
+export {
+  CLASSIFIER_HAND_OFF_ADDENDUM,
+  classifyWaitingOnYouContext,
+  isHandedOverForUserMergeOrReview,
+}
 import { logEvent } from '../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getIsRemoteMode } from '../bootstrap/state.js'
@@ -80,6 +89,9 @@ function hasOpenPrChild(job: BgJobState): boolean {
  */
 export function jobNeedsInput(job: BgJobState): boolean {
   if (isTerminalFleetJob(job)) return false
+  if (job.state === 'done' && isHandedOverForUserMergeOrReview(job.detail)) {
+    return false
+  }
   return job.tempo === 'blocked' && job.needs !== EMPTY_PROMPT_NEEDS
 }
 

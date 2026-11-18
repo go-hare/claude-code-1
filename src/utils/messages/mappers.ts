@@ -218,6 +218,14 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
         // not leak to the RC web UI.
         if (
           message.subtype === 'local_command' &&
+          (
+            message as {
+              displayTextIsHintOnly?: boolean
+              localCommandOutput?: string
+            }
+          ).displayTextIsHintOnly !== true &&
+          (message as { localCommandOutput?: string }).localCommandOutput !==
+            'terminal-hint' &&
           ((message.content as string).includes(
             `<${LOCAL_COMMAND_STDOUT_TAG}>`,
           ) ||

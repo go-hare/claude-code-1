@@ -17,6 +17,8 @@ export type TipContext = {
   session: TipSession
   /** densable `e.storageV5` — `Xt.getMarketplacePluginTips(e.storageV5)`. */
   storageV5?: unknown
+  /** Gold `explanationRequestCount` (#1224): count of explanation requests in this session. */
+  explanationRequestCount?: number
 }
 
 /** 内置或用户自定义的 Spinner 提示条目。 */

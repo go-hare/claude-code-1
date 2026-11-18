@@ -158,6 +158,6 @@ describe('getRateLimitErrorMessage densable 2.1.221 individual spend', () => {
         }),
         'claude-opus-4-6',
       ),
-    ).toBe("You've hit your session limit")
+    ).toBe("You've hit your 5-hour limit")
   })
 })

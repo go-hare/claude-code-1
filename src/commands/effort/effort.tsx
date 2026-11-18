@@ -8,6 +8,8 @@ import {
 } from '../../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
+import { CacheMissConfirmDialog } from '../model/model.js';
+import { getTotalOutputTokens } from '../../cost-tracker.js';
 import {
   type EffortLevel,
   type EffortValue,
@@ -27,6 +29,7 @@ import {
   explicitSessionEffort,
   pdSessionEffort,
   resolveAppliedEffort,
+  shouldWarnEffortCacheMiss,
   teSettingsEffortTable,
   toPersistableEffort,
   unpinAllEffortLaunchPins,
@@ -435,10 +438,36 @@ export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, arg
 function ExecuteEffortWithModel({ args, onDone }: { args: string; onDone: (result: string) => void }): React.ReactNode {
   const model = useMainLoopModel();
   const currentEffort = useAppState(s => pdSessionEffort(s, model));
+  const permissionMode = useAppState(s => s.toolPermissionContext.mode);
+  const [confirmed, setConfirmed] = React.useState(false);
   const result = React.useMemo(
     () => executeEffort(args, model, undefined, true, currentEffort),
     [args, model, currentEffort],
   );
+  const targetEffort = result.effortUpdate?.value;
+  const needsCacheConfirm =
+    !confirmed &&
+    result.effortUpdate !== undefined &&
+    permissionMode === 'plan' &&
+    shouldWarnEffortCacheMiss({
+      target: targetEffort,
+      current: currentEffort,
+      mainLoopModel: model,
+      permissionMode,
+      totalOutputTokens: getTotalOutputTokens(),
+      promptCacheMayBeWarm: getTotalOutputTokens() > 0,
+    });
+  if (needsCacheConfirm) {
+    const targetLabel = targetEffort !== undefined ? String(targetEffort) : 'auto';
+    return (
+      <CacheMissConfirmDialog
+        kind="effort"
+        targetLabel={targetLabel}
+        onConfirm={() => setConfirmed(true)}
+        onCancel={() => onDone('Effort level unchanged')}
+      />
+    );
+  }
   return <ApplyEffortAndClose result={result} onDone={onDone} />;
 }
 

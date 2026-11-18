@@ -35,6 +35,7 @@
 import type { Dirent } from 'fs'
 import {
   copyFile,
+  lstat,
   readdir,
   readFile,
   readlink,
@@ -170,8 +171,10 @@ import {
   PluginHooksSchema,
   PluginIdSchema,
   PluginManifestSchema,
+  PluginMonitorsArraySchema,
   type MarketplaceSource,
   type PluginMarketplaceEntry,
+  type PluginMonitorConfig,
   type PluginSource,
 } from './schemas.js'
 import { installFromArchive, isSameOrigin } from './pluginArchive.js'
@@ -2086,6 +2089,17 @@ export async function createPluginFromPath(
     plugin.hooksConfig = mergedHooks
   }
 
+  // Step 5b: Load plugin monitors (monitors/monitors.json or manifest.monitors)
+  const pluginMonitors = await loadPluginMonitors(
+    pluginPath,
+    manifest,
+    source,
+    errors,
+  )
+  if (pluginMonitors) {
+    plugin.monitors = pluginMonitors
+  }
+
   // Step 6: Load plugin settings
   // Settings can come from settings.json in the plugin directory or from manifest.settings
   // Only allowlisted keys are kept (currently: agent)
@@ -2095,6 +2109,68 @@ export async function createPluginFromPath(
   }
 
   return { plugin, errors, warnings }
+}
+
+/**
+ * Official Lli (#1197) — load plugin monitors from `manifest.experimental?.monitors`,
+ * `manifest.monitors` (inline array or relative path), or default `monitors/monitors.json`.
+ */
+export async function loadPluginMonitors(
+  pluginPath: string,
+  manifest: PluginManifest,
+  source: string,
+  errors: PluginError[],
+): Promise<PluginMonitorConfig[] | undefined> {
+  const spec = manifest.experimental?.monitors ?? manifest.monitors
+  let monitorsPath: string | undefined
+
+  if (spec === undefined) {
+    const defaultPath = join(pluginPath, 'monitors', 'monitors.json')
+    if (await pathExists(defaultPath)) {
+      monitorsPath = defaultPath
+    }
+  } else if (typeof spec === 'string') {
+    const base = resolve(pluginPath)
+    const full = resolve(base, spec)
+    const rel = relative(base, full)
+    if (rel === '..' || rel.startsWith(`..${sep}`) || resolve(rel) === rel) {
+      errors.push({
+        type: 'path-traversal',
+        source,
+        plugin: manifest.name,
+        path: spec,
+        component: 'monitors',
+      })
+      return undefined
+    }
+    monitorsPath = full
+  } else {
+    return spec
+  }
+
+  if (monitorsPath === undefined) {
+    return undefined
+  }
+
+  try {
+    const raw = await readFile(monitorsPath, { encoding: 'utf-8' })
+    return PluginMonitorsArraySchema().parse(jsonParse(raw))
+  } catch (err) {
+    const reason = errorMessage(err)
+    logForDebugging(
+      `Failed to load monitors for ${manifest.name} from ${monitorsPath}: ${reason}`,
+      { level: 'error' },
+    )
+    errors.push({
+      type: 'component-load-failed',
+      source,
+      plugin: manifest.name,
+      component: 'monitors',
+      path: monitorsPath,
+      reason,
+    })
+    return undefined
+  }
 }
 
 /**
@@ -3310,6 +3386,14 @@ async function pluginDirTopMarker(dir: string): Promise<string | undefined> {
     '.mcp.json',
     '.lsp.json',
   ]) {
+    if (name === '.mcp.json') {
+      const isEmptyOrMissing = await lstat(join(dir, '.mcp.json')).then(
+        st => st.isFile() && st.size === 0,
+        err => isENOENT(err),
+      )
+      if (!isEmptyOrMissing) return name
+      continue
+    }
     if (await pathExists(join(dir, name))) return name
   }
   return undefined

@@ -465,6 +465,7 @@ export function useManageMCPConnections(
             setAppState,
             dialogStore,
             requestDialog as Parameters<typeof registerElicitationHandler>[4],
+            client.transportErrorState,
           )
 
           client.client.onclose = () => {

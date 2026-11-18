@@ -30,6 +30,22 @@ export type FleetComposerDraftRestore = {
   collapsed: string[]
 }
 
+export function flushFleetComposerDraft(
+  canonicalLauncherCwd: string,
+  snapshot: FleetComposerDraftSnapshot,
+  storage?: StorageV5,
+): Promise<void> {
+  const q = fleetComposerDraftForDisk(snapshot.query, snapshot.mode)
+  if (q || snapshot.collapsed.length > 0) {
+    return persistFleetLauncherDraft(
+      canonicalLauncherCwd,
+      { q, collapsed: [...snapshot.collapsed] },
+      storage,
+    )
+  }
+  return clearFleetLauncherDraft(canonicalLauncherCwd, storage)
+}
+
 export function useFleetComposerDraftPersistence(input: {
   canonicalLauncherCwd: string
   snapshot: FleetComposerDraftSnapshot
@@ -39,8 +55,28 @@ export function useFleetComposerDraftPersistence(input: {
   const storage = storageV5 as StorageV5 | undefined
   const preExitFlushedRef = useRef(false)
   const restoreOnceRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const baselineRef = useRef<{
+    text: string
+    collapsed: readonly string[]
+  } | null>(null)
   const snapshotRef = useRef(input.snapshot)
   snapshotRef.current = input.snapshot
+  const cwdRef = useRef(input.canonicalLauncherCwd)
+  cwdRef.current = input.canonicalLauncherCwd
+  const storageRef = useRef(storage)
+  storageRef.current = storage
+
+  useEffect(() => {
+    dirtyRef.current = false
+    baselineRef.current = {
+      text: fleetComposerDraftForDisk(
+        snapshotRef.current.query,
+        snapshotRef.current.mode,
+      ),
+      collapsed: snapshotRef.current.collapsed,
+    }
+  }, [input.canonicalLauncherCwd, storage])
 
   useEffect(() => {
     if (restoreOnceRef.current) return
@@ -63,12 +99,19 @@ export function useFleetComposerDraftPersistence(input: {
     if (preExitFlushedRef.current) return
     const { query, mode, collapsed } = snapshotRef.current
     const q = fleetComposerDraftForDisk(query, mode)
-    if (!q && collapsed.length === 0) return
+    const prev = baselineRef.current
+    if (prev && (q !== prev.text || collapsed !== prev.collapsed)) {
+      prev.text = q
+      prev.collapsed = collapsed
+      dirtyRef.current = true
+    }
+    if (!dirtyRef.current) return
     const handle = setTimeout(() => {
       if (preExitFlushedRef.current) return
-      void persistFleetLauncherDraft(
+      dirtyRef.current = false
+      void flushFleetComposerDraft(
         input.canonicalLauncherCwd,
-        { q, collapsed: [...collapsed] },
+        snapshotRef.current,
         storage,
       )
     }, LIVE_PERSIST_MS)
@@ -80,6 +123,19 @@ export function useFleetComposerDraftPersistence(input: {
     input.snapshot.collapsed,
     storage,
   ])
+
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && !preExitFlushedRef.current) {
+        dirtyRef.current = false
+        void flushFleetComposerDraft(
+          cwdRef.current,
+          snapshotRef.current,
+          storageRef.current,
+        )
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let asyncDone = false
@@ -98,6 +154,7 @@ export function useFleetComposerDraftPersistence(input: {
               preExitFlushedRef.current = true
             } else {
               await clearFleetLauncherDraft(input.canonicalLauncherCwd, storage)
+              preExitFlushedRef.current = true
             }
             asyncDone = true
           })
@@ -105,16 +162,12 @@ export function useFleetComposerDraftPersistence(input: {
 
     const flush = () => {
       if (asyncDone) return
-      const { query, mode, collapsed } = snapshotRef.current
-      const q = fleetComposerDraftForDisk(query, mode)
-      const body = { q, collapsed: [...collapsed] }
-      if (q || body.collapsed.length) {
-        void persistFleetLauncherDraft(
-          input.canonicalLauncherCwd,
-          body,
-          storage,
-        )
-      }
+      dirtyRef.current = false
+      void flushFleetComposerDraft(
+        input.canonicalLauncherCwd,
+        snapshotRef.current,
+        storage,
+      )
     }
     process.on('exit', flush)
     return () => {

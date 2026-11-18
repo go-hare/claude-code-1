@@ -605,6 +605,7 @@ export const PROJECT_SCOPE_BLOCKED_ENV_VARS = new Set([
   'CLAUDE_CODE_DISABLE_SUBAGENT_HANDBACK',
   'CLAUDE_CODE_SYNC_SKILLS',
   'CLAUDE_CODE_SYNC_PLUGINS',
+  'CLAUDE_CODE_SYNC_REUSE_WITHIN_MS',
   'CLAUDE_CODE_TRANSCRIPT_LOCAL_GC',
   'CLAUDE_CODE_CCR_SURFACE',
   'CLAUDE_CODE_INCREMENTAL_REQUEST_BODY',
@@ -836,6 +837,9 @@ export function isProjectScopeBlockedEnvVar(
   value: unknown,
 ): boolean {
   const upper = key.toUpperCase()
+  if (upper === 'DISABLE_COMPACT') {
+    return !isTruthyString(value)
+  }
   const blocked =
     PROJECT_SCOPE_BLOCKED_ENV_VARS.has(upper) ||
     PROJECT_SCOPE_BLOCKED_ENV_PREFIXES.some(p => upper.startsWith(p))

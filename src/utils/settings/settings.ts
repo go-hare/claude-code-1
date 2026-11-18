@@ -214,6 +214,25 @@ function resolvePolicySettingsWithEnvMerge(): {
   return { policySettings: winner, policyErrors }
 }
 
+export {
+  evaluateStoredRemoteSettingsCopy,
+  extractHelperTier,
+  getDroppedHelperTier,
+  getRemoteHelperTierStatus,
+  getStoredCopyRefusal,
+  getStoredCopyTrust,
+  isForceRemoteSettingsRefreshBlocking,
+  reconcileMdmAndRemoteSettings,
+  recordStoredCopyRefusal,
+  resetRemoteSettingsSessionCache,
+  resolveRemoteHelperTier,
+  retainDroppedHelperBaseUrlEnv,
+  type HelperTier,
+  type RemoteHelperTierStatus,
+  type StoredCopyRefusal,
+  type StoredCopyTrust,
+} from './remoteSettingsState.js'
+
 /**
  * Get the path to the managed settings file based on the current platform
  */
@@ -671,6 +690,9 @@ export function getSettingsForSource(
 export function getSettingsForSourceUncached(
   source: SettingSource,
 ): SettingsJson | null {
+  if (!isSettingSourceEnabled(source)) {
+    return null
+  }
   // For policySettings: first source wins (remote > HKLM/plist > file > HKCU)
   // densable 2.1.223 #11: env merges per-key with machine-local under remote.
   // densable nfc: under hostManagedProvider, b6i strip + Gfg hostModelOverlay.

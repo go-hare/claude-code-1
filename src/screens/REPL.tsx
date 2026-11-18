@@ -415,6 +415,7 @@ import {
   isMetaVisibleOrigin,
 } from '../utils/messages.js';
 import { generateSessionTitle, isSyntheticSessionTitleText } from '../utils/sessionTitle.js';
+import type { TitleFallback } from './repl/runReplTurn.js';
 import { startsWithRegisteredSlashCommand } from '../utils/slashCommandParsing.js';
 import { getReplBridgeHandle } from '../bridge/replBridgeHandle.js';
 import {
@@ -718,6 +719,10 @@ import { useModelMigrationNotifications } from 'src/hooks/notifs/useModelMigrati
 import { useCanSwitchToExistingSubscription } from 'src/hooks/notifs/useCanSwitchToExistingSubscription.js';
 import { useTeammateLifecycleNotification } from 'src/hooks/notifs/useTeammateShutdownNotification.js';
 import { useFastModeNotification } from 'src/hooks/notifs/useFastModeNotification.js';
+import { useIdleUpsellNotification } from 'src/hooks/notifs/useIdleUpsellNotification.js';
+import { usePluginMonitors } from 'src/hooks/usePluginMonitors.js';
+import { isBareMode } from 'src/utils/envUtils.js';
+import { getIdleCompactionRunner, IDLE_COMPACT_COMPLETED_MESSAGE } from './repl/idleCompaction.js';
 import {
   AutoRunIssueNotification,
   shouldAutoRunIssue,
@@ -2248,6 +2253,7 @@ export function REPL({
   // on resume (initialMessages present) so we don't re-title a resumed
   // session from mid-conversation context.
   const haikuTitleAttemptedRef = useRef((initialMessages?.length ?? 0) > 0);
+  const titleFallbackRef = useRef<TitleFallback | undefined>(undefined);
   const agentTitle = mainThreadAgentDefinition?.agentType;
   const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
   // densable waiting surfaces that pause the busy title glyph. Soft NMS
@@ -3487,6 +3493,8 @@ export function REPL({
   }, [isLoading, lastQueryCompletionTime, lastTurnStopTime, submitCount]);
   // densable 2.1.246 `x(()=>()=>{sm.dispose(),...},[sm,...])`
   useEffect(() => () => idleReturnController.dispose(), [idleReturnController]);
+  useIdleUpsellNotification(isLoading, lastQueryCompletionTime);
+  usePluginMonitors({ enabled: !isBareMode() });
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
   const [spinnerColor, setSpinnerColorState] = useState<keyof Theme | null>(null);
   const [spinnerShimmerColor, setSpinnerShimmerColorState] = useState<keyof Theme | null>(null);
@@ -3579,6 +3587,45 @@ export function REPL({
   // Without this guard, both calls pick a tip → two recordShownTip → two
   // saveGlobalConfig writes back-to-back. Reset at submit in onSubmit.
   const tipPickedThisTurnRef = React.useRef(false);
+  const explanationRequestIds = React.useRef(new Set<string>());
+  const absorbExplanationRequests = useCallback((msgs: typeof messagesRef.current) => {
+    const EXPLANATION_REQUEST_RE =
+      /^(?:(?:ok|okay|please|pls|can you|could you|would you),? )*(?:explain|walk me through|help me understand|teach me)\b|^(?:why (?:does|do|is|are|was|were|would|should) (?!you\b|u\b)(?![^.?!]*\b(?:still|again)\b)|how (?:come|does|do (?:these|those)) |what (?:does|do) (?!you\b|u\b|we\b|i\b)|what(?:'s| is) (?:this|that)\b|i (?:don'?t|do not) (?:understand\b|get (?:this|it|why|how|what)\b))/;
+    for (const msg of msgs) {
+      let raw: string | undefined;
+      if (msg.type === 'user' && !msg.isMeta && msg.promptSource !== 'suggestion_accepted' && msg.message) {
+        const c = msg.message.content;
+        raw =
+          typeof c === 'string'
+            ? c
+            : Array.isArray(c)
+              ? c
+                  .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                  .map(b => b.text)
+                  .join(' ')
+              : undefined;
+      } else if (
+        msg.type === 'attachment' &&
+        msg.attachment?.type === 'queued_command' &&
+        msg.attachment.commandMode === 'prompt' &&
+        msg.attachment.isMeta !== true &&
+        msg.attachment.inputSource !== 'suggestion_accepted'
+      ) {
+        const p = msg.attachment.prompt;
+        raw = typeof p === 'string' ? p : undefined;
+      }
+      if (raw !== undefined) {
+        const normalized = raw
+          .toLowerCase()
+          .replace(/\u2019/g, "'")
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (EXPLANATION_REQUEST_RE.test(normalized)) {
+          explanationRequestIds.current.add(msg.uuid);
+        }
+      }
+    }
+  }, []);
   const spinnerTipInputsRef = React.useRef({ theme, storageV5 });
   spinnerTipInputsRef.current = { theme, storageV5 };
   useEffect(() => {
@@ -3592,12 +3639,14 @@ export function REPL({
         for (const bashHost of extractBashHostsFromMessages(newMessages)) {
           bashHosts.current.add(bashHost);
         }
+        absorbExplanationRequests(newMessages);
         bashToolsProcessedIdx.current = messagesRef.current.length;
         return {
           theme: spinnerTipInputsRef.current.theme,
           readFileState: readFileState.current,
           bashTools: bashTools.current,
           bashHosts: bashHosts.current,
+          explanationRequestCount: explanationRequestIds.current.size,
           session: { host },
           storageV5: spinnerTipInputsRef.current.storageV5,
         };
@@ -3630,12 +3679,14 @@ export function REPL({
     for (const host of extractBashHostsFromMessages(newMessages)) {
       bashHosts.current.add(host);
     }
+    absorbExplanationRequests(newMessages);
     bashToolsProcessedIdx.current = messagesRef.current.length;
     const tipContext = {
       theme,
       readFileState: readFileState.current,
       bashTools: bashTools.current,
       bashHosts: bashHosts.current,
+      explanationRequestCount: explanationRequestIds.current.size,
       session: { host: getReplDiffHost() },
       storageV5,
     };
@@ -4113,6 +4164,7 @@ export function REPL({
         // (same reasoning as the useRef seed), and the previous session's
         // Haiku title shouldn't carry over.
         haikuTitleAttemptedRef.current = true;
+        titleFallbackRef.current = undefined;
         setHaikuTitle(undefined);
 
         // Exit any worktree a prior /resume entered, then cd into the one
@@ -5326,6 +5378,9 @@ export function REPL({
     return () => setAgentSpawnHandler(undefined);
   }, [getToolUseContext, canUseTool, mainLoopModel]);
 
+  const isIdleBusyRef = useRef(isLoading);
+  isIdleBusyRef.current = isLoading;
+
   useEffect(() => {
     setFunctionHooksTurnReader(() => getMainThreadTurn());
     setTurnAbortHandler(async ({ turnId }) => {
@@ -5353,7 +5408,37 @@ export function REPL({
       setMessages(buildPostCompactMessages(result) as typeof msgs);
       return { compacted: true };
     });
+    const idleRunner = getIdleCompactionRunner();
+    const idleHost = {
+      refusal: () => (isIdleBusyRef.current ? 'busy' : undefined),
+      compact: async () => {
+        const { compactConversation, buildPostCompactMessages } = await import('../services/compact/compact.js');
+        const { getCacheSharingParams } = await import('../commands/compact/compact.js');
+        const { getMessagesAfterCompactBoundary, createSystemMessage } = await import('../utils/messages.js');
+        const { tokenCountWithEstimation } = await import('../utils/tokens.js');
+        const msgs = getMessagesAfterCompactBoundary(messagesRef.current);
+        const tokensBefore = tokenCountWithEstimation(msgs);
+        const ctx = getToolUseContext(msgs, [], new AbortController(), mainLoopModel);
+        const result = await compactConversation(
+          msgs,
+          ctx as unknown as import('../Tool.js').ToolUseContext,
+          await getCacheSharingParams(ctx as unknown as import('../Tool.js').ToolUseContext, msgs),
+          false,
+          undefined,
+          false,
+        );
+        const postMessages = buildPostCompactMessages(result) as typeof msgs;
+        const tokensAfter = tokenCountWithEstimation(postMessages);
+        setMessages([...postMessages, createSystemMessage(IDLE_COMPACT_COMPLETED_MESSAGE, 'info')] as typeof msgs);
+        return { tokensBefore, tokensAfter };
+      },
+    };
+    idleRunner.host = idleHost;
     return () => {
+      if (idleRunner.host === idleHost) {
+        idleRunner.host = null;
+      }
+      idleRunner.clear();
       setTurnAbortHandler(undefined);
       setFunctionHooksTurnReader(undefined);
       setSessionCompactHandler(undefined);
@@ -5610,6 +5695,7 @@ export function REPL({
           sessionAiTitle,
           agentTitle,
           haikuTitleAttemptedRef,
+          titleFallbackRef,
           setHaikuTitle,
           commands,
           setConversationId,
@@ -5814,6 +5900,7 @@ export function REPL({
           taskRegistry,
         });
         haikuTitleAttemptedRef.current = false;
+        titleFallbackRef.current = undefined;
         setHaikuTitle(undefined);
         bashTools.current.clear();
         bashHosts.current.clear();
@@ -6329,6 +6416,7 @@ export function REPL({
   const restoreMessageSync = useCallback(
     (message: UserMessage) => {
       rewindConversationTo(message);
+      repinScrollRef.current(true, 'rewind');
 
       const r = textForResubmit(message);
       if (r) {
@@ -8800,112 +8888,125 @@ export function REPL({
                             );
                             return { skippedLinks };
                           }}
-                          onSummarize={async (
-                            message: UserMessage,
-                            feedback?: string,
-                            direction: PartialCompactDirection = 'from',
-                          ) => {
-                            // Project snipped messages so the compact model
-                            // doesn't summarize content that was intentionally removed.
-                            const compactMessages = getMessagesAfterCompactBoundary(messages);
+                          onSummarize={
+                            isEnvTruthy(process.env.DISABLE_COMPACT)
+                              ? undefined
+                              : async (
+                                  message: UserMessage,
+                                  feedback?: string,
+                                  direction: PartialCompactDirection = 'from',
+                                ) => {
+                                  // Project snipped messages so the compact model
+                                  // doesn't summarize content that was intentionally removed.
+                                  const compactMessages = getMessagesAfterCompactBoundary(messages);
 
-                            const messageIndex = compactMessages.indexOf(message);
-                            if (messageIndex === -1) {
-                              // Selected a snipped or pre-compact message that the
-                              // selector still shows (REPL keeps full history for
-                              // scrollback). Surface why nothing happened instead
-                              // of silently no-oping.
-                              setMessages(prev => [
-                                ...prev,
-                                createSystemMessage(
-                                  'That message is no longer in the active context (snipped or pre-compact). Choose a more recent message.',
-                                  'warning',
-                                ),
-                              ]);
-                              return;
-                            }
+                                  const messageIndex = compactMessages.indexOf(message);
+                                  if (messageIndex === -1) {
+                                    // Selected a snipped or pre-compact message that the
+                                    // selector still shows (REPL keeps full history for
+                                    // scrollback). Surface why nothing happened instead
+                                    // of silently no-oping.
+                                    setMessages(prev => [
+                                      ...prev,
+                                      createSystemMessage(
+                                        'That message is no longer in the active context (snipped or pre-compact). Choose a more recent message.',
+                                        'warning',
+                                      ),
+                                    ]);
+                                    return;
+                                  }
 
-                            const newAbortController = createAbortController();
-                            const context = getToolUseContext(compactMessages, [], newAbortController, mainLoopModel);
+                                  const newAbortController = createAbortController();
+                                  const context = getToolUseContext(
+                                    compactMessages,
+                                    [],
+                                    newAbortController,
+                                    mainLoopModel,
+                                  );
 
-                            const appState = context.getAppState();
-                            const defaultSysPrompt = await getSystemPrompt(
-                              context.options.tools,
-                              context.options.mainLoopModel,
-                              Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
-                              context.options.mcpClients,
-                            );
-                            const systemPrompt = buildEffectiveSystemPrompt({
-                              mainThreadAgentDefinition,
-                              toolUseContext: context,
-                              customSystemPrompt: context.options.customSystemPrompt,
-                              defaultSystemPrompt: defaultSysPrompt,
-                              appendSystemPrompt: context.options.appendSystemPrompt,
-                            });
-                            const [userContext, systemContext] = await Promise.all([
-                              getUserContext(),
-                              getSystemContext(),
-                            ]);
+                                  const appState = context.getAppState();
+                                  const defaultSysPrompt = await getSystemPrompt(
+                                    context.options.tools,
+                                    context.options.mainLoopModel,
+                                    Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
+                                    context.options.mcpClients,
+                                  );
+                                  const systemPrompt = buildEffectiveSystemPrompt({
+                                    mainThreadAgentDefinition,
+                                    toolUseContext: context,
+                                    customSystemPrompt: context.options.customSystemPrompt,
+                                    defaultSystemPrompt: defaultSysPrompt,
+                                    appendSystemPrompt: context.options.appendSystemPrompt,
+                                  });
+                                  const [userContext, systemContext] = await Promise.all([
+                                    getUserContext(),
+                                    getSystemContext(),
+                                  ]);
 
-                            const result = await partialCompactConversation(
-                              compactMessages,
-                              messageIndex,
-                              context,
-                              {
-                                systemPrompt,
-                                userContext,
-                                systemContext,
-                                toolUseContext: context,
-                                forkContextMessages: compactMessages,
-                              },
-                              feedback,
-                              direction,
-                            );
+                                  const result = await partialCompactConversation(
+                                    compactMessages,
+                                    messageIndex,
+                                    context,
+                                    {
+                                      systemPrompt,
+                                      userContext,
+                                      systemContext,
+                                      toolUseContext: context,
+                                      forkContextMessages: compactMessages,
+                                    },
+                                    feedback,
+                                    direction,
+                                  );
 
-                            // densable Pid: zero kept-assistant usage (Edt) so
-                            // /context + status line do not report stale pre-compact
-                            // API usage after message-picker compact (#6 / 2.1.218).
-                            const postCompact = buildPartialPostCompactMessages(result, direction);
-                            // Fullscreen 'from' keeps scrollback; 'up_to' must not
-                            // (old[0] unchanged + grown array means incremental
-                            // useLogMessages path, so boundary never persisted).
-                            // Find by uuid since old is raw REPL history and snipped
-                            // entries can shift the projected messageIndex.
-                            if (isFullscreenEnvEnabled() && direction === 'from') {
-                              setMessages(old => {
-                                const rawIdx = old.findIndex(m => m.uuid === message.uuid);
-                                return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
-                              });
-                            } else {
-                              setMessages(postCompact);
-                            }
-                            // Partial compact bypasses handleMessageFromStream — clear
-                            // the context-blocked flag so proactive ticks resume.
-                            if (feature('PROACTIVE') || feature('KAIROS')) {
-                              proactiveModule?.setContextBlocked(false);
-                            }
-                            setConversationId(randomUUID());
-                            // densable z$l after message-picker summarize (Sd.current)
-                            setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
-                            runPostCompactCleanup(context.options.querySource);
+                                  // densable Pid: zero kept-assistant usage (Edt) so
+                                  // /context + status line do not report stale pre-compact
+                                  // API usage after message-picker compact (#6 / 2.1.218).
+                                  const postCompact = buildPartialPostCompactMessages(result, direction);
+                                  // Fullscreen 'from' keeps scrollback; 'up_to' must not
+                                  // (old[0] unchanged + grown array means incremental
+                                  // useLogMessages path, so boundary never persisted).
+                                  // Find by uuid since old is raw REPL history and snipped
+                                  // entries can shift the projected messageIndex.
+                                  if (isFullscreenEnvEnabled() && direction === 'from') {
+                                    setMessages(old => {
+                                      const rawIdx = old.findIndex(m => m.uuid === message.uuid);
+                                      return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
+                                    });
+                                  } else {
+                                    setMessages(postCompact);
+                                  }
+                                  // Partial compact bypasses handleMessageFromStream — clear
+                                  // the context-blocked flag so proactive ticks resume.
+                                  if (feature('PROACTIVE') || feature('KAIROS')) {
+                                    proactiveModule?.setContextBlocked(false);
+                                  }
+                                  setConversationId(randomUUID());
+                                  // densable z$l after message-picker summarize (Sd.current)
+                                  setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
+                                  runPostCompactCleanup(context.options.querySource);
 
-                            if (direction === 'from') {
-                              const r = textForResubmit(message);
-                              if (r) {
-                                setInputValue(r.text);
-                                setInputMode(r.mode);
-                              }
-                            }
+                                  if (direction === 'from') {
+                                    const r = textForResubmit(message);
+                                    if (r) {
+                                      setInputValue(r.text);
+                                      setInputMode(r.mode);
+                                    }
+                                  }
 
-                            // Show notification with ctrl+o hint
-                            const historyShortcut = getShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
-                            addNotification({
-                              key: 'summarize-ctrl-o-hint',
-                              text: `Conversation summarized (${historyShortcut} for history)`,
-                              priority: 'medium',
-                              timeoutMs: 8000,
-                            });
-                          }}
+                                  // Show notification with ctrl+o hint
+                                  const historyShortcut = getShortcutDisplay(
+                                    'app:toggleTranscript',
+                                    'Global',
+                                    'ctrl+o',
+                                  );
+                                  addNotification({
+                                    key: 'summarize-ctrl-o-hint',
+                                    text: `Conversation summarized (${historyShortcut} for history)`,
+                                    priority: 'medium',
+                                    timeoutMs: 8000,
+                                  });
+                                }
+                          }
                           onRestoreMessage={handleRestoreMessage}
                           onClose={() => {
                             setIsMessageSelectorVisible(false);

@@ -162,6 +162,37 @@ const SKIP_FIRST_PROMPT_PATTERN =
   /^(?:\s*<[a-z][\w-]*[\s>]|\[Request interrupted by user[^\]]*\])/
 
 const COMMAND_NAME_RE = /<command-name>(.*?)<\/command-name>/
+const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/
+
+function extractTruncatedJsonStringField(
+  line: string,
+  field: string,
+  maxLen: number,
+): string {
+  for (const prefix of [`"${field}":"`, `"${field}": "`]) {
+    const idx = line.indexOf(prefix)
+    if (idx < 0) continue
+    const start = idx + prefix.length
+    let pos = start
+    let count = 0
+    while (pos < line.length && count < maxLen) {
+      if (line[pos] === '\\') {
+        pos += 2
+        count++
+        continue
+      }
+      if (line[pos] === '"') break
+      pos++
+      count++
+    }
+    return line
+      .slice(start, pos)
+      .replaceAll('\\n', ' ')
+      .replaceAll('\\t', ' ')
+      .trim()
+  }
+  return ''
+}
 
 /**
  * Extracts the first meaningful user prompt from a JSONL head chunk.
@@ -172,7 +203,9 @@ const COMMAND_NAME_RE = /<command-name>(.*?)<\/command-name>/
  */
 export function extractFirstPromptFromHead(head: string): string {
   let start = 0
+  let hasProactive = false
   let commandFallback = ''
+  let truncatedFallback = ''
   while (start < head.length) {
     const newlineIdx = head.indexOf('\n', start)
     const line =
@@ -192,7 +225,13 @@ export function extractFirstPromptFromHead(head: string): string {
 
     try {
       const entry = JSON.parse(line) as Record<string, unknown>
-      if (entry.type !== 'user') continue
+      if (
+        entry.type !== 'user' ||
+        entry.isMeta === true ||
+        entry.isCompactSummary === true
+      ) {
+        continue
+      }
 
       const message = entry.message as Record<string, unknown> | undefined
       if (!message) continue
@@ -213,28 +252,47 @@ export function extractFirstPromptFromHead(head: string): string {
         let result = raw.replace(/\n/g, ' ').trim()
         if (!result) continue
 
-        // Skip slash-command messages but remember first as fallback
+        // Skip slash-command messages without args (remember first as fallback);
+        // return command + args when present.
         const cmdMatch = COMMAND_NAME_RE.exec(result)
         if (cmdMatch) {
-          if (!commandFallback) commandFallback = cmdMatch[1]!
-          continue
+          const cmd = cmdMatch[1]!
+          const args = COMMAND_ARGS_RE.exec(result)?.[1]?.trim() || ''
+          if (!args) {
+            if (!commandFallback) commandFallback = cmd
+            continue
+          }
+          return `${cmd} ${args}`
         }
 
         // Format bash input with ! prefix before the generic XML skip
         const bashMatch = /<bash-input>([\s\S]*?)<\/bash-input>/.exec(result)
         if (bashMatch) return `! ${bashMatch[1]!.trim()}`
 
-        if (SKIP_FIRST_PROMPT_PATTERN.test(result)) continue
+        if (SKIP_FIRST_PROMPT_PATTERN.test(result)) {
+          if (result.startsWith('<tick>')) hasProactive = true
+          continue
+        }
 
         if (result.length > 200) {
           result = result.slice(0, 200).trim() + '\u2026'
         }
         return result
       }
-    } catch {}
+    } catch {
+      if (newlineIdx < 0) {
+        const fallback =
+          extractTruncatedJsonStringField(line, 'content', 200) ||
+          extractTruncatedJsonStringField(line, 'text', 200)
+        if (fallback && !SKIP_FIRST_PROMPT_PATTERN.test(fallback)) {
+          truncatedFallback = fallback
+        }
+      }
+    }
   }
   if (commandFallback) return commandFallback
-  return ''
+  if (hasProactive) return 'Proactive session'
+  return truncatedFallback
 }
 
 // ---------------------------------------------------------------------------

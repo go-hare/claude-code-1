@@ -696,8 +696,11 @@ export function BackgroundTasksDialog({
   const handleKeyDown = (e: KeyboardEvent) => {
     if (viewState.mode !== 'list') return;
 
-    const currentSelection = rows[selectedIndexLive.current] ?? allSelectableItems[selectedIndexLive.current];
-    if (!currentSelection) return;
+    const selection =
+      (selectedIdRef.current ? allSelectableItems.find(i => i.id === selectedIdRef.current) : undefined) ??
+      rows[selectedIndexLive.current] ??
+      allSelectableItems[selectedIndexLive.current];
+    if (!selection) return;
 
     if (e.key === 'x' && !e.ctrl && !e.meta) {
       e.preventDefault();
@@ -705,11 +708,11 @@ export function BackgroundTasksDialog({
         ignoreNextKillRef.current = false;
         return;
       }
-      stopItem(currentSelection);
+      stopItem(selection);
     }
 
     if (e.key === 'f' && !e.ctrl && !e.meta) {
-      if (foregroundItem(currentSelection)) {
+      if (foregroundItem(selection)) {
         e.preventDefault();
       }
     }

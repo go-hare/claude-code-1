@@ -558,17 +558,38 @@ export function CollapsedReadSearchContent({
   maxReadCountRef.current = Math.max(maxReadCountRef.current, rawReadCount);
   maxSearchCountRef.current = Math.max(maxSearchCountRef.current, rawSearchCount);
   maxListCountRef.current = Math.max(maxListCountRef.current, rawListCount);
-  maxMcpCountRef.current = Math.max(maxMcpCountRef.current, message.mcpCallCount ?? 0);
+  const failedMcpCallCount = message.failedMcpCallCount ?? 0;
+  maxMcpCountRef.current = Math.max(maxMcpCountRef.current, (message.mcpCallCount ?? 0) + failedMcpCallCount);
   maxBashCountRef.current = Math.max(maxBashCountRef.current, message.bashCount ?? 0);
   const readCount = maxReadCountRef.current;
   const searchCount = maxSearchCountRef.current;
   const listCount = maxListCountRef.current;
-  const mcpCallCount = maxMcpCountRef.current;
+  const mcpCallCount = Math.max(0, maxMcpCountRef.current - failedMcpCallCount);
   // Subtract commands surfaced as "Committed …" / "Created PR …" so the
   // same command isn't counted twice. gitOpBashCount is read live (no max-ref
   // needed — it's 0 until results arrive, then only grows).
+  // #1384: Also deduct any non-run/errored/interrupted shell tool calls still
+  // inside groupMessages, and use live bashCount once finalized so popped-out
+  // calls are never overcounted by maxBashCountRef.
   const gitOpBashCount = message.gitOpBashCount ?? 0;
-  const bashCount = isFullscreenEnvEnabled() ? Math.max(0, maxBashCountRef.current - gitOpBashCount) : 0;
+  let nonRunBashCount = 0;
+  if (isFullscreenEnvEnabled()) {
+    for (const gm of groupMessages) {
+      if (gm.type !== 'assistant' || !Array.isArray(gm.message.content)) continue;
+      for (const block of gm.message.content) {
+        if (typeof block !== 'object' || block === null || block.type !== 'tool_use') continue;
+        if (block.name !== 'Bash' && block.name !== 'PowerShell') continue;
+        const tr = lookups.toolResultByToolUseID.get(block.id);
+        if (lookups.erroredToolUseIDs.has(block.id) || interruptedCall(tr)) {
+          nonRunBashCount++;
+        }
+      }
+    }
+  }
+  const effectiveRawBashCount = isActiveGroup ? maxBashCountRef.current : (message.bashCount ?? 0);
+  const bashCount = isFullscreenEnvEnabled()
+    ? Math.max(0, effectiveRawBashCount - gitOpBashCount - nonRunBashCount)
+    : 0;
 
   // densable ySu brief extras: agent / edit / other / frame
   const agentCount = message.agentCount ?? 0;

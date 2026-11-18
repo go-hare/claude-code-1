@@ -12,6 +12,7 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { logEvent } from '../../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { checkHasTrustDialogAccepted } from '../../utils/config.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
   checkOverageGate,
   isUltrareviewOverageConfirmed,
@@ -60,6 +61,7 @@ export function checkUltrareviewWorkspaceTrust(opts: {
   trustWorkspace?: boolean
   argv?: readonly string[]
   isTrusted?: () => boolean
+  shouldCheck?: () => boolean
   canPrompt?: boolean
   jsonMode?: boolean
 }): { trusted: true } | { trusted: false; reason: string; message: string } {
@@ -83,8 +85,9 @@ export function checkUltrareviewWorkspaceTrust(opts: {
     logEvent('cli_ultrareview_workspace_trust', { trust_source: 'flag' })
     return { trusted: true }
   }
-  const canPrompt = opts.canPrompt ?? false
-  if (canPrompt || shouldRunUltrareviewTrustCheck()) {
+  const canPrompt = (opts.canPrompt ?? false) && !isEnvTruthy(process.env.CI)
+  const shouldCheck = opts.shouldCheck ?? shouldRunUltrareviewTrustCheck
+  if (canPrompt || shouldCheck()) {
     if (!canPrompt) {
       const remedy = opts.jsonMode
         ? ''

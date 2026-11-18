@@ -213,6 +213,9 @@ function printPlan(plan: PurgePlan): void {
       process.stdout.write(`${w}\n`)
     }
   }
+  process.stdout.write(
+    '\nPurging deletes data only on this computer, not anything stored by Anthropic.\n',
+  )
 }
 
 async function askYesNo(question: string): Promise<boolean> {

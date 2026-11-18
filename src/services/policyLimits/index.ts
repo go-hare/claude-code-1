@@ -22,6 +22,7 @@ import {
   checkAndRefreshOAuthTokenIfNeeded,
   getAnthropicApiKeyWithSource,
   getClaudeAIOAuthTokens,
+  shouldSkipPolicyLimitsForProMaxStartup,
 } from '../../utils/auth.js'
 import { registerCleanup } from '../../utils/cleanupRegistry.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -61,6 +62,7 @@ const CACHE_FILENAME = 'policy-limits.json'
 const FETCH_TIMEOUT_MS = 10000 // 10 seconds
 const DEFAULT_MAX_RETRIES = 5
 const POLLING_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
+export const REVALIDATE_IN_FULL_AFTER_MS = 6 * 60 * 60 * 1000 // 6 hours (Official BVa)
 
 // Background polling state
 let pollingIntervalId: ReturnType<typeof setInterval> | null = null
@@ -101,7 +103,7 @@ export function initializePolicyLimitsLoadingPromise(): void {
     return
   }
 
-  if (isPolicyLimitsEligible()) {
+  if (isPolicyLimitsEligible() && !shouldSkipPolicyLimitsForProMaxStartup()) {
     loadingCompletePromise = new Promise(resolve => {
       loadingCompleteResolve = resolve
 
@@ -581,7 +583,7 @@ async function saveCachedRestrictions(
 async function fetchAndLoadPolicyLimits(): Promise<
   PolicyLimitsResponse['restrictions'] | null
 > {
-  if (!isPolicyLimitsEligible()) {
+  if (!isPolicyLimitsEligible() || shouldSkipPolicyLimitsForProMaxStartup()) {
     return null
   }
 
@@ -735,7 +737,7 @@ export function isRemotePolicyAllowed(policy: string): boolean {
 function getRestrictionsFromCache():
   | PolicyLimitsResponse['restrictions']
   | null {
-  if (!isPolicyLimitsEligible()) {
+  if (!isPolicyLimitsEligible() || shouldSkipPolicyLimitsForProMaxStartup()) {
     return null
   }
 
@@ -775,7 +777,7 @@ export async function loadPolicyLimits(): Promise<void> {
   try {
     await fetchAndLoadPolicyLimits()
 
-    if (isPolicyLimitsEligible()) {
+    if (isPolicyLimitsEligible() && !shouldSkipPolicyLimitsForProMaxStartup()) {
       startBackgroundPolling()
     }
   } finally {

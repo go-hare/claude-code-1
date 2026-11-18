@@ -21,6 +21,7 @@ describe('createStreamMarkdownState', () => {
       gapAfterChunks: false,
       stablePrefix: '',
       openFence: null,
+      openTable: null,
     })
   })
 })

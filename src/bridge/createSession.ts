@@ -1,6 +1,7 @@
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
+import { createTlsHandshakeTimeoutTransport } from './bridgeApi.js'
 import { extractErrorDetail } from './debugUtils.js'
 import { toCompatSessionId } from './sessionIdCompat.js'
 
@@ -127,6 +128,10 @@ export async function createBridgeSession(params: {
   try {
     response = await axios.post(url, requestBody, {
       headers,
+      timeout: 15_000,
+      ...(url.startsWith('https:') && {
+        transport: createTlsHandshakeTimeoutTransport(15_000),
+      }),
       signal: params.signal,
       validateStatus: s => s < 500,
     })

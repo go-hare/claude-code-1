@@ -161,6 +161,11 @@ export type ToolPermissionContext = DeepImmutable<{
    */
   blockReadsOutsideWorkingDirectories?: boolean
   /**
+   * official permissions.blockWritesOutsideWorkingDirectories — refuse file-tool
+   * writes outside working directories (and to settings/.json files) in every mode.
+   */
+  blockWritesOutsideWorkingDirectories?: boolean
+  /**
    * densable 2.1.283 `servedCall` — CCR/remote served permission context
    * (`servedCall:!0` @200392185). yBt skips DualInk first-ask; lL xa second
    * arg; outside-read deny→ask + circuitBreaker:"outsideReadsBlocked"; KDt

@@ -323,25 +323,29 @@ export function isProjectLevelReservedEntry(name: string): boolean {
   return false
 }
 
-function getCutoffDate(): Date {
+function daysToCutoffDate(days: number): Date | null {
+  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+export function getCutoffDate(): Date | null {
   const settings = getSettings_DEPRECATED() || {}
   const cleanupPeriodDays =
     settings.cleanupPeriodDays ?? DEFAULT_CLEANUP_PERIOD_DAYS
-  const cleanupPeriodMs = cleanupPeriodDays * 24 * 60 * 60 * 1000
-  return new Date(Date.now() - cleanupPeriodMs)
+  return daysToCutoffDate(cleanupPeriodDays)
 }
 
 /**
  * densable D — retention cutoff. `cleanupPeriodDays===0` → null (no sweep).
  */
-function getRetentionCutoff(maxAgeDays?: number): Date | null {
+export function getRetentionCutoff(maxAgeDays?: number): Date | null {
   const settings = getSettings_DEPRECATED() || {}
   let days = settings.cleanupPeriodDays ?? DEFAULT_CLEANUP_PERIOD_DAYS
   if (days === 0) return null
   if (maxAgeDays !== undefined && maxAgeDays < days) {
     days = maxAgeDays
   }
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  return daysToCutoffDate(days)
 }
 
 /** densable `ie("policySettings")?.cleanupPeriodDays!==void 0` */
@@ -922,6 +926,7 @@ async function cleanupOldFilesInDirectory(
 export async function cleanupOldMessageFiles(): Promise<CleanupResult> {
   const fsImpl = getFsImplementation()
   const cutoffDate = getCutoffDate()
+  if (cutoffDate === null) return emptyCleanupResult()
   const errorPath = CACHE_PATHS.errors()
   const baseCachePath = CACHE_PATHS.baseLogs()
 
@@ -992,6 +997,7 @@ async function tryRmdir(dirPath: string, fsImpl: FsOperations): Promise<void> {
 export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
   const result = emptyCleanupResult()
+  if (cutoffDate === null) return result
   const projectsDir = getProjectsDir()
   const fsImpl = getFsImplementation()
   // densable Ior: `let p=fe(),w=Ae()` — Ae always runs; skipIf is off when xe.
@@ -1116,10 +1122,26 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
                 result.errors++
               }
             }
-            await tryRmdir(toolDirPath, fsImpl)
+            if (
+              toolFiles.length > 0 ||
+              (await fsImpl
+                .stat(toolDirPath)
+                .then(s => s.mtimeMs)
+                .catch(() => Infinity)) < cutoffDate.getTime()
+            ) {
+              await tryRmdir(toolDirPath, fsImpl)
+            }
           }
         }
-        await tryRmdir(toolResultsDir, fsImpl)
+        if (
+          toolDirs.length > 0 ||
+          (await fsImpl
+            .stat(toolResultsDir)
+            .then(s => s.mtimeMs)
+            .catch(() => Infinity)) < cutoffDate.getTime()
+        ) {
+          await tryRmdir(toolResultsDir, fsImpl)
+        }
         await tryRmdir(sessionDir, fsImpl)
       }
     }
@@ -1143,6 +1165,7 @@ async function cleanupSingleDirectory(
 ): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
   const result = emptyCleanupResult()
+  if (cutoffDate === null) return result
   const fsImpl = getFsImplementation()
 
   let dirents
@@ -1178,6 +1201,7 @@ export function cleanupOldPlanFiles(): Promise<CleanupResult> {
 export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
   const result = emptyCleanupResult()
+  if (cutoffDate === null) return result
   const fsImpl = getFsImplementation()
 
   try {
@@ -1223,6 +1247,7 @@ export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
 export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
   const result = emptyCleanupResult()
+  if (cutoffDate === null) return result
   const fsImpl = getFsImplementation()
 
   try {
@@ -1269,6 +1294,7 @@ export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
 export async function cleanupOldDebugLogs(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
   const result = emptyCleanupResult()
+  if (cutoffDate === null) return result
   const fsImpl = getFsImplementation()
   const debugDir = join(getClaudeConfigHomeDir(), 'debug')
 
@@ -1509,10 +1535,13 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
   await cleanupOldSessionEnvDirs()
   await cleanupOldDebugLogs()
   await cleanupOldImageCaches()
-  await cleanupOldPastes(getCutoffDate())
-  const removedWorktrees = await cleanupStaleAgentWorktrees(getCutoffDate())
-  if (removedWorktrees > 0) {
-    logEvent('tengu_worktree_cleanup', { removed: removedWorktrees })
+  const cutoffDate = getCutoffDate()
+  if (cutoffDate !== null) {
+    await cleanupOldPastes(cutoffDate)
+    const removedWorktrees = await cleanupStaleAgentWorktrees(cutoffDate)
+    if (removedWorktrees > 0) {
+      logEvent('tengu_worktree_cleanup', { removed: removedWorktrees })
+    }
   }
   // densable zr b("jobs") skipIf → Slu. Not cleanupStaleAgentWorktrees.
   // Fe(e): parent storageV5 from pin when hover-rest handed one.

@@ -18,8 +18,10 @@ import {
 import {
   CAPABILITY_NAMES,
   envTerminalName,
+  evaluateTmuxImageCapabilities,
   isIterm2VersionAtLeast35,
   Jk,
+  queryTmuxPaneInfo,
   tD,
   type TerminalCapabilityStore,
 } from './terminalCapabilities.js'
@@ -93,6 +95,9 @@ export async function probeTerminalIdentity(
   timeoutMs = PROBE_TIMEOUT_MS,
 ): Promise<void> {
   const firstDeadline = armProbeDeadline(capabilities, timeoutMs)
+  const tmuxPanePromise = process.env.TMUX
+    ? queryTmuxPaneInfo().then(facts => ({ facts, at: performance.now() }))
+    : undefined
   const askKeys =
     capabilities.get('extendedKeys').state === 'pending' ||
     capabilities.get('kittyKeyboard').state === 'pending'
@@ -120,8 +125,13 @@ export async function probeTerminalIdentity(
   if (xtReply) {
     let name = xtReply.name
     if (process.env.TMUX && name.startsWith('tmux ')) {
-      const raw = (await tmuxClientTermtype()).trim()
-      if (raw) name = raw
+      const termtype = (await tmuxPanePromise)?.facts?.termtype
+      if (termtype) {
+        name = termtype
+      } else {
+        const raw = (await tmuxClientTermtype()).trim()
+        if (raw) name = raw
+      }
     }
     setXtversionName(name)
     log(`XTVERSION: terminal identified as "${name}"`)
@@ -201,6 +211,44 @@ export async function probeTerminalIdentity(
         mousePixels.status === 2 ||
         mousePixels.status === 3,
       `probe: DECRPM 1016 status=${mousePixels.status}, cell ${cellPixelsLabel()}`,
+    )
+  }
+  if (process.env.TMUX) {
+    const tmuxEnv = {
+      versionName: xtReply?.name,
+      hasPane: Boolean(process.env.TMUX_PANE),
+    }
+    const tmuxReply =
+      xtReply?.name.startsWith('tmux ') === true
+        ? await tmuxPanePromise
+        : undefined
+    const facts = tmuxReply?.facts
+    const hostState = Jk()
+    const prevPane = hostState.tmuxPane
+    hostState.tmuxPane =
+      facts === undefined || !tmuxEnv.hasPane
+        ? prevPane
+        : {
+            ...facts.pane,
+            passthrough: prevPane?.passthrough ?? facts.pane.passthrough,
+          }
+    hostState.tmuxPaneAnsweredAt =
+      facts !== undefined && tmuxEnv.hasPane ? tmuxReply?.at : undefined
+    const evaluated = evaluateTmuxImageCapabilities(facts, tmuxEnv)
+    capabilities.answer(
+      'kittyGraphics',
+      evaluated.kittyGraphics.value,
+      `probe: ${evaluated.kittyGraphics.source}`,
+    )
+    capabilities.answer(
+      'itermImages',
+      evaluated.itermImages.value,
+      `probe: ${evaluated.itermImages.source}`,
+    )
+    log(
+      facts === undefined || !tmuxEnv.hasPane
+        ? `tmux images: kitty no, iTerm2 no (${evaluated.itermImages.source})`
+        : `tmux images: passthrough ${facts.pane.passthrough}, focus events ${facts.pane.hasFocusEvents ? 'on' : 'off'}, kitty ${evaluated.kittyGraphics.value ? 'yes' : 'no'}, iTerm2 ${evaluated.itermImages.value ? 'yes' : 'no'}, pane's top-left at row ${facts.pane.top}, column ${facts.pane.left} (from 0)`,
     )
   }
   clearTimeout(secondDeadline)

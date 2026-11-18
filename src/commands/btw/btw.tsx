@@ -21,6 +21,7 @@ import {
 } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
+import { getActiveAgentForInput } from '../../state/selectors.js';
 import { createAbortController } from '../../utils/abortController.js';
 import { saveGlobalConfig } from '../../utils/config.js';
 import { errorMessage } from '../../utils/errors.js';
@@ -181,6 +182,7 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
 
     if (e.key === 'escape' || e.key === 'return' || e.key === ' ' || (e.ctrl && (e.key === 'c' || e.key === 'd'))) {
       e.preventDefault();
+      (e as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
       onDone(undefined, { display: 'skip' });
       return;
     }
@@ -310,7 +312,8 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
           setHistory(getBtwHistory().slice(0, -1));
           return;
         }
-        const cacheSafeParams = await buildCacheSafeParams(context);
+        const subagentCtx = getViewedSubagentMessages(context);
+        const cacheSafeParams = await buildCacheSafeParams(context, subagentCtx?.messages);
         const result = await runSideQuestion({
           question,
           cacheSafeParams,
@@ -465,9 +468,27 @@ function stripInProgressAssistantMessage(messages: Message[]): Message[] {
   return messages;
 }
 
-async function buildCacheSafeParams(context: ProcessUserInputContext): Promise<CacheSafeParams> {
-  const forkContextMessages = getMessagesAfterCompactBoundary(stripInProgressAssistantMessage(context.messages));
-  const saved = getLastCacheSafeParams();
+export function getViewedSubagentMessages(
+  context: Pick<ProcessUserInputContext, 'getAppState'>,
+): { agentId: string; messages: Message[] } | undefined {
+  const appState = context.getAppState?.();
+  if (!appState) return undefined;
+  const activeAgent = getActiveAgentForInput(appState);
+  if (activeAgent.type === 'named_agent' && activeAgent.task.agentType !== 'main-session') {
+    const id = activeAgent.task.id;
+    const messages = [...(appState.transcripts?.[id]?.messages ?? [])];
+    return { agentId: id, messages };
+  }
+  return undefined;
+}
+
+export async function buildCacheSafeParams(
+  context: ProcessUserInputContext,
+  subagentMessages?: Message[],
+): Promise<CacheSafeParams> {
+  const sourceMessages = subagentMessages ?? context.messages;
+  const forkContextMessages = getMessagesAfterCompactBoundary(stripInProgressAssistantMessage(sourceMessages));
+  const saved = subagentMessages === undefined ? getLastCacheSafeParams() : undefined;
   if (saved) {
     return {
       systemPrompt: saved.systemPrompt,
@@ -529,7 +550,8 @@ export async function runNonInteractiveBtw(
 
   let settled: InFlightBtwSettled = null;
   try {
-    const cacheSafeParams = await buildCacheSafeParams(context);
+    const subagentCtx = getViewedSubagentMessages(context);
+    const cacheSafeParams = await buildCacheSafeParams(context, subagentCtx?.messages);
     if (abortController.signal.aborted) {
       return null;
     }

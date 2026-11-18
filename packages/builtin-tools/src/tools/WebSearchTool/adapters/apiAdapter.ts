@@ -22,6 +22,7 @@ import { getMainLoopModel, getSmallFastModel } from 'src/utils/model/model.js'
 import { jsonParse } from 'src/utils/slowOperations.js'
 import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
+import { withWebSearchDeadline } from './deadline.js'
 
 function makeToolSchema(input: {
   allowedDomains?: string[]
@@ -59,155 +60,160 @@ export class ApiSearchAdapter implements WebSearchAdapter {
         })
       : null
 
-    const queryStream = queryModelWithStreaming({
-      messages: [userMessage],
-      systemPrompt: asSystemPrompt([
-        'You are an assistant for performing a web search tool use',
-      ]),
-      thinkingConfig: useHaiku
-        ? { type: 'disabled', mechanical: true }
-        : { type: 'enabled' as const, budgetTokens: 10000 },
-      tools: [],
-      signal: signal ?? new AbortController().signal,
-      options: {
-        getToolPermissionContext: async () => ({
-          mode: 'default' as const,
-          additionalWorkingDirectories: new Map(),
-          alwaysAllowRules: {},
-          alwaysDenyRules: {},
-          alwaysAskRules: {},
-          isBypassPermissionsModeAvailable: false,
-        }),
-        model,
-        toolChoice: useHaiku
-          ? { type: 'tool' as const, name: 'web_search' }
-          : undefined,
-        isNonInteractiveSession: false,
-        hasAppendSystemPrompt: false,
-        extraToolSchemas: [toolSchema],
-        querySource: 'web_search_tool' as const,
-        agents: [],
-        mcpTools: [],
-        agentId: undefined,
-        effortValue: undefined,
-        langfuseTrace,
-      },
-    })
+    return withWebSearchDeadline(signal, async effectiveSignal => {
+      const queryStream = queryModelWithStreaming({
+        messages: [userMessage],
+        systemPrompt: asSystemPrompt([
+          'You are an assistant for performing a web search tool use',
+        ]),
+        thinkingConfig: useHaiku
+          ? { type: 'disabled', mechanical: true }
+          : { type: 'enabled' as const, budgetTokens: 10000 },
+        tools: [],
+        signal: effectiveSignal,
+        options: {
+          getToolPermissionContext: async () => ({
+            mode: 'default' as const,
+            additionalWorkingDirectories: new Map(),
+            alwaysAllowRules: {},
+            alwaysDenyRules: {},
+            alwaysAskRules: {},
+            isBypassPermissionsModeAvailable: false,
+          }),
+          model,
+          toolChoice: useHaiku
+            ? { type: 'tool' as const, name: 'web_search' }
+            : undefined,
+          isNonInteractiveSession: false,
+          hasAppendSystemPrompt: false,
+          extraToolSchemas: [toolSchema],
+          querySource: 'web_search_tool' as const,
+          agents: [],
+          mcpTools: [],
+          agentId: undefined,
+          effortValue: undefined,
+          langfuseTrace,
+        },
+      })
 
-    const allContentBlocks: BetaContentBlock[] = []
-    let currentToolUseId: string | null = null
-    let currentToolUseJson = ''
-    const toolUseQueries = new Map<string, string>()
-    let progressCounter = 0
-    // densable: S = $c(I.message.content) when I.isApiErrorMessage — do NOT
-    // treat overload/API Error text as search results (#34 / #35).
-    let apiErrorText: string | null = null
+      const allContentBlocks: BetaContentBlock[] = []
+      let currentToolUseId: string | null = null
+      let currentToolUseJson = ''
+      const toolUseQueries = new Map<string, string>()
+      let progressCounter = 0
+      // densable: S = $c(I.message.content) when I.isApiErrorMessage — do NOT
+      // treat overload/API Error text as search results (#34 / #35).
+      let apiErrorText: string | null = null
 
-    for await (const event of queryStream) {
-      if (event.type === 'assistant') {
-        const msg = event as {
-          message: { content: BetaContentBlock[] }
-          isApiErrorMessage?: boolean
-        }
-        // densable: if (I.isApiErrorMessage) { S=$c(...); continue }
-        if (msg.isApiErrorMessage) {
-          apiErrorText =
-            getContentText(msg.message.content as never) ?? 'API Error'
-          continue
-        }
-        allContentBlocks.push(...msg.message.content)
-        continue
-      }
-
-      if (event.type === 'stream_event') {
-        const streamEvt = event as {
-          event?: {
-            type: string
-            content_block?: {
-              type: string
-              id?: string
-              tool_use_id?: string
-              content?: unknown
-              [key: string]: unknown
-            }
-            delta?: {
-              type: string
-              partial_json?: string
-              [key: string]: unknown
-            }
-            [key: string]: unknown
+      for await (const event of queryStream) {
+        if (event.type === 'assistant') {
+          const msg = event as {
+            message: { content: BetaContentBlock[] }
+            isApiErrorMessage?: boolean
           }
-        }
-
-        if (streamEvt.event?.type === 'content_block_start') {
-          const contentBlock = streamEvt.event.content_block
-          if (contentBlock && contentBlock.type === 'server_tool_use') {
-            currentToolUseId = contentBlock.id as string
-            currentToolUseJson = ''
+          // densable: if (I.isApiErrorMessage) { S=$c(...); continue }
+          if (msg.isApiErrorMessage) {
+            apiErrorText =
+              getContentText(msg.message.content as never) ?? 'API Error'
             continue
           }
+          allContentBlocks.push(...msg.message.content)
+          continue
         }
 
-        if (
-          currentToolUseId &&
-          streamEvt.event?.type === 'content_block_delta'
-        ) {
-          const delta = streamEvt.event.delta
-          if (delta?.type === 'input_json_delta' && delta.partial_json) {
-            currentToolUseJson += delta.partial_json
-            try {
-              const queryMatch = currentToolUseJson.match(
-                /"query"\s*:\s*"((?:[^"\\]|\\.)*)"/,
-              )
-              if (queryMatch && queryMatch[1]) {
-                const parsedQuery = jsonParse('"' + queryMatch[1] + '"')
-                if (
-                  !toolUseQueries.has(currentToolUseId) ||
-                  toolUseQueries.get(currentToolUseId) !== parsedQuery
-                ) {
-                  toolUseQueries.set(currentToolUseId, parsedQuery)
-                  progressCounter++
-                  onProgress?.({
-                    type: 'query_update',
-                    query: parsedQuery,
-                  })
-                }
+        if (event.type === 'stream_event') {
+          const streamEvt = event as {
+            event?: {
+              type: string
+              content_block?: {
+                type: string
+                id?: string
+                tool_use_id?: string
+                content?: unknown
+                [key: string]: unknown
               }
-            } catch {
-              // Ignore parsing errors for partial JSON
+              delta?: {
+                type: string
+                partial_json?: string
+                [key: string]: unknown
+              }
+              [key: string]: unknown
+            }
+          }
+
+          if (streamEvt.event?.type === 'content_block_start') {
+            const contentBlock = streamEvt.event.content_block
+            if (contentBlock && contentBlock.type === 'server_tool_use') {
+              currentToolUseId = contentBlock.id as string
+              currentToolUseJson = ''
+              continue
+            }
+          }
+
+          if (
+            currentToolUseId &&
+            streamEvt.event?.type === 'content_block_delta'
+          ) {
+            const delta = streamEvt.event.delta
+            if (delta?.type === 'input_json_delta' && delta.partial_json) {
+              currentToolUseJson += delta.partial_json
+              try {
+                const queryMatch = currentToolUseJson.match(
+                  /"query"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+                )
+                if (queryMatch && queryMatch[1]) {
+                  const parsedQuery = jsonParse('"' + queryMatch[1] + '"')
+                  if (
+                    !toolUseQueries.has(currentToolUseId) ||
+                    toolUseQueries.get(currentToolUseId) !== parsedQuery
+                  ) {
+                    toolUseQueries.set(currentToolUseId, parsedQuery)
+                    progressCounter++
+                    onProgress?.({
+                      type: 'query_update',
+                      query: parsedQuery,
+                    })
+                  }
+                }
+              } catch {
+                // Ignore parsing errors for partial JSON
+              }
+            }
+          }
+
+          if (streamEvt.event?.type === 'content_block_start') {
+            const contentBlock = streamEvt.event.content_block
+            if (
+              contentBlock &&
+              contentBlock.type === 'web_search_tool_result'
+            ) {
+              const toolUseId = contentBlock.tool_use_id as string
+              const actualQuery = toolUseQueries.get(toolUseId) || query
+              const content = contentBlock.content
+              progressCounter++
+              onProgress?.({
+                type: 'search_results_received',
+                resultCount: Array.isArray(content) ? content.length : 0,
+                query: actualQuery,
+              })
             }
           }
         }
-
-        if (streamEvt.event?.type === 'content_block_start') {
-          const contentBlock = streamEvt.event.content_block
-          if (contentBlock && contentBlock.type === 'web_search_tool_result') {
-            const toolUseId = contentBlock.tool_use_id as string
-            const actualQuery = toolUseQueries.get(toolUseId) || query
-            const content = contentBlock.content
-            progressCounter++
-            onProgress?.({
-              type: 'search_results_received',
-              resultCount: Array.isArray(content) ? content.length : 0,
-              query: actualQuery,
-            })
-          }
-        }
       }
-    }
 
-    endTrace(langfuseTrace)
+      endTrace(langfuseTrace)
 
-    // Extract SearchResult[] from content blocks
-    const results = extractSearchResults(allContentBlocks)
-    // densable: if (S!==null && x.results.length===0) throw new tn(S, "web-search-side-query-api-error")
-    if (apiErrorText !== null && results.length === 0) {
-      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-        apiErrorText,
-        'web-search-side-query-api-error',
-      )
-    }
-    return results
+      // Extract SearchResult[] from content blocks
+      const results = extractSearchResults(allContentBlocks)
+      // densable: if (S!==null && x.results.length===0) throw new tn(S, "web-search-side-query-api-error")
+      if (apiErrorText !== null && results.length === 0) {
+        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+          apiErrorText,
+          'web-search-side-query-api-error',
+        )
+      }
+      return results
+    })
   }
 }
 

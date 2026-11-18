@@ -14,7 +14,7 @@ import {
 } from '../FullscreenLayout.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
-import type { OptionWithDescription } from './select.js';
+import { type OptionWithDescription, usePasteFromOtherRows } from './select.js';
 import { SelectInputOption } from './select-input-option.js';
 import { SelectOption } from './select-option.js';
 import { useMultiSelectState } from './use-multi-select-state.js';
@@ -161,6 +161,12 @@ export function SelectMulti<T>({
     };
   };
 
+  const handlePasteFromOtherRows = usePasteFromOtherRows({
+    options,
+    focusedValue: state.focusedValue,
+    focusOption: state.focusOption,
+  });
+
   if (state.leftoverSrRadio) {
     return (
       <Box ref={leftoverHostRef} flexDirection="column" tabIndex={0} onKeyDown={state.leftoverBindKeyDown}>
@@ -190,7 +196,7 @@ export function SelectMulti<T>({
 
   return (
     <LeftoverNnDtContext value={leftoverNnDt}>
-      <Box ref={leftoverHostRef} flexDirection="column">
+      <Box ref={leftoverHostRef} flexDirection="column" onPaste={handlePasteFromOtherRows}>
         <Box flexDirection="column">
           {state.visibleOptions.map((option, index) => {
             const isOptionFocused = !isDisabled && state.focusedValue === option.value && !state.isSubmitFocused;

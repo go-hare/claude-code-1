@@ -193,6 +193,23 @@ export function classifyRepositoryDenial(
 
 export type RepositoryThrottle = 'refused_by_git_wrapper' | 'http_429'
 
+/** densable `N$i` — human-readable label for repository throttle reasons */
+export const REPOSITORY_THROTTLE_LABELS: Record<RepositoryThrottle, string> = {
+  refused_by_git_wrapper: 'a wrapper installed as git exited with 75',
+  http_429: 'the host answered HTTP 429',
+}
+
+/** densable `mfo` — git fetch failed due to throttling on its last attempt */
+export class FetchThrottledError extends Error {
+  readonly throttle: RepositoryThrottle
+
+  constructor(message: string, throttle: RepositoryThrottle) {
+    super(message)
+    this.name = 'FetchThrottledError'
+    this.throttle = throttle
+  }
+}
+
 const HTTP_429_RE =
   /^fatal: unable to access '.*': the requested url returned error: 429$/
 
@@ -1513,6 +1530,7 @@ export async function fetchWithRetry(
   const wallStart = Date.now()
   let backoff = 4000 + Math.random() * 4000
   let last: unknown
+  let lastExitCode: number | null | undefined
   const samples: string[] = []
   const sample = (u: string): string =>
     u.length <= GIT_ERR_SAMPLE_MAX
@@ -1554,6 +1572,10 @@ export async function fetchWithRetry(
       return true
     } catch (f) {
       last = f
+      lastExitCode =
+        f !== null && typeof f === 'object' && 'exitCode' in f
+          ? (f as { exitCode?: number | null }).exitCode
+          : undefined
       const m = errText(f)
       ctx.onDebug(`[byoc:git] Fetch attempt ${u + 1} failed: ${m}`)
       samples.push(sample(redactSecretsInText(m)))
@@ -1577,9 +1599,16 @@ export async function fetchWithRetry(
       }
     }
   }
-  throw new Error(
-    `git fetch failed after ${GIT_FETCH_ATTEMPTS} attempts: ${errText(last)}`,
+  const finalMsg = `git fetch failed after ${GIT_FETCH_ATTEMPTS} attempts: ${errText(last)}`
+  const throttle = classifyRepositoryThrottle(
+    errText(last),
+    lastExitCode,
+    ctx.gitURL,
   )
+  if (throttle !== undefined) {
+    throw new FetchThrottledError(finalMsg, throttle)
+  }
+  throw new Error(finalMsg)
 }
 
 /** densable `U7s` — fetch + reset/checkout */

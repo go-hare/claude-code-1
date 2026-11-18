@@ -29,13 +29,25 @@ export type SupportsHyperlinksOptions = {
  * Local: when FORCE_HYPERLINK is set, honor it over auto-detection —
  *   "0" / empty-after-parse-0 → false; any other value → true.
  */
+function isEnvFalsy(value: string): boolean {
+  const normalized = value.toLowerCase().trim()
+  return (
+    normalized === '0' ||
+    normalized === 'false' ||
+    normalized === 'no' ||
+    normalized === 'off'
+  )
+}
+
 function forceHyperlinkOverride(env: EnvLike): boolean | undefined {
   if (!('FORCE_HYPERLINK' in env)) return undefined
   const raw = env['FORCE_HYPERLINK']
-  // densable supports-hyperlinks Mms: if(r) return !(r.length>0 && parseInt(r,10)===0)
+  // densable supports-hyperlinks Mms / 2.1.314 UJe: !(ws(i) || parseInt(i,10)===0)
   // unset key handled above; present:
   if (raw === undefined) return true
-  if (raw.length > 0 && Number.parseInt(raw, 10) === 0) return false
+  if (isEnvFalsy(raw) || (raw.length > 0 && Number.parseInt(raw, 10) === 0)) {
+    return false
+  }
   return true
 }
 

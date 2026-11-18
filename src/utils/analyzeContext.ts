@@ -399,7 +399,7 @@ async function countBuiltInToolTokens(
 
   // Check if tool search is enabled
   const { isSearchExtraToolsEnabled } = await import('./searchExtraTools.js')
-  const { isDeferredTool } = await import(
+  const { isDeferredTool, getNonDeferrableBuiltins } = await import(
     '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
   )
   const isDeferred = await isSearchExtraToolsEnabled(
@@ -685,7 +685,7 @@ export async function countMcpToolTokens(
   // Check if tool search is enabled - if so, MCP tools are deferred
   // isSearchExtraToolsEnabled handles threshold calculation internally for TstAuto mode
   const { isSearchExtraToolsEnabled } = await import('./searchExtraTools.js')
-  const { isDeferredTool } = await import(
+  const { isDeferredTool, getNonDeferrableBuiltins } = await import(
     '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
   )
 
@@ -719,13 +719,20 @@ export async function countMcpToolTokens(
     }
   }
 
-  // Build tool details with isLoaded flag
+  // Build tool details with isLoaded flag.
+  // Precompute nonDeferrableBuiltins once instead of calling getNonDeferrableBuiltins()
+  // inside isDeferredTool(tool) for every MCP tool (#1433, 10k+ MCP tools).
+  const nonDeferrableBuiltins = new Set(getNonDeferrableBuiltins())
   for (const [i, tool] of mcpTools.entries()) {
+    const isToolDeferred =
+      tool.alwaysLoad !== true &&
+      !nonDeferrableBuiltins.has(tool.name) &&
+      (tool.isMcp === true || isDeferredTool(tool))
     mcpToolDetails.push({
       name: tool.name,
       serverName: tool.name.split('__')[1] || 'unknown',
       tokens: mcpToolTokensByTool[i]!,
-      isLoaded: loadedMcpToolNames.has(tool.name) || !isDeferredTool(tool),
+      isLoaded: loadedMcpToolNames.has(tool.name) || !isToolDeferred,
     })
   }
 
@@ -987,7 +994,20 @@ export async function analyzeContextUsage(
     }
   }
 
-  // Build the effective system prompt using the shared utility
+  // densable 2.1.312 YS (#1337) — subagent autoCompactWindow acts as a ceiling
+  // that can lower the env/model window, never raise it.
+  const agentCeiling =
+    mainThreadAgentDefinition &&
+    'autoCompactWindow' in mainThreadAgentDefinition &&
+    typeof mainThreadAgentDefinition.autoCompactWindow === 'number' &&
+    Number.isFinite(mainThreadAgentDefinition.autoCompactWindow) &&
+    mainThreadAgentDefinition.autoCompactWindow > 0
+      ? mainThreadAgentDefinition.autoCompactWindow
+      : undefined
+  if (agentCeiling !== undefined && agentCeiling < contextWindow) {
+    contextWindow = agentCeiling
+    autocompactSource = 'settings'
+  }
   const defaultSystemPrompt = await getSystemPrompt(tools, runtimeModel)
   const effectiveSystemPrompt = buildEffectiveSystemPrompt({
     mainThreadAgentDefinition,

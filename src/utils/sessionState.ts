@@ -60,6 +60,7 @@ export type SessionExternalMetadata = {
   // present in the official binary (BG midturn LLM writes job `detail`, not
   // this key). Callers may still set a string; Host sees it via stream mirror.
   task_summary?: string | null
+  is_ultracode_active?: boolean | null
 }
 
 /**
@@ -96,6 +97,8 @@ let waitingOnUserListener: WaitingOnUserChangedListener | null = null
 let internalMetadataListener: SessionInternalMetadataChangedListener | null =
   null
 let workerPermissionModeRecordEnabled = false
+let ultracodeActiveSent: boolean | undefined = false
+let ultracodeActiveWritten = false
 
 /**
  * Official Imn nested-chain idle densable tracker (module singleton).
@@ -400,6 +403,10 @@ export function notifySessionMetadataChanged(
 ): void {
   applyMetadataUpdate(metadata)
   metadataListener?.(metadata)
+  if ('is_ultracode_active' in metadata && metadataListener) {
+    ultracodeActiveSent = metadata.is_ultracode_active === true
+    ultracodeActiveWritten = true
+  }
   // densable 2.1.211 notifyMetadataChanged: stream system/task_summary so
   // non-CCR Hosts mirror external_metadata.task_summary (detail null = clear).
   if (Object.hasOwn(metadata, 'task_summary')) {
@@ -448,6 +455,43 @@ export function notifyPermissionModeChanged(mode: PermissionMode): void {
 /** Official `Aio.enableWorkerPermissionModeRecord`. */
 export function enableWorkerPermissionModeRecord(): void {
   workerPermissionModeRecordEnabled = true
+}
+
+/** Official 2.1.325 `ultracodeActivePatch` (#1373). */
+export function ultracodeActivePatch(active: boolean): {
+  is_ultracode_active?: boolean | null
+} {
+  return active === ultracodeActiveSent
+    ? {}
+    : { is_ultracode_active: active || null }
+}
+
+/** Official 2.1.325 `notifyUltracodeActive` (#1373). */
+export function notifyUltracodeActive(active: boolean): void {
+  const patch = ultracodeActivePatch(active)
+  if ('is_ultracode_active' in patch) {
+    notifySessionMetadataChanged(patch)
+  }
+}
+
+/** Official 2.1.325 `settleUltracodeActive` (#1373). */
+export function settleUltracodeActive(
+  active: boolean,
+  restored?: RestoredWorkerState,
+): void {
+  if (!ultracodeActiveWritten) {
+    const ext = restored?.external as Record<string, unknown> | null | undefined
+    ultracodeActiveSent =
+      restored?.readFailed === true
+        ? undefined
+        : ext?.is_ultracode_active === true
+  }
+  notifyUltracodeActive(active)
+}
+
+export function resetUltracodeActiveForTesting(): void {
+  ultracodeActiveSent = false
+  ultracodeActiveWritten = false
 }
 
 /** Official `Aio.isWorkerPermissionModeRecordEnabled`. */

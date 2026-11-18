@@ -2,7 +2,10 @@ import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useMemo } from 'react';
 import { Box, KeyboardShortcutHint, Text } from '@anthropic/ink';
-import { useAppState } from 'src/state/AppState.js';
+import { useAppState, useAppStateStore } from 'src/state/AppState.js';
+import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
+import { sendQueuedNow } from '../../utils/foregroundToolCalls.js';
+import { FePress } from '../CustomSelect/select.js';
 import { STATUS_TAG, SUMMARY_TAG, TASK_NOTIFICATION_TAG } from '../../constants/xml.js';
 import { QueuedMessageProvider } from '../../context/QueuedMessageContext.js';
 import { useCommandQueue } from '../../hooks/useCommandQueue.js';
@@ -156,13 +159,24 @@ function processQueuedCommands(queuedCommands: QueuedCommand[]): QueuedCommand[]
   return [...otherCommands, ...visibleNotifications, overflowCommand];
 }
 
+export function buildSendNowHintLabel(sendNowChord: string): React.ReactNode {
+  return sendNowChord === '' ? (
+    'click to send now'
+  ) : (
+    <KeyboardShortcutHint shortcut={sendNowChord} action="send now" format={{ keyCase: 'lower' }} />
+  );
+}
+
 function PromptInputQueuedCommandsImpl({
   abortController,
   mcpClients,
+  onSendNow,
 }: {
   abortController?: AbortController | null;
   mcpClients?: MCPServerConnection[];
+  onSendNow?: () => boolean;
 }): React.ReactNode {
+  const store = useAppStateStore();
   const queuedCommands = useCommandQueue();
   const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
@@ -217,11 +231,30 @@ function PromptInputQueuedCommandsImpl({
   const selecting = highlightRow !== -1;
 
   const sendNowChord = formatSendNowHint();
+  const isFullscreen = isFullscreenEnvEnabled();
+  const canSendNow = canShowQueueSendNowHint(queuedCommands, abortController);
+  const handleSendNowClick = React.useCallback(() => {
+    if (onSendNow) {
+      return onSendNow();
+    }
+    return sendQueuedNow(store.getState, store.setState, {
+      interruptForSubmit: () => {
+        abortController?.abort();
+        return true;
+      },
+    });
+  }, [onSendNow, store, abortController]);
   const sendNowHint =
-    sendNowChord !== '' && canShowQueueSendNowHint(queuedCommands, abortController) ? (
+    canSendNow && (sendNowChord !== '' || isFullscreen) ? (
       <Box paddingLeft={2}>
         <Text dimColor>
-          <KeyboardShortcutHint shortcut={sendNowChord} action="send now" format={{ keyCase: 'lower' }} />
+          {isFullscreen ? (
+            <FePress onPress={handleSendNowClick}>
+              {sendNowChord === '' ? 'click to send now' : `${sendNowChord} to send now`}
+            </FePress>
+          ) : (
+            buildSendNowHintLabel(sendNowChord)
+          )}
         </Text>
       </Box>
     ) : null;

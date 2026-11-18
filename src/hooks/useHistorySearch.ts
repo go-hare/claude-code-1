@@ -5,14 +5,59 @@ import {
   getValueFromInput,
 } from '../components/PromptInput/inputModes.js'
 import {
+  expandPastedTextRefs,
   historyPasteIdentityKey,
   makeHistoryReader,
+  parseReferences,
   renumberHistoryEntryPastes,
 } from '../history.js'
 import type { KeyboardEvent } from '@anthropic/ink'
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js'
 import type { PromptInputMode } from '../types/textInputTypes.js'
 import type { HistoryEntry } from '../utils/config.js'
+
+const MAX_HISTORY_PASTE_SEARCH_CHARS = 32768
+
+/**
+ * Gold `RIs`: expand text paste placeholders up to `MAX_HISTORY_PASTE_SEARCH_CHARS`
+ * per paste so Ctrl+R can match text inside collapsed `[Pasted text]` pills.
+ */
+export function expandHistoryEntryForSearch(
+  display: string,
+  pastedContents: HistoryEntry['pastedContents'],
+): string {
+  const capped: HistoryEntry['pastedContents'] = {}
+  for (const [k, v] of Object.entries(pastedContents)) {
+    capped[Number(k)] =
+      v.type === 'text' && v.content.length > MAX_HISTORY_PASTE_SEARCH_CHARS
+        ? { ...v, content: v.content.slice(0, MAX_HISTORY_PASTE_SEARCH_CHARS) }
+        : v
+  }
+  return expandPastedTextRefs(display, capped)
+}
+
+/**
+ * Gold `KGe`: locate cursor offset for a history search match — direct match
+ * in `value` first, otherwise the start index of the last matching `[Pasted text #N]`
+ * placeholder, or `value.length` if none.
+ */
+export function findHistoryMatchCursorOffset(
+  value: string,
+  pastedContents: HistoryEntry['pastedContents'],
+  lowerQuery: string,
+): number {
+  const idx = value.toLowerCase().lastIndexOf(lowerQuery)
+  if (idx !== -1) return idx
+  const ref = parseReferences(value).findLast(r => {
+    const content = pastedContents[r.id]
+    return (
+      content?.type === 'text' &&
+      !content.unavailable &&
+      content.content.toLowerCase().includes(lowerQuery)
+    )
+  })
+  return ref ? ref.index : value.length
+}
 
 export function useHistorySearch(
   onAcceptHistory: (entry: HistoryEntry) => void,
@@ -119,8 +164,13 @@ export function useHistorySearch(
           item.value.pastedContents,
         )
 
-        const matchPosition = display.lastIndexOf(historyQuery)
-        if (matchPosition !== -1 && !seenPrompts.current.has(identity)) {
+        const lowerQuery = historyQuery.toLowerCase()
+        const matched =
+          display.toLowerCase().includes(lowerQuery) ||
+          expandHistoryEntryForSearch(display, item.value.pastedContents)
+            .toLowerCase()
+            .includes(lowerQuery)
+        if (matched && !seenPrompts.current.has(identity)) {
           seenPrompts.current.add(identity)
           setHistoryMatch(item.value)
           setHistoryFailedMatch(false)
@@ -131,9 +181,12 @@ export function useHistorySearch(
 
           // Position cursor relative to the clean value, not the display
           const value = getValueFromInput(display)
-          const cleanMatchPosition = value.lastIndexOf(historyQuery)
           onCursorChange(
-            cleanMatchPosition !== -1 ? cleanMatchPosition : matchPosition,
+            findHistoryMatchCursorOffset(
+              value,
+              item.value.pastedContents,
+              lowerQuery,
+            ),
           )
           return
         }
@@ -187,6 +240,13 @@ export function useHistorySearch(
       const mode = getModeFromInput(renumbered.display)
       const value = getValueFromInput(renumbered.display)
       onInputChange(value)
+      onCursorChange(
+        findHistoryMatchCursorOffset(
+          value,
+          renumbered.pastedContents,
+          historyQuery.toLowerCase(),
+        ),
+      )
       onModeChange(mode)
       setPastedContents(renumbered.pastedContents)
     } else {
@@ -196,7 +256,9 @@ export function useHistorySearch(
     reset()
   }, [
     historyMatch,
+    historyQuery,
     onInputChange,
+    onCursorChange,
     onModeChange,
     setPastedContents,
     originalPastedContents,

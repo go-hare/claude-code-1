@@ -1,5 +1,6 @@
 import type { StructuredPatchHunk } from 'diff'
-import { access, lstat, readFile } from 'fs/promises'
+import { access, copyFile, lstat, mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
 import { dirname, join, relative, sep } from 'path'
 import { getOriginalCwd, getSessionStartTime } from '../bootstrap/state.js'
 import { getCwd } from './cwd.js'
@@ -73,11 +74,42 @@ const MAX_FILES_FOR_DETAILS = 500 // Skip per-file details if more files than th
 /** densable `_t=500` — lstat cap before AzS filter. */
 const UNTRACKED_LSTAT_CAP = 500
 
-function gitOpts(abort?: AbortSignal) {
+function gitOpts(abort?: AbortSignal, envOverride?: NodeJS.ProcessEnv) {
   return {
     timeout: GIT_TIMEOUT_MS,
     preserveOutputOnError: false,
     abortSignal: abort,
+    env: {
+      ...process.env,
+      GIT_OPTIONAL_LOCKS: '0',
+      GIT_TERMINAL_PROMPT: '0',
+      ...envOverride,
+    },
+  }
+}
+
+/**
+ * Official Voa / qoa (#1376) — run a read-only git diff operation against an
+ * isolated copy of `.git/index` (`GIT_INDEX_FILE`) in a temporary directory
+ * so concurrent user git commands never contend on `.git/index.lock`.
+ */
+export async function withPrivateGitIndex<T>(
+  gitDir: string,
+  fn: (env: NodeJS.ProcessEnv) => Promise<T>,
+): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'cc-git-idx-'))
+  const privateIndex = join(dir, 'index')
+  try {
+    await copyFile(join(gitDir, 'index'), privateIndex).catch(() => {
+      // Missing index (e.g. unborn repo) is fine — git treats absent GIT_INDEX_FILE as empty
+    })
+    return await fn({
+      GIT_INDEX_FILE: privateIndex,
+      GIT_OPTIONAL_LOCKS: '0',
+      GIT_TERMINAL_PROMPT: '0',
+    })
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
 }
 

@@ -1288,6 +1288,7 @@ export async function initEnvLessBridgeCore(
       // cannot overwrite deferredClose — do NOT clear Ei here.
       transportGeneration++
       transport.close()
+      await transport.flushGoodbye?.()
       transport = await createV2ReplTransport({
         sessionUrl: buildCCRv2SdkUrl(fresh.api_base_url, sessionId),
         ingressToken: fresh.worker_jwt,
@@ -1305,6 +1306,7 @@ export async function initEnvLessBridgeCore(
         // Don't wire/connect/schedule — we'd re-arm timers after cancelAll()
         // and fire onInboundMessage into a torn-down bridge.
         transport.close()
+        await transport.flushGoodbye?.()
         return 'rebuilt'
       }
       wireTransportCallbacks()
@@ -1889,6 +1891,7 @@ export async function initEnvLessBridgeCore(
         }
       }
       transport.close()
+      await transport.flushGoodbye?.()
       logForDebugging(
         `[remote-bridge] Teardown complete (skipArchive): session=${sessionId}`,
       )
@@ -1948,6 +1951,7 @@ export async function initEnvLessBridgeCore(
     }
 
     transport.close()
+    await transport.flushGoodbye?.()
 
     const archiveStatus: ArchiveTelemetryStatus =
       status === 'no_token'

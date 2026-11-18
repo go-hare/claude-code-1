@@ -556,6 +556,11 @@ export type Attachment =
       displayPath: string
     }
   | {
+      type: 'tool_results_cut'
+      callIds: string[]
+      standIn: string
+    }
+  | {
       type: 'selected_lines_in_ide'
       ideName: string
       lineStart: number
@@ -858,7 +863,7 @@ export type Attachment =
     }
   | {
       type: 'ultrathink_effort'
-      level: 'high'
+      level: 'high' | 'xhigh'
     }
   | {
       type: 'deferred_tools_delta'
@@ -1225,7 +1230,12 @@ export async function getAttachments(
       Promise.resolve(getDateChangeAttachments(messages)),
     ),
     maybe('ultrathink_effort', () =>
-      Promise.resolve(getUltrathinkEffortAttachment(input)),
+      Promise.resolve(
+        getUltrathinkEffortAttachment(
+          input,
+          toolUseContext.options.mainLoopModel,
+        ),
+      ),
     ),
     maybe('deferred_tools_delta', () =>
       Promise.resolve(
@@ -2128,12 +2138,294 @@ export function getDateChangeAttachments(
   return [{ type: 'date_change', newDate: currentDate }]
 }
 
-function getUltrathinkEffortAttachment(input: string | null): Attachment[] {
-  if (!isUltrathinkEnabled() || !input || !hasUltrathinkKeyword(input)) {
+/**
+ * Gold `BN` (#1287): strip `@[...]` mention tokens before ultrathink detection.
+ */
+function stripAtMentionTokens(text: string): string {
+  return text.replace(/@\[[^\]]*\]/g, '')
+}
+
+/**
+ * Gold `Nqo` (#1287): strip `<pasted_content id="...">...</pasted_content>` blocks.
+ */
+function stripPastedContentBlocks(text: string): string {
+  return text
+    .replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/g, '')
+    .trim()
+}
+
+/**
+ * Gold `Aoo` (#1287): typed-only ultrathink detection.
+ * Live composer Enter checks `preExpansionInput` (paste-safe).
+ * Local stdin checks that `ultrathink` remains outside `@[...]` and `<pasted_content>`.
+ */
+export function isTypedUltrathinkPrompt({
+  composerEnter,
+  preExpansionInput,
+  localStdinOrigin,
+  input,
+}: {
+  composerEnter?: unknown
+  preExpansionInput?: string
+  localStdinOrigin?: boolean
+  input: string | null
+}): boolean {
+  const { isComposerEnter } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./processUserInput/composerEnter.js') as typeof import('./processUserInput/composerEnter.js')
+  if (isComposerEnter(composerEnter)) {
+    return (
+      preExpansionInput !== undefined &&
+      hasUltrathinkKeyword(stripAtMentionTokens(preExpansionInput))
+    )
+  }
+  if (!localStdinOrigin || !input) {
+    return false
+  }
+  const countMatches = (s: string) => s.match(/\bultrathink\b/gi)?.length ?? 0
+  const total = countMatches(input)
+  const fromMentions = Math.max(
+    0,
+    total - countMatches(stripAtMentionTokens(input)),
+  )
+  const fromPasted = Math.max(
+    0,
+    total - countMatches(stripPastedContentBlocks(input)),
+  )
+  return (
+    total - fromMentions - fromPasted > 0 &&
+    hasUltrathinkKeyword(
+      stripAtMentionTokens(stripPastedContentBlocks(input)),
+    ) &&
+    hasUltrathinkKeyword(stripPastedContentBlocks(stripAtMentionTokens(input)))
+  )
+}
+
+export function getUltrathinkEffortAttachment(
+  input: string | null,
+  model?: string,
+  options?: {
+    composerEnter?: unknown
+    preExpansionInput?: string
+    localStdinOrigin?: boolean
+  },
+): Attachment[] {
+  if (!isUltrathinkEnabled() || !input) {
+    return []
+  }
+  const hasTypedSignal =
+    options !== undefined &&
+    (options.composerEnter !== undefined ||
+      options.localStdinOrigin !== undefined ||
+      options.preExpansionInput !== undefined)
+  const matched = hasTypedSignal
+    ? isTypedUltrathinkPrompt({
+        composerEnter: options.composerEnter,
+        preExpansionInput: options.preExpansionInput,
+        localStdinOrigin: options.localStdinOrigin,
+        input,
+      })
+    : hasUltrathinkKeyword(input)
+  if (!matched) {
     return []
   }
   logEvent('tengu_ultrathink', {})
-  return [{ type: 'ultrathink_effort', level: 'high' }]
+  let level: 'high' | 'xhigh' = 'high'
+  if (model) {
+    const { modelSupportsXhighEffort } =
+      // Lazy require avoids static cycle risk (effort ↔ attachments via messages).
+      require('./effort.js') as typeof import('./effort.js')
+    const { getAPIProvider } =
+      require('./model/providers.js') as typeof import('./model/providers.js')
+    if (getAPIProvider() === 'firstParty' && modelSupportsXhighEffort(model)) {
+      level = 'xhigh'
+    }
+  }
+  return [{ type: 'ultrathink_effort', level }]
+}
+
+const ADAPTIVE_PINWHEEL_MAX_STAND_IN_LEN = 200
+const ADAPTIVE_PINWHEEL_PRESERVE_MARKERS = [
+  '<artifact-content-authored-by-others/>',
+  '<remote-control-device-report/>',
+]
+
+export function isAdaptivePinwheelEnabled(): boolean {
+  return (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_adaptive_pinwheel', true) !==
+    false
+  )
+}
+
+/**
+ * Gold `pbs` (#1422): collect `(callId -> standIn)` from `tool_results_cut`
+ * attachment messages when `tengu_adaptive_pinwheel` is enabled.
+ */
+export function collectToolResultCutMap(
+  messages: readonly Message[],
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const msg of messages) {
+    if (msg.type !== 'attachment') continue
+    const att = msg.attachment as
+      | { type?: unknown; callIds?: unknown; standIn?: unknown }
+      | undefined
+    if (att?.type !== 'tool_results_cut') continue
+    const { callIds, standIn } = att
+    if (
+      !Array.isArray(callIds) ||
+      typeof standIn !== 'string' ||
+      standIn.length === 0 ||
+      standIn.length > ADAPTIVE_PINWHEEL_MAX_STAND_IN_LEN
+    ) {
+      continue
+    }
+    for (const id of callIds) {
+      if (typeof id === 'string' && !map.has(id)) {
+        map.set(id, standIn)
+      }
+    }
+  }
+  return map.size > 0 && !isAdaptivePinwheelEnabled() ? new Map() : map
+}
+
+/**
+ * Gold `UY` (#1422): validate `tool_results_cut` stand-ins against assistant
+ * `tool_use` blocks (excluding decomposed `batchToolUses` children) and merge
+ * with any pre-existing `cuts`.
+ */
+export function resolveToolResultCutStandIns(
+  messages: readonly Message[],
+  isEligibleTool: (name: string) => boolean = () => true,
+  existing?: ReadonlyMap<string, string>,
+): Map<string, string> | undefined {
+  const fromAttachments = collectToolResultCutMap(messages)
+  if (
+    fromAttachments.size === 0 &&
+    (existing === undefined ||
+      existing.size === 0 ||
+      !isAdaptivePinwheelEnabled())
+  ) {
+    return undefined
+  }
+  const eligibleIds = new Set<string>()
+  const ineligibleIds = new Set<string>()
+  for (const msg of fromAttachments.size > 0 ? messages : []) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+      continue
+    }
+    const batchUses = (msg as { batchToolUses?: unknown }).batchToolUses
+    const batchPrefixes = (Array.isArray(batchUses) ? batchUses : []).map(
+      b => `${String((b as { id?: unknown } | null)?.id)}_`,
+    )
+    for (const block of msg.message.content) {
+      if (
+        typeof block !== 'object' ||
+        block === null ||
+        block.type !== 'tool_use' ||
+        !fromAttachments.has(block.id)
+      ) {
+        continue
+      }
+      const isBatchChild = batchPrefixes.some(prefix =>
+        block.id.startsWith(prefix),
+      )
+      if (
+        typeof block.name === 'string' &&
+        isEligibleTool(block.name) &&
+        !isBatchChild
+      ) {
+        eligibleIds.add(block.id)
+      } else {
+        ineligibleIds.add(block.id)
+      }
+    }
+  }
+  const merged = new Map(existing)
+  for (const [id, standIn] of fromAttachments) {
+    if (eligibleIds.has(id) && !ineligibleIds.has(id) && !merged.has(id)) {
+      merged.set(id, standIn)
+    }
+  }
+  return merged.size > 0 ? merged : undefined
+}
+
+function substituteToolResultContent(
+  block: {
+    is_error?: boolean
+    content?: unknown
+  },
+  standIn: string,
+): string | undefined {
+  if (block.is_error === true) return undefined
+  let text = ''
+  let hasImage = false
+  if (typeof block.content === 'string') {
+    text = block.content
+  } else if (Array.isArray(block.content)) {
+    for (const part of block.content) {
+      if (typeof part !== 'object' || part === null) return undefined
+      const typed = part as { type?: unknown; text?: unknown }
+      if (typed.type === 'image') {
+        hasImage = true
+      } else if (typed.type === 'text' && typeof typed.text === 'string') {
+        text += typed.text
+      } else {
+        return undefined
+      }
+    }
+  } else {
+    return undefined
+  }
+  const preserved = ADAPTIVE_PINWHEEL_PRESERVE_MARKERS.filter(m =>
+    text.includes(m),
+  )
+  if (hasImage) {
+    return preserved.length > 0 ? undefined : standIn
+  }
+  const replacement = `${preserved.map(m => `${m}\n`).join('')}${standIn}`
+  return text.length > replacement.length ? replacement : undefined
+}
+
+/**
+ * Gold `xGt` / `mbs` (#1422): substitute `tool_result` contents for cut calls.
+ */
+export function applyToolResultCutStandIns<
+  T extends { type: string; message?: { content?: unknown } },
+>(messages: readonly T[], cuts: ReadonlyMap<string, string> | undefined): T[] {
+  if (cuts === undefined || cuts.size === 0) return [...messages]
+  return messages.map(msg => {
+    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) {
+      return msg
+    }
+    let changed = false
+    const nextContent = msg.message.content.map(block => {
+      if (
+        typeof block !== 'object' ||
+        block === null ||
+        (block as { type?: unknown }).type !== 'tool_result'
+      ) {
+        return block
+      }
+      const tr = block as {
+        type: 'tool_result'
+        tool_use_id: string
+        is_error?: boolean
+        content?: unknown
+      }
+      const standIn = cuts.get(tr.tool_use_id)
+      const substituted =
+        standIn === undefined
+          ? undefined
+          : substituteToolResultContent(tr, standIn)
+      if (substituted === undefined) return block
+      changed = true
+      return { ...tr, content: substituted }
+    })
+    return changed
+      ? { ...msg, message: { ...msg.message, content: nextContent } }
+      : msg
+  })
 }
 
 // Exported for compact.ts — the gate must be identical at both call sites.

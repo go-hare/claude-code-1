@@ -257,6 +257,7 @@ export function filterInvalidPermissionRules(
           file: filePath,
           path: `permissions.${key}`,
           message: `Non-string value in ${key} array was removed`,
+          severity: 'warning',
           invalidValue: rule,
         })
         return false
@@ -272,6 +273,7 @@ export function filterInvalidPermissionRules(
           file: filePath,
           path: `permissions.${key}`,
           message,
+          severity: 'warning',
           invalidValue: rule,
         })
         return false

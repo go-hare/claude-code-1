@@ -9,6 +9,7 @@ import {
   DIFF_SIDEBAR_MIN_COLS,
   DIFF_SIDEBAR_NO_GIT_MESSAGE,
   diffSidebarHasGitRepo,
+  getPersistedDiffBaseMode,
   getReplDiffHost,
   logReplDiffPanelShown,
   markReplDiffPanelAutoOpen,
@@ -16,8 +17,9 @@ import {
   shouldAutoOpenDiffSidebar,
   toggleReplDiffTab,
 } from '../../utils/replDiffTab.js';
+import { fetchGitDiff } from '../../utils/gitDiff.js';
 import { ReplDiffPanel } from './ReplDiffPanel.js';
-import type { DiffSelectionAttach } from '../../utils/replDiffMouseHost.js';
+import { type DiffSelectionAttach, hasAutoOpenDiffContent } from '../../utils/replDiffMouseHost.js';
 
 type Props = {
   width: number;
@@ -59,8 +61,21 @@ export function ReplDiffSidebarController({
     if (!shouldAutoOpenDiffSidebar(columns)) {
       return;
     }
-    markReplDiffPanelAutoOpen(host);
-    setAppState(openReplDiffTabFromAutoOpen);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetchGitDiff(getPersistedDiffBaseMode(), controller.signal)
+        .then(result => {
+          if (controller.signal.aborted) return;
+          if (!hasAutoOpenDiffContent(result)) return;
+          markReplDiffPanelAutoOpen(host);
+          setAppState(openReplDiffTabFromAutoOpen);
+        })
+        .catch(() => {});
+    }, 150);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [autoOpenBaseline, columns, host, isThinClient, replTab, setAppState, trackedFileCount]);
 
   const handleToggle = useCallback(() => {

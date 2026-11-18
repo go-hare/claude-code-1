@@ -714,6 +714,57 @@ export function meetsAvailabilityRequirement(cmd: Command): boolean {
   return false
 }
 
+const MAX_MCP_COMMAND_NAME_LENGTH = 512
+
+/**
+ * Gold `ygo` — drop commands whose `name` or `userFacingName()` is not a string
+ * (or whose MCP name/display name/alias exceeds 512 chars) instead of letting
+ * a single malformed command break all command loading (#1321).
+ */
+export function filterValidCommands(commands: Command[]): Command[] {
+  const valid: Command[] = []
+  for (const cmd of commands) {
+    let displayName: unknown
+    try {
+      displayName = cmd.userFacingName?.()
+    } catch {
+      displayName = undefined
+    }
+    if (typeof cmd.name !== 'string' || typeof displayName !== 'string') {
+      const nameTypes = [cmd.name, displayName].map(v =>
+        Array.isArray(v) ? 'array' : typeof v,
+      )
+      const meta = [
+        cmd.type,
+        cmd.type === 'prompt' ? cmd.source : undefined,
+        cmd.loadedFrom,
+        (cmd as { kind?: unknown }).kind,
+      ].map(v =>
+        typeof v === 'string' && /^[\w-]{1,24}$/.test(v) ? v : typeof v,
+      )
+      logError(
+        new Error(
+          `Command not listed: its name or display name is not a string. Types of its name and display name: ${nameTypes.join(', ')}. Its command type, source, loadedFrom and kind: ${meta.join(', ')}`,
+        ),
+      )
+      continue
+    }
+    if (
+      cmd.isMcp === true &&
+      [cmd.name, displayName, ...(cmd.aliases ?? [])].some(
+        n => n.length > MAX_MCP_COMMAND_NAME_LENGTH,
+      )
+    ) {
+      logForDebugging(
+        `MCP command not listed: its name, display name or an alias has over ${MAX_MCP_COMMAND_NAME_LENGTH} characters`,
+      )
+      continue
+    }
+    valid.push(cmd)
+  }
+  return valid
+}
+
 /**
  * Loads all command sources (skills, plugins, workflows). Memoized by cwd
  * because loading is expensive (disk I/O, dynamic imports).
@@ -725,8 +776,21 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
     workflowCommands,
   ] = await Promise.all([
     getSkills(cwd),
-    getPluginCommands(),
-    getWorkflowCommands ? getWorkflowCommands(cwd) : Promise.resolve([]),
+    getPluginCommands().catch(err => {
+      logError(toError(err))
+      logForDebugging('Plugin commands failed to load, continuing without them')
+      return []
+    }),
+    (getWorkflowCommands
+      ? getWorkflowCommands(cwd)
+      : Promise.resolve([])
+    ).catch(err => {
+      logError(toError(err))
+      logForDebugging(
+        'Workflow commands failed to load, continuing without them',
+      )
+      return []
+    }),
   ])
 
   // densable Hxb after assemble (skills/plugins/… then builtins).
@@ -739,15 +803,17 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
     require('./skills/loadSkillsDir.js') as typeof import('./skills/loadSkillsDir.js')
   return applySyncedSkillShadowFilter(
     disambiguateAddDirSkills(
-      stripCollidingPluginAliases([
-        ...bundledSkills,
-        ...builtinPluginSkills,
-        ...skillDirCommands,
-        ...(workflowCommands as Command[]),
-        ...(pluginCommands as Command[]),
-        ...pluginSkills,
-        ...COMMANDS(),
-      ]),
+      stripCollidingPluginAliases(
+        filterValidCommands([
+          ...bundledSkills,
+          ...builtinPluginSkills,
+          ...skillDirCommands,
+          ...(workflowCommands as Command[]),
+          ...(pluginCommands as Command[]),
+          ...pluginSkills,
+          ...COMMANDS(),
+        ]),
+      ),
       cwd,
     ),
   )

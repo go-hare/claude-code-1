@@ -466,13 +466,38 @@ type Props = {
   oneShotsAllowed?: boolean;
 };
 
+export function resolveWelcomeHeaderModel(args: {
+  sessionModel: string;
+  viewingAgentTaskId?: string | null;
+  tasks?: Record<string, { type?: string; model?: string; selectedAgent?: { model?: string } }> | null;
+}): string {
+  const { sessionModel, viewingAgentTaskId, tasks } = args;
+  if (!viewingAgentTaskId || !tasks) {
+    return sessionModel;
+  }
+  const task = tasks[viewingAgentTaskId];
+  if (!task || (task.type !== 'local_agent' && task.type !== 'in_process_teammate')) {
+    return sessionModel;
+  }
+  if (typeof task.model === 'string' && task.model !== '') {
+    return task.model;
+  }
+  if (typeof task.selectedAgent?.model === 'string' && task.selectedAgent.model !== '') {
+    return task.selectedAgent.model;
+  }
+  return sessionModel;
+}
+
 export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode {
   const { columns } = useTerminalSize();
   const srContext = useContext(AccessibilityContext);
   const screenReader = srContext || isScreenReaderModeEnabled();
   const agent = useAppState(s => s.agent);
   const ultracode = useAppState(s => s.ultracode);
-  const model = useMainLoopModel();
+  const sessionModel = useMainLoopModel();
+  const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  const tasks = useAppState(s => s.tasks);
+  const model = resolveWelcomeHeaderModel({ sessionModel, viewingAgentTaskId, tasks });
   const resolvedModel = parseUserSpecifiedModel(model);
   const effortValue = useAppState(s => pdSessionEffort(s, resolvedModel));
   const modelDisplayName = renderModelSetting(model);

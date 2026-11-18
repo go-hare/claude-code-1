@@ -178,7 +178,9 @@ Condition: ${hook.prompt}`
       messages?.length
         ? [...trimHookHistory(messages, model, fraction), userMessage]
         : [userMessage]
-    const hookTimeoutMs = hook.timeout ? hook.timeout * 1000 : 30000
+    const hookTimeoutMs = hook.timeout
+      ? Math.max(hook.timeout, 1) * 1000
+      : 30000
     const { signal: combinedSignal, cleanup } = createCombinedAbortSignal(
       signal,
       { timeoutMs: hookTimeoutMs },

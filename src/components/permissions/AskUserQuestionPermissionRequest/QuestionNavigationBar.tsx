@@ -4,6 +4,18 @@ import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
 import { Box, Text, stringWidth } from '@anthropic/ink';
 import type { Question } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { truncateToWidth } from '../../../utils/format.js';
+import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
+
+export function formatScreenReaderQuestionsList(questions: Question[], answers: Record<string, string>): string {
+  const labels = questions.map((q, index) => {
+    const header = q?.header || `Q${index + 1}`;
+    const safeHeader = header.includes(',') || /answered/i.test(header) ? JSON.stringify(header) : header;
+    const isAnswered = q?.question ? Boolean(answers[q.question]) : false;
+    return isAnswered ? `${safeHeader} (answered)` : safeHeader;
+  });
+  const prefix = questions.length === 1 ? 'Question' : 'Questions';
+  return `${prefix}: ${labels.join(', ')}`;
+}
 
 type Props = {
   questions: Question[];
@@ -83,6 +95,14 @@ export function QuestionNavigationBar({
   }, [questions, currentQuestionIndex, columns, hideSubmitTab]);
 
   const hideArrows = questions.length === 1 && hideSubmitTab;
+
+  if (isScreenReaderModeEnabled()) {
+    return (
+      <Box marginBottom={1}>
+        <Text>{formatScreenReaderQuestionsList(questions, answers)}</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="row" marginBottom={1}>

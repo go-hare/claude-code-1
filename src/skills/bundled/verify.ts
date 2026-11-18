@@ -17,6 +17,8 @@ export function registerVerifySkill(): void {
   registerBundledSkill({
     name: 'verify',
     description: DESCRIPTION,
+    menuDescription:
+      'Verify a code change does what it should by running the app',
     userInvocable: true,
     // densable 2.1.215: model must not auto-run /verify; user slash only
     disableModelInvocation: true,

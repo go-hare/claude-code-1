@@ -155,7 +155,14 @@ import {
   getModelMaxOutputTokens,
   getSonnet1mExpTreatmentEnabled,
 } from '../../utils/context.js'
-import { resolveAppliedEffort } from '../../utils/effort.js'
+import {
+  clampEffortToCap,
+  isEffortLevel,
+  isInvalidEffortLevelError,
+  markOrgEffortCapNotified,
+  resolveAppliedEffort,
+  stepDownOrgEffortCap,
+} from '../../utils/effort.js'
 import {
   analyticsQuerySource,
   decideEffortWhenThinkingDisabled,
@@ -176,6 +183,7 @@ import { captureAPIRequest, logError } from '../../utils/log.js'
 import { recordApiRequestForReplay } from './requestReplay.js'
 import {
   createAssistantAPIErrorMessage,
+  createSystemMessage,
   createUserMessage,
   decomposeBatchedToolUses,
   ensureToolResultPairing,
@@ -193,6 +201,7 @@ import {
   firstPartyNameToCanonical,
   getDefaultOpusModel,
   getDefaultSonnetModel,
+  getPublicModelDisplayName,
   getSmallFastModel,
   isNonCustomOpusModel,
 } from '../../utils/model/model.js'
@@ -245,6 +254,7 @@ import {
   getThinkingResumptionRefused,
   getThinkingTypeOverride,
   isEffortUnsupported,
+  markEffortUnsupported,
   setAfkModeHeaderLatched,
   setCacheEditingHeaderLatched,
   setFastModeHeaderLatched,
@@ -718,6 +728,7 @@ export type Options = {
    */
   thinkingStripPlan?: import('../../utils/thinking.js').ThinkingStripPlan
   advisorStripPlan?: import('../../utils/messages.js').AdvisorStripPlan
+  toolResultCuts?: ReadonlyMap<string, string>
   /**
    * densable agentContext — official Options field. queryModel falls back
    * to getAgentContext() ALS when omitted. Title `B` passes S() explicitly.
@@ -1549,6 +1560,23 @@ async function* queryModel(
       next = stripAdvisorBlocks(next)
     }
 
+    // Gold `xGt` / `UY` (#1422): substitute `tool_results_cut` stand-ins
+    // when `tengu_adaptive_pinwheel` is enabled.
+    const { resolveToolResultCutStandIns, applyToolResultCutStandIns } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/attachments.js') as typeof import('../../utils/attachments.js')
+    const resolvedToolResultCuts = resolveToolResultCutStandIns(
+      messages,
+      undefined,
+      options.toolResultCuts,
+    )
+    if (resolvedToolResultCuts && resolvedToolResultCuts.size > 0) {
+      next = applyToolResultCutStandIns(
+        next,
+        resolvedToolResultCuts,
+      ) as typeof next
+    }
+
     return next
   }
 
@@ -1845,9 +1873,15 @@ async function* queryModel(
     },
     resolvedModel,
   )
-  const effort = resolveAppliedEffort(options.model, options.effortValue, {
-    carriedEffort,
-  })
+  const requestedEffort = resolveAppliedEffort(
+    options.model,
+    options.effortValue,
+    {
+      carriedEffort,
+      querySource: options.querySource,
+    },
+  )
+  let effort = requestedEffort
   // densable Ie — string effort level from last request's output_config.effort
   // stamped onto every AssistantMessage for transcript persistence (#44).
   // Numeric effort_override (ant-only) is intentionally NOT recorded.
@@ -2058,8 +2092,36 @@ async function* queryModel(
     ) {
       betas = betas.filter(b => b !== DANGEROUS_TOOL_USE_BETA_HEADER)
     }
+    if (token === 'retry:effort-unsupported') {
+      betas = betas.filter(b => b !== EFFORT_BETA_HEADER)
+    }
     if (token != null) {
       return token
+    }
+
+    // Official 2.1.314 k0o — API 400 "Invalid effort level" from org cap:
+    // step down one effort level, latch for this session, and retry.
+    if (
+      isInvalidEffortLevelError(error) &&
+      options.querySource !== 'auto_mode' &&
+      options.querySource !== 'auto_mode_investigator'
+    ) {
+      const sentEffort =
+        effortLevelForTranscript ??
+        (typeof effort === 'string' && isEffortLevel(effort)
+          ? effort
+          : undefined)
+      if (sentEffort !== undefined) {
+        const nextCap = stepDownOrgEffortCap(options.model, sentEffort)
+        if (nextCap !== undefined) {
+          effort = clampEffortToCap(effort, nextCap)
+          logForDebugging(
+            `[effort] the API refused effort '${sentEffort}' as above the organization's cap for model ${options.model}. Sending the request again at no more than '${nextCap}', as later requests to this model will be.`,
+            { level: 'warn' },
+          )
+          return `retry:org-effort-cap:${nextCap}`
+        }
+      }
     }
 
     // Official M0o (#12) — strip all rejected beta headers at once (including
@@ -2068,6 +2130,13 @@ async function* queryModel(
     if (rejectedBetas.length > 0) {
       const rejectedSet = new Set(rejectedBetas.map(r => r.header))
       betas = betas.filter(b => !rejectedSet.has(b))
+      if (
+        rejectedSet.has(EFFORT_BETA_HEADER) &&
+        error instanceof APIError &&
+        error.status === 400
+      ) {
+        markEffortUnsupported(options.model)
+      }
       for (const match of rejectedBetas) {
         logEvent('tengu_beta_400_healed', {
           beta: match.header as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -2274,6 +2343,9 @@ async function* queryModel(
       betasParams,
       options.model,
     )
+    if (isEffortUnsupported(options.model)) {
+      delete (outputConfig as { effort?: unknown }).effort
+    }
 
     configureTaskBudgetParams(
       options.taskBudget,
@@ -3319,22 +3391,63 @@ async function* queryModel(
           let totalStallTime = 0
           let stallCount = 0
 
+          const CONSECUTIVE_PING_CAP = 30
+          let consecutivePingCount = 0
+
           // densable Tfb(Ne, So) — synthetic keep-alive pings when body bytes advance
           // without SSE events (custom gateway / ANTHROPIC_BASE_URL proxies).
           for await (const partOrPing of withStreamKeepAlivePings(
             stream,
             chunkTimes,
           )) {
-            // densable Gi() then _0r(us) → yield stream_event + continue
-            resetStreamIdleTimer()
             if (isStreamPingEvent(partOrPing)) {
+              consecutivePingCount++
+              if (consecutivePingCount <= CONSECUTIVE_PING_CAP) {
+                resetStreamIdleTimer()
+              } else if (
+                !streamWatchdogEnabled ||
+                streamIdleAborted ||
+                streamSuspendedError !== undefined
+              ) {
+                continue
+              }
               yield {
                 type: 'stream_event',
                 event: partOrPing,
               } as StreamEvent
               continue
             }
+            consecutivePingCount = 0
+            resetStreamIdleTimer()
             const part = partOrPing
+            // densable 2.1.314 Uqe (#1362) + jLt (#1358) — on first real stream
+            // event after retry, latch tool search off and emit org effort cap warning once.
+            if (streamEventsReceived === 0) {
+              if (options._toolSearchRefusalRetried) {
+                try {
+                  const { latchToolSearchOffForSession } =
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    require('../../utils/searchExtraTools.js') as typeof import('../../utils/searchExtraTools.js')
+                  latchToolSearchOffForSession()
+                  logForDebugging(
+                    '[ToolSearch] the endpoint answered the request sent without tool search, so this conversation goes on without it',
+                  )
+                } catch {
+                  // optional
+                }
+              }
+              if (
+                typeof effort === 'string' &&
+                typeof requestedEffort === 'string' &&
+                effort !== requestedEffort &&
+                markOrgEffortCapNotified(options.model)
+              ) {
+                yield createSystemMessage(
+                  `Your organization limits effort for ${getPublicModelDisplayName(options.model)}, so Claude Code is using '${effort}' instead of '${requestedEffort}'. Your effort setting is unchanged.`,
+                  'warning',
+                )
+              }
+            }
             // densable: Cl++; Mc??=Math.round(performance.now()-ve)
             streamEventsReceived++
             msToFirstEvent ??= Math.round(
@@ -5157,6 +5270,46 @@ async function* queryModel(
           throw errorFromRetry
         }
 
+        // Official 2.1.314 (#1361) — Foundry 404 DeploymentNotFound: fall back
+        // to an older model of the same family before 404 non-streaming fallback.
+        if (
+          getAPIProvider() === 'foundry' &&
+          !options._availabilityFallbackRetried &&
+          errorFromRetry instanceof CannotRetryError
+        ) {
+          const {
+            isFoundryDeploymentNotFoundError,
+            resolveFoundryFamilyFallbackModel,
+          } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../../utils/foundryCapabilities.js') as typeof import('../../utils/foundryCapabilities.js')
+          if (isFoundryDeploymentNotFoundError(errorFromRetry.originalError)) {
+            const fallbackModel = resolveFoundryFamilyFallbackModel(
+              options.model,
+            )
+            if (fallbackModel && fallbackModel !== options.model) {
+              logForDebugging(
+                `[foundry] deployment '${options.model}' not found (DeploymentNotFound); falling back to '${fallbackModel}'`,
+                { level: 'warn' },
+              )
+              yield* queryModelWithStreaming({
+                messages,
+                systemPrompt,
+                thinkingConfig,
+                tools,
+                signal,
+                options: {
+                  ...options,
+                  model: fallbackModel,
+                  fallbackModel: undefined,
+                  _availabilityFallbackRetried: true,
+                },
+              })
+              return
+            }
+          }
+        }
+
         // Check if this is a 404 error during stream creation that should trigger
         // non-streaming fallback. This handles gateways that return 404 for streaming
         // endpoints but work fine with non-streaming. Before v2.1.8, BetaMessageStream
@@ -5443,6 +5596,9 @@ async function* queryModel(
               fastMode: isFastModeRequest,
               previousRequestId,
               promptTooLongIsHandled: options.promptTooLongIsHandled,
+              effort:
+                effortLevelForTranscript ??
+                (typeof effort === 'string' ? effort : undefined),
             })
 
             if (error instanceof APIUserAbortError) {
@@ -5503,6 +5659,9 @@ async function* queryModel(
             fastMode: isFastModeRequest,
             previousRequestId,
             promptTooLongIsHandled: options.promptTooLongIsHandled,
+            effort:
+              effortLevelForTranscript ??
+              (typeof effort === 'string' ? effort : undefined),
           })
 
           // Don't yield an assistant error message for user aborts
@@ -5646,6 +5805,9 @@ async function* queryModel(
       fastMode: isFastModeRequest,
       previousRequestId,
       betas: lastRequestBetas,
+      effort:
+        effortLevelForTranscript ??
+        (typeof effort === 'string' ? effort : undefined),
     })
   })
 

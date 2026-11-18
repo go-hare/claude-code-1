@@ -120,6 +120,7 @@ export type CollapsedReadSearchGroup = {
   messages: CollapsibleMessage[]
   displayMessage: CollapsibleMessage
   mcpCallCount?: number
+  failedMcpCallCount?: number
   mcpServerNames?: string[]
   bashCount?: number
   gitOpBashCount?: number

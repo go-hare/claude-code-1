@@ -270,6 +270,7 @@ type ScanRecord = {
   uuid: string
   cached: number
   cacheCreate: number
+  recached: number
   uncached: number
   output: number
   isSubagent: boolean
@@ -661,6 +662,7 @@ function recordFromChunk(
     uuid,
     cached,
     cacheCreate,
+    recached: 0,
     uncached,
     output,
     isSubagent,
@@ -726,6 +728,7 @@ function createFileLineConsumer(
     | undefined
   let stickyDynamicPrompt: string | undefined
   const ctxTracker = createContextTracker()
+  const prevBySubagent = new Map<boolean, ScanRecord>()
 
   const advanceBatch = () => {
     batchId++
@@ -811,6 +814,20 @@ function createFileLineConsumer(
       lastPending = undefined
       if (rec) {
         noteAssistantContext(ctxTracker, rec)
+        const prev = prevBySubagent.get(rec.isSubagent)
+        if (
+          prev?.cached === rec.cached &&
+          prev.cacheCreate === rec.cacheCreate &&
+          prev.uncached === rec.uncached
+        ) {
+          rec.recached = prev.recached
+        } else if (prev) {
+          rec.recached = Math.min(
+            rec.cacheCreate,
+            Math.max(0, prev.cached + prev.cacheCreate - rec.cached),
+          )
+        }
+        prevBySubagent.set(rec.isSubagent, rec)
         if (turnUserCount > 1 && activeFires.length > 0) {
           const share = 1 / turnUserCount
           rec.loopShares = activeFires.map(f => ({ ...f, share }))
@@ -1036,7 +1053,7 @@ function addRecord(
     }
   }
   const ctx = rec.cached + rec.cacheCreate + rec.uncached
-  if (rec.uncached > CACHE_MISS_UNCACHED) {
+  if (rec.uncached + rec.recached > CACHE_MISS_UNCACHED) {
     acc.cacheMissCost += cost
     acc.cacheMissCount++
   }

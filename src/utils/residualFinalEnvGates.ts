@@ -490,6 +490,18 @@ export const DEFAULT_SYNC_PLUGINS_DOWNLOAD_STALL_MS = 60_000
 export const DEFAULT_SYNC_SKILLS_INSTALL_TIMEOUT_MS = 30_000
 /** Official Pbf default. */
 export const DEFAULT_SYNC_SKILLS_WAIT_TIMEOUT_MS = 5_000
+/** Official QXt default — 10-minute cross-session skills list reuse window. */
+export const DEFAULT_SYNC_REUSE_WITHIN_MS = 600_000
+
+/** Official yho() — CLAUDE_CODE_SYNC_REUSE_WITHIN_MS override (> 0), else undefined. */
+export function resolveSyncReuseWithinMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const raw = env.CLAUDE_CODE_SYNC_REUSE_WITHIN_MS
+  if (!raw) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
 
 /**
  * Official Lmn — SYNC_PLUGINS_INSTALL_TIMEOUT_MS, default 30s.

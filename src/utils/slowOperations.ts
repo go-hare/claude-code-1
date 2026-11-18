@@ -202,9 +202,15 @@ export function jsonStringify(
     replacer as Parameters<typeof JSON.stringify>[1],
     space,
   )
-  // Escape U+2028 and U+2029 so JSONL records are never split by line/paragraph
-  // separator consumers (e.g. /branch transcript serialization).
-  return result?.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  // Escape DEL (\u007f), C1 controls (\u0080-\u009f), U+2028/U+2029, and
+  // Unicode format characters (\p{Cf}) as \uXXXX so JSON/stream-json output
+  // never emits raw control/format characters while parsed values remain identical.
+  return result?.replace(/[\u007F-\u009F\u2028\u2029\p{Cf}]/gu, ch =>
+    ch
+      .split('')
+      .map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+      .join(''),
+  )
 }
 
 /**

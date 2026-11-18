@@ -114,6 +114,7 @@ import { setCwd } from './utils/Shell.js'
 import {
   flushSessionStorage,
   recordTranscript,
+  removeTranscriptMessage,
 } from './utils/sessionStorage.js'
 import { resolveChromeAppendSystemPrompt } from './utils/claudeInChrome/prompt.js'
 import { asSystemPrompt } from './utils/systemPromptType.js'
@@ -1644,6 +1645,24 @@ export class QueryEngine {
             yield ev as unknown as SDKMessage
           }
           const tombstonedMsg = tombstonePayload.message
+          // v2.1.311 (#1231) & v2.1.314 (#1374): remove tombstoned/retracted
+          // messages from in-memory conversation and persisted transcript.
+          if (!tombstonePayload.displayOnly && tombstonedMsg?.uuid) {
+            const targetUuid = tombstonedMsg.uuid
+            for (let i = this.mutableMessages.length - 1; i >= 0; i--) {
+              if (this.mutableMessages[i]?.uuid === targetUuid) {
+                this.mutableMessages.splice(i, 1)
+              }
+            }
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i]?.uuid === targetUuid) {
+                messages.splice(i, 1)
+              }
+            }
+            if (persistSession) {
+              await removeTranscriptMessage(targetUuid)
+            }
+          }
           if (
             tombstonedMsg?.type === 'assistant' &&
             Array.isArray(tombstonedMsg.message?.content)
@@ -1740,7 +1759,7 @@ export class QueryEngine {
           // forking the chain and orphaning the conversation on resume.
           if (persistSession) {
             messages.push(msg)
-            void recordTranscript(messages)
+            await recordTranscript(messages)
           }
           yield* normalizeMessage(msg)
           break
@@ -1841,7 +1860,7 @@ export class QueryEngine {
           // Record inline (same reason as progress above).
           if (persistSession) {
             messages.push(msg)
-            void recordTranscript(messages)
+            await recordTranscript(messages)
           }
 
           const attachment = msg.attachment as {

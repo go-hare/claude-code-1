@@ -208,7 +208,7 @@ describe('inboundAttachments 2.1.225 photo inline', () => {
       '',
       true,
     )
-    expect(result).toBe('[attachment could not be downloaded]')
+    expect(result).toBe('[attachment did not arrive] ')
   })
 
   test('looksLikeSlashCommandContent is densable qvt (cross-session wrap)', async () => {

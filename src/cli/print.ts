@@ -130,6 +130,7 @@ import {
   enableWorkerPermissionModeRecord,
   notifyInternalMetadataChanged,
   notifyPermissionModeChanged,
+  settleUltracodeActive,
   setPermissionModeChangedListener,
   type RequiresActionDetails,
   type RestoredWorkerState,
@@ -1996,6 +1997,17 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
       restored: restoredWorker,
       restartedWorker: isRestartedWorker(resolveWorkerEpoch()),
     })
+    // Official 2.1.325 `xRi(Ae.sessionState, r().ultracode, vr)` (#1373).
+    const appStateNow = getAppState()
+    const mainModelNow = getMainLoopModel()
+    settleUltracodeActive(
+      isUltracodeModeActive(
+        mainModelNow,
+        pdSessionEffort(appStateNow, mainModelNow),
+        appStateNow.ultracode,
+      ),
+      restoredWorker,
+    )
   } catch {
     // densable optional
   }
@@ -9174,17 +9186,38 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         fileAttachments: parseInboundFileAttachments(userMsg),
         // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
         // seeded_summon → skipAttachments.
+        // #1413: queueSkipSlashCommands + <bash-stdout>/<local-command-stdout>
         ...(userMsg.client_composed === true
           ? { skipSlashCommands: true, skipAttachments: true }
           : userMsg.seeded_summon === true
             ? { skipAttachments: true }
-            : {}),
+            : (userMsg as { queueSkipSlashCommands?: boolean })
+                  .queueSkipSlashCommands === true
+              ? { skipSlashCommands: true }
+              : {}),
       })
       // densable afterEnqueue hp/bo @199194235 — claim SessionStart wait
       {
         const content = (userMsg.message as { content?: unknown })?.content
-        if (typeof content === 'string') {
-          claimFirstTurnAck?.({ queued: content })
+        const ackText =
+          typeof content === 'string'
+            ? content
+            : Array.isArray(content)
+              ? content
+                  .map(b =>
+                    b &&
+                    typeof b === 'object' &&
+                    'type' in b &&
+                    b.type === 'text' &&
+                    'text' in b &&
+                    typeof b.text === 'string'
+                      ? b.text
+                      : '',
+                  )
+                  .join('')
+              : undefined
+        if (ackText !== undefined) {
+          claimFirstTurnAck?.({ queued: ackText })
         }
       }
       // Increment prompt count for attribution tracking and save snapshot
@@ -9638,6 +9671,12 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         if (!options.forkSession) {
           try {
             restoreWorktreeForResume(result.worktreeSession)
+            if (
+              result.worktreeSession &&
+              SandboxManager.isSandboxingEnabled()
+            ) {
+              SandboxManager.refreshConfig()
+            }
           } catch (error) {
             logError(error)
           }
@@ -10005,6 +10044,9 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
       if (!options.forkSession) {
         try {
           restoreWorktreeForResume(result.worktreeSession)
+          if (result.worktreeSession && SandboxManager.isSandboxingEnabled()) {
+            SandboxManager.refreshConfig()
+          }
         } catch (error) {
           logError(error)
         }

@@ -22,7 +22,7 @@ import {
   isClaudeAISubscriber,
 } from '../../utils/auth.js'
 import { countConcurrentSessions } from '../../utils/concurrentSessions.js'
-import { getGlobalConfig } from '../../utils/config.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import {
   getEffortEnvOverride,
   modelSupportsEffort,
@@ -57,6 +57,10 @@ import {
   isCustomTitleEnabled,
 } from '../../utils/sessionStorage.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { isRemotePolicyAllowed } from '../policyLimits/index.js'
+import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js'
+import { getOutputStyleConfig } from '../../constants/outputStyles.js'
+import { isSettingSourceEnabled } from '../../utils/settings/constants.js'
 import {
   BUILTIN_MARKETPLACE_NAME,
   getBuiltinPluginDefinition,
@@ -79,6 +83,79 @@ import {
   getTipLifetimeShownCount,
 } from './tipHistory.js'
 import type { Tip, TipContext } from './types.js'
+
+/**
+ * Gold `zas()` (#1418): push notifications tip is relevant only when Remote Control
+ * is allowed by org policy, user has used Remote Control, push notifications are
+ * not already enabled, and the push toggles are visible in `/config`.
+ */
+export function isPushNotifTipRelevant(): boolean {
+  if (!isBridgeEnabled() || !isRemotePolicyAllowed('allow_remote_control')) {
+    return false
+  }
+  const config = getGlobalConfig()
+  if (config.hasUsedRemoteControl !== true) {
+    return false
+  }
+  if (config.agentPushNotifEnabled === true) {
+    return false
+  }
+  const pushFeatureOn = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_kairos_push_notifications',
+    false,
+  )
+  return pushFeatureOn && isClaudeAISubscriber()
+}
+
+export const IDLE_UPSELL_DELAY_MINUTES = 20
+export const PUSH_NOTIF_UPSELL_MAX_SEEN = 3
+export const RC_UPSELL_MAX_SEEN = 3
+export const RC_IDLE_UPSELL_KEY = 'rc-idle-upsell'
+export const PUSH_IDLE_UPSELL_KEY = 'push-idle-upsell'
+
+/** Gold `Was()` — RC idle upsell eligibility. */
+export function shouldShowRcIdleUpsell(): boolean {
+  if (!isBridgeEnabled() || !isRemotePolicyAllowed('allow_remote_control')) {
+    return false
+  }
+  const config = getGlobalConfig() as {
+    hasUsedRemoteControl?: boolean
+    remoteControlUpsellSeenCount?: number
+  }
+  return (
+    config.hasUsedRemoteControl !== true &&
+    (config.remoteControlUpsellSeenCount ?? 0) < RC_UPSELL_MAX_SEEN
+  )
+}
+
+/** Gold `Gas()` (#1418) — push-notif idle upsell eligibility. */
+export function shouldShowPushNotifIdleUpsell(): boolean {
+  return (
+    isPushNotifTipRelevant() &&
+    (getGlobalConfig().pushNotifUpsellSeenCount ?? 0) <
+      PUSH_NOTIF_UPSELL_MAX_SEEN
+  )
+}
+
+/** Gold `BMi()` — increment `remoteControlUpsellSeenCount` in GlobalConfig. */
+export function recordRcIdleUpsellShown(): void {
+  const next = (getGlobalConfig().remoteControlUpsellSeenCount ?? 0) + 1
+  saveGlobalConfig(prev =>
+    (prev.remoteControlUpsellSeenCount ?? 0) >= next
+      ? prev
+      : { ...prev, remoteControlUpsellSeenCount: next },
+  )
+}
+
+/** Gold `jMi()` (#1418) — increment `pushNotifUpsellSeenCount` in GlobalConfig. */
+export function recordPushNotifIdleUpsellShown(): void {
+  const next = (getGlobalConfig().pushNotifUpsellSeenCount ?? 0) + 1
+  saveGlobalConfig(prev =>
+    (prev.pushNotifUpsellSeenCount ?? 0) >= next
+      ? prev
+      : { ...prev, pushNotifUpsellSeenCount: next },
+  )
+}
 
 let _isOfficialMarketplaceInstalledCache: boolean | undefined
 async function isOfficialMarketplaceInstalled(): Promise<boolean> {
@@ -577,7 +654,31 @@ const externalTips: Tip[] = [
     content: async () =>
       'Run tasks in the cloud while you keep coding locally · clau.de/web',
     cooldownSessions: 15,
-    isRelevant: async () => true,
+    isRelevant: async () => isRemotePolicyAllowed('allow_remote_sessions'),
+  },
+  {
+    id: 'push-notif',
+    content: async ctx =>
+      `Get pinged on your phone when long tasks finish · enable push notifications in ${color('suggestion', ctx?.theme ?? 'dark')('/config')}`,
+    cooldownSessions: 15,
+    isRelevant: async () => isPushNotifTipRelevant(),
+  },
+  {
+    id: 'explanatory-output-style',
+    priority: 1,
+    providerAgnostic: true,
+    content: async () =>
+      'Want Claude to teach as it works? · /config outputStyle=explanatory',
+    cooldownSessions: 15,
+    maxLifetimeShows: 3,
+    advertisedCommand: 'config',
+    isRelevant: async ctx =>
+      (ctx?.explanationRequestCount ?? 0) >= 2 &&
+      !getIsRemoteMode() &&
+      isSettingSourceEnabled('localSettings') &&
+      getSettingsForSource('flagSettings')?.outputStyle === undefined &&
+      getSettingsForSource('policySettings')?.outputStyle === undefined &&
+      (await getOutputStyleConfig()) === null,
   },
   {
     // densable 2.1.243 #8 — SEA: `/web-setup to use Claude Code on the web

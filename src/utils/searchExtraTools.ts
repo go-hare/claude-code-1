@@ -494,9 +494,22 @@ export function shouldKeepToolSearchOnRefresh(
 }
 
 let autoToolSearchLatched = false
+let toolSearchNotAllowedSessionLatch = false
 
 export function resetAutoToolSearchLatch(): void {
   autoToolSearchLatched = false
+}
+
+export function isToolSearchSessionLatchedOff(): boolean {
+  return toolSearchNotAllowedSessionLatch
+}
+
+export function latchToolSearchOffForSession(): void {
+  toolSearchNotAllowedSessionLatch = true
+}
+
+export function resetToolSearchSessionLatch(): void {
+  toolSearchNotAllowedSessionLatch = false
 }
 
 export async function isSearchExtraToolsEnabled(
@@ -544,6 +557,14 @@ export async function isSearchExtraToolsEnabled(
       `Tool search disabled${source ? ` (${source})` : ''}: optimistic/Y4 gate (mode=standard or non-first-party base URL without opt-in).`,
     )
     logModeDecision(false, getSearchExtraToolsMode(), 'optimistic_y4')
+    return false
+  }
+
+  if (toolSearchNotAllowedSessionLatch) {
+    logForDebugging(
+      `Tool search disabled${source ? ` (${source})` : ''}: session latched off after tool_reference refusal.`,
+    )
+    logModeDecision(false, getSearchExtraToolsMode(), 'session_latched_off')
     return false
   }
 

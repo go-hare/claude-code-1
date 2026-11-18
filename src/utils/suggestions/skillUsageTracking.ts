@@ -1,4 +1,5 @@
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { emitSkillInvoked } from '../plugins/pluginMonitors.js'
 
 const SKILL_USAGE_DEBOUNCE_MS = 60_000
 const DAY_MS = 86_400_000
@@ -22,6 +23,7 @@ function lookupUsage(
  * Updates both usage count and last used timestamp.
  */
 export function recordSkillUsage(skillName: string): void {
+  emitSkillInvoked(skillName)
   const now = Date.now()
   const lastWrite = lastWriteBySkill.get(skillName)
   // The ranking algorithm uses a 7-day half-life, so sub-minute granularity

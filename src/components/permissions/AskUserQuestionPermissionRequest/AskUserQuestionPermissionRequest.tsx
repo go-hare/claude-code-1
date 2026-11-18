@@ -362,6 +362,11 @@ function AskUserQuestionPermissionRequestBody({
     ],
   );
 
+  const [afkResetCount, setAfkResetCount] = useState(0);
+  const handleExternalEditorClose = useCallback(() => {
+    setAfkResetCount(c => c + 1);
+  }, []);
+
   // Official 2.1.200: auto-continue with answers selected so far after idle.
   // Disabled while the terminal is unfocused (user may be in another app).
   // Gate on resolved ms only — invalid CLAUDE_AFK_TIMEOUT_MS must not enable.
@@ -478,6 +483,7 @@ function AskUserQuestionPermissionRequestBody({
       }
       pastedContents={pastedContentsByQuestion[currentQuestion.question] ?? {}}
       onRemoveImage={id => onRemoveImage(currentQuestion.question, id)}
+      onExternalEditorClose={handleExternalEditorClose}
     />
   ) : isInSubmitView ? (
     <SubmitQuestionsView
@@ -494,7 +500,7 @@ function AskUserQuestionPermissionRequestBody({
   const engineNode: React.ReactNode = viewNode ? (
     <Ratchet>
       {viewNode}
-      <AfkCountdown enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
+      <AfkCountdown key={afkResetCount} enabled={afkEnabled} timeoutMs={afkTimeoutMs} onTimeout={handleAfkTimeout} />
     </Ratchet>
   ) : null;
 

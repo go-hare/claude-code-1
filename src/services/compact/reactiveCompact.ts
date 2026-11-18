@@ -260,9 +260,59 @@ export const isWithheldPromptTooLong: (
 export const isWithheldMediaSizeError: (
   message: Message | null | undefined,
 ) => boolean = message => {
-  // densable r8o: e?.type==="assistant" && l8o(e)
+  // densable r8o: e?.type==="assistant" && l8o(e). Media and PTL both enter
+  // n8o/tryReactiveCompact (full summary) — not query-level stripImages.
+  // SEA has strippedMedia only inside compact group retries. Collapse drain
+  // still PTL-only (media skip collapse). mediaRecoveryEnabled must match
+  // stream withhold (module present). Tail-preserved media may re-error once;
+  // hasAttemptedReactiveCompact prevents a spiral.
   if (message?.type !== 'assistant' || !message.isApiErrorMessage) return false
   return isMediaSizeErrorMessage(message as AssistantMessage)
+}
+
+/** v2.1.311 (#1227): SEA cD = 200_000 standard-context ceiling */
+export const STANDARD_CONTEXT_MAX_TOKENS = 200_000
+
+/**
+ * v2.1.311 (#1227): SEA Nae/LFn — true when the API error message indicates
+ * >200K tokens required usage credits for 1M context.
+ */
+export function isLongContextCreditsRequiredMessage(
+  message: Message | null | undefined,
+): boolean {
+  if (message?.type !== 'assistant' || !message.isApiErrorMessage) return false
+  const msg = message as AssistantMessage
+  if (msg.apiError === 'long_context_credits_required') return true
+  return (
+    typeof msg.errorDetails === 'string' &&
+    (msg.errorDetails.includes('Extra usage is required for long context') ||
+      msg.errorDetails.includes('Usage credits are required for long context'))
+  )
+}
+
+/**
+ * v2.1.311 (#1227): SEA Bc(e, n, r) — eligible to withhold a
+ * long_context_credits_required refusal and recover via reactive compact
+ * when the session is on a standard-context window (<= 200K) and
+ * tengu_linked_rose is enabled.
+ */
+export function isEligibleForLongContextRefusalCompact(
+  message: Message | null | undefined,
+  contextWindowTokens: number,
+  querySource: string,
+): boolean {
+  if (!isLongContextCreditsRequiredMessage(message)) return false
+  if (contextWindowTokens > STANDARD_CONTEXT_MAX_TOKENS) return false
+  if (
+    !canAttemptReactiveCompact({
+      hasAttempted: false,
+      querySource,
+      aborted: false,
+    })
+  ) {
+    return false
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_linked_rose', true)
 }
 
 export type TryReactiveCompactOutcome = {

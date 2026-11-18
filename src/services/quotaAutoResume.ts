@@ -66,6 +66,8 @@ const JITTER_MIN_MS = 30_000
 const JITTER_MAX_MS = 90_000
 /** densable T0S / HEv rearm cap */
 const REARM_CAP = 2
+/** v2.1.314 (#1372): SEA var N = 3 — max auto-continuations without a human prompt */
+const CONTINUATION_CAP = 3
 /**
  * densable p4f — min delay after *now* when rearm !== null (JEv).
  * Index by previous consecutiveRearms value passed into $Za/A4f.
@@ -132,6 +134,7 @@ export type CancelReason =
   | 'conversation_reset'
   | 'killswitch'
   | 'rearm_cap'
+  | 'continuation_cap'
   | 'horizon_exceeded'
   | 'continuation_dropped'
   | 'background_handoff'
@@ -166,6 +169,7 @@ export type QuotaTurnClaim = {
 type Episode = {
   state: QuotaAutoResumeState
   consecutiveRearms: number
+  continuationsSinceHumanPrompt: number
   armedAtMs: number
   lastArmedResetsAtSeconds: number
   lastObservedMs: number | null
@@ -205,6 +209,7 @@ function createEpisode(): Episode {
   return {
     state: { phase: 'idle' },
     consecutiveRearms: 0,
+    continuationsSinceHumanPrompt: 0,
     armedAtMs: 0,
     lastArmedResetsAtSeconds: 0,
     lastObservedMs: null,
@@ -657,8 +662,8 @@ export function onQuotaRejectedForAutoResume(
     return
   }
 
-  // continuation claim — densable T0S / HEv cap
-  if (episode.consecutiveRearms >= REARM_CAP) {
+  // continuation claim — v2.1.314 (#1372) SEA var N = 3 cap
+  if (episode.continuationsSinceHumanPrompt >= CONTINUATION_CAP) {
     logEvent('tengu_quota_auto_resume_cancelled', {
       reason:
         'rearm_cap' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -684,6 +689,9 @@ export function offerArmQuotaAutoResume(
 ): boolean {
   if (!canOfferQuotaAutoResume(limits)) return false
   episode.consecutiveRearms = 0
+  if (origin === 'dialog') {
+    episode.continuationsSinceHumanPrompt = 0
+  }
   episode.takeoverUuids.clear()
   episode.dispatchingTakeoverUuids.clear()
   episode.queuedBeforeArmUuids.clear()
@@ -805,6 +813,18 @@ export function tryAutoArmQuotaAutoResume(
   if (isQuotaAutoResumeLive() || episode.autoArmDedupeResetKeys.has(resetsAt)) {
     return false
   }
+  // v2.1.314 (#1372): SEA nms — cap auto-arm at 3 continuations without a human prompt
+  if (episode.continuationsSinceHumanPrompt >= CONTINUATION_CAP) {
+    logEvent('tengu_quota_auto_resume_cancelled', {
+      reason:
+        'continuation_cap' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    episode.autoArmDedupeResetKeys.add(resetsAt)
+    resetQuotaEpisodeOwnership()
+    setState({ phase: 'idle' })
+    episode.events.emit('cap-exhausted')
+    return false
+  }
   return offerArmQuotaAutoResume(limits, nowMs, 'auto')
 }
 
@@ -915,6 +935,7 @@ export function onQuotaAutoResumeHumanSubmit(
   uuid?: string,
   opts: { dispatching?: boolean } = {},
 ): void {
+  episode.continuationsSinceHumanPrompt = 0
   if (!isQuotaAutoResumeLive()) return
   dropPendingQuotaContinuationOwnership(true)
   if (episode.state.phase === 'stale') {
@@ -1009,6 +1030,9 @@ export function claimQuotaAutoResumeTurn(
 ): QuotaTurnClaim | null {
   for (const uuid of input.turnUuids) {
     episode.dispatchingTakeoverUuids.delete(uuid)
+  }
+  if (input.isHumanTakeover) {
+    episode.continuationsSinceHumanPrompt = 0
   }
   const continuationInTurn =
     episode.pendingContinuationUuid !== null &&
@@ -1117,6 +1141,7 @@ export function fireQuotaAutoResumeContinuation(
   prompt: string = CONTINUATION_PROMPT,
 ): string {
   dropPendingQuotaContinuationOwnership()
+  episode.continuationsSinceHumanPrompt++
   const uuid = randomUUID()
   episode.pendingContinuationUuid = uuid
   episode.activeTurnClaim = null
@@ -1322,4 +1347,9 @@ export function resetQuotaAutoResumeForTests(): void {
 /** Expose rearm cap for tests / future rearm path */
 export function getQuotaAutoResumeRearmCap(): number {
   return REARM_CAP
+}
+
+/** v2.1.314 (#1372): expose cross-restart continuation cap (SEA var N = 3) */
+export function getQuotaAutoResumeContinuationCap(): number {
+  return CONTINUATION_CAP
 }

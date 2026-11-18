@@ -42,6 +42,21 @@ export type OperatorContext = {
   recordChange: (change: RecordedChange) => void
 }
 
+function resolveDisplayLineMotion(
+  motion: 'gj' | 'gk',
+  count: number,
+  ctx: OperatorContext,
+): { offset: number; rowsRunOut: boolean } {
+  const { cursor } = ctx
+  const target = resolveMotion(motion, cursor, count)
+  const wrappedLines = cursor.measuredText.getWrappedLines()
+  const currentLine = cursor.getPosition().line
+  const rowsRunOut =
+    (motion === 'gj' ? wrappedLines.length - 1 - currentLine : currentLine) <
+    count
+  return { offset: target.offset, rowsRunOut }
+}
+
 /**
  * Execute an operator with a simple motion.
  */
@@ -51,6 +66,14 @@ export function executeOperatorMotion(
   count: number,
   ctx: OperatorContext,
 ): void {
+  if (motion === 'gj' || motion === 'gk') {
+    const move = resolveDisplayLineMotion(motion, count, ctx)
+    if (move.rowsRunOut) {
+      ctx.setOffset(clampVimNormalOffset(ctx.cursor, move.offset))
+      return
+    }
+  }
+
   const target = resolveMotion(motion, ctx.cursor, count)
   if (target.equals(ctx.cursor) && !isInclusiveMotion(motion)) {
     const changeWordAtEnd =
@@ -495,6 +518,18 @@ function getLineStartOffset(lines: string[], lineIndex: number): number {
   return lines.slice(0, lineIndex).join('\n').length + (lineIndex > 0 ? 1 : 0)
 }
 
+function clampWordMotionRangeEnd(
+  cursor: Cursor,
+  motion: string,
+  count: number,
+  to: number,
+): number {
+  const landed = resolveMotion(motion, cursor, count - 1)
+  const lineEnd = landed.endOfLogicalLine().offset
+  if (to <= lineEnd) return to
+  return lineEnd > landed.offset ? lineEnd : lineEnd + 1
+}
+
 function getOperatorRange(
   cursor: Cursor,
   target: Cursor,
@@ -507,21 +542,16 @@ function getOperatorRange(
   let linewise = false
 
   // Special case: cw/cW changes to end of word, not start of next word
-  const isChangeWord = op === 'change' && (motion === 'w' || motion === 'W')
+  const isWordMotion = motion === 'w' || motion === 'W'
+  const isChangeWord = op === 'change' && isWordMotion
+  const isCharWordOp = isWordMotion && op !== 'change'
   const curChar = cursor.text[cursor.offset]
   const onPlainWhitespace =
     (curChar === ' ' || curChar === '\t' || curChar === '\n') &&
     cursor.snapOutOfPlaceholder(cursor.offset, 'start') === cursor.offset
 
   if (isChangeWord && onPlainWhitespace) {
-    let wordCursor = cursor
-    for (let i = 0; i < count - 1; i++) {
-      const next =
-        motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
-      if (next.offset === wordCursor.offset) break
-      wordCursor = next
-    }
-    to = Math.min(to, wordCursor.endOfLogicalLine().offset)
+    to = clampWordMotionRangeEnd(cursor, motion, count, to)
     if (to > from && cursor.text[to - 1] === '\n') {
       to -= 1
       const lineStart = cursor.startOfLogicalLine().offset
@@ -531,11 +561,13 @@ function getOperatorRange(
       }
     }
   } else if (isChangeWord) {
-    // For cw with count, move forward (count-1) words, then find end of that word
+    // For cw with count, move forward (count-1) words, skipping empty lines
     let wordCursor = cursor
     for (let i = 0; i < count - 1; i++) {
-      wordCursor =
-        motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
+      do {
+        wordCursor =
+          motion === 'w' ? wordCursor.nextVimWord() : wordCursor.nextWORD()
+      } while (cursor.isOnEmptyLine(wordCursor.offset) && !wordCursor.isAtEnd())
     }
     let wordEnd =
       motion === 'w' ? wordCursor.endOfVimWord() : wordCursor.endOfWORD()
@@ -572,6 +604,29 @@ function getOperatorRange(
     cursor.text[to] !== '\n'
   ) {
     to = cursor.measuredText.nextOffset(to)
+  } else if (isCharWordOp) {
+    to = clampWordMotionRangeEnd(cursor, motion, count, to)
+  }
+
+  const lineStart = findLogicalLineStartInText(cursor.text, from)
+  const onlyIndentBefore = /^[ \t]*$/.test(cursor.text.slice(lineStart, from))
+  if (
+    (motion === ' ' || isCharWordOp) &&
+    to > from &&
+    cursor.text[to - 1] === '\n'
+  ) {
+    linewise = onlyIndentBefore
+    from = linewise ? lineStart : from
+    to = linewise && op !== 'change' ? to : to - 1
+  } else if (
+    isCharWordOp &&
+    op === 'delete' &&
+    onlyIndentBefore &&
+    cursor.text.slice(from, to).includes('\n') &&
+    /^[ \t]*(\n|$)/.test(cursor.text.slice(to))
+  ) {
+    from = lineStart
+    linewise = true
   }
 
   // Word motions can land inside a placeholder chip; extend the range to
@@ -868,4 +923,94 @@ export function repeatVisualOp(
   const { from, to } = getSpanRange(ctx, span, linewise)
   if (from === to && !(linewise && ctx.text.length > 0)) return
   applyVisualRangeOp(op, from, to, ctx, linewise)
+}
+
+function applyVisualPasteRange(
+  registerContent: string,
+  registerLinewise: boolean,
+  from: number,
+  to: number,
+  ctx: OperatorContext,
+  selectionLinewise: boolean,
+  trailingEmptyLine: boolean,
+): void {
+  const replaced = ctx.text.slice(from, to)
+  const stripped = registerLinewise
+    ? registerContent.replace(/\n$/, '')
+    : registerContent
+  const selectionEndsNewline = replaced.endsWith('\n') && !trailingEmptyLine
+  let insert = registerContent
+  let landingStart = from
+  if (selectionLinewise) {
+    insert = selectionEndsNewline ? stripped + '\n' : stripped
+  } else if (registerLinewise) {
+    insert = ctx.text ? '\n' + stripped + '\n' : '\n' + stripped
+    landingStart = from + 1
+  }
+  let nextRegister = replaced
+  if (selectionLinewise && !selectionEndsNewline) {
+    nextRegister += '\n'
+  }
+  if (nextRegister) {
+    ctx.setRegister(nextRegister, selectionLinewise)
+  }
+  const nextText = ctx.text.slice(0, from) + insert + ctx.text.slice(to)
+  ctx.setText(nextText)
+  if (selectionLinewise || registerLinewise) {
+    const landed = Cursor.fromText(
+      nextText,
+      ctx.cursor.measuredText.columns,
+      landingStart,
+    )
+    const firstNonBlank = landed.firstNonBlankInLogicalLine().offset
+    ctx.setOffset(
+      landed.placeholderStartingAt(firstNonBlank)
+        ? landingStart
+        : firstNonBlank,
+    )
+  } else if (insert.includes('\n')) {
+    ctx.setOffset(clampVimNormalOffset(ctx.cursor, from, nextText))
+  } else {
+    const tail = lastGrapheme(insert)
+    ctx.setOffset(Math.max(from, from + insert.length - (tail.length || 1)))
+  }
+}
+
+/**
+ * Paste over a visual selection (`p` / `P` in VISUAL or VISUAL LINE mode),
+ * honoring whether the register is linewise even over a characterwise selection.
+ */
+export function executeVisualPaste(
+  anchor: number,
+  ctx: OperatorContext,
+  linewise: boolean,
+): void {
+  const content = ctx.getRegister()
+  if (!content) return
+  const registerLinewise = ctx.getRegisterIsLinewise()
+  const { from, to } = getVisualRange(anchor, ctx.cursor, linewise)
+  const replaced = ctx.text.slice(from, to)
+  const span = countVisualSpan(replaced, linewise)
+  const trailingEmptyLine =
+    linewise &&
+    ctx.text.endsWith('\n') &&
+    Math.max(anchor, ctx.cursor.offset) >= ctx.text.length
+  applyVisualPasteRange(
+    content,
+    registerLinewise,
+    from,
+    to,
+    ctx,
+    linewise,
+    trailingEmptyLine,
+  )
+  ctx.recordChange({
+    type: 'visualPaste',
+    content,
+    registerLinewise,
+    selectionEndsLine: replaced.endsWith('\n'),
+    selectionOnOneLine: !replaced.slice(0, -1).includes('\n'),
+    span,
+    linewise,
+  })
 }

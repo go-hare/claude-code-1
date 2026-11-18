@@ -14,6 +14,7 @@ import {
   type DOMElement,
   type KeyboardEvent,
   type PasteEvent,
+  announceForScreenReader,
   Box,
   Byline,
   Dialog,
@@ -51,12 +52,24 @@ import { AddPermissionRules } from './AddPermissionRules.js';
 import { AddWorkspaceDirectory } from './AddWorkspaceDirectory.js';
 import { PermissionRuleDescription } from './PermissionRuleDescription.js';
 import { PermissionRuleInput } from './PermissionRuleInput.js';
-import { RecentDenialsTab } from './RecentDenialsTab.js';
+import { RecentDenialsTab, type RecentDenialsState } from './RecentDenialsTab.js';
 import { RemoveWorkspaceDirectory } from './RemoveWorkspaceDirectory.js';
 import { WorkspaceTab } from './WorkspaceTab.js';
 import { AutoModeRulesTab } from './AutoModeRulesTab.js';
 
-type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'automode' | 'workspace';
+export function getRecentlyBlockedEscHint(
+  approvedCount: number,
+  retryCount: number,
+  isMidTurn = false,
+): string | undefined {
+  if (retryCount > 0) {
+    return isMidTurn ? 'Esc to tell Claude next prompt' : `Esc to retry ${retryCount} blocked`;
+  }
+  if (approvedCount > 0) {
+    return `Esc to approve ${approvedCount} blocked`;
+  }
+  return undefined;
+}
 
 type RuleSourceTextProps = {
   rule: PermissionRule;
@@ -252,6 +265,8 @@ function RulesTabContent(props: RulesTabContentProps): React.ReactNode {
   );
 }
 
+type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'automode' | 'workspace';
+
 // Composes the subtitle + search + Select for a single allow/ask/deny tab.
 function PermissionRulesTab({
   tab,
@@ -309,13 +324,18 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
   // Ref not state: RecentDenialsTab updates don't need to trigger parent
   // re-render (only read on exit), and re-renders trip the modal ScrollBox
   // collapse bug from #23592 in fullscreen.
-  const denialStateRef = useRef<{
-    approved: Set<number>;
-    retry: Set<number>;
-    denials: readonly AutoModeDenial[];
-  }>({ approved: new Set(), retry: new Set(), denials: [] });
-  const handleDenialStateChange = useCallback((s: typeof denialStateRef.current) => {
+  const denialStateRef = useRef<RecentDenialsState>({
+    approved: new Set(),
+    retry: new Set(),
+    denials: [],
+    canMark: true,
+  });
+  const [denialEscHint, setDenialEscHint] = useState<string | undefined>();
+  const [canMarkDenial, setCanMarkDenial] = useState(true);
+  const handleDenialStateChange = useCallback((s: RecentDenialsState) => {
     denialStateRef.current = s;
+    setDenialEscHint(getRecentlyBlockedEscHint(s.approved.size, s.retry.size));
+    setCanMarkDenial(s.canMark);
   }, []);
 
   const [selectedRule, setSelectedRule] = useState<PermissionRule | undefined>();
@@ -602,6 +622,8 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     }
     setLastFocusedRuleKey(nextFocusKey);
 
+    const deletedRuleText = permissionRuleValueToString(selectedRule.ruleValue);
+    const deletedRuleBehavior = selectedRule.ruleBehavior;
     void deletePermissionRule({
       rule: selectedRule,
       initialContext: toolPermissionContext,
@@ -611,12 +633,15 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
           toolPermissionContext,
         }));
       },
-    });
-
-    setChanges(prev => [
-      ...prev,
-      `Deleted ${selectedRule.ruleBehavior} rule ${chalk.bold(permissionRuleValueToString(selectedRule.ruleValue))}`,
-    ]);
+    })
+      .then(() => {
+        setChanges(prev => [...prev, `Deleted ${deletedRuleBehavior} rule ${chalk.bold(deletedRuleText)}`]);
+        announceForScreenReader(`[Deleted ${deletedRuleBehavior} rule ${deletedRuleText}]`, true);
+      })
+      .catch(() => {
+        setChanges(prev => [...prev, `Could not delete ${chalk.bold(deletedRuleText)} — the rule is unchanged`]);
+        announceForScreenReader(`[Could not delete ${deletedRuleText} — the rule is unchanged]`, true);
+      });
     setSelectedRule(undefined);
   };
 
@@ -742,7 +767,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
           navFromContent={!isSearchMode}
         >
           {[
-            <Tab key="recent" id="recent" title="Recently denied">
+            <Tab key="recent" id="recent" title="Recently blocked">
               <RecentDenialsTab onHeaderFocusChange={handleHeaderFocusChange} onStateChange={handleDenialStateChange} />
             </Tab>,
             <Tab key="allow" id="allow" title="Allow">
@@ -788,13 +813,19 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
             {exitState.pending ? (
               <>Press {exitState.keyName} again to cancel</>
             ) : headerFocused ? (
-              <>←/→ to switch · ↓ to select · Esc to cancel</>
+              <>←/→ to switch · ↓ to select · {denialEscHint ?? 'Esc to cancel'}</>
             ) : isSearchMode ? (
               <>Type to filter · Enter/↓ to select · ↑ to tabs · Esc to clear</>
             ) : hasDenials && selectedTab === 'recent' ? (
-              <>Enter to approve · r to retry · {isScreenReader ? '' : '↑/↓ to navigate · '}Esc to cancel</>
+              <>
+                {canMarkDenial ? 'Enter to approve · r to retry · ' : ''}
+                {denialEscHint ?? `${isScreenReader ? '' : '↑/↓ to navigate · '}Esc to close`}
+              </>
             ) : (
-              <>{isScreenReader ? '' : '↑/↓ to navigate · Enter to select · '}←/→ to switch · Esc to cancel</>
+              <>
+                {isScreenReader ? '' : '↑/↓ to navigate · Enter to select · '}←/→ to switch ·{' '}
+                {denialEscHint ?? 'Esc to cancel'}
+              </>
             )}
           </Text>
         </Box>

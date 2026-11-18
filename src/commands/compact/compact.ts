@@ -112,14 +112,10 @@ export const call: LocalCommandCall = async (args, context) => {
           return {
             type: 'compact',
             compactionResult: sessionMemoryResult,
-            displayText: buildDisplayText(
-              context,
-              preHookResult.userDisplayMessage,
-              {
-                pre: sessionMemoryResult.preCompactTokenCount,
-                post: sessionMemoryResult.truePostCompactTokenCount,
-              },
-            ),
+            ...buildDisplayText(context, preHookResult.userDisplayMessage, {
+              pre: sessionMemoryResult.preCompactTokenCount,
+              post: sessionMemoryResult.truePostCompactTokenCount,
+            }),
           }
         }
       }
@@ -172,7 +168,7 @@ export const call: LocalCommandCall = async (args, context) => {
       return {
         type: 'compact',
         compactionResult: result,
-        displayText: buildDisplayText(context, result.userDisplayMessage, {
+        ...buildDisplayText(context, result.userDisplayMessage, {
           pre: result.preCompactTokenCount,
           post: result.truePostCompactTokenCount,
         }),
@@ -296,7 +292,7 @@ async function compactViaReactive(
         ...outcome.result!,
         userDisplayMessage: combinedMessage,
       },
-      displayText: buildDisplayText(context, combinedMessage, {
+      ...buildDisplayText(context, combinedMessage, {
         pre: outcome.result!.preCompactTokenCount,
         post: outcome.result!.truePostCompactTokenCount,
       }),
@@ -309,11 +305,11 @@ async function compactViaReactive(
   }
 }
 
-function buildDisplayText(
+export function buildDisplayText(
   context: ToolUseContext,
   userDisplayMessage?: string,
   tokenCounts?: { pre?: number; post?: number },
-): string {
+): { displayText: string; displayTextIsHintOnly: boolean } {
   const upgradeMessage = getUpgradeMessage('tip')
   const expandShortcut = getShortcutDisplay(
     'app:toggleTranscript',
@@ -332,7 +328,11 @@ function buildDisplayText(
     ...(userDisplayMessage ? [userDisplayMessage] : []),
     ...(upgradeMessage ? [upgradeMessage] : []),
   ]
-  return chalk.dim('Compacted ' + dimmed.join('\n'))
+  return {
+    displayText: chalk.dim('Compacted ' + dimmed.join('\n')),
+    // v2.1.314 (#1395): SEA !e && !m — true when only the ctrl+o / token hint is shown
+    displayTextIsHintOnly: !userDisplayMessage && !upgradeMessage,
+  }
 }
 
 /** densable 2.1.247 Ce — appState.agent → activeAgents definition. */

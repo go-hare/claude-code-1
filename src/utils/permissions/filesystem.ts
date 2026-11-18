@@ -64,6 +64,7 @@ import { getProjectDir } from '../sessionPaths.js'
 import { SETTING_SOURCES } from '../settings/constants.js'
 import {
   getSettingsFilePathForSource,
+  getSettingsForSource,
   getSettingsRootPathForSource,
 } from '../settings/settings.js'
 import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
@@ -430,12 +431,41 @@ export function isProfileStorePath(filePath: string): boolean {
   return false
 }
 
+const REMOTE_SETTINGS_FILENAME = 'remote-settings.json'
+const REMOTE_SETTINGS_HELPER_CONSENT = 'remote-settings-helper-consent'
+const REMOTE_SETTINGS_CONSENT_FILE = 'remote-settings-consent.json'
+
+/**
+ * Official 325 `Io(Jt())` (#1438): local copies of server-managed settings
+ * (`remote-settings.json`) and their signature/sync-stamp/consent voucher files
+ * in `~/.claude` and `{originalCwd}/.claude`.
+ */
+export function getRemoteSettingsCachePaths(): string[] {
+  const dirs = Array.from(
+    new Set([getClaudeConfigHomeDir(), join(getOriginalCwd(), '.claude')]),
+  )
+  const paths: string[] = []
+  for (const dir of dirs) {
+    const body = join(dir, REMOTE_SETTINGS_FILENAME)
+    paths.push(
+      body,
+      `${body}.signature.json`,
+      `${body}.signature-iat.json`,
+      `${body}.synced-at`,
+      join(dir, REMOTE_SETTINGS_HELPER_CONSENT),
+      join(dir, REMOTE_SETTINGS_CONSENT_FILE),
+    )
+  }
+  return paths
+}
+
 function getSettingsPaths(): string[] {
   return [
     ...SETTING_SOURCES.map(source =>
       getSettingsFilePathForSource(source),
     ).filter(path => path !== undefined),
     ...getFlagMcpConfigFilePaths().map(p => expandPath(p)),
+    ...getRemoteSettingsCachePaths().map(p => expandPath(p)),
   ]
 }
 
@@ -1470,6 +1500,120 @@ export function shouldHonorAllowForServedCall(
   return !(context.servedCall === true && result.behavior === 'allow')
 }
 
+const BLOCK_WRITES_OUTSIDE_MESSAGE =
+  'Writes outside the working directories are blocked (permissions.blockWritesOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.'
+
+const BLOCK_WRITES_SETTINGS_MESSAGE =
+  'Writes to Claude Code settings files are blocked while permissions.blockWritesOutsideWorkingDirectories is on, because a settings file can lift that block. While a managed settings folder cannot be resolved, any .json file counts as one.'
+
+const BLOCK_WRITES_OUTSIDE_WHY =
+  'the permissions.blockWritesOutsideWorkingDirectories setting blocks writes outside the working directories.'
+
+export type ToolPermissionContextWithWriteBlock = ToolPermissionContext & {
+  blockWritesOutsideWorkingDirectories?: boolean
+}
+
+export function contextBlocksOutsideWrites(
+  context: ToolPermissionContextWithWriteBlock,
+): boolean {
+  return context.blockWritesOutsideWorkingDirectories === true
+}
+
+export function settingsHaveBlockWritesOutsideWorkingDirectories(): boolean {
+  return SETTING_SOURCES.some(source => {
+    const perms = getSettingsForSource(source)?.permissions as
+      | { blockWritesOutsideWorkingDirectories?: boolean }
+      | undefined
+    return perms?.blockWritesOutsideWorkingDirectories === true
+  })
+}
+
+function isJsonOrSettingsPathForWriteBlock(
+  pathsToCheck: readonly string[],
+): boolean {
+  return pathsToCheck.some(
+    p =>
+      isClaudeSettingsPath(p) ||
+      p.toLowerCase().endsWith('.json') ||
+      isProfileStorePath(p),
+  )
+}
+
+/**
+ * Official 325 `Ufn(e, n, r)` (#1354): returns an error message if
+ * `permissions.blockWritesOutsideWorkingDirectories` blocks writing to `path`
+ * (either because it is outside working directories or because it is a settings/json file).
+ */
+export function checkBlockWritesOutsideWorkingDirectories(
+  path: string,
+  context: ToolPermissionContextWithWriteBlock,
+  precomputedPathsToCheck?: readonly string[],
+): string | undefined {
+  const paths = precomputedPathsToCheck ?? [expandPath(path)]
+  for (const p of paths) {
+    const denyRule = matchingRuleForInput(p, context, 'edit', 'deny')
+    if (denyRule) {
+      return `Permission to edit ${path} has been denied.`
+    }
+  }
+  if (!contextBlocksOutsideWrites(context)) return undefined
+  if (
+    !pathInWorkingDirectorySet(
+      path,
+      workingDirectoriesForOutsideReadFence(context),
+      paths,
+    )
+  ) {
+    return `${path}: ${BLOCK_WRITES_OUTSIDE_MESSAGE}`
+  }
+  if (isJsonOrSettingsPathForWriteBlock(paths)) {
+    return `${path}: ${BLOCK_WRITES_SETTINGS_MESSAGE}`
+  }
+  return undefined
+}
+
+/**
+ * Official 325 `hDo` (#1354): deny file-tool writes outside working directories
+ * or to settings/json files when `permissions.blockWritesOutsideWorkingDirectories` is on.
+ */
+export function denyBlockedOutsideWritesForFileTool(
+  path: string,
+  context: ToolPermissionContextWithWriteBlock,
+  precomputedPathsToCheck?: readonly string[],
+): PermissionDenyDecision | null {
+  if (!contextBlocksOutsideWrites(context)) return null
+  const paths = precomputedPathsToCheck ?? [expandPath(path)]
+  if (
+    !pathInWorkingDirectorySet(
+      path,
+      workingDirectoriesForOutsideReadFence(context),
+      paths,
+    )
+  ) {
+    return {
+      behavior: 'deny',
+      message: `${path}: ${BLOCK_WRITES_OUTSIDE_WHY}`,
+      decisionReason: {
+        type: 'other',
+        reason: BLOCK_WRITES_OUTSIDE_MESSAGE,
+      },
+      blockedPath: path,
+    }
+  }
+  if (isJsonOrSettingsPathForWriteBlock(paths)) {
+    return {
+      behavior: 'deny',
+      message: `${path}: ${BLOCK_WRITES_SETTINGS_MESSAGE}`,
+      decisionReason: {
+        type: 'other',
+        reason: BLOCK_WRITES_SETTINGS_MESSAGE,
+      },
+      blockedPath: path,
+    }
+  }
+  return null
+}
+
 /** official cke / file-tool deny when permissions.blockReadsOutsideWorkingDirectories */
 export function denyBlockedOutsideReadsForFileTool(
   path: string,
@@ -2411,6 +2555,14 @@ function nsWritePermissionForTool<Input extends AnyObject>(
   )
   if (restrictedWriteDeny) {
     return restrictedWriteDeny
+  }
+  const outsideWriteDeny = denyBlockedOutsideWritesForFileTool(
+    path,
+    toolPermissionContext,
+    pathsToCheck,
+  )
+  if (outsideWriteDeny) {
+    return outsideWriteDeny
   }
 
   // gold NS: after zo/UNC early returns, before session .claude allow.

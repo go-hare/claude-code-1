@@ -1368,6 +1368,58 @@ export function getBinaryPath(opts?: { pinToCurrentBinary?: boolean }): {
 // Worker Class — official zF
 // ---------------------------------------------------------------------------
 
+export type BetweenTurnCrashDecision =
+  | { action: 'respawn'; neededBy: 'attached' | 'session_cron' | 'pinned' }
+  | { action: 'settle'; notice: string; outcome: 'done' | 'failed' | 'killed' }
+  | { action: 'normal' }
+
+/**
+ * densable `@296122998` — decide whether a worker that crashed between turns
+ * (state already settled on disk) should be restarted (#1244) or settled with
+ * a non-restarting resume notice (#1276).
+ */
+export function classifyBetweenTurnCrashRespawn(opts: {
+  state: ReturnType<typeof readBgJobState>
+  attachersCount: number
+  isPinned: boolean
+  attempt: number
+  maxAttempts?: number
+}): BetweenTurnCrashDecision {
+  const { state, attachersCount, isPinned, attempt } = opts
+  const maxAttempts = opts.maxAttempts ?? MAX_RESPAWN_ATTEMPTS
+  if (!state || !isTerminalState(state) || state.queuedPrompt) {
+    return { action: 'normal' }
+  }
+  const neededBy: 'attached' | 'session_cron' | 'pinned' | undefined =
+    state.state === 'done'
+      ? attachersCount > 0
+        ? 'attached'
+        : (state.inFlight?.kinds ?? []).includes('session_cron')
+          ? 'session_cron'
+          : isPinned || state.pinned === true
+            ? 'pinned'
+            : undefined
+      : undefined
+
+  if (neededBy && attempt <= maxAttempts) {
+    return { action: 'respawn', neededBy }
+  }
+
+  const notice = neededBy
+    ? `not restarted — this session crashed again after ${Math.max(1, attempt - 1)} restarts (the conversation is saved); run \`claude --resume\` to continue`
+    : state.state === 'stopped'
+      ? 'not restarted — this session was stopped (the conversation is saved); run `claude --resume` to continue'
+      : 'not restarted — this session was idle (the conversation is saved); run `claude --resume` to continue'
+
+  const outcome =
+    state.state === 'done'
+      ? 'done'
+      : state.state === 'stopped'
+        ? 'killed'
+        : 'failed'
+  return { action: 'settle', notice, outcome }
+}
+
 export class BgWorker {
   // --- Core identity ---
   dispatch: DispatchRequest
@@ -1951,7 +2003,7 @@ export class BgWorker {
     return this.rv?.send({ type: 'reply', text }) ?? false
   }
 
-  sendAttacherCaps(caps: Record<string, unknown> | null): boolean {
+  sendAttacherCaps(caps: AttacherCaps | null): boolean {
     return this.rv?.send({ type: 'attacher-caps', caps }) ?? false
   }
 
@@ -2346,18 +2398,28 @@ export class BgWorker {
       })
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        const cwdExists = await access(dispatch.cwd)
-          .then(() => true)
-          .catch(() => false)
+        const isExec = dispatch.launch.mode === 'exec'
+        const [cwdExists, binaryMissing] = await Promise.all([
+          access(dispatch.cwd)
+            .then(() => true)
+            .catch(() => false),
+          isExec
+            ? Promise.resolve(false)
+            : access(getBinaryPath({ pinToCurrentBinary: true }).cmd).then(
+                () => false,
+                e => (e as NodeJS.ErrnoException).code === 'ENOENT',
+              ),
+        ])
         if (this.record.outcome) return
         if (!cwdExists) {
           this.settleCwdGone('cold')
           return
         }
-        const detail =
-          dispatch.launch.mode === 'exec'
-            ? `${dispatch.launch.cmd}: command not found`
-            : 'daemon binary was deleted (upgrade in progress) — run your command again to use the new version'
+        const detail = isExec
+          ? `${dispatch.launch.cmd}: command not found`
+          : binaryMissing
+            ? 'daemon binary was deleted (upgrade in progress) — run your command again to use the new version'
+            : `Couldn't start the session. Run \`claude daemon stop --any\` (ends background sessions), then run your command again. (${(err as Error).message ?? String(err)})`
         this.patch({ state: 'crashed', detail })
         const msg = `\r\n\x1B[2m[${detail}]\x1B[0m\r\n`
         this.pushRing(msg)
@@ -2625,8 +2687,29 @@ export class BgWorker {
   }
 
   private scheduleRespawn(reason: string): void {
+    const decision = classifyBetweenTurnCrashRespawn({
+      state: readBgJobState(this.dispatch.short),
+      attachersCount: this.attachers.size,
+      isPinned: isSessionPinned(this.dispatch.short),
+      attempt: this.attempt,
+    })
+    if (decision.action === 'settle') {
+      this.patch({ state: 'crashed', detail: decision.notice })
+      const noticeMsg = `\r\n\x1B[2m[${decision.notice}]\x1B[0m\r\n`
+      this.pushRing(noticeMsg)
+      this.onStream.emit(noticeMsg)
+      this.settle(decision.outcome)
+      return
+    }
+    if (decision.action === 'respawn') {
+      this.attempt = 1
+    }
     if (this.attempt >= MAX_RESPAWN_ATTEMPTS) {
-      this.patch({ state: 'crashed', detail: reason })
+      const detail = `${reason} — not restarted; run \`claude --resume\` to continue`
+      this.patch({ state: 'crashed', detail })
+      const noticeMsg = `\r\n\x1B[2m[${detail}]\x1B[0m\r\n`
+      this.pushRing(noticeMsg)
+      this.onStream.emit(noticeMsg)
       this.settle('crashed')
       return
     }
@@ -2688,7 +2771,15 @@ export class BgWorker {
         }
         if (this.attachers.size > 0) {
           const last = [...this.attachers.values()].at(-1)!
-          this.sendAttacherCaps(last.caps ?? null)
+          const hyperlinks = resolveAttacherHyperlinks(last.caps)
+          const capsToSend =
+            last.caps || hyperlinks !== undefined
+              ? {
+                  ...(last.caps ?? {}),
+                  ...(hyperlinks !== undefined ? { hyperlinks } : {}),
+                }
+              : null
+          this.sendAttacherCaps(capsToSend)
           // RV just connected and attacher is waiting — trigger repaint immediately
           this.rv?.send({ type: 'repaint' })
         } else {
@@ -2837,10 +2928,46 @@ export class BgWorker {
 // Attacher Entry type (used by attach handler)
 // ---------------------------------------------------------------------------
 
+export interface AttacherCaps {
+  hyperlinks?: boolean
+  [key: string]: unknown
+}
+
+/**
+ * Check whether `short` is pinned in `~/.claude/pins.json` (#1244).
+ */
+export function isSessionPinned(short: string): boolean {
+  try {
+    const pinsPath = join(getClaudeConfigHomeDir(), 'pins.json')
+    const parsed = JSON.parse(readFileSync(pinsPath, 'utf-8'))
+    return Array.isArray(parsed) && parsed.includes(short)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Gold `UJe` @295950995 — resolve hyperlink support from attacherCaps()?.hyperlinks
+ * first, falling back to FORCE_HYPERLINK env var when unset.
+ */
+export function resolveAttacherHyperlinks(
+  caps: AttacherCaps | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | undefined {
+  const fromCaps = caps?.hyperlinks
+  if (fromCaps !== undefined) return fromCaps
+  const force = env.FORCE_HYPERLINK
+  if (!force) return undefined
+  const lower = force.trim().toLowerCase()
+  const isFalsy =
+    lower === '0' || lower === 'false' || lower === 'no' || lower === 'off'
+  return !(isFalsy || parseInt(force, 10) === 0)
+}
+
 export interface AttacherEntry {
   cols: number
   rows: number
-  caps?: Record<string, unknown>
+  caps?: AttacherCaps
   kick: () => void
   repaint?: () => void
 }

@@ -86,6 +86,8 @@ function findWordObject(
   const offsetAt = (idx: number): number =>
     idx < graphemes.length ? graphemes[idx]!.index : text.length
   const isWs = (idx: number): boolean => isVimWhitespace(graphemeAt(idx))
+  const isInlineWs = (idx: number): boolean =>
+    graphemeAt(idx) !== '\n' && isVimWhitespace(graphemeAt(idx))
   const isWord = (idx: number): boolean => isWordChar(graphemeAt(idx))
   const isPunct = (idx: number): boolean => isVimPunctuation(graphemeAt(idx))
 
@@ -96,8 +98,12 @@ function findWordObject(
     while (startIdx > 0 && isWord(startIdx - 1)) startIdx--
     while (endIdx < graphemes.length && isWord(endIdx)) endIdx++
   } else if (isWs(graphemeIdx)) {
-    while (startIdx > 0 && isWs(startIdx - 1)) startIdx--
-    while (endIdx < graphemes.length && isWs(endIdx)) endIdx++
+    const atEnd = offset >= text.length
+    const fwdPred = isInner && !atEnd ? isInlineWs : isWs
+    while (endIdx < graphemes.length && fwdPred(endIdx)) endIdx++
+    const hitEof = !isInner && endIdx === graphemes.length
+    const bwdPred = atEnd || hitEof ? isWs : isInlineWs
+    while (startIdx > 0 && bwdPred(startIdx - 1)) startIdx--
     return { start: offsetAt(startIdx), end: offsetAt(endIdx) }
   } else if (isPunct(graphemeIdx)) {
     while (startIdx > 0 && isPunct(startIdx - 1)) startIdx--
@@ -105,11 +111,15 @@ function findWordObject(
   }
 
   if (!isInner) {
-    // Include surrounding whitespace
-    if (endIdx < graphemes.length && isWs(endIdx)) {
-      while (endIdx < graphemes.length && isWs(endIdx)) endIdx++
-    } else if (startIdx > 0 && isWs(startIdx - 1)) {
-      while (startIdx > 0 && isWs(startIdx - 1)) startIdx--
+    // Include surrounding inline whitespace (never cross line break)
+    if (endIdx < graphemes.length && isInlineWs(endIdx)) {
+      while (endIdx < graphemes.length && isInlineWs(endIdx)) endIdx++
+    } else {
+      let prev = startIdx
+      while (prev > 0 && isInlineWs(prev - 1)) prev--
+      if (prev > 0 && graphemeAt(prev - 1) !== '\n') {
+        startIdx = prev
+      }
     }
   }
 

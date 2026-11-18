@@ -121,7 +121,7 @@ export const inputSchema = lazySchema(() =>
       .enum(['document', 'slides', 'design', 'other'])
       .optional()
       .describe(
-        "quickstart only (required): what is being made — 'document' (text to read or edit together), 'slides' (a deck or one slide), 'design' (a visual design or prototype on a canvas), 'other' (anything else, or unsure).",
+        "quickstart only (required): what is being made — 'document' (writing people will keep editing or pass around as text, such as a memo, plan, spec, proposal or notes), 'slides' (a deck or one slide), 'design' (a visual design or prototype on a canvas), 'other' (a page to look at or use: an explainer, a diagram, anything interactive, a dashboard that shows data, a spreadsheet, anything else, or unsure).",
       ),
     design_systems: z
       .boolean()

@@ -26,6 +26,7 @@ import { registerChromeUploadAttachmentDigest } from '../utils/claudeInChrome/fi
 import { CROSS_SESSION_MESSAGE_TAG } from '../constants/xml.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { getErrnoCode } from '../utils/errors.js'
 import {
   type ImageLimits,
   maybeResizeAndDownsampleImageBuffer,
@@ -45,8 +46,26 @@ import {
 export const INBOUND_ATTACHMENT_MAX_BYTES = 31_457_280
 /** densable jhs — 35 MiB transfer cap for non-sha256 attachments (#695). */
 export const INBOUND_ATTACHMENT_UNVERIFIED_MAX_BYTES = 36_700_160
-/** densable Uee — max attachments materialized per message. */
+/** densable Uee — max SendFile (sha256) attachments materialized per message. */
 export const INBOUND_ATTACHMENT_MAX_COUNT = 16
+/** densable Bn — max Remote Control / cloud attachments per message (#1242). */
+export const INBOUND_ATTACHMENT_CLOUD_MAX_COUNT = 20
+export const DISK_FULL_ATTACHMENT_NOTICE =
+  'A file could not be saved: no space left on device'
+
+export function attachmentCapForMessage(
+  attachments: readonly { sha256?: unknown }[],
+): number {
+  return attachments.every(a => a.sha256 === undefined)
+    ? INBOUND_ATTACHMENT_CLOUD_MAX_COUNT
+    : INBOUND_ATTACHMENT_MAX_COUNT
+}
+
+function attachmentsMissingNotice(missing: number, total: number): string {
+  if (total === 1) return '[attachment did not arrive]'
+  if (missing === total) return `[${total} attachments did not arrive]`
+  return `[${missing} of ${total} attachments did not arrive]`
+}
 
 const DOWNLOAD_TIMEOUT_MS = 30_000
 const DOWNLOAD_MAX_ATTEMPTS = 3
@@ -129,7 +148,7 @@ type ResolveFailure = 'download' | 'digest_mismatch' | 'write'
 type ResolveOneResult =
   | { imageBlock: ImageBlockParam }
   | { path: string; inlineFellBack?: boolean }
-  | { failure: ResolveFailure }
+  | { failure: ResolveFailure; writeErrorCode?: string }
 
 const FAILURE_REASONS: Record<ResolveFailure, string> = {
   download: 'it could not be downloaded',
@@ -477,11 +496,13 @@ async function resolveOne(
   const outPath = join(dir, `${prefix}-${safeName}`)
 
   let wroteFile = false
+  let writeErrorCode: string | undefined
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await writeFile(outPath, data, { mode: 0o600 })
     wroteFile = true
   } catch (e) {
+    writeErrorCode = getErrnoCode(e)
     debug(`write ${outPath} failed: ${e}`)
   }
 
@@ -512,14 +533,14 @@ async function resolveOne(
       return { imageBlock }
     }
     if (!wroteFile) {
-      return { failure: 'write' }
+      return { failure: 'write', writeErrorCode }
     }
     debug(`inline ${att.file_uuid} fell back to @path ref`)
     return { path: outPath, inlineFellBack: true }
   }
 
   if (!wroteFile) {
-    return { failure: 'write' }
+    return { failure: 'write', writeErrorCode }
   }
 
   return { path: outPath }
@@ -542,9 +563,15 @@ function logPeerFileReceive(
   else featureBad('peer_file_receive', 'all_failed')
 }
 
+export type MissingInboundAttachment = {
+  file_uuid: string
+  reason: 'download' | 'write' | 'no_token' | 'count_cap'
+}
+
 export type ResolvedInboundAttachments = {
   prefix: string
   imageBlocks: ImageBlockParam[]
+  missingFiles?: MissingInboundAttachment[]
 }
 
 /**
@@ -564,10 +591,14 @@ export async function resolveInboundAttachments(
   const integrityAttachments = attachments.filter(
     a => typeof a.sha256 === 'string',
   )
+  const cap = attachmentCapForMessage(attachments)
 
   if (!getBridgeAccessToken()) {
     debug('skip: no oauth token')
     featureSad('bridge_attachment_resolve', 'no_token')
+    const missingNoToken: MissingInboundAttachment[] = attachments
+      .filter(a => typeof a.sha256 !== 'string')
+      .map(a => ({ file_uuid: a.file_uuid, reason: 'no_token' }))
     if (integrityAttachments.length > 0) {
       const over = integrityAttachments.length - INBOUND_ATTACHMENT_MAX_COUNT
       const slice =
@@ -576,6 +607,10 @@ export async function resolveInboundAttachments(
           : integrityAttachments
       logPeerFileReceive('bridge', slice.length, 0)
       const drop = over > 0 ? ` ${droppedNotice(over)}` : ''
+      const missingNotice =
+        missingNoToken.length > 0
+          ? ` ${attachmentsMissingNotice(missingNoToken.length, missingNoToken.length)}`
+          : ''
       return {
         prefix:
           slice
@@ -587,24 +622,31 @@ export async function resolveInboundAttachments(
             )
             .join(' ') +
           drop +
+          missingNotice +
           ' ',
         imageBlocks: [],
+        ...(missingNoToken.length > 0 ? { missingFiles: missingNoToken } : {}),
       }
     }
-    return { prefix: '', imageBlocks: [] }
+    return {
+      prefix:
+        missingNoToken.length > 0
+          ? `${attachmentsMissingNotice(missingNoToken.length, missingNoToken.length)} `
+          : '',
+      imageBlocks: [],
+      ...(missingNoToken.length > 0 ? { missingFiles: missingNoToken } : {}),
+    }
   }
 
   const notices: string[] = []
   let list = attachments
-  const overCap = list.length > INBOUND_ATTACHMENT_MAX_COUNT
+  const overCap = list.length > cap
   if (overCap) {
-    debug(
-      `dropping ${list.length - INBOUND_ATTACHMENT_MAX_COUNT} attachment(s) over the ${INBOUND_ATTACHMENT_MAX_COUNT} cap`,
-    )
+    debug(`dropping ${list.length - cap} attachment(s) over the ${cap} cap`)
     if (integrityAttachments.length > 0) {
-      notices.push(droppedNotice(list.length - INBOUND_ATTACHMENT_MAX_COUNT))
+      notices.push(droppedNotice(list.length - cap))
     }
-    list = list.slice(0, INBOUND_ATTACHMENT_MAX_COUNT)
+    list = list.slice(0, cap)
   }
 
   const tryInline = allowChromeRegistration && allowInline
@@ -621,6 +663,8 @@ export async function resolveInboundAttachments(
   let integrityTotal = 0
   let integrityOk = 0
   let hadDigestMismatch = false
+  const missingFiles: MissingInboundAttachment[] = []
+  let sawDiskFull = false
 
   results.forEach((result, idx) => {
     const att = list[idx]!
@@ -638,13 +682,38 @@ export async function resolveInboundAttachments(
       return
     }
     if (result.failure === 'digest_mismatch') hadDigestMismatch = true
-    // densable only surfaces failure notices for integrity (SendFile) attachments.
     if (isIntegrity) {
       notices.push(
         undeliveredNotice(att.file_name, FAILURE_REASONS[result.failure]),
       )
+    } else {
+      missingFiles.push({
+        file_uuid: att.file_uuid,
+        reason: result.failure === 'write' ? 'write' : 'download',
+      })
+      if (result.writeErrorCode === 'ENOSPC') sawDiskFull = true
     }
   })
+
+  const droppedNonIntegrity =
+    integrityAttachments.length === 0 ? attachments.slice(cap) : []
+  if (missingFiles.length > 0 || droppedNonIntegrity.length > 0) {
+    for (const d of droppedNonIntegrity) {
+      missingFiles.push({ file_uuid: d.file_uuid, reason: 'count_cap' })
+    }
+    notices.push(
+      attachmentsMissingNotice(
+        missingFiles.length,
+        list.length - integrityTotal + droppedNonIntegrity.length,
+      ),
+    )
+  }
+  if (droppedNonIntegrity.length > 0) {
+    notices.push(`[a message takes at most ${cap} attachments]`)
+  }
+  if (sawDiskFull && missingFiles.some(m => m.reason === 'write')) {
+    notices.push(`[${DISK_FULL_ATTACHMENT_NOTICE}]`)
+  }
 
   if (integrityTotal > 0) {
     logPeerFileReceive('bridge', integrityTotal, integrityOk)
@@ -677,6 +746,7 @@ export async function resolveInboundAttachments(
   return {
     prefix: prefixParts.length > 0 ? prefixParts.join(' ') + ' ' : '',
     imageBlocks,
+    ...(missingFiles.length > 0 ? { missingFiles } : {}),
   }
 }
 

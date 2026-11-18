@@ -26,8 +26,16 @@ import {
 } from 'node:fs'
 import { access, lstat, mkdir, readFile, rm } from 'node:fs/promises'
 import { getErrnoCode } from 'src/utils/errors.js'
+import { isPluginFsNetworkOrDevicePath } from 'src/utils/path.js'
 import { homedir, hostname } from 'node:os'
-import { dirname, join, resolve as pathResolve } from 'node:path'
+import {
+  dirname,
+  isAbsolute,
+  join,
+  parse as parsePath,
+  resolve as pathResolve,
+  sep as pathSep,
+} from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import { sanitizePermanentRefWording } from './gitPrepare.js'
 import { DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS } from './sessionHooks.js'
@@ -258,6 +266,136 @@ export function readDrainWaitMs(): number {
 /** densable `MV`-style read for defer ceiling (0 disables; invalid → 0). */
 export function readDeferShutdownMaxMs(): number {
   return readEnvMs('SELF_HOSTED_RUNNER_DEFER_SHUTDOWN_MAX_MS')
+}
+
+/** densable `Ka`, `_c`, `Sc`, `rm` — --hold-idle-file & --max-hold-min constants */
+export const HOLD_IDLE_FILE_FRESH_MS = 180_000
+export const HOLD_IDLE_RECHECK_MS = 30_000
+export const DEFAULT_MAX_HOLD_MS = 86_400_000
+export const HOLD_IDLE_LOOK_TIMEOUT_MS = 2_000
+
+/** densable `Ec` — read SELF_HOSTED_RUNNER_HOLD_IDLE_FILE (resolved path or undefined). */
+export function readHoldIdleFile(): string | undefined {
+  const raw = process.env.SELF_HOSTED_RUNNER_HOLD_IDLE_FILE
+  return raw === undefined || raw.trim() === '' ? undefined : pathResolve(raw)
+}
+
+/** densable `wc` — read SELF_HOSTED_RUNNER_MAX_HOLD_MS (defaults to 24h when unset/empty). */
+export function readMaxHoldMs(): number {
+  const raw = process.env.SELF_HOSTED_RUNNER_MAX_HOLD_MS
+  return raw === undefined || raw.trim() === ''
+    ? DEFAULT_MAX_HOLD_MS
+    : readEnvMs('SELF_HOSTED_RUNNER_MAX_HOLD_MS')
+}
+
+async function checkAncestryNotNetworkOrUnvettable(
+  filePath: string,
+): Promise<'local' | 'network' | 'unvettable'> {
+  if (!isAbsolute(filePath)) return 'unvettable'
+  const { root } = parsePath(filePath)
+  if (isPluginFsNetworkOrDevicePath(filePath, root)) return 'network'
+  const rest = filePath.slice(root.length)
+  let current = root
+  for (const seg of rest.split(pathSep)) {
+    if (seg === '' || seg === '.') continue
+    current = current.endsWith(pathSep)
+      ? `${current}${seg}`
+      : `${current}${pathSep}${seg}`
+    if (isPluginFsNetworkOrDevicePath(current, root)) return 'network'
+    try {
+      await lstat(current)
+    } catch (err) {
+      const code = getErrnoCode(err)
+      if (code === 'ENOENT' || code === 'ENOTDIR') return 'local'
+      return 'unvettable'
+    }
+  }
+  return 'local'
+}
+
+/**
+ * densable `sm` — check that `--hold-idle-file` is a local regular file whose
+ * mtime is within `HOLD_IDLE_FILE_FRESH_MS` (180s) of `nowMs`.
+ */
+export async function checkHoldIdleFileFresh(
+  filePath: string,
+  nowMs: number,
+): Promise<boolean> {
+  const ancestry = await checkAncestryNotNetworkOrUnvettable(filePath)
+  if (ancestry === 'unvettable') {
+    throw new Error(
+      'the path could not be checked for links to a network location: a folder or link on the way could not be read',
+    )
+  }
+  if (ancestry === 'network') {
+    throw new Error(
+      'the path, or a link on the way to it, leads to a network location; point --hold-idle-file at a local file',
+    )
+  }
+  const st = await lstat(filePath).catch(err => {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
+    throw err
+  })
+  return (
+    st !== undefined &&
+    st.isFile() &&
+    Math.abs(nowMs - st.mtimeMs) < HOLD_IDLE_FILE_FRESH_MS
+  )
+}
+
+const RELEASE_SESSION_RETRY_WAITS_MS = [500, 1000, 2000]
+const RELEASE_SESSION_TRANSIENT_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ERR_SOCKET_CLOSED',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'EAI_AGAIN',
+])
+
+function isTransientNoResponseDisconnect(err: unknown): string | undefined {
+  if (err === null || typeof err !== 'object') return undefined
+  const rec = err as {
+    response?: unknown
+    code?: unknown
+    isAxiosError?: unknown
+  }
+  if (rec.response !== undefined) return undefined
+  const code = typeof rec.code === 'string' ? rec.code : undefined
+  if (code === undefined || !RELEASE_SESSION_TRANSIENT_CODES.has(code)) {
+    return undefined
+  }
+  return code
+}
+
+/**
+ * densable `Pgi` — retry `releaseSession` when the connection drops before an
+ * HTTP response arrives (`ECONNRESET`/`ECONNREFUSED`/etc. with no `response`).
+ */
+export async function retryReleaseSessionOnTransientDisconnect<T>(opts: {
+  release: () => Promise<T>
+  sessionId: string
+  onStatus: (line: string) => void
+  stop: AbortSignal
+  waitsMs?: readonly number[]
+}): Promise<T> {
+  const waitsMs = opts.waitsMs ?? RELEASE_SESSION_RETRY_WAITS_MS
+  for (const [idx, waitMs] of waitsMs.entries()) {
+    try {
+      return await opts.release()
+    } catch (err) {
+      const code = isTransientNoResponseDisconnect(err)
+      if (code === undefined || opts.stop.aborted) throw err
+      opts.onStatus(
+        `[runner:session] ${opts.sessionId} ReleaseSession got no answer (${code}) on try ${idx + 1} of ${waitsMs.length + 1}; trying again in ${waitMs} ms`,
+      )
+      await sleepMs(waitMs, opts.stop)
+      if (opts.stop.aborted) throw err
+    }
+  }
+  return opts.release()
 }
 
 /**
@@ -928,6 +1066,37 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
         }
         break
       }
+      case '--hold-idle-file': {
+        const u = i
+        if (u === undefined || u.trim() === '' || u.startsWith('--')) {
+          throw new Error(
+            `--hold-idle-file requires a file path (a file your host keeps fresh while the session has processes left running), got: ${u === undefined ? 'nothing' : JSON.stringify(u)}`,
+          )
+        }
+        process.env.SELF_HOSTED_RUNNER_HOLD_IDLE_FILE = pathResolve(u)
+        t.envSetByFlag.add('SELF_HOSTED_RUNNER_HOLD_IDLE_FILE')
+        n++
+        break
+      }
+      case '--max-hold-min': {
+        const u = i
+        const s = Number(u)
+        if (
+          u === undefined ||
+          u.trim() === '' ||
+          !Number.isFinite(s) ||
+          s < 0 ||
+          s > MAX_MINUTES_FLAG
+        ) {
+          throw new Error(
+            `--max-hold-min must be a non-negative number of minutes (0 disables, max ${MAX_MINUTES_FLAG}), got: ${u}`,
+          )
+        }
+        process.env.SELF_HOSTED_RUNNER_MAX_HOLD_MS = String(s * 60 * 1000)
+        t.envSetByFlag.add('SELF_HOSTED_RUNNER_MAX_HOLD_MS')
+        n++
+        break
+      }
       case '--startup-timeout-min': {
         if (i) {
           const s = Number(i)
@@ -1190,6 +1359,14 @@ Runtime:
   --kill-session-after-min <n>
   --exit-if-unused-min <n>
   --release-idle-session-min <n>
+  --hold-idle-file <path>     Do not release an idle session while <path> is a
+                              regular file changed in the last ${HOLD_IDLE_FILE_FRESH_MS / 1000}s;
+                              looked at again every ${HOLD_IDLE_RECHECK_MS / 1000}s. Default: off.
+                              [env: SELF_HOSTED_RUNNER_HOLD_IDLE_FILE]
+  --max-hold-min <n>          With --hold-idle-file: hold a session no longer
+                              than N min after it went idle. Default: ${DEFAULT_MAX_HOLD_MS / 60_000}.
+                              0 disables. Max: ${MAX_MINUTES_FLAG}.
+                              [env: SELF_HOSTED_RUNNER_MAX_HOLD_MS, in ms]
   --startup-timeout-min <n>
   --retire-at <unix-seconds>
   --debug-token-dir <path>
@@ -1337,6 +1514,15 @@ export type PollSkeletonOpts = {
      */
     onClosed?: () => void
   }
+  /** densable `leftoverHoldLookOverride` — tests only */
+  leftoverHoldLookOverride?: (
+    filePath: string,
+    nowMs: number,
+  ) => Promise<boolean>
+  /** densable `leftoverHoldRecheckMsOverride` — tests only */
+  leftoverHoldRecheckMsOverride?: number
+  /** densable `leftoverHoldLookTimeoutMsOverride` — tests only */
+  leftoverHoldLookTimeoutMsOverride?: number
 }
 
 type ActiveSessionSlot = {
@@ -1380,6 +1566,14 @@ export async function runPollSkeleton(
     opts.retireReleaseRetryMsOverride ?? RETIRE_RELEASE_RETRY_MS
   const retireDeferredGraceMs =
     opts.retireDeferredGraceMsOverride ?? RETIRE_DEFERRED_GRACE_MS
+  const holdIdleFile = readHoldIdleFile()
+  const maxHoldMs = readMaxHoldMs()
+  const holdLook = opts.leftoverHoldLookOverride ?? checkHoldIdleFileFresh
+  const holdRecheckMs =
+    opts.leftoverHoldRecheckMsOverride ?? HOLD_IDLE_RECHECK_MS
+  const holdLookTimeoutMs =
+    opts.leftoverHoldLookTimeoutMsOverride ?? HOLD_IDLE_LOOK_TIMEOUT_MS
+  const idleSinceBySession = new Map<string, number>()
 
   const active = new Map<string, ActiveSessionSlot>()
   const stuckSessions = new Set<string>()
@@ -1885,6 +2079,10 @@ export async function runPollSkeleton(
         let retireBgTimer: ReturnType<typeof setTimeout> | undefined
         let deferredRemindTimer: ReturnType<typeof setTimeout> | undefined
         let retiringThis = false
+        let idleSinceMs: number | undefined
+        let holdLookToken: object | undefined
+        let holdLoggedActive = false
+        let holdLoggedGrace = false
         /** densable `Je` — standing release request: retire vs defer-ceiling shutdown */
         let standingRelease: 'retire' | 'shutdown' = 'retire'
         const standingWhy = (): string =>
@@ -1979,6 +2177,7 @@ export async function runPollSkeleton(
             return
           }
           clearIdleTimer()
+          holdLookToken = undefined
           if (!finished && health) {
             if (
               kind === 'turn-end' ||
@@ -1998,15 +2197,19 @@ export async function runPollSkeleton(
             return
           }
           if (kind === 'activity') {
+            if (lastIdleKind !== 'startup') {
+              idleSinceMs = undefined
+              idleSinceBySession.delete(sessionId)
+              holdLoggedActive = false
+              holdLoggedGrace = false
+              releaseFalseCounts.delete(sessionId)
+            }
             setTurn(true)
             deferredHold = false
             lastIdleKind = undefined
             retireAttempt = 0
             clearDeferredRemind()
             clearIdleTimer()
-            if (lastIdleKind !== 'startup') {
-              releaseFalseCounts.delete(sessionId)
-            }
             return
           }
           if (kind === 'turn-end-deferred') {
@@ -2050,7 +2253,15 @@ export async function runPollSkeleton(
               : kind === 'awaiting-action'
                 ? `awaiting user action ${formatDelayMs(baseMs)}`
                 : `user idle ${formatDelayMs(baseMs)}`
-          if (!initObserved && !childSilent && baseMs <= 0) return
+          if (!initObserved && !childSilent && baseMs <= 0) {
+            if (kind !== 'startup') {
+              idleSinceMs = undefined
+              idleSinceBySession.delete(sessionId)
+              holdLoggedActive = false
+              holdLoggedGrace = false
+            }
+            return
+          }
           if (finished || childAc.signal.aborted) return
           if (
             kind === 'awaiting-action' &&
@@ -2075,7 +2286,11 @@ export async function runPollSkeleton(
               `[runner:session] ${sessionId} idle clock armed (${kind}): releases in ${formatDelayMs(baseMs)} at ${new Date(Date.now() + baseMs).toISOString()} unless new activity arrives`,
             )
           }
-          idleTimer = setTimeout(() => {
+          if (!initObserved && kind !== 'startup') {
+            idleSinceMs ??= Date.now()
+            idleSinceBySession.set(sessionId, idleSinceMs)
+          }
+          const fireIdleRelease = (bypassHold = false): void => {
             idleTimer = undefined
             if (finished || childAc.signal.aborted) return
             if (releasedAwaitingDeassign.has(sessionId)) return
@@ -2084,6 +2299,102 @@ export async function runPollSkeleton(
                 `[runner:session] ${sessionId} idle timer fired mid-turn — skipping release (stdout-tee likely broken)`,
               )
               return
+            }
+            if (
+              !bypassHold &&
+              holdIdleFile !== undefined &&
+              maxHoldMs > 0 &&
+              !initObserved &&
+              kind !== 'startup' &&
+              idleSinceMs !== undefined
+            ) {
+              const filePath = holdIdleFile
+              const deadline = idleSinceMs + maxHoldMs
+              if (Date.now() < deadline) {
+                const token = {}
+                holdLookToken = token
+                const lookPromise = holdLook(filePath, Date.now())
+                const timeoutPromise = new Promise<'timed out'>(resolve => {
+                  const t = setTimeout(
+                    () => resolve('timed out'),
+                    holdLookTimeoutMs,
+                  )
+                  if (typeof t === 'object' && 'unref' in t) t.unref()
+                })
+                Promise.race([
+                  lookPromise.catch(err => ({
+                    failed: errMsg(err),
+                  })),
+                  timeoutPromise,
+                ])
+                  .then(res => {
+                    if (
+                      holdLookToken !== token ||
+                      idleTimer !== undefined ||
+                      finished ||
+                      childAc.signal.aborted ||
+                      turnInFlight ||
+                      deferredHold ||
+                      initObserved
+                    ) {
+                      return
+                    }
+                    holdLookToken = undefined
+                    const nextWait = Math.max(
+                      0,
+                      Math.min(holdRecheckMs, deadline - Date.now()),
+                    )
+                    if (res === true) {
+                      holdLoggedGrace = false
+                      if (!holdLoggedActive) {
+                        holdLoggedActive = true
+                        opts.onStatus(
+                          `[runner:session] ${sessionId} idle release held: ${filePath} says a process the session left running still lives — looking again every ${formatDelayMs(holdRecheckMs)}, until ${new Date(deadline).toISOString()} at most (--max-hold-min)`,
+                        )
+                      }
+                      idleTimer = setTimeout(fireIdleRelease, nextWait, false)
+                      return
+                    }
+                    const reason =
+                      res === 'timed out'
+                        ? `looking at ${filePath} took longer than ${formatDelayMs(holdLookTimeoutMs)}`
+                        : typeof res === 'object'
+                          ? `the look at ${filePath} failed (${res.failed})`
+                          : `${filePath} is gone, not a regular file, or has not changed in ${formatDelayMs(HOLD_IDLE_FILE_FRESH_MS)}`
+                    if (holdLoggedActive && !holdLoggedGrace) {
+                      holdLoggedGrace = true
+                      opts.onStatus(
+                        `[runner:session] ${sessionId} idle release still held: ${reason} — looking once more before releasing`,
+                      )
+                      idleTimer = setTimeout(fireIdleRelease, nextWait, false)
+                      return
+                    }
+                    if (holdLoggedActive) {
+                      opts.onStatus(
+                        `[runner:session] ${sessionId} idle release no longer held: ${reason}`,
+                      )
+                    } else if (res !== false) {
+                      opts.onStatus(
+                        `[runner:session] ${sessionId} idle release not held: ${reason} — releasing`,
+                      )
+                    }
+                    holdLoggedActive = false
+                    holdLoggedGrace = false
+                    fireIdleRelease(true)
+                  })
+                  .catch(err => {
+                    opts.onStatus(
+                      `[runner:session] ${sessionId} idle release after a look at ${filePath} failed: ${errMsg(err)}; the release may not have gone out, and the next turn end or a forced release tries again`,
+                    )
+                  })
+                return
+              }
+              if (holdLoggedActive) {
+                holdLoggedActive = false
+                opts.onStatus(
+                  `[runner:session] ${sessionId} idle release no longer held: ${formatDelayMs(maxHoldMs)} have passed since the session went idle (--max-hold-min)`,
+                )
+              }
             }
             if (initObserved) retireAttempt++
             opts.onStatus(`[runner:session] ${sessionId} ${why} — releasing`)
@@ -2096,7 +2407,16 @@ export async function runPollSkeleton(
               const liveBgTasks = active.get(sessionId)?.liveBgTasks ?? 0
               const ordered = (active.get(sessionId)?.task ?? Promise.resolve())
                 .then(() =>
-                  api.releaseSession(opts.tokenState.runnerToken, sessionId),
+                  retryReleaseSessionOnTransientDisconnect({
+                    release: () =>
+                      api.releaseSession(
+                        opts.tokenState.runnerToken,
+                        sessionId,
+                      ),
+                    sessionId,
+                    onStatus: opts.onStatus,
+                    stop: signal,
+                  }),
                 )
                 .then(({ released }) => {
                   orderedReleaseInFlight.delete(sessionId)
@@ -2215,7 +2535,8 @@ export async function runPollSkeleton(
                   `retrying ${whenLabel()}`,
                 )
               })
-          }, baseMs)
+          }
+          idleTimer = setTimeout(fireIdleRelease, baseMs, false)
         }
 
         const maybeReleaseAfterRetireWithBg = (): void => {

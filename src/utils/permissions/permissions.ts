@@ -909,6 +909,7 @@ export function isCoworkCloudAutoHookAllowBlocked(
   if (process.env.CLAUDE_CODE_ENTRYPOINT !== 'remote_cowork') return false
   if (permissionMode !== 'auto') return false
   return (
+    toolName.startsWith('mcp__') ||
     toolName === BASH_TOOL_NAME ||
     toolName === POWERSHELL_TOOL_NAME ||
     toolName === AGENT_TOOL_NAME

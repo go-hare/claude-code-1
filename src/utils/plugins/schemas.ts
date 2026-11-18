@@ -1139,6 +1139,82 @@ const PluginManifestSettingsSchema = lazySchema(() =>
 )
 
 /**
+ * Official Gg / Moi / pr (#1197) — background watch scripts in
+ * `monitors/monitors.json` or `manifest.monitors` / `manifest.experimental.monitors`.
+ */
+export const PluginMonitorSchema = lazySchema(() =>
+  z.strictObject({
+    name: z
+      .string()
+      .min(1)
+      .describe(
+        'Identifier for this monitor, unique within the plugin. Used to dedupe so re-arming (plugin reload, repeat skill invoke) does not spawn duplicates.',
+      ),
+    command: z
+      .string()
+      .min(1)
+      .describe(
+        'Shell command to run as a persistent background monitor. Each stdout line is delivered to the model as a <task_notification> event; the process runs for the session lifetime.',
+      ),
+    description: z
+      .string()
+      .min(1)
+      .describe(
+        'Short human-readable description of what is being monitored (shown in task panel and notification summary).',
+      ),
+    when: z
+      .union([
+        z.literal('always'),
+        z
+          .string()
+          .startsWith('on-skill-invoke:')
+          .refine(s => s.length > 16, {
+            message: 'on-skill-invoke: must specify a skill name',
+          }),
+      ])
+      .default('always')
+      .describe(
+        'Arm trigger. "always" arms at session start and on plugin reload. "on-skill-invoke:<skill>" arms the first time that skill is dispatched (via Skill tool or slash command).',
+      ),
+  }),
+)
+
+export type PluginMonitorConfig = z.infer<
+  ReturnType<typeof PluginMonitorSchema>
+>
+
+export const PluginMonitorsArraySchema = lazySchema(() =>
+  z
+    .array(PluginMonitorSchema())
+    .refine(items => new Set(items.map(i => i.name)).size === items.length, {
+      message: 'Monitor names must be unique within a plugin',
+    }),
+)
+
+export const PluginManifestMonitorsSchema = lazySchema(() =>
+  z.object({
+    monitors: z
+      .union([
+        z
+          .string()
+          .describe(
+            'Path to a JSON file containing the monitors array, relative to the plugin root',
+          ),
+        PluginMonitorsArraySchema(),
+      ])
+      .describe(
+        'Background watch scripts the host arms as persistent Monitor tasks (unsandboxed, same trust tier as hooks) so plugins need not instruct the model to arm them. When omitted, monitors/monitors.json at the plugin root is loaded if present.',
+      ),
+    experimental: z
+      .object({
+        monitors: z.union([z.string(), PluginMonitorsArraySchema()]).optional(),
+      })
+      .passthrough()
+      .optional(),
+  }),
+)
+
+/**
  * Plugin manifest file (plugin.json)
  *
  * This schema validates the structure of plugin manifests and provides
@@ -1166,6 +1242,7 @@ export const PluginManifestSchema = lazySchema(() =>
     ...PluginManifestLspServerSchema().partial().shape,
     ...PluginManifestSettingsSchema().partial().shape,
     ...PluginManifestUserConfigSchema().partial().shape,
+    ...PluginManifestMonitorsSchema().partial().shape,
   }),
 )
 

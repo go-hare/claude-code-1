@@ -253,6 +253,17 @@ export type FormatTokenOptions = {
   windowed?: boolean
 }
 
+const WRAPPED_BACKSLASH_PAIRS: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  ')': '(',
+  ']': '[',
+  '}': '{',
+  '>': '<',
+}
+const WRAPPED_BACKSLASH_CONTINUES_RE = /^\\.[\p{L}\p{N}\\*_`~]/u
+const WRAPPED_BACKSLASH_WORD_BEFORE_RE = /[\p{L}\p{N}].$/u
+
 export function configureMarked(): void {
   if (markedConfigured) return
   markedConfigured = true
@@ -329,6 +340,46 @@ export function configureMarked(): void {
         return token
       },
     },
+    extensions: [
+      {
+        name: 'wrappedBackslash',
+        level: 'inline',
+        tokenizer(src, tokens) {
+          const next = src[1]
+          if (
+            src[0] !== '\\' ||
+            next === undefined ||
+            this.lexer.state.inLink
+          ) {
+            return undefined
+          }
+          const open = WRAPPED_BACKSLASH_PAIRS[next]
+          const prev = tokens.at(-1)
+          if (
+            open === undefined ||
+            prev?.type !== 'text' ||
+            !prev.raw.endsWith(open) ||
+            WRAPPED_BACKSLASH_WORD_BEFORE_RE.test(prev.raw) ||
+            WRAPPED_BACKSLASH_CONTINUES_RE.test(src)
+          ) {
+            return undefined
+          }
+          const beforePrev = tokens.at(-2)
+          if (
+            prev.raw === open &&
+            beforePrev !== undefined &&
+            beforePrev.type !== 'br' &&
+            !(
+              beforePrev.type === 'escape' && beforePrev.text === beforePrev.raw
+            )
+          ) {
+            return undefined
+          }
+          const literal = `\\${next}`
+          return { type: 'escape', raw: literal, text: literal }
+        },
+      },
+    ],
   })
 }
 
@@ -450,6 +501,58 @@ function renderBlockquoteTokens(
   })
     .map(chunk => chunk.rows)
     .join('')
+}
+
+/**
+ * #1400 (official `Ze` / `rYt`): when a blockquote begins with blank tokens
+ * (`space`, empty `code`, empty `heading`, or all-blank nested `blockquote`)
+ * immediately followed by a `code` block, drop the leading blank tokens so the
+ * code block's own top blank line is preserved instead of being stripped.
+ */
+function isBlankBlockToken(
+  token: Token,
+  highlight: CliHighlight | null,
+): boolean {
+  switch (token.type) {
+    case 'space':
+      return true
+    case 'code': {
+      const codeTok = token as Tokens.Code
+      return (
+        codeTok.text === '' &&
+        (!codeTok.lang || highlight?.supportsLanguage(codeTok.lang) === true)
+      )
+    }
+    case 'heading':
+      return (token as Tokens.Heading).text === ''
+    case 'blockquote':
+      return ((token as Tokens.Blockquote).tokens ?? []).every(t =>
+        isBlankBlockToken(t, highlight),
+      )
+    default:
+      return false
+  }
+}
+
+export function stripLeadingBlankTokensBeforeCode(
+  token: Tokens.Blockquote,
+  highlight: CliHighlight | null,
+): Tokens.Blockquote | undefined {
+  const tokens = token.tokens ?? []
+  const idx = tokens.findIndex(t => !isBlankBlockToken(t, highlight))
+  const first = idx === -1 ? undefined : tokens[idx]
+  const codeOrQuote =
+    first?.type === 'blockquote'
+      ? stripLeadingBlankTokensBeforeCode(first as Tokens.Blockquote, highlight)
+      : first?.type === 'code'
+        ? first
+        : undefined
+  return (
+    codeOrQuote && {
+      ...token,
+      tokens: [codeOrQuote, ...tokens.slice(idx + 1)],
+    }
+  )
 }
 
 export function formatToken(
@@ -671,8 +774,15 @@ export function formatToken(
       let pendingMarker = !leadingBlock
       const body = (token.tokens ?? [])
         .map(child => {
+          const normalizedQuote =
+            child.type === 'blockquote'
+              ? stripLeadingBlankTokensBeforeCode(
+                  child as Tokens.Blockquote,
+                  highlight,
+                )
+              : undefined
           const rendered = formatToken(
-            child,
+            normalizedQuote ?? child,
             theme,
             listDepth + 1,
             orderedListNumber,
@@ -692,6 +802,13 @@ export function formatToken(
             child.type === 'space' ||
             child.type === 'checkbox'
           ) {
+            if (
+              (child.type === 'blockquote' && normalizedQuote === undefined) ||
+              child.type === 'hr' ||
+              child.type === 'table'
+            ) {
+              return rendered.replace(/^\n+/, '')
+            }
             return rendered
           }
           const linePrefix = pendingMarker ? `${listIndent}${marker} ` : hanging

@@ -76,6 +76,12 @@ export const PermissionsSchema = lazySchema(() =>
         .describe(
           'When true, file tools refuse reads outside the working directories',
         ),
+      blockWritesOutsideWorkingDirectories: z
+        .boolean()
+        .optional()
+        .describe(
+          'Refuse file-tool writes (Write, Edit, NotebookEdit) outside the working directories in every permission mode; true in any settings source wins.',
+        ),
       additionalDirectories: z
         .array(z.string())
         .transform(dirs => dirs.filter(dir => !dir.includes('\0')))
@@ -1021,6 +1027,24 @@ export const SettingsSchema = lazySchema(() =>
             'string or an array of UUIDs (any one is permitted). When set in ' +
             'managed settings, login fails if the authenticated account does not ' +
             'belong to a listed organization.',
+        ),
+      forceRemoteSettingsRefresh: z
+        .boolean()
+        .optional()
+        .describe(
+          'When set in managed settings, the CLI blocks startup until remote managed settings are freshly fetched, and exits if the fetch fails',
+        ),
+      bedrockDeclinedUpgrades: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          'Per-tier declined Bedrock model upgrade keys (e.g., sonnet -> "fromKey-to-toKey")',
+        ),
+      vertexDeclinedUpgrades: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          'Per-tier declined Vertex model upgrade keys (e.g., sonnet -> "fromKey-to-toKey")',
         ),
       otelHeadersHelper: z
         .string()

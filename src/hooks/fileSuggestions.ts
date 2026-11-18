@@ -65,6 +65,24 @@ let cachedTrackedDirs: string[] = []
 // Cache for .ignore/.rgignore patterns (keyed by repoRoot:cwd)
 let ignorePatternsCache: ReturnType<typeof ignore> | null = null
 let ignorePatternsCacheKey: string | null = null
+let ignoreReincludeGlobs: string[] = []
+let lastReincludedFiles: string[] = []
+let reincludeRetryAtMs = 0
+const REINCLUDE_RETRY_BACKOFF_MS = 60_000
+const VCS_EXCLUDE_GLOBS = [
+  '--glob',
+  '!.git/',
+  '--glob',
+  '!.svn/',
+  '--glob',
+  '!.hg/',
+  '--glob',
+  '!.bzr/',
+  '--glob',
+  '!.jj/',
+  '--glob',
+  '!.sl/',
+]
 
 // Throttle state for background refresh. .git/index mtime triggers an
 // immediate refresh when tracked files change (add/checkout/commit/rm).
@@ -96,6 +114,9 @@ export function clearFileSuggestionCaches(): void {
   indexBuildComplete.clear()
   ignorePatternsCache = null
   ignorePatternsCacheKey = null
+  ignoreReincludeGlobs = []
+  lastReincludedFiles = []
+  reincludeRetryAtMs = 0
   lastRefreshMs = 0
   lastGitIndexMtime = null
   loadedTrackedSignature = null
@@ -198,6 +219,60 @@ async function mergeUntrackedIntoNormalizedCache(
   )
 }
 
+function isUnanchoredBasenamePattern(pattern: string): boolean {
+  return !pattern.startsWith('/') && !pattern.replace(/\/+$/, '').includes('/')
+}
+
+function escapeIgnoreDirPrefix(dir: string): string {
+  return dir.replace(/[[\]{}*?\\]/g, '\\$&').replace(/^[!#]/, '\\$&')
+}
+
+function anchorIgnorePatternToDir(pattern: string, escapedDir: string): string {
+  if (escapedDir === '') return pattern
+  if (pattern.startsWith('/')) return `${escapedDir}${pattern}`
+  return isUnanchoredBasenamePattern(pattern)
+    ? `${escapedDir}/**/${pattern}`
+    : `${escapedDir}/${pattern}`
+}
+
+/**
+ * Gold `W(e, i)` (#1233): extract `.ignore`/`.rgignore` negation (`!pattern`)
+ * re-inclusion globs so git-ignored files explicitly un-ignored by `.ignore`
+ * or `.rgignore` are re-included in `@` file suggestions.
+ */
+export function extractIgnoreReincludeRules(
+  patterns: string[],
+  relDir: string,
+): { hasNegation: boolean; augmentations: string[]; rules: string[] } {
+  const augmentations: string[] = []
+  const rules: string[] = []
+  let hasNegation = false
+  const escapedDir = escapeIgnoreDirPrefix(relDir)
+  for (const line of patterns) {
+    const trimmed = line.endsWith('\\ ') ? line : line.trimEnd()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const isNegated = trimmed.startsWith('!')
+    const pattern = isNegated ? trimmed.slice(1) : trimmed
+    if (pattern === '') continue
+    const anchored = anchorIgnorePatternToDir(pattern, escapedDir)
+    if (isNegated) {
+      hasNegation = true
+      rules.push(anchored)
+      if (!anchored.endsWith('**')) {
+        const noTrailingSlash = anchored.replace(/\/+$/, '')
+        augmentations.push(
+          isUnanchoredBasenamePattern(noTrailingSlash)
+            ? `**/${noTrailingSlash}/**`
+            : `${noTrailingSlash}/**`,
+        )
+      }
+    } else {
+      rules.push(`!${anchored}`)
+    }
+  }
+  return { hasNegation, augmentations, rules }
+}
+
 /**
  * Load ripgrep-specific ignore patterns from .ignore or .rgignore files
  * Returns an ignore instance if patterns were found, null otherwise
@@ -220,6 +295,9 @@ async function loadRipgrepIgnorePatterns(
 
   const ig = ignore()
   let hasPatterns = false
+  let hasNegation = false
+  const augmentations: string[] = []
+  const rules: string[] = []
 
   const paths = directories.flatMap(dir =>
     ignoreFiles.map(f => path.join(dir, f)),
@@ -237,12 +315,21 @@ async function loadRipgrepIgnorePatterns(
     if (patterns.length === 0) continue
     ig.add(patterns)
     hasPatterns = true
-    logForDebugging(`[FileIndex] loaded ignore patterns from ${paths[i]}`)
+    const filePath = paths[i]!
+    const relDir = path
+      .relative(repoRoot, path.dirname(filePath))
+      .replaceAll(path.sep, '/')
+    const extracted = extractIgnoreReincludeRules(patterns, relDir)
+    hasNegation = hasNegation || extracted.hasNegation
+    augmentations.push(...extracted.augmentations)
+    rules.push(...extracted.rules)
+    logForDebugging(`[FileIndex] loaded ignore patterns from ${filePath}`)
   }
 
   const result = hasPatterns ? ig : null
   ignorePatternsCache = result
   ignorePatternsCacheKey = cacheKey
+  ignoreReincludeGlobs = hasNegation ? [...augmentations, ...rules] : []
 
   return result
 }
@@ -333,47 +420,84 @@ async function getFilesUsingGit(
         : ['-c', 'core.quotepath=false', 'ls-files', '--others']
 
       const generation = cacheGeneration
-      untrackedFetchPromise = execFileNoThrowWithCwd(gitExe(), untrackedArgs, {
-        timeout: 10000,
-        cwd: repoRoot,
-      })
-        .then(async untrackedResult => {
-          if (generation !== cacheGeneration) {
-            return // Cache was cleared; don't merge stale untracked files
-          }
-          if (untrackedResult.code === 0) {
-            const rawUntrackedFiles = untrackedResult.stdout
-              .trim()
-              .split('\n')
-              .filter(Boolean)
-
-            // Normalize paths BEFORE applying ignore patterns (consistent with tracked files)
-            let normalizedUntracked = normalizeGitPaths(
-              rawUntrackedFiles,
-              repoRoot,
-              cwd,
-            )
-
-            // Apply .ignore/.rgignore patterns to normalized untracked files
-            const ignorePatterns = await loadRipgrepIgnorePatterns(
-              repoRoot,
-              cwd,
-            )
-            if (ignorePatterns && normalizedUntracked.length > 0) {
-              const beforeCount = normalizedUntracked.length
-              normalizedUntracked = ignorePatterns.filter(normalizedUntracked)
-              logForDebugging(
-                `[FileIndex] applied ignore patterns to untracked: ${beforeCount} -> ${normalizedUntracked.length} files`,
+      untrackedFetchPromise = (async () => {
+        const ignorePatterns = await loadRipgrepIgnorePatterns(repoRoot, cwd)
+        const shouldReinclude =
+          respectGitignore && ignoreReincludeGlobs.length > 0
+        const reincludedPromise =
+          shouldReinclude && Date.now() >= reincludeRetryAtMs
+            ? ripGrep(
+                [
+                  '--files',
+                  '--hidden',
+                  ...ignoreReincludeGlobs.flatMap(g => ['--glob', g]),
+                  ...VCS_EXCLUDE_GLOBS,
+                ],
+                '.',
+                AbortSignal.timeout(10_000),
+                { cwd: repoRoot },
               )
-            }
+                .then(files => {
+                  if (generation === cacheGeneration) {
+                    lastReincludedFiles = files
+                  }
+                  return files
+                })
+                .catch(err => {
+                  logForDebugging(
+                    `[FileIndex] .ignore re-include listing failed: ${errorMessage(err)}`,
+                  )
+                  if (generation === cacheGeneration) {
+                    reincludeRetryAtMs = Date.now() + REINCLUDE_RETRY_BACKOFF_MS
+                  }
+                  return lastReincludedFiles
+                })
+            : Promise.resolve(shouldReinclude ? lastReincludedFiles : [])
 
-            logForDebugging(
-              `[FileIndex] background untracked fetch: ${normalizedUntracked.length} files`,
-            )
-            // Pass already-normalized files directly to merge function
-            void mergeUntrackedIntoNormalizedCache(normalizedUntracked)
+        const [untrackedResult, reincludedFiles] = await Promise.all([
+          execFileNoThrowWithCwd(gitExe(), untrackedArgs, {
+            timeout: 10000,
+            cwd: repoRoot,
+          }),
+          reincludedPromise,
+        ])
+        if (generation !== cacheGeneration) {
+          return // Cache was cleared; don't merge stale untracked files
+        }
+        if (untrackedResult.code === 0) {
+          const rawUntrackedFiles = untrackedResult.stdout
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+          for (const f of reincludedFiles
+            .map(p => path.normalize(p).replaceAll(path.sep, '/'))
+            .sort()) {
+            rawUntrackedFiles.push(f)
           }
-        })
+
+          // Normalize paths BEFORE applying ignore patterns (consistent with tracked files)
+          let normalizedUntracked = normalizeGitPaths(
+            rawUntrackedFiles,
+            repoRoot,
+            cwd,
+          )
+
+          // Apply .ignore/.rgignore patterns to normalized untracked files
+          if (ignorePatterns && normalizedUntracked.length > 0) {
+            const beforeCount = normalizedUntracked.length
+            normalizedUntracked = ignorePatterns.filter(normalizedUntracked)
+            logForDebugging(
+              `[FileIndex] applied ignore patterns to untracked: ${beforeCount} -> ${normalizedUntracked.length} files`,
+            )
+          }
+
+          logForDebugging(
+            `[FileIndex] background untracked fetch: ${normalizedUntracked.length} files (${reincludedFiles.length} re-included by .ignore)`,
+          )
+          // Pass already-normalized files directly to merge function
+          void mergeUntrackedIntoNormalizedCache(normalizedUntracked)
+        }
+      })()
         .catch(error => {
           logForDebugging(
             `[FileIndex] background untracked fetch failed: ${error}`,

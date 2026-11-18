@@ -72,7 +72,12 @@ export function formatFailedMcpIssue(failed: FailedIssueFields): string {
   const { errorCode, displayDetail, error } = failed
   if (errorCode && !HIDDEN_MCP_ERROR_CODES.has(errorCode)) {
     const codeLabel = formatMcpErrorCode(errorCode)
-    const withError = error !== undefined ? `${codeLabel}: ${error}` : codeLabel
+    const withError =
+      error === undefined
+        ? codeLabel
+        : error === codeLabel || error.startsWith(`${codeLabel}: `)
+          ? error
+          : `${codeLabel}: ${error}`
     const combined = displayDetail ? `${withError} ${displayDetail}` : withError
     return sanitizeMcpIssueText(combined)
   }

@@ -115,39 +115,122 @@ export type DensableModelCatalog = {
   readonly alias_migration: Readonly<Record<string, string>>
 }
 
-/** densable SQ() — baked EHl catalog (already schema-validated at extract time). */
-export function getDensableModelCatalog(): DensableModelCatalog {
-  // Cast: as-const bake is structurally compatible; models[] is readonly tuple.
-  return DENSABLE_EHL_CATALOG as unknown as DensableModelCatalog
-}
+let activePublishedCatalog: DensableModelCatalog | null = null
+let activePublishedCatalogSource: string | null = null
+let catalogDecisionPromise: Promise<DensableModelCatalog> | null = null
 
-/** densable Lqm — Map(catalog id → model), built once. */
-const Lqm: Map<string, DensableCatalogModel> = (() => {
-  const m = new Map<string, DensableCatalogModel>()
-  for (const model of getDensableModelCatalog().models) {
-    m.set(model.id, model)
-  }
-  return m
-})()
-
-/** densable Oqm — Map(provider id lower → catalog id). */
-const Oqm: Map<string, string> = (() => {
-  const m = new Map<string, string>()
-  for (const model of getDensableModelCatalog().models) {
+function rebuildCatalogIndices(catalog: DensableModelCatalog): {
+  byId: Map<string, DensableCatalogModel>
+  byProviderId: Map<string, string>
+} {
+  const byId = new Map<string, DensableCatalogModel>()
+  const byProviderId = new Map<string, string>()
+  for (const model of catalog.models) {
+    byId.set(model.id, model)
     for (const pid of Object.values(model.provider_ids)) {
       if (typeof pid !== 'string') continue
       const n = pid.toLowerCase()
-      const prev = m.get(n)
+      const prev = byProviderId.get(n)
       if (prev !== undefined && prev !== model.id) {
         throw new Error(
           `model catalog: provider id collision across distinct entries: ${pid}`,
         )
       }
-      m.set(n, model.id)
+      byProviderId.set(n, model.id)
     }
   }
-  return m
-})()
+  return { byId, byProviderId }
+}
+
+/** densable SQ() — active published catalog if verified, else baked EHl catalog. */
+export function getDensableModelCatalog(): DensableModelCatalog {
+  // Cast: as-const bake is structurally compatible; models[] is readonly tuple.
+  return (
+    activePublishedCatalog ??
+    (DENSABLE_EHL_CATALOG as unknown as DensableModelCatalog)
+  )
+}
+
+/** densable Lqm — Map(catalog id → model). */
+let Lqm: Map<string, DensableCatalogModel>
+/** densable Oqm — Map(provider id lower → catalog id). */
+let Oqm: Map<string, string>
+;({ byId: Lqm, byProviderId: Oqm } = rebuildCatalogIndices(
+  getDensableModelCatalog(),
+))
+
+export function setActivePublishedModelCatalogForTesting(
+  catalog: DensableModelCatalog | null,
+  sourceKind: string | null = catalog ? 'test' : null,
+): void {
+  activePublishedCatalog = catalog
+  activePublishedCatalogSource = sourceKind
+  catalogDecisionPromise = null
+  const rebuilt = rebuildCatalogIndices(getDensableModelCatalog())
+  Lqm = rebuilt.byId
+  Oqm = rebuilt.byProviderId
+}
+
+export function getActivePublishedModelCatalogSource(): string | null {
+  return activePublishedCatalogSource
+}
+
+function isValidPublishedCatalogShape(
+  doc: unknown,
+): doc is DensableModelCatalog {
+  if (!doc || typeof doc !== 'object') return false
+  const candidate = doc as Partial<DensableModelCatalog>
+  return (
+    typeof candidate.schema_version === 'number' &&
+    Array.isArray(candidate.models) &&
+    candidate.models.length > 0 &&
+    typeof candidate.defaults === 'object' &&
+    candidate.defaults !== null
+  )
+}
+
+/**
+ * Official `Xcr({ headless })` (#1295) — fetch, signature-verify, and activate
+ * the published model catalog for 1P/3P (Bedrock/Mantle/Vertex/Foundry) startup
+ * and model settings loading, falling back to the compiled catalog on failure.
+ */
+export async function ensurePublishedModelCatalogLoaded(opts?: {
+  headless?: boolean
+  env?: NodeJS.ProcessEnv
+  managedUrl?: string
+  managedPublicKeyPem?: string
+  ignoreEnvUrl?: boolean
+  timeoutMs?: number
+}): Promise<DensableModelCatalog> {
+  if (catalogDecisionPromise !== null) {
+    return catalogDecisionPromise
+  }
+  catalogDecisionPromise = (async () => {
+    try {
+      const { loadAndVerifyPublishedCatalog } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../cli/clientDataUrl.js') as typeof import('../../cli/clientDataUrl.js')
+      const res = await loadAndVerifyPublishedCatalog({
+        env: opts?.env,
+        managedUrl: opts?.managedUrl,
+        managedPublicKeyPem: opts?.managedPublicKeyPem,
+        ignoreEnvUrl: opts?.ignoreEnvUrl,
+        timeoutMs: opts?.timeoutMs,
+      })
+      if (res.ok && isValidPublishedCatalogShape(res.document)) {
+        activePublishedCatalog = res.document
+        activePublishedCatalogSource = res.source.kind
+        const rebuilt = rebuildCatalogIndices(res.document)
+        Lqm = rebuilt.byId
+        Oqm = rebuilt.byProviderId
+      }
+    } catch {
+      // Fail open to compiled catalog
+    }
+    return getDensableModelCatalog()
+  })()
+  return catalogDecisionPromise
+}
 
 /** densable Aw(e) — exact catalog id lookup. */
 export function getDensableCatalogModel(

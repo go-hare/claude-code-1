@@ -2,7 +2,7 @@ import { createPrivateKey, X509Certificate } from 'crypto'
 import type * as https from 'https'
 import { Agent as HttpsAgent } from 'https'
 import memoize from 'lodash-es/memoize.js'
-import type * as tls from 'tls'
+import * as tls from 'tls'
 import type * as undici from 'undici'
 import { getCACertificates } from './caCerts.js'
 import { logForDebugging } from './debug.js'
@@ -593,6 +593,8 @@ export function resetMtlsCachesForTests(): void {
  * Configure global Node.js TLS settings
  */
 export function configureGlobalMTLS(): void {
+  syncDefaultCACertificates()
+
   const mtlsConfig = getMTLSConfig()
 
   if (!mtlsConfig) {
@@ -605,4 +607,288 @@ export function configureGlobalMTLS(): void {
       'NODE_EXTRA_CA_CERTS detected - Node.js will automatically append to built-in CAs',
     )
   }
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.325 (#1363 & #1368): setDefaultCACertificates & droppedCrossCertificates
+// ---------------------------------------------------------------------------
+
+type TlsWithSetDefaultCACertificates = typeof tls & {
+  setDefaultCACertificates?: (certs: readonly string[]) => void
+}
+
+let lastSyncedDefaultCACertList: string[] | undefined
+
+function trySetDefaultCACertificates(
+  certs: readonly string[],
+  setter?: (certs: readonly string[]) => void,
+): boolean {
+  const fn =
+    setter ?? (tls as TlsWithSetDefaultCACertificates).setDefaultCACertificates
+  if (typeof fn !== 'function') return false
+  try {
+    fn(certs)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function splitPemCertificateBlocks(
+  pemOrArray: string | readonly string[],
+): string[] {
+  const items = Array.isArray(pemOrArray) ? pemOrArray : [pemOrArray]
+  const blocks: string[] = []
+  for (const item of items) {
+    if (typeof item !== 'string') continue
+    const matches = item.match(PEM_CERTIFICATE_BLOCK_RE)
+    if (matches) {
+      blocks.push(...matches)
+    }
+  }
+  return blocks
+}
+
+/**
+ * Gold `ar` @280021524 (#1363) — sync default CA certificates with
+ * `tls.setDefaultCACertificates`, filtering out damaged/unparseable blocks
+ * individually when the batch call throws.
+ */
+export function syncDefaultCACertificates(opts?: {
+  caCerts?: string | string[]
+  setDefaultCACertificates?: (certs: readonly string[]) => void
+}): boolean {
+  const caCerts = opts?.caCerts ?? getCACertificates()
+  if (caCerts === undefined) return false
+  const setter =
+    opts?.setDefaultCACertificates ??
+    (tls as TlsWithSetDefaultCACertificates).setDefaultCACertificates
+  if (typeof setter !== 'function') return false
+
+  const blocks = splitPemCertificateBlocks(caCerts)
+  if (blocks.length === 0) return false
+
+  if (trySetDefaultCACertificates(blocks, setter)) {
+    lastSyncedDefaultCACertList = blocks
+    return true
+  }
+
+  const valid = blocks.filter(block =>
+    trySetDefaultCACertificates([block], setter),
+  )
+  const skipped = blocks.length - valid.length
+  if (skipped > 0) {
+    logForDebugging(
+      `CA certs: ${skipped} certificate(s) in the CA list could not be read and are skipped for connections that pass no CA. Check the NODE_EXTRA_CA_CERTS file, or the OS certificate store, for a damaged or cut-off certificate.`,
+      { level: 'warn' },
+    )
+  }
+  if (valid.length > 0 && trySetDefaultCACertificates(valid, setter)) {
+    lastSyncedDefaultCACertList = valid
+    return true
+  }
+  return false
+}
+
+export function getLastSyncedDefaultCACertListForTesting():
+  | readonly string[]
+  | undefined {
+  return lastSyncedDefaultCACertList
+}
+
+export const MAX_HELD_SERVED_CERTIFICATES = 8
+
+export type DroppedCrossCertificatePair = {
+  cross: X509Certificate
+  root: X509Certificate
+}
+
+let droppedCrossCertificates: DroppedCrossCertificatePair[] = []
+let servedCertificates: X509Certificate[] = []
+let servedCrossCertificateSignerMissing = false
+let caCertsFromHost = false
+
+function matchesCrossRootPair(
+  cert: X509Certificate,
+  cross: X509Certificate,
+  root: X509Certificate,
+): boolean {
+  return (
+    cert.subject === cross.subject &&
+    cert.issuer === root.subject &&
+    cert.publicKey.equals(cross.publicKey)
+  )
+}
+
+/**
+ * Gold `gai` @280016750 (#1368) — record server-sent certificates so they can
+ * select among dropped cross-certificates without being added to the CA list.
+ */
+export function noteServerServedCertificates(
+  certs: readonly X509Certificate[],
+  nowMs: number = Date.now(),
+): boolean {
+  if (caCertsFromHost) return false
+  const seen = new Set(servedCertificates.map(c => c.fingerprint256))
+  const unmatched = droppedCrossCertificates.filter(
+    ({ cross, root }) =>
+      !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+  )
+  const accepted: X509Certificate[] = []
+  let ignored = 0
+  for (const cert of certs) {
+    const idx = unmatched.findIndex(
+      ({ cross, root }) =>
+        !seen.has(cert.fingerprint256) &&
+        !(new Date(cert.validFrom).getTime() > nowMs) &&
+        new Date(cert.validTo).getTime() > nowMs &&
+        matchesCrossRootPair(cert, cross, root),
+    )
+    if (idx === -1) continue
+    if (
+      servedCertificates.length + accepted.length >=
+      MAX_HELD_SERVED_CERTIFICATES
+    ) {
+      ignored++
+      continue
+    }
+    unmatched.splice(idx, 1)
+    seen.add(cert.fingerprint256)
+    accepted.push(cert)
+  }
+  if (ignored > 0) {
+    logForDebugging(
+      `CA certs: Ignored ${ignored} more certificate(s) that a server sent: ${MAX_HELD_SERVED_CERTIFICATES} are already held to choose among the system store's cross-certificates`,
+    )
+  }
+  if (accepted.length === 0) return false
+  servedCertificates = [...servedCertificates, ...accepted]
+  logForDebugging(
+    `CA certs: Noted ${accepted.length} certificate(s) that a server sent; they only choose which system cross-certificates stay and are not added to the CA list`,
+  )
+  return true
+}
+
+/** Gold `_ai` @280017478 (#1368). */
+export function hasUnmatchedDroppedCrossCertificate(): boolean {
+  return (
+    !caCertsFromHost &&
+    droppedCrossCertificates.some(
+      ({ cross, root }) =>
+        !servedCertificates.some(s => matchesCrossRootPair(s, cross, root)),
+    )
+  )
+}
+
+/** Gold `F4o` @280017599 (#1368). */
+export function getDroppedCrossCertificatesCount(): number {
+  return droppedCrossCertificates.length
+}
+
+/** Gold `yai` @280017630 (#1368). */
+export function isServedCrossCertificateSignerMissing(): boolean {
+  return !caCertsFromHost && servedCrossCertificateSignerMissing
+}
+
+export function setDroppedCrossCertificatesStateForTesting(state: {
+  dropped?: DroppedCrossCertificatePair[]
+  served?: X509Certificate[]
+  signerMissing?: boolean
+  fromHost?: boolean
+}): void {
+  droppedCrossCertificates = state.dropped ?? []
+  servedCertificates = state.served ?? []
+  servedCrossCertificateSignerMissing = state.signerMissing ?? false
+  caCertsFromHost = state.fromHost ?? false
+}
+
+/**
+ * Extract the peer X509 certificate chain from a TLS socket.
+ */
+export function extractPeerCertificateChain(
+  socket: Pick<tls.TLSSocket, 'getPeerCertificate'>,
+): X509Certificate[] {
+  const chain: X509Certificate[] = []
+  const seen = new Set<string>()
+  let current = socket.getPeerCertificate(true) as
+    | (tls.DetailedPeerCertificate & { raw?: Buffer })
+    | undefined
+  while (current && current.raw && Buffer.isBuffer(current.raw)) {
+    const key = current.fingerprint256 || current.raw.toString('hex')
+    if (seen.has(key)) break
+    seen.add(key)
+    try {
+      chain.push(new X509Certificate(current.raw))
+    } catch {
+      // Ignore malformed certificate entries
+    }
+    const next = current.issuerCertificate as
+      | (tls.DetailedPeerCertificate & { raw?: Buffer })
+      | undefined
+    if (!next || next === current) break
+    current = next
+  }
+  return chain
+}
+
+/**
+ * TLS handshake callback (#1368): note server-served certificates so matching
+ * dropped cross-certificates can be re-enabled and default CA certs re-synced.
+ */
+export function handleTlsHandshakeServerCertificates(
+  socket: Pick<tls.TLSSocket, 'getPeerCertificate'>,
+  nowMs: number = Date.now(),
+): boolean {
+  const chain = extractPeerCertificateChain(socket)
+  if (chain.length === 0) return false
+  const noted = noteServerServedCertificates(chain, nowMs)
+  if (noted) {
+    clearMTLSCache()
+    syncDefaultCACertificates()
+  }
+  return noted
+}
+
+/**
+ * Attach a `secureConnect` listener to a TLS socket to record server-served
+ * certificates for cross-signed root disambiguation.
+ */
+export function attachTlsHandshakeCrossCertHook(socket: tls.TLSSocket): void {
+  socket.once('secureConnect', () => {
+    handleTlsHandshakeServerCertificates(socket)
+  })
+}
+
+/**
+ * Probe a list of CA certificates for self-named / cross-signed root pairs
+ * (respecting `CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP=1`).
+ */
+export function probeCrossSignedRootPairs(
+  certs: readonly X509Certificate[],
+  env: NodeJS.ProcessEnv = process.env,
+): DroppedCrossCertificatePair[] {
+  if (env.CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP === '1') {
+    return []
+  }
+  const bySubject = new Map<string, X509Certificate[]>()
+  for (const cert of certs) {
+    const list = bySubject.get(cert.subject) ?? []
+    list.push(cert)
+    bySubject.set(cert.subject, list)
+  }
+  const pairs: DroppedCrossCertificatePair[] = []
+  for (const cert of certs) {
+    if (cert.subject === cert.issuer) continue
+    const sameSubjectRoots = bySubject.get(cert.subject) ?? []
+    for (const root of sameSubjectRoots) {
+      if (
+        root !== cert &&
+        root.subject === root.issuer &&
+        cert.publicKey.equals(root.publicKey)
+      ) {
+        pairs.push({ cross: cert, root })
+      }
+    }
+  }
+  return pairs
 }

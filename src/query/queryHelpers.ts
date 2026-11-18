@@ -173,6 +173,47 @@ export function malformedToolUseRetryAction(input: {
 }
 
 /**
+ * Official 2.1.325 (#1374): tracks retracted wire UUIDs across malformed
+ * `tool_use` retries so both the synthetic retry message (`retractedWireUuids`
+ * -> `retracted_message_uuids`) and any subsequent assistant message
+ * (`supersedes`) can name them.
+ */
+export class RetractedWireUuidTracker {
+  private uuids: string[] = []
+
+  add(messages: readonly { uuid: string }[]): string[] {
+    const added: string[] = []
+    for (const msg of messages) {
+      if (!this.uuids.includes(msg.uuid)) {
+        this.uuids.push(msg.uuid)
+      }
+      added.push(msg.uuid)
+    }
+    return added
+  }
+
+  getAll(): readonly string[] {
+    return this.uuids
+  }
+
+  consumeForSupersedes(): string[] | undefined {
+    if (this.uuids.length === 0) return undefined
+    const out = [...this.uuids]
+    this.uuids = []
+    return out
+  }
+}
+
+export function buildRetractedWireFields(msg: {
+  retractedWireUuids?: readonly string[]
+}): { retracted_message_uuids?: string[] } {
+  if (msg.retractedWireUuids && msg.retractedWireUuids.length > 0) {
+    return { retracted_message_uuids: [...msg.retractedWireUuids] }
+  }
+  return {}
+}
+
+/**
  * densable ap / GJn.
  * truncatedAfterOutput && (subagent || (main && noninteractive)) && GB.
  */
@@ -386,4 +427,86 @@ export function maybeSkillInlineCommandHandoffNotRun(
     thisTurnAssistants,
     agentId ?? null,
   )
+}
+
+/**
+ * v2.1.314 (#1445): SEA Ad(jp(e), "walk_down_opus_lineup") — resolve a
+ * refusal-fallback model when ANTHROPIC_DEFAULT_OPUS_MODEL, availableModels,
+ * or deniedModels restricts the default fallback target.
+ */
+export function resolveRefusalFallbackCandidate(input: {
+  currentModel: string
+  fallbackModel?: string
+}): string | undefined {
+  const { currentModel, fallbackModel } = input
+  const isCandidateUsable = (
+    candidate: string | undefined,
+  ): candidate is string => {
+    if (!candidate || candidate === currentModel) return false
+    try {
+      const { isModelAllowed } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/model/modelAllowlist.js') as typeof import('../utils/model/modelAllowlist.js')
+      if (!isModelAllowed(candidate)) return false
+    } catch {
+      // Allowlist module unavailable in minimal test environments
+    }
+    try {
+      const { isModelDenied } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/model/entitlementOverlay.js') as typeof import('../utils/model/entitlementOverlay.js')
+      if (isModelDenied(candidate)) return false
+    } catch {
+      // Entitlement overlay unavailable in minimal test environments
+    }
+    return true
+  }
+
+  const raw =
+    fallbackModel && fallbackModel !== currentModel ? fallbackModel : undefined
+  if (raw !== undefined) {
+    let target = raw
+    try {
+      const { applyEntitlementBlindFallbackTarget } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/model/entitlementOverlay.js') as typeof import('../utils/model/entitlementOverlay.js')
+      target = applyEntitlementBlindFallbackTarget(raw)
+    } catch {
+      // ignore
+    }
+    if (isCandidateUsable(target)) return target
+  }
+
+  const candidates: Array<string | undefined> = []
+  const envOpus = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  if (envOpus) candidates.push(envOpus)
+  try {
+    const { newestAllowedModelInFamily } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/model/modelAllowlist.js') as typeof import('../utils/model/modelAllowlist.js')
+    candidates.push(
+      newestAllowedModelInFamily('opus') ?? undefined,
+      newestAllowedModelInFamily('sonnet') ?? undefined,
+      newestAllowedModelInFamily('haiku') ?? undefined,
+    )
+  } catch {
+    // ignore
+  }
+  try {
+    const { getDefaultOpusModel, getDefaultSonnetModel, getDefaultHaikuModel } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/model/model.js') as typeof import('../utils/model/model.js')
+    candidates.push(
+      getDefaultOpusModel(),
+      getDefaultSonnetModel(),
+      getDefaultHaikuModel(),
+    )
+  } catch {
+    // ignore
+  }
+
+  for (const cand of candidates) {
+    if (isCandidateUsable(cand)) return cand
+  }
+  return undefined
 }

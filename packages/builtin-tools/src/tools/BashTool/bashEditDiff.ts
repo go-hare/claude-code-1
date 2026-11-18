@@ -296,7 +296,7 @@ export async function takeBashEditDiffSnapshot(
     })
     await writeFile(
       join(privateDir, 'config'),
-      '[core]\n\trepositoryformatversion = 0\n\tbare = false\n',
+      '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = false\n',
       { flag: 'wx' },
     )
     await writeFile(

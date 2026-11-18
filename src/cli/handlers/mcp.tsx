@@ -676,7 +676,18 @@ export async function mcpLogoutHandler(name: string): Promise<void> {
       cliError(`"${name}" doesn't use OAuth — there are no stored credentials to clear.`);
       break;
     case 'oauth': {
-      await revokeServerTokens(name, target.config);
+      const revokeResult = await revokeServerTokens(name, target.config);
+      if (!revokeResult.cleared) {
+        logEvent('tengu_mcp_logout', {
+          status: (revokeResult.reason ?? 'failed') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        });
+        cliError(
+          revokeResult.reason === 'keychain_unreadable'
+            ? `Could not sign out of "${name}": the macOS keychain is locked or unreadable. Unlock the keychain and run \`claude mcp logout ${name}\` again.`
+            : `Could not sign out of "${name}": stored credentials could not be removed from the credential store. Run \`claude mcp logout ${name}\` again.`,
+        );
+        return;
+      }
       clearServerTokensFromLocalStorage(name, target.config);
       clearMcpClientConfig(name, target.config);
       const reauth = hasStaticAuthHeader(target.config)

@@ -8,6 +8,7 @@ import { type AskPreview, mapOfyPreview } from '../../../dialog/permissionAsk.js
 import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
+import { updateLastInteractionTime } from '../../../bootstrap/state.js';
 import TextInput from '../../TextInput.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
@@ -32,6 +33,7 @@ type Props = {
   onTabPrev?: () => void;
   onTabNext?: () => void;
   onRespondToClaude: () => void;
+  onExternalEditorClose?: () => void;
 };
 
 /**
@@ -61,6 +63,7 @@ export function PreviewQuestionView({
   onTabPrev,
   onTabNext,
   onRespondToClaude,
+  onExternalEditorClose,
 }: Props): React.ReactNode {
   const [isFooterFocused, setIsFooterFocused] = useState(false);
   const [isInNotesInput, setIsInNotesInput] = useState(false);
@@ -132,11 +135,16 @@ export function PreviewQuestionView({
   // Handle ctrl+g to open external editor for notes
   useKeybinding(
     'chat:externalEditor',
-    async () => {
+    () => {
       const currentValue = questionState?.textInputValue || '';
-      const result = await editPromptInEditor(currentValue);
-      if (result.content !== null && result.content !== currentValue) {
-        onUpdateQuestionState(questionText, { textInputValue: result.content }, false);
+      try {
+        const result = editPromptInEditor(currentValue);
+        if (result.content !== null && result.content !== currentValue) {
+          onUpdateQuestionState(questionText, { textInputValue: result.content }, false);
+        }
+      } finally {
+        updateLastInteractionTime(true);
+        onExternalEditorClose?.();
       }
     },
     { context: 'Chat', isActive: isInNotesInput && !!editor },

@@ -1,5 +1,12 @@
+import {
+  request as httpRequest,
+  type ClientRequest,
+  type RequestOptions,
+} from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import axios from 'axios'
 
+import { getAnthropicClientPlatform } from '../utils/teleport/api.js'
 import { debugBody, extractErrorDetail } from './debugUtils.js'
 import { rcLog } from './rcDebugLog.js'
 import {
@@ -37,6 +44,105 @@ type BridgeApiDeps = {
 }
 
 const BETA_HEADER = 'environments-2025-11-01'
+
+export const DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS = 15_000
+export const ERR_TLS_HANDSHAKE_STALLED = 'ERR_TLS_HANDSHAKE_STALLED'
+
+function failStalledTlsHandshake(req: ClientRequest): void {
+  const err = Object.assign(
+    new Error(
+      'The TLS handshake with the server did not finish in the time allowed, normally 120 seconds. Check the network or proxy.',
+    ),
+    { code: ERR_TLS_HANDSHAKE_STALLED },
+  )
+  req.destroy(err)
+}
+
+/**
+ * densable `si(handshakeBoundMs)` — bound the TLS handshake on `https:` requests
+ * so a proxy blocking or stalling a Remote Control startup request does not
+ * leave the session on "Connecting" for ~2 minutes.
+ */
+export function createTlsHandshakeTimeoutTransport(
+  handshakeBoundMs: number = DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS,
+): {
+  request: (
+    options: RequestOptions,
+    callback?: (res: import('node:http').IncomingMessage) => void,
+  ) => ClientRequest
+} {
+  return {
+    request(options, callback) {
+      if (options.protocol !== 'https:') {
+        return httpRequest(options, callback)
+      }
+      const req = httpsRequest(options, callback)
+      const origSetTimeout = req.setTimeout.bind(req)
+      let deferredTimeoutArgs:
+        | Parameters<ClientRequest['setTimeout']>
+        | undefined
+      let handshakeDone = false
+      req.setTimeout = ((
+        ...args: Parameters<ClientRequest['setTimeout']>
+      ): ClientRequest => {
+        if (handshakeDone) return origSetTimeout(...args)
+        deferredTimeoutArgs = args
+        return req
+      }) as ClientRequest['setTimeout']
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let startedAt: number | undefined
+      const startTimer = (): void => {
+        if (handshakeDone || timer !== undefined) return
+        startedAt = performance.now()
+        timer = setTimeout(failStalledTlsHandshake, handshakeBoundMs, req)
+        if (typeof timer === 'object' && 'unref' in timer) timer.unref()
+      }
+      const finishHandshake = (): void => {
+        handshakeDone = true
+        if (timer !== undefined) {
+          clearTimeout(timer)
+          timer = undefined
+        }
+        if (deferredTimeoutArgs) {
+          const [timeoutMs, ...rest] = deferredTimeoutArgs
+          const elapsed =
+            startedAt === undefined ? 0 : performance.now() - startedAt
+          origSetTimeout(
+            timeoutMs &&
+              Math.max(timeoutMs, Math.min(elapsed, handshakeBoundMs / 2)),
+            ...rest,
+          )
+        }
+      }
+      // Start bound immediately as well so runtimes that defer 'socket' until
+      // after TLS (e.g. Bun) still abort stalled handshakes within handshakeBoundMs.
+      startTimer()
+      req.once('socket', socket => {
+        if (
+          req.reusedSocket ||
+          (!socket.connecting &&
+            'secureConnecting' in socket &&
+            (socket as { secureConnecting?: boolean }).secureConnecting ===
+              false)
+        ) {
+          finishHandshake()
+          return
+        }
+        socket.once('secureConnect', finishHandshake)
+        if (socket.connecting) {
+          socket.once('connect', startTimer)
+        } else {
+          startTimer()
+        }
+      })
+      req.once('response', finishHandshake)
+      req.once('close', () => {
+        if (timer !== undefined) clearTimeout(timer)
+      })
+      return req
+    },
+  }
+}
 
 /** Allowlist pattern for server-provided IDs used in URL path segments. */
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -80,6 +186,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
       'anthropic-beta': BETA_HEADER,
+      'anthropic-client-platform': getAnthropicClientPlatform(),
       'x-environment-runner-version': deps.runnerVersion,
     }
     const deviceToken = deps.getTrustedDeviceToken?.()
@@ -181,6 +288,9 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
             {
               headers: getHeaders(token),
               timeout: 15_000,
+              ...(deps.baseUrl.startsWith('https:') && {
+                transport: createTlsHandshakeTimeoutTransport(15_000),
+              }),
               validateStatus: status => status < 500,
               signal,
             },

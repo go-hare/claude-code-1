@@ -57,6 +57,7 @@ import {
 } from 'src/utils/fileToolApprovedOpen.js'
 import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
+  checkBlockWritesOutsideWorkingDirectories,
   checkWritePermissionForTool,
   matchingRuleForInput,
   matchesPathRule,
@@ -92,6 +93,7 @@ import {
 import {
   areFileEditsInputsEquivalent,
   findActualString,
+  getFastPatchFromContents,
   getPatchForEdit,
 } from './utils.js'
 
@@ -526,6 +528,14 @@ export const FileEditTool = buildTool({
 
     const absoluteFilePath = expandPath(file_path)
 
+    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
+      absoluteFilePath,
+      toolUseContext.getAppState().toolPermissionContext,
+    )
+    if (outsideWriteBlock !== undefined) {
+      throw new Error(outsideWriteBlock)
+    }
+
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     // Skip in simple mode - no skills available
     const cwd = getCwd()
@@ -641,16 +651,10 @@ export const FileEditTool = buildTool({
       const memdirStamped = updatedFile !== editedFile
       patchForDisplay = !memdirStamped
         ? patch
-        : getPatchForDisplay({
-            filePath: absoluteFilePath,
-            fileContents: originalFileContents,
-            edits: [
-              {
-                old_string: originalFileContents,
-                new_string: updatedFile,
-                replace_all: false,
-              },
-            ],
+        : getFastPatchFromContents({
+            oldContent: originalFileContents,
+            newContent: updatedFile,
+            convertTabs: true,
           })
 
       await openedWrite.recheckBeforeWrite()
@@ -698,7 +702,11 @@ export const FileEditTool = buildTool({
     if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
       logEvent('tengu_write_claudemd', {})
     }
-    countLinesChanged(patchForDisplay)
+    if (patchForDisplay.length === 0 && originalFileContents !== updatedFile) {
+      countLinesChanged([], updatedFile, originalFileContents)
+    } else {
+      countLinesChanged(patchForDisplay)
+    }
 
     logFileOperation({
       operation: 'edit',

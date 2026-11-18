@@ -1,13 +1,48 @@
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { type KeyboardEvent, Box, StatusIcon, Text, useTabHeaderFocus } from '@anthropic/ink';
+import { type KeyboardEvent, Box, StatusIcon, Text, useTabHeaderFocus, wrapText } from '@anthropic/ink';
+import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
 import { type AutoModeDenial, getAutoModeDenials } from '../../../utils/autoModeDenials.js';
+import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
 import { Select } from '../../CustomSelect/select.js';
+
+export type RecentDenialsState = {
+  approved: Set<number>;
+  retry: Set<number>;
+  denials: readonly AutoModeDenial[];
+  canMark: boolean;
+};
+
+export function formatDenialRefusal(reason: string): string {
+  return `This row can't be approved here: ${reason}`;
+}
+
+export function isDenialBodyOnScreen(
+  commandText: string,
+  terminalRows: number,
+  terminalColumns: number,
+  listedCount: number,
+): boolean {
+  if (!commandText) return true;
+  const colWidth = Math.max(1, terminalColumns - 8);
+  const bodyLines = wrapText(commandText, colWidth, 'wrap').split('\n').length;
+  // Reserve rows for dialog header, tab bar, list rows, and footer.
+  const reservedRows = 8 + Math.min(10, listedCount);
+  const availableRows = Math.max(0, terminalRows - reservedRows);
+  return bodyLines <= availableRows;
+}
+
+function removeFromSet(set: Set<number>, idx: number): Set<number> {
+  if (!set.has(idx)) return set;
+  const next = new Set(set);
+  next.delete(idx);
+  return next;
+}
 
 type Props = {
   onHeaderFocusChange?: (focused: boolean) => void;
   /** Called when approved/retry state changes so parent can act on exit */
-  onStateChange: (state: { approved: Set<number>; retry: Set<number>; denials: readonly AutoModeDenial[] }) => void;
+  onStateChange: (state: RecentDenialsState) => void;
 };
 
 export function RecentDenialsTab({ onHeaderFocusChange, onStateChange }: Props): React.ReactNode {
@@ -24,12 +59,12 @@ export function RecentDenialsTab({ onHeaderFocusChange, onStateChange }: Props):
 
   useEffect(() => {
     if (isEmpty) {
-      onStateChange({ approved: new Set(), retry: new Set(), denials });
+      onStateChange({ approved: new Set(), retry: new Set(), denials, canMark: false });
     }
   }, [isEmpty, denials, onStateChange]);
 
   if (isEmpty) {
-    return <Text dimColor>No recent denials. Commands denied by the auto mode classifier will appear here.</Text>;
+    return <Text dimColor>No recent blocks. Commands auto mode blocks will appear here.</Text>;
   }
 
   return (
@@ -50,10 +85,19 @@ function RecentDenialsList({
   const [approved, setApproved] = useState<Set<number>>(() => new Set());
   const [retry, setRetry] = useState<Set<number>>(() => new Set());
   const [focusedIdx, setFocusedIdx] = useState(0);
+  const isScreenReader = isScreenReaderModeEnabled();
+  const { rows, columns } = useTerminalSize();
+  const [prevSize, setPrevSize] = useState({ rows, columns });
+  const [marksClearedNotice, setMarksClearedNotice] = useState(false);
 
-  useEffect(() => {
-    onStateChange({ approved, retry, denials });
-  }, [approved, retry, denials, onStateChange]);
+  if (rows !== prevSize.rows || columns !== prevSize.columns) {
+    setPrevSize({ rows, columns });
+    if (!isScreenReader && approved.size + retry.size > 0 && (rows < prevSize.rows || columns < prevSize.columns)) {
+      setApproved(new Set());
+      setRetry(new Set());
+      setMarksClearedNotice(true);
+    }
+  }
 
   const withheldIndices = useMemo(
     () =>
@@ -63,12 +107,38 @@ function RecentDenialsList({
     [denials],
   );
 
+  const focusedDenial = denials[focusedIdx];
+  const focusedCommand = focusedDenial ? (focusedDenial.command ?? focusedDenial.display) : '';
+  const bodyOnScreen = isScreenReader ? true : isDenialBodyOnScreen(focusedCommand, rows, columns, denials.length);
+  const isTooShort = focusedDenial !== undefined && !bodyOnScreen;
+
+  const blockedIndices = useMemo(() => {
+    if (!isTooShort) return withheldIndices;
+    const next = new Set(withheldIndices);
+    next.add(focusedIdx);
+    return next;
+  }, [withheldIndices, isTooShort, focusedIdx]);
+
+  const canMark = isScreenReader ? withheldIndices.size < denials.length : !blockedIndices.has(focusedIdx);
+
+  useEffect(() => {
+    if (isTooShort) {
+      setApproved(prev => removeFromSet(prev, focusedIdx));
+      setRetry(prev => removeFromSet(prev, focusedIdx));
+    }
+  }, [isTooShort, focusedIdx]);
+
+  useEffect(() => {
+    onStateChange({ approved, retry, denials, canMark });
+  }, [approved, retry, denials, canMark, onStateChange]);
+
   const handleSelect = useCallback(
     (value: string) => {
       const idx = Number(value);
-      if (withheldIndices.has(idx)) {
+      if (blockedIndices.has(idx)) {
         return;
       }
+      setMarksClearedNotice(false);
       setApproved(prev => {
         const next = new Set(prev);
         if (next.has(idx)) next.delete(idx);
@@ -76,7 +146,7 @@ function RecentDenialsList({
         return next;
       });
     },
-    [withheldIndices],
+    [blockedIndices],
   );
 
   const handleFocus = useCallback((value: string) => {
@@ -89,7 +159,8 @@ function RecentDenialsList({
       if (e.ctrl || e.meta || e.shift) return;
       if (e.key !== 'r') return;
       e.preventDefault();
-      if (withheldIndices.has(focusedIdx)) return;
+      if (blockedIndices.has(focusedIdx)) return;
+      setMarksClearedNotice(false);
       setRetry(prev => {
         const next = new Set(prev);
         if (next.has(focusedIdx)) next.delete(focusedIdx);
@@ -104,12 +175,21 @@ function RecentDenialsList({
         return next;
       });
     },
-    [focusedIdx, headerFocused, withheldIndices],
+    [focusedIdx, headerFocused, blockedIndices],
   );
 
   const options = denials.map((d, idx) => {
     const isApproved = approved.has(idx);
-    const suffix = retry.has(idx) ? ' (retry)' : '';
+    const isWithheld = withheldIndices.has(idx);
+    const suffix = retry.has(idx)
+      ? ' (retry)'
+      : !isScreenReader
+        ? ''
+        : isApproved
+          ? ' (approved)'
+          : isWithheld
+            ? " (can't be approved)"
+            : '';
     const reason = d.reason ? d.reason.replace(/\s+/g, ' ').trim() : undefined;
     return {
       label: (
@@ -124,9 +204,16 @@ function RecentDenialsList({
     };
   });
 
+  const refusalMessage = withheldIndices.has(focusedIdx)
+    ? formatDenialRefusal("its command can't be read in full")
+    : isTooShort
+      ? formatDenialRefusal('this terminal is too short to show it')
+      : undefined;
+  const noticeText = `${marksClearedNotice ? 'Marks cleared: terminal shrank. ' : ''}${refusalMessage ?? ''}`.trim();
+
   return (
     <Box flexDirection="column" onKeyDown={handleKeyDown}>
-      <Text>Commands recently denied by the auto mode classifier.</Text>
+      <Text>Commands recently blocked by auto mode.</Text>
       <Box marginTop={1}>
         <Select
           options={options}
@@ -137,6 +224,11 @@ function RecentDenialsList({
           onUpFromFirstItem={focusHeader}
         />
       </Box>
+      {noticeText ? (
+        <Box marginTop={1}>
+          <Text color="warning">{noticeText}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

@@ -160,6 +160,15 @@ export type RecordedChange =
       linewise: boolean
       text: string
     }
+  | {
+      type: 'visualPaste'
+      content: string
+      registerLinewise: boolean
+      selectionEndsLine: boolean
+      selectionOnOneLine: boolean
+      span: number
+      linewise: boolean
+    }
 
 /**
  * densable Poa — operators that enter INSERT (change / openLine / substitute).

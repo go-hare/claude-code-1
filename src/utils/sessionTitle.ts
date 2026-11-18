@@ -108,6 +108,82 @@ export function isSyntheticSessionTitleText(text: string): boolean {
   )
 }
 
+export type SessionTitleCommandLike = {
+  name: string
+  type: string
+  description?: string
+  menuDescription?: string
+  userInvocable?: boolean
+  isEnabled?: () => boolean
+}
+
+function extractXmlTag(text: string, tag: string): string | undefined {
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`).exec(text)
+  return match?.[1]
+}
+
+/**
+ * Gold `rco` / `tyr` — resolves the input text for auto-titling a session.
+ * When a session starts with a skill or prompt-based command (e.g.
+ * `/security-review` or `<command-message>...<command-name>/security-review</command-name>`),
+ * extracts `/name args` + description instead of skipping it as synthetic.
+ */
+export function resolveSessionTitleInput({
+  text,
+  commands,
+  dispatchesSlashCommands = true,
+}: {
+  text: string
+  commands: readonly SessionTitleCommandLike[]
+  dispatchesSlashCommands?: boolean
+}): string | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+
+  let parsedName: string | undefined
+  let parsedArgs = ''
+
+  if (
+    dispatchesSlashCommands &&
+    (trimmed.startsWith(`<${COMMAND_MESSAGE_TAG}>`) ||
+      trimmed.startsWith(`<${COMMAND_NAME_TAG}>`))
+  ) {
+    const rawName = extractXmlTag(trimmed, COMMAND_NAME_TAG)?.trim()
+    if (!rawName) return null
+    parsedName = rawName.startsWith('/') ? rawName.slice(1) : rawName
+    parsedArgs = extractXmlTag(trimmed, 'command-args')?.trim() ?? ''
+  } else if (isSyntheticSessionTitleText(trimmed)) {
+    return null
+  } else if (dispatchesSlashCommands && trimmed.startsWith('/')) {
+    const spaceIdx = trimmed.search(/\s/)
+    parsedName = spaceIdx === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIdx)
+    parsedArgs = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1).trim()
+  } else {
+    return trimmed
+  }
+
+  const cmd = commands.find(c => c.name === parsedName)
+  if (!cmd) {
+    // Unknown slash command: only non-dispatched plain text should pass through;
+    // registered non-prompt commands are skipped.
+    return null
+  }
+  if (
+    cmd.type !== 'prompt' ||
+    cmd.userInvocable === false ||
+    (cmd.isEnabled && !cmd.isEnabled())
+  ) {
+    return null
+  }
+
+  const invocation = `/${cmd.name} ${parsedArgs}`.trim()
+  const desc = (cmd.menuDescription ?? cmd.description ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200)
+  return desc ? `${invocation}\n${desc}` : invocation
+}
+
 const titleSchema = lazySchema(() => z.object({ title: z.string() }))
 
 /** densable 2.1.246 `B` — wrap content, attach language line, parse fenced JSON. */

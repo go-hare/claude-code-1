@@ -676,7 +676,7 @@ export function formatCodeReviewUltraFallbackNote(options: {
     : `(Claude can't launch the cloud review directly — the user can run \`claude ultrareview\` from a terminal to start it. Falling back to a local ${level}-effort review for now.)\n`
 }
 
-/** densable `Ea` — effort bands, remembered --max-findings, ultra --post. */
+/** densable `Ea` / `Ks` — effort level first before any target, remembered --max-findings, ultra --post. */
 function codeReviewCommandDescription(): string {
   const ultra = isUltrareviewEnabled()
   const effortTail = ultra
@@ -685,7 +685,14 @@ function codeReviewCommandDescription(): string {
   const postTail = ultra
     ? ' For ultra on a GitHub.com PR target, --post asks to post the finished review’s findings to the PR as a single comment from the user’s GitHub account (not a review; the launch dialog still confirms in interactive sessions, while non-interactive mode posts on the flag alone) and --no-post hides that option.'
     : ''
-  return `Review the current diff, or a PR number/branch/path target, for correctness bugs (plus reuse/simplification/efficiency cleanups where the model's review recipe covers them) at the given effort level (low/medium: fewer, high-confidence findings; high→max: broader coverage, may include uncertain findings${effortTail}); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply the findings to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.${postTail}`
+  return `Review the current diff, or a PR number/branch/path target, for correctness bugs (plus reuse/simplification/efficiency cleanups where the model's recipe covers them) at the effort level given first, before any target (${EFFORT_LEVELS.join('|')}: from few high-confidence findings to many, some uncertain${effortTail}); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply them to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.${postTail}`
+}
+
+/** Official `Vs` (#1293) — only use max/ultra when explicitly requested. */
+function codeReviewWhenToUse(): string {
+  return isUltrareviewEnabled()
+    ? 'Use the max or ultra level only when the user, or instructions such as CLAUDE.md or a skill, explicitly ask for one, never on your own judgment: they are the costliest reviews and start many reviewer subagents.'
+    : 'Use the max level only when the user, or instructions such as CLAUDE.md or a skill, explicitly ask for it, never on your own judgment: it is the costliest level and starts many reviewer subagents.'
 }
 
 /** densable `Ra`. */
@@ -704,6 +711,7 @@ const codeReview = {
   // densable WJf menuDescription / Ea description
   menuDescription: 'Review the current diff or a PR for bugs and cleanups',
   description: codeReviewCommandDescription(),
+  whenToUse: codeReviewWhenToUse(),
   argumentHint: codeReviewArgumentHint(),
   userInvocable: true,
   // densable 2.1.218: fork by default → background subagent + task-notification

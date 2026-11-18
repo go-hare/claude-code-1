@@ -29,6 +29,122 @@ import {
 import { plural } from '../../utils/stringUtils.js';
 import { getCurrentWorktreeSession } from '../../utils/worktree.js';
 
+const VSCODE_EXTENSION_DOCS_URL = 'https://code.claude.com/docs/en/vs-code#install-the-extension';
+const JETBRAINS_PLUGIN_DOCS_URL = 'https://code.claude.com/docs/en/jetbrains#installation';
+
+export type IdeInstallResult = {
+  installed?: boolean;
+  previouslyInstalled?: boolean;
+  error?: string;
+};
+
+export function formatIdeInstallOutcome(ide: IdeType, result: IdeInstallResult | null | undefined): string {
+  const displayName = toIDEDisplayName(ide);
+  const boldName = chalk.bold(displayName);
+  const docsHint = `To install it yourself, see ${VSCODE_EXTENSION_DOCS_URL}`;
+  if (result?.installed) {
+    return result.previouslyInstalled
+      ? `The Claude Code extension is installed in ${boldName}. Reload the ${displayName} window (Developer: Reload Window), then run /ide again.`
+      : `Installed the Claude Code extension in ${boldName}.`;
+  }
+  if (result?.error) {
+    return `Couldn't install the Claude Code extension in ${boldName}:\n${result.error}\n${docsHint}`;
+  }
+  return `Didn't install the Claude Code extension in ${boldName}.\n${docsHint}`;
+}
+
+export function formatJetBrainsMissingPluginMessage(ide: IdeType): string {
+  const displayName = toIDEDisplayName(ide);
+  return (
+    `Couldn't find the Claude Code plugin running in ${chalk.bold(displayName)}.\n` +
+    `If it isn't installed, install it from the JetBrains Marketplace.\n` +
+    `Then ${chalk.bold(`restart ${displayName}`)} completely and run /ide again.\n` +
+    `Installation guide: ${JETBRAINS_PLUGIN_DOCS_URL}`
+  );
+}
+
+function InstallExtensionWaiter({
+  ide,
+  installExtension,
+  onDone,
+}: {
+  ide: IdeType;
+  installExtension: (ide: IdeType) => unknown;
+  onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
+}): React.ReactNode {
+  const displayName = toIDEDisplayName(ide);
+  useEffect(() => {
+    let active = true;
+    Promise.resolve(installExtension(ide))
+      .catch(err => ({
+        installed: false,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      .then(result => {
+        if (!active) return;
+        const typed = result && typeof result === 'object' ? (result as IdeInstallResult) : undefined;
+        onDone(formatIdeInstallOutcome(ide, typed));
+      });
+    return () => {
+      active = false;
+    };
+  }, [ide, installExtension, onDone]);
+
+  return (
+    <Dialog
+      title={`Installing the Claude Code extension in ${displayName}…`}
+      color="ide"
+      onCancel={() =>
+        onDone(
+          `Still installing the Claude Code extension in ${displayName}. /status shows the result when it finishes.`,
+          { display: 'system' },
+        )
+      }
+    >
+      <Text dimColor>Press Esc to stop waiting</Text>
+    </Dialog>
+  );
+}
+
+function RunningIDEInstaller({
+  runningIDEs,
+  installExtension,
+  onDone,
+}: {
+  runningIDEs: IdeType[];
+  installExtension: (ide: IdeType) => unknown;
+  onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
+}): React.ReactNode {
+  const [pendingIde, setPendingIde] = useState<IdeType | null>(null);
+  const handleInstall = useCallback(
+    (ide: IdeType) => {
+      if (isJetBrainsIde(ide)) {
+        installExtension(ide);
+        onDone(formatJetBrainsMissingPluginMessage(ide));
+        return;
+      }
+      setPendingIde(ide);
+    },
+    [installExtension, onDone],
+  );
+
+  if (pendingIde) {
+    return <InstallExtensionWaiter ide={pendingIde} installExtension={installExtension} onDone={onDone} />;
+  }
+  if (runningIDEs.length === 1) {
+    return <InstallOnMount ide={runningIDEs[0]!} onInstall={handleInstall} />;
+  }
+  return (
+    <RunningIDESelector
+      runningIDEs={runningIDEs}
+      onSelectIDE={handleInstall}
+      onDone={() => {
+        onDone('No IDE selected.', { display: 'system' });
+      }}
+    />
+  );
+}
+
 function CollapsedListSummary({ count, unit = 'line' }: { count: number; unit?: string }): React.ReactNode {
   if (count <= 0) return null;
   return (
@@ -334,34 +450,14 @@ export async function call(
   if (detectedIDEs.length === 0 && context.onInstallIDEExtension && !isSupportedTerminal()) {
     const runningIDEs = await detectRunningIDEs();
 
-    const onInstall = (ide: IdeType) => {
-      if (context.onInstallIDEExtension) {
-        context.onInstallIDEExtension(ide);
-        // The completion message will be shown after installation
-        if (isJetBrainsIde(ide)) {
-          onDone(
-            `Installed plugin to ${chalk.bold(toIDEDisplayName(ide))}\n` +
-              `Please ${chalk.bold('restart your IDE')} completely for it to take effect`,
-          );
-        } else {
-          onDone(`Installed extension to ${chalk.bold(toIDEDisplayName(ide))}`);
-        }
-      }
-    };
-
-    if (runningIDEs.length > 1) {
-      // Show selector when multiple IDEs are running
+    if (runningIDEs.length > 0) {
       return (
-        <RunningIDESelector
+        <RunningIDEInstaller
           runningIDEs={runningIDEs}
-          onSelectIDE={onInstall}
-          onDone={() => {
-            onDone('No IDE selected.', { display: 'system' });
-          }}
+          installExtension={context.onInstallIDEExtension}
+          onDone={onDone}
         />
       );
-    } else if (runningIDEs.length === 1) {
-      return <InstallOnMount ide={runningIDEs[0]!} onInstall={onInstall} />;
     }
   }
 

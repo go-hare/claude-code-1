@@ -15,7 +15,7 @@ import { BSU, ESU, HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
 import { inkSession } from './instances.js'
 import { isJediTermEnv } from './jediTermInput.js'
 import { attacherCaps, link, printsUnknownSequences } from './termio/osc.js'
-import { Jk, tD } from './terminalCapabilities.js'
+import { Jk, tD, xtversionAllowsKittyGraphics } from './terminalCapabilities.js'
 
 function isEnvTruthyLike(value: string | undefined): boolean {
   return value === '1' || value === 'true' || value === 'yes' || value === 'on'
@@ -311,22 +311,7 @@ export function subscribeMousePixelsSupported(
   })
 }
 
-/** densable `lgo` — XTVERSION allows kitty graphics (kitty ≥0.28 / ghostty). */
-export function xtversionAllowsKittyGraphics(
-  name: string | undefined,
-): boolean {
-  if (name === undefined || name === '') return false
-  if (name.startsWith('kitty(')) {
-    const parsed = coerce(name.slice(6))
-    return parsed !== null && gte(parsed.version, '0.28.0')
-  }
-  return (
-    name === 'kitty' ||
-    name === 'ghostty' ||
-    name.startsWith('kitty ') ||
-    name.startsWith('ghostty ')
-  )
-}
+export { xtversionAllowsKittyGraphics }
 
 export function setKittyGraphicsSupported(supported: boolean): void {
   tD().answer('kittyGraphics', supported, 'probe: kitty graphics')

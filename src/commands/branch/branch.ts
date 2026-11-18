@@ -22,6 +22,7 @@ import {
 } from '../../utils/sessionStorage.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { escapeRegExp } from '../../utils/stringUtils.js'
+import { resetTaskListState } from '../../utils/tasks.js'
 
 type TranscriptEntry = TranscriptMessage & {
   forkedFrom?: {
@@ -316,6 +317,7 @@ export async function call(
     const successMessage = `Branched conversation${titleInfo}. You are now in the branch.${resumeHint}`
 
     if (context.resume) {
+      resetTaskListState()
       await context.resume(sessionId, forkLog, 'fork')
       onDone(successMessage, { display: 'system' })
     } else {

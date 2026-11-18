@@ -12,6 +12,7 @@ import { addKeepaliveReason, removeKeepaliveReason } from 'src/utils/task/framew
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import { bashToolHasPermission } from '../BashTool/bashPermissions.js';
+import { BashTool } from '../BashTool/BashTool.js';
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
@@ -438,6 +439,24 @@ export const MonitorTool = buildTool({
       return `websocket ${input.ws.url}${subprotocols}`;
     }
     return input.command ?? '';
+  },
+
+  async preparePermissionMatcher(input: MonitorInput) {
+    const command =
+      typeof input === 'object' &&
+      input !== null &&
+      'command' in input &&
+      typeof input.command === 'string' &&
+      input.command !== ''
+        ? input.command
+        : undefined;
+    if (command === undefined) {
+      return () => false;
+    }
+    if (!BashTool.preparePermissionMatcher) {
+      return () => false;
+    }
+    return BashTool.preparePermissionMatcher({ command });
   },
 
   async checkPermissions(input: MonitorInput, context: ToolUseContext): Promise<PermissionResult> {

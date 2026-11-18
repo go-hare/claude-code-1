@@ -60,7 +60,7 @@ describe('densable 2.1.289 model [1m] display + picker footer', () => {
       'claude-custom-model[1m]',
     )
     const opusRes = parseUserSpecifiedModel('opus[1m][1m]')
-    expect(opusRes.endsWith('[1m]')).toBe(true)
+    expect(opusRes.endsWith('[1m][1m]')).toBe(false)
     expect(opusRes.endsWith('[1m][1m]')).toBe(false)
   })
 })

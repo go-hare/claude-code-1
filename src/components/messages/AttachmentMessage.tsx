@@ -470,10 +470,10 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       );
     }
     case 'task_status':
-      return <TaskStatusMessage attachment={attachment} />;
+      return <TaskStatusMessage attachment={attachment} addMargin={addMargin} />;
     case 'teammate_shutdown_batch':
       return (
-        <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
+        <Box flexDirection="row" width="100%" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
           <Text aria-hidden dimColor>
             {BLACK_CIRCLE}{' '}
           </Text>
@@ -509,7 +509,7 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       // densable Ul: Goal/Reason expand only when verbose. Transcript keeps the hint.
       const expanded = verbose;
       return (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={addMargin ? 1 : 0}>
           <Text>
             <StatusIcon status={iconStatus} withSpace />
             <Text dimColor={!attachment.met && !failed} color={failed ? 'error' : undefined}>
@@ -590,7 +590,13 @@ function WithheldMemoryMessage({ entries }: { entries: WithheldMemoryAttachmentE
   );
 }
 
-function TaskStatusMessage({ attachment }: { attachment: TaskStatusAttachment }): React.ReactNode {
+function TaskStatusMessage({
+  attachment,
+  addMargin,
+}: {
+  attachment: TaskStatusAttachment;
+  addMargin: boolean;
+}): React.ReactNode {
   // For ants, killed task status is shown in the CoordinatorTaskPanel.
   // Don't render it again in the chat.
   if (process.env.USER_TYPE === 'ant' && attachment.status === 'killed') {
@@ -601,13 +607,19 @@ function TaskStatusMessage({ attachment }: { attachment: TaskStatusAttachment })
   // TeammateTaskStatus subscribes to AppState; by gating the mount we
   // avoid adding a store listener for every non-teammate attachment.
   if (isAgentSwarmsEnabled() && attachment.taskType === 'in_process_teammate') {
-    return <TeammateTaskStatus attachment={attachment} />;
+    return <TeammateTaskStatus attachment={attachment} addMargin={addMargin} />;
   }
 
-  return <GenericTaskStatus attachment={attachment} />;
+  return <GenericTaskStatus attachment={attachment} addMargin={addMargin} />;
 }
 
-function GenericTaskStatus({ attachment }: { attachment: TaskStatusAttachment }): React.ReactNode {
+function GenericTaskStatus({
+  attachment,
+  addMargin,
+}: {
+  attachment: TaskStatusAttachment;
+  addMargin: boolean;
+}): React.ReactNode {
   const bg = useSelectedMessageBg();
   const statusText =
     attachment.status === 'completed'
@@ -618,7 +630,7 @@ function GenericTaskStatus({ attachment }: { attachment: TaskStatusAttachment })
           ? 'still running in background'
           : attachment.status;
   return (
-    <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
+    <Box flexDirection="row" width="100%" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Text aria-hidden dimColor>
         {BLACK_CIRCLE}{' '}
       </Text>
@@ -629,18 +641,24 @@ function GenericTaskStatus({ attachment }: { attachment: TaskStatusAttachment })
   );
 }
 
-function TeammateTaskStatus({ attachment }: { attachment: TaskStatusAttachment }): React.ReactNode {
+function TeammateTaskStatus({
+  attachment,
+  addMargin,
+}: {
+  attachment: TaskStatusAttachment;
+  addMargin: boolean;
+}): React.ReactNode {
   const bg = useSelectedMessageBg();
   // Narrow selector: only re-render when this specific task changes.
   const task = useAppState(s => s.tasks[attachment.taskId]);
   if (task?.type !== 'in_process_teammate') {
     // Fall through to generic rendering (task not yet in store, or wrong type)
-    return <GenericTaskStatus attachment={attachment} />;
+    return <GenericTaskStatus attachment={attachment} addMargin={addMargin} />;
   }
   const agentColor = toInkColor(task.identity.color);
   const statusText = attachment.status === 'completed' ? 'shut down gracefully' : attachment.status;
   return (
-    <Box flexDirection="row" width="100%" marginTop={1} backgroundColor={bg}>
+    <Box flexDirection="row" width="100%" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Text aria-hidden dimColor>
         {BLACK_CIRCLE}{' '}
       </Text>

@@ -226,7 +226,7 @@ function formatSessionOrWeeklyResetHint(
   let limitName: string | null = null
   switch (limits.rateLimitType) {
     case 'five_hour':
-      limitName = 'session limit'
+      limitName = '5-hour limit'
       break
     case 'seven_day':
       limitName = 'weekly limit'
@@ -479,7 +479,7 @@ function getTypedLimitReachedText(
         { progressSavedSuffix },
       )
     case 'five_hour':
-      return formatLimitReachedText('session limit', resetMessage, model, {
+      return formatLimitReachedText('5-hour limit', resetMessage, model, {
         progressSavedSuffix,
       })
     case 'seven_day':
@@ -504,7 +504,7 @@ function getEarlyWarningText(limits: RateLimitMessageLimits): string | null {
       limitName = 'weekly limit'
       break
     case 'five_hour':
-      limitName = 'session limit'
+      limitName = '5-hour limit'
       break
     case 'seven_day_opus':
       limitName = 'Opus limit'
@@ -611,7 +611,7 @@ export function getUsingOverageText(limits: RateLimitMessageLimits): string {
 
   let limitName = ''
   if (limits.rateLimitType === 'five_hour') {
-    limitName = 'session limit'
+    limitName = '5-hour limit'
   } else if (limits.rateLimitType === 'seven_day') {
     limitName = 'weekly limit'
   } else if (limits.rateLimitType === 'seven_day_opus') {

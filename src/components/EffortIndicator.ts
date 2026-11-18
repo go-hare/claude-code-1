@@ -21,10 +21,39 @@ import {
  * Ultracode: "◉ ultracode · {wire} effort + dynamic workflows for maximum thoroughness"
  * Wire tier is catalog-driven (Grok → high, Claude 4.7 → xhigh).
  */
+/**
+ * densable 2.1.312 fA — format the prompt effort indicator, optionally showing
+ * "may wait for your next message" when changed mid-task.
+ */
+export function formatEffortIndicatorText(
+  level: EffortLevel | undefined,
+  ultracode = false,
+  showLabel = false,
+  midTaskPending = false,
+  requestedLevel: EffortLevel | undefined = level,
+): string | undefined {
+  if (!level) return undefined
+  const prefix = showLabel ? 'effort:' : effortLevelToSymbol(level)
+  const ultraSuffix = ultracode ? ' · ultracode' : ''
+  const actionSuffix = midTaskPending
+    ? 'may wait for your next message'
+    : '/effort'
+  const displayLevel =
+    showLabel && requestedLevel !== undefined && requestedLevel !== level
+      ? `${requestedLevel} (${level})`
+      : (requestedLevel ?? level)
+  return `${prefix} ${displayLevel}${ultraSuffix} · ${actionSuffix}`
+}
+
 export function getEffortNotificationText(
   effortValue: EffortValue | undefined,
   model: string,
   ultracodeFlag?: boolean,
+  opts?: {
+    midTaskPending?: boolean
+    showLabel?: boolean
+    requestedLevel?: EffortLevel
+  },
 ): string | undefined {
   if (!shouldShowEffortUI(model, effortValue)) return undefined
   // Official 2.1.304 (#990): do not guess a level when CLAUDE_CODE_EFFORT_LEVEL=auto|unset
@@ -35,7 +64,19 @@ export function getEffortNotificationText(
   if (isUltracodeModeActive(model, effortValue, ultracodeFlag)) {
     const wire = getUltracodeEffortForModel(model) ?? level
     // densable uses the effort symbol for the wire tier (vHr), not a separate ultra glyph.
+    if (opts?.midTaskPending) {
+      return `${effortLevelToSymbol(wire)} ${wire} · ultracode · may wait for your next message`
+    }
     return `${effortLevelToSymbol(wire)} ultracode · ${wire} effort + dynamic workflows for maximum thoroughness`
+  }
+  if (opts?.midTaskPending || opts?.showLabel || opts?.requestedLevel) {
+    return formatEffortIndicatorText(
+      level,
+      false,
+      opts?.showLabel ?? false,
+      opts?.midTaskPending ?? false,
+      opts?.requestedLevel ?? level,
+    )
   }
   return `${effortLevelToSymbol(level)} ${level} · /effort`
 }

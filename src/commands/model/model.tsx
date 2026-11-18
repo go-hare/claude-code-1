@@ -1,5 +1,7 @@
+import { Box, Dialog, Text } from '@anthropic/ink';
 import * as React from 'react';
 import { useState } from 'react';
+import { Select } from '../../components/CustomSelect/index.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { FableConsentDialog } from '../../components/FableConsentDialog.js';
 import { ModelPicker } from '../../components/ModelPicker.js';
@@ -43,6 +45,46 @@ import { em } from '../../utils/model/modelNoticeCode.js';
 import { validateModel } from '../../utils/model/validateModel.js';
 
 export type SaveModelHookResult = { kind: 'saved'; saved: string | null } | { kind: 'refused'; reason?: string };
+
+export const CACHE_MISS_SUBTITLE = 'Your next response will be slower and use more tokens';
+
+export function formatCacheSwitchBody(kind: 'model' | 'effort', targetLabel: string): string {
+  const unit = kind === 'model' ? 'model' : 'effort level';
+  return `This conversation is cached for the current ${unit}. Switching to ${targetLabel} means the full history gets re-read.`;
+}
+
+export function CacheMissConfirmDialog({
+  kind,
+  targetLabel,
+  onConfirm,
+  onCancel,
+}: {
+  kind: 'model' | 'effort';
+  targetLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): React.ReactNode {
+  const title = kind === 'model' ? 'Switch model?' : 'Change effort level?';
+  const confirmLabel = `Yes, switch to ${targetLabel}`;
+  return (
+    <Dialog title={title} subtitle={CACHE_MISS_SUBTITLE} color="warning" onCancel={onCancel} hideInputGuide>
+      <Box flexDirection="column" gap={1} marginBottom={1}>
+        <Text>{formatCacheSwitchBody(kind, targetLabel)}</Text>
+        <Select
+          options={[
+            { label: confirmLabel, value: 'confirm' },
+            { label: 'No, go back', value: 'cancel' },
+          ]}
+          onChange={value => {
+            if (value === 'confirm') onConfirm();
+            else onCancel();
+          }}
+          onCancel={onCancel}
+        />
+      </Box>
+    </Dialog>
+  );
+}
 
 /**
  * Official 2.1.295 (#407): ask plugin `config.set` hooks before persisting

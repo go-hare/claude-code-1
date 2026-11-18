@@ -74,12 +74,27 @@ export type WorkspaceDiffResponse = { diff: WorkspaceDiffPayload | null }
 type TreeEntry = { mode: string; oid: string; size: number }
 
 function gitArgs(args: string[]): string[] {
-  return ['--literal-pathspecs', ...args]
+  const withLocks =
+    args[0] === '--no-optional-locks' ? args : ['--no-optional-locks', ...args]
+  return [
+    '--literal-pathspecs',
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.fsmonitor=',
+    ...withLocks,
+  ]
 }
 
-function gitOpts(cwd: string) {
+function gitOpts(cwd: string, envOverride?: NodeJS.ProcessEnv) {
   return {
     cwd,
+    env: {
+      ...process.env,
+      GIT_OPTIONAL_LOCKS: '0',
+      GIT_TERMINAL_PROMPT: '0',
+      ...envOverride,
+    },
     timeout: GIT_TIMEOUT_MS,
     preserveOutputOnError: false,
     maxBuffer: 10_000_000,

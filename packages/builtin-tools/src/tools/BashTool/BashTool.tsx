@@ -1898,7 +1898,7 @@ async function* runShellCommand({
 
       if (backgroundShellId) {
         return {
-          stdout: '',
+          stdout: timedOutAfterMs !== undefined ? fullOutput : '',
           stderr: '',
           code: 0,
           interrupted: false,
@@ -1982,7 +1982,7 @@ async function* runShellCommand({
         // Check if command was backgrounded (either via old mechanism or new backgroundAll)
         if (backgroundShellId) {
           return {
-            stdout: interruptBackgroundingStarted ? fullOutput : '',
+            stdout: interruptBackgroundingStarted || timedOutAfterMs !== undefined ? fullOutput : '',
             stderr: '',
             code: 0,
             interrupted: false,
@@ -2027,7 +2027,7 @@ async function* runShellCommand({
           // shellCommand.status becomes 'backgrounded' when background() is called
           if (shellCommand.status === 'backgrounded') {
             return {
-              stdout: '',
+              stdout: timedOutAfterMs !== undefined ? fullOutput : '',
               stderr: '',
               code: 0,
               interrupted: false,

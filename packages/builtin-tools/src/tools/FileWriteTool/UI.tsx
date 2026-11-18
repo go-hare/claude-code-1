@@ -12,7 +12,7 @@ import { FileEditToolUseRejectedMessage } from 'src/components/FileEditToolUseRe
 
 import { HighlightedCode } from 'src/components/HighlightedCode.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth, wrapText } from '@anthropic/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
@@ -79,6 +79,58 @@ function isUndiffedLargeOverwrite({ type, content, structuredPatch, originalFile
   );
 }
 
+/**
+ * SEA `glr` (@335793705) + `nto` (@314047816): compute visual row height per
+ * source line in `preview` at `codeWidth`, then accumulate how many source
+ * lines and characters fit within `MAX_LINES_TO_RENDER` visual rows.
+ */
+export function computePreviewHiddenMetrics(
+  content: string,
+  preview: string,
+  codeWidth: number,
+  verbose: boolean,
+): { hiddenLines: number; hiddenChars: number | undefined } {
+  const numLines = countLines(content);
+  if (verbose) {
+    return { hiddenLines: 0, hiddenChars: undefined };
+  }
+  const contentWithFallback = content || '(No content)';
+  const rawLines = contentWithFallback.split(EOL, MAX_LINES_TO_RENDER);
+  const previewLines = preview.split(EOL);
+  const infiniteWidth = codeWidth <= 0 || !Number.isFinite(codeWidth);
+  const lineHeights = previewLines.map(line => {
+    if (infiniteWidth) return 1;
+    const stripped = line.replace(/\r$/, '');
+    if (stringWidth(stripped) <= codeWidth) return 1;
+    const wrapped = wrapText(stripped, codeWidth, 'wrap');
+    return Math.max(1, wrapped.split(EOL).length);
+  });
+
+  let remainingRows = MAX_LINES_TO_RENDER;
+  let renderedSourceLines = 0;
+  let renderedChars = 0;
+  let truncatedMidLine = false;
+  for (const [idx, lineHeight] of lineHeights.entries()) {
+    const lineText = previewLines[idx] ?? '';
+    if (remainingRows === 0) {
+      break;
+    }
+    if (lineHeight > remainingRows || lineText !== rawLines[idx]) {
+      renderedChars += Math.floor((lineText.length * Math.min(lineHeight, remainingRows)) / lineHeight);
+      truncatedMidLine = true;
+      break;
+    }
+    remainingRows -= lineHeight;
+    renderedSourceLines++;
+    renderedChars += lineText.length + EOL.length;
+  }
+
+  const trailingEmpty = renderedSourceLines === numLines - 1 && rawLines[renderedSourceLines] === '';
+  const hiddenLines = numLines - renderedSourceLines - (trailingEmpty ? 1 : 0);
+  const hiddenChars = truncatedMidLine ? Math.max(0, content.length - renderedChars) : undefined;
+  return { hiddenLines, hiddenChars };
+}
+
 function FileWriteToolCreatedMessage({
   filePath,
   content,
@@ -94,7 +146,6 @@ function FileWriteToolCreatedMessage({
   const contentWithFallback = content || '(No content)';
   const codeWidth = Math.max(1, columns - 12);
   const numLines = countLines(content);
-  const plusLines = verbose ? 0 : wrapVisibleLines(contentWithFallback, codeWidth) - MAX_LINES_TO_RENDER;
   const preview = verbose
     ? contentWithFallback
     : contentWithFallback
@@ -102,6 +153,8 @@ function FileWriteToolCreatedMessage({
         .slice(0, MAX_LINES_TO_RENDER)
         .join(EOL)
         .slice(0, MAX_LINES_TO_RENDER * (codeWidth + 1));
+  const { hiddenLines, hiddenChars } = computePreviewHiddenMetrics(content, preview, codeWidth, verbose);
+  const kbHint = hiddenChars !== undefined && hiddenChars >= 1000 ? ` (~${Math.round(hiddenChars / 1024)} KB)` : '';
 
   return (
     <MessageResponse>
@@ -116,11 +169,14 @@ function FileWriteToolCreatedMessage({
           overflowY={verbose ? undefined : 'hidden'}
           maxHeight={verbose ? undefined : MAX_LINES_TO_RENDER}
         >
-          <HighlightedCode code={preview} filePath={filePath} width={codeWidth} />
+          <Box flexDirection="column" flexShrink={0} width={verbose ? undefined : codeWidth}>
+            <HighlightedCode code={preview} filePath={filePath} width={codeWidth} />
+          </Box>
         </Box>
-        {!verbose && plusLines > 0 && (
+        {!verbose && (hiddenLines > 0 || hiddenChars !== undefined) && (
           <Text dimColor>
-            … +{plusLines} {plural(plusLines, 'line')} {numLines > 0 && <CtrlOToExpand />}
+            … +{hiddenLines} {plural(hiddenLines, 'line')}
+            {kbHint} {numLines > 0 && <CtrlOToExpand />}
           </Text>
         )}
       </Box>

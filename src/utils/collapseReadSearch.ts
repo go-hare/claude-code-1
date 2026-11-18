@@ -3641,6 +3641,43 @@ export function collapseReadSearchGroups(
             )
           : [],
       )
+      const mcpEntries = currentGroup.messages.flatMap(m => {
+        const info = isCollapsibleToolUse(m, tools)
+          ? getCollapsibleToolInfo(m, tools)
+          : null
+        return info?.mcpServerName
+          ? [
+              {
+                info,
+                serverName: info.mcpServerName,
+                ids: getToolUseIdsFromMessage(m),
+              },
+            ]
+          : []
+      })
+      const failedMcpEntries = new Set(
+        mcpEntries.filter(
+          entry =>
+            entry.info.popsOutOnError &&
+            entry.ids.length > 0 &&
+            entry.ids.every(id => erroredIds.has(id)),
+        ),
+      )
+      if (failedMcpEntries.size > 0) {
+        let failedCount = 0
+        for (const entry of failedMcpEntries) {
+          failedCount += entry.ids.length
+        }
+        currentGroup.mcpCallCount = Math.max(
+          0,
+          (currentGroup.mcpCallCount ?? 0) - failedCount,
+        )
+        currentGroup.mcpServerNames = new Set(
+          mcpEntries.flatMap(entry =>
+            failedMcpEntries.has(entry) ? [] : [entry.serverName],
+          ),
+        )
+      }
       if (
         !(
           currentGroup.hookCount > 0 ||
@@ -3651,62 +3688,29 @@ export function collapseReadSearchGroups(
           (currentGroup.workshopWriteCount ?? 0) > 0 ||
           (currentGroup.scratchpadWriteCount ?? 0) > 0
         ) &&
+        last &&
         lastIds.length > 0 &&
         lastIds.every(id => erroredIds.has(id))
-      ) {
-        currentGroup.messages.pop()
-        for (const id of lastIds) currentGroup.toolUseIds.delete(id)
-        if (currentGroup.messages.length > 0) {
-          flushGroup()
-          if (last) result.push(last)
-        } else {
-          if (last) result.push(last)
-          leftoverEmitDeferred()
-          currentGroup = createEmptyGroup()
-        }
-      } else {
-        flushGroup()
-      }
-      result.push(msg)
-    } else if (
-      isCollapsibleToolResult(msg, currentGroup.toolUseIds) &&
-      leftoverGwr(msg)
-    ) {
-      const last = currentGroup.messages.at(-1)
-      const lastIds = last ? getToolUseIdsFromMessage(last) : []
-      // Same predicate overlap as the popsOutOnError arm: both tool-use and
-      // tool-result guards narrow to CollapsibleMessage, so the second true
-      // branch is `never` unless we read through RenderableMessage.
-      const diffMsg = msg as RenderableMessage
-      const resultIds = new Set(
-        diffMsg.type === 'user'
-          ? getContentItems(diffMsg.message?.content).flatMap(block =>
-              block.type === 'tool_result'
-                ? [(block as { tool_use_id: string }).tool_use_id]
-                : [],
-            )
-          : [],
-      )
-      const blocked =
-        currentGroup.messages.length === 1 &&
-        (currentGroup.hookCount > 0 ||
-          (currentGroup.relevantMemories?.length ?? 0) > 0 ||
-          (currentGroup.accountMemoryRecalls?.length ?? 0) > 0 ||
-          (currentGroup.accountMemoryReadKeys?.size ?? 0) > 0 ||
-          (currentGroup.accountMemorySearchCount ?? 0) > 0 ||
-          (currentGroup.workshopWriteCount ?? 0) > 0 ||
-          (currentGroup.scratchpadWriteCount ?? 0) > 0)
-      if (
-        last &&
-        !blocked &&
-        lastIds.length > 0 &&
-        lastIds.every(id => resultIds.has(id))
       ) {
         currentGroup.messages.pop()
         const info = getCollapsibleToolInfo(last, tools)
         const count = countToolUses(last)
         const readPaths = getFilePathsFromReadMessage(last)
-        if (isFullscreenEnvEnabled() && info?.isBash) {
+        if (info?.mcpServerName) {
+          // If not already decremented above via failedMcpEntries, decrement now
+          if (
+            !mcpEntries.some(
+              e =>
+                failedMcpEntries.has(e) &&
+                e.ids.every(id => lastIds.includes(id)),
+            )
+          ) {
+            currentGroup.mcpCallCount = Math.max(
+              0,
+              (currentGroup.mcpCallCount ?? 0) - count,
+            )
+          }
+        } else if (isFullscreenEnvEnabled() && info?.isBash) {
           currentGroup.bashCount = Math.max(
             0,
             (currentGroup.bashCount ?? 0) - count,
@@ -3735,6 +3739,91 @@ export function collapseReadSearchGroups(
           result.push(last)
           leftoverEmitDeferred()
           currentGroup = createEmptyGroup()
+        }
+      } else {
+        flushGroup()
+      }
+      result.push(msg)
+    } else if (
+      isCollapsibleToolResult(msg, currentGroup.toolUseIds) &&
+      leftoverGwr(msg)
+    ) {
+      // Same predicate overlap as the popsOutOnError arm: both tool-use and
+      // tool-result guards narrow to CollapsibleMessage, so the second true
+      // branch is `never` unless we read through RenderableMessage.
+      const diffMsg = msg as RenderableMessage
+      const resultIds = new Set(
+        diffMsg.type === 'user'
+          ? getContentItems(diffMsg.message?.content).flatMap(block =>
+              block.type === 'tool_result'
+                ? [(block as { tool_use_id: string }).tool_use_id]
+                : [],
+            )
+          : [],
+      )
+      const blocked =
+        currentGroup.messages.length === 1 &&
+        (currentGroup.hookCount > 0 ||
+          (currentGroup.relevantMemories?.length ?? 0) > 0 ||
+          (currentGroup.accountMemoryRecalls?.length ?? 0) > 0 ||
+          (currentGroup.accountMemoryReadKeys?.size ?? 0) > 0 ||
+          (currentGroup.accountMemorySearchCount ?? 0) > 0 ||
+          (currentGroup.workshopWriteCount ?? 0) > 0 ||
+          (currentGroup.scratchpadWriteCount ?? 0) > 0)
+      // #1384: Match the errored/blocked/not-run tool_use even when it is not at
+      // the tail of currentGroup.messages (e.g. batched/interleaved shell calls).
+      let matchIdx = -1
+      let matchIds: string[] = []
+      if (!blocked && resultIds.size > 0) {
+        for (let i = currentGroup.messages.length - 1; i >= 0; i--) {
+          const candidate = currentGroup.messages[i]
+          if (!candidate || candidate.type !== 'assistant') continue
+          const ids = getToolUseIdsFromMessage(candidate)
+          if (ids.length > 0 && ids.every(id => resultIds.has(id))) {
+            matchIdx = i
+            matchIds = ids
+            break
+          }
+        }
+      }
+      if (matchIdx !== -1) {
+        const [matched] = currentGroup.messages.splice(matchIdx, 1)
+        if (matched) {
+          const info = getCollapsibleToolInfo(matched, tools)
+          const count = countToolUses(matched)
+          const readPaths = getFilePathsFromReadMessage(matched)
+          if (isFullscreenEnvEnabled() && info?.isBash) {
+            currentGroup.bashCount = Math.max(
+              0,
+              (currentGroup.bashCount ?? 0) - count,
+            )
+          } else if (info?.isList) {
+            currentGroup.listCount = Math.max(0, currentGroup.listCount - count)
+          } else if (info?.isSearch) {
+            currentGroup.searchCount = Math.max(
+              0,
+              currentGroup.searchCount - count,
+            )
+          } else if (readPaths.length === 0) {
+            currentGroup.readOperationCount = Math.max(
+              0,
+              currentGroup.readOperationCount - count,
+            )
+          }
+          for (const id of matchIds) {
+            currentGroup.toolUseIds.delete(id)
+            currentGroup.bashCommands?.delete(id)
+          }
+          if (currentGroup.messages.length > 0) {
+            flushGroup()
+            result.push(matched)
+          } else {
+            result.push(matched)
+            leftoverEmitDeferred()
+            currentGroup = createEmptyGroup()
+          }
+        } else {
+          flushGroup()
         }
       } else {
         flushGroup()

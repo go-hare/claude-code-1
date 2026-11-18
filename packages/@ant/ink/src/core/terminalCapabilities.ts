@@ -3,8 +3,13 @@
  * Gold: official-289 SEA @192996635–193001438. Do not export minify `o`/`f`/`h`.
  */
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { coerce, gte } from 'semver'
 import { inkSessionHost } from './instances.js'
 import { isJediTermEnv } from './jediTermInput.js'
+
+const execFileAsync = promisify(execFile)
 
 export type TerminalCapabilityName =
   | 'extendedKeys'
@@ -298,14 +303,18 @@ function kittyGraphicsSeed(input: {
   terminal: string | null
   bgWorker: boolean
   multiplexed: boolean
+  tmux: boolean
   forced: boolean
 }): CapabilitySeed {
   if (input.forced) {
     return { settled: true, source: 'env: CLAUDE_CODE_FORCE_TERMINAL_IMAGES' }
   }
   if (input.bgWorker) return { settled: false, source: 'bg worker' }
+  if (input.tmux) {
+    return { likely: false, source: 'env: inside tmux, not asked yet' }
+  }
   if (input.multiplexed) {
-    return { settled: false, source: 'env: inside tmux or screen' }
+    return { settled: false, source: 'env: inside screen' }
   }
   return {
     likely: false,
@@ -375,6 +384,7 @@ export function defaultCapabilityReadings(): CapabilityDefaults {
       terminal,
       bgWorker,
       multiplexed,
+      tmux,
       forced: Boolean(process.env.CLAUDE_CODE_FORCE_TERMINAL_IMAGES),
     }),
     itermImages: itermImagesSeed({
@@ -546,6 +556,9 @@ export class TerminalHostState {
   cellPixels: { width: number; height: number } | undefined = undefined
   probeEventLogged = false
   nativeCursorEnabled: boolean | undefined = undefined
+  tmuxPane: TmuxPaneState | undefined = undefined
+  isTmuxPaneAsked = false
+  tmuxPaneAnsweredAt: number | undefined = undefined
 
   get capabilities(): TerminalCapabilityStore {
     return (this.#capabilities ??= new TerminalCapabilityStore(
@@ -567,6 +580,9 @@ export class TerminalHostState {
   resetCapabilities(): void {
     this.#capabilities = undefined
     this.#imageFiles = undefined
+    this.tmuxPane = undefined
+    this.isTmuxPaneAsked = false
+    this.tmuxPaneAnsweredAt = undefined
   }
 }
 
@@ -608,4 +624,209 @@ export function subscribeImageProtocol(
   return () => {
     for (const unsub of unsubs) unsub()
   }
+}
+
+export type TmuxPassthroughMode = 'on' | 'all' | 'off'
+
+export type TmuxPaneState = {
+  passthrough: TmuxPassthroughMode
+  hasFocusEvents: boolean
+  isPlaced: boolean
+  top: number
+  left: number
+}
+
+export type TmuxPaneQueryResult = {
+  termtype: string
+  pane: TmuxPaneState
+  hasPassthroughOption: boolean
+}
+
+export const TMUX_PANE_STALE_MS = 1500
+
+const TMUX_ERR_NEED_OPTIONS =
+  'images inside tmux need tmux 3.3 or later with allow-passthrough and focus-events on: run `tmux set -g allow-passthrough on` and `tmux set -g focus-events on`, detach and attach tmux again, then restart Claude Code'
+const TMUX_ERR_OLD_TMUX =
+  'images inside tmux need tmux 3.3 or later, with kitty 0.28 or later, Ghostty, or iTerm2 3.5 or later as the terminal outside it: update tmux, then end every tmux session so the new version runs (`tmux kill-server` ends them all, and Claude Code with them), start tmux again, run `tmux set -g allow-passthrough on` and `tmux set -g focus-events on`, detach and attach again, then start Claude Code'
+const TMUX_ERR_BAD_OUTER =
+  'images inside tmux need kitty 0.28 or later, Ghostty, or iTerm2 3.5 or later as the terminal outside tmux: attach tmux from one of those, run `tmux set -g allow-passthrough on` and `tmux set -g focus-events on`, detach and attach again, then restart Claude Code'
+const TMUX_ERR_UNKNOWN_OUTER =
+  'tmux does not know which terminal is outside it, so Claude Code draws no images here: attach tmux from kitty 0.28 or later, Ghostty, or iTerm2 3.5 or later, run `tmux set -g allow-passthrough on` and `tmux set -g focus-events on`, detach and attach again, then restart Claude Code'
+const TMUX_ERR_NO_REPLY =
+  'tmux did not say whether it passes images through; restart Claude Code to ask again'
+const TMUX_ERR_NO_XTVERSION =
+  "the terminal did not answer Claude Code's version query, so tmux was not asked whether it passes images through; restart Claude Code to ask again"
+const TMUX_ERR_NO_PANE =
+  'TMUX_PANE is not set (as in a tmux popup), so Claude Code cannot ask tmux about this pane; run Claude Code in a tmux pane to draw images'
+const TMUX_ERR_NOT_TMUX =
+  'TMUX is set, but the terminal did not answer as tmux; if this is not a tmux pane, unset TMUX and restart Claude Code'
+
+const TMUX_DISPLAY_FORMAT = [
+  '#{client_termtype}',
+  '#{allow-passthrough}',
+  '#{focus-events}',
+  '#{pane_top}',
+  '#{pane_left}',
+  '#{status}',
+  '#{status-position}',
+  '#{window_bigger}',
+].join('\t')
+
+/** Official 2.1.310 `POr` — XTVERSION allows kitty graphics (kitty >=0.28 / ghostty). */
+export function xtversionAllowsKittyGraphics(
+  name: string | null | undefined,
+): boolean {
+  if (name === null || name === undefined || name === '') return false
+  if (name.startsWith('kitty(')) {
+    const parsed = coerce(name.slice(6))
+    return parsed !== null && gte(parsed.version, '0.28.0')
+  }
+  return (
+    name === 'kitty' ||
+    name === 'ghostty' ||
+    name.startsWith('kitty ') ||
+    name.startsWith('ghostty ')
+  )
+}
+
+/** Official 2.1.310 `H` — parse tmux display-message pane facts. */
+export function parseTmuxPaneInfo(
+  stdout: string,
+): TmuxPaneQueryResult | undefined {
+  const parts = stdout.replace(/\r?\n$/, '').split('\t')
+  const [
+    termtype,
+    passthroughRaw,
+    focusEvents,
+    topStr,
+    leftStr,
+    status,
+    statusPos,
+  ] = parts
+  const windowBigger = parts[7]
+  if (
+    parts.length !== 8 ||
+    termtype === undefined ||
+    passthroughRaw === undefined ||
+    topStr === undefined ||
+    leftStr === undefined ||
+    status === undefined ||
+    !/^\d+$/.test(topStr) ||
+    !/^\d+$/.test(leftStr)
+  ) {
+    return undefined
+  }
+  const statusRows =
+    status === 'on' ? 1 : /^[2-5]$/.test(status) ? Number(status) : 0
+  const topOffset = statusPos === 'top' ? statusRows : 0
+  const passthrough: TmuxPassthroughMode =
+    passthroughRaw === 'on' || passthroughRaw === '1'
+      ? 'on'
+      : passthroughRaw === 'all'
+        ? 'all'
+        : 'off'
+  return {
+    termtype,
+    pane: {
+      passthrough,
+      hasFocusEvents: focusEvents === '1',
+      isPlaced: windowBigger !== '1',
+      top: Number(topStr) + topOffset,
+      left: Number(leftStr),
+    },
+    hasPassthroughOption: passthroughRaw !== '',
+  }
+}
+
+/** Official 2.1.310 `eOs` — query tmux pane passthrough & placement facts. */
+export async function queryTmuxPaneInfo(): Promise<
+  TmuxPaneQueryResult | undefined
+> {
+  try {
+    const paneArgs = process.env.TMUX_PANE ? ['-t', process.env.TMUX_PANE] : []
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', ...paneArgs, TMUX_DISPLAY_FORMAT],
+      { timeout: 1000 },
+    )
+    return parseTmuxPaneInfo(stdout)
+  } catch {
+    return undefined
+  }
+}
+
+/** Official 2.1.310 `jYi` — decide kittyGraphics/itermImages inside tmux. */
+export function evaluateTmuxImageCapabilities(
+  facts: TmuxPaneQueryResult | undefined,
+  env: { versionName: string | undefined; hasPane: boolean },
+): {
+  kittyGraphics: { value: boolean; source: string }
+  itermImages: { value: boolean; source: string }
+} {
+  const isTmux = env.versionName?.startsWith('tmux ') === true
+  const outerTerm =
+    facts === undefined || facts.termtype === '' ? null : facts.termtype
+  const allowsKitty = xtversionAllowsKittyGraphics(outerTerm)
+  const allowsIterm = !allowsKitty && isIterm2VersionAtLeast35(outerTerm)
+
+  if (
+    !isTmux ||
+    !env.hasPane ||
+    facts === undefined ||
+    facts.pane.passthrough === 'off' ||
+    !facts.pane.hasFocusEvents
+  ) {
+    const source =
+      env.versionName === undefined
+        ? TMUX_ERR_NO_XTVERSION
+        : !isTmux
+          ? TMUX_ERR_NOT_TMUX
+          : !env.hasPane
+            ? TMUX_ERR_NO_PANE
+            : facts === undefined
+              ? TMUX_ERR_NO_REPLY
+              : !facts.hasPassthroughOption
+                ? TMUX_ERR_OLD_TMUX
+                : allowsKitty || allowsIterm
+                  ? TMUX_ERR_NEED_OPTIONS
+                  : outerTerm === null
+                    ? TMUX_ERR_UNKNOWN_OUTER
+                    : `${TMUX_ERR_BAD_OUTER}; tmux says it is ${outerTerm}`
+    const reading = { value: false, source }
+    return { kittyGraphics: reading, itermImages: reading }
+  }
+
+  const baseSource =
+    outerTerm === null
+      ? `tmux passthrough ${facts.pane.passthrough}, but tmux does not know which terminal is outside`
+      : `tmux passthrough ${facts.pane.passthrough}, outer terminal ${outerTerm}`
+  const itermIssue = !allowsIterm
+    ? undefined
+    : facts.pane.passthrough === 'all'
+      ? 'iTerm2 pictures need `tmux set -g allow-passthrough on`, not `all`; then restart Claude Code'
+      : !facts.pane.isPlaced
+        ? 'the tmux window is bigger than this terminal, so Claude Code cannot tell where on screen to draw iTerm2 pictures; make the window fit, then restart Claude Code'
+        : undefined
+  return {
+    kittyGraphics: { value: allowsKitty, source: baseSource },
+    itermImages: {
+      value: allowsIterm && itermIssue === undefined,
+      source:
+        itermIssue === undefined ? baseSource : `${baseSource}: ${itermIssue}`,
+    },
+  }
+}
+
+/** Official 2.1.310 `WYi` — whether tmux pane placement is fresh enough to draw. */
+export function isTmuxPaneFresh(
+  isTmux: boolean,
+  answeredAt: number | undefined,
+  now: number,
+): boolean {
+  return (
+    !isTmux ||
+    (answeredAt !== undefined &&
+      now >= answeredAt &&
+      now - answeredAt <= TMUX_PANE_STALE_MS)
+  )
 }

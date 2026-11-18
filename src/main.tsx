@@ -1689,6 +1689,13 @@ async function run(): Promise<CommanderCommand> {
       if (process.env.USER_TYPE === 'ant' && taskListId) {
         process.env.CLAUDE_CODE_TASK_LIST_ID = taskListId;
       }
+      // #1252: consume internal session task list ID override if passed.
+      const internalSessionTaskListId = process.env.CLAUDE_INTERNAL_SESSION_TASK_LIST_ID?.trim();
+      delete process.env.CLAUDE_INTERNAL_SESSION_TASK_LIST_ID;
+      if (internalSessionTaskListId && /^[a-zA-Z0-9_-]{1,128}$/.test(internalSessionTaskListId)) {
+        const { setSessionTaskListId } = await import('./utils/tasks.js');
+        setSessionTaskListId(internalSessionTaskListId);
+      }
 
       // Extract worktree option
       // worktree can be true (flag without value) or a string (custom name or PR reference)
@@ -2980,7 +2987,11 @@ async function run(): Promise<CommanderCommand> {
       };
 
       // Look up main thread agent from CLI flag or settings
-      const agentSetting = agentCli ?? getInitialSettings().agent;
+      // Gold #1251 (`qm()`): Cowork cloud ignores the `agent` setting (CLI `--agent` still applies).
+      const isCoworkCloudEntrypoint =
+        process.env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork' ||
+        process.env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork_trigger';
+      const agentSetting = agentCli ?? (isCoworkCloudEntrypoint ? undefined : getInitialSettings().agent);
       let mainThreadAgentDefinition: (typeof agentDefinitions.activeAgents)[number] | undefined;
       if (agentSetting) {
         mainThreadAgentDefinition = agentDefinitions.activeAgents.find(agent => agent.agentType === agentSetting);
@@ -3383,12 +3394,26 @@ async function run(): Promise<CommanderCommand> {
       // MCP config errors don't block settings from loading, so exclude them
       if (!isNonInteractiveSession) {
         const { errors } = getSettingsWithErrors();
-        const nonMcpErrors = errors.filter(e => !e.mcpErrorMetadata);
+        const { filterUnseenSecurityWarnings, markSecurityWarningsSeen } = await import('./utils/config.js');
+        const keyedErrors = errors
+          .filter(e => !e.mcpErrorMetadata)
+          .map(e => ({
+            error: e,
+            seenKey: e.path.startsWith('permissions')
+              ? `perm-rule:${e.file ?? ''}:${e.path}:${String(e.invalidValue ?? '')}:${e.message}`
+              : undefined,
+          }));
+        const unseen = filterUnseenSecurityWarnings(keyedErrors);
+        const nonMcpErrors = unseen.map(u => u.error);
         if (nonMcpErrors.length > 0) {
           const settingsResult = await launchInvalidSettingsDialog(root, {
             settingsErrors: nonMcpErrors,
             onExit: () => gracefulShutdownSync(1),
           });
+          const seenKeys = unseen.map(u => u.seenKey).filter((k): k is string => k !== undefined);
+          if (seenKeys.length > 0) {
+            markSecurityWarningsSeen(seenKeys);
+          }
           if (settingsResult === 'fix') {
             const fixPrompt = buildSettingsFixPrompt(nonMcpErrors, {
               flagSettingsPath: getFlagSettingsExpectedContent() === undefined ? getFlagSettingsPath() : undefined,
@@ -3651,6 +3676,10 @@ async function run(): Promise<CommanderCommand> {
             existingTeamName: assistantTeamContext?.teamName,
           })
         ).teamContext;
+        if (options.sessionId && !options.forkSession) {
+          const { restoreSessionTaskListId } = await import('./utils/tasks.js');
+          await restoreSessionTaskListId(getSessionId());
+        }
       }
 
       const setupTrigger = determineSetupTrigger({ initOnly, init, maintenance });
@@ -4094,61 +4123,67 @@ async function run(): Promise<CommanderCommand> {
         profileCheckpoint('before_print_import');
         const { runHeadless } = await import('src/cli/print.js');
         profileCheckpoint('after_print_import');
-        void runHeadless(
-          inputPrompt,
-          // TODO(print.ts): widen runHeadless getAppState/setAppState to HeadlessAppState
-          () => headlessStore.getState() as AppState,
-          updater => headlessStore.setState(prev => updater(prev as AppState)),
-          commandsHeadless,
-          tools,
-          sdkMcpConfigs,
-          agentDefinitions.activeAgents,
-          {
-            subscribeAppState: headlessStore.subscribe,
-            continue: options.continue,
-            resume: options.resume,
-            verbose: verbose,
-            outputFormat: outputFormat,
-            jsonSchema,
-            permissionPromptToolName: options.permissionPromptTool,
-            allowedTools,
-            thinkingConfig,
-            maxTurns:
-              options.maxTurns ??
-              (
-                require('./utils/maxTurnsEnv.js') as typeof import('./utils/maxTurnsEnv.js')
-              ).tryResolveMaxTurnsFromEnv(),
-            maxBudgetUsd: options.maxBudgetUsd,
-            taskBudget: options.taskBudget ? { total: options.taskBudget } : undefined,
-            systemPrompt,
-            appendSystemPrompt,
-            appendSubagentSystemPrompt,
-            userSpecifiedModel: effectiveModel,
-            fallbackModel: userSpecifiedFallbackModel,
-            teleport,
-            sdkUrl,
-            permissionModeSuppliedOnInvocation: permissionModeSuppliedOnInvocationFromKo({
-              permissionModeCli,
-              dangerouslySkipPermissions,
-              agentPermissionMode: agentCli
-                ? agentDefinitions.activeAgents.find(a => a.agentType === agentCli)?.permissionMode
-                : undefined,
-            }),
-            replayUserMessages: effectiveReplayUserMessages,
-            includePartialMessages: effectiveIncludePartialMessages,
-            sessionMirror: Boolean(sessionMirror),
-            forwardSubagentText: effectiveForwardSubagentText,
-            forkSession: options.forkSession || false,
-            replyOnResume: options.replyOnResume || false,
-            resumeSessionAt: options.resumeSessionAt || undefined,
-            rewindFiles: options.rewindFiles,
-            enableAuthStatus: options.enableAuthStatus,
-            agent: agentCli,
-            workload: options.workload,
-            setupTrigger: setupTrigger ?? undefined,
-            sessionStartHooksPromise,
-          },
-        );
+        try {
+          await runHeadless(
+            inputPrompt,
+            // TODO(print.ts): widen runHeadless getAppState/setAppState to HeadlessAppState
+            () => headlessStore.getState() as AppState,
+            updater => headlessStore.setState(prev => updater(prev as AppState)),
+            commandsHeadless,
+            tools,
+            sdkMcpConfigs,
+            agentDefinitions.activeAgents,
+            {
+              subscribeAppState: headlessStore.subscribe,
+              continue: options.continue,
+              resume: options.resume,
+              verbose: verbose,
+              outputFormat: outputFormat,
+              jsonSchema,
+              permissionPromptToolName: options.permissionPromptTool,
+              allowedTools,
+              thinkingConfig,
+              maxTurns:
+                options.maxTurns ??
+                (
+                  require('./utils/maxTurnsEnv.js') as typeof import('./utils/maxTurnsEnv.js')
+                ).tryResolveMaxTurnsFromEnv(),
+              maxBudgetUsd: options.maxBudgetUsd,
+              taskBudget: options.taskBudget ? { total: options.taskBudget } : undefined,
+              systemPrompt,
+              appendSystemPrompt,
+              appendSubagentSystemPrompt,
+              userSpecifiedModel: effectiveModel,
+              fallbackModel: userSpecifiedFallbackModel,
+              teleport,
+              sdkUrl,
+              permissionModeSuppliedOnInvocation: permissionModeSuppliedOnInvocationFromKo({
+                permissionModeCli,
+                dangerouslySkipPermissions,
+                agentPermissionMode: agentCli
+                  ? agentDefinitions.activeAgents.find(a => a.agentType === agentCli)?.permissionMode
+                  : undefined,
+              }),
+              replayUserMessages: effectiveReplayUserMessages,
+              includePartialMessages: effectiveIncludePartialMessages,
+              sessionMirror: Boolean(sessionMirror),
+              forwardSubagentText: effectiveForwardSubagentText,
+              forkSession: options.forkSession || false,
+              replyOnResume: options.replyOnResume || false,
+              resumeSessionAt: options.resumeSessionAt || undefined,
+              rewindFiles: options.rewindFiles,
+              enableAuthStatus: options.enableAuthStatus,
+              agent: agentCli,
+              workload: options.workload,
+              setupTrigger: setupTrigger ?? undefined,
+              sessionStartHooksPromise,
+            },
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`Error: ${msg}\n`);
+          await gracefulShutdown(1);
+        }
         return;
       }
 
@@ -4564,6 +4599,10 @@ async function run(): Promise<CommanderCommand> {
             },
             resumeContext,
           );
+          if (!options.forkSession) {
+            const { restoreSessionTaskListId } = await import('./utils/tasks.js');
+            await restoreSessionTaskListId(getSessionId());
+          }
 
           if (loaded.restoredAgentDef) {
             mainThreadAgentDefinition = loaded.restoredAgentDef;
@@ -5234,6 +5273,10 @@ async function run(): Promise<CommanderCommand> {
                     },
                     resumeContext,
                   );
+                  if (!options.forkSession) {
+                    const { restoreSessionTaskListId } = await import('./utils/tasks.js');
+                    await restoreSessionTaskListId(getSessionId());
+                  }
                   if (processedResume.restoredAgentDef) {
                     mainThreadAgentDefinition = processedResume.restoredAgentDef;
                   }
@@ -5295,6 +5338,10 @@ async function run(): Promise<CommanderCommand> {
               },
               resumeContext,
             );
+            if (!options.forkSession) {
+              const { restoreSessionTaskListId } = await import('./utils/tasks.js');
+              await restoreSessionTaskListId(getSessionId());
+            }
 
             if (processedResume.restoredAgentDef) {
               mainThreadAgentDefinition = processedResume.restoredAgentDef;
@@ -5687,9 +5734,17 @@ async function run(): Promise<CommanderCommand> {
   // + 40ms sync keychain subprocess), both hidden by the try/catch that
   // always returns false before enableConfigs(). cc:// URLs are rewritten to
   // `open` at main() line ~851 BEFORE this runs, so argv check is safe here.
-  const isPrintMode = process.argv.includes('-p') || process.argv.includes('--print');
-  const isCcUrl = process.argv.some(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
+  const rawArgs = process.argv.slice(2);
+  const isPrintMode = rawArgs.includes('-p') || rawArgs.includes('--print');
+  const isCcUrl = rawArgs.some(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
   if (isPrintMode && !isCcUrl) {
+    profileCheckpoint('run_before_parse');
+    await program.parseAsync(process.argv);
+    profileCheckpoint('run_after_parse');
+    return program;
+  }
+  const { mayDispatchSubcommand } = await import('./cli/bg.js');
+  if (!mayDispatchSubcommand(rawArgs) && !isCcUrl) {
     profileCheckpoint('run_before_parse');
     await program.parseAsync(process.argv);
     profileCheckpoint('run_after_parse');

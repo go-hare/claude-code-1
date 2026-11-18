@@ -176,48 +176,57 @@ function useCanUseTool(
                   result.decisionReason?.type === 'classifier' &&
                   result.decisionReason.classifier === 'auto-mode'
                 ) {
-                  // densable: reason D2b → K8o; if length>80 then Jd(K8o,79)+…
-                  const rawReason = result.decisionReason.reason ?? '';
-                  const isShellTool = !tool.mcpInfo && (tool.name === BASH_TOOL_NAME || tool.name === 'PowerShell');
-                  const rawCommand =
-                    isShellTool &&
-                    input !== null &&
-                    typeof input === 'object' &&
-                    'command' in input &&
-                    typeof (input as { command?: unknown }).command === 'string'
-                      ? (input as { command: string }).command
-                      : undefined;
-                  const shellCommand = rawCommand && rawCommand !== '' ? rawCommand : undefined;
-                  const inputKey = computeAutoModeDenialInputKey(tool.name, input);
-                  removeAutoModeDenial(tool.name, inputKey);
-                  recordAutoModeDenial({
-                    toolName: tool.name,
-                    display: shellCommand ?? description,
-                    ...(shellCommand !== undefined && { command: shellCommand }),
-                    inputKey,
-                    reason: rawReason,
-                    timestamp: Date.now(),
-                  });
-                  let reasonHint = rawReason;
-                  if (reasonHint.length > 80) {
-                    reasonHint = `${truncateCodeUnitsSafe(reasonHint, 79)}…`;
+                  // #1388 (official P2o / FKt): do not record or notify auto-mode-denied
+                  // when the safety check gave no verdict (`noVerdict === true`).
+                  const hasNoVerdict =
+                    'noVerdict' in result.decisionReason &&
+                    (result.decisionReason as { noVerdict?: boolean }).noVerdict === true;
+                  if (!hasNoVerdict) {
+                    const rawReason = result.decisionReason.reason ?? '';
+                    const isShellTool = !tool.mcpInfo && (tool.name === BASH_TOOL_NAME || tool.name === 'PowerShell');
+                    const rawCommand =
+                      isShellTool &&
+                      input !== null &&
+                      typeof input === 'object' &&
+                      'command' in input &&
+                      typeof (input as { command?: unknown }).command === 'string'
+                        ? (input as { command: string }).command
+                        : undefined;
+                    const shellCommand = rawCommand && rawCommand !== '' ? rawCommand : undefined;
+                    const inputKey = computeAutoModeDenialInputKey(tool.name, input);
+                    removeAutoModeDenial(tool.name, inputKey);
+                    recordAutoModeDenial({
+                      toolName: tool.name,
+                      display: shellCommand ?? description,
+                      ...(shellCommand !== undefined && { command: shellCommand }),
+                      inputKey,
+                      reason: rawReason,
+                      timestamp: Date.now(),
+                    });
+                    // #1426 (official P2o): "${tool} blocked by auto mode · /permissions · Auto mode: ${reason}"
+                    let reasonHint = rawReason;
+                    if (reasonHint) {
+                      const labeled = `Auto mode: ${reasonHint}`;
+                      reasonHint = labeled.length > 40 ? `${truncateCodeUnitsSafe(labeled, 39)}…` : labeled;
+                    }
+                    const toolLabel = truncateCodeUnitsSafe(tool.userFacingName(input).toLowerCase(), 40);
+                    toolUseContext.addNotification?.({
+                      key: 'auto-mode-denied',
+                      priority: 'immediate',
+                      jsx: (
+                        <>
+                          <Text color="error">{toolLabel} blocked by auto mode</Text>
+                          <Text dimColor> · /permissions</Text>
+                          {reasonHint ? (
+                            <Text dimColor>
+                              {' · '}
+                              {reasonHint}
+                            </Text>
+                          ) : null}
+                        </>
+                      ),
+                    });
                   }
-                  toolUseContext.addNotification?.({
-                    key: 'auto-mode-denied',
-                    priority: 'immediate',
-                    jsx: (
-                      <>
-                        <Text color="error">{tool.userFacingName(input).toLowerCase()} denied by auto mode</Text>
-                        {reasonHint ? (
-                          <Text dimColor>
-                            {' · '}
-                            {reasonHint}
-                          </Text>
-                        ) : null}
-                        <Text dimColor> · /permissions</Text>
-                      </>
-                    ),
-                  });
                 }
                 resolve(result);
                 return;

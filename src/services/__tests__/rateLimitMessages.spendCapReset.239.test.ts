@@ -79,7 +79,7 @@ describe('getRateLimitErrorMessage densable 2.1.239 spend-cap reset hint', () =>
     expect(msg).toContain(
       'run /usage-credits to ask your admin for a higher limit',
     )
-    expect(msg).toContain(` · your session limit resets ${RESET_TIME}`)
+    expect(msg).toContain(` · your 5-hour limit resets ${RESET_TIME}`)
   })
 
   test('team + seven_day → weekly limit reset', () => {
@@ -131,7 +131,7 @@ describe('getRateLimitErrorMessage densable 2.1.239 spend-cap reset hint', () =>
       rejected({ rateLimitType: 'five_hour' }),
       'claude-opus-4-6',
     )
-    expect(noReset).not.toContain('session limit resets')
+    expect(noReset).not.toContain('5-hour limit resets')
     expect(noReset).not.toContain('weekly limit resets')
   })
 })

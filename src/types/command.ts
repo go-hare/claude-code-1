@@ -19,6 +19,8 @@ export type LocalCommandResult =
       type: 'compact'
       compactionResult: CompactionResult
       displayText?: string
+      displayTextIsHintOnly?: boolean
+      displayRepeatsSummary?: boolean
     }
   | { type: 'skip' } // Skip messages
   /**

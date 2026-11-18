@@ -14,6 +14,8 @@ import type { ClipboardPath } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import {
   AuthenticationCancelledError,
+  dialedWithoutOAuth,
+  hasStaticAuthHeader,
   performMCPOAuthFlow,
   revokeReplacedMcpTokens,
   revokeServerTokens,
@@ -119,11 +121,21 @@ export function MCPRemoteServerMenu({
     [],
   );
 
-  // A server is effectively authenticated if:
-  // 1. It has OAuth tokens (server.isAuthenticated), OR
-  // 2. It's connected and has tools (meaning it's working via some auth mechanism)
+  // Gold `Gn` / `xn` (#1264): a connected remote server is only effectively
+  // authenticated if it has OAuth tokens or sends credentials (headers/helper/XAA).
+  // Otherwise it is connected without credentials ("not signed in").
+  const isConnectedWithTools = server.client.type === 'connected' && serverToolsCount > 0;
+  const hasStaticAuth =
+    (server.config.type === 'sse' || server.config.type === 'http') && hasStaticAuthHeader(server.config);
+  const hasHeadersHelper = server.config.type !== 'claudeai-proxy' && !!server.config.headersHelper;
+  const hasXaaOrCliAuth =
+    (server.config.type === 'sse' || server.config.type === 'http') &&
+    Boolean(server.config.oauth?.authServerMetadataUrl);
   const isEffectivelyAuthenticated =
-    server.isAuthenticated || (server.client.type === 'connected' && serverToolsCount > 0);
+    server.isAuthenticated ||
+    (isConnectedWithTools &&
+      server.config.type !== 'claudeai-proxy' &&
+      (hasHeadersHelper || hasStaticAuth || hasXaaOrCliAuth));
 
   const reconnectMcpServer = useMcpReconnect();
 
@@ -391,7 +403,13 @@ export function MCPRemoteServerMenu({
 
     if (server.config) {
       // First revoke the authentication tokens and clear all auth state
-      await revokeServerTokens(server.name, server.config);
+      const revokeResult = await revokeServerTokens(server.name, server.config);
+      if (!revokeResult.cleared) {
+        onComplete?.(
+          `Authentication for ${server.name} was not cleared: sign-in data is still stored, or the credential store could not be read. Try Clear authentication again.`,
+        );
+        return;
+      }
       logEvent('tengu_mcp_auth_config_clear', {});
 
       // Disconnect the client and clear the cache
@@ -421,6 +439,22 @@ export function MCPRemoteServerMenu({
           },
         };
       });
+
+      // Gold #1263: if the server was connected/needs-auth, dial without OAuth
+      // so servers that work without sign-in reconnect as connected instead of
+      // remaining marked failed.
+      if (server.client.type !== 'failed' && server.client.type !== 'disabled' && 'url' in server.config) {
+        dialedWithoutOAuth.set(server.name, server.config.url);
+        try {
+          const result = await reconnectMcpServer(server.name);
+          if (result.client.type === 'connected') {
+            onComplete?.(`Authentication cleared for ${server.name}. Connected without sign-in.`);
+            return;
+          }
+        } catch {
+          // Fall through to default clear message if reconnect fails
+        }
+      }
 
       onComplete?.(`Authentication cleared for ${server.name}.`);
     }
@@ -680,6 +714,8 @@ export function MCPRemoteServerMenu({
               <Text bold>Auth: </Text>
               {isEffectivelyAuthenticated ? (
                 <Text>{color('success', theme)(figures.tick)} authenticated</Text>
+              ) : isConnectedWithTools ? (
+                <Text dimColor>not signed in</Text>
               ) : (
                 <Text>{color('error', theme)(figures.cross)} not authenticated</Text>
               )}

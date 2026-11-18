@@ -5,6 +5,7 @@ import type {
   CommandMetadata,
   PluginAuthor,
   PluginManifest,
+  PluginMonitorConfig,
 } from '../utils/plugins/schemas.js'
 import type { MarketplaceSource } from '../utils/plugins/schemas.js'
 import type { HooksSettings } from '../utils/settings/types.js'
@@ -107,7 +108,7 @@ export type LoadedPlugin = {
   /** densable `p()` persistent surfaces — skip disuse tips. */
   themesPath?: string
   themesPaths?: string[]
-  monitors?: unknown[]
+  monitors?: PluginMonitorConfig[]
   workflowsPath?: string
   workflowsPaths?: string[]
   hooksConfig?: HooksSettings
@@ -142,6 +143,7 @@ export type PluginComponent =
   | 'skills'
   | 'hooks'
   | 'output-styles'
+  | 'monitors'
 
 /**
  * Discriminated union of plugin error types.
@@ -359,6 +361,7 @@ export type PluginError =
       plugin?: string
       error: string
       orphan?: boolean
+      guardHookRefused?: boolean
     }
   | {
       /** densable `synced-plugin-shadowed` — local copy wins over claude.ai */

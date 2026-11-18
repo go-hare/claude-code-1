@@ -2,6 +2,7 @@ import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import {
   createUserMessage,
   REJECT_MESSAGE,
+  STOPPED_WHILE_RUNNING_REJECT_MESSAGE,
   withMemoryCorrectionHint,
 } from 'src/utils/messages.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
@@ -495,6 +496,7 @@ export class StreamingToolExecutor {
       | 'streaming_fallback'
       | 'conversation_ended',
     assistantMessage: AssistantMessage,
+    wasRunning = false,
   ): Message {
     // densable 2.1.214: sibling tools cancelled by EndConversation abort
     // content = Cancelled…; toolUseResult = "Conversation ended by model"
@@ -516,11 +518,18 @@ export class StreamingToolExecutor {
     // For user interruptions (ESC to reject), use REJECT_MESSAGE so the UI shows
     // "User rejected edit" instead of "Error editing file"
     if (reason === 'user_interrupted') {
+      const rejectMessage =
+        wasRunning &&
+        isRemoteCancelAbortReason(
+          this.toolUseContext.abortController.signal.reason,
+        )
+          ? STOPPED_WHILE_RUNNING_REJECT_MESSAGE
+          : REJECT_MESSAGE
       return createUserMessage({
         content: [
           {
             type: 'tool_result',
-            content: withMemoryCorrectionHint(REJECT_MESSAGE),
+            content: withMemoryCorrectionHint(rejectMessage),
             is_error: true,
             tool_use_id: toolUseId,
           },
@@ -702,6 +711,7 @@ export class StreamingToolExecutor {
             tool.id,
             initialAbortReason,
             tool.assistantMessage,
+            false,
           ),
         )
         tool.results = messages
@@ -858,6 +868,7 @@ export class StreamingToolExecutor {
                   tool.id,
                   abortReason,
                   tool.assistantMessage,
+                  true,
                 ),
               )
               break

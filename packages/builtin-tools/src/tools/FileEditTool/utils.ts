@@ -125,6 +125,339 @@ export function getPatchForEdit({
  *
  * NOTE: The returned patch is to be used for display purposes only - it has spaces instead of tabs
  */
+function splitLinesKeepNewline(text: string): string[] {
+  const lines: string[] = []
+  let pos = 0
+  while (pos < text.length) {
+    const nl = text.indexOf('\n', pos)
+    const end = nl === -1 ? text.length : nl + 1
+    lines.push(text.slice(pos, end))
+    pos = end
+  }
+  return lines
+}
+
+type DiffScript = {
+  kinds: number[] // 0 = equal, 1 = insert, 2 = delete
+  counts: number[]
+}
+
+function pushDiffOp(script: DiffScript, kind: number, count: number): void {
+  const last = script.kinds.length - 1
+  if (kind !== 0 && script.kinds[last] === kind) {
+    script.counts[last] = (script.counts[last] ?? 0) + count
+  } else {
+    script.kinds.push(kind)
+    script.counts.push(count)
+  }
+}
+
+function myersSearch(
+  a: Int32Array,
+  b: Int32Array,
+  deadline: number,
+  maxSearchSteps: number,
+): Uint8Array | undefined {
+  const n = a.length
+  const m = b.length
+  const maxD = n + m
+  const offset = maxD + 1
+  const v = new Int32Array(2 * maxD + 3).fill(-2)
+  let x = -1
+  while (x + 1 < n && x + 1 < m && a[x + 1] === b[x + 1]) x++
+  if (x + 1 >= n && x + 1 >= m) return new Uint8Array(0)
+  v[offset] = x
+  let trace = new Uint8Array(4096)
+  let bitPos = 0
+  const layerOffsets = [0]
+  const layerKMin = [0]
+  let kMinBound = -maxD
+  let kMaxBound = maxD
+  for (let d = 1; d <= maxD; d++) {
+    const kStart = Math.max(kMinBound, -d)
+    const kEnd = Math.min(kMaxBound, d)
+    const count = kEnd >= kStart ? ((kEnd - kStart) >> 1) + 1 : 0
+    if (Date.now() > deadline || bitPos + count > maxSearchSteps) {
+      return undefined
+    }
+    layerOffsets.push(bitPos)
+    layerKMin.push(kStart)
+    if (bitPos + count > trace.length * 8) {
+      const next = new Uint8Array(
+        Math.max(trace.length * 2, ((bitPos + count) >> 3) + 1),
+      )
+      next.set(trace)
+      trace = next
+    }
+    for (let k = kStart; k <= kEnd && k <= kMaxBound; k += 2) {
+      const bitIdx = bitPos++
+      const idx = k + offset
+      const down = v[idx - 1]!
+      const right = v[idx + 1]!
+      if (down !== -2) v[idx - 1] = -2
+      const canRight = right !== -2 && right - k >= 0 && right - k < m
+      const canDown = down !== -2 && down + 1 < n
+      if (!canRight && !canDown) {
+        v[idx] = -2
+        continue
+      }
+      if (!canDown || (canRight && down < right)) {
+        x = right
+        trace[bitIdx >> 3]! |= 1 << (bitIdx & 7)
+      } else {
+        x = down + 1
+      }
+      let y = x - k
+      while (y + 1 < m && x + 1 < n && a[x + 1] === b[y + 1]) {
+        y++
+        x++
+      }
+      if (x + 1 >= n && y + 1 >= m) {
+        const edits = new Uint8Array(d)
+        let curK = k
+        for (let step = d; step > 0; step--) {
+          const bIdx = layerOffsets[step]! + ((curK - layerKMin[step]!) >> 1)
+          const isInsert = (trace[bIdx >> 3]! >> (bIdx & 7)) & 1
+          edits[step - 1] = isInsert
+          curK += isInsert ? 1 : -1
+        }
+        return edits
+      }
+      v[idx] = x
+      if (x + 1 >= n) kMaxBound = Math.min(kMaxBound, k - 1)
+      if (y + 1 >= m) kMinBound = Math.max(kMinBound, k + 1)
+    }
+  }
+  return undefined
+}
+
+function buildScriptFromEdits(
+  a: Int32Array,
+  b: Int32Array,
+  edits: Uint8Array,
+): DiffScript {
+  const script: DiffScript = { kinds: [], counts: [] }
+  let ai = 0
+  let bi = 0
+  const flushEqual = () => {
+    let eq = 0
+    while (ai < a.length && bi < b.length && a[ai] === b[bi]) {
+      ai++
+      bi++
+      eq++
+    }
+    if (eq > 0) pushDiffOp(script, 0, eq)
+  }
+  flushEqual()
+  for (const isInsert of edits) {
+    if (isInsert) {
+      bi++
+      pushDiffOp(script, 1, 1)
+    } else {
+      ai++
+      pushDiffOp(script, 2, 1)
+    }
+    flushEqual()
+  }
+  return script
+}
+
+function tryDisjointDiff(
+  a: Int32Array,
+  b: Int32Array,
+  vocabSize: number,
+  maxSearchSteps: number,
+): DiffScript | 'search' | undefined {
+  const minLen = Math.min(a.length, b.length)
+  let suffix = 0
+  while (
+    suffix < minLen &&
+    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  ) {
+    suffix++
+  }
+  const aMid = a.length - suffix
+  const bMid = b.length - suffix
+  const seen = new Uint8Array(vocabSize)
+  for (const id of b) seen[id] = 1
+  for (let i = 0; i < aMid; i++) {
+    if (seen[a[i]!]) return 'search'
+  }
+  seen.fill(0)
+  for (const id of a) seen[id] = 1
+  for (let i = 0; i < bMid; i++) {
+    if (seen[b[i]!]) return 'search'
+  }
+  if (aMid * bMid > maxSearchSteps) return undefined
+  const script: DiffScript = { kinds: [], counts: [] }
+  if (aMid > 0) pushDiffOp(script, 2, aMid)
+  if (bMid > 0) pushDiffOp(script, 1, bMid)
+  if (suffix > 0) pushDiffOp(script, 0, suffix)
+  return script
+}
+
+function scriptToHunks(
+  script: DiffScript,
+  oldLines: string[],
+  newLines: string[],
+  context: number,
+): StructuredPatchHunk[] {
+  const hunks: StructuredPatchHunk[] = []
+  let oldStart = 0
+  let newStart = 0
+  let hunkLines: string[] = []
+  let oldCursor = 1
+  let newCursor = 1
+  const totalOps = script.kinds.length + 1
+  for (let idx = 0; idx < totalOps; idx++) {
+    const kind = script.kinds[idx] ?? 0
+    const count = script.counts[idx] ?? 0
+    if (kind !== 0) {
+      if (!oldStart) {
+        oldStart = oldCursor
+        newStart = newCursor
+        if (idx > 0 && context > 0) {
+          const lead = Math.min(context, script.counts[idx - 1]!)
+          for (let j = newCursor - 1 - lead; j < newCursor - 1; j++) {
+            hunkLines.push(' ' + newLines[j]!)
+          }
+          oldStart -= lead
+          newStart -= lead
+        }
+      }
+      if (kind === 1) {
+        for (let j = newCursor - 1; j < newCursor - 1 + count; j++) {
+          hunkLines.push('+' + newLines[j]!)
+        }
+        newCursor += count
+      } else {
+        for (let j = oldCursor - 1; j < oldCursor - 1 + count; j++) {
+          hunkLines.push('-' + oldLines[j]!)
+        }
+        oldCursor += count
+      }
+      continue
+    }
+    if (oldStart) {
+      const mergeNext = count <= context * 2 && idx < totalOps - 2
+      const trail = mergeNext ? count : Math.min(count, context)
+      for (let j = newCursor - 1; j < newCursor - 1 + trail; j++) {
+        hunkLines.push(' ' + newLines[j]!)
+      }
+      if (!mergeNext) {
+        hunks.push({
+          oldStart,
+          oldLines: oldCursor - oldStart + trail,
+          newStart,
+          newLines: newCursor - newStart + trail,
+          lines: hunkLines,
+        })
+        oldStart = 0
+        newStart = 0
+        hunkLines = []
+      }
+    }
+    oldCursor += count
+    newCursor += count
+  }
+  for (const hunk of hunks) {
+    const stripped: string[] = []
+    for (const line of hunk.lines) {
+      if (line.endsWith('\n')) {
+        stripped.push(line.slice(0, -1))
+      } else {
+        stripped.push(line, '\\ No newline at end of file')
+      }
+    }
+    hunk.lines = stripped
+  }
+  return hunks
+}
+
+/**
+ * SEA `Se` (@286984800): fast line-interned Myers diff with common prefix/suffix
+ * trimming and disjoint-block shortcut so thousands-of-lines Write/Edit calls
+ * complete in milliseconds instead of hitting the 5s `diff.structuredPatch` timeout.
+ */
+export function computeFastStructuredPatch(
+  oldContent: string,
+  newContent: string,
+  {
+    context = 3,
+    timeout = DIFF_TIMEOUT_MS,
+    maxSearchSteps = 268435456,
+  }: { context?: number; timeout?: number; maxSearchSteps?: number } = {},
+): StructuredPatchHunk[] | undefined {
+  const deadline = Date.now() + timeout
+  const oldLines = splitLinesKeepNewline(oldContent)
+  const newLines = splitLinesKeepNewline(newContent)
+  const minLen = Math.min(oldLines.length, newLines.length)
+  let prefix = 0
+  while (prefix < minLen && oldLines[prefix] === newLines[prefix]) prefix++
+  let suffix = 0
+  while (
+    suffix < minLen - prefix &&
+    oldLines[oldLines.length - 1 - suffix] ===
+      newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix++
+  }
+  const lineIds = new Map<string, number>()
+  const internSlice = (lines: string[], end: number): Int32Array => {
+    const out = new Int32Array(lines.length - prefix)
+    for (let i = prefix; i < end; i++) {
+      const line = lines[i]!
+      let id = lineIds.get(line)
+      if (id === undefined) {
+        id = lineIds.size
+        lineIds.set(line, id)
+      }
+      out[i - prefix] = id
+    }
+    return out
+  }
+  const a = internSlice(oldLines, oldLines.length)
+  const b = internSlice(newLines, newLines.length - suffix)
+  b.set(a.subarray(a.length - suffix), b.length - suffix)
+
+  let script = tryDisjointDiff(a, b, lineIds.size, maxSearchSteps)
+  if (script === 'search') {
+    const edits = myersSearch(a, b, deadline, maxSearchSteps)
+    script = edits ? buildScriptFromEdits(a, b, edits) : undefined
+  }
+  if (script === undefined) return undefined
+  if (prefix > 0) {
+    script.kinds.unshift(0)
+    script.counts.unshift(prefix)
+  }
+  return scriptToHunks(script, oldLines, newLines, context)
+}
+
+export function getFastPatchFromContents({
+  oldContent,
+  newContent,
+  singleHunk = false,
+  convertTabs = true,
+}: {
+  oldContent: string
+  newContent: string
+  singleHunk?: boolean
+  convertTabs?: boolean
+}): StructuredPatchHunk[] {
+  const hunks = computeFastStructuredPatch(oldContent, newContent, {
+    context: singleHunk ? 100_000 : 3,
+    timeout: DIFF_TIMEOUT_MS,
+  })
+  if (!hunks) return []
+  if (!convertTabs) return hunks
+  return hunks.map(hunk => ({
+    ...hunk,
+    lines: hunk.lines.map(
+      line => line.slice(0, 1) + convertLeadingTabsToSpaces(line.slice(1)),
+    ),
+  }))
+}
+
 export function getPatchForEdits({
   filePath,
   fileContents,
@@ -206,10 +539,10 @@ export function getPatchForEdits({
   // Previously this went through getPatchForDisplay with edits=[{old:fileContents,new:updatedFile}],
   // which transforms fileContents twice (once as preparedFileContents, again as escapedOldString
   // inside the reduce) and runs a no-op full-content .replace(). This saves ~20% on large files.
-  const patch = getPatchFromContents({
-    filePath,
-    oldContent: convertLeadingTabsToSpaces(fileContents),
-    newContent: convertLeadingTabsToSpaces(updatedFile),
+  const patch = getFastPatchFromContents({
+    oldContent: fileContents,
+    newContent: updatedFile,
+    convertTabs: true,
   })
 
   return { patch, updatedFile }

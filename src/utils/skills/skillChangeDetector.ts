@@ -176,11 +176,44 @@ export async function initialize(): Promise<void> {
   })
 }
 
+/**
+ * Official `ignored` predicate for skill/command chokidar watcher (#1415):
+ * ignores non-file/dir/symlink entries, `.git` segments, `~/.claude/skills/.trash`,
+ * and regular files not ending in `.md`.
+ */
+export function shouldIgnoreSkillWatchPath(
+  filePath: string,
+  stats:
+    | { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }
+    | undefined,
+  userSkillsDir: string = platformPath.join(getClaudeConfigHomeDir(), 'skills'),
+): boolean {
+  if (
+    stats &&
+    !stats.isFile() &&
+    !stats.isDirectory() &&
+    !stats.isSymbolicLink()
+  ) {
+    return true
+  }
+  if (filePath.split(/[/\\]/).some(dir => dir === '.git')) return true
+  if (
+    platformPath
+      .relative(userSkillsDir, filePath)
+      .split(platformPath.sep)[0] === '.trash'
+  ) {
+    return true
+  }
+  if (stats?.isFile()) return !filePath.endsWith('.md')
+  return false
+}
+
 function createWatcher(interval: number): FSWatcher {
   const stabilityThreshold =
     testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS
   const pollInterval =
     testOverrides?.pollInterval ?? FILE_STABILITY_POLL_INTERVAL_MS
+  const userSkillsDir = platformPath.join(getClaudeConfigHomeDir(), 'skills')
 
   const w = chokidar.watch(watchedPaths, {
     persistent: true,
@@ -190,20 +223,9 @@ function createWatcher(interval: number): FSWatcher {
       stabilityThreshold,
       pollInterval,
     },
-    // densable ignored: non-file/dir/symlink; .git; files not ending in .md
-    ignored: (path, stats) => {
-      if (
-        stats &&
-        !stats.isFile() &&
-        !stats.isDirectory() &&
-        !stats.isSymbolicLink()
-      ) {
-        return true
-      }
-      if (path.split(/[/\\]/).some(dir => dir === '.git')) return true
-      if (stats?.isFile()) return !path.endsWith('.md')
-      return false
-    },
+    // densable ignored: non-file/dir/symlink; .git; .trash; files not ending in .md
+    ignored: (path, stats) =>
+      shouldIgnoreSkillWatchPath(path, stats, userSkillsDir),
     ignorePermissionErrors: true,
     usePolling: USE_POLLING,
     interval,

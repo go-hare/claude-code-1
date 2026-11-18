@@ -48,6 +48,7 @@ import {
 } from '../components/ScrollKeybindingHandler.js';
 import type { Root } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
+import { logEvent } from '../services/analytics/index.js';
 import { listLiveSessions, handleBgStart, attachHandler } from '../cli/bg.js';
 import type { SessionEntry } from '../cli/bg/engine.js';
 import { patchSessionByPid } from '../utils/concurrentSessions.js';
@@ -263,6 +264,15 @@ const FLEET_RESTART_OFFER_MSG =
   "Press enter again to restart this session — it isn't responding (its conversation is saved and resumes).";
 const FLEET_RESTART_STOP_UNCONFIRMED_MSG =
   "Press enter to try the restart again — couldn't stop the unresponsive session yet (the background service may be restarting).";
+
+export function getAgentViewUnavailableSlashHint(
+  commandName: string,
+  defaultToAgentsView: boolean | undefined,
+): string {
+  return commandName === 'config' && defaultToAgentsView === true
+    ? 'Run /config in a session. /config defaultToAgentsView=false stops opening here'
+    : `/${commandName} isn't available in agent view — open a session and run it there`;
+}
 
 export function findNonHeaderRowIndex(rows: ReadonlyArray<{ kind: string }>, preferredIndex: number): number {
   if (rows.length === 0) return 0;
@@ -1332,6 +1342,7 @@ function AgentViewApp({
   const deleteArmIdRef = useRef<string | null>(null);
   // densable Mt — only Ctrl+C double-press (CJ) arms exit; Esc is one-shot Tt.
   const [exitArmed, setExitArmed] = useState(false);
+  const [exitArmedKind, setExitArmedKind] = useState<'Ctrl-C' | 'Ctrl-D'>('Ctrl-C');
   const exitArmedRef = useRef(false);
   const exitArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1394,20 +1405,24 @@ function AgentViewApp({
    * ctrl+c → ur(); escape → … else Tt()).
    * densable fSg = 800ms arm window.
    */
-  const handleCtrlCDoublePress = useCallback(() => {
-    if (exitArmedRef.current) {
-      forceExit();
-      return;
-    }
-    exitArmedRef.current = true;
-    setExitArmed(true);
-    if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
-    exitArmTimerRef.current = setTimeout(() => {
-      exitArmedRef.current = false;
-      setExitArmed(false);
-      exitArmTimerRef.current = null;
-    }, FLEET_EXIT_ARM_MS);
-  }, [forceExit]);
+  const handleCtrlCDoublePress = useCallback(
+    (kind: 'Ctrl-C' | 'Ctrl-D' = 'Ctrl-C') => {
+      if (exitArmedRef.current) {
+        forceExit();
+        return;
+      }
+      exitArmedRef.current = true;
+      setExitArmedKind(kind);
+      setExitArmed(true);
+      if (exitArmTimerRef.current) clearTimeout(exitArmTimerRef.current);
+      exitArmTimerRef.current = setTimeout(() => {
+        exitArmedRef.current = false;
+        setExitArmed(false);
+        exitArmTimerRef.current = null;
+      }, FLEET_EXIT_ARM_MS);
+    },
+    [forceExit],
+  );
 
   /** densable cO(null) — clear delete/ungroup arm + justKilled. */
   const clearDeleteArm = useCallback(() => {
@@ -2426,6 +2441,7 @@ function AgentViewApp({
     pinned: selectedSession?.pinned,
     openSlots: Math.min(9, openableJobs.length),
     exitArmed,
+    exitArmedKind,
     runningCount,
     helpOpen,
     canDispatchAndOpen,
@@ -2876,6 +2892,16 @@ function AgentViewApp({
             ).catch(err => {
               setError(err instanceof Error ? err.message : String(err));
             });
+            return;
+          }
+          if (cmd && cmd.type !== 'prompt' && isCommandEnabled(cmd)) {
+            setError(null);
+            logEvent('tengu_slash_command_unavailable', {
+              command_name: cmd.name,
+              surface: 'fleet-local',
+              reason: 'unavailable_in_agent_view',
+            });
+            setInfo(getAgentViewUnavailableSlashHint(cmd.name, getGlobalConfig().defaultToAgentsView));
             return;
           }
         }
@@ -3894,7 +3920,23 @@ function AgentViewApp({
       if (dispatchMode === 'bash') {
         setDispatchMode('prompt');
       }
-      handleCtrlCDoublePress();
+      handleCtrlCDoublePress('Ctrl-C');
+      return;
+    }
+
+    // #1289 / #1327: Ctrl+D on empty input (or simpleView) double-presses to exit;
+    // when in empty bash (`!`) mode, reset to prompt mode first so draft persistence
+    // does not reopen AgentView in shell mode.
+    if (
+      ((input === 'd' && key.ctrl) || input === '\x04') &&
+      viewMode === 'list' &&
+      !helpOpen &&
+      (simpleView || dispatchInput === '')
+    ) {
+      if (dispatchMode === 'bash' && dispatchInput === '') {
+        setDispatchMode('prompt');
+      }
+      handleCtrlCDoublePress('Ctrl-D');
       return;
     }
 

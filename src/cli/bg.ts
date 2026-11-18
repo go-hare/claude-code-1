@@ -321,6 +321,39 @@ export function backgroundSessionVerbIndex(
   return idx
 }
 
+/**
+ * Return the first positional operand in `argv` (outside option values), or
+ * `undefined` when all arguments are options and their values. (SEA `yor`)
+ */
+export function eagerFirstOperand(
+  argv: readonly string[] = process.argv.slice(2),
+): string | undefined {
+  const idx = firstOperandIndex(argv)
+  return idx === -1 ? undefined : argv[idx]
+}
+
+function isKnownRootOptionToken(token: string): boolean {
+  if (ROOT_BOOLEAN_FLAGS.has(token)) return true
+  const eq = token.indexOf('=')
+  const name = eq === -1 ? token : token.slice(0, eq)
+  return ROOT_VALUE_OPTIONS.has(name) || ROOT_OPTIONAL_VALUE_OPTIONS.has(name)
+}
+
+/**
+ * Return `false` when `argv` contains only known root options and their values
+ * (e.g. `claude --model opus`), so startup can skip registering subcommands.
+ * (SEA `Tgi`, #1281)
+ */
+export function mayDispatchSubcommand(
+  argv: readonly string[] = process.argv.slice(2),
+): boolean {
+  if (argv.some(t => t === '--help' || /^-[^-]*h/.test(t))) return true
+  for (let i = 0; i < argv.length; i = lastValueSlot(argv, i) + 1) {
+    if (!isKnownRootOptionToken(argv[i]!)) return true
+  }
+  return false
+}
+
 export type { SessionEntry } from './bg/engine.js'
 
 function getSessionsDir(): string {
@@ -1086,6 +1119,24 @@ export async function respawnHandler(
     process.stderr.write('usage: claude respawn <id>|--all\n')
     process.exitCode = 1
     return
+  }
+
+  if (target !== '--all') {
+    const { listAllJobs } = await import('../daemon/jobState.js')
+    const jobs = await listAllJobs().catch(() => [])
+    const matches = jobs
+      .map(j => j.short)
+      .filter(id => SHORT_HEX_ID_RE.test(id) && id.startsWith(target))
+    if (matches.length !== 1) {
+      process.stderr.write(
+        matches.length === 0
+          ? `No job matching '${target}'\n`
+          : `Ambiguous prefix '${target}', matches: ${matches.join(', ')}\n`,
+      )
+      await logRespawnBad(matches.length === 0 ? 'no_match' : 'ambiguous')
+      process.exitCode = 1
+      return
+    }
   }
 
   const { ensureDaemonRunning } = await import('../daemon/installPrompt.js')

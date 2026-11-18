@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { UUID } from 'crypto'
+import { createHash, type UUID } from 'crypto'
 import type { Dirent } from 'fs'
 import { getSessionOnceLatches } from './sessionRoot.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
@@ -2448,6 +2448,25 @@ export async function recordQueueOperation(queueOp: QueueOperationMessage) {
  */
 export async function removeTranscriptMessage(targetUuid: UUID): Promise<void> {
   await getProject().removeMessageByUuid(targetUuid)
+}
+
+/**
+ * Gold `hRs` @289230666 (#1205 & #1231) — remove a message from the transcript
+ * only if it has already been persisted in the current session's transcript.
+ */
+export async function removeTranscriptMessageIfPersisted(
+  targetUuid: UUID,
+  _agentId?: AgentId,
+): Promise<void> {
+  const sessionId = validateUuid(getSessionId())
+  if (!sessionId || !(await doesMessageExistInSession(sessionId, targetUuid))) {
+    return
+  }
+  await getProject().removeMessageByUuid(targetUuid)
+  const cached = sessionMessagesCache.get(sessionId)
+  if (cached !== undefined) {
+    void cached.then(set => set.delete(targetUuid))
+  }
 }
 
 export async function recordFileHistorySnapshot(
@@ -6822,22 +6841,36 @@ export async function loadTranscriptFile(
     if (!precompactSkipDisabled) {
       const { size } = await stat(filePath)
       if (size > SKIP_PRECOMPACT_THRESHOLD) {
-        const scan = await readTranscriptForLoad(filePath, size)
-        buf = scan.postBoundaryBuf
-        hasPreservedSegment = scan.hasPreservedSegment
-        tailTorn = !(await fileEndsWithNewline(filePath, size))
-        // >0 means we truncated pre-boundary bytes and must recover
-        // session-scoped metadata from that range. A preservedSegment
-        // boundary does not truncate (preserved messages are physically
-        // pre-boundary), so offset stays 0 unless an EARLIER non-preserved
-        // boundary already truncated — in which case the preserved messages
-        // for the later boundary are post-that-earlier-boundary and were
-        // kept, and we still want the metadata scan.
-        if (scan.boundaryStartOffset > 0) {
-          metadataLines = await scanPreBoundaryMetadata(
-            filePath,
-            scan.boundaryStartOffset,
-          )
+        const fastHead = !opts?.keepAllLeaves
+          ? await tryLoadResumeHeadRows(filePath, size).catch(() => null)
+          : null
+        if (fastHead) {
+          buf = fastHead.postBoundaryBuf
+          hasPreservedSegment = fastHead.hasPreservedSegment
+          tailTorn = !(await fileEndsWithNewline(filePath, size))
+          const preLines: string[] = []
+          fastHead.preservedRows.scan((rowBuf, start, length) => {
+            preLines.push(rowBuf.toString('utf8', start, start + length))
+          })
+          metadataLines = preLines
+        } else {
+          const scan = await readTranscriptForLoad(filePath, size)
+          buf = scan.postBoundaryBuf
+          hasPreservedSegment = scan.hasPreservedSegment
+          tailTorn = !(await fileEndsWithNewline(filePath, size))
+          // >0 means we truncated pre-boundary bytes and must recover
+          // session-scoped metadata from that range. A preservedSegment
+          // boundary does not truncate (preserved messages are physically
+          // pre-boundary), so offset stays 0 unless an EARLIER non-preserved
+          // boundary already truncated — in which case the preserved messages
+          // for the later boundary are post-that-earlier-boundary and were
+          // kept, and we still want the metadata scan.
+          if (scan.boundaryStartOffset > 0) {
+            metadataLines = await scanPreBoundaryMetadata(
+              filePath,
+              scan.boundaryStartOffset,
+            )
+          }
         }
       }
     }
@@ -9003,4 +9036,422 @@ export function rehydrateAgentNameRegistry(
   }
 
   return recovered.size > 0 ? new Map([...existing, ...recovered]) : null
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.325 (#1432): resume-head.jsonl side-file cache & vouching
+// ---------------------------------------------------------------------------
+
+export const RESUME_HEAD_FILENAME = 'resume-head.jsonl'
+export const RESUME_HEAD_VERSION = 1
+export const RESUME_HEAD_RULES = 1
+export const RESUME_HEAD_MAX_BYTES = 1_048_576
+export const RESUME_HEAD_MIN_ROW_STRIDE = 32
+export const RESUME_HEAD_MAX_PRESERVED_BYTES = 8_388_608
+export const RESUME_HEAD_WINDOW_BYTES = 1_048_576
+export const RESUME_HEAD_PIECE_BYTES = 1_048_576
+export const RESUME_HEAD_MAX_PIECES = 32
+export const RESUME_HEAD_MAX_BOUNDARY_LEN = 1_048_576
+export const RESUME_HEAD_MIN_GAIN = 4_194_304
+export const RESUME_HEAD_MAX_GENERATION = 8
+
+const RESUME_HEAD_SHA256_RE = /^[0-9a-f]{64}$/
+const RESUME_HEAD_HEADER_PREFIX = '{"sha256":"'
+const RESUME_HEAD_HEADER_SUFFIX = '"}\n'
+const RESUME_HEAD_HEADER_LEN =
+  RESUME_HEAD_HEADER_PREFIX.length + 64 + RESUME_HEAD_HEADER_SUFFIX.length
+
+export type ResumeHeadData = {
+  boundaryOffset: number
+  boundaryLength: number
+  probe: string
+  generation: number
+  rowOffsets: number[]
+  rowLengths: number[]
+}
+
+export type ResumeHeadParseResult =
+  | ResumeHeadData
+  | 'too_large'
+  | 'malformed'
+  | 'checksum'
+  | 'other_version'
+  | 'other_rules'
+
+export class NeedsWholeTranscript extends Error {
+  reason: string
+  constructor(reason: string) {
+    super('a load from the resume head gave up')
+    this.reason = reason
+    this.name = 'NeedsWholeTranscript'
+  }
+}
+
+export function resumeHeadSha256(buf: Buffer | Uint8Array): string {
+  return createHash('sha256').update(buf).digest('hex')
+}
+
+/**
+ * Gold `yne` @289068350 — compute `<projectDir>/<sessionId>/resume-head.jsonl`
+ * for a valid `<projectDir>/<sessionId>.jsonl` transcript path.
+ */
+export function getResumeHeadPath(
+  transcriptPath: string,
+  projectDir: string,
+): string | null {
+  const file = basename(transcriptPath)
+  const dir = dirname(transcriptPath)
+  if (!file.endsWith('.jsonl') || dirname(dir) !== projectDir) {
+    return null
+  }
+  const sessionId = file.slice(0, -6)
+  if (validateUuid(sessionId) === null) return null
+  return join(dir, sessionId, RESUME_HEAD_FILENAME)
+}
+
+function resumeHeadWindowStart(boundaryOffset: number): number {
+  return Math.max(0, boundaryOffset - RESUME_HEAD_WINDOW_BYTES)
+}
+
+function isResumeHeadTooScattered(
+  rowOffsets: readonly number[],
+  rowLengths: readonly number[],
+  windowStart: number,
+): { pieces: number; tooScattered: boolean } {
+  let pieces = 0
+  let lastPiece = -1
+  for (let i = 0; i < rowOffsets.length; i++) {
+    const startPiece = Math.floor(
+      Math.max(0, rowOffsets[i]! - 1) / RESUME_HEAD_PIECE_BYTES,
+    )
+    const endPiece = Math.floor(
+      (rowOffsets[i]! + rowLengths[i]!) / RESUME_HEAD_PIECE_BYTES,
+    )
+    pieces += endPiece - Math.max(startPiece, lastPiece + 1) + 1
+    lastPiece = endPiece
+  }
+  return {
+    pieces,
+    tooScattered:
+      pieces > RESUME_HEAD_MAX_PIECES ||
+      pieces * 4 > Math.floor(windowStart / RESUME_HEAD_PIECE_BYTES),
+  }
+}
+
+/**
+ * Gold `_ne` @289068800 — serialize a `resume-head.jsonl` buffer with its
+ * leading `{"sha256":"..."}` integrity line.
+ */
+export function serializeResumeHead(
+  head: ResumeHeadData,
+  tableKey = 'v1',
+): Buffer {
+  const payload = {
+    version: RESUME_HEAD_VERSION,
+    rules: RESUME_HEAD_RULES,
+    table: tableKey,
+    boundaryOffset: head.boundaryOffset,
+    boundaryLength: head.boundaryLength,
+    probe: head.probe,
+    generation: head.generation,
+    rowOffsets: head.rowOffsets,
+    rowLengths: head.rowLengths,
+  }
+  const body = Buffer.from(jsonStringify(payload) + '\n', 'utf8')
+  const header = Buffer.from(
+    RESUME_HEAD_HEADER_PREFIX +
+      resumeHeadSha256(body) +
+      RESUME_HEAD_HEADER_SUFFIX,
+    'utf8',
+  )
+  return Buffer.concat([header, body])
+}
+
+/**
+ * Gold `G2t` @289069100 — validate checksum, version, rules, and non-overlapping
+ * monotonic row offsets/lengths of a `resume-head.jsonl` buffer.
+ */
+export function parseResumeHead(
+  buf: Buffer,
+  expectedTableKey = 'v1',
+): ResumeHeadParseResult {
+  if (buf.length > RESUME_HEAD_MAX_BYTES) return 'too_large'
+  const header = buf.toString('latin1', 0, RESUME_HEAD_HEADER_LEN)
+  const hex = header.slice(
+    RESUME_HEAD_HEADER_PREFIX.length,
+    -RESUME_HEAD_HEADER_SUFFIX.length,
+  )
+  if (
+    buf.length <= RESUME_HEAD_HEADER_LEN ||
+    header !== RESUME_HEAD_HEADER_PREFIX + hex + RESUME_HEAD_HEADER_SUFFIX ||
+    !RESUME_HEAD_SHA256_RE.test(hex)
+  ) {
+    return 'malformed'
+  }
+  if (resumeHeadSha256(buf.subarray(RESUME_HEAD_HEADER_LEN)) !== hex) {
+    return 'checksum'
+  }
+  let raw: unknown
+  try {
+    raw = jsonParse(buf.toString('utf8', RESUME_HEAD_HEADER_LEN))
+  } catch {
+    return 'malformed'
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return 'malformed'
+  }
+  const obj = raw as Record<string, unknown>
+  if (typeof obj.version !== 'number' || typeof obj.rules !== 'number') {
+    return 'malformed'
+  }
+  if (obj.version !== RESUME_HEAD_VERSION) return 'other_version'
+  if (obj.rules !== RESUME_HEAD_RULES || obj.table !== expectedTableKey) {
+    return 'other_rules'
+  }
+  if (
+    !Array.isArray(obj.rowOffsets) ||
+    !Array.isArray(obj.rowLengths) ||
+    obj.rowOffsets.length >
+      RESUME_HEAD_MAX_BYTES / RESUME_HEAD_MIN_ROW_STRIDE ||
+    obj.rowLengths.length >
+      RESUME_HEAD_MAX_BYTES / RESUME_HEAD_MIN_ROW_STRIDE ||
+    obj.rowOffsets.length !== obj.rowLengths.length
+  ) {
+    return 'malformed'
+  }
+  const boundaryOffset = obj.boundaryOffset
+  const boundaryLength = obj.boundaryLength
+  const probe = obj.probe
+  const generation = obj.generation
+  if (
+    typeof boundaryOffset !== 'number' ||
+    !Number.isSafeInteger(boundaryOffset) ||
+    boundaryOffset < 1 ||
+    typeof boundaryLength !== 'number' ||
+    !Number.isSafeInteger(boundaryLength) ||
+    boundaryLength < 1 ||
+    boundaryLength > RESUME_HEAD_MAX_BOUNDARY_LEN ||
+    !Number.isSafeInteger(boundaryOffset + boundaryLength) ||
+    typeof probe !== 'string' ||
+    !RESUME_HEAD_SHA256_RE.test(probe) ||
+    typeof generation !== 'number' ||
+    !Number.isSafeInteger(generation) ||
+    generation < 0 ||
+    generation > RESUME_HEAD_MAX_GENERATION
+  ) {
+    return 'malformed'
+  }
+
+  const rowOffsets: number[] = []
+  const rowLengths: number[] = []
+  const windowStart = resumeHeadWindowStart(boundaryOffset)
+  let totalBytes = 0
+  let prevEnd = -1
+  for (let i = 0; i < obj.rowOffsets.length; i++) {
+    const offset = obj.rowOffsets[i]
+    const length = obj.rowLengths[i]
+    if (
+      typeof offset !== 'number' ||
+      !Number.isSafeInteger(offset) ||
+      typeof length !== 'number' ||
+      !Number.isSafeInteger(length) ||
+      length < 1 ||
+      length > RESUME_HEAD_MAX_PRESERVED_BYTES ||
+      offset <= prevEnd ||
+      offset >= windowStart ||
+      offset + length >= boundaryOffset
+    ) {
+      return 'malformed'
+    }
+    rowOffsets.push(offset)
+    rowLengths.push(length)
+    totalBytes += length + 1
+    prevEnd = offset + length
+  }
+  if (
+    totalBytes > RESUME_HEAD_MAX_PRESERVED_BYTES ||
+    isResumeHeadTooScattered(rowOffsets, rowLengths, windowStart).tooScattered
+  ) {
+    return 'malformed'
+  }
+  return {
+    boundaryOffset,
+    boundaryLength,
+    probe,
+    generation,
+    rowOffsets,
+    rowLengths,
+  }
+}
+
+/**
+ * Gold `z2t` @289070400 — in-memory index over preserved rows before `boundaryOffset`.
+ */
+export class PreservedResumeRows {
+  readonly rowOffsets: readonly number[]
+  readonly rowLengths: readonly number[]
+  readonly bytes: Buffer
+  private readonly startsInBytes: number[] = []
+
+  constructor(
+    rowOffsets: readonly number[],
+    rowLengths: readonly number[],
+    bytes: Buffer,
+  ) {
+    this.rowOffsets = rowOffsets
+    this.rowLengths = rowLengths
+    this.bytes = bytes
+    let pos = 0
+    for (const len of rowLengths) {
+      this.startsInBytes.push(pos)
+      pos += len + 1
+    }
+  }
+
+  scan(
+    fn: (buf: Buffer, start: number, length: number, offset: number) => void,
+  ): void {
+    for (let i = 0; i < this.rowOffsets.length; i++) {
+      fn(
+        this.bytes,
+        this.startsInBytes[i]!,
+        this.rowLengths[i]!,
+        this.rowOffsets[i]!,
+      )
+    }
+  }
+
+  read(offset: number, length: number): Buffer {
+    const { rowOffsets, rowLengths, bytes } = this
+    if (rowOffsets.length === 0) {
+      throw new NeedsWholeTranscript('read_before_boundary')
+    }
+    let lo = 0
+    let hi = rowOffsets.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (rowOffsets[mid]! < offset) lo = mid + 1
+      else hi = mid
+    }
+    if (rowOffsets[lo] !== offset) {
+      throw new NeedsWholeTranscript('read_before_boundary')
+    }
+    const targetEnd = offset + length
+    let idx = lo
+    let curEnd = offset + rowLengths[idx]!
+    while (
+      curEnd < targetEnd &&
+      idx + 1 < rowOffsets.length &&
+      rowOffsets[idx + 1] === curEnd + 1
+    ) {
+      idx++
+      curEnd = rowOffsets[idx]! + rowLengths[idx]!
+    }
+    if (curEnd !== targetEnd) {
+      throw new NeedsWholeTranscript('read_before_boundary')
+    }
+    const start = this.startsInBytes[lo]!
+    return bytes.subarray(start, start + length)
+  }
+}
+
+/**
+ * Vouch that a `resume-head.jsonl` boundary probe matches the transcript bytes
+ * at `[head.boundaryOffset, head.boundaryOffset + head.boundaryLength)`.
+ */
+export function vouchResumeHeadProbe(
+  transcriptBytes: Buffer,
+  head: Pick<ResumeHeadData, 'boundaryOffset' | 'boundaryLength' | 'probe'>,
+): boolean {
+  const end = head.boundaryOffset + head.boundaryLength
+  if (head.boundaryOffset < 0 || end > transcriptBytes.length) return false
+  return (
+    resumeHeadSha256(transcriptBytes.subarray(head.boundaryOffset, end)) ===
+    head.probe
+  )
+}
+
+/**
+ * Low-memory transcript load via `resume-head.jsonl` + `PreservedResumeRows` (#1205).
+ * Returns null if side-file is absent/invalid or probe mismatches, allowing
+ * callers to fall back to `readTranscriptForLoad`.
+ */
+export async function tryLoadResumeHeadRows(
+  filePath: string,
+  fileSize: number,
+  expectedTableKey = 'v1',
+): Promise<{
+  preservedRows: PreservedResumeRows
+  postBoundaryBuf: Buffer
+  hasPreservedSegment: boolean
+  boundaryOffset: number
+} | null> {
+  if (!filePath.endsWith('.jsonl')) return null
+  const headPath = getResumeHeadPath(filePath, dirname(dirname(filePath)))
+  if (!headPath) return null
+  let headBuf: Buffer
+  try {
+    headBuf = await readFile(headPath)
+  } catch {
+    return null
+  }
+  const head = parseResumeHead(headBuf, expectedTableKey)
+  if (typeof head === 'string') return null
+  if (
+    head.boundaryOffset < 0 ||
+    head.boundaryOffset + head.boundaryLength > fileSize
+  ) {
+    return null
+  }
+  const fh = await fsOpen(filePath, 'r')
+  try {
+    const probeBuf = Buffer.allocUnsafe(head.boundaryLength)
+    const { bytesRead } = await fh.read(
+      probeBuf,
+      0,
+      head.boundaryLength,
+      head.boundaryOffset,
+    )
+    if (bytesRead !== head.boundaryLength) return null
+    if (resumeHeadSha256(probeBuf) !== head.probe) return null
+
+    const rowChunks: Buffer[] = []
+    for (let i = 0; i < head.rowOffsets.length; i++) {
+      const len = head.rowLengths[i]!
+      const rowBuf = Buffer.allocUnsafe(len + 1)
+      const res = await fh.read(rowBuf, 0, len, head.rowOffsets[i]!)
+      if (res.bytesRead !== len) return null
+      rowBuf[len] = 0x0a
+      rowChunks.push(rowBuf)
+    }
+    const preservedRows = new PreservedResumeRows(
+      head.rowOffsets,
+      head.rowLengths,
+      Buffer.concat(rowChunks),
+    )
+
+    const tailLen = fileSize - head.boundaryOffset
+    const postBoundaryBuf = Buffer.allocUnsafe(tailLen)
+    let offset = 0
+    while (offset < tailLen) {
+      const r = await fh.read(
+        postBoundaryBuf,
+        offset,
+        tailLen - offset,
+        head.boundaryOffset + offset,
+      )
+      if (r.bytesRead <= 0) break
+      offset += r.bytesRead
+    }
+    const finalTail =
+      offset === tailLen ? postBoundaryBuf : postBoundaryBuf.subarray(0, offset)
+    return {
+      preservedRows,
+      postBoundaryBuf: finalTail,
+      hasPreservedSegment: finalTail.includes('"preservedSegment"'),
+      boundaryOffset: head.boundaryOffset,
+    }
+  } finally {
+    await fh.close().catch(() => {})
+  }
 }

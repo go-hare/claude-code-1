@@ -489,7 +489,18 @@ export const SandboxSettingsSchema = lazySchema(() =>
             '**Reduces security** — removes code-execution isolation: sandboxed commands can launch other applications ' +
             'unsandboxed with no user prompt, and can script running apps subject to TCC automation consent. Default: false',
         ),
-      excludedCommands: z.array(z.string()).optional(),
+      excludedCommands: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Command patterns (Bash permission-rule syntax) for commands to run outside the sandbox. ' +
+            'An entry takes a call out of the sandbox only when every command in the call matches an entry: ' +
+            'in a Bash pipe or a chain such as `a && b`, each part needs its own match. ' +
+            'Some calls stay sandboxed whatever the entries, such as one with a `cd`, a command substitution, ' +
+            'or a redirect other than a file-descriptor duplication like `2>&1`, a heredoc included. ' +
+            'A convenience, not a security boundary: excluded commands still go through the permission flow. ' +
+            'Merged across settings sources.',
+        ),
       // densable 2.1.232 #48 — sJc includes ripgrep; rkt() layers only
       // (policy + flag + user). Project/local must not override the binary.
       ripgrep: z

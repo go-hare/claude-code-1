@@ -96,6 +96,16 @@ export function hideDiffPanelLatch(state: AppState): AppState {
 }
 
 /**
+ * #1262: Do not auto-open the diff panel after an edit when the diff has no
+ * changed files (e.g. edit outside git repo or zero-diff change).
+ */
+export function hasAutoOpenDiffContent(
+  result: { stats: { filesCount: number } } | null | undefined,
+): boolean {
+  return result != null && result.stats.filesCount > 0
+}
+
+/**
  * densable `WJ` / `Pte` — toast hold while Obe is mounted OR pane toast-hold
  * latch is on (`diffPanelVisible || paneHoldsToasts`).
  */

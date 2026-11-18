@@ -76,6 +76,99 @@ export type ReplBridgeTransport = {
    * immediately — HybridTransport POSTs are already awaited per-write).
    */
   flush(): Promise<void>
+  /**
+   * Await the goodbye/idle worker-state flush started at close() (#1348).
+   */
+  flushGoodbye?(): Promise<void>
+}
+
+export const REGISTER_WORKER_MAX_ATTEMPTS = 4
+export const REGISTER_WORKER_BASE_MS = 2_000
+export const REGISTER_WORKER_JITTER_RATIO = 0.25
+
+function getHttpStatusFromError(err: unknown): number | undefined {
+  if (err === null || typeof err !== 'object') return undefined
+  const rec = err as { status?: unknown; response?: { status?: unknown } }
+  if (typeof rec.status === 'number') return rec.status
+  if (rec.response && typeof rec.response.status === 'number') {
+    return rec.response.status
+  }
+  return undefined
+}
+
+export function isRetryableRegisterWorkerError(err: unknown): boolean {
+  const status = getHttpStatusFromError(err)
+  return (
+    status === undefined || status === 408 || status === 429 || status >= 500
+  )
+}
+
+export function computeRegisterWorkerBackoffMs(
+  attempt: number,
+  baseMs: number = REGISTER_WORKER_BASE_MS,
+  jitterRatio: number = REGISTER_WORKER_JITTER_RATIO,
+  rand: () => number = Math.random,
+): number {
+  const raw = baseMs * 2 ** (attempt - 1)
+  const factor = 1 + (rand() * 2 - 1) * jitterRatio
+  return Math.max(0, Math.round(raw * factor))
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || ms <= 0) return Promise.resolve()
+  return new Promise(resolve => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (typeof timer === 'object' && 'unref' in timer) timer.unref()
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * densable `@308621751` — retry `registerWorker` with growing proportional-jitter
+ * waits (2s, 4s, 8s ±25%) on network errors and 408/429/5xx responses (#1381).
+ */
+export async function registerWorkerWithRetry(
+  sessionUrl: string,
+  ingressToken: string,
+  opts?: {
+    signal?: AbortSignal
+    maxAttempts?: number
+    baseMs?: number
+    registerFn?: (url: string, token: string) => Promise<number>
+    onBeforeRetry?: (attempt: number, err: unknown) => Promise<void> | void
+  },
+): Promise<number> {
+  const maxAttempts = opts?.maxAttempts ?? REGISTER_WORKER_MAX_ATTEMPTS
+  const baseMs = opts?.baseMs ?? REGISTER_WORKER_BASE_MS
+  const fn = opts?.registerFn ?? registerWorker
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn(sessionUrl, ingressToken)
+    } catch (err) {
+      if (
+        attempt < maxAttempts &&
+        isRetryableRegisterWorkerError(err) &&
+        !opts?.signal?.aborted
+      ) {
+        logForDebugging(
+          `[bridge:session] CCR v2: registerWorker attempt ${attempt} failed, retrying: ${errorMessage(err)}`,
+        )
+        await opts?.onBeforeRetry?.(attempt, err)
+        const waitMs = computeRegisterWorkerBackoffMs(attempt, baseMs)
+        await sleepAbortable(waitMs, opts?.signal)
+        if (!opts?.signal?.aborted) continue
+      }
+      throw err
+    }
+  }
+  throw new Error('registerWorkerWithRetry exhausted attempts')
 }
 
 /**
@@ -108,6 +201,7 @@ export function createV1ReplTransport(
     reportMetadata: () => {},
     reportDelivery: () => {},
     flush: () => Promise.resolve(),
+    flushGoodbye: () => Promise.resolve(),
   }
 }
 
@@ -198,7 +292,8 @@ export async function createV2ReplTransport(opts: {
     updateSessionIngressAuthToken(ingressToken)
   }
 
-  const epoch = opts.epoch ?? (await registerWorker(sessionUrl, ingressToken))
+  const epoch =
+    opts.epoch ?? (await registerWorkerWithRetry(sessionUrl, ingressToken))
   logForDebugging(
     `[bridge:repl] CCR v2: worker sessionId=${sessionId} epoch=${epoch}${opts.epoch !== undefined ? ' (from /bridge)' : ' (via registerWorker)'}`,
   )
@@ -287,6 +382,7 @@ export async function createV2ReplTransport(opts: {
   let onConnectCb: (() => void) | undefined
   let ccrInitialized = false
   let closed = false
+  let goodbyeFlushPromise: Promise<void> = Promise.resolve()
 
   return {
     write(msg) {
@@ -304,8 +400,13 @@ export async function createV2ReplTransport(opts: {
     },
     close() {
       closed = true
-      ccr.close()
-      sse.close()
+      goodbyeFlushPromise = Promise.race([
+        ccr.flush().catch(() => {}),
+        sleepAbortable(1_500),
+      ]).finally(() => {
+        ccr.close()
+        sse.close()
+      })
     },
     isConnectedStatus() {
       // Write-readiness, not read-readiness — replBridge checks this
@@ -354,6 +455,9 @@ export async function createV2ReplTransport(opts: {
     },
     flush() {
       return ccr.flush()
+    },
+    flushGoodbye() {
+      return goodbyeFlushPromise
     },
     connect() {
       // Outbound-only: skip the SSE read stream entirely — no inbound

@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
+import { APIError } from '@anthropic-ai/sdk'
 import chalk from 'chalk'
 import { getEnabledSettingSources } from './settings/constants.js'
 import {
@@ -1339,6 +1340,7 @@ export type ResolveAppliedEffortOptions = {
   turnEffort?: EffortValue
   hookEffortValue?: EffortValue
   carriedEffort?: EffortLevel | null
+  querySource?: string
 }
 
 /**
@@ -1423,7 +1425,215 @@ export function resolveAppliedEffort(
     selected = convertEffortValueToLevel(selected)
   }
 
-  return clampEffortForModel(selected, model)
+  return clampEffortToCap(
+    clampEffortForModel(selected, model),
+    getSessionOrgEffortCap(model, options.querySource),
+  )
+}
+
+type SessionOrgEffortCapEntry = {
+  level: EffortLevel
+  told: boolean
+}
+
+const sessionOrgEffortCaps = new Map<string, SessionOrgEffortCapEntry>()
+
+export function _resetSessionOrgEffortCapsForTesting(): void {
+  sessionOrgEffortCaps.clear()
+}
+
+function getOrgEffortCapKey(model: string): string {
+  const { getCanonicalName } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+  return getCanonicalName(model).replace(/\[1m\]$/i, '')
+}
+
+function extractApiErrorMessageForEffort(error: APIError): string | null {
+  const errObj = error.error
+  if (typeof errObj === 'object' && errObj !== null) {
+    const nested = (errObj as { error?: { message?: unknown } }).error
+    if (
+      nested &&
+      typeof nested.message === 'string' &&
+      nested.message.length > 0
+    ) {
+      return nested.message
+    }
+    const direct = (errObj as { message?: unknown }).message
+    if (typeof direct === 'string' && direct.length > 0) {
+      return direct
+    }
+  }
+  return error.message || null
+}
+
+/**
+ * densable 2.1.314 gce — HTTP 400 "Invalid effort level" from API org cap.
+ */
+export function isInvalidEffortLevelError(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 400) return false
+  if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_eager_quilt', false)) {
+    return false
+  }
+  return extractApiErrorMessageForEffort(error) === 'Invalid effort level'
+}
+
+function isNonInteractiveCapExemptQuerySource(querySource?: string): boolean {
+  return querySource === 'auto_mode' || querySource === 'auto_mode_investigator'
+}
+
+/**
+ * densable 2.1.314 _ce — session-learned org effort cap for model.
+ */
+export function getSessionOrgEffortCap(
+  model: string,
+  querySource?: string,
+): EffortLevel | undefined {
+  if (
+    sessionOrgEffortCaps.size === 0 ||
+    isNonInteractiveCapExemptQuerySource(querySource)
+  ) {
+    return undefined
+  }
+  const level = sessionOrgEffortCaps.get(getOrgEffortCapKey(model))?.level
+  if (level === 'xhigh' && !modelSupportsXhighEffort(model)) {
+    return 'high'
+  }
+  return level
+}
+
+/**
+ * densable 2.1.314 vN — clamp effort down to cap if effort > cap.
+ */
+export function clampEffortToCap(
+  effort: EffortValue | undefined,
+  cap: EffortLevel | undefined,
+): EffortValue | undefined {
+  if (
+    cap !== undefined &&
+    typeof effort === 'string' &&
+    isEffortLevel(effort) &&
+    EFFORT_LEVELS.indexOf(effort) > EFFORT_LEVELS.indexOf(cap)
+  ) {
+    return cap
+  }
+  return effort
+}
+
+/**
+ * densable 2.1.314 qWn — step down one level below `currentEffort` and latch.
+ */
+export function stepDownOrgEffortCap(
+  model: string,
+  currentEffort: EffortLevel,
+): EffortLevel | undefined {
+  const key = getOrgEffortCapKey(model)
+  const existing = sessionOrgEffortCaps.get(key)?.level
+  const idx = EFFORT_LEVELS.indexOf(currentEffort)
+  const next = idx > 0 ? EFFORT_LEVELS[idx - 1] : undefined
+  if (next === undefined) {
+    sessionOrgEffortCaps.delete(key)
+    return undefined
+  }
+  if (
+    existing === undefined ||
+    EFFORT_LEVELS.indexOf(existing) > EFFORT_LEVELS.indexOf(next)
+  ) {
+    sessionOrgEffortCaps.set(key, { level: next, told: false })
+    return next
+  }
+  return existing
+}
+
+/**
+ * densable 2.1.314 KWn — mark the org effort cap notice as shown once.
+ */
+export function markOrgEffortCapNotified(model: string): boolean {
+  const key = getOrgEffortCapKey(model)
+  const entry = sessionOrgEffortCaps.get(key)
+  if (entry === undefined || entry.told) return false
+  sessionOrgEffortCaps.set(key, { ...entry, told: true })
+  return true
+}
+
+/**
+ * densable 2.1.311/312 QSa — true when changing effort on `model` will
+ * invalidate a warm prompt cache.
+ */
+export function willEffortChangeInvalidateCache(input: {
+  target: EffortValue | undefined
+  current: EffortValue | undefined
+  model: string
+  totalOutputTokens: number
+  ackedAtOutputTokens?: number
+  promptCacheMayBeWarm?: boolean
+}): boolean {
+  if (!input.promptCacheMayBeWarm) return false
+  if (
+    input.totalOutputTokens === 0 ||
+    input.totalOutputTokens === input.ackedAtOutputTokens
+  ) {
+    return false
+  }
+  if (!modelSupportsEffort(input.model)) return false
+  // Adaptive-thinking models do not bust the prompt cache on effort change
+  // unless either side is a numeric ant override.
+  const nextEffort = resolveAppliedEffort(input.model, input.target, {
+    carriedEffort: null,
+  })
+  const prevEffort = resolveAppliedEffort(input.model, input.current)
+  const { modelSupportsAdaptiveThinking } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./thinking.js') as typeof import('./thinking.js')
+  if (
+    typeof nextEffort !== 'number' &&
+    typeof prevEffort !== 'number' &&
+    modelSupportsAdaptiveThinking(input.model)
+  ) {
+    return false
+  }
+  return nextEffort !== prevEffort
+}
+
+/**
+ * densable 2.1.311 (#1247) wAe — check both session model and plan-mode model
+ * (e.g. opusplan uses Opus in plan mode) for prompt cache invalidation.
+ */
+export function shouldWarnEffortCacheMiss(input: {
+  target: EffortValue | undefined
+  current: EffortValue | undefined
+  mainLoopModel: string
+  permissionMode: string
+  exceeds200kTokens?: boolean
+  totalOutputTokens: number
+  ackedAtOutputTokens?: number
+  promptCacheMayBeWarm?: boolean
+}): boolean {
+  const { getRuntimeMainLoopModel } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./model/model.js') as typeof import('./model/model.js')
+  const planModel = getRuntimeMainLoopModel({
+    permissionMode:
+      input.permissionMode as import('../types/permissions.js').PermissionMode,
+    mainLoopModel: input.mainLoopModel,
+    exceeds200kTokens:
+      input.permissionMode === 'plan' && Boolean(input.exceeds200kTokens),
+  })
+  const models =
+    planModel !== input.mainLoopModel
+      ? [input.mainLoopModel, planModel]
+      : [input.mainLoopModel]
+  return models.some(model =>
+    willEffortChangeInvalidateCache({
+      target: input.target,
+      current: input.current,
+      model,
+      totalOutputTokens: input.totalOutputTokens,
+      ackedAtOutputTokens: input.ackedAtOutputTokens,
+      promptCacheMayBeWarm: input.promptCacheMayBeWarm,
+    }),
+  )
 }
 
 /**
@@ -1437,6 +1647,40 @@ export function getDisplayedEffortLevel(
 ): EffortLevel {
   const resolved = resolveAppliedEffort(model, appStateEffort) ?? 'high'
   return convertEffortValueToLevel(resolved)
+}
+
+const EFFORT_RANK: Record<EffortLevel, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  xhigh: 3,
+  max: 4,
+}
+
+/**
+ * Gold `jjr` / `ake` / `_e` (#1287): returns true when the current model/effort
+ * can be boosted to `'xhigh'` for a typed `ultrathink` prompt.
+ */
+export function canBoostTurnToXhigh(
+  model: string,
+  appStateEffort: EffortValue | undefined,
+): boolean {
+  const { isUltrathinkEnabled } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./thinking.js') as typeof import('./thinking.js')
+  if (!isUltrathinkEnabled()) return false
+  if (!modelSupportsEffort(model) || !modelSupportsXhighEffort(model)) {
+    return false
+  }
+  const current = resolveAppliedEffort(model, appStateEffort)
+  if (typeof current !== 'string') return false
+  if (
+    resolveAppliedEffort(model, appStateEffort, { turnEffort: 'xhigh' }) !==
+    'xhigh'
+  ) {
+    return false
+  }
+  return EFFORT_RANK[current] < EFFORT_RANK.xhigh
 }
 
 /**

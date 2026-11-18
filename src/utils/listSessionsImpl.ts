@@ -134,6 +134,20 @@ export function parseSessionInfoFromLite(
 
   // Skip metadata-only sessions (no title, no summary, no prompt)
   if (!summary) return null
+
+  // Guard against deleted/bookkeeping-only remnant files (e.g. only
+  // custom-title/ai-title/last-prompt/summary flushed after deletion, with no
+  // actual conversation rows).
+  const hasConversationRow =
+    head.includes('"parentUuid":') ||
+    tail.includes('"parentUuid":') ||
+    head.includes('"type":"user"') ||
+    head.includes('"type": "user"') ||
+    head.includes('"type":"assistant"') ||
+    head.includes('"type": "assistant"')
+  if (!hasConversationRow && size <= 65536) {
+    return null
+  }
   const gitBranch =
     extractLastJsonStringField(tail, 'gitBranch') ||
     extractJsonStringField(head, 'gitBranch') ||

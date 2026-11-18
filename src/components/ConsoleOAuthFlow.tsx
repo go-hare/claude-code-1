@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -117,8 +118,46 @@ type OAuthStatus =
   | {
       state: 'error';
       message: string;
+      verbatim?: boolean;
       toRetry?: OAuthStatus;
     };
+
+export const AUTH_CODE_REFUSED_MESSAGE =
+  "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.";
+
+export class AuthCodeRefusedError extends Error {
+  constructor() {
+    super(AUTH_CODE_REFUSED_MESSAGE);
+    this.name = 'AuthCodeRefusedError';
+  }
+}
+
+export function isInvalidGrantOAuthError(err: unknown): boolean {
+  if (err instanceof AuthCodeRefusedError) {
+    return true;
+  }
+  if (err instanceof Error && err.name === 'AuthCodeRefusedError') {
+    return true;
+  }
+  if (axios.isAxiosError(err) && err.response) {
+    const status = err.response.status;
+    if (status !== 400 && status !== 401) {
+      return false;
+    }
+    const data: unknown = err.response.data;
+    if (typeof data === 'object' && data !== null && 'error' in data) {
+      return (data as { error?: unknown }).error === 'invalid_grant';
+    }
+  }
+  if (err instanceof Error) {
+    return (
+      err.message.includes('Authentication failed: Invalid authorization code') ||
+      err.message.includes('Token exchange failed (400)') ||
+      err.message.includes('Token exchange failed (401)')
+    );
+  }
+  return false;
+}
 
 const PASTE_HERE_MSG = 'Paste code here if prompted > ';
 export function ConsoleOAuthFlow({
@@ -198,6 +237,7 @@ export function ConsoleOAuthFlow({
   // densable Tt — debounce so held/repeated `c` does not retrigger copy.
   const [copyDebounced, setCopyDebounced] = useState(false);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usedManualCodeRef = useRef(false);
   // densable fr — fullscreen + mouse-on: tell the user how to native-select.
   const [showFullscreenCopyHint] = useState(() => isFullscreenActive() && resolveMouseTrackingMode() !== 'off');
 
@@ -308,6 +348,7 @@ export function ConsoleOAuthFlow({
       }
 
       // Track which path the user is taking (manual code entry)
+      usedManualCodeRef.current = true;
       logEvent('tengu_oauth_manual_entry', {});
       oauthService.handleManualAuthCodeInput({
         authorizationCode,
@@ -340,6 +381,7 @@ export function ConsoleOAuthFlow({
       }
     };
     // densable st(null) at the start of each attempt
+    usedManualCodeRef.current = false;
     setKeyMintFallbackReason(null);
     let fellBackToApiKey = false;
     try {
@@ -374,8 +416,24 @@ export function ConsoleOAuthFlow({
             orgUUID,
           },
         )
-        .catch(err => {
-          const isTokenExchangeError = err.message.includes('Token exchange failed');
+        .catch((err: unknown) => {
+          const isRefusedCode = usedManualCodeRef.current && isInvalidGrantOAuthError(err);
+          if (isRefusedCode) {
+            const refusedErr = new AuthCodeRefusedError();
+            setOAuthStatus({
+              state: 'error',
+              message: refusedErr.message,
+              verbatim: true,
+              toRetry: mode === 'setup-token' ? { state: 'ready_to_start' } : { state: 'idle' },
+            });
+            logEvent('tengu_oauth_token_exchange_error', {
+              error: refusedErr.message,
+              ssl_error: false,
+            });
+            throw refusedErr;
+          }
+          const errMessage = err instanceof Error ? err.message : String(err);
+          const isTokenExchangeError = errMessage.includes('Token exchange failed');
           // Enterprise TLS proxies (Zscaler et al.) intercept the token
           // exchange POST and cause cryptic SSL errors. Surface an
           // actionable hint so the user isn't stuck in a login loop.
@@ -386,11 +444,11 @@ export function ConsoleOAuthFlow({
               sslHint ??
               (isTokenExchangeError
                 ? 'Failed to exchange authorization code for access token. Please try again.'
-                : err.message),
+                : errMessage),
             toRetry: mode === 'setup-token' ? { state: 'ready_to_start' } : { state: 'idle' },
           });
           logEvent('tengu_oauth_token_exchange_error', {
-            error: err.message,
+            error: errMessage,
             ssl_error: sslHint !== null,
           });
           throw err;
@@ -442,6 +500,7 @@ export function ConsoleOAuthFlow({
       setOAuthStatus({
         state: 'error',
         message: sslHint ?? errorMessage,
+        verbatim: err instanceof AuthCodeRefusedError,
         toRetry: {
           state: mode === 'setup-token' ? 'ready_to_start' : 'idle',
         },
@@ -1966,7 +2025,9 @@ function OAuthStatusMessage({
     case 'error':
       return (
         <Box flexDirection="column" gap={1}>
-          <Text color="error">OAuth error: {oauthStatus.message}</Text>
+          <Text color="error">
+            {oauthStatus.verbatim ? oauthStatus.message : `OAuth error: ${oauthStatus.message}`}
+          </Text>
           {keyMintFallbackReason && (
             <Text dimColor>
               {RECOMMENDED_SIGNIN_UNAVAILABLE}: {keyMintFallbackReason.message}

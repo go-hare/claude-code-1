@@ -64,6 +64,7 @@ import {
   type SessionSpawnOpts,
   type SpawnMode,
 } from './types.js'
+import { registerWorkerWithRetry } from './replBridgeTransport.js'
 import {
   buildCCRv2SdkUrl,
   buildSdkUrl,
@@ -1158,44 +1159,37 @@ export async function runBridgeLoop(
             isEnvTruthy(process.env.CLAUDE_BRIDGE_USE_CCR_V2)
           ) {
             sdkUrl = buildCCRv2SdkUrl(config.apiBaseUrl, sessionId)
-            // Retry once on transient failure (network blip, 500) before
-            // permanently giving up and killing the session.
-            for (let attempt = 1; attempt <= 2; attempt++) {
-              try {
-                workerEpoch = await registerWorker(
-                  sdkUrl,
-                  secret.session_ingress_token,
-                )
-                useCcrV2 = true
-                logForDebugging(
-                  `[bridge:session] CCR v2: registered worker sessionId=${sessionId} epoch=${workerEpoch} attempt=${attempt}`,
-                )
-                break
-              } catch (err) {
-                const errMsg = errorMessage(err)
-                if (attempt < 2) {
-                  logForDebugging(
-                    `[bridge:session] CCR v2: registerWorker attempt ${attempt} failed, retrying: ${errMsg}`,
-                  )
-                  await sleep(2_000, loopSignal)
-                  if (loopSignal.aborted) break
-                  continue
-                }
+            try {
+              workerEpoch = await registerWorkerWithRetry(
+                sdkUrl,
+                secret.session_ingress_token,
+                {
+                  signal: loopSignal,
+                  registerFn: registerWorker,
+                },
+              )
+              useCcrV2 = true
+              logForDebugging(
+                `[bridge:session] CCR v2: registered worker sessionId=${sessionId} epoch=${workerEpoch}`,
+              )
+            } catch (err) {
+              const errMsg = errorMessage(err)
+              if (!loopSignal.aborted) {
                 logger.logError(
                   `CCR v2 worker registration failed for session ${sessionId}: ${errMsg}`,
                 )
                 logError(new Error(`registerWorker failed: ${errMsg}`))
-                completedWorkIds.add(work.id)
-                trackCleanup(
-                  stopWorkWithRetry(
-                    api,
-                    environmentId,
-                    work.id,
-                    logger,
-                    backoffConfig.stopWorkBaseDelayMs,
-                  ),
-                )
               }
+              completedWorkIds.add(work.id)
+              trackCleanup(
+                stopWorkWithRetry(
+                  api,
+                  environmentId,
+                  work.id,
+                  logger,
+                  backoffConfig.stopWorkBaseDelayMs,
+                ),
+              )
             }
             if (!useCcrV2) break
           } else {

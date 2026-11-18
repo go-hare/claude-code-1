@@ -4,6 +4,7 @@ import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { createAdapter } from './adapters/index.js'
+import { withWebSearchDeadline } from './adapters/deadline.js'
 import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.js'
 import {
   getToolUseSummary,
@@ -312,24 +313,28 @@ export const WebSearchTool = buildTool({
     }
 
     const adapter = createAdapter()
-    const adapterResults = await adapter.search(query, {
-      allowedDomains: input.allowed_domains,
-      blockedDomains: input.blocked_domains,
-      numResults: input.num_results,
-      livecrawl: input.livecrawl,
-      searchType: input.search_type,
-      contextMaxCharacters: input.context_max_characters,
-      signal: context.abortController.signal,
-      onProgress(progress) {
-        if (onProgress) {
-          const progressCounter = Date.now()
-          onProgress({
-            toolUseID: `search-progress-${progressCounter}`,
-            data: progress,
-          })
-        }
-      },
-    })
+    const adapterResults = await withWebSearchDeadline(
+      context.abortController.signal,
+      effectiveSignal =>
+        adapter.search(query, {
+          allowedDomains: input.allowed_domains,
+          blockedDomains: input.blocked_domains,
+          numResults: input.num_results,
+          livecrawl: input.livecrawl,
+          searchType: input.search_type,
+          contextMaxCharacters: input.context_max_characters,
+          signal: effectiveSignal,
+          onProgress(progress) {
+            if (onProgress) {
+              const progressCounter = Date.now()
+              onProgress({
+                toolUseID: `search-progress-${progressCounter}`,
+                data: progress,
+              })
+            }
+          },
+        }),
+    )
 
     const endTime = performance.now()
     const durationSeconds = (endTime - startTime) / 1000

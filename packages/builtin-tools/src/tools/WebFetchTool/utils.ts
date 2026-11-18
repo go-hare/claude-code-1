@@ -6,6 +6,7 @@ import {
 } from 'src/services/analytics/index.js'
 import { queryHaiku, queryWithModel } from 'src/services/api/claude.js'
 import { type EffortValue, resolveAppliedEffort } from 'src/utils/effort.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
   AbortError,
@@ -36,6 +37,16 @@ class EgressBlockedError extends Error {
       }),
     )
     this.name = 'EgressBlockedError'
+  }
+}
+
+export class WebFetchRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message)
+    this.name = 'WebFetchRequestError'
   }
 }
 
@@ -151,6 +162,19 @@ const MAX_HTTP_CONTENT_LENGTH = 10 * 1024 * 1024
 // Prevents hanging indefinitely on slow/unresponsive servers.
 // Overridable via settings.webFetchHttpTimeoutMs (set in /web-tools panel).
 const DEFAULT_FETCH_TIMEOUT_MS = 60_000
+const DEFAULT_WEBFETCH_DEADLINE_MS = 300_000
+const MAX_SAFE_TIMEOUT_MS = 2_147_483_647
+
+export function getWebFetchDeadlineMs(): number {
+  const envRaw = process.env.CLAUDE_CODE_WEBFETCH_DEADLINE_MS
+  if (envRaw !== undefined) {
+    const parsed = Number(envRaw)
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.min(parsed, MAX_SAFE_TIMEOUT_MS)
+    }
+  }
+  return DEFAULT_WEBFETCH_DEADLINE_MS
+}
 
 function getFetchTimeoutMs(): number {
   const settings = getSettings_DEPRECATED() as Record<string, unknown> & {
@@ -272,7 +296,33 @@ export async function getWithPermittedRedirects(
   signal: AbortSignal,
   redirectChecker: (originalUrl: string, redirectUrl: string) => boolean,
   depth = 0,
+  deadlineSignal?: AbortSignal,
 ): Promise<AxiosResponse<ArrayBuffer> | RedirectInfo> {
+  if (deadlineSignal === undefined) {
+    const deadlineMs = getWebFetchDeadlineMs()
+    if (deadlineMs === 0) {
+      return getWithPermittedRedirects(
+        url,
+        signal,
+        redirectChecker,
+        depth,
+        new AbortController().signal,
+      )
+    }
+    const deadlineController = new AbortController()
+    const timer = setTimeout(() => deadlineController.abort(), deadlineMs)
+    try {
+      return await getWithPermittedRedirects(
+        url,
+        signal,
+        redirectChecker,
+        depth,
+        deadlineController.signal,
+      )
+    } finally {
+      clearTimeout(timer)
+    }
+  }
   if (depth > MAX_REDIRECTS) {
     throw new Error(`Too many redirects (exceeded ${MAX_REDIRECTS})`)
   }
@@ -309,7 +359,7 @@ export async function getWithPermittedRedirects(
   }
   try {
     return await axios.get(fetchUrl, {
-      signal,
+      signal: AbortSignal.any([signal, deadlineSignal]),
       timeout: getFetchTimeoutMs(),
       maxRedirects: 0,
       responseType: 'arraybuffer',
@@ -340,6 +390,7 @@ export async function getWithPermittedRedirects(
           signal,
           redirectChecker,
           depth + 1,
+          deadlineSignal,
         )
       } else {
         // Return redirect information to the caller
@@ -362,6 +413,22 @@ export async function getWithPermittedRedirects(
     ) {
       const hostname = new URL(url).hostname
       throw new EgressBlockedError(hostname)
+    }
+
+    if (axios.isCancel(error) && deadlineSignal.aborted && !signal.aborted) {
+      throw new WebFetchRequestError(
+        `Fetch did not complete within the ${getWebFetchDeadlineMs() / 1000}s deadline`,
+        'EDEADLINE',
+      )
+    }
+
+    if (axios.isAxiosError(error) && !axios.isCancel(error)) {
+      const isCloudSession = isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
+      const message =
+        error.code === 'ENOTFOUND' && isCloudSession
+          ? `${error.message}. In this cloud session a host fails to resolve like this when it is outside the session's allowed network domains, or does not exist. If another host has failed the same way, stop trying more sites: carry on without them, and say in your answer that ${new URL(url).hostname} has to be allowed in the session's network settings. Fetch it again only once the user says it is allowed.`
+          : error.message
+      throw new WebFetchRequestError(message, error.code)
     }
 
     throw error

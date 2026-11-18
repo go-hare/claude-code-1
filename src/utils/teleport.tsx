@@ -26,7 +26,6 @@ import { toCompatSessionId, toInfraSessionId } from '../bridge/sessionIdCompat.j
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js';
 import type { Root } from '@anthropic/ink';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
-import { queryHaiku } from '../services/api/claude.js';
 import { getSessionLogsViaOAuth, getTeleportEvents } from '../services/api/sessionIngress.js';
 import { getOrganizationUUID } from '../services/oauth/client.js';
 import { AppStateProvider } from '../state/AppState.js';
@@ -46,9 +45,8 @@ import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js';
 import { getSessionBriefTranscript, isFocusViewActive } from './focusView.js';
 import { truncateToWidth } from './format.js';
 import { findGitRoot, getDefaultBranch, getIsClean, gitExe } from './git.js';
-import { safeParseJSON } from './json.js';
 import { logError } from './log.js';
-import { createSystemMessage, createUserMessage } from './messages.js';
+import { createSystemMessage, createUserMessage, isCompactBoundaryMessage } from './messages.js';
 import { getMainLoopModel } from './model/model.js';
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
 import { isTranscriptMessage } from './sessionPaths.js';
@@ -56,7 +54,6 @@ import { isRestrictedSession, RESTRICTED_CLOUD_CREATE_REFUSE } from './restricte
 import { getInitialSettings } from './settings/settings.js';
 import { sleep } from './sleep.js';
 import { jsonStringify } from './slowOperations.js';
-import { asSystemPrompt } from './systemPromptType.js';
 import {
   fetchSession,
   type GitRepositoryOutcome,
@@ -274,84 +271,76 @@ function remoteSessionsPolicyDenyMessage(): string | null {
   return "Cloud sessions are disabled by your organization's policy. Contact your organization admin to enable them.";
 }
 
-const SESSION_TITLE_AND_BRANCH_PROMPT = `You are coming up with a succinct title and git branch name for a coding session based on the provided description. The title should be clear, concise, and accurately reflect the content of the coding task.
-You should keep it short and simple, ideally no more than 6 words. Avoid using jargon or overly technical terms unless absolutely necessary. The title should be easy to understand for anyone reading it.
-Use sentence case for the title (capitalize only the first word and proper nouns), not Title Case.
-
-The branch name should be clear, concise, and accurately reflect the content of the coding task.
-You should keep it short and simple, ideally no more than 4 words. The branch should always start with "claude/" and should be all lower case, with words separated by dashes.
-
-Return a JSON object with "title" and "branch" fields.
-
-Example 1: {"title": "Fix login button not working on mobile", "branch": "claude/fix-mobile-login-button"}
-Example 2: {"title": "Update README with installation instructions", "branch": "claude/update-readme"}
-Example 3: {"title": "Improve performance of data processing script", "branch": "claude/improve-data-processing"}
-
-Here is the session description:
-<description>{description}</description>
-Please generate a title and branch name for this session.`;
-
 type TitleAndBranch = {
   title: string;
   branchName: string;
 };
 
+const MAX_TITLE_MESSAGE_CHARS = 2000;
+const TITLE_MESSAGE_HEAD_CHARS = 1500;
+const VALID_BRANCH_NAME_RE = /^\w[\w.-]*(\/\w[\w.-]*)+$/;
+const generateTitleAndBranchResponseSchema = z.object({
+  title: z.string(),
+  branch_name: z.string(),
+});
+
+export function truncateFirstSessionMessageForTitle(msg: string): string {
+  if (msg.length <= MAX_TITLE_MESSAGE_CHARS) return msg;
+  const omitted = msg.length - MAX_TITLE_MESSAGE_CHARS;
+  const marker = `\n[\u2026 ${omitted} characters omitted \u2026]\n`;
+  const tailLen = Math.max(0, MAX_TITLE_MESSAGE_CHARS - TITLE_MESSAGE_HEAD_CHARS - marker.length);
+  return msg.slice(0, TITLE_MESSAGE_HEAD_CHARS) + marker + (tailLen > 0 ? msg.slice(-tailLen) : '');
+}
+
 /**
- * Generates a title and branch name for a coding session using Claude Haiku
- * @param description The description/prompt for the session
- * @returns Promise<TitleAndBranch> The generated title and branch name
+ * Generates a title and branch name for a cloud session via the server endpoint
+ * `/api/organizations/:orgUUID/dust/generate_title_and_branch`, falling back to
+ * truncated description and `'claude/task'` when unavailable.
  */
-async function generateTitleAndBranch(description: string, signal: AbortSignal): Promise<TitleAndBranch> {
+export async function generateTitleAndBranch(
+  description: string,
+  signal: AbortSignal,
+  credentials?: { accessToken?: string; orgUUID?: string },
+): Promise<TitleAndBranch> {
   const fallbackTitle = truncateToWidth(description, 75);
   const fallbackBranch = 'claude/task';
+  const fallback: TitleAndBranch = { title: fallbackTitle, branchName: fallbackBranch };
 
   try {
-    const userPrompt = SESSION_TITLE_AND_BRANCH_PROMPT.replace('{description}', description);
+    const accessToken = credentials?.accessToken ?? getClaudeAIOAuthTokens()?.accessToken;
+    const orgUUID = credentials?.orgUUID ?? (await getOrganizationUUID());
+    if (!accessToken || !orgUUID) {
+      logForDebugging('Session name request not sent (missing credentials or org); using the default title and branch');
+      return fallback;
+    }
 
-    const response = await queryHaiku({
-      systemPrompt: asSystemPrompt([]),
-      userPrompt,
-      outputFormat: {
-        type: 'json_schema',
-        schema: {
-          type: 'object',
-          properties: {
-            title: { type: 'string' },
-            branch: { type: 'string' },
-          },
-          required: ['title', 'branch'],
-          additionalProperties: false,
+    const url = `${getOauthConfig().BASE_API_URL}/api/organizations/${orgUUID}/dust/generate_title_and_branch`;
+    const response = await axios.post(
+      url,
+      { first_session_message: truncateFirstSessionMessageForTitle(description) },
+      {
+        headers: {
+          ...getOAuthHeaders(accessToken),
+          'anthropic-beta': 'ccr-byoc-2025-07-29',
         },
+        timeout: 15000,
+        signal,
       },
-      signal,
-      options: {
-        querySource: 'teleport_generate_title',
-        agents: [],
-        isNonInteractiveSession: false,
-        hasAppendSystemPrompt: false,
-        mcpTools: [],
-      },
-    });
+    );
 
-    // Extract text from the response
-    const firstBlock = response.message!.content?.[0] as { type?: string; text?: string } | undefined;
-    if (firstBlock?.type !== 'text') {
-      return { title: fallbackTitle, branchName: fallbackBranch };
+    const parsed = generateTitleAndBranchResponseSchema.safeParse(response.data);
+    if (!parsed.success) {
+      return fallback;
     }
 
-    const parsed = safeParseJSON(firstBlock.text!.trim());
-    const parseResult = z.object({ title: z.string(), branch: z.string() }).safeParse(parsed);
-    if (parseResult.success) {
-      return {
-        title: parseResult.data.title || fallbackTitle,
-        branchName: parseResult.data.branch || fallbackBranch,
-      };
-    }
-
-    return { title: fallbackTitle, branchName: fallbackBranch };
+    const branch = parsed.data.branch_name.trim();
+    return {
+      title: parsed.data.title || fallbackTitle,
+      branchName: VALID_BRANCH_NAME_RE.test(branch) ? branch : fallbackBranch,
+    };
   } catch (error) {
     logError(new Error(`Error generating title and branch: ${error}`));
-    return { title: fallbackTitle, branchName: fallbackBranch };
+    return fallback;
   }
 }
 
@@ -488,6 +477,31 @@ async function getCurrentBranch(): Promise<string> {
   return currentBranch.trim();
 }
 
+export const LOADED_FROM_LAST_COMPACTION_WARNING =
+  "Loaded from the session's last compaction, so the messages it summarized aren't here.";
+
+export function findLastCompactBoundaryIndex(messages: readonly Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg && isCompactBoundaryMessage(msg)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+export function didLoadFromLastCompaction(messages: readonly Message[]): boolean {
+  const idx = findLastCompactBoundaryIndex(messages);
+  const boundary = idx >= 0 ? messages[idx] : undefined;
+  if (!boundary || !isCompactBoundaryMessage(boundary)) {
+    return false;
+  }
+  const preservedUuids = (boundary.compactMetadata?.preservedMessages as { uuids?: readonly string[] } | undefined)
+    ?.uuids;
+  const preservedSet = new Set(Array.isArray(preservedUuids) ? preservedUuids : []);
+  return messages.slice(0, idx).every(m => preservedSet.has(m.uuid));
+}
+
 /**
  * Processes messages for teleport resume, removing incomplete tool_use blocks
  * and adding teleport notice messages
@@ -500,11 +514,15 @@ export function processMessagesForTeleportResume(messages: Message[], error: Err
   const deserializedMessages = deserializeMessages(messages);
 
   // Add user message about teleport resume (visible to model)
-  const messagesWithTeleportNotice = [
+  const messagesWithTeleportNotice: Message[] = [
     ...deserializedMessages,
     createTeleportResumeUserMessage(),
     createTeleportResumeSystemMessage(error),
   ];
+
+  if (didLoadFromLastCompaction(messages)) {
+    messagesWithTeleportNotice.push(createSystemMessage(LOADED_FROM_LAST_COMPACTION_WARNING, 'warning'));
+  }
 
   return messagesWithTeleportNotice;
 }

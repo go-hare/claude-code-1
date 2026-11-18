@@ -299,6 +299,8 @@ export function FeedbackDraftNotice({
     },
   );
 
+  const hasEmptyInput = inputValue === '';
+
   if (state === 'dismissPrompt') {
     return (
       <Box marginTop={1} marginBottom={1}>
@@ -306,8 +308,9 @@ export function FeedbackDraftNotice({
           Turn off Claude-drafted feedback?{' '}
           <Text dimColor>
             <Byline>
-              <KeyboardShortcutHint shortcut="0" action="turn off" />
-              <KeyboardShortcutHint shortcut="escape" action="keep" />
+              {hasEmptyInput && <KeyboardShortcutHint shortcut="0" action="turn off" />}
+              {hasEmptyInput && <KeyboardShortcutHint shortcut="escape" action="keep" />}
+              {!hasEmptyInput && 'clear text to answer it'}
             </Byline>
           </Text>
         </Text>
@@ -334,8 +337,9 @@ export function FeedbackDraftNotice({
         Send without reviewing <Text dimColor>(full draft + env, no transcript)</Text>?{' '}
         <Text dimColor>
           <Byline>
-            <KeyboardShortcutHint shortcut="2" action="send" />
-            <KeyboardShortcutHint shortcut="escape" action="back" />
+            {hasEmptyInput && <KeyboardShortcutHint shortcut="2" action="send" />}
+            {hasEmptyInput && <KeyboardShortcutHint shortcut="escape" action="back" />}
+            {!hasEmptyInput && 'clear text to answer it'}
           </Byline>
         </Text>
       </Text>
@@ -352,17 +356,19 @@ export function FeedbackDraftNotice({
         <Text color="error">{error}</Text>{' '}
         <Text dimColor>
           <Byline>
-            <KeyboardShortcutHint shortcut="1" action="review & retry" />
-            <KeyboardShortcutHint shortcut="escape" action="dismiss" />
+            {hasEmptyInput && <KeyboardShortcutHint shortcut="1" action="review & retry" />}
+            {hasEmptyInput && <KeyboardShortcutHint shortcut="escape" action="dismiss" />}
+            {!hasEmptyInput && 'clear text to open review or dismiss'}
           </Byline>
         </Text>
       </Text>
     ) : (
       <Text dimColor>
         <Byline>
-          <KeyboardShortcutHint shortcut="1" action="review" />
-          <KeyboardShortcutHint shortcut="2" action="send" />
-          <KeyboardShortcutHint shortcut="0" action="dismiss" />
+          {hasEmptyInput && <KeyboardShortcutHint shortcut="1" action="review" />}
+          {hasEmptyInput && <KeyboardShortcutHint shortcut="2" action="send" />}
+          {hasEmptyInput && <KeyboardShortcutHint shortcut="0" action="dismiss" />}
+          {!hasEmptyInput && 'clear text to review, send, or dismiss'}
           {more > 0 && `+${more} more queued`}
         </Byline>
       </Text>

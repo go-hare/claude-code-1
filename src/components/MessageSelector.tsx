@@ -587,7 +587,10 @@ export function MessageSelector({
           )}
           {canRestoreCode && (
             <Box marginBottom={1}>
-              <Text dimColor>{figures.warning} Rewinding does not affect files edited manually or via bash.</Text>
+              <Text dimColor>
+                {figures.warning} Restored files go back whole, losing later changes by anyone. Bash changes to other
+                files are not undone.
+              </Text>
             </Box>
           )}
         </>
@@ -699,7 +702,7 @@ export function MessageSelector({
   );
 }
 
-function getRestoreOptionConversationText(option: RestoreOption): string {
+export function getRestoreOptionConversationText(option: RestoreOption): string {
   switch (option) {
     case 'summarize':
       return 'Messages after this point will be summarized.';
@@ -707,7 +710,7 @@ function getRestoreOptionConversationText(option: RestoreOption): string {
       return 'Preceding messages will be summarized. This and subsequent messages will remain unchanged — you will stay at the end of the conversation.';
     case 'both':
     case 'conversation':
-      return 'The conversation will be forked.';
+      return 'The conversation goes back to before this message.';
     case 'code':
     case 'nevermind':
       return 'The conversation will be unchanged.';

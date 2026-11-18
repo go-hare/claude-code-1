@@ -244,7 +244,7 @@ describe('densable 2.1.251 #31 usage-credits zero limit', () => {
         'claude-sonnet-4-6',
       ),
     ).toBe(
-      `You've hit your session limit · resets ${RESET_TIME} · progress saved`,
+      `You've hit your 5-hour limit · resets ${RESET_TIME} · progress saved`,
     )
     expect(
       getRateLimitErrorMessage(

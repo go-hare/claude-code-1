@@ -41,6 +41,7 @@ import {
 } from '../../utils/secureStorage/index.js'
 import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpers.js'
 import type { SecureStorageData } from '../../utils/secureStorage/types.js'
+import type { ScopedMcpServerConfig } from './types.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
@@ -1017,14 +1018,130 @@ export async function revokeReplacedMcpTokens(
  * Do **not** use this before interactive re-auth (2.1.216 #19) — use
  * snapshotMcpOAuthTokens + revokeReplacedMcpTokens after connected instead.
  */
+/**
+ * Gold `vt().dialedWithoutOAuth` (#1263): tracks servers whose OAuth tokens
+ * were cleared in `/mcp` so the immediate reconnect dials without OAuth.
+ */
+export const dialedWithoutOAuth = new Map<string, string>()
+export const rejectedStoredTokens = new Map<string, string>()
+export const connectsToRedialWithoutToken = new WeakMap<
+  { name: string; type: string },
+  () => { name: string; type: string }
+>()
+
+/**
+ * Gold `kBi` / `connectsToRedialWithoutToken` (#1364): if a stored access token
+ * was rejected and there is no refresh token, mark the needs-auth result for
+ * one signed-out redial.
+ */
+export function markStoredTokenRejectedForRedial<
+  T extends { name: string; type: string },
+>(
+  serverName: string,
+  serverConfig: ScopedMcpServerConfig,
+  makeNeedsAuth: () => T,
+): T {
+  const result = makeNeedsAuth()
+  if (serverConfig.type !== 'http' && serverConfig.type !== 'sse') {
+    return result
+  }
+  const storage = getSecureStorage()
+  const serverKey = getServerKey(serverName, serverConfig)
+  const entry = storage.read()?.mcpOAuth?.[serverKey]
+  if (!entry?.accessToken || entry.refreshToken) {
+    return result
+  }
+  rejectedStoredTokens.set(serverKey, entry.accessToken)
+  connectsToRedialWithoutToken.set(result, makeNeedsAuth)
+  return result
+}
+
+/**
+ * Gold `kBi` (#1364): if connecting with a stored token fails with no refresh
+ * token, retry once without sending the rejected token. If the server works
+ * without sign-in, clear the stale accessToken and return the connected client.
+ */
+export async function dialWithSignedOutFallback<
+  T extends { name: string; type: string },
+>(
+  dialFn: () => Promise<T>,
+  isStillCurrent: () => boolean,
+  serverName: string,
+  serverConfig: ScopedMcpServerConfig,
+): Promise<T> {
+  const first = await dialFn()
+  if (serverConfig.type !== 'http' && serverConfig.type !== 'sse') {
+    return first
+  }
+  const serverKey = getServerKey(serverName, serverConfig)
+  const fallbackFn = connectsToRedialWithoutToken.get(first)
+  if (fallbackFn === undefined) {
+    return first
+  }
+  if (!isStillCurrent()) {
+    rejectedStoredTokens.delete(serverKey)
+    return isStillCurrent() ? (fallbackFn() as T) : first
+  }
+  logMCPDebug(
+    serverName,
+    'The server rejected the stored access token and no refresh token is stored; connecting again without a token',
+  )
+  const second = await dialFn()
+  const rejectedToken = rejectedStoredTokens.get(serverKey)
+  if (second.type !== 'connected') {
+    rejectedStoredTokens.delete(serverKey)
+    const signInRequired =
+      second.type === 'needs-auth' && !connectsToRedialWithoutToken.has(second)
+    if (signInRequired) return second
+    return isStillCurrent() ? (fallbackFn() as T) : first
+  }
+  logMCPDebug(serverName, 'Connected without the rejected access token')
+  logEvent('tengu_mcp_signed_out_fallback', {})
+  try {
+    const storage = getSecureStorage()
+    const data = storage.read()
+    const entry = data?.mcpOAuth?.[serverKey]
+    if (
+      data?.mcpOAuth &&
+      entry &&
+      !entry.refreshToken &&
+      entry.accessToken === rejectedToken
+    ) {
+      data.mcpOAuth[serverKey] = {
+        ...entry,
+        accessToken: '',
+        expiresAt: 0,
+      }
+      storage.update(data)
+    }
+  } catch (err) {
+    logMCPDebug(
+      serverName,
+      `Deleting the rejected access token failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  return second
+}
+
+export type RevokeTokensResult = {
+  cleared: boolean
+  reason?: 'keychain_unreadable' | 'credential_store_failed'
+}
+
 export async function revokeServerTokens(
   serverName: string,
   serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
   { preserveStepUpState = false }: { preserveStepUpState?: boolean } = {},
-): Promise<void> {
+): Promise<RevokeTokensResult> {
   const storage = getSecureStorage()
   const existingData = storage.read()
-  if (!existingData?.mcpOAuth) return
+  if (existingData === null && storage.name === 'keychain') {
+    const strict = await storage.readAsyncStrict?.()
+    if (strict?.status === 'inaccessible') {
+      return { cleared: false, reason: 'keychain_unreadable' }
+    }
+  }
+  if (!existingData?.mcpOAuth) return { cleared: true }
 
   const serverKey = getServerKey(serverName, serverConfig)
   const tokenData = existingData.mcpOAuth[serverKey]
@@ -1050,7 +1167,10 @@ export async function revokeServerTokens(
   }
 
   // Always clear local tokens, regardless of server-side revocation result.
-  clearServerTokensFromLocalStorage(serverName, serverConfig)
+  const cleared = clearServerTokensFromLocalStorage(serverName, serverConfig)
+  if (!cleared) {
+    return { cleared: false, reason: 'credential_store_failed' }
+  }
 
   // When re-authenticating, preserve step-up auth state (scope + discovery)
   // so the next performMCPOAuthFlow can use cached scope instead of
@@ -1092,6 +1212,7 @@ export async function revokeServerTokens(
     storage.update(updatedData)
     logMCPDebug(serverName, 'Preserved step-up auth state across revocation')
   }
+  return { cleared: true }
 }
 
 /**
@@ -1105,19 +1226,19 @@ export function clearServerTokensFromLocalStorage(
   serverName: string,
   serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
   opts?: { preserveClientRegistration?: boolean },
-): void {
+): boolean {
   const storage = getSecureStorage()
   const existingData = storage.read()
-  if (!existingData?.mcpOAuth) return
+  if (!existingData?.mcpOAuth) return true
 
   const serverKey = getServerKey(serverName, serverConfig)
   const entry = existingData.mcpOAuth[serverKey]
-  if (!entry) return
+  if (!entry) return true
 
   if (opts?.preserveClientRegistration && entry.clientId) {
     // densable: if already tokenless stub, leave as-is
     if (!entry.accessToken && !entry.refreshToken) {
-      return
+      return true
     }
     existingData.mcpOAuth[serverKey] = {
       ...entry,
@@ -1126,17 +1247,20 @@ export function clearServerTokensFromLocalStorage(
       expiresAt: 0,
       scope: undefined,
     }
-    storage.update(existingData)
+    const res = storage.update(existingData)
+    if (!res.success) return false
     logMCPDebug(
       serverName,
       'Cleared stored tokens (preserved client registration)',
     )
-    return
+    return true
   }
 
   delete existingData.mcpOAuth[serverKey]
-  storage.update(existingData)
+  const res = storage.update(existingData)
+  if (!res.success) return false
   logMCPDebug(serverName, 'Cleared stored tokens')
+  return true
 }
 
 type WWWAuthenticateParams = {
@@ -2221,6 +2345,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
     const tokenData = data?.mcpOAuth?.[serverKey]
+    if (
+      tokenData?.accessToken &&
+      rejectedStoredTokens.get(serverKey) === tokenData.accessToken
+    ) {
+      return undefined
+    }
 
     // XAA: a cached id_token plays the same UX role as a refresh_token — run
     // the silent exchange to get a fresh access_token without a browser. The
@@ -2384,6 +2514,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async saveTokens(tokens: OAuthTokens): Promise<void> {
+    if (dialedWithoutOAuth.get(this.serverName) === this.serverConfig.url) {
+      dialedWithoutOAuth.delete(this.serverName)
+    }
+    rejectedStoredTokens.delete(
+      getServerKey(this.serverName, this.serverConfig),
+    )
     if (
       tokens.access_token !== this._lastServedAccessToken &&
       this.handleRedirection
@@ -2853,6 +2989,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       const storage = getSecureStorage()
       const data = storage.read()
       const tokenData = data?.mcpOAuth?.[serverKey]
+      if (
+        tokenData?.accessToken &&
+        rejectedStoredTokens.get(serverKey) === tokenData.accessToken
+      ) {
+        return undefined
+      }
       if (tokenData) {
         const expiresIn = (tokenData.expiresAt - Date.now()) / 1000
         if (expiresIn > 300) {
@@ -2900,6 +3042,12 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const data = storage.read()
     const serverKey = getServerKey(this.serverName, this.serverConfig)
     const tokenData = data?.mcpOAuth?.[serverKey]
+    if (
+      tokenData?.accessToken &&
+      rejectedStoredTokens.get(serverKey) === tokenData.accessToken
+    ) {
+      return { tokenData: undefined, freshTokens: undefined }
+    }
     const expiresIn =
       tokenData?.expiresAt != null
         ? (tokenData.expiresAt - Date.now()) / 1000
@@ -3246,4 +3394,11 @@ function getScopeFromMetadata(
   }
   // Intentionally no scopes_supported fallback (2.1.196).
   return undefined
+}
+
+export function hasStaticAuthHeader(
+  config: McpSSEServerConfig | McpHTTPServerConfig,
+): boolean {
+  const headers = config.headers ?? {}
+  return Object.keys(headers).some(key => key.toLowerCase() === 'authorization')
 }

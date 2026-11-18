@@ -1654,6 +1654,67 @@ export function hasUltrathinkKeyword(text: string): boolean {
   return /\bultrathink\b/i.test(text)
 }
 
+const THINKING_TRIGGER_DELIMITERS: Record<string, string> = {
+  '`': '`',
+  '"': '"',
+  '<': '>',
+  '{': '}',
+  '[': ']',
+  '(': ')',
+  "'": "'",
+}
+
+function findKeywordTriggerPositions(
+  text: string,
+  keyword: string,
+): Array<{ word: string; start: number; end: number }> {
+  if (!new RegExp(keyword, 'i').test(text)) return []
+  if (text.startsWith('/')) return []
+  const excludedRanges: Array<{ start: number; end: number }> = []
+  let activeDelimiter: string | null = null
+  let rangeStart = 0
+  const isWordChar = (ch: string | undefined): boolean =>
+    Boolean(ch && /[\p{L}\p{N}_]/u.test(ch))
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (activeDelimiter) {
+      if (activeDelimiter === '[' && ch === '[') {
+        rangeStart = i
+        continue
+      }
+      if (ch !== THINKING_TRIGGER_DELIMITERS[activeDelimiter]) continue
+      if (activeDelimiter === "'" && isWordChar(text[i + 1])) continue
+      excludedRanges.push({ start: rangeStart, end: i + 1 })
+      activeDelimiter = null
+    } else if (
+      (ch === '<' && i + 1 < text.length && /[a-zA-Z/]/.test(text[i + 1]!)) ||
+      (ch === "'" && !isWordChar(text[i - 1])) ||
+      (ch !== '<' && ch !== "'" && ch in THINKING_TRIGGER_DELIMITERS)
+    ) {
+      activeDelimiter = ch
+      rangeStart = i
+    }
+  }
+
+  const positions: Array<{ word: string; start: number; end: number }> = []
+  // Fresh /g literal each call — String.prototype.matchAll copies lastIndex
+  // from the source regex, so a shared instance would leak state across calls.
+  const matches = text.matchAll(new RegExp(`\\b${keyword}\\b`, 'gi'))
+  for (const match of matches) {
+    if (match.index === undefined) continue
+    const start = match.index
+    const end = start + match[0].length
+    if (excludedRanges.some(r => start >= r.start && start < r.end)) continue
+    const prev = text[start - 1]
+    const next = text[end]
+    if (prev === '/' || prev === '\\' || prev === '-') continue
+    if (next === '/' || next === '\\' || next === '-' || next === '?') continue
+    if (next === '.' && isWordChar(text[end + 1])) continue
+    positions.push({ word: match[0], start, end })
+  }
+  return positions
+}
+
 /**
  * Find positions of "ultrathink" keyword in text (for UI highlighting/notification)
  */
@@ -1662,23 +1723,7 @@ export function findThinkingTriggerPositions(text: string): Array<{
   start: number
   end: number
 }> {
-  const positions: Array<{ word: string; start: number; end: number }> = []
-  // Fresh /g literal each call — String.prototype.matchAll copies lastIndex
-  // from the source regex, so a shared instance would leak state from
-  // hasUltrathinkKeyword's .test() into this call on the next render.
-  const matches = text.matchAll(/\bultrathink\b/gi)
-
-  for (const match of matches) {
-    if (match.index !== undefined) {
-      positions.push({
-        word: match[0],
-        start: match.index,
-        end: match.index + match[0].length,
-      })
-    }
-  }
-
-  return positions
+  return findKeywordTriggerPositions(text, 'ultrathink')
 }
 
 const RAINBOW_COLORS: Array<keyof Theme> = [

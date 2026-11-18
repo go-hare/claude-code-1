@@ -8,7 +8,13 @@ import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
 import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
 import { logError } from '../utils/log.js';
-import { configureMarked, endsWithBlankLine, formatToken, stripRawOsc8Sequences } from '../utils/markdown.js';
+import {
+  configureMarked,
+  endsWithBlankLine,
+  formatToken,
+  stripLeadingBlankTokensBeforeCode,
+  stripRawOsc8Sequences,
+} from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { countCharInString } from '../utils/stringUtils.js';
@@ -355,20 +361,17 @@ function MarkdownBlockquote({
   isScreenReader: boolean;
   maxWidth?: number;
 }): React.ReactNode {
-  const parts = token.tokens.map(child => ({
+  const normalized = stripLeadingBlankTokensBeforeCode(token, highlight);
+  const effectiveToken = normalized ?? token;
+  const parts = effectiveToken.tokens.map(child => ({
     code: child.type === 'code',
     fullWidth: maxWidth !== undefined && tokenContainsFullWidthBlock(child),
     text: formatToken(child, theme, 0, null, null, highlight),
   }));
 
   if (maxWidth === undefined || isScreenReader || !parts.some(p => p.fullWidth)) {
-    const body = chalk.italic(
-      parts
-        .map(p => p.text)
-        .join('')
-        .replace(/^\n+/, '')
-        .trimEnd(),
-    );
+    const joined = parts.map(p => p.text).join('');
+    const body = chalk.italic((normalized ? joined : joined.replace(/^\n+/, '')).trimEnd());
     return (
       <Box
         borderStyle="quote"
@@ -397,7 +400,8 @@ function MarkdownBlockquote({
   const rows: React.ReactNode[] = [];
   let pendingNewlines = 0;
   for (const part of merged) {
-    const leadingTrimmed = part.code ? part.text : part.text.replace(/^\n+/, '');
+    const leadingTrimmed =
+      part.code || (normalized !== undefined && part === merged[0]) ? part.text : part.text.replace(/^\n+/, '');
     const trimmed = part.code ? leadingTrimmed.replace(/\n$/, '') : leadingTrimmed.trimEnd();
     if (!trimmed) {
       pendingNewlines += countCharInString(part.text, '\n');
@@ -630,6 +634,15 @@ export const STREAM_MD_FREEZE_CHARS = 4096;
 export const STREAM_MD_SOFT_TAIL_CHARS = 1536;
 /** Official lsd: GFM fenced code open/close lines. */
 export const STREAM_MD_FENCE_RE = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/gm;
+/** #1377 (official Ps / vs / ito): streaming table header + row detection. */
+export const STREAM_MD_INCOMPLETE_TABLE_HEADER_RE = /^ {0,3}\|[^\n]*\n[ |:\r-]*$/;
+export const STREAM_MD_TABLE_LINE_RE = /^ {0,3}\|/;
+const STREAM_MD_TABLE_HEADER_MAX_BYTES = 1024;
+const STREAM_MD_TABLE_MAX_COLS = 64;
+
+export function extractTableHeaderPrefix(raw: string): string {
+  return raw.slice(0, raw.indexOf('\n', raw.indexOf('\n') + 1) + 1);
+}
 
 export type StreamMarkdownState = {
   chunks: ReactNode[];
@@ -637,6 +650,7 @@ export type StreamMarkdownState = {
   gapAfterChunks: boolean;
   stablePrefix: string;
   openFence: string | null;
+  openTable: string | null;
 };
 
 export function createStreamMarkdownState(): StreamMarkdownState {
@@ -646,6 +660,7 @@ export function createStreamMarkdownState(): StreamMarkdownState {
     gapAfterChunks: false,
     stablePrefix: '',
     openFence: null,
+    openTable: null,
   };
 }
 
@@ -743,10 +758,11 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
 
   const freezeUpTo = (source: string, end: number, gapAfter: boolean): string => {
     const frozenSlice = source.substring(0, end);
-    const markdownSource = state.openFence !== null ? `${state.openFence}\n${frozenSlice}` : frozenSlice;
+    const markdownSource = (state.openFence !== null ? `${state.openFence}\n` : (state.openTable ?? '')) + frozenSlice;
+    const skipHighlight = state.openFence !== null || !gapAfter;
     state.chunks.push(
       <Box key={state.chunks.length} marginTop={state.chunks.length > 0 && state.gapAfterChunks ? 1 : 0}>
-        <Markdown skipTokenCache capProseWidth>
+        <Markdown skipTokenCache skipHighlightCache={skipHighlight} capProseWidth>
           {markdownSource}
         </Markdown>
       </Box>,
@@ -755,6 +771,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     state.frozenSource += frozenSlice;
     state.gapAfterChunks = gapAfter;
     state.stablePrefix = '';
+    if (gapAfter) state.openTable = null;
     return source.substring(end);
   };
 
@@ -767,18 +784,49 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     }
   }
 
+  let hasIncompleteTable = false;
+  let hasStableContent = false;
   if (state.openFence === null) {
     const boundary = state.stablePrefix.length;
-    const tokens = marked.lexer(live.substring(boundary));
+    const openTable = state.openTable ?? '';
+    const combined = openTable + live.substring(boundary);
+    const lastNl = combined.lastIndexOf('\n') + 1;
+    const lexSource =
+      openTable !== '' || STREAM_MD_TABLE_LINE_RE.test(combined.substring(lastNl))
+        ? combined.substring(0, lastNl)
+        : combined;
+    const tokens = marked.lexer(lexSource);
     let lastContentIdx = tokens.length - 1;
     while (lastContentIdx >= 0 && tokens[lastContentIdx]!.type === 'space') {
       lastContentIdx--;
     }
+    const lastToken = tokens.at(-1);
+    const closedTable = lastToken?.type === 'table' && endsWithBlankLine(lexSource);
     let advance = 0;
-    for (let i = 0; i < lastContentIdx; i++) {
-      advance += tokens[i]!.raw.length;
+    if (closedTable) {
+      advance = lexSource.length;
+    } else {
+      for (let i = 0; i < lastContentIdx; i++) {
+        advance += tokens[i]!.raw.length;
+      }
     }
-    if (advance > 0) {
+    const openTableToken = lastToken?.type === 'table' && !closedTable ? (lastToken as Tokens.Table) : null;
+    hasIncompleteTable =
+      openTableToken !== null ||
+      (lastToken?.type === 'paragraph' &&
+        STREAM_MD_INCOMPLETE_TABLE_HEADER_RE.test(lastToken.raw + combined.substring(lexSource.length)));
+    hasStableContent = advance > 0 || lastContentIdx === 0;
+    if (tokens[0]?.type !== 'table') {
+      state.openTable = null;
+    }
+    if (openTable !== '' && advance >= openTable.length) {
+      if (tokens[0]?.type === 'table' && (tokens[0] as Tokens.Table).rows.length === 0) {
+        state.openTable = null;
+        state.gapAfterChunks = true;
+      } else {
+        live = freezeUpTo(live, advance - openTable.length, true);
+      }
+    } else if (openTable === '' && advance > 0) {
       state.stablePrefix = live.substring(0, boundary + advance);
     }
     if (state.stablePrefix.length > STREAM_MD_FREEZE_CHARS) {
@@ -787,20 +835,34 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     if (live.length - state.stablePrefix.length > STREAM_MD_FREEZE_CHARS) {
       const start = state.stablePrefix.length;
       const split = softSplitIndex(live.substring(start));
+      const nextOpenTable =
+        live[start + split - 1] === '\n' &&
+        openTableToken !== null &&
+        openTableToken.header.length <= STREAM_MD_TABLE_MAX_COLS
+          ? extractTableHeaderPrefix(openTableToken.raw)
+          : '';
       live = freezeUpTo(live, start + split, false);
+      state.openTable =
+        nextOpenTable !== '' && nextOpenTable.length <= STREAM_MD_TABLE_HEADER_MAX_BYTES ? nextOpenTable : null;
     }
   }
 
   const stablePrefix = state.stablePrefix;
   const unstableSuffix = live.substring(stablePrefix.length);
   const hasStable = stablePrefix.trim() !== '';
-  const unstableForRender =
-    unstableSuffix && state.openFence !== null ? `${state.openFence}\n${unstableSuffix}` : unstableSuffix;
+  const tableOrFencePrefix = state.openFence !== null ? `${state.openFence}\n` : (state.openTable ?? '');
+  let unstableForRender = unstableSuffix ? tableOrFencePrefix + unstableSuffix : '';
+  if (hideTrailingLine && hasIncompleteTable) {
+    unstableForRender = unstableForRender.substring(0, unstableForRender.lastIndexOf('\n') + 1);
+    if (hasStableContent && countCharInString(unstableForRender.trim(), '\n') < 2) {
+      unstableForRender = '';
+    }
+  }
   // densable aPa: hideTrailingLine && !suffix.endsWith('\n') → tailWrap wrap-stream
-  const incompleteLiveLine = !unstableSuffix.endsWith('\n');
+  const incompleteLiveLine = !unstableForRender.endsWith('\n');
   const tailWrap = hideTrailingLine && incompleteLiveLine ? ('wrap-stream' as const) : undefined;
-  const unstableEl = unstableSuffix ? (
-    <Markdown skipTokenCache tailWrap={tailWrap} capProseWidth>
+  const unstableEl = unstableForRender ? (
+    <Markdown skipTokenCache skipHighlightCache tailWrap={tailWrap} capProseWidth>
       {unstableForRender}
     </Markdown>
   ) : null;

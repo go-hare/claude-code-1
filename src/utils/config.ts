@@ -508,6 +508,9 @@ export type GlobalConfig = {
   taskCompleteNotifEnabled?: boolean
   inputNeededNotifEnabled?: boolean
   agentPushNotifEnabled?: boolean
+  pushNotifUpsellSeenCount?: number
+  remoteControlUpsellSeenCount?: number
+  hasUsedRemoteControl?: boolean
 
   // Claude Code usage tracking
   claudeCodeFirstTokenDate?: string // ISO timestamp of the user's first Claude Code OAuth token
@@ -579,6 +582,9 @@ export type GlobalConfig = {
 
   // Resume-return dialog tracking (tengu_gleaming_fair / CBp)
   resumeReturnDismissed?: boolean // "Don't ask me again" picked
+
+  /** Gold #1292 — capped (256) list of seen security warning keys. */
+  seenSecurityWarnings?: string[]
 
   // /config Dynamic workflow size guideline (official workflowSizeGuideline)
   // 'unrestricted' | 'small' | 'medium' | 'large' | positive agent cap number
@@ -1014,6 +1020,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'taskCompleteNotifEnabled',
   'inputNeededNotifEnabled',
   'agentPushNotifEnabled',
+  'pushNotifUpsellSeenCount',
+  'remoteControlUpsellSeenCount',
   'respectGitignore',
   'claudeInChromeDefaultEnabled',
   'hasCompletedClaudeInChromeOnboarding',
@@ -2638,4 +2646,37 @@ export function _resetGlobalConfigFreshnessWatchForTesting(): void {
   globalConfigFreshnessResubscribed = false
   globalConfigFreshnessCleanup?.()
   globalConfigFreshnessCleanup = undefined
+}
+
+const MAX_SEEN_SECURITY_WARNINGS = 256
+
+/**
+ * Gold `qCi` @299967319 — filter security warnings to those whose `seenKey`
+ * has not yet been recorded in `GlobalConfig.seenSecurityWarnings`.
+ */
+export function filterUnseenSecurityWarnings<T extends { seenKey?: string }>(
+  warnings: readonly T[],
+): T[] {
+  const seen = new Set(getGlobalConfig().seenSecurityWarnings ?? [])
+  return warnings.filter(w => w.seenKey === undefined || !seen.has(w.seenKey))
+}
+
+/**
+ * Gold `KCi` @299967411 — persist newly-seen security warning keys,
+ * deduplicated and capped to the latest 256 entries.
+ */
+export function markSecurityWarningsSeen(seenKeys: readonly string[]): void {
+  if (seenKeys.length === 0) return
+  saveGlobalConfig(prev => {
+    const existing = prev.seenSecurityWarnings ?? []
+    const seen = new Set(existing)
+    const fresh = Array.from(new Set(seenKeys)).filter(k => !seen.has(k))
+    if (fresh.length === 0) return prev
+    return {
+      ...prev,
+      seenSecurityWarnings: [...existing, ...fresh].slice(
+        -MAX_SEEN_SECURITY_WARNINGS,
+      ),
+    }
+  })
 }

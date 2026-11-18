@@ -61,6 +61,10 @@ import { createSystemMessage } from './messages.js'
 import { parseUserSpecifiedModel } from './model/model.js'
 import { getPlansDirectory } from './plans.js'
 import {
+  resolveResumeRefusalFallbackModel,
+  restoreModelOnResume,
+} from './refusalFallback.js'
+import {
   isCoordinatorModeEnvEnabled,
   syncCoordinatorModeEnvFromSession,
 } from './residualFinalEnvGates.js'
@@ -207,14 +211,28 @@ export function restoreSessionStateFromLog(
     }
   }
 
-  // Restore session model choice (from /model command)
+  // Restore session model choice (from /model command), guarding refusal fallback on fork (#1392)
   const sessionModel = (result as Record<string, unknown>).sessionModel as
     | string
     | undefined
-  if (sessionModel) {
+  const resumeEntries = (result.messages ?? []) as Parameters<
+    typeof restoreModelOnResume
+  >[0]
+  const restoredFallback = restoreModelOnResume(resumeEntries, {
+    isFork: !!options?.forkSession,
+  })
+  const effectiveSessionModel = sessionModel
+    ? (restoredFallback.model ??
+      resolveResumeRefusalFallbackModel(
+        resumeEntries,
+        sessionModel,
+        !!options?.forkSession,
+      ))
+    : undefined
+  if (effectiveSessionModel) {
     setAppState(prev => ({
       ...prev,
-      mainLoopModel: sessionModel,
+      mainLoopModel: effectiveSessionModel,
     }))
   }
 

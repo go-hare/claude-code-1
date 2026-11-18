@@ -2,7 +2,10 @@ import { feature } from 'bun:bundle'
 import { prependBullets } from 'src/constants/prompts.js'
 import * as attributionMod from 'src/utils/attribution.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
-import { isBareMode } from 'src/utils/envUtils.js'
+import {
+  isBareMode,
+  shouldMaintainProjectWorkingDir,
+} from 'src/utils/envUtils.js'
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { shouldIncludeGitInstructions } from 'src/utils/gitSettings.js'
 import { getClaudeTempDir } from 'src/utils/permissions/filesystem.js'
@@ -396,6 +399,12 @@ async function getLeanGitInstructions(): Promise<string> {
 - Commit or push only when the user asks. If on the default branch, branch first.${attributionLines ? `\n${attributionLines}` : ''}${sandboxSection ? `\n\n${sandboxSection.trimStart()}` : ''}`
 }
 
+function getWorkingDirPersistenceNote(): string {
+  return shouldMaintainProjectWorkingDir()
+    ? 'Every call starts in the start folder: a `cd` does not carry over.'
+    : '`cd` carries to the next call only in the main session, if the command succeeds and ends inside the working directories. Outside them the shell returns to the start folder; otherwise it stays where it was.'
+}
+
 async function getLeanBashPrompt(): Promise<string> {
   const hasBg = getBackgroundUsageNote() !== null
   const gitSection = await getLeanGitInstructions()
@@ -406,8 +415,7 @@ async function getLeanBashPrompt(): Promise<string> {
   const toolLines = [
     `- IMPORTANT: Avoid using this tool to run ${avoidCommands} commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.`,
   ]
-  const workingDirLine =
-    "- Working directory persists between calls, but prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile."
+  const workingDirLine = `- ${getWorkingDirPersistenceNote()} Prefer absolute paths — \`cd\` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist; the shell is initialized from the user's profile.`
   const bgLines: string[] = []
   if (hasBg) {
     let bgLine =
@@ -547,7 +555,7 @@ export async function getSimplePrompt(
   return [
     'Executes a given bash command and returns its output.',
     '',
-    "The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh).",
+    `${getWorkingDirPersistenceNote()} Shell state does not persist. The shell environment is initialized from the user's profile (bash or zsh).`,
     '',
     `IMPORTANT: Avoid using this tool to run ${avoidCommands} commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user:`,
     '',

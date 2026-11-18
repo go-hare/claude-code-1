@@ -1,7 +1,9 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import React from 'react';
-import { Ansi, Box, Text } from '@anthropic/ink';
+import { Ansi, Box, Text, wrapText } from '@anthropic/ink';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { truncateToWidth } from '../../utils/format.js';
 import ThemedText from '../design-system/ThemedText.js';
 import { useAppState } from '../../state/AppState.js';
 import type { PermissionMode, PermissionRule } from '../../types/permissions.js';
@@ -13,7 +15,60 @@ import { PermissionPreviewGutter } from './PermissionPreviewGutter.js';
 export type PermissionRuleExplanationProps = {
   permissionResult: PermissionDecision;
   toolType: 'tool' | 'command' | 'edit' | 'read';
+  rowBudget?: number;
+  rowColumns?: number;
+  hideAskRuleHint?: boolean;
 };
+
+const MIN_REASON_ROW_BUDGET = 4;
+const MAX_REASON_ROW_BUDGET = 12;
+
+export function capExplanationRows(text: string, maxRows: number, colWidth: number, shouldCap: boolean): string {
+  if (!shouldCap) return text;
+  const lines = wrapText(text, colWidth, 'wrap')
+    .split('\n')
+    .map(line => truncateToWidth(line, colWidth));
+  if (lines.length <= maxRows) {
+    return lines.join('\n');
+  }
+  const keep = Math.max(1, maxRows - 1);
+  const more = `… (+${lines.length - keep} more lines)`;
+  return [...lines.slice(0, keep), truncateToWidth(more, colWidth)].join('\n');
+}
+
+export function allocateExplanationRowBudget(
+  consentText: string | undefined,
+  askRuleText: string | undefined,
+  colWidth: number,
+  budget: number,
+  compact: boolean,
+): { shouldCap: boolean; consentRows: number; askRuleRows: number } {
+  const countLines = (text: string | undefined): number => {
+    if (text === undefined) return 0;
+    const wrapped = wrapText(text, colWidth, 'wrap');
+    return wrapped.split('\n').length;
+  };
+  const consentNeeded = countLines(consentText);
+  const askRuleNeeded = countLines(askRuleText);
+  const shouldCap = compact || consentNeeded + askRuleNeeded > budget;
+  if (!shouldCap) {
+    return { shouldCap: false, consentRows: consentNeeded, askRuleRows: askRuleNeeded };
+  }
+  const mins = compact ? { consent: 2, askRule: 2 } : { consent: 4, askRule: 4 };
+  let consentRows = Math.min(consentNeeded, mins.consent);
+  let askRuleRows = Math.min(askRuleNeeded, mins.askRule);
+  let extra = Math.max(0, budget - (consentRows + askRuleRows));
+  if (extra > 0) {
+    const addConsent = Math.min(consentNeeded - consentRows, extra);
+    consentRows += addConsent;
+    extra -= addConsent;
+  }
+  if (extra > 0) {
+    const addAskRule = Math.min(askRuleNeeded - askRuleRows, extra);
+    askRuleRows += addAskRule;
+  }
+  return { shouldCap: true, consentRows, askRuleRows };
+}
 
 type DecisionReasonStrings = {
   reasonString: string;
@@ -129,8 +184,12 @@ function stringsForDecisionReason(
 export function PermissionRuleExplanation({
   permissionResult,
   toolType,
+  rowBudget,
+  rowColumns,
+  hideAskRuleHint,
 }: PermissionRuleExplanationProps): React.ReactNode {
   const permissionMode = useAppState(s => s.toolPermissionContext.mode);
+  const { columns, rows } = useTerminalSize();
   const strings = stringsForDecisionReason(permissionResult?.decisionReason, toolType, permissionMode);
   const matchedAskRule = permissionResult?.behavior === 'ask' ? permissionResult.matchedAskRule : undefined;
   const matchedAskRuleStrings =
@@ -141,34 +200,53 @@ export function PermissionRuleExplanation({
     return null;
   }
 
+  const budget = Math.min(MAX_REASON_ROW_BUDGET, Math.max(MIN_REASON_ROW_BUDGET, rowBudget ?? rows - 13));
+  const colWidth = Math.max(1, rowColumns ?? columns - 8);
+  const compact = rowBudget !== undefined || budget < MAX_REASON_ROW_BUDGET;
+  const { shouldCap, consentRows, askRuleRows } = allocateExplanationRowBudget(
+    strings?.reasonString,
+    matchedAskRuleStrings?.reasonString,
+    colWidth,
+    budget,
+    compact || permissionResult?.decisionReason?.type === 'sandboxOverride',
+  );
+  const displayReason = strings
+    ? capExplanationRows(strings.reasonString, consentRows, colWidth, shouldCap)
+    : undefined;
+  const displayAskRule = matchedAskRuleStrings
+    ? capExplanationRows(matchedAskRuleStrings.reasonString, askRuleRows, colWidth, shouldCap)
+    : undefined;
+
   const themeColor =
     strings?.themeColor ??
     (permissionResult?.decisionReason?.type === 'hook' && permissionMode === 'auto' ? 'warning' : undefined);
 
   return (
     <Box marginBottom={1} flexDirection="column">
-      {strings && (
-        <PermissionPreviewGutter multiline={strings.reasonString.includes('\n')}>
+      {strings && displayReason !== undefined && (
+        <PermissionPreviewGutter multiline={displayReason.includes('\n')}>
           {themeColor ? (
-            <ThemedText color={themeColor}>{strings.reasonString}</ThemedText>
+            <ThemedText color={themeColor}>{displayReason}</ThemedText>
           ) : (
             <Text>
-              <Ansi>{strings.reasonString}</Ansi>
+              <Ansi>{displayReason}</Ansi>
             </Text>
           )}
         </PermissionPreviewGutter>
       )}
       {strings?.configString && <Text dimColor>{strings.configString}</Text>}
-      {matchedAskRuleStrings && (
+      {matchedAskRuleStrings && displayAskRule !== undefined && (
         <>
-          <PermissionPreviewGutter multiline={matchedAskRuleStrings.reasonString.includes('\n')}>
+          <PermissionPreviewGutter multiline={displayAskRule.includes('\n')}>
             <Text>
-              <Ansi>{matchedAskRuleStrings.reasonString}</Ansi>
+              <Ansi>{displayAskRule}</Ansi>
             </Text>
           </PermissionPreviewGutter>
-          {matchedAskRuleStrings.configString && matchedAskRuleStrings.configString !== strings?.configString && (
-            <Text dimColor>{matchedAskRuleStrings.configString}</Text>
-          )}
+          {matchedAskRuleStrings.configString &&
+            hideAskRuleHint !== true &&
+            matchedAskRuleStrings.configString !== strings?.configString && (
+              <Text dimColor>{matchedAskRuleStrings.configString}</Text>
+            )}
         </>
       )}
     </Box>
