@@ -2,8 +2,8 @@
  * densable 2.1.289 iIt dynamic Wf bodies (jmo / Xmo / Gmo / Tgo / Ymo / Vmo /
  * _go / kgo / ogo / Zmo). Analog hosts — never export minify names.
  */
+import { readSubagentSteer } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
@@ -196,10 +196,7 @@ export function getSubagentSteerDelegationSection(
   if (!enabledTools.has(AGENT_TOOL_NAME)) {
     return null
   }
-  const mode =
-    process.env.CLAUDE_CODE_SUBAGENT_STEER ??
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_subagent_steer', '')
-  if (mode !== 'counter_steer') {
+  if (readSubagentSteer() !== 'counter_steer') {
     return null
   }
   return `## Delegating to subagents
