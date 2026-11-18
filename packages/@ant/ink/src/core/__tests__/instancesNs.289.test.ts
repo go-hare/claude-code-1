@@ -14,30 +14,20 @@ describe('densable 2.1.289 Ns Ht factory / querier.owed', () => {
   test('two Ns() calls return the same map as the default export', async () => {
     // Other suites reset the bootstrap host after the default map was captured.
     // Check the initial-load contract before any session replacement in a child.
-    if (process.env.CLAUDE_TEST_INK_INITIAL_HOST_CHILD !== '1') {
-      const child = Bun.spawn({
-        cmd: [
-          process.execPath,
-          'test',
-          import.meta.path,
-          '--test-name-pattern',
-          'two Ns\\(\\) calls return the same map as the default export',
-        ],
-        env: { ...process.env, CLAUDE_TEST_INK_INITIAL_HOST_CHILD: '1' },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
-      const [exit, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ])
-      expect(exit, `${stdout}\n${stderr}`).toBe(0)
-      expect(stderr).toContain('1 pass')
-      return
-    }
-    expect(Ns()).toBe(Ns())
-    expect(Ns()).toBe(instances)
+    const instancesPath = new URL('../instances.ts', import.meta.url).pathname
+    const script = `import instances, { Ns } from ${JSON.stringify(instancesPath)}; if (Ns() !== Ns() || Ns() !== instances) process.exit(1); console.error('1 pass');`
+    const child = Bun.spawn({
+      cmd: [process.execPath, '-e', script],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const [exit, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect(exit, `${stdout}\n${stderr}`).toBe(0)
+    expect(stderr).toContain('1 pass')
   })
 
   test('bindInkSessionHost keys Ns off U().host', () => {
