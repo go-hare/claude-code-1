@@ -1,9 +1,30 @@
 import type { Command } from '../commands.js'
 import type { LocalCommandCall } from '../types/command.js'
-import { getAPIProvider } from '../utils/model/providers.js'
-import { updateSettingsForSource } from '../utils/settings/settings.js'
-import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { applyConfigEnvironmentVariables } from '../utils/managedEnv.js'
+import { getAPIProvider } from '../utils/model/providers.js'
+import {
+  getSettings_DEPRECATED,
+  updateSettingsForSource,
+} from '../utils/settings/settings.js'
+
+const PROVIDER_ENV_FLAGS = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_OPENAI',
+  'CLAUDE_CODE_USE_GEMINI',
+  'CLAUDE_CODE_USE_GROK',
+] as const
+
+const CLEARED_PROVIDER_ENV = Object.fromEntries(
+  PROVIDER_ENV_FLAGS.map(k => [k, undefined]),
+) as unknown as Record<string, string>
+
+function clearProcessProviderFlags(): void {
+  for (const key of PROVIDER_ENV_FLAGS) {
+    delete process.env[key]
+  }
+}
 
 function getEnvVarForProvider(provider: string): string {
   switch (provider) {
@@ -36,6 +57,31 @@ function getMergedEnv(): Record<string, string> {
   return merged
 }
 
+function getMissingCredentialWarning(arg: string): string | null {
+  const mergedEnv = getMergedEnv()
+  if (arg === 'openai') {
+    const hasChatGPTAuth = mergedEnv.OPENAI_AUTH_MODE === 'chatgpt'
+    const hasKey = !!mergedEnv.OPENAI_API_KEY
+    const hasUrl = !!mergedEnv.OPENAI_BASE_URL
+    if (!hasChatGPTAuth && (!hasKey || !hasUrl)) {
+      const missing: string[] = []
+      if (!hasKey) missing.push('OPENAI_API_KEY')
+      if (!hasUrl) missing.push('OPENAI_BASE_URL')
+      return `Warning: Missing env vars: ${missing.join(', ')}\nConfigure them via settings.json env or set manually.`
+    }
+  } else if (arg === 'grok') {
+    const hasKey = !!(mergedEnv.GROK_API_KEY || mergedEnv.XAI_API_KEY)
+    if (!hasKey) {
+      return 'Warning: Missing env var: GROK_API_KEY (or XAI_API_KEY)\nConfigure it via settings.json env or set manually.'
+    }
+  } else if (arg === 'gemini') {
+    if (!mergedEnv.GEMINI_API_KEY) {
+      return 'Warning: Missing env var: GEMINI_API_KEY\nConfigure it via settings.json env or set manually.'
+    }
+  }
+  return null
+}
+
 const call: LocalCommandCall = async (args, _context) => {
   const arg = args.trim().toLowerCase()
 
@@ -49,24 +95,9 @@ const call: LocalCommandCall = async (args, _context) => {
   if (arg === 'unset') {
     updateSettingsForSource('userSettings', {
       modelType: undefined,
-      // Clear persisted provider flags so applyConfigEnvironmentVariables
-      // cannot resurrect a previous /login choice.
-      env: {
-        CLAUDE_CODE_USE_OPENAI: undefined,
-        CLAUDE_CODE_USE_GEMINI: undefined,
-        CLAUDE_CODE_USE_GROK: undefined,
-        CLAUDE_CODE_USE_BEDROCK: undefined,
-        CLAUDE_CODE_USE_VERTEX: undefined,
-        CLAUDE_CODE_USE_FOUNDRY: undefined,
-      } as unknown as Record<string, string>,
+      env: CLEARED_PROVIDER_ENV,
     })
-    // Also clear all provider-specific env vars to prevent conflicts
-    delete process.env.CLAUDE_CODE_USE_BEDROCK
-    delete process.env.CLAUDE_CODE_USE_VERTEX
-    delete process.env.CLAUDE_CODE_USE_FOUNDRY
-    delete process.env.CLAUDE_CODE_USE_OPENAI
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
+    clearProcessProviderFlags()
     return {
       type: 'text',
       value: 'API provider cleared (will use environment variables).',
@@ -90,97 +121,45 @@ const call: LocalCommandCall = async (args, _context) => {
     }
   }
 
-  // Check env vars when switching to openai (including settings.env)
-  if (arg === 'openai') {
-    const mergedEnv = getMergedEnv()
-    const hasChatGPTAuth = mergedEnv.OPENAI_AUTH_MODE === 'chatgpt'
-    const hasKey = !!mergedEnv.OPENAI_API_KEY
-    const hasUrl = !!mergedEnv.OPENAI_BASE_URL
-    if (!hasChatGPTAuth && (!hasKey || !hasUrl)) {
-      updateSettingsForSource('userSettings', { modelType: 'openai' })
-      const missing = []
-      if (!hasKey) missing.push('OPENAI_API_KEY')
-      if (!hasUrl) missing.push('OPENAI_BASE_URL')
-      return {
-        type: 'text',
-        value: `Switched to OpenAI provider.\nWarning: Missing env vars: ${missing.join(', ')}\nConfigure them via /login or set manually.`,
-      }
-    }
-  }
-
-  // Check env vars when switching to grok (including settings.env)
-  if (arg === 'grok') {
-    const mergedEnv = getMergedEnv()
-    const hasKey = !!(mergedEnv.GROK_API_KEY || mergedEnv.XAI_API_KEY)
-    if (!hasKey) {
-      updateSettingsForSource('userSettings', { modelType: 'grok' })
-      return {
-        type: 'text',
-        value: `Switched to Grok provider.\nWarning: Missing env var: GROK_API_KEY (or XAI_API_KEY)\nConfigure it via settings.json env or set manually.`,
-      }
-    }
-  }
-
-  // Check env vars when switching to gemini (including settings.env)
-  if (arg === 'gemini') {
-    const mergedEnv = getMergedEnv()
-    const hasKey = !!mergedEnv.GEMINI_API_KEY
-    // GEMINI_BASE_URL is optional (has default)
-    if (!hasKey) {
-      updateSettingsForSource('userSettings', { modelType: 'gemini' })
-      return {
-        type: 'text',
-        value: `Switched to Gemini provider.\nWarning: Missing env var: GEMINI_API_KEY\nConfigure it via /login or set manually.`,
-      }
-    }
-  }
-
-  // Handle different provider types
-  // - 'anthropic', 'openai', 'gemini' are stored in settings.json (persistent)
-  // - 'bedrock', 'vertex', 'foundry' are env-only (do NOT touch settings.json)
   if (
     arg === 'anthropic' ||
     arg === 'openai' ||
     arg === 'gemini' ||
     arg === 'grok'
   ) {
+    const warning = getMissingCredentialWarning(arg)
     // Clear any cloud / third-party provider env vars to avoid conflicts
-    delete process.env.CLAUDE_CODE_USE_BEDROCK
-    delete process.env.CLAUDE_CODE_USE_VERTEX
-    delete process.env.CLAUDE_CODE_USE_FOUNDRY
-    delete process.env.CLAUDE_CODE_USE_OPENAI
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
+    clearProcessProviderFlags()
     // Update settings.json — also strip persisted USE_* flags from settings.env
     // so applyConfigEnvironmentVariables() cannot re-pin a previous provider.
     updateSettingsForSource('userSettings', {
       modelType: arg,
-      env: {
-        CLAUDE_CODE_USE_OPENAI: undefined,
-        CLAUDE_CODE_USE_GEMINI: undefined,
-        CLAUDE_CODE_USE_GROK: undefined,
-        CLAUDE_CODE_USE_BEDROCK: undefined,
-        CLAUDE_CODE_USE_VERTEX: undefined,
-        CLAUDE_CODE_USE_FOUNDRY: undefined,
-      } as unknown as Record<string, string>,
+      env: CLEARED_PROVIDER_ENV,
     })
     // Ensure settings.env gets applied to process.env
     applyConfigEnvironmentVariables()
-    return { type: 'text', value: `API provider set to ${arg}.` }
-  } else {
-    // Cloud providers: set env vars only, do NOT touch settings.json
-    delete process.env.CLAUDE_CODE_USE_OPENAI
-    delete process.env.OPENAI_API_KEY
-    delete process.env.OPENAI_BASE_URL
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
-    process.env[getEnvVarForProvider(arg)] = '1'
-    // Do not modify settings.json - cloud providers controlled solely by env vars
-    applyConfigEnvironmentVariables()
-    return {
-      type: 'text',
-      value: `API provider set to ${arg} (via environment variable).`,
+    if (warning) {
+      return {
+        type: 'text',
+        value: `Switched to ${arg} provider.\n${warning}`,
+      }
     }
+    return { type: 'text', value: `API provider set to ${arg}.` }
+  }
+
+  // Cloud providers (bedrock / vertex / foundry): clear all conflicting flags
+  // and any persisted non-cloud modelType so env var takes effect, while
+  // preserving in-memory API credentials (e.g. OPENAI_API_KEY / OPENAI_BASE_URL).
+  clearProcessProviderFlags()
+  updateSettingsForSource('userSettings', {
+    modelType: undefined,
+    env: CLEARED_PROVIDER_ENV,
+  })
+  applyConfigEnvironmentVariables()
+  process.env[getEnvVarForProvider(arg)] = '1'
+  return {
+    type: 'text',
+    value: `API provider set to ${arg} (via environment variable).`,
   }
 }
 
