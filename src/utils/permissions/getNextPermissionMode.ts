@@ -1,12 +1,27 @@
 import type { ToolPermissionContext } from '../../Tool.js'
 import type { PermissionMode } from './PermissionMode.js'
-import { transitionPermissionMode } from './permissionSetup.js'
+import {
+  isAutoModeGateEnabled,
+  transitionPermissionMode,
+} from './permissionSetup.js'
+
+function canCycleToAutoModeInCycle(
+  toolPermissionContext: ToolPermissionContext,
+): boolean {
+  return (
+    Boolean(toolPermissionContext.isAutoModeAvailable) &&
+    isAutoModeGateEnabled()
+  )
+}
 
 /**
  * Determines the next permission mode when cycling through modes with Shift+Tab.
  *
- * Unified cycle for all users (no USER_TYPE distinction):
- *   default → acceptEdits → plan → auto → bypassPermissions → default
+ * Official 2.1.289 cycle:
+ *   default → acceptEdits → plan
+ *     ├─ if isBypassPermissionsModeAvailable → bypassPermissions → (auto if gated else default)
+ *     ├─ else if isAutoModeAvailable && isAutoModeGateEnabled() → auto → default
+ *     └─ else → default
  */
 export function getNextPermissionMode(
   toolPermissionContext: ToolPermissionContext,
@@ -20,15 +35,21 @@ export function getNextPermissionMode(
       return 'plan'
 
     case 'plan':
-      return 'auto'
-
-    case 'auto':
       if (toolPermissionContext.isBypassPermissionsModeAvailable) {
         return 'bypassPermissions'
+      }
+      if (canCycleToAutoModeInCycle(toolPermissionContext)) {
+        return 'auto'
       }
       return 'default'
 
     case 'bypassPermissions':
+      if (canCycleToAutoModeInCycle(toolPermissionContext)) {
+        return 'auto'
+      }
+      return 'default'
+
+    case 'auto':
       return 'default'
 
     case 'dontAsk':

@@ -11,12 +11,11 @@
  * These functions are tested through the getNextPermissionMode cycle
  * and through direct unit tests of the gate functions.
  */
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import type { ToolPermissionContext } from '../../../Tool.js'
-import type { PermissionMode } from '../PermissionMode.js'
 import { getNextPermissionMode } from '../getNextPermissionMode.js'
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
+import type { PermissionMode } from '../PermissionMode.js'
+import { _setAutoModeGateEnabledForTesting } from '../permissionSetup.js'
 
 function makeContext(
   mode: PermissionMode,
@@ -29,79 +28,55 @@ function makeContext(
     alwaysDenyRules: {},
     alwaysAskRules: {},
     isBypassPermissionsModeAvailable: true,
+    isAutoModeAvailable: true,
     ...overrides,
   }
 }
 
-// ─── tests ────────────────────────────────────────────────────────────────────
+describe('permission gate invariants (official 2.1.289 cycle)', () => {
+  afterEach(() => {
+    _setAutoModeGateEnabledForTesting(undefined)
+  })
 
-describe('permission gate invariants (after opening auto/bypass)', () => {
-  // ── Bypass permissions is always available ──────────────────────────────
-
-  describe('bypass mode always reachable in cycle', () => {
-    test('auto → bypassPermissions when isBypassPermissionsModeAvailable is true', () => {
-      const ctx = makeContext('auto', {
+  describe('bypass mode precedes auto in cycle', () => {
+    test('plan → bypassPermissions when isBypassPermissionsModeAvailable is true', () => {
+      const ctx = makeContext('plan', {
         isBypassPermissionsModeAvailable: true,
       })
       expect(getNextPermissionMode(ctx)).toBe('bypassPermissions')
     })
 
     test('isBypassPermissionsModeAvailable true is the default from getEmptyToolPermissionContext', () => {
-      // This test verifies the Tool.ts default is true
-      // (imported indirectly through the cycle behavior)
-      const ctx = makeContext('auto')
+      const ctx = makeContext('plan')
       expect(ctx.isBypassPermissionsModeAvailable).toBe(true)
       expect(getNextPermissionMode(ctx)).toBe('bypassPermissions')
     })
   })
 
-  // ── Auto mode is always available in cycle ──────────────────────────────
-
-  describe('auto mode always reachable in cycle', () => {
-    test('plan → auto (always, no gate check)', () => {
-      expect(getNextPermissionMode(makeContext('plan'))).toBe('auto')
+  describe('auto mode requires isAutoModeAvailable && isAutoModeGateEnabled()', () => {
+    test('bypassPermissions → auto when gated', () => {
+      _setAutoModeGateEnabledForTesting(true)
+      expect(getNextPermissionMode(makeContext('bypassPermissions'))).toBe(
+        'auto',
+      )
     })
 
-    test('plan → auto even when isBypassPermissionsModeAvailable is false', () => {
+    test('plan → auto when isBypassPermissionsModeAvailable is false and auto is gated', () => {
+      _setAutoModeGateEnabledForTesting(true)
       const ctx = makeContext('plan', {
         isBypassPermissionsModeAvailable: false,
       })
       expect(getNextPermissionMode(ctx)).toBe('auto')
     })
 
-    test('bypassPermissions → default (then default → acceptEdits → plan → auto)', () => {
-      // Verify that after bypass, you can reach auto by cycling through
-      const fromBypass = getNextPermissionMode(makeContext('bypassPermissions'))
-      expect(fromBypass).toBe('default')
-
-      const fromDefault = getNextPermissionMode(makeContext('default'))
-      expect(fromDefault).toBe('acceptEdits')
-
-      const fromAcceptEdits = getNextPermissionMode(makeContext('acceptEdits'))
-      expect(fromAcceptEdits).toBe('plan')
-
-      const fromPlan = getNextPermissionMode(makeContext('plan'))
-      expect(fromPlan).toBe('auto')
+    test('auto → default', () => {
+      expect(getNextPermissionMode(makeContext('auto'))).toBe('default')
     })
   })
 
-  // ── No opt-in gate between modes ────────────────────────────────────────
-
-  describe('no opt-in gate between modes', () => {
-    test('cycling from default to auto completes in 3 steps without any opt-in check', () => {
-      let mode: PermissionMode = 'default'
-      const steps: PermissionMode[] = []
-
-      // default → acceptEdits → plan → auto
-      for (let i = 0; i < 3; i++) {
-        mode = getNextPermissionMode(makeContext(mode))
-        steps.push(mode)
-      }
-
-      expect(steps).toEqual(['acceptEdits', 'plan', 'auto'])
-    })
-
-    test('cycling from default to bypassPermissions completes in 4 steps', () => {
+  describe('full cycle order', () => {
+    test('cycling from default reaches bypassPermissions in 3 steps and auto in 4 steps', () => {
+      _setAutoModeGateEnabledForTesting(true)
       let mode: PermissionMode = 'default'
       const steps: PermissionMode[] = []
 
@@ -113,30 +88,44 @@ describe('permission gate invariants (after opening auto/bypass)', () => {
       expect(steps).toEqual([
         'acceptEdits',
         'plan',
-        'auto',
         'bypassPermissions',
+        'auto',
+      ])
+    })
+
+    test('skips auto when gate is disabled', () => {
+      _setAutoModeGateEnabledForTesting(false)
+      let mode: PermissionMode = 'default'
+      const steps: PermissionMode[] = []
+
+      for (let i = 0; i < 4; i++) {
+        mode = getNextPermissionMode(makeContext(mode))
+        steps.push(mode)
+      }
+
+      expect(steps).toEqual([
+        'acceptEdits',
+        'plan',
+        'bypassPermissions',
+        'default',
       ])
     })
   })
 
-  // ── Mode ordering safety (most dangerous modes last) ────────────────────
-
   describe('safety ordering', () => {
-    test('auto comes before bypassPermissions in the cycle', () => {
-      // Starting from plan, user must press Shift+Tab twice to reach bypass
-      // (plan → auto → bypassPermissions)
-      const fromPlan = getNextPermissionMode(makeContext('plan'))
-      expect(fromPlan).toBe('auto')
-
-      const fromAuto = getNextPermissionMode(makeContext('auto'))
-      expect(fromAuto).toBe('bypassPermissions')
+    test('plan → bypassPermissions → auto → default', () => {
+      _setAutoModeGateEnabledForTesting(true)
+      expect(getNextPermissionMode(makeContext('plan'))).toBe(
+        'bypassPermissions',
+      )
+      expect(getNextPermissionMode(makeContext('bypassPermissions'))).toBe(
+        'auto',
+      )
+      expect(getNextPermissionMode(makeContext('auto'))).toBe('default')
     })
 
     test('default comes before any dangerous mode', () => {
-      // default → acceptEdits (safe, just auto-accept edits)
-      const fromDefault = getNextPermissionMode(makeContext('default'))
-      expect(fromDefault).toBe('acceptEdits')
-      // acceptEdits is the least dangerous mode
+      expect(getNextPermissionMode(makeContext('default'))).toBe('acceptEdits')
     })
   })
 })

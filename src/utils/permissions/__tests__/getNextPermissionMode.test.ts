@@ -1,22 +1,17 @@
 /**
  * Tests for src/utils/permissions/getNextPermissionMode.ts
  *
- * Covers the unified permission mode cycling logic:
- *   default → acceptEdits → plan → auto → bypassPermissions → default
- *
- * After the "open auto/bypass to all users" change, there is no USER_TYPE
- * distinction — all users share the same cycle order.
+ * Covers the official 2.1.289 permission mode cycling logic:
+ *   default → acceptEdits → plan
+ *     ├─ if isBypassPermissionsModeAvailable → bypassPermissions → (auto if gated else default)
+ *     ├─ else if isAutoModeAvailable && isAutoModeGateEnabled() → auto → default
+ *     └─ else → default
  */
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import type { ToolPermissionContext } from '../../../Tool.js'
 import type { PermissionMode } from '../PermissionMode.js'
-
-// Inline getNextPermissionMode to avoid importing the heavy permissionSetup
-// dependency chain (growthbook, settings, etc.).
-// The function under test is small and pure enough to copy for testing.
 import { getNextPermissionMode } from '../getNextPermissionMode.js'
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
+import { _setAutoModeGateEnabledForTesting } from '../permissionSetup.js'
 
 function makeContext(
   mode: PermissionMode,
@@ -29,16 +24,17 @@ function makeContext(
     alwaysDenyRules: {},
     alwaysAskRules: {},
     isBypassPermissionsModeAvailable: true,
+    isAutoModeAvailable: true,
     ...overrides,
   }
 }
 
-// ─── tests ────────────────────────────────────────────────────────────────────
-
 describe('getNextPermissionMode', () => {
-  // ── Full cycle ──────────────────────────────────────────────────────────
+  afterEach(() => {
+    _setAutoModeGateEnabledForTesting(undefined)
+  })
 
-  describe('unified cycle order', () => {
+  describe('official 2.1.289 cycle order', () => {
     test('default → acceptEdits', () => {
       expect(getNextPermissionMode(makeContext('default'))).toBe('acceptEdits')
     })
@@ -47,23 +43,40 @@ describe('getNextPermissionMode', () => {
       expect(getNextPermissionMode(makeContext('acceptEdits'))).toBe('plan')
     })
 
-    test('plan → auto', () => {
-      expect(getNextPermissionMode(makeContext('plan'))).toBe('auto')
-    })
-
-    test('auto → bypassPermissions (when bypass available)', () => {
-      expect(getNextPermissionMode(makeContext('auto'))).toBe(
+    test('plan → bypassPermissions when bypass is available', () => {
+      _setAutoModeGateEnabledForTesting(true)
+      expect(getNextPermissionMode(makeContext('plan'))).toBe(
         'bypassPermissions',
       )
     })
 
-    test('bypassPermissions → default', () => {
+    test('bypassPermissions → auto when auto mode is available and gated', () => {
+      _setAutoModeGateEnabledForTesting(true)
       expect(getNextPermissionMode(makeContext('bypassPermissions'))).toBe(
-        'default',
+        'auto',
       )
     })
 
+    test('bypassPermissions → default when auto mode is unavailable or gate disabled', () => {
+      _setAutoModeGateEnabledForTesting(false)
+      expect(getNextPermissionMode(makeContext('bypassPermissions'))).toBe(
+        'default',
+      )
+
+      _setAutoModeGateEnabledForTesting(true)
+      expect(
+        getNextPermissionMode(
+          makeContext('bypassPermissions', { isAutoModeAvailable: false }),
+        ),
+      ).toBe('default')
+    })
+
+    test('auto → default', () => {
+      expect(getNextPermissionMode(makeContext('auto'))).toBe('default')
+    })
+
     test('full cycle completes back to default', () => {
+      _setAutoModeGateEnabledForTesting(true)
       const cycle: PermissionMode[] = []
       let ctx = makeContext('default')
       for (let i = 0; i < 5; i++) {
@@ -74,25 +87,31 @@ describe('getNextPermissionMode', () => {
       expect(cycle).toEqual([
         'acceptEdits',
         'plan',
-        'auto',
         'bypassPermissions',
+        'auto',
         'default',
       ])
     })
   })
 
-  // ── auto → default when bypass unavailable ─────────────────────────────
+  describe('plan transition with bypass unavailable', () => {
+    test('plan → auto when bypass unavailable and auto gated', () => {
+      _setAutoModeGateEnabledForTesting(true)
+      const ctx = makeContext('plan', {
+        isBypassPermissionsModeAvailable: false,
+        isAutoModeAvailable: true,
+      })
+      expect(getNextPermissionMode(ctx)).toBe('auto')
+    })
 
-  describe('auto mode with bypass unavailable', () => {
-    test('auto → default when isBypassPermissionsModeAvailable is false', () => {
-      const ctx = makeContext('auto', {
+    test('plan → default when both bypass and auto are unavailable', () => {
+      _setAutoModeGateEnabledForTesting(false)
+      const ctx = makeContext('plan', {
         isBypassPermissionsModeAvailable: false,
       })
       expect(getNextPermissionMode(ctx)).toBe('default')
     })
   })
-
-  // ── dontAsk mode ────────────────────────────────────────────────────────
 
   describe('dontAsk mode', () => {
     test('dontAsk → default', () => {
@@ -100,14 +119,11 @@ describe('getNextPermissionMode', () => {
     })
   })
 
-  // ── USER_TYPE independence ──────────────────────────────────────────────
-
   describe('no USER_TYPE distinction', () => {
     test('cycle order is the same regardless of USER_TYPE', () => {
-      // Save original
+      _setAutoModeGateEnabledForTesting(true)
       const originalUserType = process.env.USER_TYPE
 
-      // Test with no USER_TYPE
       delete process.env.USER_TYPE
       const cycleNoType: PermissionMode[] = []
       let ctx = makeContext('default')
@@ -117,7 +133,6 @@ describe('getNextPermissionMode', () => {
         ctx = makeContext(next)
       }
 
-      // Test with USER_TYPE=ant
       process.env.USER_TYPE = 'ant'
       const cycleAnt: PermissionMode[] = []
       ctx = makeContext('default')
@@ -127,26 +142,22 @@ describe('getNextPermissionMode', () => {
         ctx = makeContext(next)
       }
 
-      // Restore
       if (originalUserType !== undefined) {
         process.env.USER_TYPE = originalUserType
       } else {
         delete process.env.USER_TYPE
       }
 
-      // Both should produce the same cycle
       expect(cycleNoType).toEqual(cycleAnt)
       expect(cycleNoType).toEqual([
         'acceptEdits',
         'plan',
-        'auto',
         'bypassPermissions',
+        'auto',
         'default',
       ])
     })
   })
-
-  // ── teamContext parameter ───────────────────────────────────────────────
 
   describe('teamContext parameter', () => {
     test('does not affect cycle when provided', () => {
@@ -158,14 +169,13 @@ describe('getNextPermissionMode', () => {
     test('does not affect cycle for plan mode', () => {
       const ctx = makeContext('plan')
       const teamCtx = { leadAgentId: 'agent-456' }
-      expect(getNextPermissionMode(ctx, teamCtx)).toBe('auto')
+      expect(getNextPermissionMode(ctx, teamCtx)).toBe('bypassPermissions')
     })
   })
 
-  // ── cycle stability (no infinite loops) ─────────────────────────────────
-
   describe('cycle stability', () => {
     test('all modes return to default within 6 steps', () => {
+      _setAutoModeGateEnabledForTesting(true)
       const modes: PermissionMode[] = [
         'default',
         'acceptEdits',

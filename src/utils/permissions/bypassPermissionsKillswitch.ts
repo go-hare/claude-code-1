@@ -9,34 +9,73 @@ import {
   useSetAppState,
 } from '../../state/AppState.js'
 import type { ToolPermissionContext } from '../../Tool.js'
-import { verifyAutoModeGateAccess } from './permissionSetup.js'
+import {
+  createDisabledBypassPermissionsContext,
+  isBypassPermissionsModeDisabled,
+  verifyAutoModeGateAccess,
+} from './permissionSetup.js'
+
+let bypassPermissionsCheckRan = false
 
 /**
- * No-op — bypass permissions is always available.
+ * Checks whether bypassPermissions mode is disabled by policy/settings/gate
+ * and strips it from AppState.toolPermissionContext if so.
  */
 export async function checkAndDisableBypassPermissionsIfNeeded(
   _toolPermissionContext: ToolPermissionContext,
-  _setAppState: (
+  setAppState: (
     f: (
       prev: import('../../state/AppState.js').AppState,
     ) => import('../../state/AppState.js').AppState,
   ) => void,
 ): Promise<void> {
-  // Bypass permissions is always available — no gate check needed
+  if (bypassPermissionsCheckRan) {
+    return
+  }
+  bypassPermissionsCheckRan = true
+
+  if (!isBypassPermissionsModeDisabled()) {
+    return
+  }
+
+  setAppState(prev => {
+    const nextCtx = createDisabledBypassPermissionsContext(
+      prev.toolPermissionContext,
+    )
+    return nextCtx === prev.toolPermissionContext
+      ? prev
+      : { ...prev, toolPermissionContext: nextCtx }
+  })
 }
 
 /**
- * Reset stub — kept for interface compatibility.
+ * Reset the run-once flag for checkAndDisableBypassPermissionsIfNeeded.
  */
 export function resetBypassPermissionsCheck(): void {
-  // No-op
+  bypassPermissionsCheckRan = false
 }
 
 /**
- * No-op hook — bypass permissions is always available.
+ * Runs the bypassPermissions killswitch check on mount.
  */
 export function useKickOffCheckAndDisableBypassPermissionsIfNeeded(): void {
-  // No-op
+  const setAppState = useSetAppState()
+  const store = useAppStateStore()
+
+  useEffect(() => {
+    if (getIsRemoteMode()) return
+    void checkAndDisableBypassPermissionsIfNeeded(
+      store.getState().toolPermissionContext,
+      setAppState,
+    ).catch(error => {
+      logError(
+        new Error('Bypass permissions killswitch check failed', {
+          cause: toError(error),
+        }),
+      )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 }
 
 let autoModeCheckRan = false
