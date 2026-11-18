@@ -112,7 +112,6 @@ const ProposeGoalTool =
   require('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js')
     .ProposeGoalTool as typeof import('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js').ProposeGoalTool
 import { LocalMemoryRecallTool } from '@claude-code/builtin-tools/tools/LocalMemoryRecallTool/LocalMemoryRecallTool.js'
-import { VaultHttpFetchTool } from '@claude-code/builtin-tools/tools/VaultHttpFetchTool/VaultHttpFetchTool.js'
 import { TaskCreateTool } from '@claude-code/builtin-tools/tools/TaskCreateTool/TaskCreateTool.js'
 import { TaskGetTool } from '@claude-code/builtin-tools/tools/TaskGetTool/TaskGetTool.js'
 import { TaskUpdateTool } from '@claude-code/builtin-tools/tools/TaskUpdateTool/TaskUpdateTool.js'
@@ -261,7 +260,6 @@ export function getAllBaseTools(): Tools {
     SkillTool,
     EnterPlanModeTool,
     LocalMemoryRecallTool,
-    VaultHttpFetchTool,
     ConfigTool,
     // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
     SendFeedbackTool,
