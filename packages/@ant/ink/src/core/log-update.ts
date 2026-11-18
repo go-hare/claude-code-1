@@ -284,36 +284,6 @@ export class LogUpdate {
     const shrinking = heightDelta < 0
     const growing = heightDelta > 0
 
-    // Handle shrinking: clear lines from the bottom
-    if (shrinking) {
-      const linesToClear = prev.screen.height - next.screen.height
-
-      // eraseLines only works within the viewport - it can't clear scrollback.
-      // If we need to clear more lines than fit in the viewport, some are in
-      // scrollback, so we need a full reset.
-      if (linesToClear > prev.viewport.height) {
-        return fullResetSequence_CAUSES_FLICKER(
-          next,
-          'offscreen',
-          this.options.stylePool,
-          altScreen,
-          undefined,
-          scrollbackY,
-        )
-      }
-
-      // clear(N) moves cursor UP by N-1 lines and to column 0
-      // This puts us at line prev.screen.height - N = next.screen.height
-      // But we want to be at next.screen.height - 1 (bottom of new screen)
-      screen.txn(prev => [
-        [
-          { type: 'clear', count: linesToClear },
-          { type: 'cursorMove', x: 0, y: -1 },
-        ],
-        { dx: -prev.x, dy: -linesToClear },
-      ])
-    }
-
     // viewportY = number of rows in scrollback (not visible on terminal).
     // For shrinking: use max(prev, next) because terminal clears don't scroll.
     // For growing: use prev state because new rows haven't scrolled old ones yet.
@@ -331,6 +301,49 @@ export class LogUpdate {
       this.scrolledOutRows.get(prev) ?? 0,
     )
     const nextViewportStartY = next.screen.height - next.viewport.height + 1
+
+    // Handle shrinking: clear lines from the bottom
+    if (shrinking) {
+      const linesToClear = prev.screen.height - next.screen.height
+
+      // eraseLines only works within the viewport - it can't clear scrollback.
+      // If we need to clear more lines than fit in the viewport, or if the
+      // new bottom row (next.screen.height - 1) would land above viewportY
+      // (clamping cursor-up at viewport top and desyncing VirtualScreen),
+      // trigger a full reset.
+      if (
+        linesToClear > prev.viewport.height ||
+        next.screen.height - 1 < viewportY
+      ) {
+        return fullResetSequence_CAUSES_FLICKER(
+          next,
+          'offscreen',
+          this.options.stylePool,
+          altScreen,
+          undefined,
+          scrollbackY,
+        )
+      }
+
+      // clear(N) erases UP from the current cursor row. When prev.cursor.y is
+      // above prev.screen.height - 1 (e.g. PromptInput cursor sits above the
+      // bottom divider + status bar), anchor to the actual bottom row first so
+      // trailing rows aren't left orphaned and cursor math stays exact.
+      if (prev.cursor.y !== prev.screen.height - 1) {
+        moveCursorTo(screen, 0, prev.screen.height - 1)
+      }
+
+      // clear(N) moves cursor UP by N-1 lines and to column 0
+      // This puts us at line prev.screen.height - N = next.screen.height
+      // But we want to be at next.screen.height - 1 (bottom of new screen)
+      screen.txn(prevCursor => [
+        [
+          { type: 'clear', count: linesToClear },
+          { type: 'cursorMove', x: 0, y: -1 },
+        ],
+        { dx: -prevCursor.x, dy: -linesToClear },
+      ])
+    }
 
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink
