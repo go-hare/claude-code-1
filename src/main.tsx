@@ -2638,7 +2638,7 @@ async function run(): Promise<CommanderCommand> {
               }
               return allowed;
             })
-          : Promise.resolve({});
+          : Promise.resolve(Object.create(null) as Record<string, ScopedMcpServerConfig>);
 
       // Kick off MCP config loading early (safe - just reads files, no execution).
       // Both interactive and -p use getClaudeCodeMcpConfigs (local file reads only).
@@ -2653,7 +2653,7 @@ async function run(): Promise<CommanderCommand> {
       const mcpConfigPromise = (
         strictMcpConfig || isBareMode()
           ? Promise.resolve({
-              servers: {} as Record<string, ScopedMcpServerConfig>,
+              servers: Object.create(null) as Record<string, ScopedMcpServerConfig>,
             })
           : getClaudeCodeMcpConfigs(dynamicMcpConfig)
       ).then(result => {

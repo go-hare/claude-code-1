@@ -257,6 +257,26 @@ function getTerminalBulletColor(status: string): 'success' | 'error' | undefined
   }
 }
 
+/**
+ * #770 — Evict terminal panel tasks only after their evictAfter deadline AND
+ * never evict an ancestor of the currently viewed agent (keeps breadcrumb intact).
+ */
+export function shouldEvictPanelTask(
+  task: AppState['tasks'][string],
+  now: number,
+  viewedAncestors: ReadonlySet<string>,
+): boolean {
+  if (!task || viewedAncestors.has(task.id)) return false;
+  if (isLocalWorkflowTask(task)) {
+    const evictAfter = (task as LocalWorkflowTaskState & { evictAfter?: number }).evictAfter;
+    return task.status !== 'running' && (evictAfter ?? Infinity) <= now;
+  }
+  if (isPanelListTask(task)) {
+    return (task.evictAfter ?? Infinity) <= now;
+  }
+  return false;
+}
+
 export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?: boolean } = {}): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
@@ -312,21 +332,17 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
   // (and other consumers) see the updated count without their own tick.
   const tasksRef = React.useRef(tasks);
   tasksRef.current = tasks;
+  const viewingAgentTaskIdRef = React.useRef(viewingAgentTaskId);
+  viewingAgentTaskIdRef.current = viewingAgentTaskId;
   const [, setTick] = React.useState(0);
   React.useEffect(() => {
     if (!hasTasks && !hasWorkflows) return;
     const interval = setInterval(
-      (tasksRef, setAppState, setTick) => {
+      (tasksRef, viewingAgentTaskIdRef, setAppState, setTick) => {
         const now = Date.now();
+        const viewedAncestorsAtTick = viewingPanelAncestorIds(tasksRef.current, viewingAgentTaskIdRef.current);
         for (const t of Object.values(tasksRef.current)) {
-          if (isLocalWorkflowTask(t)) {
-            const evictAfter = (t as LocalWorkflowTaskState & { evictAfter?: number }).evictAfter;
-            if (t.status !== 'running' && (evictAfter ?? Infinity) <= now) {
-              evictTerminalTask(t.id, setAppState);
-            }
-            continue;
-          }
-          if (isPanelListTask(t) && (t.evictAfter ?? Infinity) <= now) {
+          if (shouldEvictPanelTask(t, now, viewedAncestorsAtTick)) {
             evictTerminalTask(t.id, setAppState);
           }
         }
@@ -334,6 +350,7 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
       },
       1000,
       tasksRef,
+      viewingAgentTaskIdRef,
       setAppState,
       setTick,
     );

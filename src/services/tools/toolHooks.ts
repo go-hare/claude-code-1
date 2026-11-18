@@ -640,12 +640,13 @@ export async function resolveHookPermissionDecision(
       }
     }
 
-    // Hook allow skips the interactive prompt, but deny/ask rules still apply.
+    // Hook allow skips the interactive prompt, but deny/ask rules and plan-mode
+    // write floor still apply.
     const ruleCheck = await checkRuleBasedPermissions(
       tool,
       hookInput,
       toolUseContext,
-      { crashIsObjection: true },
+      { crashIsObjection: true, planModeWriteFloor: true },
     )
     if (ruleCheck === null) {
       const effectiveMode = getEffectivePermissionMode(

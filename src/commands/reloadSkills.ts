@@ -7,7 +7,7 @@ import type { Command, LocalCommandResult } from '../types/command.js'
 const reloadSkills = {
   type: 'local',
   name: 'reload-skills',
-  description: 'Re-scan skill directories without restarting the session',
+  description: 'Pick up skills added or changed on disk during this session',
   immediate: true,
   supportsNonInteractive: false,
   load: () =>
@@ -23,7 +23,8 @@ const reloadSkills = {
           await getSkillDirCommands(cwd)
           return {
             type: 'text',
-            value: 'Skills reloaded successfully.',
+            value:
+              'Skills reloaded. The full skill list will be re-sent to Claude on the next turn (which restores skills after compaction).',
           }
         } catch (e) {
           return {

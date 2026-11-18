@@ -724,6 +724,26 @@ export function parseMultipleKeypresses(
   return [keys, newState]
 }
 
+/** Official 2.1.325 (#864) `Qc` — true when sequence starts with ESC and has trailing chars. */
+export function isEscPrefixedKey(sequence: string): boolean {
+  return sequence.length > 1 && sequence.startsWith('\x1b')
+}
+
+/**
+ * Official 2.1.325 (#864) `xy` — split an ESC-prefixed sequence into separate
+ * `[ESC, rest]` parsed inputs when a handler calls `event.readAsEscapeThenKey()`.
+ */
+export function splitEscPrefixedKey(sequence: string): ParsedInput[] {
+  if (!isEscPrefixedKey(sequence)) return []
+  return ['\x1b', sequence.slice(1)].flatMap(part => {
+    const [keys, nextState] = parseMultipleKeypresses(
+      { ...INITIAL_STATE },
+      part,
+    )
+    return keys.concat(parseMultipleKeypresses(nextState, null)[0])
+  })
+}
+
 const keyName: Record<string, string> = {
   /* xterm/gnome ESC O letter */
   OP: 'f1',
@@ -1094,6 +1114,8 @@ export type ParsedKey = {
    * densable SGR wheel `col` — 1-indexed. Pixel reports stay raw until App `S1`.
    */
   col?: number
+  /** Official 2.1.325 (#864) `readLate` — key arrived after ESC timeout or held across late read. */
+  readLate?: boolean
   /** densable SGR wheel `row` — 1-indexed. */
   row?: number
 }

@@ -148,10 +148,11 @@ export function resolveByteStreamIdleTimeoutMs(input: {
 }): number {
   const env = input.env ?? process.env
   const streamFloor = resolveStreamIdleTimeoutMs(env)
-  const firstPartyDefault =
-    input.provider === 'firstParty'
-      ? BYTE_STREAM_IDLE_TIMEOUT_FIRST_PARTY_MS
-      : streamFloor
+  // Official VIo(e) -> fv(Zd(e) ? e : undefined):
+  // Custom ANTHROPIC_BASE_URL makes Zd('firstParty') false, so fv(undefined)
+  // keeps the 300s streamFloor unconditionally without consulting GrowthBook.
+  const eligibleFirstParty =
+    input.provider === 'firstParty' && isFirstPartyAnthropicBaseUrl(env)
 
   let chosen = streamFloor
   const byteRaw = Number(env.CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS)
@@ -159,14 +160,14 @@ export function resolveByteStreamIdleTimeoutMs(input: {
 
   if (Number.isFinite(byteRaw) && byteRaw > 0) {
     chosen = byteRaw
-  } else if (!streamExplicit) {
-    chosen = firstPartyDefault
+  } else if (!streamExplicit && eligibleFirstParty) {
+    chosen = BYTE_STREAM_IDLE_TIMEOUT_FIRST_PARTY_MS
     const gb =
       input.gbTimeoutMs !== undefined
         ? input.gbTimeoutMs
         : getFeatureValue_CACHED_MAY_BE_STALE<number | null>(
             'tengu_byte_stream_idle_timeout_ms',
-            firstPartyDefault,
+            BYTE_STREAM_IDLE_TIMEOUT_FIRST_PARTY_MS,
           )
     if (typeof gb === 'number' && Number.isFinite(gb) && gb > 0) {
       chosen = gb

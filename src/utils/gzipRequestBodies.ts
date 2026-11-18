@@ -20,10 +20,13 @@ export function isGzipRequestBodiesEnabled(input?: {
   if (raw !== undefined) {
     if (isEnvTruthy(raw)) return true
     if (isEnvDefinedFalsy(raw)) return false
-    // empty / other → fall through to GB
+    // empty / other → fall through to default ON
   }
   if (input?.gbValue !== undefined) return input.gbValue
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_gzip_request_bodies', false)
+  // Official 2.1.300 ge(): large api.anthropic.com requests use gzip by default
+  // even when telemetry/GrowthBook is disabled; CLAUDE_CODE_GZIP_REQUEST_BODIES=0 turns it off.
+  void getFeatureValue_CACHED_MAY_BE_STALE
+  return true
 }
 
 /** Official _Ie — only first-party Anthropic API host is eligible. */

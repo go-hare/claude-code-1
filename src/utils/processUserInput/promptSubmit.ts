@@ -580,16 +580,21 @@ export function rewritePromptSubmitUserMessage(
       message.message.content = rewritePromptSubmitContent(content, next)
       return message
     }
-    if (
-      typeof content !== 'string' &&
-      Array.isArray(content) &&
-      getContentText(content) === original
-    ) {
-      message.message.content = rewritePromptSubmitContent(
-        content as ContentBlockParam[],
-        next,
+    if (Array.isArray(content)) {
+      const blocks = content as ContentBlockParam[]
+      const lastText = blocks.findLast(
+        (b): b is Extract<ContentBlockParam, { type: 'text' }> =>
+          b.type === 'text',
       )
-      return message
+      const hasNonText = blocks.some(b => b.type !== 'text')
+      if (
+        getContentText(blocks) === original ||
+        lastText?.text === original ||
+        (original === '' && hasNonText && lastText === undefined)
+      ) {
+        message.message.content = rewritePromptSubmitContent(blocks, next)
+        return message
+      }
     }
   }
   logForDebugging(
@@ -629,6 +634,7 @@ type PromptSubmitAttachment = {
   type: 'image' | 'document'
   mediaType?: string
   filename?: string
+  unreadable?: string
 }
 
 /**
@@ -670,10 +676,12 @@ export function collectPromptSubmitAttachments(
   }
   for (const pasted of Object.values(pastedContents ?? {})) {
     if (pasted.type === 'image') {
+      const isEmpty = !pasted.content
       attachments.push({
         type: pasted.type,
         ...(pasted.mediaType !== undefined && { mediaType: pasted.mediaType }),
         ...(pasted.filename !== undefined && { filename: pasted.filename }),
+        ...(isEmpty && { unreadable: 'the pasted image is empty' }),
       })
     }
   }

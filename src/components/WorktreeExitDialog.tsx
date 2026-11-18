@@ -57,7 +57,7 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
 
       // Check for commits to eject
       if (worktreeSession) {
-        let count: number | null = worktreeSession.hookBased ? 0 : null;
+        let count: number | null = null;
         if (worktreeSession.originalHeadCommit) {
           // Get commits in worktree that are not in original branch
           const { stdout: commitsStr, code } = await execFileNoThrow('git', [
@@ -244,7 +244,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
 
   let subtitle = '';
   if (commitCount === null) {
-    subtitle = `${hasUncommitted ? `You have ${uncommittedSummary}, and the ` : 'The '}branch ${branchName} may hold unpushed commits (commit baseline unavailable). The branch will be deleted if you remove.`;
+    subtitle = worktreeSession.hookBased
+      ? `${hasUncommitted ? `You have ${uncommittedSummary}. These will be lost if you remove the worktree. ` : ''}A WorktreeCreate hook made this worktree, so Claude Code can't tell whether it has unpushed commits.${sessionTitle ? ` This session was named "${sessionTitle}". Keep the worktree to resume it later.` : ''}`
+      : `${hasUncommitted ? `You have ${uncommittedSummary}, and the ` : 'The '}branch ${branchName} may hold ${worktreeSession.originalHeadCommit ? 'commits that could not be counted' : 'unpushed commits (commit baseline unavailable)'}. The branch will be deleted if you remove.`;
   } else if (hasUncommitted && hasCommits) {
     subtitle = `You have ${uncommittedSummary} and ${commitCount} ${commitCount === 1 ? 'commit' : 'commits'} on ${branchName}. All will be lost if you remove.`;
   } else if (hasUncommitted) {

@@ -27,6 +27,9 @@ import { errorMessage } from '../../utils/errors.js';
 import { type CacheSafeParams, getLastCacheSafeParams } from '../../utils/forkedAgent.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js';
+import { registerCleanup } from '../../utils/cleanupRegistry.js';
+import { logForDebugging } from '../../utils/debug.js';
 import {
   type BtwHistoryEntry,
   getBtwHistory,
@@ -51,6 +54,37 @@ const OUTER_CHROME_ROWS = 6;
 const SCROLL_LINES = 3;
 /** densable wNo — max history rows shown in panel chrome. */
 const HISTORY_VISIBLE = 5;
+
+/**
+ * Official 2.1.299 (#669): track in-flight `/btw` requests so duplicate requests
+ * mid-run adopt the running promise instead of spawning a second query, and
+ * non-interactive requests abort when the session ends.
+ */
+type InFlightBtwSettled = { response: string; synthetic: boolean } | { error: string } | null;
+
+type InFlightBtwEntry = {
+  question: string;
+  settled: Promise<InFlightBtwSettled>;
+  abort: () => void;
+};
+
+let inFlightBtwQuestions: InFlightBtwEntry[] = [];
+
+export function getInFlightBtw(): InFlightBtwEntry | null {
+  return inFlightBtwQuestions.at(-1) ?? null;
+}
+
+function setInFlightBtw(entry: InFlightBtwEntry): void {
+  if (!inFlightBtwQuestions.includes(entry)) {
+    inFlightBtwQuestions = [...inFlightBtwQuestions, entry];
+  }
+}
+
+function clearInFlightBtw(entry: InFlightBtwEntry): void {
+  if (inFlightBtwQuestions.includes(entry)) {
+    inFlightBtwQuestions = inFlightBtwQuestions.filter(e => e !== entry);
+  }
+}
 
 /**
  * densable bgr — collapse whitespace then width-truncate for history labels.
@@ -242,9 +276,40 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
     }
 
     const abortController = createAbortController();
+    const existing = getInFlightBtw();
+    const adopted = existing?.question === question ? existing : undefined;
+    let resolveSettled: (val: InFlightBtwSettled) => void = () => {};
+    const entry: InFlightBtwEntry = adopted ?? {
+      question,
+      settled: new Promise<InFlightBtwSettled>(resolve => {
+        resolveSettled = resolve;
+      }),
+      abort: () => abortController.abort(),
+    };
+    if (!adopted) {
+      setInFlightBtw(entry);
+    }
 
     async function fetchResponse(): Promise<void> {
       try {
+        if (adopted) {
+          const settled = await adopted.settled;
+          clearInFlightBtw(adopted);
+          if (abortController.signal.aborted || settled === null) return;
+          if ('error' in settled) {
+            setHistoryCursor(null);
+            setRetry(null);
+            setError(settled.error);
+            return;
+          }
+          setHistoryCursor(null);
+          setError(null);
+          setRetry(null);
+          setResponse(settled.response);
+          setSynthetic(settled.synthetic);
+          setHistory(getBtwHistory().slice(0, -1));
+          return;
+        }
         const cacheSafeParams = await buildCacheSafeParams(context);
         const result = await runSideQuestion({
           question,
@@ -258,6 +323,8 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
 
         if (!abortController.signal.aborted) {
           if (result.aborted) {
+            resolveSettled(null);
+            clearInFlightBtw(entry);
             return;
           }
           if (result.response) {
@@ -268,25 +335,40 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
             setSynthetic(result.synthetic ?? false);
             // densable refreshes list from global after append inside xhr
             setHistory(getBtwHistory().slice(0, -1));
+            resolveSettled({ response: result.response, synthetic: result.synthetic ?? false });
+            clearInFlightBtw(entry);
           } else {
             setHistoryCursor(null);
             setRetry(null);
             setError('No response received');
+            resolveSettled({ error: 'No response received' });
+            clearInFlightBtw(entry);
           }
+        } else {
+          resolveSettled(null);
+          clearInFlightBtw(entry);
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
+          const msg = errorMessage(err) || 'Failed to get response';
           setHistoryCursor(null);
           setRetry(null);
-          setError(errorMessage(err) || 'Failed to get response');
+          setError(msg);
+          resolveSettled({ error: msg });
+        } else {
+          resolveSettled(null);
         }
+        clearInFlightBtw(entry);
       }
     }
 
     void fetchResponse();
 
     return () => {
-      abortController.abort();
+      if (!adopted) {
+        abortController.abort();
+        clearInFlightBtw(entry);
+      }
     };
   }, [question, context, initialResponse]);
 
@@ -410,6 +492,79 @@ async function buildCacheSafeParams(context: ProcessUserInputContext): Promise<C
 }
 
 /**
+ * Official 2.1.299 (#669) `bt(i, l)` — non-interactive `/btw`:
+ * deduplicates identical mid-run requests and aborts when the session ends.
+ */
+export async function runNonInteractiveBtw(
+  question: string,
+  context: ProcessUserInputContext,
+): Promise<InFlightBtwSettled> {
+  const existing = getInFlightBtw();
+  if (existing?.question === question) {
+    return existing.settled;
+  }
+
+  const abortController = createAbortController();
+  const onSessionAbort = (): void => {
+    abortController.abort();
+  };
+  const sessionSignal = context.abortController?.signal;
+  if (sessionSignal?.aborted) {
+    return null;
+  }
+  sessionSignal?.addEventListener('abort', onSessionAbort, { once: true });
+  const unregisterCleanup = registerCleanup(async () => {
+    abortController.abort();
+  });
+
+  let resolveSettled: (val: InFlightBtwSettled) => void = () => {};
+  const entry: InFlightBtwEntry = {
+    question,
+    settled: new Promise<InFlightBtwSettled>(resolve => {
+      resolveSettled = resolve;
+    }),
+    abort: () => abortController.abort(),
+  };
+  setInFlightBtw(entry);
+
+  let settled: InFlightBtwSettled = null;
+  try {
+    const cacheSafeParams = await buildCacheSafeParams(context);
+    if (abortController.signal.aborted) {
+      return null;
+    }
+    const result = await runSideQuestion({
+      question,
+      cacheSafeParams,
+      parentController: abortController,
+    });
+    if (abortController.signal.aborted || result.aborted) {
+      settled = null;
+    } else if (result.response) {
+      settled = { response: result.response, synthetic: result.synthetic ?? false };
+    } else {
+      settled = { error: 'No response received' };
+    }
+  } catch (err) {
+    settled = abortController.signal.aborted ? null : { error: errorMessage(err) || 'Failed to get response' };
+  } finally {
+    sessionSignal?.removeEventListener('abort', onSessionAbort);
+    unregisterCleanup();
+    resolveSettled(settled);
+    clearInFlightBtw(entry);
+    if (settled === null || 'error' in settled || settled.synthetic) {
+      logForDebugging(
+        `[btw] unwatched side question ${
+          settled === null ? 'was cancelled' : 'error' in settled ? 'failed' : 'came back synthetic'
+        }`,
+        { level: 'warn' },
+      );
+    }
+  }
+  return settled;
+}
+
+/**
  * densable IO_ — bare `/btw` reopens last history entry with initialResponse;
  * non-empty args bump btwUseCount and open a fresh query panel.
  */
@@ -435,6 +590,12 @@ export async function call(
     ...current,
     btwUseCount: current.btwUseCount + 1,
   }));
+
+  if (getIsNonInteractiveSession()) {
+    void runNonInteractiveBtw(question, context);
+    onDone(undefined, { display: 'skip' });
+    return null;
+  }
 
   return <BtwSideQuestion question={question} context={context} onDone={onDone} />;
 }

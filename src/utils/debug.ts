@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import { appendFile, mkdir, symlink, unlink } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { dirname, join, resolve } from 'path'
@@ -130,69 +131,268 @@ export function getHasFormattedOutput(): boolean {
   return hasFormattedOutput
 }
 
-let debugWriter: BufferedWriter | null = null
-let pendingWrite: Promise<void> = Promise.resolve()
+const runInRootContext: <T>(fn: () => T) => T =
+  typeof AsyncLocalStorage.snapshot === 'function'
+    ? AsyncLocalStorage.snapshot()
+    : fn => fn()
 
-// Module-level so .bind captures only its explicit args, not the
-// writeFn closure's parent scope (Jarred, #22257).
-async function appendAsync(
-  needMkdir: boolean,
-  dir: string,
-  path: string,
+const BACKLOG_MAX_BYTES = 1048576 // 1 MiB (ut)
+const BACKLOG_STUCK_AGE_MS = 10_000 // 10 s (rn)
+const APPEND_CHUNK_BYTES = 262144 // 256 KiB (sn)
+const APPEND_STUCK_MS = 5000 // (on)
+const DRAIN_POLL_MS = 100 // (lt)
+
+type UnflushedChunk = {
+  target: string | null
+  content: string
+  queued?: {
+    at: number
+    target: string
+    needMkdir: boolean
+  }
+}
+
+type DebugBacklog = {
+  chain: Promise<void>
+  length: number
+  appendSince: number
+  stuck: 'no' | 'suspected' | 'yes'
+  droppedCount: number
+  droppedTotal: number
+}
+
+let debugWriter: BufferedWriter | null = null
+let unflushedChunks: UnflushedChunk[] = []
+let backlog: DebugBacklog = {
+  chain: Promise.resolve(),
+  length: 0,
+  appendSince: 0,
+  stuck: 'no',
+  droppedCount: 0,
+  droppedTotal: 0,
+}
+let exiting = false
+let exitHandlerRegistered = false
+let resolvedLogPath: string | null = null
+
+function noop(): void {}
+
+function raceWithTimeout(p: Promise<boolean>, ms: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const t = setTimeout(() => resolve(false), ms)
+    t.unref?.()
+    void p.then(
+      v => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(true)
+      },
+    )
+  })
+}
+
+function isAppendStuck(): boolean {
+  const { appendSince } = backlog
+  if (
+    backlog.stuck === 'no' &&
+    appendSince !== 0 &&
+    Date.now() - appendSince >= APPEND_STUCK_MS
+  ) {
+    backlog.stuck = 'suspected'
+    const t = setTimeout(
+      (bl: DebugBacklog, since: number) => {
+        bl.stuck = bl.appendSince === since ? 'yes' : 'no'
+      },
+      DRAIN_POLL_MS,
+      backlog,
+      appendSince,
+    )
+    t.unref?.()
+  }
+  return backlog.stuck === 'yes'
+}
+
+async function drained(): Promise<void> {
+  if (isAppendStuck()) return
+  const done = backlog.chain.then(() => true)
+  do {
+    if (await raceWithTimeout(done, DRAIN_POLL_MS)) return
+  } while (!isAppendStuck())
+}
+
+function takeDroppedNote(): string {
+  const { droppedCount } = backlog
+  if (droppedCount === 0) return ''
+  backlog.droppedCount = 0
+  return `${new Date().toISOString()} [WARN] debug messages not logged: ${droppedCount} since the line above, because writes to this log were over 10 s behind, with over 1 MiB waiting\n`
+}
+
+function isEisdir(err: unknown): boolean {
+  return (
+    err !== null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'EISDIR'
+  )
+}
+
+function resolveDirToFile(dirPath: string): string {
+  resolvedLogPath = join(dirPath, `${getSessionId()}.txt`)
+  return resolvedLogPath
+}
+
+async function appendGroup(
+  target: string,
   content: string,
+  needMkdir: boolean,
 ): Promise<void> {
   if (needMkdir) {
-    await mkdir(dir, { recursive: true }).catch(() => {})
+    await mkdir(dirname(target), { recursive: true }).catch(noop)
   }
-  await appendFile(path, content)
+  try {
+    await appendFile(target, content)
+  } catch (err) {
+    if (!isEisdir(err)) throw err
+    await appendFile(resolveDirToFile(target), content)
+  }
   void updateLatestDebugLogSymlink()
 }
 
-function noop(): void {}
+async function appendOldestChunks(): Promise<void> {
+  const first = unflushedChunks[0]
+  const queued = first?.queued
+  if (queued === undefined) return
+  let count = 0
+  let totalBytes = 0
+  let needMkdir = false
+  for (const chunk of unflushedChunks) {
+    const q = chunk.queued
+    if (
+      q === undefined ||
+      q.target !== queued.target ||
+      (count > 0 && totalBytes + chunk.content.length > APPEND_CHUNK_BYTES)
+    ) {
+      break
+    }
+    count++
+    totalBytes += chunk.content.length
+    needMkdir ||= q.needMkdir
+  }
+  const combined = unflushedChunks
+    .slice(0, count)
+    .map(c => c.content)
+    .join('')
+  backlog.appendSince = Date.now()
+  await appendGroup(queued.target, combined, needMkdir).catch(noop)
+  backlog.appendSince = 0
+  backlog.stuck = 'no'
+  if (unflushedChunks[0] === first) {
+    unflushedChunks.splice(0, count)
+    backlog.length -= totalBytes
+  }
+}
+
+function drainSync(): void {
+  if (unflushedChunks.length === 0) return
+  backlog.length = 0
+  if (isAppendStuck()) {
+    unflushedChunks.length = 0
+    return
+  }
+  const groups: Array<{ target: string; parts: UnflushedChunk[] }> = []
+  for (const chunk of unflushedChunks.splice(0)) {
+    if (chunk.target === null) continue
+    const last = groups.at(-1)
+    if (last !== undefined && last.target === chunk.target) {
+      last.parts.push(chunk)
+    } else {
+      groups.push({ target: chunk.target, parts: [chunk] })
+    }
+  }
+  for (const group of groups) {
+    const content = group.parts.map(p => p.content).join('')
+    try {
+      getFsImplementation().mkdirSync(dirname(group.target))
+    } catch {
+      // Directory already exists or unwritable
+    }
+    try {
+      getFsImplementation().appendFileSync(group.target, content)
+    } catch (err) {
+      if (isEisdir(err)) {
+        try {
+          getFsImplementation().appendFileSync(
+            resolveDirToFile(group.target),
+            content,
+          )
+        } catch {
+          // Best-effort
+        }
+      }
+    }
+  }
+}
+
+function handleDebugExit(): void {
+  exiting = true
+  if (backlog.droppedCount > 0) {
+    try {
+      getDebugWriter().write('')
+    } catch {
+      // ignore
+    }
+  }
+  debugWriter?.flush()
+  drainSync()
+}
 
 function getDebugWriter(): BufferedWriter {
   if (!debugWriter) {
     let ensuredDir: string | null = null
     debugWriter = createBufferedWriter({
       writeFn: content => {
-        const path = getDebugLogPath()
-        const dir = dirname(path)
-        const needMkdir = ensuredDir !== dir
-        ensuredDir = dir
-        if (isDebugMode()) {
-          // immediateMode: must stay sync. Async writes are lost on direct
-          // process.exit() and keep the event loop alive in beforeExit
-          // handlers (infinite loop with Perfetto tracing). See #22257.
-          if (needMkdir) {
-            try {
-              getFsImplementation().mkdirSync(dir)
-            } catch {
-              // Directory already exists
-            }
-          }
-          try {
-            getFsImplementation().appendFileSync(path, content)
-          } catch (e) {
-            // If the directory was removed between mkdirSync and
-            // appendFileSync (or the path was relative and CWD changed),
-            // retry once with a fresh mkdirSync. Swallow on second failure
-            // to avoid crashing the React render tree via the error boundary.
-            try {
-              getFsImplementation().mkdirSync(dir)
-              getFsImplementation().appendFileSync(path, content)
-            } catch {
-              // Best-effort: debug log write failed, don't crash the UI
-            }
-          }
-          void updateLatestDebugLogSymlink()
+        const target = getDebugLogPath()
+        if (exiting) {
+          unflushedChunks.push({
+            target,
+            content: takeDroppedNote() + content,
+          })
+          drainSync()
           return
         }
-        // Buffered path (ants without --debug): flushes ~1/sec so chain
-        // depth stays ~1. .bind over a closure so only the bound args are
-        // retained, not this scope.
-        pendingWrite = pendingWrite
-          .then(appendAsync.bind(null, needMkdir, dir, path, content))
-          .catch(noop)
+        isAppendStuck()
+        if (
+          backlog.droppedCount > 0
+            ? backlog.length >= BACKLOG_MAX_BYTES / 2
+            : backlog.length >= BACKLOG_MAX_BYTES &&
+              Date.now() - (unflushedChunks[0]?.queued?.at ?? Infinity) >=
+                BACKLOG_STUCK_AGE_MS
+        ) {
+          backlog.droppedCount++
+          backlog.droppedTotal++
+          return
+        }
+        const out = takeDroppedNote() + content
+        if (out === '') return
+        const dir = dirname(target)
+        const needMkdir = ensuredDir !== dir
+        ensuredDir = dir
+        unflushedChunks.push({
+          target,
+          content: out,
+          queued: {
+            at: Date.now(),
+            target,
+            needMkdir,
+          },
+        })
+        backlog.length += out.length
+        backlog.chain = runInRootContext(() =>
+          backlog.chain.then(appendOldestChunks),
+        )
       },
       flushIntervalMs: 1000,
       maxBufferSize: 100,
@@ -200,15 +400,44 @@ function getDebugWriter(): BufferedWriter {
     })
     registerCleanup(async () => {
       debugWriter?.dispose()
-      await pendingWrite
+      await drained()
     })
+    if (!exitHandlerRegistered) {
+      exitHandlerRegistered = true
+      process.on('exit', handleDebugExit)
+    }
   }
   return debugWriter
 }
 
 export async function flushDebugLogs(): Promise<void> {
   debugWriter?.flush()
-  await pendingWrite
+  await drained()
+  if (backlog.droppedCount > 0 && backlog.length === 0) {
+    getDebugWriter().write('')
+    debugWriter?.flush()
+    await drained()
+  }
+}
+
+export function getDebugFileDroppedTotal(): number {
+  return backlog.droppedTotal
+}
+
+export function _resetDebugLoggerForTesting(): void {
+  debugWriter?.dispose()
+  debugWriter = null
+  unflushedChunks = []
+  backlog = {
+    chain: Promise.resolve(),
+    length: 0,
+    appendSince: 0,
+    stuck: 'no',
+    droppedCount: 0,
+    droppedTotal: 0,
+  }
+  exiting = false
+  resolvedLogPath = null
 }
 
 export function logForDebugging(
@@ -231,7 +460,7 @@ export function logForDebugging(
   const timestamp = new Date().toISOString()
   const output = `${timestamp} [${level.toUpperCase()}] ${message.trim()}\n`
   if (isDebugToStdErr()) {
-    writeToStderr(output)
+    writeToStderr(output, { mayDrop: true })
     return
   }
 
@@ -241,6 +470,7 @@ export function logForDebugging(
 export function getDebugLogPath(): string {
   return (
     getDebugFilePath() ??
+    resolvedLogPath ??
     (process.env.CLAUDE_CODE_DEBUG_LOGS_DIR
       ? resolve(process.env.CLAUDE_CODE_DEBUG_LOGS_DIR)
       : null) ??

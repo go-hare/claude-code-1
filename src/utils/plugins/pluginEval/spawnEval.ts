@@ -1091,6 +1091,7 @@ export type SpawnEvalParams = {
   case_: ResolvedCase
   sandbox: EvalSandbox
   allowedTools: string[]
+  disallowedTools?: string[]
   operatorAllowedTools?: string[]
   modelOverride?: string
   artifactPublishGranted: boolean
@@ -1211,6 +1212,7 @@ export async function buildEvalChildArgv(
   allowedTools: string[],
   modelOverride: string | undefined,
   mcpConfigPath: string | undefined,
+  disallowedTools: string[] = [],
 ): Promise<string[]> {
   const argv = [
     '-p',
@@ -1275,7 +1277,7 @@ export async function buildEvalChildArgv(
       evalToolPathRule('Write', path),
     ]),
     // gold sf R.push(...Ai(r)) — r is original allowedTools, before mf/df
-    ...extraEvalToolDenies(allowedTools),
+    ...extraEvalToolDenies(allowedTools, disallowedTools),
   ]
   if (process.platform !== 'win32') disallowed.push(EVAL_PROC_READ_DENY)
   argv.push(`--disallowed-tools=${disallowed.join(',')}`)
@@ -1344,6 +1346,7 @@ function parseTrace(
   let sawResult = false
   let resultError: string | null = null
   let authRejected = false
+  let endedOnApiError = false
   for (const event of events) {
     if (!event || typeof event !== 'object') continue
     const rec = event as Record<string, unknown>
@@ -1418,6 +1421,8 @@ function parseTrace(
       if (typeof rec.total_cost_usd === 'number') {
         costUsd = Math.max(0, rec.total_cost_usd - (opts.restoredCostUsd ?? 0))
       }
+      endedOnApiError =
+        rec.is_error === true && typeof rec.api_error_status === 'number'
       if (Array.isArray(rec.permission_denials)) {
         for (const denial of rec.permission_denials) {
           const id =
@@ -1481,6 +1486,7 @@ function parseTrace(
     mockRecordings: [],
     artifactPublishes: collectEvalArtifactPublishes(events),
     authRejected: sawResult ? authRejected && error !== null : null,
+    endedOnApiError,
     tracePath,
   }
 }
@@ -1504,6 +1510,7 @@ export async function spawnEvalChild(
     params.allowedTools,
     params.modelOverride,
     params.mocks?.configPath,
+    params.disallowedTools ?? [],
   )
   const env = buildEvalChildEnv(
     params.case_,
@@ -1698,9 +1705,15 @@ export async function spawnEvalChild(
                 error: result.error,
                 stderr,
               })
+              const apiErrPrefix = result.endedOnApiError ? result.error : null
               result.mockSetupFailure = integrity.mockSetupFailure
               result.aborted = integrity.aborted
-              result.error = integrity.error
+              result.error =
+                apiErrPrefix !== null &&
+                integrity.error !== null &&
+                !integrity.error.startsWith(apiErrPrefix)
+                  ? `${apiErrPrefix} · ${integrity.error}`
+                  : integrity.error
               result.mockCalls = integrity.mockCalls
               result.mockTally = integrity.mockTally
             } catch (error) {

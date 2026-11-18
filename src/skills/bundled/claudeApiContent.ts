@@ -2,14 +2,26 @@
 // Each .md file is inlined as a string at build time via Bun's text loader.
 // densable 2.1.221 layout: language dirs use `{lang}/claude-api/*` + shared/*.
 
+import csharpClaudeApiOpentelemetry from './claude-api/csharp/claude-api/opentelemetry.md' with {
+  type: 'text',
+}
 import csharpClaudeApi from './claude-api/csharp/claude-api/README.md' with {
   type: 'text',
 }
 import curlExamples from './claude-api/curl/examples.md' with { type: 'text' }
+import goClaudeApiOpentelemetry from './claude-api/go/claude-api/opentelemetry.md' with {
+  type: 'text',
+}
 import goClaudeApi from './claude-api/go/claude-api/README.md' with {
   type: 'text',
 }
+import javaClaudeApiOpentelemetry from './claude-api/java/claude-api/opentelemetry.md' with {
+  type: 'text',
+}
 import javaClaudeApi from './claude-api/java/claude-api/README.md' with {
+  type: 'text',
+}
+import phpClaudeApiOpentelemetry from './claude-api/php/claude-api/opentelemetry.md' with {
   type: 'text',
 }
 import phpClaudeApi from './claude-api/php/claude-api/README.md' with {
@@ -19,6 +31,9 @@ import pythonClaudeApiBatches from './claude-api/python/claude-api/batches.md' w
   type: 'text',
 }
 import pythonClaudeApiFilesApi from './claude-api/python/claude-api/files-api.md' with {
+  type: 'text',
+}
+import pythonClaudeApiOpentelemetry from './claude-api/python/claude-api/opentelemetry.md' with {
   type: 'text',
 }
 import pythonClaudeApiReadme from './claude-api/python/claude-api/README.md' with {
@@ -33,6 +48,9 @@ import pythonClaudeApiStreaming from './claude-api/python/claude-api/streaming.m
 import pythonClaudeApiToolUse from './claude-api/python/claude-api/tool-use.md' with {
   type: 'text',
 }
+import rubyClaudeApiOpentelemetry from './claude-api/ruby/claude-api/opentelemetry.md' with {
+  type: 'text',
+}
 import rubyClaudeApi from './claude-api/ruby/claude-api/README.md' with {
   type: 'text',
 }
@@ -41,6 +59,9 @@ import sharedAdminApi from './claude-api/shared/admin-api.md' with {
   type: 'text',
 }
 import sharedAgentDesign from './claude-api/shared/agent-design.md' with {
+  type: 'text',
+}
+import sharedClaudePlatformOnAws from './claude-api/shared/claude-platform-on-aws.md' with {
   type: 'text',
 }
 import sharedCostOptimization from './claude-api/shared/cost-optimization.md' with {
@@ -62,6 +83,9 @@ import sharedModelMigration from './claude-api/shared/model-migration.md' with {
   type: 'text',
 }
 import sharedModels from './claude-api/shared/models.md' with { type: 'text' }
+import sharedOpentelemetry from './claude-api/shared/opentelemetry.md' with {
+  type: 'text',
+}
 import sharedPromptAudit from './claude-api/shared/prompt-audit.md' with {
   type: 'text',
 }
@@ -78,6 +102,9 @@ import typescriptClaudeApiBatches from './claude-api/typescript/claude-api/batch
   type: 'text',
 }
 import typescriptClaudeApiFilesApi from './claude-api/typescript/claude-api/files-api.md' with {
+  type: 'text',
+}
+import typescriptClaudeApiOpentelemetry from './claude-api/typescript/claude-api/opentelemetry.md' with {
   type: 'text',
 }
 import typescriptClaudeApiReadme from './claude-api/typescript/claude-api/README.md' with {
@@ -123,20 +150,27 @@ export {
 } from './claudeApi.js'
 
 export const SKILL_FILES: Record<string, string> = {
+  'csharp/claude-api/opentelemetry.md': csharpClaudeApiOpentelemetry,
   'csharp/claude-api/README.md': csharpClaudeApi,
   'curl/examples.md': curlExamples,
+  'go/claude-api/opentelemetry.md': goClaudeApiOpentelemetry,
   'go/claude-api/README.md': goClaudeApi,
+  'java/claude-api/opentelemetry.md': javaClaudeApiOpentelemetry,
   'java/claude-api/README.md': javaClaudeApi,
+  'php/claude-api/opentelemetry.md': phpClaudeApiOpentelemetry,
   'php/claude-api/README.md': phpClaudeApi,
   'python/claude-api/README.md': pythonClaudeApiReadme,
   'python/claude-api/sdk-upgrade.md': pythonClaudeApiSdkUpgrade,
   'python/claude-api/batches.md': pythonClaudeApiBatches,
   'python/claude-api/files-api.md': pythonClaudeApiFilesApi,
+  'python/claude-api/opentelemetry.md': pythonClaudeApiOpentelemetry,
   'python/claude-api/streaming.md': pythonClaudeApiStreaming,
   'python/claude-api/tool-use.md': pythonClaudeApiToolUse,
+  'ruby/claude-api/opentelemetry.md': rubyClaudeApiOpentelemetry,
   'ruby/claude-api/README.md': rubyClaudeApi,
   'shared/admin-api.md': sharedAdminApi,
   'shared/agent-design.md': sharedAgentDesign,
+  'shared/claude-platform-on-aws.md': sharedClaudePlatformOnAws,
   'shared/cost-optimization.md': sharedCostOptimization,
   'shared/error-codes.md': sharedErrorCodes,
   'shared/live-sources.md': sharedLiveSources,
@@ -145,6 +179,7 @@ export const SKILL_FILES: Record<string, string> = {
   'shared/managed-agents-tools.md': sharedManagedAgentsTools,
   'shared/model-migration.md': sharedModelMigration,
   'shared/models.md': sharedModels,
+  'shared/opentelemetry.md': sharedOpentelemetry,
   'shared/prompt-audit.md': sharedPromptAudit,
   'shared/prompt-caching.md': sharedPromptCaching,
   'shared/token-counting.md': sharedTokenCounting,
@@ -152,6 +187,7 @@ export const SKILL_FILES: Record<string, string> = {
   'typescript/claude-api/README.md': typescriptClaudeApiReadme,
   'typescript/claude-api/batches.md': typescriptClaudeApiBatches,
   'typescript/claude-api/files-api.md': typescriptClaudeApiFilesApi,
+  'typescript/claude-api/opentelemetry.md': typescriptClaudeApiOpentelemetry,
   'typescript/claude-api/streaming.md': typescriptClaudeApiStreaming,
   'typescript/claude-api/tool-use.md': typescriptClaudeApiToolUse,
 }

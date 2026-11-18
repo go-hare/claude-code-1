@@ -5,6 +5,11 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvDefinedFalsy } from '../utils/envUtils.js'
 import {
+  getGatewayAuth,
+  isGatewayAuthPinned,
+  isGatewayHttpLoopbackHost,
+} from '../utils/gatewayEnv.js'
+import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from '../utils/model/providers.js'
@@ -18,6 +23,10 @@ export type AttributionHeaderOptions = {
    * so auto-mode classifier sideQuery still sends the billing header.
    */
   ignoreEnvOptOut?: boolean
+  responseBeforeCompaction?: {
+    messageId?: string
+    turnPosition?: { promptIndex?: number; turnIndex?: number }
+  }
 }
 
 const DEFAULT_PREFIX = `You are Claude Code, Anthropic's official CLI for Claude.`
@@ -111,6 +120,31 @@ function shouldIgnoreAttributionEnvOptOut(
  * We use a placeholder (instead of injecting from Zig) because same-length
  * replacement avoids Content-Length changes and buffer reallocation.
  */
+function hasClaudeGatewayJwtAud(token: string | undefined): boolean {
+  if (!token) return false
+  const parts = token.split('.')
+  if (parts.length < 2) return false
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1]!, 'base64url').toString('utf8'),
+    ) as { aud?: unknown }
+    return (
+      payload.aud === 'claude-gateway' ||
+      (Array.isArray(payload.aud) && payload.aud.includes('claude-gateway'))
+    )
+  } catch {
+    return false
+  }
+}
+
+function isNonNegativeInt(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0
+}
+
+function isPositiveInt(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1
+}
+
 export function getAttributionHeader(
   options?: AttributionHeaderOptions,
 ): string {
@@ -123,6 +157,9 @@ export function getAttributionHeader(
     return ''
   }
 
+  const provider = getAPIProvider()
+  const isFirstPartyDirect =
+    provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()
   const version = MACRO.VERSION
   const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT ?? 'unknown'
 
@@ -132,7 +169,79 @@ export function getAttributionHeader(
   // requests to a lower QoS pool. Absent = interactive default.
   const workload = getWorkload()
   const workloadPair = workload ? ` cc_workload=${workload};` : ''
-  const header = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=${entrypoint};${cch}${workloadPair}`
+
+  // #578: cc_gateway attribution field (SEA 325 sJs)
+  const gatewayAuth = provider === 'gateway' ? getGatewayAuth() : null
+  const nonFirstPartyBaseHost = (() => {
+    const baseUrl = process.env.ANTHROPIC_BASE_URL
+    if (
+      provider !== 'firstParty' ||
+      !baseUrl ||
+      process.env.ANTHROPIC_UNIX_SOCKET !== undefined ||
+      isFirstPartyAnthropicBaseUrl()
+    ) {
+      return undefined
+    }
+    try {
+      return new URL(baseUrl).host || undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const hasGatewayCreds =
+    isGatewayAuthPinned(gatewayAuth) ||
+    hasClaudeGatewayJwtAud(gatewayAuth?.jwt ?? process.env.ANTHROPIC_AUTH_TOKEN)
+  const gatewayActive =
+    (provider === 'gateway' || nonFirstPartyBaseHost !== undefined) &&
+    hasGatewayCreds
+  const gatewayUrl = gatewayAuth?.url ?? process.env.ANTHROPIC_BASE_URL
+  let isLoopbackOrInvalid = false
+  if (gatewayUrl !== undefined) {
+    if (!URL.canParse(gatewayUrl)) {
+      isLoopbackOrInvalid = true
+    } else {
+      isLoopbackOrInvalid = isGatewayHttpLoopbackHost(
+        new URL(gatewayUrl).hostname,
+      )
+    }
+  }
+  const hostVerdict = (
+    gatewayAuth as { hostVerdict?: Record<string, unknown> } | null
+  )?.hostVerdict
+  const hasVouchedVerdict =
+    hostVerdict !== undefined && 'vouched' in hostVerdict
+  const gatewayPair =
+    (provider === 'gateway' || gatewayActive) &&
+    !(isLoopbackOrInvalid || hasVouchedVerdict)
+      ? ` cc_gateway=${gatewayActive ? '1' : 'env'};`
+      : ''
+
+  const prevMsgId = options?.responseBeforeCompaction?.messageId
+  const prevPromptIdx =
+    options?.responseBeforeCompaction?.turnPosition?.promptIndex
+  const prevTurnIdx = options?.responseBeforeCompaction?.turnPosition?.turnIndex
+  const prevMsgPair =
+    prevMsgId !== undefined &&
+    /^msg_[A-Za-z0-9_]{1,64}$/.test(prevMsgId) &&
+    isFirstPartyDirect
+      ? ` cc_prev_msg=${prevMsgId};`
+      : ''
+  const prevPosPair =
+    isNonNegativeInt(prevPromptIdx) &&
+    isPositiveInt(prevTurnIdx) &&
+    isFirstPartyDirect
+      ? ` cc_prev_prompt_index=${prevPromptIdx}; cc_prev_turn_index=${prevTurnIdx};`
+      : ''
+  const bgDispatch = process.env.CLAUDE_BG_DISPATCH_ENTRYPOINT
+  const dispatchPair =
+    process.env.CLAUDE_CODE_SESSION_KIND === 'bg' &&
+    bgDispatch !== undefined &&
+    /^[a-zA-Z0-9_-]{1,64}$/.test(bgDispatch) &&
+    isFirstPartyDirect
+      ? ` cc_dispatch_entrypoint=${bgDispatch};`
+      : ''
+
+  const header = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=${entrypoint};${cch}${workloadPair}${gatewayPair}${prevMsgPair}${prevPosPair}${dispatchPair}`
 
   logForDebugging(`attribution header ${header}`)
   return header

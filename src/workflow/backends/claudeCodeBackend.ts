@@ -19,7 +19,8 @@ import {
   type BuiltInAgentDefinition,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { createUserMessage, extractTextContent } from '../../utils/messages.js'
-import { applyWorkflowHarnessPrompt } from '../../utils/workflowHarness.js'
+import { buildWorkflowHarnessMessages } from '../../utils/workflowHarness.js'
+import { runWorkflowAgentSpawn } from '../../utils/plugins/functionHooksModules.js'
 import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { createHash } from 'node:crypto'
 import { createAgentId } from '../../utils/uuid.js'
@@ -35,7 +36,7 @@ import { logEvent } from '../../services/analytics/index.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import type { Message } from '../../types/message.js'
 import type { ToolUseContext } from '../../Tool.js'
-import { getCwd } from '../../utils/cwd.js'
+import { getProjectRoot } from '../../bootstrap/state.js'
 import { readHostBundle } from '../hostHandle.js'
 import {
   buildWorkflowPrefixKey,
@@ -281,9 +282,41 @@ export const claudeCodeBackend: AgentAdapter = {
     // Historically the prompt required "call StructuredOutput tool", causing 8/12 agents to refuse to wrap up or struggle to call it;
     // empirically the main cause of dead is the tool being unreachable rather than "forgetting". Change the contract: raw JSON text, extractStructuredOutput
     // tolerates fenced fences + preceding/trailing narration + multiple segments.
+    let effectiveInputPrompt = params.prompt
+    let effectiveModelOverride = model
+    const spawnHookResult = await runWorkflowAgentSpawn(
+      {
+        prompt: params.prompt,
+        workflow: { run: ctx.runId ?? '', index: ctx.agentId },
+        description: params.label,
+        subagentType: agentDef.agentType,
+        model: effectiveModelOverride,
+        background: false,
+        cwd: worktreeInfo?.worktreePath,
+        parentAgentId: toolUseContext.agentId,
+        parentModel: toolUseContext.options.mainLoopModel,
+        permissionMode: appState.toolPermissionContext.mode,
+      },
+      async passed => {
+        if (typeof passed.prompt === 'string') {
+          effectiveInputPrompt = passed.prompt
+        }
+        if (typeof passed.model === 'string') {
+          effectiveModelOverride = mapWorkflowModel(passed.model)
+        }
+        return passed
+      },
+      agentAbort.signal,
+    )
+    if (!spawnHookResult.ok) {
+      throw new Error(
+        `Workflow agent spawn denied by a plugin: ${spawnHookResult.deny}`,
+      )
+    }
+
     const promptText = params.schema
       ? [
-          params.prompt,
+          effectiveInputPrompt,
           '',
           'After completing the task, emit your final answer as a single JSON object matching this JSON Schema:',
           '```json',
@@ -296,15 +329,18 @@ export const claudeCodeBackend: AgentAdapter = {
           '- Do NOT call any "StructuredOutput" or "SyntheticOutput" tool — it is not available in this environment.',
           '- Your turn must end with the JSON object. Anything after it (prose, tool calls) will be ignored or cause your answer to be discarded.',
         ].join('\n')
-      : params.prompt
+      : effectiveInputPrompt
 
-    // densable leftover #55 sMt host @214773110 — Ae? harness : raw me
-    const harnessed = applyWorkflowHarnessPrompt(
+    // Official #853 (@304215500) — split relayed user request and computed task
+    // into separate user messages when relay.kind === 'relay'.
+    const harnessed = buildWorkflowHarnessMessages(
       toolUseContext.messages ?? [],
       promptText,
       toolUseContext.agentId,
     )
-    const promptMessages = [createUserMessage({ content: harnessed })]
+    const promptMessages = harnessed.promptMessages.map(content =>
+      createUserMessage({ content }),
+    )
     const messages: Message[] = []
     const startTime = Date.now()
     // Accumulate running progress (onProgress push -> agent_progress event -> panel refreshes token/tool in real time).
@@ -315,7 +351,8 @@ export const claudeCodeBackend: AgentAdapter = {
     // densable 2.1.229 #24 — same-prefix prompt-cache warm-up stagger (FZp)
     const toolNames = workerTools.map(t => t.name).sort()
     // densable Ze = model, effort, agentType, tools, schema, cwd (newline-joined)
-    const effectiveModel = model ?? toolUseContext.options.mainLoopModel
+    const effectiveModel =
+      effectiveModelOverride ?? toolUseContext.options.mainLoopModel
     const sessionEffort = pdSessionEffort(appState, effectiveModel) ?? ''
     const prefixKey = buildWorkflowPrefixKey({
       model: effectiveModel,
@@ -323,7 +360,7 @@ export const claudeCodeBackend: AgentAdapter = {
       agentType: agentDef.agentType,
       toolNames,
       schemaJson: params.schema ? JSON.stringify(params.schema) : '',
-      cwd: worktreeInfo?.worktreePath ?? getCwd(),
+      cwd: worktreeInfo?.worktreePath ?? getProjectRoot(),
     })
     const prefixGate = await enterWorkflowPrefixStagger({
       prefix: prefixKey,
@@ -351,7 +388,9 @@ export const claudeCodeBackend: AgentAdapter = {
           // runAgent's model is the top-level ModelAlias; workflow's model is an arbitrary alias string,
           // the types are incompatible and resolved by the provider layer at runtime. Passes through via double assertion (better than as any/never).
           override: { agentId: coreAgentId, abortController: agentAbort },
-          ...(model ? { model: model as unknown as ModelAlias } : {}),
+          ...(effectiveModelOverride
+            ? { model: effectiveModelOverride as unknown as ModelAlias }
+            : {}),
           ...(worktreeInfo ? { worktreePath: worktreeInfo.worktreePath } : {}),
         })) {
           if (isRunAgentSpinnerMode(msg)) continue
@@ -454,7 +493,8 @@ export const claudeCodeBackend: AgentAdapter = {
     // For panel display: total context tokens, tool-call count, parsed model id at completion.
     const finalTokenCount = finalized.totalTokens ?? 0
     const finalToolCount = finalized.totalToolUseCount ?? 0
-    const resolvedModel = model ?? toolUseContext.options.mainLoopModel
+    const resolvedModel =
+      effectiveModelOverride ?? toolUseContext.options.mainLoopModel
     logEvent('tengu_workflow_agent', { ok: 1, outputTokens })
 
     if (params.schema) {

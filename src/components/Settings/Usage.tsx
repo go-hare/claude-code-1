@@ -32,11 +32,14 @@ import {
   behaviorsOverMin,
   scanUsageTranscripts,
   usageTranscriptScanPermission,
+  warningBehaviorsOverMin,
   windowHasNamedRows,
   type UsageBehaviorKey,
   type UsageBehaviorStat,
   type UsageScanResult,
   type UsageScanWindow,
+  type UsageWarningBehaviorKey,
+  type UsageWarningBehaviorStat,
 } from '../../utils/usageSessionScan.js';
 import { formatResetText, formatRelativeTimeAgo, formatTokens } from '../../utils/format.js';
 import {
@@ -83,8 +86,10 @@ function LimitBar({
     return null;
   }
 
-  // Calculate usage percentage
-  const usedText = `${Math.floor(utilization)}% used`;
+  // Calculate usage percentage (clamped to [0, 100])
+  const clampedUtilization = Math.min(100, Math.max(0, utilization));
+  const usedText = `${Math.floor(clampedUtilization)}% used`;
+  const ratio = Math.min(1, Math.max(0, clampedUtilization / 100));
 
   let subtext: string | undefined;
   if (resets_at) {
@@ -109,12 +114,7 @@ function LimitBar({
       <Box flexDirection="column" flexShrink={0}>
         <Text bold>{title}</Text>
         <Box flexDirection="row" gap={1}>
-          <ProgressBar
-            ratio={utilization / 100}
-            width={maxBarWidth}
-            fillColor="rate_limit_fill"
-            emptyColor="rate_limit_empty"
-          />
+          <ProgressBar ratio={ratio} width={maxBarWidth} fillColor="rate_limit_fill" emptyColor="rate_limit_empty" />
           <Text>{usedText}</Text>
         </Box>
         {subtext && <Text dimColor>{subtext}</Text>}
@@ -134,12 +134,7 @@ function LimitBar({
           )}
         </Text>
         <TrailingLines lines={trailingLines} />
-        <ProgressBar
-          ratio={utilization / 100}
-          width={maxWidth}
-          fillColor="rate_limit_fill"
-          emptyColor="rate_limit_empty"
-        />
+        <ProgressBar ratio={ratio} width={maxWidth} fillColor="rate_limit_fill" emptyColor="rate_limit_empty" />
         <Text>{usedText}</Text>
       </Box>
     );
@@ -590,7 +585,10 @@ const EMPTY_USAGE_WINDOW: UsageScanWindow = {
 const NAMED_SHARE_NAME_WIDTH = 28;
 const NAMED_SHARE_PCT_WIDTH = 6;
 
-const BEHAVIOR_CARDS: Record<UsageBehaviorKey, { headline: (pct: number) => string; body: string }> = {
+export const BEHAVIOR_CARDS: Record<
+  UsageBehaviorKey | UsageWarningBehaviorKey,
+  { headline: (pct: number) => string; body: string }
+> = {
   cache_miss: {
     headline: pct => `${pct}% of your usage hit a >100k-token cache miss`,
     body: 'Uncached input is expensive, and often happens when sending a message to a session that has gone idle. /compact before stepping away keeps the cold-start small.',
@@ -610,6 +608,22 @@ const BEHAVIOR_CARDS: Record<UsageBehaviorKey, { headline: (pct: number) => stri
   cron: {
     headline: pct => `${pct}% of your usage came from sessions active for 8+ hours`,
     body: 'These are often background/loop sessions. Continuous usage can add up quickly so make sure it is intentional.',
+  },
+  max_effort: {
+    headline: pct => `${pct}% of your usage ran at max effort`,
+    body: 'Max effort spends significantly more thinking tokens per turn. Save it for the hardest problems and use /effort auto or medium for everyday work.',
+  },
+  workflow: {
+    headline: pct => `${pct}% of your usage came from multi-agent workflows`,
+    body: 'Workflows spawn multiple agents per request. Save them for large tasks where parallel exploration or review pays off.',
+  },
+  always_on_context: {
+    headline: pct => `${pct}% of your usage started with heavy always-on context`,
+    body: 'Large CLAUDE.md files, skills, or MCP tool definitions load on every turn. Use /context to see what fills your startup budget and trim what you do not need.',
+  },
+  large_tool_results: {
+    headline: pct => `${pct}% of your usage included large tool results`,
+    body: 'Tool outputs over 10k tokens stay in context for the rest of the session. Ask for narrower reads or searches so only the lines that matter enter context.',
   },
 };
 
@@ -638,7 +652,7 @@ function BehaviorCalloutCard({
   totalCost,
   maxWidth,
 }: {
-  stat: UsageBehaviorStat;
+  stat: UsageBehaviorStat | UsageWarningBehaviorStat;
   totalCost: number;
   maxWidth: number;
 }): React.ReactNode {
@@ -732,6 +746,7 @@ function ContributingWindowBody({
   period: 'day' | 'week';
 }): React.ReactNode {
   const over = behaviorsOverMin(window);
+  const warnings = warningBehaviorsOverMin(window);
   const named = windowHasNamedRows(window);
   const label = period === 'day' ? '24h' : '7d';
   return (
@@ -742,11 +757,14 @@ function ContributingWindowBody({
         </Text>
       </Box>
       <Box marginTop={1} flexDirection="column" gap={1}>
-        {over.length === 0 && !named ? (
+        {over.length === 0 && warnings.length === 0 && !named ? (
           <Text dimColor>Nothing over {BEHAVIOR_PCT_MIN}% in this period — try the other window.</Text>
         ) : (
           <>
             {over.map(stat => (
+              <BehaviorCalloutCard key={stat.key} stat={stat} totalCost={window.totalCost} maxWidth={maxWidth} />
+            ))}
+            {warnings.map(stat => (
               <BehaviorCalloutCard key={stat.key} stat={stat} totalCost={window.totalCost} maxWidth={maxWidth} />
             ))}
             <TopContributorCalloutCard

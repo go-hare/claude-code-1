@@ -42,6 +42,7 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
+import { getMcpServerHeaders } from './headersHelper.js'
 
 function oauthErrorCodeOf(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined
@@ -241,6 +242,103 @@ export async function normalizeOAuthErrorBody(
   })
 }
 /* eslint-enable eslint-plugin-n/no-unsupported-features/node-builtins */
+
+const MAX_AUTH_HEADER_REDIRECTS = 5
+
+function isSameOriginUrl(a: string | URL, b: string | URL): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return false
+  }
+}
+
+function isSameOriginForAuthHeaders(
+  serverConfig: { url: string; headers?: unknown; headersHelper?: unknown },
+  targetUrl: string | URL,
+): boolean {
+  return (
+    (Boolean(serverConfig.headers) || Boolean(serverConfig.headersHelper)) &&
+    isSameOriginUrl(String(targetUrl), serverConfig.url)
+  )
+}
+
+async function getAuthRequestHeaders(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+): Promise<Headers> {
+  const raw = await getMcpServerHeaders(serverName, serverConfig)
+  // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+  const headers = new Headers()
+  for (const [k, v] of Object.entries(raw)) {
+    headers.set(k, v)
+  }
+  // Never let a static/helper Authorization header clobber OAuth Basic/Bearer.
+  headers.delete('authorization')
+  return headers
+}
+
+export async function getAuthConfiguredHeadersForUrl(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+  targetUrl: string | URL,
+): Promise<Record<string, string>> {
+  if (!isSameOriginForAuthHeaders(serverConfig, targetUrl)) {
+    return {}
+  }
+  const headers = await getAuthRequestHeaders(serverName, serverConfig)
+  return Object.fromEntries(headers)
+}
+
+/**
+ * SEA 325 `ie(e, r, n)` (#680) — injects configured `headers`/`headersHelper`
+ * on same-origin OAuth requests (discovery, registration, token exchange,
+ * refresh) and guards redirects so configured headers are never leaked to
+ * another origin.
+ */
+export function wrapAuthFetchWithHeaders(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+  baseFetch: FetchLike,
+): FetchLike {
+  let headersPromise: Promise<Headers> | undefined
+  return async (url: string | URL, init?: RequestInit) => {
+    const isGet = (init?.method ?? 'GET').toUpperCase() === 'GET'
+    let currentUrl: string | URL = url
+    for (let hop = 0; ; hop++) {
+      if (!isSameOriginForAuthHeaders(serverConfig, currentUrl)) {
+        return baseFetch(currentUrl, init)
+      }
+      headersPromise ??= getAuthRequestHeaders(serverName, serverConfig)
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      const merged = new Headers(await headersPromise)
+      // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+      new Headers(init?.headers).forEach((v, k) => merged.set(k, v))
+      const response = await baseFetch(currentUrl, {
+        ...init,
+        headers: merged,
+        redirect: 'manual',
+      })
+      const location = response.headers.get('location')
+      if (
+        !(response.status >= 300 && response.status < 400) ||
+        !location ||
+        hop === MAX_AUTH_HEADER_REDIRECTS
+      ) {
+        return response
+      }
+      const nextUrl = new URL(location, String(currentUrl))
+      const canFollow = isGet
+        ? nextUrl.protocol === 'https:' || nextUrl.protocol === 'http:'
+        : (response.status === 307 || response.status === 308) &&
+          isSameOriginForAuthHeaders(serverConfig, nextUrl)
+      if (!canFollow) {
+        return response
+      }
+      currentUrl = nextUrl
+    }
+  }
+}
 
 /**
  * Creates a fetch function with a fresh 30-second timeout for each OAuth request.
@@ -452,6 +550,7 @@ async function revokeToken({
   clientSecret,
   accessToken,
   authMethod = 'client_secret_basic',
+  configuredHeaders,
 }: {
   serverName: string
   endpoint: string
@@ -461,12 +560,14 @@ async function revokeToken({
   clientSecret?: string
   accessToken?: string
   authMethod?: 'client_secret_basic' | 'client_secret_post'
+  configuredHeaders?: Record<string, string>
 }): Promise<void> {
   const params = new URLSearchParams()
   params.set('token', token)
   params.set('token_type_hint', tokenTypeHint)
 
   const headers: Record<string, string> = {
+    ...configuredHeaders,
     'Content-Type': 'application/x-www-form-urlencoded',
   }
 
@@ -577,10 +678,16 @@ export async function revokeTokensAtServer(
   try {
     const asUrl =
       tokens.discoveryState?.authorizationServerUrl ?? serverConfig.url
+    const authFetch = wrapAuthFetchWithHeaders(
+      serverName,
+      serverConfig,
+      createAuthFetch(),
+    )
     const metadata = await fetchAuthServerMetadata(
       serverName,
       asUrl,
       serverConfig.oauth?.authServerMetadataUrl,
+      authFetch,
     )
     if (!metadata) {
       logMCPDebug(serverName, 'No OAuth metadata found')
@@ -593,6 +700,11 @@ export async function revokeTokensAtServer(
         failure = 'no_revocation_endpoint'
       } else {
         const revocationEndpointStr = String(revocationEndpoint)
+        const configuredHeaders = await getAuthConfiguredHeadersForUrl(
+          serverName,
+          serverConfig,
+          revocationEndpointStr,
+        )
         const authMethods =
           ('revocation_endpoint_auth_methods_supported' in metadata
             ? metadata.revocation_endpoint_auth_methods_supported
@@ -621,6 +733,7 @@ export async function revokeTokensAtServer(
               clientSecret: tokens.clientSecret,
               accessToken: tokens.accessToken,
               authMethod,
+              configuredHeaders,
             })
           } catch (error: unknown) {
             logMCPDebug(
@@ -641,6 +754,7 @@ export async function revokeTokensAtServer(
               clientSecret: tokens.clientSecret,
               accessToken: tokens.accessToken,
               authMethod,
+              configuredHeaders,
             })
           } catch (error: unknown) {
             logMCPDebug(
@@ -1219,12 +1333,17 @@ export async function performMCPOAuthFlow(
     )
 
     // Fetch and store OAuth metadata for scope information
+    const authFetch = wrapAuthFetchWithHeaders(
+      serverName,
+      serverConfig,
+      createAuthFetch(),
+    )
     try {
       const metadata = await fetchAuthServerMetadata(
         serverName,
         serverConfig.url,
         serverConfig.oauth?.authServerMetadataUrl,
-        undefined,
+        authFetch,
         wwwAuthParams.resourceMetadataUrl,
       )
       if (metadata) {
@@ -1365,6 +1484,7 @@ export async function performMCPOAuthFlow(
             serverUrl: serverConfig.url,
             scope: wwwAuthParams.scope,
             resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
+            fetchFn: authFetch,
           })
           logMCPDebug(serverName, `Initial auth result: ${result}`)
 
@@ -1516,6 +1636,7 @@ export async function performMCPOAuthFlow(
       serverUrl: serverConfig.url,
       authorizationCode,
       resourceMetadataUrl: wwwAuthParams.resourceMetadataUrl,
+      fetchFn: authFetch,
     })
 
     logMCPDebug(serverName, `Auth result: ${result}`)
@@ -2448,6 +2569,11 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           this.serverName,
           this.serverConfig.url,
           metadataUrl,
+          wrapAuthFetchWithHeaders(
+            this.serverName,
+            this.serverConfig,
+            createAuthFetch(),
+          ),
         )
         if (metadata) {
           return {
@@ -2630,7 +2756,11 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
       let refreshClientInfo: OAuthClientInformation | undefined
       try {
         logMCPDebug(this.serverName, `Starting token refresh`)
-        const authFetch = createAuthFetch()
+        const authFetch = wrapAuthFetchWithHeaders(
+          this.serverName,
+          this.serverConfig,
+          createAuthFetch(),
+        )
 
         // Reuse cached metadata from the initial OAuth flow if available,
         // since metadata (token endpoint URL, etc.) is static per auth server.

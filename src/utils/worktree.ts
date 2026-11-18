@@ -650,6 +650,68 @@ async function unlinkDanglingWorktreeGitPointer(
   }
 }
 
+const REFTABLE_ADMIN_FILE_RE =
+  /^(?:tables\.list(?:\.lock)?|0x[0-9a-f]{12,16}-0x[0-9a-f]{12,16}-[0-9a-f]{8}\.(?:(?:ref|log)(?:\.lock)?|temp\.[A-Za-z0-9]{6}))$/
+
+async function resolveWorktreeAdminDir(
+  worktreePath: string,
+): Promise<string | null> {
+  try {
+    const content = (await readFile(join(worktreePath, '.git'), 'utf-8')).trim()
+    if (!content.startsWith('gitdir:')) return null
+    const raw = content.slice('gitdir:'.length).trim()
+    return raw ? resolve(worktreePath, raw) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Clean up leftover `.git/worktrees/<entryId>/reftable/*` files and remove
+ * the `<entryId>` directory if it is now empty after `git worktree remove`.
+ * Matches official `jt` / `Pe` / `Bt` for reftable repositories.
+ */
+export async function cleanupWorktreeReftableAdminDir(
+  adminDir: string,
+  commonGitDir?: string | null,
+): Promise<boolean> {
+  try {
+    const reftableDir = join(adminDir, 'reftable')
+    const rtStat = await lstat(reftableDir).catch(() => null)
+    if (!rtStat || !rtStat.isDirectory()) {
+      return false
+    }
+    if (commonGitDir) {
+      const commonRtStat = await lstat(join(commonGitDir, 'reftable')).catch(
+        () => null,
+      )
+      if (
+        commonRtStat &&
+        commonRtStat.isDirectory() &&
+        rtStat.dev === commonRtStat.dev &&
+        rtStat.ino === commonRtStat.ino
+      ) {
+        return false
+      }
+    }
+    const entries = await readdir(reftableDir).catch(() => null)
+    if (entries) {
+      for (const entry of entries) {
+        if (REFTABLE_ADMIN_FILE_RE.test(entry)) {
+          await unlink(join(reftableDir, entry)).catch(() => {})
+        }
+      }
+    }
+    await unlink(join(adminDir, 'refs', 'heads')).catch(() => {})
+    await rmdir(reftableDir).catch(() => {})
+    await rmdir(join(adminDir, 'refs')).catch(() => {})
+    await rmdir(adminDir).catch(() => {})
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * densable create-fail teardown: M4 → `worktree remove --force` [+ prune];
  * else EHt EINVAL/ENOENT → CHt `.git`. Sparse also runs Mne afterwards.
@@ -690,6 +752,81 @@ async function teardownFailedWorktreeCreate(
 // slug-segment allowlist ([a-zA-Z0-9._-]), so the mapping is injective.
 function flattenSlug(slug: string): string {
   return slug.replaceAll('/', '+')
+}
+
+export type WorktreeBaseSource = 'fetch_head' | 'origin_default' | 'head'
+
+/**
+ * #710 (SEA `@292838361`): Format an informative error when `git rev-parse`
+ * cannot resolve a worktree base commit, explaining how the lookup ended and
+ * likely causes (e.g. a repository without a commit yet).
+ */
+export function formatWorktreeBaseResolveError(params: {
+  baseBranch: string
+  source: WorktreeBaseSource
+  code: number | null
+  stdout: string
+  stderr: string
+}): string {
+  const { baseBranch, source, code, stdout, stderr } = params
+  if (code === null) {
+    return `Failed to resolve base branch "${baseBranch}": git failed to start, or was stopped before it finished.`
+  }
+  const output = (stderr || stdout).trim()
+  if (code === 1 && output.length > 0) {
+    const prefix = `git rev-parse failed (git said ${output.slice(0, 180)}).`
+    if (source === 'origin_default') {
+      return `${prefix} The fetch from origin succeeded, so it may be that this repository has no such ref afterwards (for example a single-branch clone of another branch, or a bare clone without a fetch refspec).`
+    }
+    if (source === 'fetch_head') {
+      return `${prefix} The fetch of the PR/MR succeeded, so it may be that FETCH_HEAD names no commit afterwards.`
+    }
+    return `${prefix} It may be that HEAD does not point to a commit (for example a new repository, or a branch without a commit yet).`
+  }
+  if (code === 1 && output.length === 0) {
+    if (source === 'origin_default') {
+      return `the fetch from origin succeeded, but git rev-parse found no such ref afterwards (for example in a single-branch clone of another branch, or a bare clone without a fetch refspec).`
+    }
+    if (source === 'fetch_head') {
+      return `the fetch of the PR/MR succeeded, but git rev-parse returned no commit for FETCH_HEAD afterwards.`
+    }
+    return `git rev-parse found no commit for "${baseBranch}". It may be that HEAD does not point to a commit (for example a new repository, or a branch without a commit yet).`
+  }
+  return `git rev-parse failed (git said ${output.slice(0, 180) || 'nothing that can be shown here'}).`
+}
+
+/**
+ * #711 (SEA `eDa` / `git_worktree_create_bare_layout_root`): Detect when
+ * `repoRoot/.git` is a gitdir pointer to a bare repository (and not itself a
+ * linked worktree) so creating a worktree at the bare-layout root gives an
+ * explanatory error instead of an unrelated git error.
+ */
+export async function isBareRepositoryLayoutRoot(
+  repoRoot: string,
+): Promise<boolean> {
+  const dotGitPath = join(repoRoot, '.git')
+  try {
+    const st = await lstat(dotGitPath)
+    if (!st.isFile()) return false
+  } catch {
+    return false
+  }
+  const gitDir = await resolveGitDir(repoRoot)
+  if (!gitDir) return false
+  try {
+    // Linked worktrees have a `commondir` file in their git admin dir;
+    // a bare-layout root's `.git` file points directly to the bare repo.
+    await stat(join(gitDir, 'commondir'))
+    return false
+  } catch {
+    // no commondir — check whether git considers this a bare repository
+  }
+  const { code, stdout } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--is-bare-repository'],
+    { cwd: repoRoot, env: gitWorktreeEnv() },
+  )
+  return code === 0 && stdout.trim() === 'true'
 }
 
 export function worktreeBranchName(slug: string): string {
@@ -757,10 +894,10 @@ export async function assertWorktreeNotForeignRepo(
  * prevents unconditionally running `git fetch` (which can hang waiting for credentials)
  * on every resume.
  */
-async function getOrCreateWorktree(
+export async function getOrCreateWorktree(
   repoRoot: string,
   slug: string,
-  options?: { prNumber?: number },
+  options?: { prNumber?: number; fromCwd?: string },
 ): Promise<WorktreeCreateResult> {
   const worktreePath = worktreePathFor(repoRoot, slug)
   const worktreeBranch = worktreeBranchName(slug)
@@ -809,6 +946,13 @@ async function getOrCreateWorktree(
     }
   }
 
+  if (await isBareRepositoryLayoutRoot(repoRoot)) {
+    logEvent('git_worktree_create_bare_layout_root', {})
+    throw new Error(
+      `The .git in ${repoRoot} points to a bare repository, so Claude Code can't create a worktree from this directory. Start Claude Code in one of that repository's worktrees instead (git worktree add makes one).`,
+    )
+  }
+
   // densable 2.1.212 xqi: refuse symlink at .claude / worktrees / target
   // before any mkdir or `git worktree add` that could follow it out of tree.
   await assertWorktreeCreatePathsNotSymlinked(repoRoot, worktreePath)
@@ -819,7 +963,9 @@ async function getOrCreateWorktree(
   const fetchEnv = gitWorktreeEnv()
 
   let baseBranch: string
+  let baseSource: WorktreeBaseSource = 'head'
   let baseSha: string | null = null
+  let revParseCwd = repoRoot
   if (options?.prNumber) {
     // densable 2.1.233 #1: provider-aware fetch refs (NEr/Hod/Oxr).
     // gitlab → merge-requests only; github → pull only; other → [pull, mr].
@@ -845,6 +991,7 @@ async function getOrCreateWorktree(
       )
     }
     baseBranch = 'FETCH_HEAD'
+    baseSource = 'fetch_head'
   } else {
     // If origin/<branch> already exists locally, skip fetch. In large repos
     // (210k files, 16M objects) fetch burns ~6-8s on a local commit-graph
@@ -869,21 +1016,43 @@ async function getOrCreateWorktree(
         ['fetch', 'origin', defaultBranch],
         { cwd: repoRoot, stdin: 'ignore', env: fetchEnv },
       )
-      baseBranch = fetchCode === 0 ? originRef : 'HEAD'
+      if (fetchCode === 0) {
+        baseBranch = originRef
+        baseSource = 'origin_default'
+      } else {
+        logForDebugging(
+          `[worktree] fetch of origin/${defaultBranch} failed — basing worktree on local HEAD`,
+          { level: 'warn' },
+        )
+        baseBranch = 'HEAD'
+        baseSource = 'head'
+        revParseCwd = options?.fromCwd ?? repoRoot
+      }
     }
   }
 
   // For the fetch/PR-fetch paths we still need the SHA — the fs-only resolveRef
   // above only covers the "origin/<branch> already exists locally" case.
+  // #783: use `^{commit}` to disambiguate a tag/branch named like a commit ID.
   if (!baseSha) {
-    const { stdout, code: shaCode } = await execFileNoThrowWithCwd(
+    const {
+      stdout,
+      stderr,
+      code: shaCode,
+    } = await execFileNoThrowWithCwd(
       gitExe(),
-      ['rev-parse', baseBranch],
-      { cwd: repoRoot, env: gitWorktreeEnv() },
+      ['rev-parse', `${baseBranch}^{commit}`],
+      { cwd: revParseCwd, env: gitWorktreeEnv() },
     )
     if (shaCode !== 0) {
       throw new Error(
-        `Failed to resolve base branch "${baseBranch}": git rev-parse failed`,
+        formatWorktreeBaseResolveError({
+          baseBranch,
+          source: baseSource,
+          code: shaCode,
+          stdout,
+          stderr,
+        }),
       )
     }
     baseSha = stdout.trim()
@@ -896,7 +1065,7 @@ async function getOrCreateWorktree(
   }
   // -B (not -b): reset any orphan branch left behind by a removed worktree dir.
   // Saves a `git branch -D` subprocess (~15ms spawn overhead) on every create.
-  addArgs.push('-B', worktreeBranch, worktreePath, baseBranch)
+  addArgs.push('-B', worktreeBranch, worktreePath, baseSha)
 
   const { code: createCode, stderr: createStderr } =
     await execFileNoThrowWithCwd(gitExe(), addArgs, {
@@ -1535,7 +1704,10 @@ export async function createWorktreeForSession(
 
     const createStart = Date.now()
     const { worktreePath, worktreeBranch, headCommit, existed } =
-      await getOrCreateWorktree(gitRoot, slug, options)
+      await getOrCreateWorktree(gitRoot, slug, {
+        ...options,
+        fromCwd: getCwd(),
+      })
 
     let creationDurationMs: number | undefined
     if (existed) {
@@ -1745,6 +1917,7 @@ export async function cleanupWorktree(persist?: {
           clearActiveWorktreeSession()
           return false
         }
+        const adminDir = await resolveWorktreeAdminDir(worktreePath)
         const { code: removeCode, stderr: removeError } =
           await execFileNoThrowWithCwd(
             gitExe(),
@@ -1764,6 +1937,10 @@ export async function cleanupWorktree(persist?: {
             clearActiveWorktreeSession()
             return false
           }
+        }
+        if (adminDir) {
+          const commonGitDir = await resolveGitDir(gitRoot).catch(() => null)
+          await cleanupWorktreeReftableAdminDir(adminDir, commonGitDir)
         }
         logForDebugging(`Removed linked worktree at: ${worktreePath}`)
         await restoreWorktreeConfigExtension(gitRoot)
@@ -1850,7 +2027,7 @@ export async function createAgentWorktree(slug: string): Promise<{
   }
 
   const { worktreePath, worktreeBranch, headCommit, existed } =
-    await getOrCreateWorktree(gitRoot, slug)
+    await getOrCreateWorktree(gitRoot, slug, { fromCwd })
 
   if (!existed) {
     logForDebugging(
@@ -2563,6 +2740,7 @@ export async function removeAgentWorktree(
 
   await unlockAgentWorktree(worktreePath, gitRoot)
 
+  const adminDir = await resolveWorktreeAdminDir(worktreePath)
   const { code: removeCode, stderr: removeError } =
     await execFileNoThrowWithCwd(
       gitExe(),
@@ -2574,6 +2752,10 @@ export async function removeAgentWorktree(
     () => true,
     () => false,
   )
+  if (!stillExists && adminDir) {
+    const commonGitDir = await resolveGitDir(gitRoot).catch(() => null)
+    await cleanupWorktreeReftableAdminDir(adminDir, commonGitDir)
+  }
   if (removeCode !== 0 && stillExists) {
     if (WORKTREE_NOT_REGISTERED.test(removeError)) {
       const prune = await execFileNoThrowWithCwd(
@@ -3935,10 +4117,11 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
 
     // Create or resume worktree
     try {
+      const fromCwd = getCwd()
       const result = await getOrCreateWorktree(
         repoRoot,
         worktreeName,
-        prNumber !== null ? { prNumber } : undefined,
+        prNumber !== null ? { prNumber, fromCwd } : { fromCwd },
       )
       if (!result.existed) {
         console.log(

@@ -22,6 +22,7 @@ import {
 } from 'node:fs/promises'
 import { hostname as osHostname, tmpdir } from 'node:os'
 import { join, resolve as pathResolve } from 'node:path'
+import { createNonBlockingRunnerLogWriter } from './nonBlockingLog.js'
 import {
   assertSafeId,
   classifyRunnerError,
@@ -200,6 +201,7 @@ export type OrchestratorArgs = {
   logLevel: string
   poolSecretFile: string | undefined
   scmConnector?: ScmConnectorConfig
+  shutdownDrainMs: number
 }
 
 export type SpawnHintClaims = {
@@ -419,6 +421,7 @@ export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
     debugDir: process.env.SELF_HOSTED_RUNNER_DEBUG_DIR,
     logLevel: 'info',
     poolSecretFile: undefined,
+    shutdownDrainMs: 0,
   }
 
   let scmHost: { host: string; port: number } | undefined
@@ -565,6 +568,24 @@ export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
           i++
         }
         break
+      case '--shutdown-drain-sec': {
+        if (val) {
+          const d = parseInt(val, 10)
+          if (
+            Number.isNaN(d) ||
+            d < 0 ||
+            d > 3600 ||
+            String(d) !== val.trim()
+          ) {
+            throw new Error(
+              '--shutdown-drain-sec must be a whole number of seconds from 0 to 3600 (0 turns the drain off)',
+            )
+          }
+          t.shutdownDrainMs = d * 1000
+          i++
+        }
+        break
+      }
       case '--log-level':
         if (val) {
           t.logLevel = val
@@ -1283,6 +1304,11 @@ export function startOrchestratorHealthServer(
   return server
 }
 
+export type OrchestratorDrainHandle = {
+  stopSignal: AbortSignal
+  abortAt: () => number | undefined
+}
+
 export type RunOrchestratorLoopOpts = {
   apiClient: SelfHostedRunnerApi
   healthState: OrchestratorHealthState
@@ -1293,6 +1319,7 @@ export type RunOrchestratorLoopOpts = {
   runHook?: typeof runSpawnRunnerHook
   fatalExit?: (msg: string) => never
   pollIntervalMs?: number
+  drain?: OrchestratorDrainHandle
 }
 
 function defaultFatalExit(msg: string): never {
@@ -1317,11 +1344,18 @@ export async function runOrchestratorLoop(
     runHook = runSpawnRunnerHook,
     fatalExit = defaultFatalExit,
     pollIntervalMs = ORCH_POLL_INTERVAL_MS,
+    drain,
   } = opts
+
+  const stopSignal = drain?.stopSignal ?? signal
+  const nackSignal = (): AbortSignal =>
+    drain && stopSignal.aborted && !signal.aborted
+      ? AbortSignal.timeout(5000)
+      : signal
 
   let backoff = ORCH_POLL_BACKOFF_INITIAL_MS
 
-  while (!signal.aborted) {
+  while (!stopSignal.aborted && !signal.aborted) {
     healthState.last_poll_at = Date.now()
     let poll
     try {
@@ -1341,6 +1375,14 @@ export async function runOrchestratorLoop(
       healthState.pollErrors[classifyRunnerError(err)]++
       const status = getHttpStatusFromError(err)
       const msg = redactLogText(errMsg(err))
+      if (stopSignal.aborted) {
+        healthState.connected = false
+        healthState.last_error = msg
+        onStatus(
+          `[runner:orchestrator] stop: the poll in flight failed${status ? ` (HTTP ${status})` : ''}: ${msg}. If the server had claimed a session for this poll, that session is requested again only after --expected-spawn-seconds`,
+        )
+        break
+      }
       if (status !== undefined && ORCH_FATAL_HTTP.has(status)) {
         healthState.connected = false
         healthState.last_error = msg
@@ -1355,7 +1397,7 @@ export async function runOrchestratorLoop(
       onStatus(
         `[runner:orchestrator] poll failed${status ? ` (HTTP ${status})` : ''}: ${msg} — retrying in ${Math.round(backoff / 1000)}s`,
       )
-      await sleepMs(backoff, signal)
+      await sleepMs(backoff, stopSignal)
       backoff = Math.min(backoff * 2, ORCH_POLL_BACKOFF_MAX_MS)
       continue
     }
@@ -1408,15 +1450,58 @@ export async function runOrchestratorLoop(
     }
 
     const warmBudget = Math.max(0, args.hookConcurrency - take.length)
-    const warm = args.minIdle > 0 ? poll.warm_hints.slice(0, warmBudget) : []
-    if (poll.warm_hints.length > warm.length) {
+    const rawWarm = args.minIdle > 0 ? poll.warm_hints.slice(0, warmBudget) : []
+    if (poll.warm_hints.length > rawWarm.length) {
       onDebug(
-        `[runner:orchestrator] dropping ${poll.warm_hints.length - warm.length} warm hint(s) (budget=${warmBudget}, minIdle=${args.minIdle})`,
+        `[runner:orchestrator] dropping ${poll.warm_hints.length - rawWarm.length} warm hint(s) (budget=${warmBudget}, minIdle=${args.minIdle})`,
       )
     }
-    if (take.length > 0) {
+
+    const draining = drain !== undefined && stopSignal.aborted
+    const abortAt = drain?.abortAt()
+    const remainingDrainMs =
+      abortAt === undefined ? 0 : abortAt - performance.now()
+    const enoughDrainTime =
+      !draining ||
+      (!signal.aborted &&
+        remainingDrainMs >= args.hookTimeoutMs + 2 * ORCH_SIGKILL_GRACE_MS)
+    const dispatchHints = enoughDrainTime ? take : []
+    const handBackHints = enoughDrainTime ? [] : take
+    const warm = enoughDrainTime ? rawWarm : []
+
+    if (draining) {
+      for (const hint of dispatchHints) {
+        onStatus(
+          `[runner:orchestrator] stop: starting session=${hint.session_uuid} attempt=${hint.attempt} jti=${hint.jti}, which the poll in flight brought: ${Math.floor(remainingDrainMs / 1000)}s of the shutdown drain are left`,
+        )
+      }
+      if (!enoughDrainTime && rawWarm.length > 0) {
+        onStatus(
+          `[runner:orchestrator] stop: not starting ${rawWarm.length} standby runner(s) that the poll in flight brought: too little of the shutdown drain is left. The server asks for them again once their lease has ended`,
+        )
+      }
+      for (const hint of handBackHints) {
+        await apiClient
+          .nackSpawnHint(
+            {
+              session_uuid: hint.session_uuid,
+              attempt: hint.attempt,
+              error: 'orchestrator: shutting down during drain',
+              retryable: true,
+            },
+            nackSignal(),
+          )
+          .catch(err =>
+            onStatus(
+              `[runner:orchestrator] stop: handback nack failed: ${errMsg(err)}`,
+            ),
+          )
+      }
+    }
+
+    if (dispatchHints.length > 0) {
       onStatus(
-        `[runner:orchestrator] dispatching ${take.length} hint(s) (concurrency=${args.hookConcurrency})`,
+        `[runner:orchestrator] dispatching ${dispatchHints.length} hint(s) (concurrency=${args.hookConcurrency})`,
       )
     }
     if (warm.length > 0) {
@@ -1532,7 +1617,7 @@ export async function runOrchestratorLoop(
             retryable,
             ...(failureKind ? { failure_kind: failureKind } : {}),
           },
-          signal,
+          nackSignal(),
         )
       } catch (err) {
         onStatus(
@@ -1541,13 +1626,13 @@ export async function runOrchestratorLoop(
       }
     }
 
-    if (take.length + warm.length > 0) {
+    if (dispatchHints.length + warm.length > 0) {
       await Promise.all([
-        ...take.map(h => dispatch(h, poll.server_date, false)),
+        ...dispatchHints.map(h => dispatch(h, poll.server_date, false)),
         ...warm.map(h => dispatch(h, poll.server_date, true)),
       ])
     }
-    await sleepMs(getJitteredPollIntervalMs(pollIntervalMs), signal)
+    await sleepMs(getJitteredPollIntervalMs(pollIntervalMs), stopSignal)
   }
 }
 
@@ -1631,11 +1716,20 @@ export async function selfHostedRunnerOrchestratorMain(
   const debugEnabled = args.logLevel === 'debug'
   const ts = () => new Date().toISOString()
   const clean = (s: string) => stripControlCharsForLog(redactLogText(s))
+  const logWriter =
+    process.platform === 'win32'
+      ? undefined
+      : createNonBlockingRunnerLogWriter({ stamp: s => s })
   const onDebug = (s: string): void => {
-    if (debugEnabled) console.error(`${ts()} [DEBUG] ${clean(s)}`)
+    if (!debugEnabled) return
+    const line = `${ts()} [DEBUG] ${clean(s)}`
+    if (logWriter) logWriter.write('stderr', line)
+    else console.error(line)
   }
   const onStatus = (s: string): void => {
-    console.log(`${ts()} [self-hosted-runner] ${clean(s)}`)
+    const line = `${ts()} [self-hosted-runner] ${clean(s)}`
+    if (logWriter) logWriter.write('stdout', line)
+    else console.log(line)
   }
 
   let hookPath: string
@@ -1711,6 +1805,13 @@ export async function selfHostedRunnerOrchestratorMain(
 
   // densable: health server + SCM before loop; abort stops both
   const ac = new AbortController()
+  const stopAc = new AbortController()
+  let drainDeadline: number | undefined
+  let drainTimer: ReturnType<typeof setTimeout> | undefined
+  const drain: OrchestratorDrainHandle | undefined =
+    args.shutdownDrainMs > 0
+      ? { stopSignal: stopAc.signal, abortAt: () => drainDeadline }
+      : undefined
 
   // densable JFh — /healthz + /metrics
   const healthServer =
@@ -1745,12 +1846,40 @@ export async function selfHostedRunnerOrchestratorMain(
   if (deps.enterLoop === false) {
     scmHandle?.stop()
     healthServer?.close()
+    logWriter?.close()
     return
   }
 
   let forced = false
-  const onSignal = (): void => {
-    if (forced) {
+  const handleSignal = (isTerm: boolean): void => {
+    if (drain && !ac.signal.aborted) {
+      if (isTerm && !stopAc.signal.aborted) {
+        onStatus(
+          `Received SIGTERM, stopping poll loop; the poll in flight and running hooks have up to ${args.shutdownDrainMs / 1000}s to end...`,
+        )
+        drainDeadline = performance.now() + args.shutdownDrainMs
+        drainTimer = setTimeout(() => {
+          onStatus(
+            'Shutdown drain time is over, stopping what is still running...',
+          )
+          ac.abort()
+        }, args.shutdownDrainMs)
+        drainTimer.unref?.()
+        stopAc.abort()
+        return
+      }
+      onStatus(
+        stopAc.signal.aborted
+          ? 'Received a second shutdown signal, stopping what is still running...'
+          : 'Received SIGINT, stopping poll loop and running hooks...',
+      )
+      if (drainTimer) clearTimeout(drainTimer)
+      drainDeadline = performance.now()
+      stopAc.abort()
+      ac.abort()
+      return
+    }
+    if (forced || drain) {
       onStatus('Forced shutdown')
       process.exit(1)
     }
@@ -1758,8 +1887,10 @@ export async function selfHostedRunnerOrchestratorMain(
     onStatus('Received shutdown signal, stopping poll loop...')
     ac.abort()
   }
-  process.on('SIGTERM', onSignal)
-  process.on('SIGINT', onSignal)
+  const onTerm = (): void => handleSignal(true)
+  const onInt = (): void => handleSignal(false)
+  process.on('SIGTERM', onTerm)
+  process.on('SIGINT', onInt)
   try {
     await (deps.runLoop ?? runOrchestratorLoop)(
       {
@@ -1769,10 +1900,12 @@ export async function selfHostedRunnerOrchestratorMain(
         healthState,
         onStatus,
         onDebug,
+        drain,
       },
       ac.signal,
     )
   } finally {
+    if (drainTimer) clearTimeout(drainTimer)
     scmHandle?.stop()
     try {
       healthServer?.closeAllConnections?.()
@@ -1780,7 +1913,8 @@ export async function selfHostedRunnerOrchestratorMain(
       /* ignore */
     }
     healthServer?.close()
-    process.removeListener('SIGTERM', onSignal)
-    process.removeListener('SIGINT', onSignal)
+    process.removeListener('SIGTERM', onTerm)
+    process.removeListener('SIGINT', onInt)
+    logWriter?.close()
   }
 }

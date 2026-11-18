@@ -58,6 +58,7 @@ import {
   OAuthRefreshLockTimeoutError,
   rememberOAuthAccountOnHold,
 } from './accountOnHold.js'
+import { getErrnoCode } from './errors.js'
 import {
   maybeRemoveApiKeyFromMacOSKeychainThrows,
   normalizeApiKeyForConfig,
@@ -2421,14 +2422,29 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
 
   // Tokens are still expired, try to acquire lock and refresh
   const claudeDir = getClaudeConfigHomeDir()
-  await mkdir(claudeDir, { recursive: true })
+  try {
+    await mkdir(claudeDir, { recursive: true })
+  } catch (err) {
+    if (isDiskFullError(err)) {
+      logError(err)
+      logEvent('tengu_oauth_token_refresh_lock_error', {
+        error: errorMessage(
+          err,
+        ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      throw new OAuthRefreshDiskFullError()
+    }
+    throw err
+  }
 
   let release
+  const releaseHold = beginOAuthRefreshLockHold()
   try {
     logEvent('tengu_oauth_token_refresh_lock_acquiring', {})
     release = await lockfile.lock(claudeDir)
     logEvent('tengu_oauth_token_refresh_lock_acquired', {})
   } catch (err) {
+    releaseHold()
     if ((err as { code?: string }).code === 'ELOCKED') {
       // Another process has the lock, let's retry if we haven't exceeded max retries
       if (retryCount < MAX_RETRIES) {
@@ -2456,6 +2472,9 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
         err,
       ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
+    if (isDiskFullError(err)) {
+      throw new OAuthRefreshDiskFullError()
+    }
     return false
   }
   let refreshToken: string | undefined
@@ -2524,12 +2543,131 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
       logEvent('tengu_oauth_refresh_token_account_on_hold', {})
     }
 
+    if (isDiskFullError(error)) {
+      throw new OAuthRefreshDiskFullError()
+    }
+
     return false
   } finally {
-    logEvent('tengu_oauth_token_refresh_lock_releasing', {})
-    await release()
-    logEvent('tengu_oauth_token_refresh_lock_released', {})
+    try {
+      logEvent('tengu_oauth_token_refresh_lock_releasing', {})
+      await release()
+      logEvent('tengu_oauth_token_refresh_lock_released', {})
+    } finally {
+      releaseHold()
+    }
   }
+}
+
+/**
+ * Official gO / V4r / O4t / Sjo / I4t (#860) — track in-flight OAuth refresh locks
+ * so short-lived commands (e.g. `claude auth status`, `claude plugin list`) can
+ * wait briefly for an active refresh to finish before exiting.
+ */
+type OAuthRefreshHoldState = {
+  held: number
+  released: PromiseWithResolvers<void> | null
+}
+
+const oauthRefreshHoldStates = new WeakOwnerCache<OAuthRefreshHoldState>(
+  () => ({ held: 0, released: null }),
+)
+
+const OAUTH_REFRESH_EXIT_WAIT_BASE_MS = 2000
+const OAUTH_REFRESH_EXIT_WAIT_DEADLINE_MS = 8500
+
+export function beginOAuthRefreshLockHold(): () => void {
+  const state = oauthRefreshHoldStates.of(getBootstrapSessionHost())
+  state.held++
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    if (--state.held === 0) {
+      state.released?.resolve()
+      state.released = null
+    }
+  }
+}
+
+export function getHeldOAuthRefreshPromise(): Promise<void> | null {
+  const state = oauthRefreshHoldStates.of(getBootstrapSessionHost())
+  if (state.held === 0) return null
+  state.released ??= Promise.withResolvers<void>()
+  return state.released.promise
+}
+
+export function getOAuthRefreshExitWaitMs(untilDeadline = false): number {
+  return untilDeadline
+    ? Math.max(
+        OAUTH_REFRESH_EXIT_WAIT_BASE_MS,
+        OAUTH_REFRESH_EXIT_WAIT_DEADLINE_MS - process.uptime() * 1000,
+      )
+    : OAUTH_REFRESH_EXIT_WAIT_BASE_MS
+}
+
+export async function waitForHeldOAuthRefresh(
+  timeoutMs: number = getOAuthRefreshExitWaitMs(),
+): Promise<boolean> {
+  try {
+    const held = getHeldOAuthRefreshPromise()
+    if (held === null) return true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const settled = await Promise.race([
+      held.then(() => true),
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(resolve, Math.max(0, timeoutMs), false)
+        timer.unref?.()
+      }),
+    ])
+    if (timer !== undefined) clearTimeout(timer)
+    if (!settled) {
+      logForDebugging(
+        `OAuth refresh still in flight after ${timeoutMs}ms; exiting without waiting further`,
+      )
+    }
+    return settled
+  } catch {
+    return false
+  }
+}
+
+export function resetOAuthRefreshHoldForTesting(): void {
+  const state = oauthRefreshHoldStates.of(getBootstrapSessionHost())
+  state.held = 0
+  state.released?.resolve()
+  state.released = null
+}
+
+/**
+ * Official FJo / eRn (#773) — roll back a refused sign-in so an organization-pinned
+ * session never leaves a refused org's OAuth token stored on disk or live in memory.
+ */
+export async function rollbackRefusedSignIn(): Promise<{
+  cleared: boolean
+}> {
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+  clearOAuthTokenCache()
+  let cleared = true
+  try {
+    const storage = getSecureStorage()
+    const data = (await storage.readAsync?.()) ?? storage.read()
+    if (data && 'claudeAiOauth' in data) {
+      const { claudeAiOauth: _drop, ...rest } = data as Record<string, unknown>
+      if (Object.keys(rest).length === 0) {
+        cleared = storage.delete()
+      } else {
+        const res = storage.update(rest)
+        cleared = res.success
+      }
+    }
+  } catch (err) {
+    logError(err)
+    cleared = false
+  } finally {
+    clearOAuthTokenCache()
+  }
+  return { cleared }
 }
 
 export function isClaudeAISubscriber(): boolean {
@@ -3435,3 +3573,32 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
 }
 
 class GcpCredentialsTimeoutError extends Error {}
+
+/**
+ * Official `oj` (2.1.301 #851): true when an error (or its cause chain) is a
+ * disk-full / quota-exceeded error (`ENOSPC` or `EDQUOT`).
+ */
+export function isDiskFullError(err: unknown): boolean {
+  let cur: unknown = err
+  for (let i = 0; i < 5 && cur !== null && typeof cur === 'object'; i++) {
+    const code = getErrnoCode(cur)
+    if (code === 'ENOSPC' || code === 'EDQUOT') {
+      return true
+    }
+    cur = (cur as { cause?: unknown }).cause
+  }
+  return false
+}
+
+/**
+ * Official `YX` (2.1.301 #851): thrown when OAuth token refresh fails because
+ * the disk or quota holding the config directory is full.
+ */
+export class OAuthRefreshDiskFullError extends Error {
+  constructor() {
+    super(
+      'OAuth access token could not be refreshed: the disk that holds the Claude Code config directory, or the disk quota on it, is full; delete files you no longer need on that disk and try again',
+    )
+    this.name = 'OAuthRefreshDiskFullError'
+  }
+}

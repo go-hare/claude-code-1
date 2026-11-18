@@ -18,6 +18,10 @@ const SESSION_ID_MIN_LENGTH = 8
 // Maximum sessions to display in the interactive picker
 const PICKER_PAGE_CAP = 20
 
+/** Official `OYn` (2.1.299 #702). */
+export const CLOUD_LOGIN_REAUTH_HINT =
+  'Run `claude auth login` (or /login in a local session), then try again.'
+
 function meta(
   s: string,
 ): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
@@ -130,12 +134,22 @@ export const callTeleport: LocalJSXCommandCall = async (
       const msg =
         fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
 
-      if (/forbidden|401|403/i.test(msg)) {
+      if (/401|unauthorized|expired|rejected/i.test(msg)) {
+        logEvent('tengu_teleport_error_bad_token', {
+          error: meta(msg.slice(0, 200)),
+        })
+        onDone(
+          `Teleport: your claude.ai login was rejected or has expired. ${CLOUD_LOGIN_REAUTH_HINT}`,
+          { display: 'system' },
+        )
+        return null
+      }
+      if (/forbidden|403/i.test(msg)) {
         logEvent('tengu_teleport_events_fetch_forbidden', {
           error: meta(msg.slice(0, 200)),
         })
         onDone(
-          'Teleport: permission denied fetching sessions. Check your OAuth token (`claude auth status`).',
+          `Teleport: permission denied fetching sessions. Check your OAuth token (\`claude auth status\`), or ${CLOUD_LOGIN_REAUTH_HINT}`,
           { display: 'system' },
         )
         return null
@@ -150,12 +164,12 @@ export const callTeleport: LocalJSXCommandCall = async (
         )
         return null
       }
-      if (/token|unauthorized/i.test(msg)) {
+      if (/token/i.test(msg)) {
         logEvent('tengu_teleport_error_bad_token', {
           error: meta(msg.slice(0, 200)),
         })
         onDone(
-          `Teleport: authentication error — ${msg}. Try \`claude auth login\`.`,
+          `Teleport: authentication error — ${msg}. ${CLOUD_LOGIN_REAUTH_HINT}`,
           { display: 'system' },
         )
         return null
@@ -298,7 +312,7 @@ export const callTeleport: LocalJSXCommandCall = async (
       evt = 'tengu_teleport_error_repo_not_in_git_dir_sessions_api'
     } else if (/cancelled|aborted/i.test(msg)) {
       evt = 'tengu_teleport_cancelled'
-    } else if (/token|unauthorized|401/i.test(msg)) {
+    } else if (/token|unauthorized|401|expired|rejected/i.test(msg)) {
       evt = 'tengu_teleport_error_bad_token'
     } else if (/status|4\d\d|5\d\d/i.test(msg)) {
       evt = 'tengu_teleport_error_bad_status'
@@ -308,7 +322,12 @@ export const callTeleport: LocalJSXCommandCall = async (
     logEvent('tengu_teleport_first_message_error', {
       error: meta(msg.slice(0, 200)),
     })
-    onDone(`Teleport failed: ${msg}`, { display: 'system' })
+    onDone(
+      evt === 'tengu_teleport_error_bad_token'
+        ? `Teleport failed: ${msg}. ${CLOUD_LOGIN_REAUTH_HINT}`
+        : `Teleport failed: ${msg}`,
+      { display: 'system' },
+    )
     return null
   }
 }

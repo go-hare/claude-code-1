@@ -126,6 +126,7 @@ export const caseSchema = lazySchema(() =>
       timeout_seconds: z.number().int().positive().max(3600).default(300),
       model: z.string().optional(),
       allowed_tools: z.array(z.string()).default([]),
+      disallowed_tools: z.array(z.string()).optional(),
       artifact_publish: z.boolean().optional(),
       growthbook_overrides: z
         .record(
@@ -171,6 +172,7 @@ export const EXECUTION_KEYS = new Set([
   'max_turns',
   'timeout_seconds',
   'allowed_tools',
+  'disallowed_tools',
   'artifact_publish',
   'growthbook_overrides',
   'append_system_prompt',
@@ -244,6 +246,13 @@ export function parseCaseDefinition(
   return { ok: true, case: data }
 }
 
+function mergeDisallowedTools(yamlVal: unknown, proseVal: unknown): unknown {
+  if (yamlVal === undefined) return proseVal
+  if (proseVal === undefined) return yamlVal
+  if (!Array.isArray(yamlVal)) return yamlVal
+  return Array.isArray(proseVal) ? [...yamlVal, ...proseVal] : proseVal
+}
+
 export function mergeProseOntoYaml(
   yaml: Record<string, unknown> | null,
   prose: {
@@ -262,12 +271,22 @@ export function mergeProseOntoYaml(
     typeof base.execution === 'object' && base.execution !== null
       ? (base.execution as Record<string, unknown>)
       : {}
+  const yamlDisallowed = execution.disallowed_tools
+  const proseDisallowed = prose.execution.disallowed_tools
   const merged: Record<string, unknown> = {
     ...base,
     ...prose.top,
     execution: {
       ...execution,
       ...prose.execution,
+      ...(yamlDisallowed !== undefined || proseDisallowed !== undefined
+        ? {
+            disallowed_tools: mergeDisallowedTools(
+              yamlDisallowed,
+              proseDisallowed,
+            ),
+          }
+        : {}),
       ...(prose.prompt !== undefined ? { prompt: prose.prompt } : {}),
     },
   }

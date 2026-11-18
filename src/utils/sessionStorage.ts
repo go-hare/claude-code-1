@@ -58,6 +58,7 @@ import { REPL_TOOL_NAME } from '@claude-code/builtin-tools/tools/REPLTool/consta
 import {
   type AgentId,
   asAgentId,
+  toAgentId,
   asSessionId,
   type SessionId,
 } from '../types/ids.js'
@@ -1040,6 +1041,8 @@ class Project {
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
   // on the first user/assistant message — prevents metadata-only session files.
   private pendingEntries: Entry[] = []
+  private replayHashes = new Map<string, Set<string>>()
+  private oversizeReplayShapes = new Set<string>()
   /**
    * densable `relocationBuffer` — while non-null, appendEntry enqueues here
    * instead of writing, so mid-rehome writes land after setSessionFile.
@@ -1963,6 +1966,17 @@ class Project {
     } else if (entry.type === 'relocated') {
       // densable tNt stamp — always append (last-wins on resume scans)
       void this.enqueueWrite(sessionFile, entry)
+    } else if (
+      (entry as { type: string }).type === 'api-request-shape' ||
+      (entry as { type: string }).type === 'api-request-blob' ||
+      (entry as { type: string }).type === 'api-request'
+    ) {
+      // Official 2.1.300 (#816): route-by-agent for request replay entries.
+      const replayEntry = entry as unknown as { agentId?: AgentId }
+      const targetFile = replayEntry.agentId
+        ? getAgentTranscriptPath(replayEntry.agentId)
+        : sessionFile
+      void this.enqueueWrite(targetFile, entry)
     } else if (entry.type === 'goal') {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'goal-cleared') {
@@ -2022,6 +2036,88 @@ class Project {
         }
       }
     }
+  }
+
+  async writeRequestReplayRecords(
+    records: RequestReplayRecords,
+  ): Promise<RequestReplayWriteResult> {
+    return this.trackWrite(async () => {
+      if (this.shouldSkipPersistence()) {
+        return 'no_transcript'
+      }
+      if (this.oversizeReplayShapes.has(records.shapeHash)) {
+        return 'shape_too_large'
+      }
+      const targetSessionId = records.target.sessionId as UUID
+      const currentSessionId = getSessionId() as UUID
+      const targetFile =
+        targetSessionId === currentSessionId
+          ? this.sessionFile
+          : await this.getExistingSessionFile(targetSessionId)
+      if (!targetFile) {
+        return 'no_transcript'
+      }
+
+      let seen = this.replayHashes.get(targetFile)
+      if (!seen) {
+        seen = new Set<string>()
+        this.replayHashes.set(targetFile, seen)
+      }
+
+      const entries: Array<
+        ApiRequestShapeEntry | ApiRequestBlobEntry | ApiRequestEntry
+      > = []
+      if (!seen.has(records.shapeHash)) {
+        const shapeEntry: ApiRequestShapeEntry = {
+          type: 'api-request-shape',
+          sessionId: records.request.sessionId,
+          ...(records.request.agentId !== undefined && {
+            agentId: records.request.agentId,
+          }),
+          shapeHash: records.shapeHash,
+          timestamp: records.request.timestamp,
+          version: records.request.version,
+          shape: records.shape,
+        }
+        if (
+          Buffer.byteLength(jsonStringify(shapeEntry)) > MAX_REPLAY_SHAPE_BYTES
+        ) {
+          this.oversizeReplayShapes.add(records.shapeHash)
+          logError(
+            new Error(
+              'request-replay: system+tools over the record size cap; not recording requests that use them',
+            ),
+          )
+          return 'shape_too_large'
+        }
+        entries.push(shapeEntry)
+        seen.add(records.shapeHash)
+      }
+
+      for (const { hash, message } of records.blobCandidates) {
+        if (!seen.has(hash)) {
+          const blobEntry: ApiRequestBlobEntry = {
+            type: 'api-request-blob',
+            sessionId: records.request.sessionId,
+            ...(records.request.agentId !== undefined && {
+              agentId: records.request.agentId,
+            }),
+            hash,
+            message,
+          }
+          entries.push(blobEntry)
+          seen.add(hash)
+        }
+      }
+
+      entries.push(records.request)
+      await Promise.all(
+        entries.map(entry =>
+          this.appendEntry(entry as unknown as Entry, targetSessionId),
+        ),
+      )
+      return 'written'
+    })
   }
 
   /**
@@ -3254,17 +3350,57 @@ export function removeExtraFields(
  *
  * Mutates the Map in place.
  */
-function applyPreservedSegmentRelinks(
+type PreservedMessagesRef = {
+  anchorUuid: UUID
+  uuids: UUID[]
+  allUuids?: UUID[]
+}
+
+type PreservedCompactMeta = SystemCompactBoundaryMessage['compactMetadata'] & {
+  preservedMessages?: PreservedMessagesRef
+}
+
+function resolvePreservedFromCompactMeta(
+  meta: PreservedCompactMeta,
+  messages: Map<UUID, TranscriptMessage>,
+): { preserved: PreservedMessagesRef; source: 'list' | 'walk' } | undefined {
+  if (meta.preservedMessages) {
+    return { preserved: meta.preservedMessages, source: 'list' }
+  }
+  const seg = meta.preservedSegment
+  if (!seg) return undefined
+  const seen = new Set<UUID>()
+  const uuids: UUID[] = []
+  let cur = messages.get(seg.tailUuid)
+  while (cur && !seen.has(cur.uuid)) {
+    seen.add(cur.uuid)
+    uuids.push(cur.uuid)
+    if (cur.uuid === seg.headUuid) {
+      uuids.reverse()
+      return {
+        preserved: { anchorUuid: seg.anchorUuid, uuids },
+        source: 'walk',
+      }
+    }
+    cur = cur.parentUuid ? messages.get(cur.parentUuid) : undefined
+  }
+  logEvent('tengu_relink_walk_broken', {
+    tailInTranscript: messages.has(seg.tailUuid),
+    headInTranscript: messages.has(seg.headUuid),
+    anchorInTranscript: messages.has(seg.anchorUuid),
+    walkSteps: seen.size,
+    transcriptSize: messages.size,
+  })
+  return undefined
+}
+
+export function applyPreservedSegmentRelinks(
   messages: Map<UUID, TranscriptMessage>,
 ): void {
-  type Seg = NonNullable<
-    SystemCompactBoundaryMessage['compactMetadata']['preservedSegment']
-  >
-
-  // Find the absolute-last boundary and the last seg-boundary (can differ:
-  // manual /compact after reactive compact → seg is stale).
-  let lastSeg: Seg | undefined
-  let lastSegBoundaryIdx = -1
+  // Find the absolute-last boundary and the last seg/messages-boundary
+  // (can differ: manual /compact after reactive compact → seg is stale).
+  let lastMeta: PreservedCompactMeta | undefined
+  let lastPreservedBoundaryIdx = -1
   let absoluteLastBoundaryIdx = -1
   const entryIndex = new Map<UUID, number>()
   let i = 0
@@ -3272,67 +3408,56 @@ function applyPreservedSegmentRelinks(
     entryIndex.set(entry.uuid, i)
     if (isCompactBoundaryMessage(entry)) {
       absoluteLastBoundaryIdx = i
-      const seg = entry.compactMetadata?.preservedSegment
-      if (seg) {
-        lastSeg = seg
-        lastSegBoundaryIdx = i
+      const meta = entry.compactMetadata as PreservedCompactMeta | undefined
+      if (meta?.preservedMessages || meta?.preservedSegment) {
+        lastMeta = meta
+        lastPreservedBoundaryIdx = i
       }
     }
     i++
   }
-  // No seg anywhere → no-op. findUnresolvedToolUse etc. read the full map.
-  if (!lastSeg) return
+  // No preserved metadata anywhere → no-op.
+  if (!lastMeta) return
 
-  // Seg stale (no-seg boundary came after): skip relink, still prune at
+  // Stale (non-preserved boundary came after): skip relink, still prune at
   // absolute — otherwise the stale preserved chain becomes a phantom leaf.
-  const segIsLive = lastSegBoundaryIdx === absoluteLastBoundaryIdx
+  const segIsLive = lastPreservedBoundaryIdx === absoluteLastBoundaryIdx
+  const resolved = segIsLive
+    ? resolvePreservedFromCompactMeta(lastMeta, messages)
+    : undefined
+  if (segIsLive && !resolved) return
 
-  // Validate tail→head BEFORE mutating so malformed metadata is a true
-  // no-op (walk stops at headUuid, doesn't need the relink to run first).
-  const preservedUuids = new Set<UUID>()
-  if (segIsLive) {
-    const walkSeen = new Set<UUID>()
-    let cur = messages.get(lastSeg.tailUuid)
-    let reachedHead = false
-    while (cur && !walkSeen.has(cur.uuid)) {
-      walkSeen.add(cur.uuid)
-      preservedUuids.add(cur.uuid)
-      if (cur.uuid === lastSeg.headUuid) {
-        reachedHead = true
-        break
-      }
-      cur = cur.parentUuid ? messages.get(cur.parentUuid) : undefined
-    }
-    if (!reachedHead) {
-      // tail→head walk broke — a UUID in the preserved segment isn't in the
-      // transcript. Returning here skips the prune below, so resume loads
-      // the full pre-compact history. Known cause: mid-turn-yielded
-      // attachment pushed to mutableMessages but never recordTranscript'd
-      // (SDK subprocess restarted before next turn's qe:420 flush).
-      logEvent('tengu_relink_walk_broken', {
-        tailInTranscript: messages.has(lastSeg.tailUuid),
-        headInTranscript: messages.has(lastSeg.headUuid),
-        anchorInTranscript: messages.has(lastSeg.anchorUuid),
-        walkSteps: walkSeen.size,
-        transcriptSize: messages.size,
-      })
-      return
-    }
+  const preserved =
+    resolved && resolved.preserved.uuids.length > 0
+      ? resolved.preserved
+      : undefined
+  if (preserved?.uuids.some(id => !messages.has(id))) {
+    logEvent('tengu_relink_walk_broken', {
+      anchorInTranscript: messages.has(preserved.anchorUuid),
+      walkSteps: preserved.uuids.filter(id => messages.has(id)).length,
+      transcriptSize: messages.size,
+    })
+    return
   }
 
-  if (segIsLive) {
-    const head = messages.get(lastSeg.headUuid)
-    if (head) {
-      messages.set(lastSeg.headUuid, {
-        ...head,
-        parentUuid: lastSeg.anchorUuid,
-      })
+  const uuids = preserved?.uuids ?? []
+  const preservedUuids = new Set<UUID>(uuids)
+
+  if (preserved) {
+    let prevParent: UUID = preserved.anchorUuid
+    for (const id of uuids) {
+      const msg = messages.get(id)
+      if (msg) {
+        messages.set(id, { ...msg, parentUuid: prevParent })
+      }
+      prevParent = id
     }
+    const tailUuid = uuids.at(-1)!
     // Tail-splice: anchor's other children → tail. No-op if already pointing
     // at tail (the useLogMessages race case).
     for (const [uuid, msg] of messages) {
-      if (msg.parentUuid === lastSeg.anchorUuid && uuid !== lastSeg.headUuid) {
-        messages.set(uuid, { ...msg, parentUuid: lastSeg.tailUuid })
+      if (msg.parentUuid === preserved.anchorUuid && uuid !== uuids[0]) {
+        messages.set(uuid, { ...msg, parentUuid: tailUuid })
       }
     }
     // Zero stale usage: on-disk input_tokens reflect pre-compact context
@@ -3371,6 +3496,24 @@ function applyPreservedSegmentRelinks(
     }
   }
   for (const uuid of toDelete) messages.delete(uuid)
+
+  // #794 SEA 325 x9o: if any post-boundary user/assistant message still has
+  // parentUuid pointing to a pruned pre-boundary message (e.g. retried or
+  // unfinished reply in the same turn), relink it to the preserved tail.
+  if (preserved && toDelete.length > 0) {
+    const tailUuid = uuids.at(-1)!
+    const deletedSet = new Set(toDelete)
+    for (const [uuid, msg] of messages) {
+      if (
+        (msg.type === 'user' || msg.type === 'assistant') &&
+        msg.parentUuid !== null &&
+        msg.parentUuid !== undefined &&
+        deletedSet.has(msg.parentUuid)
+      ) {
+        messages.set(uuid, { ...msg, parentUuid: tailUuid })
+      }
+    }
+  }
 }
 
 /**
@@ -8455,4 +8598,138 @@ export async function enrichLogs(
   }
 
   return { logs: result, nextIndex: i }
+}
+
+const MAX_REPLAY_SHAPE_BYTES = 4 * 1024 * 1024
+
+export type RequestReplayWriteResult =
+  | 'written'
+  | 'no_transcript'
+  | 'shape_too_large'
+
+export type ApiRequestShapeEntry = {
+  type: 'api-request-shape'
+  sessionId: string
+  agentId?: AgentId
+  shapeHash: string
+  timestamp: string
+  version: string
+  shape: {
+    system: unknown
+    tools: unknown
+  }
+}
+
+export type ApiRequestBlobEntry = {
+  type: 'api-request-blob'
+  sessionId: string
+  agentId?: AgentId
+  hash: string
+  message: unknown
+}
+
+export type ApiRequestEntry = {
+  type: 'api-request'
+  sessionId: string
+  agentId?: AgentId
+  id: string
+  timestamp: string
+  version: string
+  querySource?: string
+  shapeHash: string
+  params: Record<string, unknown>
+  base?: string
+  keep: number
+  tail: string[]
+}
+
+export type RequestReplayRecords = {
+  target: {
+    sessionId: string
+    agentId?: AgentId
+  }
+  shapeHash: string
+  shape: {
+    system: unknown
+    tools: unknown
+  }
+  blobCandidates: Array<{ hash: string; message: unknown }>
+  request: ApiRequestEntry
+}
+
+export async function writeRequestReplayRecords(
+  records: RequestReplayRecords,
+): Promise<RequestReplayWriteResult> {
+  return getProject().writeRequestReplayRecords(records)
+}
+
+const REHYDRATE_AGENT_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/
+const RESERVED_AGENT_NAMES = new Set(['team-lead', 'main', 'lead'])
+
+function isReservedAgentName(name: string): boolean {
+  const lower = name.trim().toLowerCase()
+  return RESERVED_AGENT_NAMES.has(lower) || toAgentId(lower) !== null
+}
+
+/**
+ * Official `xpr` (2.1.299 #688): rebuild `agentNameRegistry` from resumed
+ * transcript messages so `SendMessage` can find named subagents after a CLI
+ * restart/resume (for names given after the last compaction).
+ */
+export function rehydrateAgentNameRegistry(
+  messages: readonly Message[],
+  existing: ReadonlyMap<string, AgentId>,
+): Map<string, AgentId> | null {
+  const pendingByToolUseId = new Map<string, string>()
+  const recovered = new Map<string, AgentId>()
+
+  for (const msg of messages) {
+    if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      for (const block of msg.message.content) {
+        if (
+          block.type === 'tool_use' &&
+          (block.name === 'Agent' || block.name === 'Task') &&
+          block.input !== null &&
+          typeof block.input === 'object'
+        ) {
+          const name = (block.input as { name?: unknown }).name
+          if (
+            typeof name === 'string' &&
+            REHYDRATE_AGENT_NAME_RE.test(name) &&
+            !isReservedAgentName(name) &&
+            !existing.has(name)
+          ) {
+            pendingByToolUseId.set(block.id, name)
+          }
+        }
+      }
+    } else if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+      const toolResults = msg.message.content.filter(
+        b => b.type === 'tool_result',
+      )
+      const first = toolResults[0]
+      const name =
+        first !== undefined && toolResults.length === 1 && !first.is_error
+          ? pendingByToolUseId.get(first.tool_use_id)
+          : undefined
+      if (name === undefined) continue
+
+      const result = msg.toolUseResult as
+        | { status?: unknown; agentId?: unknown }
+        | undefined
+      if (
+        result !== null &&
+        typeof result === 'object' &&
+        (result.status === 'async_launched' || result.status === 'completed') &&
+        typeof result.agentId === 'string'
+      ) {
+        const agentId = toAgentId(result.agentId)
+        if (agentId !== null) {
+          recovered.set(name, agentId)
+        }
+      }
+    }
+  }
+
+  return recovered.size > 0 ? new Map([...existing, ...recovered]) : null
 }

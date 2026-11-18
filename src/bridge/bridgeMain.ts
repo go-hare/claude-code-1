@@ -152,6 +152,40 @@ function safeSpawn(
   }
 }
 
+const SECRET_RENEW_MIN_LEAD_MS = 900_000
+const SECRET_RENEW_MAX_LEAD_MS = 86_400_000
+const SECRET_RENEW_MIN_TTL_MS = 3_600_000
+const PROACTIVE_RENEW_MIN_BACKOFF_MS = 300_000
+const PROACTIVE_RENEW_MAX_BACKOFF_MS = 3_600_000
+const PROACTIVE_RENEW_MAX_ATTEMPTS = 3
+
+/**
+ * Official `Tno` — compute proactive credential renewal timestamp from
+ * `environment_secret_expires_in` (seconds), leaving 10% (clamped to
+ * [15m, 24h] with up to +25% jitter) before expiry.
+ */
+export function computeSecretRenewalAtMs(
+  expiresInSec: number | undefined,
+  nowMs: number = Date.now(),
+  rand: () => number = Math.random,
+): number | undefined {
+  if (
+    typeof expiresInSec !== 'number' ||
+    !Number.isFinite(expiresInSec) ||
+    expiresInSec * 1000 < SECRET_RENEW_MIN_TTL_MS
+  ) {
+    return undefined
+  }
+  const ttlMs = expiresInSec * 1000
+  const leadMs =
+    Math.min(
+      Math.max(ttlMs / 10, SECRET_RENEW_MIN_LEAD_MS),
+      SECRET_RENEW_MAX_LEAD_MS,
+    ) *
+    (1 + 0.25 * rand())
+  return nowMs + ttlMs - leadMs
+}
+
 export async function runBridgeLoop(
   config: BridgeConfig,
   environmentId: string,
@@ -163,6 +197,7 @@ export async function runBridgeLoop(
   backoffConfig: BackoffConfig = DEFAULT_BACKOFF,
   initialSessionId?: string,
   getAccessToken?: () => string | undefined | Promise<string | undefined>,
+  initialSecretExpiresInSec?: number,
 ): Promise<void> {
   // Local abort controller so that onSessionDone can stop the poll loop.
   // Linked to the incoming signal so external aborts also work.
@@ -175,6 +210,13 @@ export async function runBridgeLoop(
   const loopSignal = controller.signal
   // Official `B` — poll secret is replaced in-place after a 404 remint.
   let currentEnvironmentSecret = environmentSecret
+  let nextSecretRenewAtMs = computeSecretRenewalAtMs(initialSecretExpiresInSec)
+  let secretExpiresAtMs =
+    typeof initialSecretExpiresInSec === 'number' &&
+    Number.isFinite(initialSecretExpiresInSec)
+      ? Date.now() + initialSecretExpiresInSec * 1000
+      : undefined
+  let proactiveRenewAttempts = 0
   // Official `A` / `ne` / `v` / `N` / `X` / `G` (densable 2.1.243 #55).
   let reregisterAttempts = 0
   let envJustReregistered = false
@@ -184,6 +226,7 @@ export async function runBridgeLoop(
   const keptOfflineWorktrees = new Set<string>()
 
   const activeSessions = new Map<string, SessionHandle>()
+  const sessionLastHeartbeatWall = new Map<string, number>()
   const sessionStartTimes = new Map<string, number>()
   const sessionWorkIds = new Map<string, string>()
   // Compat-surface ID (session_*) computed once at spawn and cached so
@@ -230,14 +273,17 @@ export async function runBridgeLoop(
    * got a 401/403 (JWT expired — re-queued via reconnectSession so the next
    * poll delivers fresh work), or 'failed' if all failed for other reasons.
    */
-  async function heartbeatActiveWorkItems(): Promise<
-    'ok' | 'auth_failed' | 'fatal' | 'failed'
-  > {
+  async function heartbeatActiveWorkItems(
+    onlySessionIds?: ReadonlySet<string>,
+  ): Promise<'ok' | 'auth_failed' | 'fatal' | 'failed'> {
     rcLog(`heartbeat: checking ${activeSessions.size} active session(s)`)
     let anySuccess = false
     let anyFatal = false
     const authFailedSessions: string[] = []
     for (const [sessionId] of activeSessions) {
+      if (onlySessionIds && !onlySessionIds.has(sessionId)) {
+        continue
+      }
       const workId = sessionWorkIds.get(sessionId)
       const ingressToken = sessionIngressTokens.get(sessionId)
       if (!workId || !ingressToken) {
@@ -245,6 +291,7 @@ export async function runBridgeLoop(
       }
       try {
         await api.heartbeatWork(environmentId, workId, ingressToken)
+        sessionLastHeartbeatWall.set(sessionId, Date.now())
         anySuccess = true
       } catch (err) {
         logForDebugging(
@@ -658,6 +705,91 @@ export async function runBridgeLoop(
     startStatusUpdates()
   }
 
+  const isSecretRenewalDue = (): boolean =>
+    nextSecretRenewAtMs !== undefined && Date.now() >= nextSecretRenewAtMs
+
+  const renewSecretProactively = async (): Promise<void> => {
+    proactiveRenewAttempts++
+    logger.logVerbose(
+      "Renewing this computer's Remote Control credential before it expires",
+    )
+    const res = await reregisterEnvironment({
+      api,
+      config,
+      environmentId,
+      activeSessions,
+      attempt: proactiveRenewAttempts,
+      trigger: 'proactive',
+      signal: loopSignal,
+    })
+    if (res.outcome === 'reregistered') {
+      currentEnvironmentSecret = res.environmentSecret
+      nextSecretRenewAtMs = computeSecretRenewalAtMs(
+        res.environmentSecretExpiresIn,
+      )
+      secretExpiresAtMs =
+        typeof res.environmentSecretExpiresIn === 'number' &&
+        Number.isFinite(res.environmentSecretExpiresIn)
+          ? Date.now() + res.environmentSecretExpiresIn * 1000
+          : undefined
+      proactiveRenewAttempts = 0
+      logger.logVerbose('Remote Control credential renewed.')
+      return
+    }
+    if (loopSignal.aborted) return
+    const is401 =
+      res.outcome === 'fatal' &&
+      res.reason === 'register_rejected' &&
+      res.status === 401
+    if (
+      res.outcome === 'transient' ||
+      ((res.reason === 'replaced' || is401) &&
+        proactiveRenewAttempts < PROACTIVE_RENEW_MAX_ATTEMPTS)
+    ) {
+      const backoff = Math.max(
+        PROACTIVE_RENEW_MIN_BACKOFF_MS,
+        Math.min(
+          res.outcome === 'transient' ? (res.retryAfterMs ?? 0) : 0,
+          PROACTIVE_RENEW_MAX_BACKOFF_MS,
+        ),
+      )
+      nextSecretRenewAtMs = Date.now() + backoff * (1 + 0.25 * Math.random())
+      logger.logVerbose(
+        `Could not renew the Remote Control credential yet. The current one still works; trying again in about ${Math.ceil((nextSecretRenewAtMs - Date.now()) / 60_000)} minutes.`,
+      )
+      return
+    }
+    nextSecretRenewAtMs = undefined
+    if (is401) {
+      let expiryNote: string
+      if (secretExpiresAtMs !== undefined && secretExpiresAtMs <= Date.now()) {
+        expiryNote =
+          "The connection's credential has already expired, so it stops unless the next try can sign in."
+      } else {
+        const minsLeft =
+          secretExpiresAtMs === undefined
+            ? undefined
+            : Math.round((secretExpiresAtMs - Date.now()) / 60_000)
+        const duration =
+          minsLeft === undefined
+            ? 'until its credential expires'
+            : minsLeft < 5
+              ? 'for a few more minutes'
+              : minsLeft < 90
+                ? `for about ${minsLeft} minutes`
+                : `for about ${Math.round(minsLeft / 60)} hours`
+        expiryNote = `The connection keeps working ${duration}; if it still cannot sign in then, it stops.`
+      }
+      logger.logError(
+        `Remote Control could not renew this computer's connection: claude.ai did not accept the sign-in it uses. Run \`claude /login\` to sign in again. ${expiryNote}`,
+      )
+    } else {
+      logger.logVerbose(
+        'Could not renew the Remote Control credential. It keeps working until it expires, and Remote Control will try again then.',
+      )
+    }
+  }
+
   while (!loopSignal.aborted) {
     // Fetched once per iteration — the GrowthBook cache refreshes every
     // 5 min, so a loop running at the at-capacity rate picks up config
@@ -665,6 +797,10 @@ export async function runBridgeLoop(
     const pollConfig = getPollIntervalConfig()
 
     try {
+      if (isSecretRenewalDue()) {
+        await renewSecretProactively()
+        if (loopSignal.aborted) break
+      }
       rcLog(
         `poll: envId=${environmentId} activeSessions=${activeSessions.size}`,
       )
@@ -710,6 +846,11 @@ export async function runBridgeLoop(
       // Null response = no work available in the queue.
       // Add a minimum delay to avoid hammering the server.
       if (!work) {
+        for (const sid of sessionLastHeartbeatWall.keys()) {
+          if (!activeSessions.has(sid)) {
+            sessionLastHeartbeatWall.delete(sid)
+          }
+        }
         if (pendingRequeues.size > 0) {
           await drainPendingRequeues({
             pendingRequeues,
@@ -745,7 +886,8 @@ export async function runBridgeLoop(
             while (
               !loopSignal.aborted &&
               activeSessions.size >= config.maxSessions &&
-              (pollDeadline === null || Date.now() < pollDeadline)
+              (pollDeadline === null || Date.now() < pollDeadline) &&
+              !isSecretRenewalDue()
             ) {
               // Re-read config each cycle so GrowthBook updates take effect
               const hbConfig = getPollIntervalConfig()
@@ -820,6 +962,19 @@ export async function runBridgeLoop(
             cap.cleanup()
           }
         } else {
+          const hbInterval = pollConfig.non_exclusive_heartbeat_interval_ms
+          if (activeSessions.size > 0 && hbInterval > 0) {
+            const now = Date.now()
+            const dueSessionIds = new Set(
+              [...activeSessions.keys()].filter(
+                sid =>
+                  now - (sessionLastHeartbeatWall.get(sid) ?? 0) >= hbInterval,
+              ),
+            )
+            if (dueSessionIds.size > 0) {
+              await heartbeatActiveWorkItems(dueSessionIds)
+            }
+          }
           const interval =
             activeSessions.size > 0
               ? pollConfig.multisession_poll_interval_ms_partial_capacity
@@ -1980,10 +2135,10 @@ export function parseArgs(args: string[]): ParsedArgs {
       help = true
     } else if (arg === '--verbose' || arg === '-v') {
       verbose = true
-    } else if (arg === '--sandbox') {
-      sandbox = true
-    } else if (arg === '--no-sandbox') {
-      sandbox = false
+    } else if (arg === '--sandbox' || arg === '--no-sandbox') {
+      return makeError(
+        `${arg} is not supported by claude remote-control. The flag had no effect and was removed. ${arg === '--sandbox' ? 'To sandbox sessions, set sandbox.enabled to true in settings.' : 'Remove it from the command.'}`,
+      )
     } else if (arg === '--debug-file' && i + 1 < args.length) {
       debugFile = resolve(args[++i]!)
     } else if (arg.startsWith('--debug-file=')) {
@@ -2741,10 +2896,12 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // Register the bridge environment before entering the poll loop.
   let environmentId: string
   let environmentSecret: string
+  let environmentSecretExpiresIn: number | undefined
   try {
     const reg = await api.registerBridgeEnvironment(config)
     environmentId = reg.environment_id
     environmentSecret = reg.environment_secret
+    environmentSecretExpiresIn = reg.environment_secret_expires_in
   } catch (err) {
     logEvent('tengu_bridge_registration_failed', {
       status: err instanceof BridgeFatalError ? err.status : undefined,
@@ -3140,6 +3297,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
         await checkAndRefreshOAuthTokenIfNeeded()
         return getBridgeAccessToken()
       },
+      environmentSecretExpiresIn,
     )
   } finally {
     if (pointerRefreshTimer !== null) {
@@ -3300,10 +3458,12 @@ async function runBridgeHeadlessImpl(
 
   let environmentId: string
   let environmentSecret: string
+  let environmentSecretExpiresIn: number | undefined
   try {
     const reg = await api.registerBridgeEnvironment(config)
     environmentId = reg.environment_id
     environmentSecret = reg.environment_secret
+    environmentSecretExpiresIn = reg.environment_secret_expires_in
   } catch (err) {
     // Transient — let supervisor backoff-retry.
     throw new Error(`Bridge registration failed: ${errorMessage(err)}`)
@@ -3357,6 +3517,7 @@ async function runBridgeHeadlessImpl(
     undefined,
     initialSessionId,
     async () => opts.getAccessToken(),
+    environmentSecretExpiresIn,
   )
 }
 

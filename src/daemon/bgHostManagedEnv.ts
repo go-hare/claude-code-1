@@ -30,11 +30,23 @@ export const BG_CHILD_AUTH_TOKEN_KEYS = [
   'ANTHROPIC_AWS_API_KEY',
 ] as const
 
-/** densable OO / ke — endpoint + header keys dropped with the tokens. */
+/** densable OO / Sct — endpoint + header keys dropped with the tokens. */
 export const BG_CHILD_ENDPOINT_KEYS = [
   'ANTHROPIC_BASE_URL',
   '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL',
   'ANTHROPIC_CUSTOM_HEADERS',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'CLAUDE_CODE_SKIP_BEDROCK_AUTH',
+  'ANTHROPIC_VERTEX_BASE_URL',
+  'CLAUDE_CODE_SKIP_VERTEX_AUTH',
+  'ANTHROPIC_FOUNDRY_BASE_URL',
+  'CLAUDE_CODE_SKIP_FOUNDRY_AUTH',
+  'ANTHROPIC_AWS_BASE_URL',
+  'CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH',
+  'ANTHROPIC_GOOGLE_CLOUD_BASE_URL',
+  'CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH',
+  'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+  'CLAUDE_CODE_SKIP_MANTLE_AUTH',
 ] as const
 
 /** densable o — always deleted by AO, even if dispatch.env sets them. */
@@ -84,8 +96,18 @@ function stripCloudCreds(
   }
 }
 
+function isGatewayPairActive(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+  pair: { endpoint: string; selection?: string },
+): boolean {
+  return (
+    Boolean(env[pair.endpoint]) &&
+    (pair.selection === undefined || isEnvTruthy(env[pair.selection]))
+  )
+}
+
 /**
- * densable ci() RO/ne block + the BASE_URL-override else-if.
+ * densable ci() RO/ne block + the q7e gateway/BASE_URL-override else block.
  * `parentEnv` is `o` (copy of process.env before dispatch merge).
  */
 export function applyHostManagedWorkerEnv(
@@ -111,9 +133,49 @@ export function applyHostManagedWorkerEnv(
     for (const key of BG_CHILD_ENDPOINT_KEYS) delete env[key]
     return
   }
-  if (env.ANTHROPIC_BASE_URL !== parentEnv.ANTHROPIC_BASE_URL) {
-    for (const key of BG_CHILD_ENDPOINT_KEYS) delete env[key]
-    if (parentEnv.ANTHROPIC_BASE_URL) delete env.ANTHROPIC_AUTH_TOKEN
+  const keepCompanions = new Set<string>()
+  const dropKeys = new Set<string>()
+  const overrideKeep = new Set<string>()
+  let parentHadOtherGateway = false
+  let overriddenOtherGateway = false
+  for (const pair of BG_ENDPOINT_GATEWAY_PAIRS) {
+    const selectionActive =
+      pair.selection === undefined || isEnvTruthy(env[pair.selection])
+    if (
+      env[pair.endpoint] === parentEnv[pair.endpoint] &&
+      (!env[pair.endpoint] || selectionActive) &&
+      pair.companions.every(
+        c =>
+          !BG_GATEWAY_BOOL_COMPANIONS.has(c) ||
+          isEnvTruthy(env[c]) === isEnvTruthy(parentEnv[c]),
+      )
+    ) {
+      if (env[pair.endpoint]) {
+        for (const c of pair.companions) keepCompanions.add(c)
+        parentHadOtherGateway ||= isGatewayPairActive(parentEnv, pair)
+      }
+      continue
+    }
+    for (const key of [pair.endpoint, ...pair.companions]) {
+      dropKeys.add(key)
+      if (env[pair.endpoint] && env[key] !== parentEnv[key]) {
+        overrideKeep.add(key)
+      }
+    }
+    if (
+      pair.endpoint === 'ANTHROPIC_BASE_URL' &&
+      parentEnv.ANTHROPIC_BASE_URL
+    ) {
+      delete env.ANTHROPIC_AUTH_TOKEN
+    } else {
+      overriddenOtherGateway ||= isGatewayPairActive(parentEnv, pair)
+    }
+  }
+  for (const key of dropKeys) {
+    if (!keepCompanions.has(key) || overrideKeep.has(key)) delete env[key]
+  }
+  if (overriddenOtherGateway && !parentHadOtherGateway) {
+    delete env.ANTHROPIC_AUTH_TOKEN
   }
 }
 
@@ -483,7 +545,45 @@ export const BG_PROVIDER_GATEWAY_ENV_PAIRS = [
       'ANTHROPIC_CUSTOM_HEADERS',
     ],
   },
+  {
+    endpoint: 'ANTHROPIC_GOOGLE_CLOUD_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
+    companions: [
+      'CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH',
+      'ANTHROPIC_CUSTOM_HEADERS',
+    ],
+  },
+  {
+    endpoint: 'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+    selection: 'CLAUDE_CODE_USE_MANTLE',
+    companions: ['CLAUDE_CODE_SKIP_MANTLE_AUTH', 'ANTHROPIC_CUSTOM_HEADERS'],
+  },
 ] as const
+
+const BG_ENDPOINT_GATEWAY_PAIRS: ReadonlyArray<{
+  endpoint: string
+  selection?: string
+  companions: readonly string[]
+}> = [
+  {
+    endpoint: 'ANTHROPIC_BASE_URL',
+    companions: [
+      '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL',
+      'ANTHROPIC_CUSTOM_HEADERS',
+    ],
+  },
+  ...BG_PROVIDER_GATEWAY_ENV_PAIRS,
+]
+
+const BG_GATEWAY_BOOL_COMPANIONS = new Set([
+  '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL',
+  'CLAUDE_CODE_SKIP_BEDROCK_AUTH',
+  'CLAUDE_CODE_SKIP_VERTEX_AUTH',
+  'CLAUDE_CODE_SKIP_FOUNDRY_AUTH',
+  'CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH',
+  'CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH',
+  'CLAUDE_CODE_SKIP_MANTLE_AUTH',
+])
 
 /**
  * densable Oo — copy endpoint + companions from parent when the endpoint is

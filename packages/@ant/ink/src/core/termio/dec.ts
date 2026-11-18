@@ -6,6 +6,7 @@
  */
 
 import { csi } from './csi.js'
+import { printsUnknownSequences } from './osc.js'
 
 /**
  * DEC private mode numbers
@@ -67,7 +68,12 @@ export function enterAltScreenSequence(extendedKeys = false): string {
 
 /** Official alt-screen exit wrapper: pop Kitty, restore main screen, reset modifyOtherKeys. */
 export function exitAltScreenSequence(): string {
-  return csi('<u') + EXIT_ALT_SCREEN + csi('>4m')
+  const skipUnknown = printsUnknownSequences()
+  return (
+    (skipUnknown ? '' : csi('<u')) +
+    EXIT_ALT_SCREEN +
+    (skipUnknown ? '' : csi('>4m'))
+  )
 }
 // Mouse tracking: 1000 reports button press/release/wheel, 1002 adds drag
 // events (button-motion), 1003 adds all-motion (no button held — for

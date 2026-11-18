@@ -335,9 +335,14 @@ export async function extractPDFPages(
       }
     }
 
-    const heldBytes = heldHandle
-      ? await readBytesFromHandle(heldHandle, originalSize, options?.signal)
-      : undefined
+    const procFdHandle =
+      heldHandle !== undefined && filePath === `/proc/self/fd/${heldHandle.fd}`
+        ? heldHandle
+        : undefined
+    const heldBytes =
+      heldHandle !== undefined && procFdHandle === undefined
+        ? await readBytesFromHandle(heldHandle, originalSize, options?.signal)
+        : undefined
 
     const uuid = randomUUID()
     const outputDir = join(getToolResultsDir(), `pdf-${uuid}`)
@@ -352,13 +357,22 @@ export async function extractPDFPages(
     if (options?.lastPage && options.lastPage !== Infinity) {
       args.push('-l', String(options.lastPage))
     }
-    args.push(heldBytes !== undefined ? '-' : filePath, prefix)
+    const inputArg =
+      procFdHandle !== undefined
+        ? '/proc/self/fd/3'
+        : heldBytes !== undefined
+          ? '-'
+          : filePath
+    args.push(inputArg, prefix)
     const { code, stderr } = await execFileNoThrow('pdftoppm', args, {
       timeout: 120_000,
       useCwd: false,
       abortSignal: options?.signal,
       ...(heldBytes !== undefined && {
         input: heldBytes as unknown as string,
+      }),
+      ...(procFdHandle !== undefined && {
+        inheritFd: procFdHandle.fd,
       }),
     })
 

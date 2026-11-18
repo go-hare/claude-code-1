@@ -285,6 +285,7 @@ export type BuildSessionChildEnvOpts = {
   governedGitConfig?: boolean
   governedGhPathShim?: boolean
   agentProxyUrlFromEnv?: string
+  mcpConfigPath?: string
 }
 
 /**
@@ -352,6 +353,9 @@ export function buildSessionChildEnv(
     CLAUDE_CODE_TEE_SDK_STDOUT: '1',
     CLAUDE_RUNNER_ACTIVITY_FD: '3',
     CLAUDE_CODE_REMOTE: 'true',
+    ...(opts.mcpConfigPath
+      ? { CLAUDE_CODE_REMOTE_MCP_CONFIG: opts.mcpConfigPath }
+      : {}),
     CLAUDE_CODE_RETRY_WATCHDOG: '1',
     CLAUDE_CODE_MAX_RETRIES: '',
     CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE: 'self_hosted',

@@ -4,9 +4,10 @@
  * Gold WKe source `mod_hot_reload`. Skill prompt placeholder
  * `${CLAUDE_DEV_MODS_DIR}` expands to this session's mods folder.
  */
+import { createHash } from 'crypto'
 import { mkdirSync, readdirSync, statSync } from 'fs'
 import chokidar from 'chokidar'
-import { mkdir, utimes } from 'fs/promises'
+import { mkdir, readFile, stat, utimes } from 'fs/promises'
 import {
   basename,
   dirname,
@@ -553,8 +554,9 @@ function notePluginDevMods(text: string): void {
       value: text,
       mode: 'task-notification',
       skipAttachments: true,
+      isMeta: true,
       // densable D() agentId:Ve() mode:task-notification skipAttachments:!0
-      // priority:next shouldQuery:!1 passive:!0. Ve analog is getSessionId().
+      // isMeta:hEo priority:next shouldQuery:!1 passive:!0. Ve analog is getSessionId().
       agentId: getSessionId() as unknown as AgentId,
       shouldQuery: false,
       passive: true,
@@ -1086,6 +1088,120 @@ function recordDevModLines(folder: string, outcome: DevModLoad): void {
   }
 }
 
+export type DevModFileStamp = {
+  size: number
+  hash: string
+}
+
+export type DevModTrackedStamp = {
+  ctimeMs: number
+  stamp?: DevModFileStamp
+}
+
+export type DevModStampState = {
+  read?: DevModFileStamp
+  taken?: DevModTrackedStamp
+  isServed?: boolean
+}
+
+/**
+ * #635: SEA `Wpe(e, n)` — compare two file `{ size, hash }` fingerprints.
+ */
+export function compareFileStamp(
+  a: DevModFileStamp | undefined,
+  b: DevModFileStamp | undefined,
+): 'same' | 'other' | 'unknown' {
+  if (a === undefined || b === undefined) return 'unknown'
+  return a.size === b.size && a.hash === b.hash ? 'same' : 'other'
+}
+
+/**
+ * #635: SEA `wxt(e, n, r)` — decide whether a file change event should trigger
+ * a mod hot reload (`undefined`) or be skipped (`'served' | 'retold' | 'clock'`).
+ */
+export function classifyFileStampChange(
+  next: DevModTrackedStamp,
+  state: DevModStampState,
+  readAtMs: number,
+): 'served' | 'retold' | 'clock' | undefined {
+  const vsRead = compareFileStamp(next.stamp, state.read)
+  const vsTaken =
+    next.ctimeMs === state.taken?.ctimeMs
+      ? compareFileStamp(next.stamp, state.taken?.stamp)
+      : 'other'
+  const isNewContent = vsRead === 'other' && vsTaken !== 'same'
+  const isAlreadyServed = vsRead === 'same' && Boolean(state.isServed)
+  const isRetold = vsTaken !== 'other'
+  const isStaleClock = next.ctimeMs <= readAtMs
+  return isNewContent
+    ? undefined
+    : isAlreadyServed
+      ? 'served'
+      : isRetold
+        ? 'retold'
+        : isStaleClock
+          ? 'clock'
+          : undefined
+}
+
+export function createDevModStampTracker(now: () => number = Date.now) {
+  const files = new Map<string, DevModStampState>()
+  let readAtMs = 0
+
+  return {
+    shouldReload(filePath: string, next: DevModTrackedStamp): boolean {
+      const state = files.get(filePath) ?? {}
+      const skip = classifyFileStampChange(next, state, readAtMs)
+      if (skip !== undefined) {
+        return false
+      }
+      files.set(filePath, {
+        ...state,
+        taken: next,
+      })
+      return true
+    },
+    markReloaded(succeeded: boolean): void {
+      readAtMs = now()
+      for (const [path, state] of files) {
+        if (succeeded && state.taken?.stamp !== undefined) {
+          files.set(path, {
+            read: state.taken.stamp,
+            taken: state.taken,
+            isServed: true,
+          })
+        } else if (!succeeded) {
+          files.set(path, {
+            ...state,
+            isServed: false,
+          })
+        }
+      }
+    },
+    getState(filePath: string): DevModStampState | undefined {
+      return files.get(filePath)
+    },
+  }
+}
+
+const activeDevModStampTracker = createDevModStampTracker()
+
+async function readDevModTrackedStamp(
+  filePath: string,
+): Promise<DevModTrackedStamp | undefined> {
+  try {
+    const [st, bytes] = await Promise.all([stat(filePath), readFile(filePath)])
+    if (!st.isFile()) return undefined
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    return {
+      ctimeMs: st.ctimeMs,
+      stamp: { size: st.size, hash },
+    }
+  } catch {
+    return undefined
+  }
+}
+
 /** densable gqn / M9t — held when a reload would bust the prompt cache. */
 async function reloadDevMods(): Promise<DevModLoad> {
   if (binding?.reloadPlugins === undefined) return 'unbound'
@@ -1110,8 +1226,10 @@ async function reloadDevMods(): Promise<DevModLoad> {
       return 'held'
     }
     await binding.reloadPlugins()
+    activeDevModStampTracker.markReloaded(true)
     return 'reloaded'
   } catch (error) {
+    activeDevModStampTracker.markReloaded(false)
     try {
       const { logForDebugging } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1427,9 +1545,19 @@ function leftoverWatchRoot(
     binaryInterval: 400,
   })
   const fire = () => onChange()
-  watcher.on('add', fire)
+  const fireIfChanged = (filePath: string) => {
+    void readDevModTrackedStamp(filePath).then(tracked => {
+      if (
+        tracked === undefined ||
+        activeDevModStampTracker.shouldReload(filePath, tracked)
+      ) {
+        onChange()
+      }
+    })
+  }
+  watcher.on('add', fireIfChanged)
   watcher.on('addDir', fire)
-  watcher.on('change', fire)
+  watcher.on('change', fireIfChanged)
   watcher.on('unlink', fire)
   watcher.on('unlinkDir', fire)
   watcher.on('error', (error: unknown) => {

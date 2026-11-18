@@ -197,11 +197,14 @@ export function jsonStringify(
   space?: string | number,
 ): string {
   using _ = slowLogging`JSON.stringify(${value})`
-  return JSON.stringify(
+  const result = JSON.stringify(
     value,
     replacer as Parameters<typeof JSON.stringify>[1],
     space,
   )
+  // Escape U+2028 and U+2029 so JSONL records are never split by line/paragraph
+  // separator consumers (e.g. /branch transcript serialization).
+  return result?.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
 /**

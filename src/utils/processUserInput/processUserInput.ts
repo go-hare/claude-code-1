@@ -130,6 +130,39 @@ export type ProcessUserInputBaseResult = {
    * payload when base processing rewrites the input before submission hooks.
    */
   expandedInput?: string | Array<ContentBlockParam>
+  /**
+   * Official 2.1.325 (#731): pre-expansion UserPromptSubmit / prompt.submit
+   * line check result from processSlashCommand.
+   */
+  lineCheck?: SlashLineCheckResult
+  /**
+   * Official 2.1.325 (#731): forked slash command already ran
+   * UserPromptSubmit hooks before dispatch; skip duplicate runPromptSubmit.
+   */
+  forkDispatched?: boolean
+}
+
+export type SlashLineCheckResult = {
+  ran: { name: string; args: string; argsRanWith: string }
+  rows: ProcessUserInputBaseResult
+  outcome?: Awaited<ReturnType<typeof runPromptSubmit>>
+  threw?: { error: unknown }
+}
+
+export type SlashLineCheckFn = (ran: {
+  name: string
+  args: string
+  argsRanWith: string
+}) => Promise<SlashLineCheckResult>
+
+function rewriteSlashArgs(
+  text: string,
+  ran?: { name: string; args: string; argsRanWith: string },
+): string | undefined {
+  if (ran === undefined || ran.argsRanWith === ran.args) return undefined
+  return ran.args !== '' && text.endsWith(ran.args)
+    ? text.slice(0, text.length - ran.args.length) + ran.argsRanWith
+    : `/${ran.name} ${ran.argsRanWith}`
 }
 
 /**
@@ -537,6 +570,57 @@ export async function processUserInput({
     ? [...context.nestedMemoryAttachmentTriggers]
     : []
 
+  // Official 2.1.325 (#731): checkLine (`ut`) runs prompt.submit +
+  // UserPromptSubmit BEFORE skill/slash expansion in processSlashCommand.
+  const checkLine: SlashLineCheckFn | undefined =
+    (shouldQueryInput === false && queryHeldForNextTurn !== true) ||
+    skipSubmissionHooks ||
+    promptSubmitted !== undefined
+      ? undefined
+      : async ran => {
+          const rows: ProcessUserInputBaseResult = {
+            messages: [],
+            shouldQuery: true,
+          }
+          if (context.abortController?.signal.aborted) {
+            return { ran, rows, outcome: undefined }
+          }
+          const rawText = getContentText(input) || ''
+          const lineText = rewriteSlashArgs(rawText, ran) ?? rawText
+          const isStartInput =
+            aheadOfSessionStart === true || isAheadOfSessionStart(uuid)
+          const linePromptSource = resolvePromptSource({
+            isNonInteractive: context.options.isNonInteractiveSession,
+            isMeta,
+            callerSource: originIsTypedOrUnset(origin) ? undefined : 'system',
+          })
+          try {
+            const outcome = await runPromptSubmit({
+              text: lineText,
+              originalInput: input,
+              result: rows,
+              context,
+              isStartInput,
+              shouldWait: wait === true,
+              promptSource: linePromptSource,
+              wakeupSource,
+              entries,
+              queued: queuedSettle,
+              pastedContents,
+              origin,
+              bridgeOrigin,
+              mode,
+              turnId: uuid,
+            })
+            return { ran, rows, outcome }
+          } catch (error) {
+            logForDebugging(
+              `processUserInput checkLine error: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return { ran, rows, outcome: undefined, threw: { error } }
+          }
+        }
+
   const result = await processUserInputBase(
     input,
     mode,
@@ -570,7 +654,13 @@ export async function processUserInput({
     shouldQueryInput,
     composerEnter,
     taskDelivery,
+    checkLine,
   )
+  const lineCheck = result.lineCheck
+  delete result.lineCheck
+  if (lineCheck?.threw !== undefined) {
+    throw lineCheck.threw.error
+  }
   queryCheckpoint('query_process_user_input_base_end')
 
   // densable Art after yn: Fe = e9e unless skip-query meta (gold H===!1 && ue && be!==!0).
@@ -643,13 +733,71 @@ export async function processUserInput({
     }
   }
 
-  if (!result.shouldQuery) {
+  if (!result.shouldQuery || result.forkDispatched) {
     await deliverOwedAmbientAttachments(result, context, messages, querySource)
     return result
   }
 
   if (skipSubmissionHooks) {
     await deliverOwedAmbientAttachments(result, context, messages, querySource)
+    return result
+  }
+
+  // Official 2.1.325 (#731): reuse lineCheck.outcome when UserPromptSubmit /
+  // prompt.submit already ran before skill/slash expansion.
+  if (promptSubmitted === undefined && lineCheck !== undefined) {
+    if (lineCheck.outcome === undefined) {
+      queryCheckpoint('query_hooks_end')
+      return { messages: [], shouldQuery: false }
+    }
+    queryCheckpoint('query_hooks_start')
+    const submissionInput = result.expandedInput ?? input
+    const inputMessage = getContentText(submissionInput) || ''
+    const rawInputText = getContentText(input) || ''
+    const typedInput =
+      preExpansionInput ?? (typeof input === 'string' ? input : undefined)
+    const consumedNestedTriggers = (
+      context as { consumedNestedMemoryTriggers?: Iterable<string> }
+    ).consumedNestedMemoryTriggers
+    const ambientTriggers =
+      consumedNestedTriggers !== undefined
+        ? [...initialNestedMemoryTriggers, ...consumedNestedTriggers]
+        : initialNestedMemoryTriggers
+    if (lineCheck.outcome.kind === 'return') {
+      if (
+        lineCheck.outcome.value &&
+        'stopped' in lineCheck.outcome.value &&
+        lineCheck.outcome.value.stopped !== undefined
+      ) {
+        result.messages.push(...lineCheck.outcome.result.messages)
+        result.shouldQuery = false
+        result.resultText = lineCheck.outcome.result.resultText
+        queryCheckpoint('query_hooks_end')
+        return result
+      }
+      queryCheckpoint('query_hooks_end')
+      return lineCheck.outcome.result
+    }
+    result.messages.push(...lineCheck.rows.messages)
+    await applyPromptSubmitProceeds(
+      result,
+      {
+        originalText: inputMessage,
+        rawInputText,
+        text: lineCheck.outcome.stamp.text,
+        context: lineCheck.outcome.stamp.context,
+        sessionTitle: lineCheck.outcome.stamp.sessionTitle,
+      },
+      {
+        skipAttachments: effectiveSkipAttachments,
+        toolUseContext: context,
+        history: messages,
+        querySource,
+        typed: typedInput,
+        ambientTriggers,
+      },
+    )
+    queryCheckpoint('query_hooks_end')
     return result
   }
 
@@ -872,6 +1020,7 @@ async function processUserInputBase(
   shouldQuery?: boolean,
   composerEnter?: unknown,
   taskDelivery?: unknown,
+  checkLine?: SlashLineCheckFn,
 ): Promise<ProcessUserInputBaseResult> {
   let inputString: string | null = null
   let precedingInputBlocks: ContentBlockParam[] = []
@@ -1148,7 +1297,21 @@ async function processUserInputBase(
           },
         ),
       )
-    : []
+    : shouldQuery !== false
+      ? await toArray(
+          getAttachmentMessages(
+            null,
+            context,
+            null,
+            [],
+            messages,
+            querySource,
+            {
+              deliveredTurnStart: true,
+            },
+          ),
+        )
+      : []
   queryCheckpoint('query_attachment_loading_end')
 
   const inlinedImageAttachment =
@@ -1214,6 +1377,9 @@ async function processUserInputBase(
       autonomy,
       modelScheduledOrigin,
       origin,
+      wakeupSource,
+      hostInitiator,
+      checkLine,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
@@ -1249,6 +1415,7 @@ async function processUserInputBase(
       origin,
       wakeupSource,
       hostInitiator,
+      checkLine,
     )
     if (inlinedImageAttachment) {
       slashResult.messages.push(inlinedImageAttachment)

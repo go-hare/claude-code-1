@@ -4,10 +4,13 @@
  * isEnabled: densable `nDa(), ASe()` plus tip cloud-artifacts upload surface.
  * Actions: list | read | comments | reply | resolve | live-edit | tip upload.
  */
-import { stat, readFile } from 'fs/promises'
+import { createHash } from 'crypto'
+import { constants as fsConstants } from 'fs'
+import { open, readFile, stat } from 'fs/promises'
 import { z } from 'zod/v4'
 import type { Tool, ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
+import { detectLineEndingsForString } from 'src/utils/fileRead.js'
 import {
   isArtifactEnvForceEnabled,
   isArtifactSdkDefaultAllowed,
@@ -33,6 +36,10 @@ import {
   describeArtifactTool,
   getArtifactToolPrompt,
 } from './prompt.js'
+import {
+  hasEditOrWritePreToolUseHook,
+  type PreToolUseHookContext,
+} from './quickstartRules.js'
 import { getArtifactsToken, getUploadUrl } from './config.js'
 import { uploadArtifact } from './client.js'
 import { markdownToHtml } from './markdown.js'
@@ -168,6 +175,15 @@ const outputSchema = lazySchema(() =>
     room_send: z.unknown().optional(),
     /** Gold `iy` result bag — not a public `types[]` invent. */
     quickstart: z.unknown().optional(),
+    editsApplied: z.number().int().optional(),
+    editsNotWritten: z
+      .enum([
+        'changed_during_publish',
+        'not_writable',
+        'hard_linked',
+        'write_failed',
+      ])
+      .optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -535,6 +551,25 @@ export const ArtifactTool = buildTool({
         },
       }
     }
+    if (
+      isUploadInput(input) &&
+      (input as { edits?: unknown }).edits !== undefined &&
+      hasEditOrWritePreToolUseHook(
+        context as unknown as PreToolUseHookContext | undefined,
+      )
+    ) {
+      const target = String(
+        (input as { file_path?: string }).file_path ?? 'file',
+      )
+      return {
+        behavior: 'deny' as const,
+        message: `Refusing to apply edits to ${target}: a hook is configured for file edits in this session, so a publish can't apply edits here. Edit the file, then publish it without edits.`,
+        decisionReason: {
+          type: 'other' as const,
+          reason: 'PreToolUse hook for file edits',
+        },
+      }
+    }
     return checkArtifactActionPermissions(
       input as Record<string, unknown>,
       context,
@@ -585,6 +620,17 @@ export const ArtifactTool = buildTool({
         case 'quickstart':
           return `Quickstart ${'intent' in input ? input.intent : '…'}`
       }
+    }
+    if (
+      !input ||
+      ((!('action' in input) ||
+        input.action === undefined ||
+        (input as { action?: string }).action === 'publish') &&
+        (!('file_path' in input) || input.file_path === undefined) &&
+        (!('hash' in input) || input.hash === undefined) &&
+        (!('url' in input) || !input.url))
+    ) {
+      return ''
     }
     const hashPart =
       input && 'hash' in input && input.hash ? ` (hash=${input.hash})` : ''
@@ -822,10 +868,14 @@ export const ArtifactTool = buildTool({
         content: JSON.stringify(content),
       }
     }
+    const editsNote =
+      typeof content.editsApplied === 'number'
+        ? `\n\n${formatPublishEditsWritebackNote(content.editsApplied, 'page', content.editsNotWritten)}`
+        : ''
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})`,
+      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})${editsNote}`,
     }
   },
   renderToolResultMessage,
@@ -971,7 +1021,7 @@ export const ArtifactTool = buildTool({
           }
       }
     }
-    return callUpload(input)
+    return callUpload(input, context)
   },
 })
 
@@ -2515,8 +2565,356 @@ async function callLiveEdit(
   }
 }
 
+const PUBLISH_EDITS_MAX_TOTAL_CHARS = 65536
+const PUBLISH_EDITS_MAX_WORK = 268435456
+const PUBLISH_EDITS_AMBIGUOUS_CAP = 100
+const DEFAULT_PUBLISH_EDITS_MAX_ERROR_CHARS = 20000
+
+const CHANGED_DURING_PUBLISH_ERRNOS = new Set(['ELOOP', 'ENXIO', 'EISDIR'])
+const NOT_WRITABLE_ERRNOS = new Set(['EACCES', 'EPERM', 'EROFS'])
+
+export type PublishEdit = {
+  old_str: string
+  new_str: string
+}
+
+export type PublishEditsNotWrittenReason =
+  | 'changed_during_publish'
+  | 'not_writable'
+  | 'hard_linked'
+  | 'write_failed'
+
+export type PublishEditsValidationFailure =
+  | { reason: 'empty_old_str'; edit: number }
+  | { reason: 'malformed'; edit: number }
+  | { reason: 'too_large' }
+
+export type PublishEditsFailure =
+  | PublishEditsValidationFailure
+  | { reason: 'too_much_work' }
+  | { reason: 'not_found'; edit: number }
+  | { reason: 'ambiguous'; edit: number; count: number }
+  | { reason: 'noop' }
+  | { reason: 'json_invalid' }
+
+export type PublishEditsResult =
+  | { ok: true; content: string }
+  | ({ ok: false } & PublishEditsFailure)
+
+function isWellFormedUnicode(s: string): boolean {
+  const maybeWellFormed = (s as unknown as { isWellFormed?: () => boolean })
+    .isWellFormed
+  if (typeof maybeWellFormed === 'function') {
+    return maybeWellFormed.call(s)
+  }
+  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
+    s,
+  )
+}
+
+function isValidJson(s: string): boolean {
+  try {
+    JSON.parse(s)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function countOccurrencesCapped(haystack: string, needle: string): number {
+  let count = 0
+  for (
+    let idx = haystack.indexOf(needle);
+    idx !== -1 && count < PUBLISH_EDITS_AMBIGUOUS_CAP;
+    idx = haystack.indexOf(needle, idx + 1)
+  ) {
+    count++
+  }
+  return count
+}
+
+/** Official `UFs` @286664862 — pre-validate inline publish edits. */
+export function validatePublishEdits(
+  edits: readonly PublishEdit[],
+): PublishEditsValidationFailure | undefined {
+  let total = 0
+  for (let i = 0; i < edits.length; i++) {
+    const { old_str, new_str } = edits[i]!
+    if (old_str === '') return { reason: 'empty_old_str', edit: i }
+    if (new_str.includes('\x00')) return { reason: 'malformed', edit: i }
+    total += old_str.length + new_str.length
+    if (total > PUBLISH_EDITS_MAX_TOTAL_CHARS) return { reason: 'too_large' }
+  }
+  return undefined
+}
+
+function applyEditOpsSequential(
+  content: string,
+  ops: readonly { find: string; replace: string }[],
+):
+  | { ok: true; content: string }
+  | { ok: false; reason: 'malformed' | 'not_found' | 'ambiguous'; op: number }
+  | { ok: false; reason: 'noop' } {
+  let cur = content
+  for (let i = 0; i < ops.length; i++) {
+    const { find, replace } = ops[i]!
+    if (!isWellFormedUnicode(find) || !isWellFormedUnicode(replace)) {
+      return { ok: false, reason: 'malformed', op: i }
+    }
+    const idx = find === '' ? -1 : cur.indexOf(find)
+    if (idx === -1) return { ok: false, reason: 'not_found', op: i }
+    if (cur.indexOf(find, idx + 1) !== -1) {
+      return { ok: false, reason: 'ambiguous', op: i }
+    }
+    cur = cur.slice(0, idx) + replace + cur.slice(idx + find.length)
+  }
+  if (cur === content) return { ok: false, reason: 'noop' }
+  return { ok: true, content: cur }
+}
+
+/** Official `BFs` + `Zxo` @286664862 — apply sequential exact edits with CRLF normalization. */
+export function applyPublishEdits(
+  content: string,
+  edits: readonly PublishEdit[],
+  options: { json?: boolean } = {},
+): PublishEditsResult {
+  const precheck = validatePublishEdits(edits)
+  if (precheck !== undefined) return { ok: false, ...precheck }
+  if (edits.length * content.length > PUBLISH_EDITS_MAX_WORK) {
+    return { ok: false, reason: 'too_much_work' }
+  }
+  const isCrlf = detectLineEndingsForString(content) === 'CRLF'
+  const normalize = (s: string) => (isCrlf ? s.replaceAll('\r\n', '\n') : s)
+  const normalizedContent = normalize(content)
+  const ops = edits.map(e => ({
+    find: normalize(e.old_str),
+    replace: normalize(e.new_str),
+  }))
+  const res = applyEditOpsSequential(normalizedContent, ops)
+  if (!res.ok) {
+    switch (res.reason) {
+      case 'noop':
+        return { ok: false, reason: 'noop' }
+      case 'ambiguous': {
+        let cur = normalizedContent
+        for (let i = 0; i < res.op; i++) {
+          const { find, replace } = ops[i]!
+          const idx = cur.indexOf(find)
+          cur = cur.slice(0, idx) + replace + cur.slice(idx + find.length)
+        }
+        return {
+          ok: false,
+          reason: 'ambiguous',
+          edit: res.op,
+          count: countOccurrencesCapped(cur, ops[res.op]!.find),
+        }
+      }
+      default:
+        return { ok: false, reason: res.reason, edit: res.op }
+    }
+  }
+  if (
+    options.json === true &&
+    isValidJson(normalizedContent) &&
+    !isValidJson(res.content)
+  ) {
+    return { ok: false, reason: 'json_invalid' }
+  }
+  return isCrlf
+    ? {
+        ok: true,
+        content: res.content.replaceAll('\r\n', '\n').split('\n').join('\r\n'),
+      }
+    : res
+}
+
+function describePublishEditsFailure(
+  err: PublishEditsFailure,
+  editCount: number,
+  contentLength: number,
+): string {
+  switch (err.reason) {
+    case 'empty_old_str':
+      return `edits[${err.edit}] old_str is empty`
+    case 'malformed':
+      return `edits[${err.edit}] has a NUL character in new_str, or a broken character (an unpaired surrogate) in old_str or new_str`
+    case 'too_large':
+      return `old_str and new_str add up to more than ${PUBLISH_EDITS_MAX_TOTAL_CHARS} characters over all the edits; make a change that large with Edit and publish without edits`
+    case 'too_much_work':
+      return `${editCount} edits on a file of ${contentLength} characters is more than one publish call will apply; send at most ${Math.max(1, Math.floor(PUBLISH_EDITS_MAX_WORK / Math.max(1, contentLength)))} edits per call for a file this size, over as many calls as the change needs`
+    case 'not_found':
+      return `edits[${err.edit}] old_str does not occur in the file`
+    case 'ambiguous':
+      return `edits[${err.edit}] old_str occurs ${err.count >= PUBLISH_EDITS_AMBIGUOUS_CAP ? 'at least ' : ''}${err.count} times in the file; include more of the surrounding text so that it occurs once`
+    case 'noop':
+      return 'the edits leave the file unchanged (it already reads that way); publish the file without edits if it should go out as it is'
+    case 'json_invalid':
+      return 'after these edits the file would no longer be valid JSON, which the page that reads it needs; correct the edit that breaks it (a missing comma, quote or bracket) and send this publish again with all of its edits'
+  }
+}
+
+/** Official `jFs` @286664862 — format inline publish edits error message. */
+export function formatPublishEditsError(
+  err: PublishEditsFailure,
+  edits: readonly PublishEdit[],
+  content: string,
+  maxChars: number = DEFAULT_PUBLISH_EDITS_MAX_ERROR_CHARS,
+): string {
+  const prefix = `No edits were applied and nothing was published: ${describePublishEditsFailure(err, edits.length, content.length)}.`
+  if (err.reason !== 'not_found' && err.reason !== 'ambiguous') {
+    return prefix
+  }
+  const withFile = `${prefix} The file's current text follows; copy old_str from it exactly and send the publish again.\n\n${content}`
+  if (withFile.length <= maxChars) return withFile
+  return `${prefix} The file is too long to show here: Read the file at file_path, copy old_str from it exactly and send the publish again.`
+}
+
+/** Official `WFs` @284127990 — re-encode edited text preserving original BOM/UTF-16LE. */
+export function encodeWithOriginalBom(
+  origBytes: Uint8Array,
+  text: string,
+): Buffer {
+  if (origBytes[0] === 0xff && origBytes[1] === 0xfe) {
+    return Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from(text, 'utf16le'),
+    ])
+  }
+  const hasUtf8Bom =
+    origBytes[0] === 0xef && origBytes[1] === 0xbb && origBytes[2] === 0xbf
+  return Buffer.concat([
+    ...(hasUtf8Bom ? [Buffer.from([0xef, 0xbb, 0xbf])] : []),
+    Buffer.from(text, 'utf8'),
+  ])
+}
+
+/** Official `Pia` @284126732 — format post-publish disk writeback note. */
+export function formatPublishEditsWritebackNote(
+  count: number,
+  target: 'page' | 'artifact',
+  notWritten?: PublishEditsNotWrittenReason,
+): string {
+  const what = target === 'page' ? 'the published page' : 'what was published'
+  if (notWritten === undefined) {
+    return count === 1
+      ? `The edit was written to the file after it was published, so the file matches ${what}.`
+      : `The ${count} edits were written to the file after it was published, so the file matches ${what}.`
+  }
+  const single = count === 1
+  const lead = `Published \u2014 ${target === 'page' ? 'the page' : 'the artifact'} now has ${single ? 'the edit' : `the ${count} edits`}, but the file at file_path does not`
+  if (notWritten === 'write_failed') {
+    return `${lead}: writing it back failed, and the file may be partly written. Read it before anything else, restore it to the published text (${what}, ${single ? 'the edit' : 'the edits'} included), and only then publish it again; publishing it as it is could put damaged content ${target === 'page' ? 'on the page' : 'in the artifact'}.`
+  }
+  const reasonText =
+    notWritten === 'changed_during_publish'
+      ? 'it changed on disk while the publish ran, so it was left as it is'
+      : notWritten === 'not_writable'
+        ? 'it could not be opened for writing (read-only), so it was left as it is'
+        : 'it has other names on disk (a hard link), so it was left as it is'
+  return `${lead} (${reasonText}). Apply the same ${single ? 'edit' : 'edits'} to that file with Edit before you publish it again${notWritten === 'hard_linked' ? ', and publish it without `edits` while it has other names' : ''}; publishing it as it is would revert ${single ? 'it' : 'them'}.`
+}
+
+function decodePublishSourceBytes(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(bytes)
+  }
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function getErrnoCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code)
+    : undefined
+}
+
+/** Official `Jf` @314151000 — guarded disk writeback after publish succeeds. */
+async function writePublishEditsBack(opts: {
+  path: string
+  origSize: number
+  origSha256: string
+  identity: { dev: bigint; ino: bigint }
+  bytes: Buffer
+}): Promise<
+  { kind: 'written'; mtimeMs: number } | { kind: PublishEditsNotWrittenReason }
+> {
+  let fh: Awaited<ReturnType<typeof open>>
+  try {
+    fh = await open(opts.path, fsConstants.O_RDWR)
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (
+      code === 'ENOENT' ||
+      (code !== undefined && CHANGED_DURING_PUBLISH_ERRNOS.has(code))
+    ) {
+      return { kind: 'changed_during_publish' }
+    }
+    if (code !== undefined && NOT_WRITABLE_ERRNOS.has(code)) {
+      return { kind: 'not_writable' }
+    }
+    return { kind: 'write_failed' }
+  }
+
+  try {
+    const st = await fh.stat({ bigint: true })
+    if (
+      !st.isFile() ||
+      st.size !== BigInt(opts.origSize) ||
+      st.dev !== opts.identity.dev ||
+      st.ino !== opts.identity.ino
+    ) {
+      return { kind: 'changed_during_publish' }
+    }
+    const existing = Buffer.allocUnsafe(opts.origSize)
+    let totalRead = 0
+    while (totalRead < opts.origSize) {
+      const { bytesRead } = await fh.read(
+        existing,
+        totalRead,
+        opts.origSize - totalRead,
+        totalRead,
+      )
+      if (bytesRead <= 0) {
+        return { kind: 'changed_during_publish' }
+      }
+      totalRead += bytesRead
+    }
+    if (sha256Hex(existing) !== opts.origSha256) {
+      return { kind: 'changed_during_publish' }
+    }
+    if (st.nlink > 1n) {
+      return { kind: 'hard_linked' }
+    }
+    let written = 0
+    while (written < opts.bytes.length) {
+      const { bytesWritten } = await fh.write(
+        opts.bytes,
+        written,
+        opts.bytes.length - written,
+        written,
+      )
+      if (bytesWritten <= 0) {
+        return { kind: 'write_failed' }
+      }
+      written += bytesWritten
+    }
+    await fh.truncate(opts.bytes.length)
+    await fh.sync().catch(() => {})
+    const afterStat = await fh.stat()
+    return { kind: 'written', mtimeMs: afterStat.mtimeMs }
+  } catch {
+    return { kind: 'write_failed' }
+  } finally {
+    await fh.close().catch(() => {})
+  }
+}
+
 async function callUpload(
   input: ArtifactInput,
+  context?: Partial<ToolUseContext>,
 ): Promise<{ data: ArtifactOutput }> {
   const file_path = input.file_path
   if (typeof file_path !== 'string' || file_path === '') {
@@ -2542,8 +2940,10 @@ async function callUpload(
   }
 
   let size: number
+  let fileDev: bigint
+  let fileIno: bigint
   try {
-    const fileStat = await stat(expanded)
+    const fileStat = await stat(expanded, { bigint: true })
     if (!fileStat.isFile()) {
       return {
         data: {
@@ -2554,7 +2954,9 @@ async function callUpload(
         },
       }
     }
-    size = fileStat.size
+    size = Number(fileStat.size)
+    fileDev = fileStat.dev
+    fileIno = fileStat.ino
   } catch {
     return {
       data: {
@@ -2577,9 +2979,9 @@ async function callUpload(
     }
   }
 
-  let rawContent: string
+  let origBytes: Buffer
   try {
-    rawContent = await readFile(expanded, 'utf8')
+    origBytes = await readFile(expanded)
   } catch {
     return {
       data: {
@@ -2589,6 +2991,16 @@ async function callUpload(
         error: `Failed to read file: ${expanded}`,
       },
     }
+  }
+  let rawContent = decodePublishSourceBytes(origBytes)
+
+  const edits = (input as { edits?: readonly PublishEdit[] }).edits
+  if (edits !== undefined) {
+    const editResult = applyPublishEdits(rawContent, edits)
+    if (!editResult.ok) {
+      return emptyErr(formatPublishEditsError(editResult, edits, rawContent))
+    }
+    rawContent = editResult.content
   }
 
   const lowerPath = expanded.toLowerCase()
@@ -2616,6 +3028,35 @@ async function callUpload(
       hash,
       ttl,
     })
+
+    let editsNotWritten: PublishEditsNotWrittenReason | undefined
+    if (edits !== undefined) {
+      const writeResult = await writePublishEditsBack({
+        path: expanded,
+        origSize: origBytes.length,
+        origSha256: sha256Hex(origBytes),
+        identity: { dev: fileDev, ino: fileIno },
+        bytes: encodeWithOriginalBom(origBytes, rawContent),
+      })
+      if (writeResult.kind === 'written') {
+        if (context?.readFileState) {
+          const prev = context.readFileState.get(expanded)
+          context.readFileState.set(expanded, {
+            content: rawContent,
+            timestamp: Math.floor(writeResult.mtimeMs),
+            offset: undefined,
+            limit: undefined,
+            ...(prev?.isPartialView === true ? { isPartialView: true } : {}),
+            ...(prev === undefined || prev.contentNotInModelContext === true
+              ? { contentNotInModelContext: true }
+              : {}),
+          })
+        }
+      } else {
+        editsNotWritten = writeResult.kind
+      }
+    }
+
     try {
       const { isArtifactAutoOpenEnabled } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -2629,7 +3070,17 @@ async function callUpload(
     } catch {
       // densable optional
     }
-    return { data: result }
+    return {
+      data: {
+        ...result,
+        ...(edits !== undefined
+          ? {
+              editsApplied: edits.length,
+              ...(editsNotWritten !== undefined ? { editsNotWritten } : {}),
+            }
+          : {}),
+      },
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return { data: { id: '', url: '', expiresAt: '', error: message } }

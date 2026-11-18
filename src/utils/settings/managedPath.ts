@@ -25,6 +25,11 @@ export const getManagedFilePath = memoize(function (): string {
 })
 
 /**
+ * Official 325 `OH` — Windows managed settings path as visible from WSL2 DrvFs.
+ */
+export const WSL_WINDOWS_MANAGED_PATH = '/mnt/c/Program Files/ClaudeCode'
+
+/**
  * Get the path to the managed-settings.d/ drop-in directory.
  * managed-settings.json is merged first (base), then files in this directory
  * are merged alphabetically on top (drop-ins override base, later files win).

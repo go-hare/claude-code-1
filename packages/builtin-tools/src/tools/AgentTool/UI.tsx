@@ -138,98 +138,192 @@ type SummaryMessage = {
 
 type ProcessedMessage = { type: 'original'; message: ProgressMessage<AgentToolProgress> } | SummaryMessage;
 
+type OpenProgressGroup = {
+  searchCount: number;
+  readCount: number;
+  replCount: number;
+  startUuid: string;
+};
+
+export type ProgressTrailState = {
+  processedSourceCount: number;
+  lastSourceUuid: string | undefined;
+  tools: Tools | null;
+  toolUseByID: Map<string, ToolUseBlockParam>;
+  stable: ProcessedMessage[];
+  stableCountableCount: number;
+  openGroup: OpenProgressGroup | null;
+};
+
+export function createProgressTrailState(): ProgressTrailState {
+  return {
+    processedSourceCount: 0,
+    lastSourceUuid: undefined,
+    tools: null,
+    toolUseByID: new Map(),
+    stable: [],
+    stableCountableCount: 0,
+    openGroup: null,
+  };
+}
+
+function isCountableProcessedMessage(m: ProcessedMessage): boolean {
+  if (m.type === 'summary') {
+    return m.searchCount + m.readCount + m.replCount > 0;
+  }
+  const data = m.message.data;
+  if (!hasProgressMessage(data)) {
+    return false;
+  }
+  return data.message.message.content.some((content: BetaContentBlock) => content.type === 'tool_use');
+}
+
+function hasOpenGroupCounts(group: OpenProgressGroup): boolean {
+  return group.searchCount > 0 || group.readCount > 0 || group.replCount > 0;
+}
+
+function toSummaryMessage(group: OpenProgressGroup, isActive: boolean): SummaryMessage {
+  return {
+    type: 'summary',
+    searchCount: group.searchCount,
+    readCount: group.readCount,
+    replCount: group.replCount,
+    uuid: `summary-${group.startUuid}`,
+    isActive,
+  };
+}
+
+function pushStableMessage(state: ProgressTrailState, msg: ProcessedMessage): void {
+  state.stable.push(msg);
+  if (isCountableProcessedMessage(msg)) {
+    state.stableCountableCount++;
+  }
+}
+
+function flushOpenGroup(state: ProgressTrailState): void {
+  if (state.openGroup && hasOpenGroupCounts(state.openGroup)) {
+    pushStableMessage(state, toSummaryMessage(state.openGroup, false));
+  }
+  state.openGroup = null;
+}
+
+function stepProgressTrail(state: ProgressTrailState, msg: ProgressMessage<Progress>, tools: Tools): void {
+  if (!hasProgressMessage(msg.data)) {
+    return;
+  }
+  const agentMsg = msg as ProgressMessage<AgentToolProgress>;
+
+  if (process.env.USER_TYPE !== 'ant') {
+    if (agentMsg.data.message.type !== 'user') {
+      pushStableMessage(state, { type: 'original', message: agentMsg });
+    }
+    return;
+  }
+
+  if (agentMsg.data.message.type === 'assistant') {
+    for (const c of agentMsg.data.message.message.content) {
+      if (c.type === 'tool_use') {
+        state.toolUseByID.set(c.id, c as ToolUseBlockParam);
+      }
+    }
+  }
+
+  const info = getSearchOrReadInfo(agentMsg, tools, state.toolUseByID);
+  if (info && (info.isSearch || info.isRead || info.isREPL)) {
+    if (!state.openGroup) {
+      state.openGroup = {
+        searchCount: 0,
+        readCount: 0,
+        replCount: 0,
+        startUuid: agentMsg.uuid,
+      };
+    }
+    if (agentMsg.data.message.type === 'user') {
+      if (info.isSearch) {
+        state.openGroup.searchCount++;
+      } else if (info.isREPL) {
+        state.openGroup.replCount++;
+      } else if (info.isRead) {
+        state.openGroup.readCount++;
+      }
+    }
+  } else {
+    flushOpenGroup(state);
+    if (agentMsg.data.message.type !== 'user') {
+      pushStableMessage(state, { type: 'original', message: agentMsg });
+    }
+  }
+}
+
+export function advanceProgressTrailState(
+  state: ProgressTrailState,
+  messages: ProgressMessage<Progress>[],
+  tools: Tools,
+): void {
+  const needsReset =
+    state.tools !== tools ||
+    messages.length < state.processedSourceCount ||
+    (state.processedSourceCount > 0 && messages[state.processedSourceCount - 1]?.uuid !== state.lastSourceUuid);
+  if (needsReset) {
+    Object.assign(state, createProgressTrailState());
+    state.tools = tools;
+  }
+  for (let i = state.processedSourceCount; i < messages.length; i++) {
+    const msg = messages[i]!;
+    state.processedSourceCount = i + 1;
+    state.lastSourceUuid = msg.uuid;
+    stepProgressTrail(state, msg, tools);
+  }
+}
+
+export function getProcessedProgressMessages(state: ProgressTrailState, isAgentRunning: boolean): ProcessedMessage[] {
+  if (!state.openGroup || !hasOpenGroupCounts(state.openGroup)) {
+    return state.stable;
+  }
+  return state.stable.concat(toSummaryMessage(state.openGroup, isAgentRunning));
+}
+
+const PROGRESS_TRAIL_CACHE_MAX = 64;
+const progressTrailCache = new Map<string, ProgressTrailState>();
+
+function getOrAdvanceProgressTrail(
+  messages: ProgressMessage<Progress>[],
+  tools: Tools,
+  isAgentRunning: boolean,
+): ProcessedMessage[] {
+  const first = messages[0];
+  if (!first) {
+    return [];
+  }
+  const key = String(first.parentToolUseID ?? first.uuid);
+  let state = progressTrailCache.get(key);
+  if (!state) {
+    if (progressTrailCache.size >= PROGRESS_TRAIL_CACHE_MAX) {
+      const oldestKey = progressTrailCache.keys().next().value;
+      if (typeof oldestKey === 'string') {
+        progressTrailCache.delete(oldestKey);
+      }
+    }
+    state = createProgressTrailState();
+    progressTrailCache.set(key, state);
+  }
+  advanceProgressTrailState(state, messages, tools);
+  return getProcessedProgressMessages(state, isAgentRunning);
+}
+
 /**
  * Process progress messages to group consecutive search/read operations into summaries.
  * For ants only - returns original messages for non-ants.
  * @param isAgentRunning - If true, the last group is always marked as active (in progress)
  */
-function processProgressMessages(
+export function processProgressMessages(
   messages: ProgressMessage<Progress>[],
   tools: Tools,
   isAgentRunning: boolean,
 ): ProcessedMessage[] {
-  // Only process for ants
-  if (process.env.USER_TYPE !== 'ant') {
-    return messages
-      .filter(
-        (m): m is ProgressMessage<AgentToolProgress> => hasProgressMessage(m.data) && m.data.message.type !== 'user',
-      )
-      .map(m => ({ type: 'original', message: m }));
-  }
-
-  const result: ProcessedMessage[] = [];
-  let currentGroup: {
-    searchCount: number;
-    readCount: number;
-    replCount: number;
-    startUuid: string;
-  } | null = null;
-
-  function flushGroup(isActive: boolean): void {
-    if (currentGroup && (currentGroup.searchCount > 0 || currentGroup.readCount > 0 || currentGroup.replCount > 0)) {
-      result.push({
-        type: 'summary',
-        searchCount: currentGroup.searchCount,
-        readCount: currentGroup.readCount,
-        replCount: currentGroup.replCount,
-        uuid: `summary-${currentGroup.startUuid}`,
-        isActive,
-      });
-    }
-    currentGroup = null;
-  }
-
-  const agentMessages = messages.filter((m): m is ProgressMessage<AgentToolProgress> => hasProgressMessage(m.data));
-
-  // Build tool_use lookup incrementally as we iterate
-  const toolUseByID = new Map<string, ToolUseBlockParam>();
-  for (const msg of agentMessages) {
-    // Track tool_use blocks as we see them
-    if (msg.data.message.type === 'assistant') {
-      for (const c of msg.data.message.message.content) {
-        if (c.type === 'tool_use') {
-          toolUseByID.set(c.id, c as ToolUseBlockParam);
-        }
-      }
-    }
-    const info = getSearchOrReadInfo(msg, tools, toolUseByID);
-
-    if (info && (info.isSearch || info.isRead || info.isREPL)) {
-      // This is a search/read/REPL operation - add to current group
-      if (!currentGroup) {
-        currentGroup = {
-          searchCount: 0,
-          readCount: 0,
-          replCount: 0,
-          startUuid: msg.uuid,
-        };
-      }
-      // Only count tool_result messages (not tool_use) to avoid double counting
-      if (msg.data.message.type === 'user') {
-        if (info.isSearch) {
-          currentGroup.searchCount++;
-        } else if (info.isREPL) {
-          currentGroup.replCount++;
-        } else if (info.isRead) {
-          currentGroup.readCount++;
-        }
-      }
-    } else {
-      // Non-search/read/REPL message - flush current group (completed) and add this message
-      flushGroup(false);
-      // Skip user tool_result messages — subagent progress messages lack
-      // toolUseResult, so UserToolSuccessMessage returns null and the
-      // height=1 Box in renderToolUseProgressMessage shows as a blank line.
-      if (msg.data.message.type !== 'user') {
-        result.push({ type: 'original', message: msg });
-      }
-    }
-  }
-
-  // Flush any remaining group - it's active if the agent is still running
-  flushGroup(isAgentRunning);
-
-  return result;
+  const state = createProgressTrailState();
+  advanceProgressTrailState(state, messages, tools);
+  return getProcessedProgressMessages(state, isAgentRunning);
 }
 
 const ESTIMATED_LINES_PER_TOOL = 9;
@@ -680,9 +774,9 @@ export function renderToolUseProgressMessage(
     );
   }
 
-  // Process messages to group consecutive search/read operations into summaries (ants only)
+  // Process messages incrementally to group consecutive search/read operations into summaries (ants only)
   // isAgentRunning=true since this is the progress view while the agent is still running
-  const processedMessages = processProgressMessages(progressMessages, tools, true);
+  const processedMessages = getOrAdvanceProgressTrail(progressMessages, tools, true);
 
   // For display, take the last few processed messages
   const displayedMessages = isTranscriptMode

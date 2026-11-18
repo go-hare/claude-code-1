@@ -16,6 +16,14 @@
  */
 
 import { tryParseShellCommand } from './bash/shellQuote.js'
+import { ClaudeError } from './errors.js'
+
+/** densable Bmo — max total character budget after substituting arguments */
+const MAX_SUBSTITUTED_LENGTH = 4_000_000
+/** densable lgr — max number of named argument placeholders to substitute */
+const MAX_NAMED_ARGS = 64
+/** densable dgr — max character length of a named argument name */
+const MAX_NAMED_ARG_LENGTH = 64
 
 /** densable yPr — temporary stand-in for `$` inside substituted values */
 const DOLLAR_SENTINEL = '￿'
@@ -142,17 +150,31 @@ export function substituteArguments(
     .replaceAll(DOLLAR_SENTINEL, '�')
     .replaceAll(VALUE_WRAPPER, '�')
 
-  const wrap = (u: string | undefined) => protectValue(u, valueTransform)
-  const parsedArgs = parseArguments(args)
+  let totalLength = e.length
+  const wrap = (u: string | undefined) => {
+    const raw = u ?? ''
+    const transformed = valueTransform ? valueTransform(raw) : raw
+    totalLength += Math.max(raw.length, transformed.length)
+    if (totalLength > MAX_SUBSTITUTED_LENGTH) {
+      throw new ClaudeError(
+        `This skill, command or hook and the arguments filled into it add up to more than ${MAX_SUBSTITUTED_LENGTH.toLocaleString('en-US')} characters. Use shorter arguments or fewer placeholders such as $ARGUMENTS.`,
+      )
+    }
+    return protectValue(transformed)
+  }
+  let parsedArgs: string[] | undefined
+  const getParsedArg = (idx: number): string | undefined =>
+    (parsedArgs ??= parseArguments(args))[idx]
 
-  // densable: longer named args first
+  // densable: max 64 named args, each <= 64 chars, longer named args first
   const named = argumentNames
     .map((name, i) => ({ name, i }))
-    .filter(u => Boolean(u.name))
-    .sort((a, b) => b.name!.length - a.name!.length)
+    .filter(u => Boolean(u.name) && u.name.length <= MAX_NAMED_ARG_LENGTH)
+    .slice(0, MAX_NAMED_ARGS)
+    .sort((a, b) => b.name.length - a.name.length)
 
   // densable: `\$` before placeholder names → sentinel so they stay literal `$`
-  const nameAlts = named.map(({ name }) => `${escapeRegExp(name!)}(?![\\[\\w])`)
+  const nameAlts = named.map(({ name }) => `${escapeRegExp(name)}(?![\\[\\w])`)
   const escapeAlt = ['\\d', 'ARGUMENTS', ...nameAlts].join('|')
   // densable: unescaped `\$` before placeholder tokens → protect as literal `$`
   // eslint-disable-next-line custom-rules/no-lookbehind-regex -- densable iCt short strings
@@ -169,7 +191,7 @@ export function substituteArguments(
       new RegExp(`\\$${escapeRegExp(name)}(?![\\[\\w])`, 'g'),
       () => {
         anyHit = true
-        return wrap(parsedArgs[i])
+        return wrap(getParsedArg(i))
       },
     )
   }
@@ -177,20 +199,22 @@ export function substituteArguments(
   // densable: missing index → yPr + match without leading $ (restores to $ARGUMENTS[n])
   e = e.replace(/\$ARGUMENTS\[(\d+)\]/g, (full, indexStr: string) => {
     const index = parseInt(indexStr, 10)
-    if (parsedArgs[index] === undefined) {
+    const val = getParsedArg(index)
+    if (val === undefined) {
       return DOLLAR_SENTINEL + full.slice(1)
     }
     anyHit = true
-    return wrap(parsedArgs[index])
+    return wrap(val)
   })
 
   e = e.replace(/\$(\d+)(?!\w)/g, (full, indexStr: string) => {
     const index = parseInt(indexStr, 10)
-    if (parsedArgs[index] === undefined) {
+    const val = getParsedArg(index)
+    if (val === undefined) {
       return full
     }
     anyHit = true
-    return wrap(parsedArgs[index])
+    return wrap(val)
   })
 
   e = e.replaceAll('$ARGUMENTS', () => {

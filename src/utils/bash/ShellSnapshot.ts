@@ -18,6 +18,7 @@ import { logError } from '../log.js'
 import { getPlatform } from '../platform.js'
 import { ripgrepCommand } from '../ripgrep.js'
 import { subprocessEnv } from '../subprocessEnv.js'
+import { windowsPathToPosixPath } from '../windowsPaths.js'
 import { quote } from './shellQuote.js'
 
 const SNAPSHOT_CREATION_TIMEOUT = 10000 // 10 seconds
@@ -295,21 +296,59 @@ export function appendPluginBinPathsToPath(
   }
 }
 
-async function getClaudeCodeSnapshotContent(
+/**
+ * Official `lls` (#699): probe Git Bash's login PATH directly via
+ * `binShell -lc 'echo "$PATH"'` instead of `execa('echo $PATH', { shell: true })`
+ * (which ran under cmd.exe on Windows and returned literal `$PATH` or
+ * semicolon-separated Windows paths, causing "command not found").
+ */
+export async function probeWindowsBashPath(
+  binShell: string,
+): Promise<string | undefined> {
+  const res = await execa(binShell, ['-lc', 'echo "$PATH"'], {
+    reject: false,
+    timeout: SNAPSHOT_CREATION_TIMEOUT,
+    windowsHide: true,
+  })
+  const rawStdout = (res.stdout ?? '').trim()
+  const lastLine = rawStdout.split('\n').at(-1)?.trim() ?? ''
+  if (
+    res.exitCode === 0 &&
+    lastLine.startsWith('/') &&
+    !lastLine.includes(';')
+  ) {
+    return lastLine
+  }
+  const stderr = res.stderr ?? ''
+  logForDebugging(
+    `Shell snapshot: ${binShell} -lc 'echo "$PATH"' gave no usable PATH (exit code ${res.exitCode ?? 'none'}, timed out: ${res.timedOut === true}, output empty: ${rawStdout === ''}). The snapshot will take PATH from the shell that creates it.`,
+    { level: 'warn' },
+  )
+  logForDebugging(
+    `Shell snapshot: PATH probe stderr (${stderr.length} chars): ${stderr}`,
+  )
+  logEvent('tengu_shell_snapshot_path_probe_failed', {
+    timed_out: res.timedOut === true,
+    exit_code: res.exitCode,
+    empty_output: rawStdout === '',
+  })
+  return undefined
+}
+
+export async function getClaudeCodeSnapshotContent(
+  binShell: string,
   pluginBinPaths: readonly string[] = [],
 ): Promise<string> {
   // Get the appropriate PATH based on platform
   let pathValue = process.env.PATH
+  let fallbackToShellPath = false
   if (getPlatform() === 'windows') {
-    // On Windows with git-bash, read the Cygwin PATH
-    const cygwinResult = await execa('echo $PATH', {
-      shell: true,
-      reject: false,
-    })
-    if (cygwinResult.exitCode === 0 && cygwinResult.stdout) {
-      pathValue = cygwinResult.stdout.trim()
+    const probed = await probeWindowsBashPath(binShell)
+    if (probed === undefined) {
+      fallbackToShellPath = true
+    } else {
+      pathValue = probed
     }
-    // Fall back to process.env.PATH if we can't get Cygwin PATH
   }
 
   const rgIntegration = createRipgrepShellIntegration()
@@ -369,18 +408,39 @@ ${pkillGuard}
 PKILL_FUNC_END
     `
 
-  const { path: finalPathValue } = appendPluginBinPathsToPath(
-    pathValue,
-    pluginBinPaths,
+  const effectivePluginBinPaths =
+    getPlatform() === 'windows'
+      ? pluginBinPaths.map(windowsPathToPosixPath)
+      : pluginBinPaths
+  const { appended, path: finalPathValue } = appendPluginBinPathsToPath(
+    fallbackToShellPath ? undefined : pathValue,
+    effectivePluginBinPaths,
     ':',
   )
 
   // Add PATH to the file
-  content += `
+  if (fallbackToShellPath) {
+    const appendLoop =
+      appended.length > 0
+        ? `
+      for __cc_dir in ${quote(appended)}; do
+        case ":$__cc_path:" in *":$__cc_dir:"*) ;; *) __cc_path=\${__cc_path:+$__cc_path:}$__cc_dir ;; esac
+      done`
+        : ''
+    content += `
+
+      # Add PATH to the file, as this shell has it, plus missing plugin dirs
+      __cc_path=$PATH${appendLoop}
+      builtin printf 'export PATH=%q\\n' "$__cc_path" >> "$SNAPSHOT_FILE"
+      unset __cc_path __cc_dir
+  `
+  } else {
+    content += `
 
       # Add PATH to the file
       echo "export PATH=${quote([finalPathValue || ''])}" >> "$SNAPSHOT_FILE"
   `
+  }
 
   return content
 }
@@ -436,7 +496,10 @@ async function getSnapshotScript(
       ? // we need to manually force alias expansion in bash - normally `getUserSnapshotContent` takes care of this
         'echo "shopt -s expand_aliases" >> "$SNAPSHOT_FILE"'
       : ''
-  const claudeCodeContent = await getClaudeCodeSnapshotContent(pluginBinPaths)
+  const claudeCodeContent = await getClaudeCodeSnapshotContent(
+    shellPath,
+    pluginBinPaths,
+  )
 
   const script = `SNAPSHOT_FILE=${quote([snapshotFilePath])}
       ${configFileExists ? `source "${configFile}" < /dev/null` : '# No user config file to source'}

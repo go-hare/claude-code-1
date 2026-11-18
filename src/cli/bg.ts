@@ -25,6 +25,302 @@ import {
 } from './bg/logsSubscribe.js'
 import { backgroundServiceLabel } from '../bridge/remoteControlServers.js'
 
+const ROOT_VALUE_OPTIONS = new Set([
+  '--deep-link-cwd-b64',
+  '--handle-uri',
+  '--settings',
+  '--managed-settings',
+  '--setting-sources',
+  '--client-data-url',
+  '--watch-artifact',
+  '--watch-artifact-no-autoreact',
+  '--team-name',
+  '--agent-id',
+  '--agent-name',
+  '--agent-color',
+  '--parent-session-id',
+  '--lead-verify-key',
+  '--agent-type',
+  '--model',
+  '--agent',
+  '--routine',
+  '--effort',
+  '--fast-mode',
+  '--permission-mode',
+  '--inherit-permission-mode',
+  '--proactivity',
+  '--debug-file',
+  '--system-prompt',
+  '--system-prompt-file',
+  '--append-system-prompt',
+  '--append-system-prompt-file',
+  '--system-prompt-snapshot',
+  '--append-subagent-system-prompt',
+  '--append-subagent-system-prompt-file',
+  '--plan-mode-instructions',
+  '--permission-prompt-tool',
+  '--permission-prompts',
+  '--json-schema',
+  '--fallback-model',
+  '--advisor',
+  '--agents',
+  '--name',
+  '-n',
+  '--allowedTools',
+  '--allowed-tools',
+  '--disallowedTools',
+  '--disallowed-tools',
+  '--tools',
+  '--add-dir',
+  '--mcp-config',
+  '--betas',
+  '--file',
+  '--channels',
+  '--dangerously-load-development-channels',
+  '--plugin-dir',
+  '--plugin-dir-no-mcp',
+  '--plugin-url',
+  '--remote-control-session-name-prefix',
+  '--exec',
+  '-m',
+  '--sdk-url',
+  '--thinking',
+  '--thinking-display',
+  '--max-thinking-tokens',
+  '--max-turns',
+  '--max-budget-usd',
+  '--task-budget',
+  '--autocompact',
+  '--rewind-files',
+  '--resume-session-at',
+  '--resume-drops-turn',
+  '--workload',
+  '--output-format',
+  '--input-format',
+  '--teammate-mode',
+  '--messaging-socket-path',
+  '--session-id',
+  '--environment',
+  '--pool',
+  '--ref',
+  '--on-branch',
+  '--correlation-id',
+  '--forward-home-settings',
+  '--project-config-root',
+  '--attach-serve',
+  '--runner-declares',
+  '--session-began-as-copy',
+])
+
+const ROOT_VARIADIC_OPTIONS = new Set([
+  '--allowedTools',
+  '--allowed-tools',
+  '--disallowedTools',
+  '--disallowed-tools',
+  '--tools',
+  '--add-dir',
+  '--mcp-config',
+  '--betas',
+  '--file',
+  '--channels',
+  '--dangerously-load-development-channels',
+])
+
+const ROOT_OPTIONAL_VALUE_OPTIONS = new Set([
+  '-d',
+  '--debug',
+  '-r',
+  '--resume',
+  '--from-pr',
+  '-w',
+  '--worktree',
+  '--teleport',
+  '--cloud',
+  '--remote',
+  '--project',
+  '--remote-control',
+  '--rc',
+  '--prompt-suggestions',
+])
+
+const BG_SESSION_VERBS = new Set([
+  'attach',
+  'logs',
+  'stop',
+  'kill',
+  'respawn',
+  'rm',
+])
+
+const BG_CONFLICTING_FLAGS = new Set([
+  '-p',
+  '--print',
+  '--bg',
+  '--background',
+  '--routine',
+  '-h',
+  '--help',
+  '-v',
+  '-V',
+  '--version',
+])
+
+const ROOT_BOOLEAN_FLAGS = new Set([
+  '-d2e',
+  '--debug-to-stderr',
+  '--verbose',
+  '-p',
+  '--print',
+  '--bare',
+  '--safe-mode',
+  '--init',
+  '--init-only',
+  '--maintenance',
+  '--include-hook-events',
+  '--include-partial-messages',
+  '--forward-subagent-text',
+  '--session-mirror',
+  '--await-claim',
+  '--await-initialize',
+  '--managed-settings-in-initialize',
+  '--dangerously-skip-permissions',
+  '--allow-dangerously-skip-permissions',
+  '--replay-user-messages',
+  '--host-auth-is-org-sign-in',
+  '--enable-auth-status',
+  '--restricted',
+  '--allow-other-models',
+  '--exclude-dynamic-system-prompt-sections',
+  '--disable-auto-mode',
+  '--bg',
+  '--background',
+  '--agents-view-if-allowed',
+  '--brief',
+  '--ax-screen-reader',
+  '--plan-mode-required',
+  '--hard-fail',
+])
+
+const NON_VERB_PRECEDING_VALUE_FLAGS = new Set(['--exec', '-m', '--handle-uri'])
+const SHORT_HEX_ID_RE = /^[a-f0-9]{8}$/
+
+function looksLikeOption(token: string): boolean {
+  return token.length > 1 && token.startsWith('-')
+}
+
+function lastValueSlot(argv: readonly string[], idx: number): number {
+  const token = argv[idx]
+  if (token !== undefined && ROOT_OPTIONAL_VALUE_OPTIONS.has(token)) {
+    const next = argv[idx + 1]
+    return next !== undefined && !looksLikeOption(next) ? idx + 1 : idx
+  }
+  if (token === undefined || !ROOT_VALUE_OPTIONS.has(token)) return idx
+  let end = idx + 1
+  if (ROOT_VARIADIC_OPTIONS.has(token)) {
+    while (end + 1 < argv.length && !looksLikeOption(argv[end + 1]!)) {
+      end++
+    }
+  }
+  return end
+}
+
+/**
+ * Scan argv for a root flag matching `predicate`, stopping at `--` and
+ * skipping option values. (SEA `J9t`)
+ */
+export function findRootFlagIndex(
+  predicate: (token: string) => boolean,
+  argv: readonly string[] = process.argv.slice(2),
+): number {
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]
+    if (token === '--') break
+    if (token !== undefined && predicate(token)) return i
+    i = lastValueSlot(argv, i)
+  }
+  return -1
+}
+
+/**
+ * Return true if `flag` appears as a root option before `--`. (SEA `Wb`)
+ */
+export function hasRootFlag(
+  flag: string,
+  argv: readonly string[] = process.argv.slice(2),
+): boolean {
+  return findRootFlagIndex(t => t === flag, argv) !== -1
+}
+
+/**
+ * Return true if `--bg` or `--background` appears before `--` and outside
+ * another option's value. (SEA `xQa` — #674/#675)
+ */
+export function hasBackgroundFlag(
+  argv: readonly string[] = process.argv.slice(2),
+): boolean {
+  return hasRootFlag('--bg', argv) || hasRootFlag('--background', argv)
+}
+
+function firstOperandIndex(argv: readonly string[]): number {
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!
+    if (token === '--') return i + 1 < argv.length ? i + 1 : -1
+    if (!looksLikeOption(token)) return i
+    i = lastValueSlot(argv, i)
+  }
+  return -1
+}
+
+function isAllowedRootOption(token: string): boolean {
+  if (ROOT_BOOLEAN_FLAGS.has(token)) return true
+  const eq = token.indexOf('=')
+  const name = eq === -1 ? token : token.slice(0, eq)
+  return (
+    (ROOT_VALUE_OPTIONS.has(name) &&
+      !NON_VERB_PRECEDING_VALUE_FLAGS.has(name)) ||
+    ROOT_OPTIONAL_VALUE_OPTIONS.has(name)
+  )
+}
+
+function isConflictingBgFlag(token: string): boolean {
+  return (
+    BG_CONFLICTING_FLAGS.has(token) ||
+    token.startsWith('--routine=') ||
+    /^-[A-Za-z]{2,}$/.test(token)
+  )
+}
+
+/**
+ * Find the index of a background session verb (`attach`, `logs`, `stop`,
+ * `kill`, `respawn`, `rm`) in `argv`, optionally allowing root options before
+ * the verb. Disabled behind root options when `CLAUDE_CODE_SESSION_KIND=bg`
+ * so prompts/replies starting with `--bg` or verbs aren't hijacked. (SEA `vgi`)
+ */
+export function backgroundSessionVerbIndex(
+  argv: readonly string[] = process.argv.slice(2),
+  { behindRootOptions = true }: { behindRootOptions?: boolean } = {},
+): number {
+  const idx = firstOperandIndex(argv)
+  if (idx === -1 || !BG_SESSION_VERBS.has(argv[idx]!)) return -1
+  if (idx === 0) return 0
+  if (!behindRootOptions || argv[idx - 1] === '--') return -1
+  const target = argv[idx + 1]
+  if (
+    target === undefined ||
+    !(
+      SHORT_HEX_ID_RE.test(target) ||
+      (argv[idx] === 'respawn' && target === '--all')
+    )
+  ) {
+    return -1
+  }
+  for (let i = 0; i < idx; i = lastValueSlot(argv, i) + 1) {
+    const token = argv[i]!
+    if (isConflictingBgFlag(token) || !isAllowedRootOption(token)) return -1
+  }
+  return idx
+}
+
 export type { SessionEntry } from './bg/engine.js'
 
 function getSessionsDir(): string {

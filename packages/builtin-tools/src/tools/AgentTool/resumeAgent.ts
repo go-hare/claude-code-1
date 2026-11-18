@@ -14,6 +14,11 @@ import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
 import { asAgentId, toAgentId } from 'src/types/ids.js'
 import { MAIN_RECIPIENT_NAME } from 'src/utils/swarm/constants.js'
 import { runWithAgentContext } from 'src/utils/agentContext.js'
+import {
+  hasMatchingFunctionHook,
+  isInsideAgentSpawnLaunch,
+  runFunctionHookChain,
+} from 'src/utils/plugins/functionHooksModules.js'
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js'
 import {
   isHardIsolationPinRefuse,
@@ -890,6 +895,52 @@ async function resumeAgentBackgroundAfterClaim({
   const workerPermissionContext = {
     ...appState.toolPermissionContext,
     mode: resolvedWorkerMode,
+  }
+
+  // #683 (SEA `Sdo` / `bdo`): dispatch `agent.spawn` with `resume: { agentId }`
+  // so mod hooks can observe or refuse a resumed agent's run (rewrites ignored).
+  if (hasMatchingFunctionHook('agent.spawn') && !isInsideAgentSpawnLaunch()) {
+    const spawn = {
+      subagentType: selectedAgent.agentType,
+      prompt,
+      description: uiDescription,
+      model: resumeModelAlias ?? resolvedAgentModel,
+      permissionMode: resolvedWorkerMode,
+      background: true,
+      fork: isResumedFork,
+      resume: Object.freeze({ agentId }),
+      name: selectedAgent.agentType,
+      cwd: resumedWorktreePath ?? getCwd(),
+    }
+    const answered = await runFunctionHookChain(
+      'agent.spawn',
+      spawn,
+      async event => event,
+      undefined,
+      undefined,
+      {
+        signal: toolUseContext.abortController.signal,
+      },
+    )
+    const rec =
+      answered && typeof answered === 'object'
+        ? (answered as Record<string, unknown>)
+        : undefined
+    const deny =
+      rec && typeof rec.deny === 'string'
+        ? rec.deny
+        : answered === undefined ||
+            (rec && 'deny' in rec && rec.deny !== undefined)
+          ? 'agent.spawn: a hook answered without passing the spawn on'
+          : undefined
+    if (deny !== undefined) {
+      logForDebugging(
+        `agent.spawn ${selectedAgent.agentType} (resume): refused by a hook (${deny})`,
+      )
+      throw new AgentResumePermanentlyRefusedError(
+        `a plugin declined the resume: ${deny}`,
+      )
+    }
   }
   // densable Aye:
   //   G = parent tools.filter(IH)  (MCP subset; local uses full assemble)

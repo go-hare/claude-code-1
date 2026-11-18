@@ -1,4 +1,10 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import { withTimeout } from './sleep.js'
+
+const runInRootContext: <T>(fn: () => T) => T =
+  typeof AsyncLocalStorage.snapshot === 'function'
+    ? AsyncLocalStorage.snapshot()
+    : fn => fn()
 
 // densable process IO module (WEt / Ds / fVt / zRn / P_m / L_m) — 2.1.214 #19
 // stream-json exit drain scales with pending stdout queue bytes, not fixed 2s.
@@ -64,18 +70,89 @@ export function registerProcessOutputErrorHandlers(): void {
     queueEmptyNotify?.()
   })
   handleStreamGoneErrors(process.stderr)
+  process.stderr.on('error', () => {
+    stderrBuffer.giveUpOnUnflushed()
+  })
 }
 
-/** densable `ull` — write if stream still writable */
-function safeWrite(
+/** densable `jYr` — write if stream still writable; report dropped / backed-up / accepted */
+function safeWriteStream(
   stream: NodeJS.WriteStream,
   data: string,
   cb?: () => void,
-): boolean {
-  if (stream.destroyed || stream.writableEnded) return false
-  stream.write(data, cb)
-  return true
+): 'dropped' | 'backed-up' | 'accepted' {
+  if (stream.destroyed || stream.writableEnded) return 'dropped'
+  return stream.write(data, cb) === false ? 'backed-up' : 'accepted'
 }
+
+const STDERR_BACKLOG_LIMIT = 1048576 // 1 MiB
+const STDERR_BACKLOG_AGE_MS = 10_000
+
+class StderrBackpressureTracker {
+  private unflushed = { length: 0, since: 0 }
+  private droppedCount = 0
+  private droppedTotal = 0
+
+  write(data: string, mayDrop: boolean): void {
+    const u = this.unflushed
+    if (
+      mayDrop &&
+      u.length >= STDERR_BACKLOG_LIMIT &&
+      (this.droppedCount > 0 || Date.now() - u.since >= STDERR_BACKLOG_AGE_MS)
+    ) {
+      this.droppedCount++
+      this.droppedTotal++
+      return
+    }
+    let state: 'writing' | 'unflushed' | 'flushed' = 'writing'
+    const onFlushed = () => {
+      const wasUnflushed = state === 'unflushed'
+      state = 'flushed'
+      if (wasUnflushed) {
+        u.length -= data.length
+        this.reportDropped()
+      }
+    }
+    const status = runInRootContext(() =>
+      safeWriteStream(process.stderr, data, onFlushed),
+    )
+    if (status === 'backed-up' && state === 'writing') {
+      state = 'unflushed'
+      if (u.length === 0) {
+        u.since = Date.now()
+      }
+      u.length += data.length
+    }
+  }
+
+  giveUpOnUnflushed(): void {
+    this.unflushed = { length: 0, since: 0 }
+    this.reportDropped()
+  }
+
+  getDroppedTotal(): number {
+    return this.droppedTotal
+  }
+
+  reset(): void {
+    this.unflushed = { length: 0, since: 0 }
+    this.droppedCount = 0
+    this.droppedTotal = 0
+  }
+
+  private reportDropped(): void {
+    if (this.droppedCount > 0 && this.unflushed.length < STDERR_BACKLOG_LIMIT) {
+      const count = this.droppedCount
+      this.droppedCount = 0
+      this.write(
+        `[stderr messages dropped before this line: ${count}. Whatever reads this stderr had not caught up for over 10 s and 1 MiB of output.]\n`,
+        false,
+      )
+    }
+  }
+}
+
+const stderrBuffer = new StderrBackpressureTracker()
 
 /**
  * densable `Ds` — write stdout and account pending bytes for exit drain.
@@ -85,18 +162,31 @@ export function writeToStdout(data: string): void {
   wroteToStdout = true
   const t = Buffer.byteLength(data)
   if (
-    safeWrite(process.stdout, data, () => {
+    safeWriteStream(process.stdout, data, () => {
       bytesFlushed += t
       queueEmptyNotify?.()
-    })
+    }) !== 'dropped'
   ) {
     bytesEnqueued += t
   }
 }
 
-/** densable `mVt` */
-export function writeToStderr(data: string): void {
-  safeWrite(process.stderr, data)
+/** densable `lR` / `mVt` */
+export function writeToStderr(
+  data: string,
+  { mayDrop = false }: { mayDrop?: boolean } = {},
+): void {
+  stderrBuffer.write(data, mayDrop)
+}
+
+/** densable `uui` — total stderr messages dropped due to backpressure */
+export function getStderrDroppedTotal(): number {
+  return stderrBuffer.getDroppedTotal()
+}
+
+/** Testing-only: reset stderr backpressure tracker state. */
+export function _resetStderrBackpressureForTesting(): void {
+  stderrBuffer.reset()
 }
 
 // Write error to stderr and exit with code 1. Consolidates the

@@ -16,7 +16,7 @@ import {
   checkAndDisableAutoModeIfNeeded,
   resetAutoModeGateCheck,
 } from '../../utils/permissions/bypassPermissionsKillswitch.js';
-import { getOauthAccountInfoFromDisk } from '../../utils/auth.js';
+import { getOauthAccountInfoFromDisk, rollbackRefusedSignIn, validateForceLoginOrg } from '../../utils/auth.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { resetUserCache } from '../../utils/user.js';
 import { AuthPlaneSummary } from './AuthPlaneSummary.js';
@@ -55,6 +55,17 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
         // Signature-bearing blocks (thinking, connector_text) are bound to the API key —
         // strip them so the new key doesn't reject stale signatures.
         context.setMessages(stripSignatureBlocks);
+        const orgValidation = await validateForceLoginOrg();
+        if (!orgValidation.valid) {
+          await rollbackRefusedSignIn();
+          context.setAppState(prev => ({
+            ...prev,
+            authChangeGeneration: prev.authChangeGeneration + 1,
+            authVersion: prev.authVersion + 1,
+          }));
+          onDone(orgValidation.message);
+          return;
+        }
         let consentNeeded = false;
         if (success) {
           // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx

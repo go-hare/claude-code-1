@@ -164,7 +164,7 @@ Owners and primary owners have all admin permissions and can also manage admins.
 
 ## Platform Restrictions
 
-- **Claude Platform on AWS:** only the workspace endpoints work. Members, workspace members, invites, API keys, and usage/cost/rate-limit reports are unavailable. CMEK external-key endpoints are not yet available there - register and attach keys in the Claude Console.
+- **Claude Platform on AWS:** only the workspace, CMEK external-key, telemetry destination and usage and cost analytics endpoints work. Requests go through Amazon's gateway, signed with the user's AWS credentials (`shared/claude-platform-on-aws.md`; for destinations, `shared/opentelemetry.md`); Admin API keys and OAuth tokens don't work there. There is no external-key validate endpoint: a key is validated when it's attached to a workspace. Keys can also be registered and attached in the Claude Console. Members, workspace members, invites, API keys, rate-limit reports and the legacy usage and cost reports are unavailable.
 - **Claude Enterprise (claude.ai orgs):** only members and invites from this surface, plus Enterprise-only endpoints (group and custom-role reads, spend limits) that are not in the SDKs.
 
 ## Live Docs

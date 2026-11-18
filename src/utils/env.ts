@@ -1,8 +1,9 @@
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
-import { join } from 'path'
+import { basename, dirname, join } from 'path'
 import { fileSuffixForOauthConfig } from '../constants/oauth.js'
 import { isRunningWithBun } from './bundledMode.js'
+import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { findExecutable } from './findExecutable.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -14,17 +15,103 @@ export type GlobalClaudeFileSeed = 'seeded' | 'unchanged' | 'conflict'
 
 let globalClaudeFile: string | undefined
 
-/** densable leftover `Xt` — compute path when unset. */
+function isEnoent(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'ENOENT'
+  )
+}
+
+/**
+ * Official Q_(): detects an empty, read-only (0o000/0o444) 1-link file on
+ * Linux/WSL left behind by a sandbox bind mount (e.g. bwrap) in the config dir.
+ */
+function isEmptyReadOnlySandboxBindMount(stats: {
+  isFile(): boolean
+  size: number
+  mode: number
+  nlink: number
+}): boolean {
+  return (
+    process.platform === 'linux' &&
+    stats.isFile() &&
+    stats.size === 0 &&
+    (stats.mode & 0o222) === 0 &&
+    stats.nlink === 1
+  )
+}
+
+/** official z_() — compute path when unset. */
 function computeGlobalClaudeFile(): string {
-  if (
-    getFsImplementation().existsSync(
-      join(getClaudeConfigHomeDir(), '.config.json'),
-    )
-  ) {
-    return join(getClaudeConfigHomeDir(), '.config.json')
-  }
+  const legacyPath = join(getClaudeConfigHomeDir(), '.config.json')
   const filename = `.claude${fileSuffixForOauthConfig()}.json`
-  return join(process.env.CLAUDE_CONFIG_DIR || homedir(), filename)
+  const primaryPath = join(process.env.CLAUDE_CONFIG_DIR || homedir(), filename)
+  const fs = getFsImplementation()
+  try {
+    const legacyStats = fs.statSync(legacyPath)
+    if (
+      legacyStats.isFile() &&
+      (legacyStats.size > 0 || (legacyStats.mode & 0o222) !== 0)
+    ) {
+      let primaryStats: ReturnType<typeof fs.statSync> | undefined
+      try {
+        primaryStats = fs.statSync(primaryPath)
+      } catch (err) {
+        if (isEnoent(err)) {
+          return legacyPath
+        }
+        logForDebugging(
+          `Could not look at ${primaryPath}: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'warn' },
+        )
+        if (legacyStats.size === 0) {
+          return legacyPath
+        }
+      }
+      if (
+        legacyStats.size === 0 &&
+        primaryStats !== undefined &&
+        isEmptyReadOnlySandboxBindMount(primaryStats)
+      ) {
+        return legacyPath
+      }
+      if (legacyStats.size > 0) {
+        if (
+          primaryStats !== undefined &&
+          (!primaryStats.isFile() || primaryStats.size === 0)
+        ) {
+          return legacyPath
+        }
+        try {
+          if (
+            !fs
+              .readdirSync(dirname(legacyPath))
+              .some(d => d.name === basename(legacyPath))
+          ) {
+            return primaryPath
+          }
+        } catch (err) {
+          if (isEnoent(err)) {
+            return primaryPath
+          }
+        }
+        if (
+          primaryStats === undefined ||
+          (process.platform !== 'win32' &&
+            primaryStats.dev === legacyStats.dev &&
+            primaryStats.ino === legacyStats.ino)
+        ) {
+          return legacyPath
+        }
+        return legacyPath
+      }
+    }
+  } catch {
+    // legacyPath does not exist or cannot be stat'd
+  }
+  return primaryPath
 }
 
 /**

@@ -1,9 +1,10 @@
 import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
+import { readdirSync, readlinkSync, realpathSync } from 'fs'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
-import { basename, dirname, join, normalize, posix, sep } from 'path'
+import { basename, dirname, join, normalize, posix, resolve, sep } from 'path'
 import { hasAutoMemPathOverride, isAutoMemPath } from 'src/memdir/paths.js'
 import { isAgentMemoryPath } from '@claude-code/builtin-tools/tools/AgentTool/agentMemory.js'
 import {
@@ -32,7 +33,9 @@ import {
 import { getErrnoCode } from '../errors.js'
 import {
   getCommandProducerScanRoots,
+  isPathEqualOrUnder,
   isPathUnderDeniedCommandProducer,
+  toComparablePath,
 } from '../plugins/commandProducerDirs.js'
 import {
   containsPathTraversal,
@@ -628,6 +631,78 @@ export function isBgJobTmpPath(absolutePath: string): boolean {
  * - Shell configuration files (to prevent shell startup script manipulation)
  * - UNC paths (to prevent network file access and WebDAV attacks)
  */
+const DEV_MODS_LINK_SCAN_DEPTH = 4
+
+function realpathOrSelf(targetPath: string): string {
+  try {
+    return realpathSync(targetPath)
+  } catch {
+    return targetPath
+  }
+}
+
+function collectDevModsSymlinks(
+  dir: string,
+  depth = DEV_MODS_LINK_SCAN_DEPTH,
+): { links: string[]; isWhole: boolean } {
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    const links: string[] = []
+    let isWhole = true
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name)
+      if (entry.isSymbolicLink()) {
+        links.push(fullPath)
+        try {
+          links.push(
+            resolve(realpathOrSelf(dirname(fullPath)), readlinkSync(fullPath)),
+          )
+        } catch {
+          // ignore unreadable symlink target
+        }
+      } else if (
+        entry.isDirectory() &&
+        depth > 1 &&
+        entry.name !== 'node_modules'
+      ) {
+        const sub = collectDevModsSymlinks(fullPath, depth - 1)
+        links.push(...sub.links)
+        if (!sub.isWhole) isWhole = false
+      }
+    }
+    return { links, isWhole }
+  } catch (err: unknown) {
+    const code = getErrnoCode(err)
+    return { links: [], isWhole: code === 'ENOENT' || code === 'ENOTDIR' }
+  }
+}
+
+/**
+ * #586 (SEA `cha` in `tg`): protect `{CLAUDE_CONFIG_DIR}/dev-mods` (session mods
+ * folder) from accept-edits auto-approval even when `CLAUDE_CONFIG_DIR` does not
+ * contain `.claude` in its path.
+ */
+export function isPathUnderDevModsRoot(filePath: string): boolean {
+  const devModsRoot = join(getClaudeConfigHomeDir(), 'dev-mods')
+  const rootPaths = getPathsForPermissionCheck(resolve(devModsRoot))
+  const normCandidate = normalizeCaseForComparison(resolve(filePath))
+  if (
+    rootPaths
+      .map(normalizeCaseForComparison)
+      .some(r => normCandidate === r || normCandidate.startsWith(r + sep))
+  ) {
+    return true
+  }
+  const { links, isWhole } = collectDevModsSymlinks(devModsRoot)
+  if (!isWhole) {
+    return true
+  }
+  const comparableCandidate = toComparablePath(filePath)
+  return [...rootPaths, ...links].some(root =>
+    isPathEqualOrUnder(toComparablePath(root), comparableCandidate),
+  )
+}
+
 function isDangerousFilePathToAutoEdit(path: string): boolean {
   const absolutePath = expandPath(path)
   const pathSegments = absolutePath.split(sep)
@@ -636,6 +711,11 @@ function isDangerousFilePathToAutoEdit(path: string): boolean {
   // Check for UNC paths (defense-in-depth to catch any patterns that might not be caught by containsVulnerableUncPath)
   // Block anything starting with \\ or // as these are potentially UNC paths that could access network resources
   if (path.startsWith('\\\\') || path.startsWith('//')) {
+    return true
+  }
+
+  // #586: protect session dev-mods folder even when CLAUDE_CONFIG_DIR has no `.claude` segment
+  if (isPathUnderDevModsRoot(absolutePath)) {
     return true
   }
 

@@ -44,6 +44,7 @@ export type Color = RGBColor | HexColor | Ansi256Color | AnsiColor
 export type TextStyles = {
   readonly color?: Color
   readonly backgroundColor?: Color
+  readonly faintInk?: Color
   readonly dim?: boolean
   readonly bold?: boolean
   readonly italic?: boolean

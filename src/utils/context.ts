@@ -20,6 +20,7 @@ import {
   resolveCatalogIdFromProviderId,
 } from './model/modelCatalogCapabilities.js'
 import { firstPartyNameToCanonical } from './model/model.js'
+import { isFirstPartyAnthropicBaseUrl } from './model/providers.js'
 
 // Model context window size (200k tokens for all models right now)
 export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
@@ -265,6 +266,9 @@ export function getContextWindowForModel(
 
   // densable 2.1.223 #17 — unrecognized model IDs: enforce assumed 200K unless
   // CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT restores wait-for-API.
+  // Official 2.1.299 (#583) xC(): behind a custom ANTHROPIC_BASE_URL gateway,
+  // unrecognized gateway-specific model IDs honor CLAUDE_CODE_MAX_CONTEXT_TOKENS
+  // (for all users) and default to 1M unless CLAUDE_CODE_DISABLE_1M_CONTEXT is set.
   if (!isRecognizedModelForWindowEnforcement(model)) {
     if (isUnknownModelWindowEnforcementDisabled()) {
       try {
@@ -275,6 +279,16 @@ export function getContextWindowForModel(
       } catch {
         return 100_000_000
       }
+    }
+    if (!isFirstPartyAnthropicBaseUrl()) {
+      if (process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS) {
+        const override = parseInt(
+          process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
+          10,
+        )
+        if (!isNaN(override) && override > 0) return override
+      }
+      return is1mContextDisabled() ? MODEL_CONTEXT_WINDOW_DEFAULT : 1_000_000
     }
     return MODEL_CONTEXT_WINDOW_DEFAULT
   }

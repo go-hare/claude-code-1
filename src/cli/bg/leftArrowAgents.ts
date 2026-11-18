@@ -28,6 +28,7 @@ import {
   getSessionId,
   isSessionPersistenceDisabled,
 } from '../../bootstrap/state.js'
+import { formatLeftArrowStrandedQueuedMessage } from '../../utils/leftArrowConfirm.js'
 import {
   getCurrentSessionTitle,
   getTranscriptPathForSession,
@@ -97,6 +98,8 @@ export type LeftArrowOpenOptions = {
   haikuTitle?: string | null
   sessionTitle?: string | null
   agentColor?: string
+  /** Queued messages that cannot move to the background (dse). */
+  strandedQueuedCount?: number
   /**
    * Official aAf via — idle-fork | abort-then-fork | defer-then-fork.
    * Prefill only when abort-then-fork + partial text (portable gate).
@@ -580,6 +583,14 @@ export async function openAgentsViaLeftArrow(
   messages: readonly BackgroundSeedMessage[],
   options?: LeftArrowOpenOptions,
 ): Promise<LeftArrowOpenResult> {
+  if ((options?.strandedQueuedCount ?? 0) > 0) {
+    return {
+      ok: false,
+      error: formatLeftArrowStrandedQueuedMessage(
+        options!.strandedQueuedCount!,
+      ),
+    }
+  }
   let resumeSessionId: string | undefined
   try {
     resumeSessionId = getSessionId()

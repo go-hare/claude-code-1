@@ -521,7 +521,10 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
         ? formatCents(extraUsage.monthly_limit, currency)
         : 'unknown';
   const used = typeof extraUsage?.used_credits === 'number' ? formatCents(extraUsage.used_credits, currency) : null;
-  const utilization = typeof extraUsage?.utilization === 'number' ? Math.round(extraUsage.utilization) : undefined;
+  const utilization =
+    typeof extraUsage?.utilization === 'number'
+      ? Math.min(100, Math.max(0, Math.round(extraUsage.utilization)))
+      : undefined;
   const barWidth = Math.min(columns - 6, 50);
   const menuOptions = [
     ...(enabled ? [] : [{ value: 'enable', label: 'Turn on usage credits' }]),

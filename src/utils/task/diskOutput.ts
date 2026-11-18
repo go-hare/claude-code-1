@@ -18,6 +18,7 @@ import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
 import { logError } from '../log.js'
 import { getProjectTempDir } from '../permissions/filesystem.js'
+import { sleep } from '../sleep.js'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
 // Without this, an attacker in the sandbox could create symlinks in the tasks directory
@@ -42,6 +43,12 @@ export const UNWRITTEN_OUTPUT_NOTICE = `
 `
 /** densable 2.1.247 hlo — drop the in-memory queue after a failed drain retry. */
 export const UNWRITTEN_CHARS_DROP_THRESHOLD = 16_777_216
+
+/** densable 2.1.301 tt/V — Windows EBUSY backoff schedule for trailer writes. */
+export const EBUSY_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600] as const
+const EBUSY_RETRY_TOTAL_MS = EBUSY_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0)
+const EXHAUSTION_ERRNOS = new Set(['ENOSPC', 'EDQUOT', 'EROFS'])
+export type TaskOutputTrailerKind = 'killed' | 'exited'
 
 /** densable 2.1.247 TaskOutput.getStdout when failing || lostOutput. */
 export function formatLostOutputNotice(sizeKB: number, path: string): string {
@@ -466,6 +473,8 @@ export class DiskTaskOutput {
   #failing = false
   #loggedKeys = new Set<string>()
   #lostOutput = false
+  #trailerKind: TaskOutputTrailerKind | null = null
+  #retryAbort: AbortController | null = null
   #flushPromise: Promise<void> | null = null
   #flushResolve: (() => void) | null = null
 
@@ -496,6 +505,13 @@ export class DiskTaskOutput {
     }
   }
 
+  appendTrailer(content: string, kind: TaskOutputTrailerKind): void {
+    if (!this.#capped) {
+      this.#trailerKind = kind
+    }
+    this.append(content)
+  }
+
   flush(): Promise<void> {
     return this.#flushPromise ?? Promise.resolve()
   }
@@ -516,6 +532,9 @@ export class DiskTaskOutput {
     this.#generation += 1
     this.#queue.length = 0
     this.#unwrittenChars = 0
+    this.#trailerKind = null
+    this.#retryAbort?.abort()
+    this.#retryAbort = null
   }
 
   async #drainAllChunks(): Promise<void> {
@@ -580,6 +599,7 @@ export class DiskTaskOutput {
     // Use .splice to in-place mutate the array, informing the GC it can free it.
     const queue = this.#queue.splice(0, this.#queue.length)
     this.#unwrittenChars = 0
+    this.#trailerKind = null
 
     let totalLength = 0
     for (const str of queue) {
@@ -600,6 +620,38 @@ export class DiskTaskOutput {
       await this.#drainAllChunks()
       this.#clearFailing()
     } catch (e) {
+      const ebusyKind = this.#ebusyTrailerKind(e)
+      if (ebusyKind !== null) {
+        if (!this.#failing) {
+          this.#failing = true
+          logForDebugging(
+            `Task output closing line delayed: its file is busy (EBUSY); trying again for up to ${EBUSY_RETRY_TOTAL_MS} ms`,
+          )
+        }
+        for (const [idx, delayMs] of EBUSY_RETRY_DELAYS_MS.entries()) {
+          this.#retryAbort ??= new AbortController()
+          await sleep(delayMs, this.#retryAbort.signal)
+          if (this.#queue.length === 0) {
+            return
+          }
+          const generation = this.#generation
+          try {
+            await this.#drainAllChunks()
+            this.#clearFailing()
+            return
+          } catch (e2) {
+            if (this.#queue.length === 0 && this.#generation !== generation) {
+              return
+            }
+            const nextKind = this.#ebusyTrailerKind(e2)
+            if (nextKind === null || idx === EBUSY_RETRY_DELAYS_MS.length - 1) {
+              this.#giveUp(e2, nextKind)
+              return
+            }
+          }
+        }
+        return
+      }
       // densable 2.1.247 joe.#g: first fail marks failing and retries once.
       // A growing queue on permanent write failure is dropped at hlo.
       if (!this.#failing) {
@@ -613,10 +665,10 @@ export class DiskTaskOutput {
           await this.#drainAllChunks()
           this.#clearFailing()
         } catch (e2) {
-          this.#giveUp(e2)
+          this.#giveUp(e2, null)
         }
       } else {
-        this.#giveUp(e)
+        this.#giveUp(e, null)
       }
     } finally {
       const resolve = this.#flushResolve!
@@ -631,12 +683,45 @@ export class DiskTaskOutput {
     this.#loggedKeys.clear()
   }
 
-  #giveUp(e: unknown): void {
+  #ebusyTrailerKind(e: unknown): TaskOutputTrailerKind | null {
+    return process.platform === 'win32' && getErrnoCode(e) === 'EBUSY'
+      ? this.#trailerKind
+      : null
+  }
+
+  #giveUp(e: unknown, trailerKind: TaskOutputTrailerKind | null): void {
     const errno = getErrnoCode(e)
-    const key = `unexpected:${errno ?? 'no errno'}`
+    const category =
+      errno !== undefined && EXHAUSTION_ERRNOS.has(errno)
+        ? 'exhaustion'
+        : (trailerKind ?? 'unexpected')
+    const key = `${category}:${errno ?? 'no errno'}`
     if (!this.#loggedKeys.has(key)) {
       this.#loggedKeys.add(key)
-      logError(e)
+      switch (category) {
+        case 'exhaustion':
+          logForDebugging(`Task output drain retry failed (${errno}): ${e}`, {
+            level: 'error',
+          })
+          break
+        case 'exited':
+          logForDebugging(
+            `Task output closing line not written (EBUSY): the file was still busy after ${EBUSY_RETRY_TOTAL_MS} ms`,
+            { level: 'warn' },
+          )
+          break
+        case 'killed':
+          logError(
+            new Error(
+              `closing line of a stopped shell command not written: output file still busy after ${EBUSY_RETRY_TOTAL_MS} ms`,
+              { cause: e },
+            ),
+          )
+          break
+        case 'unexpected':
+          logError(e)
+          break
+      }
     }
     if (this.#unwrittenChars > UNWRITTEN_CHARS_DROP_THRESHOLD) {
       logForDebugging(
@@ -647,6 +732,7 @@ export class DiskTaskOutput {
       this.#queue.length = 0
       this.#queue.push(UNWRITTEN_OUTPUT_NOTICE)
       this.#unwrittenChars = UNWRITTEN_OUTPUT_NOTICE.length
+      this.#trailerKind = null
     }
   }
 }
@@ -688,6 +774,25 @@ function getOrCreateOutput(taskId: string): DiskTaskOutput {
  */
 export function appendTaskOutput(taskId: string, content: string): void {
   getOrCreateOutput(taskId).append(content)
+}
+
+/**
+ * Official SWt — append a terminal closing line (`[killed]` or `[exited with code ...]`)
+ * so Windows EBUSY backoff retries apply when the shell's handle closes just after kill/exit.
+ */
+export function appendTaskOutputTrailer(
+  taskId: string,
+  outcome: 'killed' | { exitCode: number | null | undefined },
+): void {
+  const output = getOrCreateOutput(taskId)
+  if (outcome === 'killed') {
+    output.appendTrailer('\n[killed]\n', 'killed')
+  } else {
+    output.appendTrailer(
+      `\n[exited with code ${outcome.exitCode ?? 'unknown'}]\n`,
+      'exited',
+    )
+  }
 }
 
 /**

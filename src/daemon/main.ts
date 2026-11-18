@@ -471,6 +471,52 @@ function pluralDaemonUnit(n: number, unit: string): string {
   return n === 1 ? unit : `${unit}s`
 }
 
+export type SignalExitResult = 'exited' | 'timed-out' | 'eperm'
+
+/**
+ * SEA `hmt` (#797): send `signal` to `pid` and poll every `pollMs` (default 50ms)
+ * up to `gracefulMs` (default 2000ms) until the process exits.
+ */
+export async function signalAndWaitForExit(
+  pid: number,
+  options: {
+    signal?: NodeJS.Signals
+    gracefulMs?: number
+    pollMs?: number
+    killFn?: (pid: number, signal?: NodeJS.Signals | 0) => void
+  } = {},
+): Promise<SignalExitResult> {
+  const signal = options.signal ?? 'SIGTERM'
+  const gracefulMs = options.gracefulMs ?? 2000
+  const pollMs = options.pollMs ?? 50
+  const killFn =
+    options.killFn ?? ((p, s) => process.kill(p, s as NodeJS.Signals))
+
+  if (pid <= 1) return 'eperm'
+  try {
+    killFn(pid, signal)
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : ''
+    if (code === 'EPERM') return 'eperm'
+    return 'exited'
+  }
+
+  const deadline = Date.now() + gracefulMs
+  while (true) {
+    const timedOut = Date.now() >= deadline
+    try {
+      killFn(pid, 0)
+    } catch {
+      return 'exited'
+    }
+    if (timedOut) return 'timed-out'
+    await new Promise<void>(resolve => setTimeout(resolve, pollMs))
+  }
+}
+
 /**
  * densable case "stop" — control-socket shutdown first; never SIGTERM an
  * unverified lock holder; require `--any` for transient (non-service) daemons.
@@ -598,8 +644,10 @@ async function handleDaemonStop(args: string[]): Promise<void> {
     return
   }
 
-  // Fallback: service stop OR verified SIGTERM (never unverified; never win32 kill)
+  // Fallback: service stop OR verified SIGTERM + wait + SIGKILL (never unverified; never win32 kill)
   let stopped = false
+  let stopOutcome: 'exited' | 'timed-out' | 'unverified' | undefined
+  let sentSigkill = false
   if (serviceInstalled) {
     const svc = await stopDaemonService()
     if (!svc.ok) {
@@ -609,28 +657,32 @@ async function handleDaemonStop(args: string[]): Promise<void> {
     }
     stopped = true
   } else if (verified && process.platform !== 'win32') {
-    try {
-      process.kill(verified.pid, 'SIGTERM')
+    const termRes = await signalAndWaitForExit(verified.pid, {
+      signal: 'SIGTERM',
+      gracefulMs: 2000,
+    })
+    if (termRes === 'eperm') {
+      console.error(
+        `could not stop daemon (pid=${verified.pid}): EPERM (running as another user — try with elevated privileges)`,
+      )
+      await finish(false, 0)
+      return
+    }
+    if (termRes === 'exited') {
       stopped = true
-    } catch (err) {
-      const code =
-        err && typeof err === 'object' && 'code' in err
-          ? String((err as { code?: unknown }).code)
-          : ''
-      if (code === 'ESRCH') {
+    } else if (isDaemonLockSignalable(verified)) {
+      sentSigkill = true
+      const killRes = await signalAndWaitForExit(verified.pid, {
+        signal: 'SIGKILL',
+        gracefulMs: 2000,
+      })
+      if (killRes === 'exited') {
         stopped = true
       } else {
-        const eperm =
-          code === 'EPERM'
-            ? ' (running as another user — try with elevated privileges)'
-            : ''
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(
-          `could not stop daemon (pid=${verified.pid}): ${msg}${eperm}`,
-        )
-        await finish(false, 0)
-        return
+        stopOutcome = 'timed-out'
       }
+    } else {
+      stopOutcome = 'unverified'
     }
   }
 
@@ -645,6 +697,24 @@ async function handleDaemonStop(args: string[]): Promise<void> {
         `supervisor (pid=${verified.pid}) is still running — stop it with \`taskkill /PID ${verified.pid}\` or close the terminal it was started in.`,
     )
     await finish(false, reaped)
+    return
+  }
+
+  if (verified && !stopped) {
+    const lockPath = getDaemonLockPath()
+    const detail =
+      stopOutcome === 'timed-out'
+        ? 'after SIGKILL. A process that outlives SIGKILL is usually waiting inside the operating system, for example on a network drive that stopped answering, and exits by itself once that wait ends. Until then, `claude agents` and `claude --bg` cannot start a new daemon. `claude daemon status` says "not running" once it has gone; if it never goes, restart the computer.'
+        : sentSigkill
+          ? 'after SIGKILL, and could no longer be verified as the daemon. It should exit shortly. If `claude agents` or `claude --bg` still cannot start a new daemon in a minute, restart the computer.'
+          : `2s after SIGTERM, and could no longer be verified as the daemon, so it was not sent SIGKILL. While it runs, \`claude agents\` and \`claude --bg\` may not be able to start a new daemon. Re-run \`claude daemon stop --any${keepWorkers ? ' --keep-workers' : ''}\`. If that does not stop it, run \`ps -ww -o args= -p ${verified.pid}\`: if that shows Claude Code started with "daemon", stop it with \`kill -9 ${verified.pid}\`. If it shows anything else, another program probably has that pid: leave it alone, and delete ${lockPath}.`
+    console.error(
+      (reaped > 0
+        ? `terminated ${reaped} background ${pluralDaemonUnit(reaped, 'session')}; `
+        : '') +
+        `the daemon was not stopped: pid=${verified.pid} is still running ${detail}${keepWorkers ? ' No sessions were ended.' : ''}`,
+    )
+    await finish(false, reaped, 'daemon_stop_still_running')
     return
   }
 

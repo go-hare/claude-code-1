@@ -1015,7 +1015,7 @@ export async function createAndUploadGitBundle(
         })
         return {
           success: false,
-          error: `Could not capture uncommitted changes (git ${built.step}: ${built.detail}). Run \`git add .\` or commit, then retry.`,
+          error: `Could not capture uncommitted changes (git ${built.step}: ${built.detail}). Commit or stash your changes, then retry.`,
           failReason: 'stash_failed',
         }
       }
@@ -1066,7 +1066,7 @@ export async function createAndUploadGitBundle(
           })
           return {
             success: false,
-            error: `Could not capture uncommitted changes (git stash create: ${detail}). Run \`git add .\` or commit, then retry.`,
+            error: `Could not capture uncommitted changes (git stash create: ${detail}). Commit or stash your changes, then retry.`,
             failReason: 'stash_failed',
           }
         }

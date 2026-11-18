@@ -114,16 +114,21 @@ export function stripHostManagedSettingsEnv(
   opts: {
     managedByHost: boolean
     managedByHostFlag: boolean
+    desktopHost?: boolean
     source?: string
     onStrip?: (key: string, source: string) => void
   },
 ): Record<string, string> {
   if (!env) return {}
-  const { managedByHost, managedByHostFlag } = opts
+  const { managedByHost, managedByHostFlag, desktopHost = false } = opts
   if (!managedByHost && !managedByHostFlag) {
     return env
   }
   const source = opts.source ?? 'settings'
+  const isProjectOrLocal =
+    source === 'projectSettings' || source === 'localSettings'
+  const stripTransportAndProxy =
+    managedByHostFlag && (!desktopHost || isProjectOrLocal)
   const onStrip = opts.onStrip ?? warnHostManagedSettingsEnvIgnored
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
@@ -137,12 +142,13 @@ export function stripHostManagedSettingsEnv(
       onStrip(key, source)
       continue
     }
-    // densable LLn / KVt — only when managedByHostFlag (PROVIDER_MANAGED_BY_HOST)
-    if (managedByHostFlag && isHostProxyEnvVar(key)) {
+    // densable LLn / KVt (#809) — when managedByHostFlag, strip proxy/CA/git-TLS/git-config
+    // vars; under Claude Desktop (`desktopHost`), only in project/local settings (`hfe`).
+    if (stripTransportAndProxy && isHostProxyEnvVar(key)) {
       onStrip(key, source)
       continue
     }
-    if (managedByHostFlag && isHostTransportSensitiveEnvVar(key)) {
+    if (stripTransportAndProxy && isHostTransportSensitiveEnvVar(key)) {
       onStrip(key, source)
       continue
     }
@@ -158,6 +164,7 @@ function withoutHostManagedProviderVars(
   return stripHostManagedSettingsEnv(env, {
     managedByHost: isManagedByHostSession(),
     managedByHostFlag: isProviderManagedByHostFlag(),
+    desktopHost: process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop',
     source,
   })
 }

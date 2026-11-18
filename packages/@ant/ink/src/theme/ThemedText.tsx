@@ -123,17 +123,19 @@ export default function ThemedText({
 
   // Resolve theme keys to raw colors
   const resolvedColor =
-    !color && hoverColor
-      ? resolveColor(hoverColor, theme)
-      : dimColor
-        ? (theme.inactive as Color)
+    dimColor && !hoverColor
+      ? (theme.inactive as Color)
+      : !color && hoverColor
+        ? resolveColor(hoverColor, theme)
         : resolveColor(color, theme);
   const resolvedBackgroundColor = resolveColor(backgroundColor, theme);
+  const faintInk = dimColor && !hoverColor ? resolvedColor : undefined;
 
   return (
     <Text
       color={resolvedColor}
       backgroundColor={resolvedBackgroundColor}
+      faintInk={faintInk}
       bold={bold}
       italic={italic}
       underline={underline}

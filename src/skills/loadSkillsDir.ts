@@ -40,6 +40,7 @@ import {
 } from '../utils/envUtils.js'
 import { isENOENT, isFsInaccessible } from '../utils/errors.js'
 import {
+  buildSkillFile,
   coerceDescriptionToString,
   type FrontmatterData,
   type FrontmatterShell,
@@ -246,9 +247,16 @@ export function parseSkillFrontmatterFields(
     )
   }
 
+  const rawDisplayName =
+    frontmatter.name != null ? String(frontmatter.name) : undefined
+  let displayName: string | undefined = rawDisplayName
+  if (rawDisplayName !== undefined && !isValidSkillName(rawDisplayName)) {
+    recordNameNotShown(rawDisplayName, `is not shown for ${resolvedName}`)
+    displayName = undefined
+  }
+
   return {
-    displayName:
-      frontmatter.name != null ? String(frontmatter.name) : undefined,
+    displayName,
     description,
     hasUserSpecifiedDescription: validatedDescription !== null,
     allowedTools: parseSlashCommandToolsFromFrontmatter(
@@ -322,6 +330,7 @@ export function createSkillCommand({
   effort,
   shell,
   createdBy,
+  skillFile,
 }: {
   skillName: string
   displayName: string | undefined
@@ -349,6 +358,7 @@ export function createSkillCommand({
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
   createdBy?: 'dream-proposal'
+  skillFile?: PromptCommand['skillFile']
 }): Command {
   // densable 2.1.228 #12 — $vr/$Phn label+sanitize for claude.ai synced skills;
   // bDo capability wipe when xTt says body is untrusted (syncedSkills on local
@@ -442,6 +452,7 @@ export function createSkillCommand({
     source,
     loadedFrom,
     ...(createdBy !== undefined ? { createdBy } : {}),
+    ...(skillFile !== undefined ? { skillFile } : {}),
     hooks: finalHooks,
     skillRoot: baseDir,
     ...(finalAllowedTools.length > 0
@@ -581,10 +592,12 @@ async function loadSkillsFromSkillsDir(
           return null
         }
 
-        const { frontmatter, content: markdownContent } = parseFrontmatter(
-          content,
-          skillFilePath,
-        )
+        const {
+          frontmatter,
+          frontmatterAsWritten,
+          asWrittenProblem,
+          content: markdownContent,
+        } = parseFrontmatter(content, skillFilePath)
 
         const skillName = entry.name
         if (!isValidSkillName(skillName)) {
@@ -609,6 +622,11 @@ async function loadSkillsFromSkillsDir(
             baseDir: skillDirPath,
             loadedFrom: 'skills',
             paths,
+            skillFile: buildSkillFile(
+              frontmatterAsWritten,
+              skillFilePath,
+              asWrittenProblem,
+            ),
           }),
           filePath: skillFilePath,
         }
@@ -755,6 +773,7 @@ async function loadSkillsFromCommandsDir(
             baseDir: skillDirectory,
             loadedFrom: 'commands_DEPRECATED',
             paths: undefined,
+            skillFile: buildSkillFile(frontmatter, filePath),
           }),
           filePath,
         })

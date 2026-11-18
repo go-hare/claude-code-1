@@ -201,6 +201,42 @@ function getOauthAccountInfo(): ReturnType<
 }
 
 /**
+ * densable `U2e` — describe how to unset a non-claude.ai auth token source.
+ */
+export function describeAuthSourceUnset(source: string): string {
+  switch (source) {
+    case 'claude.ai':
+      return 'claude /logout to sign out of claude.ai.'
+    case 'profile':
+    case 'anthropic-profile':
+      return 'Run `ant auth logout`, or remove the active profile under ~/.config/anthropic/configs/.'
+    case 'apiKeyHelper':
+      return 'Unset the apiKeyHelper setting.'
+    case 'CCR_OAUTH_TOKEN_FILE':
+      return 'This token is injected by the CCR host; check the host session.'
+    case 'none':
+      return ''
+    default:
+      return `Unset the ${source} environment variable.`
+  }
+}
+
+function isImplicitProfileOAuthDefault(): boolean {
+  try {
+    const { getAnthropicProfileSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/anthropicProfile.js') as typeof import('../utils/anthropicProfile.js')
+    return getAnthropicProfileSource() === 'profile-implicit'
+  } catch {
+    return false
+  }
+}
+
+function isClaudeAISubscriberTokenSource(source: string): boolean {
+  return source === 'claude.ai' || source === 'CCR_OAUTH_TOKEN_FILE'
+}
+
+/**
  * densable `rot` — explain when an API key / auth token / apiKeyHelper
  * overrides the user's claude.ai login.
  */
@@ -209,11 +245,15 @@ export function formatApiKeyOverrideReason({
   suffix,
   env = process.env,
   apiKeySource,
+  tokenSource,
+  isImplicitProfileOAuth,
 }: {
   prefix: string
   suffix: string
   env?: NodeJS.ProcessEnv
   apiKeySource?: { key: string | null; source: string }
+  tokenSource?: string
+  isImplicitProfileOAuth?: boolean
 }): string {
   try {
     if (env.ANTHROPIC_UNIX_SOCKET && !env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -235,6 +275,25 @@ export function formatApiKeyOverrideReason({
     }
     if (env.ANTHROPIC_AUTH_TOKEN) {
       return `${prefix} ANTHROPIC_AUTH_TOKEN is set, so this session is using API-key auth — unset it (or run in a shell without it) ${suffix}`
+    }
+    const resolvedTokenSource =
+      tokenSource ?? authModule.getAuthTokenSource().source
+    const implicitOAuth =
+      isImplicitProfileOAuth ?? isImplicitProfileOAuthDefault()
+    if (
+      (resolvedTokenSource === 'profile' ||
+        resolvedTokenSource === 'anthropic-profile') &&
+      implicitOAuth
+    ) {
+      return `${prefix} Run \`claude auth login\` ${suffix}`
+    }
+    const unsetHint = describeAuthSourceUnset(resolvedTokenSource)
+    if (
+      resolvedTokenSource !== 'none' &&
+      !isClaudeAISubscriberTokenSource(resolvedTokenSource) &&
+      unsetHint
+    ) {
+      return `${prefix} This session is using ${resolvedTokenSource} auth — ${unsetHint}`
     }
   } catch {
     // fall through to generic unset hint
@@ -333,6 +392,157 @@ export function formatOrgPolicyLoadError(
         ? `${unavailable}: your organization's policy couldn't be loaded from ${host} (HTTP ${httpStatus}). Check your proxy settings.`
         : `${unavailable}: the request to ${host} for your organization's policy didn't complete. If you use a proxy, check that it lets ${host} through.`
   }
+}
+
+export type CloudSessionsPolicyLoadFailure = OrgPolicyLoadFailureInfo & {
+  success: boolean
+  retrying?: boolean
+}
+
+export type CloudSessionsDisabledReasonDeps = {
+  provider?: 'firstParty' | string
+  providerDisplayName?: string
+  featureLabel?: string
+  verb?: 'is' | 'are'
+  policyReason?: string | null
+  policyVerdict?:
+    | 'allowed'
+    | 'org_denied'
+    | 'cache_miss'
+    | 'route_missing'
+    | null
+  orgDeniedMessage?: string
+  orgDenialIsAuthoritative?: boolean
+  policyTaints?: readonly string[]
+  apiKeyOverrideSource?:
+    | 'ANTHROPIC_API_KEY'
+    | 'apiKeyHelper'
+    | 'ANTHROPIC_AUTH_TOKEN'
+    | null
+  fetchedLoadedKeyAnswer?: boolean
+  fetchedLoadedTokenAnswer?: boolean
+  loadFailure?: CloudSessionsPolicyLoadFailure | null
+  isSoftFail?: boolean
+  hasClaudeAISubscriberAuth?: boolean
+  hasOAuthToken?: boolean
+  hasImplicitProfile?: boolean
+  isImplicitProfileOAuth?: boolean
+  isBareMode?: boolean
+  hasStoredClaudeAiLogin?: boolean
+  implicitProfileHint?: string
+}
+
+const CLOUD_SESSIONS_LOGIN_PREFIX = 'Cloud sessions use your claude.ai login.'
+
+/**
+ * densable `ihe()` (2.1.302 #702 / #582) — explain why cloud sessions
+ * (`allow_remote_sessions`) are unavailable, including `apiKeyHelper` org_denied
+ * short-circuit, `formatApiKeyOverrideReason`, and `claude auth login` hints.
+ */
+export function getCloudSessionsDisabledReason(
+  deps: CloudSessionsDisabledReasonDeps,
+): string | null {
+  const provider = deps.provider ?? 'firstParty'
+  if (provider !== 'firstParty') {
+    const label = deps.providerDisplayName ?? provider
+    return `Cloud sessions aren't available with ${label}. They run on Anthropic's infrastructure and require an Anthropic account.`
+  }
+
+  const featureLabel = deps.featureLabel ?? 'Cloud sessions'
+  const verb = deps.verb ?? 'are'
+  const policyReason = deps.policyReason ?? null
+  if (policyReason === null) {
+    return null
+  }
+
+  const verdict = deps.policyVerdict ?? null
+  if (verdict === 'org_denied') {
+    const taints = deps.policyTaints ?? []
+    const overrideSource =
+      deps.orgDenialIsAuthoritative && taints.length === 0
+        ? (deps.apiKeyOverrideSource ?? null)
+        : null
+    if (overrideSource === null) {
+      return policyReason
+    }
+    const base = `${featureLabel} ${verb} ${deps.orgDeniedMessage ?? "disabled by your organization's policy"}.`
+    if (overrideSource === 'apiKeyHelper') {
+      return base
+    }
+    const noun = overrideSource === 'ANTHROPIC_API_KEY' ? 'key' : 'token'
+    const fetchedLoaded =
+      overrideSource === 'ANTHROPIC_API_KEY'
+        ? Boolean(deps.fetchedLoadedKeyAnswer)
+        : Boolean(deps.fetchedLoadedTokenAnswer)
+    if (!fetchedLoaded) {
+      return policyReason
+    }
+    return `${base} This session is using ${overrideSource}, so Claude Code checked the policy for the organization that ${noun} belongs to. ${CLOUD_SESSIONS_LOGIN_PREFIX}`
+  }
+
+  const loadFailure = deps.loadFailure ?? null
+  if (
+    verdict !== 'cache_miss' ||
+    loadFailure === null ||
+    loadFailure.success ||
+    loadFailure.httpStatus === 404
+  ) {
+    return policyReason
+  }
+
+  const softFail = Boolean(deps.isSoftFail)
+  const subscriberAuth = Boolean(deps.hasClaudeAISubscriberAuth)
+  if (loadFailure.retrying) {
+    return loadFailure.errorCode === 'auth_failed' &&
+      loadFailure.httpStatus === 401 &&
+      !softFail &&
+      subscriberAuth
+      ? `${policyReason} If that doesn't help, run \`claude auth login\` (or /login in a local session).`
+      : policyReason
+  }
+
+  const loadMsg = formatOrgPolicyLoadError(featureLabel, verb, loadFailure)
+  if (
+    loadFailure.errorCode !== 'auth_failed' ||
+    loadFailure.httpStatus === 403 ||
+    softFail
+  ) {
+    return loadMsg
+  }
+
+  if (deps.apiKeyOverrideSource != null) {
+    const overrideMsg = formatApiKeyOverrideReason({
+      prefix: CLOUD_SESSIONS_LOGIN_PREFIX,
+      suffix: 'to use cloud sessions.',
+      apiKeySource:
+        deps.apiKeyOverrideSource === 'ANTHROPIC_AUTH_TOKEN'
+          ? { key: null, source: 'none' }
+          : { key: null, source: deps.apiKeyOverrideSource },
+      env:
+        deps.apiKeyOverrideSource === 'ANTHROPIC_AUTH_TOKEN'
+          ? { ANTHROPIC_AUTH_TOKEN: '1' }
+          : {},
+    })
+    return `${loadMsg} ${overrideMsg}`
+  }
+
+  if (loadFailure.httpStatus === 401 && subscriberAuth) {
+    return `${loadMsg} Run \`claude auth login\` (or /login in a local session), then try again.`
+  }
+
+  if (
+    !deps.hasOAuthToken &&
+    deps.hasImplicitProfile &&
+    loadFailure.httpStatus === null &&
+    deps.isImplicitProfileOAuth &&
+    !deps.isBareMode &&
+    deps.hasStoredClaudeAiLogin &&
+    deps.implicitProfileHint
+  ) {
+    return `${loadMsg} Cloud sessions need a claude.ai sign-in. ${deps.implicitProfileHint}`
+  }
+
+  return loadMsg
 }
 
 /**

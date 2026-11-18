@@ -1,4 +1,8 @@
-export { BridgeClient, createBridgeClient } from './bridgeClient.js'
+export {
+  BridgeClient,
+  createBridgeClient,
+  NoExtensionConnectedError,
+} from './bridgeClient.js'
 export {
   BRIDGE_ONLY_BROWSER_TOOL_NAMES,
   BRIDGE_ONLY_BROWSER_TOOLS,

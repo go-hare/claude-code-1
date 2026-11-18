@@ -564,6 +564,12 @@ export async function handlePromptSubmit(
   )
 
   const hasImages = Object.values(pastedContents).some(isValidImagePaste)
+  const hasReferencedPastes =
+    Boolean(skipSlashCommands) &&
+    parseReferences(input).some(r => pastedContents[r.id] !== undefined)
+  const hasInlineTextPastes = Object.values(pastedContents).some(
+    c => c.type === 'text' && c.inline === true && c.content !== '',
+  )
   if (input.trim() === '') {
     return
   }
@@ -616,6 +622,11 @@ export async function handlePromptSubmit(
   // Fall back to expandPastedTextRefs for empty-removed case (identical).
   const finalInput =
     removed.length > 0 ? expanded : expandPastedTextRefs(input, pastedContents)
+  const keepPastedContents =
+    hasImages ||
+    hasReferencedPastes ||
+    finalInput !== input ||
+    hasInlineTextPastes
   // densable: only count available text pastes for tengu_paste_text.
   const pastedTextRefs = parseReferences(input).filter(
     r =>
@@ -787,7 +798,7 @@ export async function handlePromptSubmit(
       value: finalInput.trim(),
       preExpansionValue: input.trim(),
       mode,
-      pastedContents: hasImages ? pastedContents : undefined,
+      pastedContents: keepPastedContents ? pastedContents : undefined,
       skipSlashCommands,
       bridgeOrigin,
       // densable prompt enqueue stamps human origin so Wzn keyword gate can fire.
@@ -902,7 +913,7 @@ export async function handlePromptSubmit(
     value: finalInput,
     preExpansionValue: input,
     mode,
-    pastedContents: hasImages ? pastedContents : undefined,
+    pastedContents: keepPastedContents ? pastedContents : undefined,
     skipSlashCommands,
     bridgeOrigin,
     // densable prompt path: origin.kind === "human" (Wzn for ultracode keyword).

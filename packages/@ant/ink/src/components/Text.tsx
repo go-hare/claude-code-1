@@ -15,6 +15,12 @@ type BaseProps = {
   readonly backgroundColor?: Color;
 
   /**
+   * Official `faintInk` — apply SGR dim (`\x1b[2m`) when this color resolves to a
+   * neutral 16-color ANSI code (black/white) and is not overridden by bold/dim/inverse.
+   */
+  readonly faintInk?: Color;
+
+  /**
    * Make the text italic.
    */
   readonly italic?: boolean;
@@ -133,6 +139,7 @@ const memoizedStylesForWrap: Record<NonNullable<Styles['textWrap']>, Styles> = {
 export default function Text({
   color,
   backgroundColor,
+  faintInk,
   bold,
   dim,
   italic = false,
@@ -159,6 +166,7 @@ export default function Text({
   const textStyles: TextStyles = {
     ...(color && { color }),
     ...(backgroundColor && { backgroundColor }),
+    ...(faintInk && { faintInk }),
     ...(dim && { dim }),
     ...(bold && { bold }),
     ...(italic && { italic }),

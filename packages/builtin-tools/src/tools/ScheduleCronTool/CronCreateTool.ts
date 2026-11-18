@@ -3,11 +3,13 @@ import { setScheduledTasksEnabled } from 'src/bootstrap/state.js'
 import type { ValidationResult } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { cronToHuman, parseCronExpression } from 'src/utils/cron.js'
+import { getCronJitterConfig } from 'src/utils/cronJitterConfig.js'
 import {
   addCronTask,
   getCronFilePath,
   listAllCronTasks,
   nextCronRunMs,
+  nextScheduledFireAtMs,
 } from 'src/utils/cronTasks.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
@@ -49,6 +51,12 @@ const outputSchema = lazySchema(() =>
     humanSchedule: z.string(),
     recurring: z.boolean(),
     durable: z.boolean().optional(),
+    nextFireAt: z
+      .number()
+      .optional()
+      .describe(
+        "Epoch ms of the job's next run, the scheduler's per-job offset included",
+      ),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -144,12 +152,18 @@ export const CronCreateTool = buildTool({
     // Kill switch forces session-only; schema stays stable so the model sees
     // no validation errors when the gate flips mid-session.
     const effectiveDurable = durable && isDurableCronEnabled()
+    const createdAt = Date.now()
     const id = await addCronTask(
       cron,
       prompt,
       recurring,
       effectiveDurable,
       getTeammateContext()?.agentId,
+      createdAt,
+    )
+    const nextFireAt = nextScheduledFireAtMs(
+      { id, cron, createdAt, recurring },
+      getCronJitterConfig(),
     )
     // Enable the scheduler so the task fires in this session. The
     // useScheduledTasks hook polls this flag and will start watching
@@ -163,6 +177,7 @@ export const CronCreateTool = buildTool({
         humanSchedule: cronToHuman(cron),
         recurring,
         durable: effectiveDurable,
+        ...(nextFireAt !== null && { nextFireAt }),
       },
     }
   },

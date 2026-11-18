@@ -399,7 +399,33 @@ export type ServerControlRequestHandlers = {
    * 248 xi also Ze.clear().
    */
   getPendingPrompts?: () => SDKControlRequest[]
+  onSideQuestion?: (
+    input: {
+      question: string
+      history?: Array<{
+        question: string
+        response: string
+        fallback_notice?: string
+      }>
+    },
+    ctx: {
+      signal: AbortSignal
+      onProgress?: (progress: Record<string, unknown>) => void
+    },
+  ) => Promise<{
+    response: string | null
+    synthetic?: boolean
+    [key: string]: unknown
+  }>
+  sideQuestionDeadlineMs?: number
+  cancellableRequests?: Map<string, AbortController>
 }
+
+export const SIDE_QUESTION_TIMEOUT_MS = 660_000
+export const SIDE_QUESTION_TIMEOUT_ERROR =
+  'side_question timed out: the host did not answer in time'
+const SIDE_QUESTION_FALLBACK =
+  '(No answer available for this side question. Try again, or ask in the main conversation.)'
 
 const OUTBOUND_ONLY_ERROR =
   'This session is outbound-only. Enable Remote Control locally to allow inbound control.'
@@ -546,6 +572,9 @@ export function handleServerControlRequest(
     onRenameSession,
     onGetWorkspaceDiff,
     getPendingPrompts,
+    onSideQuestion,
+    sideQuestionDeadlineMs,
+    cancellableRequests,
   } = handlers
   if (!transport) {
     logForDebugging(
@@ -820,6 +849,106 @@ export function handleServerControlRequest(
           abort.abort()
           throw err
         }),
+      )
+      return
+    }
+
+    case 'side_question': {
+      if (
+        typeof req.question !== 'string' ||
+        (req.history !== undefined &&
+          (!Array.isArray(req.history) ||
+            req.history.some(
+              item =>
+                !item ||
+                typeof item !== 'object' ||
+                typeof (item as { question?: unknown }).question !== 'string' ||
+                typeof (item as { response?: unknown }).response !== 'string',
+            )))
+      ) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error:
+              'side_question: question must be a string and history an array of {question, response} strings',
+          },
+        }
+        break
+      }
+      if (!onSideQuestion) {
+        response = {
+          type: 'control_response',
+          response: {
+            subtype: 'error',
+            request_id: request.request_id,
+            error:
+              'side_question is not supported in this context (onSideQuestion callback not registered)',
+          },
+        }
+        break
+      }
+      if (cancellableRequests?.has(request.request_id)) {
+        logForDebugging(
+          `[bridge:repl] side_question request_id=${request.request_id} already in flight — ignoring duplicate delivery`,
+        )
+        return
+      }
+      const abort = new AbortController()
+      cancellableRequests?.set(request.request_id, abort)
+      const work = Promise.resolve().then(() =>
+        onSideQuestion(
+          {
+            question: req.question as string,
+            history: req.history as
+              | Array<{
+                  question: string
+                  response: string
+                  fallback_notice?: string
+                }>
+              | undefined,
+          },
+          {
+            signal: abort.signal,
+            onProgress: progress => {
+              void transport.write({
+                type: 'system',
+                subtype: 'control_request_progress',
+                request_id: request.request_id,
+                ...progress,
+                uuid: randomUUID(),
+                session_id: sessionId,
+              } as unknown as Parameters<typeof transport.write>[0])
+            },
+          },
+        ),
+      )
+      replyGetWorkspaceDiffAsync(
+        request,
+        transport,
+        sessionId,
+        raceWithTimeout(
+          work,
+          sideQuestionDeadlineMs ?? SIDE_QUESTION_TIMEOUT_MS,
+          SIDE_QUESTION_TIMEOUT_ERROR,
+        )
+          .then(
+            res =>
+              res.response !== null && res.synthetic !== false
+                ? { ...res, response: SIDE_QUESTION_FALLBACK, synthetic: true }
+                : res,
+            err => {
+              if (errorMessage(err) === SIDE_QUESTION_TIMEOUT_ERROR) {
+                abort.abort()
+                throw new Error(SIDE_QUESTION_TIMEOUT_ERROR)
+              }
+              throw err
+            },
+          )
+          .finally(() => {
+            cancellableRequests?.delete(request.request_id)
+          }),
       )
       return
     }

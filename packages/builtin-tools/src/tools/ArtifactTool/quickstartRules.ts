@@ -309,3 +309,60 @@ export function hasPreToolUseHook(context?: PreToolUseHookContext): boolean {
     return true
   }
 }
+
+function matcherCoversEditOrWrite(matcher: string | undefined): boolean {
+  if (
+    matcher === undefined ||
+    matcher.trim() === '' ||
+    matcher.trim() === '*'
+  ) {
+    return true
+  }
+  return /\b(?:Edit|Write|FileEdit|FileWrite)\b/i.test(matcher)
+}
+
+/**
+ * Official `xgs` (2.1.301 #854): check if a PreToolUse hook covers Edit or
+ * Write. When true, ArtifactTool must not offer in-publish `edits` so Claude
+ * edits the file first (firing the hook) and then republishes.
+ */
+export function hasEditOrWritePreToolUseHook(
+  context?: PreToolUseHookContext,
+): boolean {
+  try {
+    const sessionHooks = context?.getAppState?.()?.sessionHooks
+    if (sessionHooks instanceof Map) {
+      const key = context?.agentId ?? context?.sessionId
+      const matchers = key
+        ? sessionHooks.get(key)?.hooks?.PreToolUse
+        : undefined
+      if (
+        Array.isArray(matchers) &&
+        matchers.some(entry => matcherCoversEditOrWrite(entry.matcher))
+      ) {
+        return true
+      }
+    }
+    const { getRegisteredHooks } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/bootstrap/state.js') as typeof import('src/bootstrap/state.js')
+    const matchers = getRegisteredHooks()?.PreToolUse
+    if (!Array.isArray(matchers) || matchers.length === 0) return false
+    return matchers.some(entry => {
+      const matcher = (entry as { matcher?: string }).matcher
+      if (!matcherCoversEditOrWrite(matcher)) return false
+      const hooks = (entry as { hooks?: SessionPreToolUseMatcher['hooks'] })
+        .hooks
+      return hooksAreUserPreToolUse(hooks)
+    })
+  } catch {
+    return true
+  }
+}
+
+/** Official `be` / `Ge` (2.1.301 #854): only offer publish edits when no Edit/Write PreToolUse hook is active. */
+export function shouldOfferPublishEdits(
+  context?: PreToolUseHookContext,
+): boolean {
+  return !hasEditOrWritePreToolUseHook(context)
+}

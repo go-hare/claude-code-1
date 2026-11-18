@@ -22,7 +22,11 @@ import { DEFAULT_SESSION_EFFORT } from '../effort.js'
 import { errorMessage } from '../errors.js'
 import type { HookResult } from '../hooks.js'
 import { createUserMessage, handleMessageFromStream } from '../messages.js'
-import { getCanonicalName, getSmallFastModel } from '../model/model.js'
+import {
+  getCanonicalName,
+  getSmallFastModel,
+  parseUserSpecifiedModel,
+} from '../model/model.js'
 import { hasPermissionsToUseTool } from '../permissions/permissions.js'
 import { getAgentTranscriptPath, getTranscriptPath } from '../sessionPaths.js'
 import type { AgentHook } from '../settings/types.js'
@@ -142,11 +146,22 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool, alwa
 ${HOOK_EVALUATOR_OK_GUIDANCE}`,
       ])
 
-      const model = hook.model ?? getSmallFastModel()
-      const parentModel = toolUseContext.options.mainLoopModel
-      // #485 SEA kmn/kNo: When the hook runs on a different model (e.g. Haiku)
+      const model =
+        hook.model !== undefined
+          ? parseUserSpecifiedModel(hook.model)
+          : getSmallFastModel()
+      const callerModelFromLayers = (
+        toolUseContext.permissionLayers ?? []
+      ).findLast(
+        (layer): layer is { kind: 'model'; mainLoopModel: string } =>
+          layer.kind === 'model',
+      )?.mainLoopModel
+      const parentModel =
+        callerModelFromLayers ?? toolUseContext.options.mainLoopModel
+      // #485 SEA kmn/kNo + #782: When the hook runs on a different model (e.g. Haiku)
       // than the parent turn (e.g. Opus at xhigh/max effort), do not inherit the
-      // parent's effort layer or level-tagged sessionEffort.
+      // parent's effort layer or level-tagged sessionEffort; and strip any subagent
+      // model layer so it does not override the hook's resolved model.
       const sameModel =
         parentModel !== undefined &&
         getCanonicalName(model) === getCanonicalName(parentModel)
@@ -158,7 +173,10 @@ ${HOOK_EVALUATOR_OK_GUIDANCE}`,
         agentId: hookAgentId,
         abortController: hookAbortController,
         permissionLayers: (toolUseContext.permissionLayers ?? [])
-          .filter(layer => sameModel || layer.kind !== 'effort')
+          .filter(
+            layer =>
+              layer.kind !== 'model' && (sameModel || layer.kind !== 'effort'),
+          )
           .concat({ kind: 'model', mainLoopModel: model }),
         options: {
           ...toolUseContext.options,
@@ -205,6 +223,7 @@ ${HOOK_EVALUATOR_OK_GUIDANCE}`,
       } | null = null
       let turnCount = 0
       let hitMaxTurns = false
+      let firstTurnRefused = false
 
       // Use query() for multi-turn execution
       for await (const message of query({
@@ -247,6 +266,17 @@ ${HOOK_EVALUATOR_OK_GUIDANCE}`,
 
         // Count assistant turns
         if (message.type === 'assistant') {
+          if (turnCount === 0) {
+            const apiMsg = message as {
+              isApiErrorMessage?: boolean
+              apiErrorStatus?: number
+              resendCannotCure?: boolean
+            }
+            firstTurnRefused =
+              apiMsg.isApiErrorMessage === true &&
+              [400, 403, 404].includes(apiMsg.apiErrorStatus ?? 0) &&
+              !apiMsg.resendCannotCure
+          }
           turnCount++
 
           // Check if we've hit the turn limit
@@ -277,6 +307,34 @@ ${HOOK_EVALUATOR_OK_GUIDANCE}`,
 
       // Check if we got a result
       if (!structuredOutputResult) {
+        if (
+          firstTurnRefused &&
+          parentModel !== undefined &&
+          model !== parentModel &&
+          hook.model !== parentModel &&
+          !signal.aborted
+        ) {
+          logForDebugging(
+            `Hooks: ${model} was refused, running the agent hook on ${parentModel}`,
+          )
+          if (sessionHookRegistered) {
+            clearSessionHooks(toolUseContext.setAppState, hookAgentId)
+            sessionHookRegistered = false
+          }
+          return {
+            ...(await execAgentHook(
+              { ...hook, model: parentModel },
+              hookName,
+              hookEvent,
+              jsonInput,
+              signal,
+              toolUseContext,
+              toolUseID,
+              agentName,
+            )),
+            hook,
+          }
+        }
         // If we hit max turns, just log and return cancelled (no UI message)
         if (hitMaxTurns) {
           logForDebugging(

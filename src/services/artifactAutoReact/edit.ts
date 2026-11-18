@@ -380,7 +380,10 @@ export async function publishArtifactHtml(input: {
       }
     }
     if (res.status < 200 || res.status >= 300) {
-      return { ok: false, message: `deploy HTTP ${res.status}` }
+      return {
+        ok: false,
+        message: formatDeployHttpError(res.status, res.data),
+      }
     }
     let ver: string | undefined
     if (res.data && typeof res.data === 'object') {
@@ -416,6 +419,38 @@ export async function publishArtifactHtml(input: {
     }
     return { ok: false, message: 'network' }
   }
+}
+
+/**
+ * Official `Ml` / `eke` 403 refusal formatting (2.1.299 #609):
+ * Distinguish 403 connector / access refusals from transient errors and do not
+ * advise the model to retry.
+ */
+export function formatDeployHttpError(status: number, data: unknown): string {
+  if (status === 403) {
+    const reason =
+      data &&
+      typeof data === 'object' &&
+      'reason' in data &&
+      typeof (data as { reason?: unknown }).reason === 'string'
+        ? (data as { reason: string }).reason
+        : undefined
+    if (reason === 'not_owner') {
+      return 'publish denied: this account can open the artifact but is not allowed to publish to it — nothing was published; ask its owner for edit access, or publish it as a new artifact (omit `url`).'
+    }
+    if (
+      reason !== 'credential_required' &&
+      data &&
+      typeof data === 'object' &&
+      'error' in data &&
+      typeof (data as { error?: unknown }).error === 'string' &&
+      reason !== undefined
+    ) {
+      return `publish denied: ${(data as { error: string }).error.slice(0, 300)}`
+    }
+    return 'deploy HTTP 403: the server, or a proxy in front of it, refused this request (for example because requested connectors or access are not allowed). Do not retry this call; tell the user that publishing was refused.'
+  }
+  return `deploy HTTP ${status}`
 }
 
 /**

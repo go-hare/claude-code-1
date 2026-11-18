@@ -9,6 +9,7 @@ import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type { AgentId } from '../../types/ids.js'
 import type { SdkWorkflowProgress } from '../../types/workflowProgress.js'
+import { logEvent } from '../../services/analytics/index.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import { evictTaskOutput } from '../../utils/task/diskOutput.js'
@@ -532,6 +533,66 @@ export function killWorkflowTasksForAgent(
       )
       killWorkflowTask(taskId, createTaskRegistry(getAppState, setAppState))
     }
+  }
+}
+
+export const CARRIED_WORKFLOW_DONT_ASK_NOTE =
+  " This session's permission mode cannot ask for approval, so the run will not continue in this session unless that call is already allowed."
+
+export type CarriedWorkflowHandoff = {
+  taskId: string
+  workflowRunId?: string
+  withholdScriptFromSdkEvents?: boolean
+}
+
+/**
+ * Official `qqe` (2.1.300 #815):
+ * Background sessions resume a carried workflow through the Workflow tool's
+ * approval instead of running it from the handoff file.
+ */
+export function adoptCarriedWorkflowNeedsConsent(
+  handoff: CarriedWorkflowHandoff,
+  ctx: {
+    taskRegistry: TaskRegistry
+    permissionMode?: string
+    onScriptSha256Reset?: (workflowRunId: string) => void
+    onNeedsConsent: (
+      handoff: CarriedWorkflowHandoff,
+      reason: string,
+      dontAskNote: string,
+    ) => void
+  },
+): boolean {
+  try {
+    ctx.taskRegistry.remove(handoff.taskId)
+    const alreadyRunning = Object.values(ctx.taskRegistry.all()).some(
+      t =>
+        isLocalWorkflowTask(t) &&
+        t.status === 'running' &&
+        handoff.workflowRunId !== undefined &&
+        t.workflowRunId === handoff.workflowRunId,
+    )
+    if (alreadyRunning) return false
+    const hiddenScript = handoff.withholdScriptFromSdkEvents === true
+    const isDontAsk = !hiddenScript && ctx.permissionMode === 'dontAsk'
+    if (hiddenScript && handoff.workflowRunId !== undefined) {
+      ctx.onScriptSha256Reset?.(handoff.workflowRunId)
+    }
+    const reason = hiddenScript
+      ? 'it hides its script, so what launched it starts it again'
+      : 'a carried workflow runs again only through the Workflow tool'
+    ctx.onNeedsConsent(
+      handoff,
+      reason,
+      isDontAsk ? CARRIED_WORKFLOW_DONT_ASK_NOTE : '',
+    )
+    logEvent('tengu_task_local_workflow_adopt_resume_needs_consent', {})
+    return true
+  } catch (err) {
+    logForDebugging(
+      `adoptCarriedWorkflowNeedsConsent failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return false
   }
 }
 

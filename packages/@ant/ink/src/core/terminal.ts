@@ -14,7 +14,7 @@ import {
 import { BSU, ESU, HIDE_CURSOR, SHOW_CURSOR } from './termio/dec.js'
 import { inkSession } from './instances.js'
 import { isJediTermEnv } from './jediTermInput.js'
-import { attacherCaps, link } from './termio/osc.js'
+import { attacherCaps, link, printsUnknownSequences } from './termio/osc.js'
 import { Jk, tD } from './terminalCapabilities.js'
 
 function isEnvTruthyLike(value: string | undefined): boolean {
@@ -450,7 +450,8 @@ export function shouldPushKittyKeyboard(
  * is live (`y()||tD().now("kittyKeyboard")?Uto:""`).
  */
 export function kittyKeyboardPopSeq(): string {
-  return supportsExtendedKeys() || tD().now('kittyKeyboard')
+  return !printsUnknownSequences() &&
+    (supportsExtendedKeys() || tD().now('kittyKeyboard'))
     ? DISABLE_KITTY_KEYBOARD
     : ''
 }

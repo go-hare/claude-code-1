@@ -21,6 +21,7 @@ import {
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { logError } from '../utils/log.js'
+import { jsonStringify } from '../utils/slowOperations.js'
 import {
   type RemoteMessageContent,
   sendEventToRemoteSession,
@@ -35,6 +36,22 @@ import {
  * Used so redelivered dialog request_ids that were already answered stay skipped.
  */
 const SEEN_CONTROL_RESPONSE_ID_CAP = 1000
+
+/**
+ * Official `qX` — subagent permission requests (non-AskUserQuestion, non-ExitPlanMode)
+ * may outlive a main-thread turn end when `subagentRequestsOutliveTheTurn` is enabled.
+ */
+function isSubagentPermissionRequest(
+  req: SDKControlPermissionRequest & { agent_id?: unknown },
+): boolean {
+  return (
+    typeof req.agent_id === 'string' &&
+    req.agent_id !== '' &&
+    typeof req.tool_name === 'string' &&
+    req.tool_name !== 'AskUserQuestion' &&
+    req.tool_name !== 'ExitPlanMode'
+  )
+}
 
 /**
  * Type guard to check if a message is an SDKMessage (not a control message)
@@ -92,6 +109,12 @@ export type RemoteSessionConfig = {
    * Undefined → leftover `wAt` stays null.
    */
   servedTools?: unknown
+  /** 2.1.299 #621: open subagent permission/dialog requests carried across attach */
+  seedSubagentRequests?: SDKControlRequest[]
+  /** 2.1.299 #621: subagent ids asking past a turn end */
+  seedAskersPastATurn?: string[]
+  /** 2.1.300 #626: keep open subagent permission requests alive across turn end */
+  subagentRequestsOutliveTheTurn?: boolean
 }
 
 export type RemoteSessionCallbacks = {
@@ -165,6 +188,8 @@ export class RemoteSessionManager {
   private websocket: SessionsWebSocket | null = null
   private pendingPermissionRequests: Map<string, SDKControlPermissionRequest> =
     new Map()
+  private seedRequestsArmed = false
+  private lifetime = new AbortController()
   /** densable pendingDialogRequests — request_ids of open request_user_dialog */
   private pendingDialogRequests: Set<string> = new Set()
   /**
@@ -177,6 +202,12 @@ export class RemoteSessionManager {
    * already answered or cancelled here so large-transcript replays don't re-arm.
    */
   private retiredPermissionRequestIds: Set<string> = new Set()
+  /** Official 2.1.300 (#626): turn-dismissed requests eligible for redelivery reinstatement */
+  private reinstatablePermissionRequests: Map<
+    string,
+    SDKControlPermissionRequest
+  > = new Map()
+  private reinstatableDialogIds: Set<string> = new Set()
   /**
    * gold `pendingServedRequests` — inbound `Cle` subtypes in hand.
    */
@@ -212,6 +243,29 @@ export class RemoteSessionManager {
       onConnected: () => {
         logForDebugging('[RemoteSessionManager] Connected')
         this.callbacks.onConnected?.()
+        if (!this.seedRequestsArmed && !this.lifetime.signal.aborted) {
+          this.seedRequestsArmed = true
+          const before = this.pendingPermissionRequests.size
+          const seeds = this.config.seedSubagentRequests ?? []
+          for (const seed of seeds) {
+            try {
+              this.handleControlRequest(seed, {})
+            } catch (err) {
+              logForDebugging(
+                `[RemoteSessionManager] seedSubagentRequests handler threw: ${errorMessage(err)}`,
+                { level: 'warn' },
+              )
+            }
+          }
+          const adopted = this.pendingPermissionRequests.size - before
+          if (adopted > 0) {
+            logEvent('tengu_remote_subagent_requests_adopted', {
+              count: adopted,
+              subagents_asking_at_a_turn_end:
+                this.config.seedAskersPastATurn?.length ?? 0,
+            })
+          }
+        }
       },
       onClose: () => {
         logForDebugging('[RemoteSessionManager] Disconnected')
@@ -273,6 +327,8 @@ export class RemoteSessionManager {
     // densable: dialog cancel first, then permission; unknown → ignore
     if (message.type === 'control_cancel_request') {
       const { request_id } = message as SDKControlCancelRequest
+      this.reinstatablePermissionRequests.delete(request_id)
+      this.reinstatableDialogIds.delete(request_id)
       if (this.retireServedRequest(request_id, 'worker')) {
         return
       }
@@ -356,20 +412,38 @@ export class RemoteSessionManager {
       return
     }
 
-    // densable result: clear unresolved permission + dialog prompts, then forward
+    // Official 2.1.300 (#626): clear unresolved main-thread permission + dialog prompts
+    // on turn result; keep subagent permission requests open when subagentRequestsOutliveTheTurn.
     if (isSDKMessage(message) && message.type === 'result') {
-      for (const [requestId, pending] of this.pendingPermissionRequests) {
+      const allPending = [...this.pendingPermissionRequests]
+      const toDismiss =
+        this.config.subagentRequestsOutliveTheTurn === true
+          ? allPending.filter(([, perm]) => !isSubagentPermissionRequest(perm))
+          : allPending
+      for (const [requestId, pending] of toDismiss) {
         logForDebugging(
           `[RemoteSessionManager] Turn ended with permission request ${requestId} unresolved — dismissing`,
         )
         this.callbacks.onPermissionCancelled?.(requestId, pending.tool_use_id)
+        this.retirePermissionRequest(requestId)
+        this.recordReinstatablePermissionRequest(requestId, pending)
       }
-      this.pendingPermissionRequests.clear()
+      if (allPending.length > 0 && extras.replayed !== true) {
+        const fromSubagents = allPending.filter(([, perm]) =>
+          isSubagentPermissionRequest(perm),
+        ).length
+        logEvent('tengu_remote_turn_ended_with_open_permission_requests', {
+          from_main_thread: allPending.length - fromSubagents,
+          from_subagents: fromSubagents,
+          kept_open: allPending.length - toDismiss.length,
+        })
+      }
       for (const requestId of this.pendingDialogRequests) {
         logForDebugging(
           `[RemoteSessionManager] Turn ended with user dialog request ${requestId} unresolved — dismissing`,
         )
         this.callbacks.onUserDialogCancelled?.(requestId)
+        this.recordReinstatableDialogId(requestId)
       }
       this.pendingDialogRequests.clear()
       this.callbacks.onMessage(message)
@@ -385,6 +459,29 @@ export class RemoteSessionManager {
   private retirePermissionRequest(requestId: string): void {
     this.pendingPermissionRequests.delete(requestId)
     this.retiredPermissionRequestIds.add(requestId)
+  }
+
+  private recordReinstatablePermissionRequest(
+    requestId: string,
+    perm: SDKControlPermissionRequest,
+  ): void {
+    this.reinstatablePermissionRequests.set(requestId, perm)
+    if (
+      this.reinstatablePermissionRequests.size > SEEN_CONTROL_RESPONSE_ID_CAP
+    ) {
+      const first = this.reinstatablePermissionRequests.keys().next().value
+      if (first !== undefined) {
+        this.reinstatablePermissionRequests.delete(first)
+      }
+    }
+  }
+
+  private recordReinstatableDialogId(requestId: string): void {
+    this.reinstatableDialogIds.add(requestId)
+    if (this.reinstatableDialogIds.size > SEEN_CONTROL_RESPONSE_ID_CAP) {
+      const first = this.reinstatableDialogIds.values().next().value
+      if (first !== undefined) this.reinstatableDialogIds.delete(first)
+    }
   }
 
   /** densable recordSeenControlResponseId — FIFO-capped set (y5b=1000). */
@@ -416,10 +513,22 @@ export class RemoteSessionManager {
         return
       }
       if (this.retiredPermissionRequestIds.has(requestId)) {
-        logForDebugging(
-          `[RemoteSessionManager] Permission request ${requestId} arrived again after it was retired here — not arming it`,
-        )
-        return
+        const saved = this.reinstatablePermissionRequests.get(requestId)
+        if (saved === undefined) {
+          logForDebugging(
+            `[RemoteSessionManager] Permission request ${requestId} arrived again after it was retired here — not arming it`,
+          )
+          return
+        }
+        this.reinstatablePermissionRequests.delete(requestId)
+        if (jsonStringify(saved) !== jsonStringify(perm)) {
+          logForDebugging(
+            `[RemoteSessionManager] Redelivered can_use_tool ${requestId} differs from the request first shown under that id — not arming it`,
+            { level: 'warn' },
+          )
+          return
+        }
+        this.retiredPermissionRequestIds.delete(requestId)
       }
       logForDebugging(
         `[RemoteSessionManager] Permission request for tool: ${perm.tool_name}`,
@@ -786,6 +895,7 @@ export class RemoteSessionManager {
    */
   disconnect(): void {
     logForDebugging('[RemoteSessionManager] Disconnecting')
+    this.lifetime.abort()
     this.websocket?.close()
     this.websocket = null
     this.pendingPermissionRequests.clear()

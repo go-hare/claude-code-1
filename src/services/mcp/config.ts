@@ -108,7 +108,8 @@ function addScopeToServers(
   if (!servers) {
     return {}
   }
-  const scopedServers: Record<string, ScopedMcpServerConfig> = {}
+  const scopedServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
   for (const [name, config] of Object.entries(servers)) {
     scopedServers[name] = { ...config, scope }
   }
@@ -408,7 +409,7 @@ export function dedupPluginMcpServers(
     if (sig && !manualSigs.has(sig)) manualSigs.set(sig, name)
   }
 
-  const servers: Record<string, ScopedMcpServerConfig> = {}
+  const servers: Record<string, ScopedMcpServerConfig> = Object.create(null)
   const suppressed: Array<{ name: string; duplicateOf: string }> = []
   const seenPluginSigs = new Map<string, string>()
   for (const [name, config] of Object.entries(pluginServers)) {
@@ -466,7 +467,7 @@ export function dedupClaudeAiMcpServers(
     if (sig && !manualSigs.has(sig)) manualSigs.set(sig, name)
   }
 
-  const servers: Record<string, ScopedMcpServerConfig> = {}
+  const servers: Record<string, ScopedMcpServerConfig> = Object.create(null)
   const suppressed: Array<{ name: string; duplicateOf: string }> = []
   for (const [name, config] of Object.entries(claudeAiServers)) {
     const sig = getMcpServerSignature(config)
@@ -972,7 +973,7 @@ export function filterMcpServersByPolicy<T>(configs: Record<string, T>): {
   allowed: Record<string, T>
   blocked: string[]
 } {
-  const allowed: Record<string, T> = {}
+  const allowed: Record<string, T> = Object.create(null)
   const blocked: string[] = []
   for (const [name, config] of Object.entries(configs)) {
     const c = config as McpServerConfig
@@ -1339,12 +1340,13 @@ export function getMcpConfigsByScope(
   }
 
   if (scope in sourceMap && !isSettingSourceEnabled(sourceMap[scope]!)) {
-    return { servers: {}, errors: [] }
+    return { servers: Object.create(null), errors: [] }
   }
 
   switch (scope) {
     case 'project': {
-      const allServers: Record<string, ScopedMcpServerConfig> = {}
+      const allServers: Record<string, ScopedMcpServerConfig> =
+        Object.create(null)
       const allErrors: ValidationError[] = []
 
       // Build list of directories to check
@@ -1399,7 +1401,7 @@ export function getMcpConfigsByScope(
     case 'user': {
       const mcpServers = getGlobalConfig().mcpServers
       if (!mcpServers) {
-        return { servers: {}, errors: [] }
+        return { servers: Object.create(null), errors: [] }
       }
 
       const { config, errors } = parseMcpConfig({
@@ -1551,7 +1553,7 @@ export async function getClaudeCodeMcpConfigs(
   // (enterprise customers often do not want their users to be able to add their own MCP servers).
   if (doesEnterpriseMcpConfigExist()) {
     // Apply policy filtering to enterprise servers
-    const filtered: Record<string, ScopedMcpServerConfig> = {}
+    const filtered: Record<string, ScopedMcpServerConfig> = Object.create(null)
 
     for (const [name, serverConfig] of Object.entries(enterpriseServers)) {
       if (!isMcpServerAllowedByPolicy(name, serverConfig)) {
@@ -1567,7 +1569,7 @@ export async function getClaudeCodeMcpConfigs(
   // Unlike the enterprise-exclusive block above, this keeps plugin servers.
   const mcpLocked = isRestrictedToPluginOnly('mcp')
   const noServers: { servers: Record<string, ScopedMcpServerConfig> } = {
-    servers: {},
+    servers: Object.create(null),
   }
   const { servers: userServers } = mcpLocked
     ? noServers
@@ -1580,7 +1582,8 @@ export async function getClaudeCodeMcpConfigs(
     : getMcpConfigsByScope('local')
 
   // Load plugin MCP servers
-  const pluginMcpServers: Record<string, ScopedMcpServerConfig> = {}
+  const pluginMcpServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
 
   const pluginResult = await loadAllPluginsCacheOnly()
 
@@ -1630,7 +1633,8 @@ export async function getClaudeCodeMcpConfigs(
   }
 
   // Filter project servers to only include approved ones
-  const approvedProjectServers: Record<string, ScopedMcpServerConfig> = {}
+  const approvedProjectServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
   for (const [name, config] of Object.entries(projectServers)) {
     if (getProjectMcpServerStatus(name) === 'approved') {
       approvedProjectServers[name] = config
@@ -1645,14 +1649,18 @@ export async function getClaudeCodeMcpConfigs(
   // disabled manual server mustn't suppress a plugin server, or neither runs
   // (manual is skipped by name at connection time; plugin was removed here).
   const extraTargets = await extraDedupTargets
-  const enabledManualServers: Record<string, ScopedMcpServerConfig> = {}
-  for (const [name, config] of Object.entries({
-    ...userServers,
-    ...approvedProjectServers,
-    ...localServers,
-    ...dynamicServers,
-    ...extraTargets,
-  })) {
+  const enabledManualServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
+  for (const [name, config] of Object.entries(
+    Object.assign(
+      Object.create(null) as Record<string, ScopedMcpServerConfig>,
+      userServers,
+      approvedProjectServers,
+      localServers,
+      dynamicServers,
+      extraTargets,
+    ) as Record<string, ScopedMcpServerConfig>,
+  )) {
     if (
       !isMcpServerDisabled(name) &&
       isMcpServerAllowedByPolicy(name, config)
@@ -1664,8 +1672,10 @@ export async function getClaudeCodeMcpConfigs(
   // first-plugin-wins race against an enabled duplicate — same invariant as
   // above. They're merged back after dedup so they still appear in /mcp
   // (policy filtering at the end of this function drops blocked ones).
-  const enabledPluginServers: Record<string, ScopedMcpServerConfig> = {}
-  const disabledPluginServers: Record<string, ScopedMcpServerConfig> = {}
+  const enabledPluginServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
+  const disabledPluginServers: Record<string, ScopedMcpServerConfig> =
+    Object.create(null)
   for (const [name, config] of Object.entries(pluginMcpServers)) {
     // Plugin keys now reach the approval dialog (collectPendingProjectMcpApprovals),
     // which persists the answer to enabled/disabledMcpjsonServers — a different
@@ -1706,7 +1716,7 @@ export async function getClaudeCodeMcpConfigs(
 
   // Merge in order of precedence: plugin < user < project < local
   const configs = Object.assign(
-    {},
+    Object.create(null) as Record<string, ScopedMcpServerConfig>,
     dedupedPluginServers,
     userServers,
     approvedProjectServers,
@@ -1714,7 +1724,7 @@ export async function getClaudeCodeMcpConfigs(
   )
 
   // Apply policy filtering to merged configs
-  const filtered: Record<string, ScopedMcpServerConfig> = {}
+  const filtered: Record<string, ScopedMcpServerConfig> = Object.create(null)
 
   for (const [name, serverConfig] of Object.entries(configs)) {
     if (!isMcpServerAllowedByPolicy(name, serverConfig as McpServerConfig)) {
@@ -1761,7 +1771,11 @@ export async function getAllMcpConfigs(): Promise<{
   )
 
   // Merge with claude.ai having lowest precedence
-  const servers = Object.assign({}, dedupedClaudeAi, claudeCodeServers)
+  const servers = Object.assign(
+    Object.create(null) as Record<string, ScopedMcpServerConfig>,
+    dedupedClaudeAi,
+    claudeCodeServers,
+  )
 
   return { servers, errors }
 }
@@ -1925,7 +1939,7 @@ export function parseMcpConfig(params: {
   }
 
   const errors: ValidationError[] = []
-  const validatedServers: Record<string, McpServerConfig> = {}
+  const validatedServers: Record<string, McpServerConfig> = Object.create(null)
 
   const pushSkip = (
     name: string,
@@ -1978,7 +1992,9 @@ export function parseMcpConfig(params: {
       typeof (entry as { type: unknown }).type === 'string'
         ? (entry as { type: string }).type
         : 'stdio'
-    const schemaFn = MCP_SERVER_TYPE_SCHEMA_MAP[declaredType]
+    const schemaFn = Object.hasOwn(MCP_SERVER_TYPE_SCHEMA_MAP, declaredType)
+      ? MCP_SERVER_TYPE_SCHEMA_MAP[declaredType]
+      : undefined
     if (!schemaFn) {
       pushSkip(
         name,
@@ -2192,6 +2208,14 @@ export function parseMcpConfigFromFilePath(params: {
           },
         },
       ],
+    }
+  }
+
+  if (scope === 'project' && !configContent.trim()) {
+    logForDebugging(`MCP config is blank, read as no servers: ${filePath}`)
+    return {
+      config: { mcpServers: Object.create(null) },
+      errors: [],
     }
   }
 

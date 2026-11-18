@@ -210,6 +210,7 @@ export const SIMPLE_MOTIONS = new Set([
   '0',
   '^',
   '$', // Line positions
+  '%', // Matching bracket
 ])
 
 export const FIND_KEYS = new Set(['f', 'F', 't', 'T'])

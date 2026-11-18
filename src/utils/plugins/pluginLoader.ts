@@ -55,9 +55,11 @@ import {
 import {
   ensureSyncedPluginDirsHydrated,
   getSyncedPluginSyncErrors,
+  markSyncedDirsLoaded,
 } from './syncedPluginCloudSync.js'
 import {
   applySyncedPluginAttribution,
+  hydrateSyncedPluginDirsFromDisk,
   readSyncedPluginAttributionMap,
 } from './syncedPluginHydrate.js'
 import {
@@ -3159,15 +3161,58 @@ type ZpfPathLoadItem = {
 
 /** densable Zpf path-kind after resolve: probe → zip → JAi → Aff → Tff. */
 async function loadOneZpfPathPlugin(
-  resolvedPath: string,
+  initialResolvedPath: string,
   index: number,
   marketplace: 'inline' | typeof SYNCED_MARKETPLACE_NAME,
   options: {
     skipMcp?: boolean
     enabledPlugins?: Record<string, boolean | string[] | undefined>
+    allPaths?: readonly string[]
+    getHydratedSyncedDirs?: () => Promise<string[]>
   } = {},
 ): Promise<ZpfPathLoadItem> {
-  const probe = await probeZpfPluginPath(resolvedPath)
+  let resolvedPath = initialResolvedPath
+  let probe = await probeZpfPluginPath(resolvedPath)
+  // densable 2.1.299 #608: when another process just rotated a synced plugin
+  // directory, fall back to the manifest's current successor dir for the same
+  // logical item instead of surfacing a spurious `synced[N] commands path not found`.
+  if (
+    !probe.exists &&
+    probe.errno === 'ENOENT' &&
+    marketplace === SYNCED_MARKETPLACE_NAME &&
+    options.getHydratedSyncedDirs
+  ) {
+    const stripGen = (name: string): string =>
+      name.replace(/~g(?:[2-9]|[1-9]\d+)$/, '')
+    const targetBase = stripGen(basename(resolvedPath))
+    const targetDir = dirname(resolvedPath)
+    const hydrated = await options.getHydratedSyncedDirs()
+    const successor = hydrated
+      .map(p => resolve(p))
+      .find(
+        p =>
+          p !== resolvedPath &&
+          dirname(p) === targetDir &&
+          stripGen(basename(p)) === targetBase &&
+          !(options.allPaths ?? []).includes(p),
+      )
+    if (successor !== undefined) {
+      const successorProbe = await probeZpfPluginPath(successor)
+      if (successorProbe.exists) {
+        logForDebugging(
+          `Synced plugin dir ${resolvedPath} is gone; the sync manifest now places it at ${successor}, loading that`,
+          { level: 'warn' },
+        )
+        resolvedPath = successor
+        probe = successorProbe
+      } else {
+        logForDebugging(
+          `Synced plugin dir ${resolvedPath} is gone and its manifest successor ${successor} did not stat either (${successorProbe.errno ?? 'UNKNOWN'})`,
+          { level: 'warn' },
+        )
+      }
+    }
+  }
   if (!probe.exists) {
     logForDebugging(zpfPathNotFoundLog(resolvedPath, probe), {
       level: 'warn',
@@ -3485,20 +3530,34 @@ export async function loadSyncedPlugins(
   }
 
   const enabledPlugins = getSettings_DEPRECATED()?.enabledPlugins
+  const resolvedPaths = syncedPluginPaths.map(p => resolve(p))
+  markSyncedDirsLoaded(resolvedPaths)
+  let hydratedDirsPromise: Promise<string[]> | undefined
+  const getHydratedSyncedDirs = (): Promise<string[]> =>
+    (hydratedDirsPromise ??= hydrateSyncedPluginDirsFromDisk()
+      .then(() => getSyncedPluginDirs())
+      .catch(err => {
+        logError(err)
+        return []
+      }))
   // densable Zpf: Promise.all(e.map) then flatMap plugins/errors/warnings
   const items = await Promise.all(
-    syncedPluginPaths.map(async (pluginPath, index) => {
+    resolvedPaths.map(async (resolvedPath, index) => {
       try {
         return await loadOneZpfPathPlugin(
-          resolve(pluginPath),
+          resolvedPath,
           index,
           SYNCED_MARKETPLACE_NAME,
-          { enabledPlugins },
+          {
+            enabledPlugins,
+            allPaths: resolvedPaths,
+            getHydratedSyncedDirs,
+          },
         )
       } catch (error) {
         const errorMsg = errorMessage(error)
         logForDebugging(
-          `Failed to load synced plugin from ${pluginPath}: ${errorMsg}`,
+          `Failed to load synced plugin from ${resolvedPath}: ${errorMsg}`,
           { level: 'warn' },
         )
         return {
@@ -3508,7 +3567,7 @@ export async function loadSyncedPlugins(
               type: 'generic-error' as const,
               source: `${SYNCED_MARKETPLACE_NAME}[${index}]`,
               error: `Failed to load plugin: ${errorMsg}`,
-              path: resolve(pluginPath),
+              path: resolvedPath,
             },
           ],
           warnings: [],

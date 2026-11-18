@@ -14,6 +14,7 @@ export const IDLE_RETURN_HINT_KEY = 'idle-return-hint'
 export type IdleReturnTurnSnapshot = {
   isLoading: boolean
   lastQueryCompletionTime: number
+  lastTurnStopTime?: number
   submitCount: number
 }
 
@@ -117,7 +118,10 @@ export class IdleReturnController {
     if (loadingOrCompleteChanged || next.submitCount !== prev.submitCount) {
       this.#scheduleIdleNotif()
     }
-    if (loadingOrCompleteChanged) {
+    if (
+      loadingOrCompleteChanged ||
+      (next.lastTurnStopTime ?? 0) !== (prev.lastTurnStopTime ?? 0)
+    ) {
       this.#scheduleHint()
     }
   }
@@ -227,6 +231,7 @@ export class IdleReturnController {
   #lastCompletionTime(): number {
     return Math.max(
       this.#snapshot.lastQueryCompletionTime,
+      this.#snapshot.lastTurnStopTime ?? 0,
       this.#lastOtherTurnCompletionTime,
     )
   }
@@ -252,6 +257,7 @@ export function createIdleReturnTurnSource(initial: IdleReturnTurnSnapshot): {
       if (
         next.isLoading === snapshot.isLoading &&
         next.lastQueryCompletionTime === snapshot.lastQueryCompletionTime &&
+        (next.lastTurnStopTime ?? 0) === (snapshot.lastTurnStopTime ?? 0) &&
         next.submitCount === snapshot.submitCount
       ) {
         return

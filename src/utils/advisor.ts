@@ -1,6 +1,9 @@
 import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { shouldIncludeFirstPartyOnlyBetas } from './betas.js'
+import { isEnvTruthy } from './envUtils.js'
+import { isHipaaPolicy } from './midConversationSystem.js'
+import { getAPIProvider } from './model/providers.js'
 import {
   isAdvisorToolDisabled,
   isExperimentalAdvisorToolEnabled,
@@ -48,35 +51,51 @@ export function isAdvisorBlock(param: {
 
 type AdvisorConfig = {
   enabled?: boolean
-  canUserConfigure?: boolean
-  baseModel?: string
-  advisorModel?: string
+}
+
+function isAwsOrGcpProvider(): boolean {
+  const provider = getAPIProvider()
+  return provider === 'anthropicAws' || provider === 'anthropicGoogleCloud'
+}
+
+/**
+ * Official `Pin()` (2.1.300 #759): firstParty, anthropicAws, or
+ * anthropicGoogleCloud, with experimental betas allowed and not HIPAA.
+ */
+function isAdvisorSupported(): boolean {
+  if (isAdvisorToolDisabled() || isHipaaPolicy()) {
+    return false
+  }
+  const provider = getAPIProvider()
+  if (provider === 'firstParty') {
+    return shouldIncludeFirstPartyOnlyBetas()
+  }
+  if (provider === 'anthropicAws' || provider === 'anthropicGoogleCloud') {
+    return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+  }
+  return false
 }
 
 function getAdvisorConfig(): AdvisorConfig {
   return getFeatureValue_CACHED_MAY_BE_STALE<AdvisorConfig>(
-    'tengu_sage_compass',
-    {},
+    'tengu_sage_compass2',
+    { enabled: isAwsOrGcpProvider() },
   )
 }
 
 export function isAdvisorEnabled(): boolean {
-  if (isAdvisorToolDisabled()) {
+  if (!isAdvisorSupported()) {
     return false
   }
   // Official CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL force-on.
   if (isExperimentalAdvisorToolEnabled()) {
-    return shouldIncludeFirstPartyOnlyBetas()
-  }
-  // The advisor beta header is first-party only (Bedrock/Vertex 400 on it).
-  if (!shouldIncludeFirstPartyOnlyBetas()) {
-    return false
+    return true
   }
   return getAdvisorConfig().enabled ?? false
 }
 
 export function canUserConfigureAdvisor(): boolean {
-  return isAdvisorEnabled() && (getAdvisorConfig().canUserConfigure ?? false)
+  return isAdvisorEnabled()
 }
 
 /**
@@ -99,13 +118,7 @@ export function getAdvisorCommandAliases(): string[] {
 export function getExperimentAdvisorModels():
   | { baseModel: string; advisorModel: string }
   | undefined {
-  const config = getAdvisorConfig()
-  return isAdvisorEnabled() &&
-    !canUserConfigureAdvisor() &&
-    config.baseModel &&
-    config.advisorModel
-    ? { baseModel: config.baseModel, advisorModel: config.advisorModel }
-    : undefined
+  return undefined
 }
 
 /**

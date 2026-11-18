@@ -28,7 +28,10 @@ import {
 } from './sessionEnvironment.js'
 import { subprocessEnv } from './subprocessEnv.js'
 import { getPlatform } from './platform.js'
-import { findGitBashPath, windowsPathToPosixPath } from './windowsPaths.js'
+import {
+  findGitBashPathOrNull,
+  windowsPathToPosixPath,
+} from './windowsPaths.js'
 import { getCachedPowerShellPath } from './shell/powershellDetection.js'
 import { DEFAULT_HOOK_SHELL } from './shell/shellProvider.js'
 import { buildPowerShellArgs } from './shell/powershellProvider.js'
@@ -40,10 +43,12 @@ import {
 import { getPluginDataDir } from './plugins/pluginDirectories.js'
 import {
   getLoadedFunctionHooksModules,
+  getPersonalPluginEnvSetKeys,
   getPluginRegisteredCommands,
   hasMatchingFunctionHook,
   runFunctionHookChain,
   setLaterLoadedSessionStart,
+  withPersonalPluginEnvIsolated,
   type LoadedFunctionHooksModule,
 } from './plugins/functionHooksModules.js'
 import {
@@ -570,6 +575,62 @@ export function formatHookCompletionDebugLog({
   return `Hooks: ${hookName} [${command}]${pluginId ? ` (plugin ${pluginId})` : ''} ${outcome} (${durationMs}ms)`
 }
 
+function isManagedCommandHook(
+  hook: HookCommand & { type: 'command' },
+  hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
+  pluginRoot?: string,
+  skillRoot?: string,
+): boolean {
+  if (pluginRoot !== undefined || skillRoot !== undefined) {
+    return false
+  }
+  if (hookEvent === 'StatusLine' || hookEvent === 'FileSuggestion') {
+    const policy = getSettingsForSource('policySettings')
+    const entry =
+      hookEvent === 'StatusLine' ? policy?.statusLine : policy?.fileSuggestion
+    return entry?.type === 'command' && entry.command === hook.command
+  }
+  const matchers = getSettingsForSource('policySettings')?.hooks?.[hookEvent]
+  if (!matchers) return false
+  return matchers.some(m =>
+    m.hooks.some(h => h.type === 'command' && h.command === hook.command),
+  )
+}
+
+/**
+ * #696 (SEA `dX` / `F2e` / `lEn`): When a command hook comes from managed
+ * settings (`policySettings`), strip repository (`projectSettings` /
+ * `localSettings`) env vars that are not also set by `policySettings` or
+ * `userSettings` so project env cannot hijack `CLAUDE_CODE_SHELL_PREFIX` or
+ * managed hook execution environment.
+ */
+export function buildManagedHookIsolatedEnv(baseEnv: NodeJS.ProcessEnv): {
+  env: NodeJS.ProcessEnv
+  strippedKeys: string[]
+} {
+  const policyEnv = getSettingsForSource('policySettings')?.env ?? {}
+  const userEnv = getSettingsForSource('userSettings')?.env ?? {}
+  const projectEnv = getSettingsForSource('projectSettings')?.env ?? {}
+  const localEnv = getSettingsForSource('localSettings')?.env ?? {}
+
+  const strippedKeys: string[] = []
+  const env: NodeJS.ProcessEnv = { ...baseEnv }
+  for (const key of new Set([
+    ...Object.keys(projectEnv),
+    ...Object.keys(localEnv),
+  ])) {
+    if (
+      !Object.hasOwn(policyEnv, key) &&
+      !Object.hasOwn(userEnv, key) &&
+      Object.hasOwn(env, key)
+    ) {
+      delete env[key]
+      strippedKeys.push(key)
+    }
+  }
+  return { env, strippedKeys }
+}
+
 export async function execCommandHook(
   hook: HookCommand & { type: 'command' },
   hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
@@ -608,7 +669,11 @@ export async function execCommandHook(
   // PowerShell path deliberately skips the Windows-specific bash
   // accommodations (cygpath conversion, .sh auto-prepend, POSIX-quoted
   // SHELL_PREFIX).
-  const shellType = hook.shell ?? DEFAULT_HOOK_SHELL
+  const shellType =
+    hook.shell ??
+    (isWindows && findGitBashPathOrNull() === null
+      ? 'powershell'
+      : DEFAULT_HOOK_SHELL)
 
   const isPowerShell = shellType === 'powershell'
 
@@ -721,16 +786,36 @@ export async function execCommandHook(
     }
   }
 
+  const isManaged = isManagedCommandHook(hook, hookEvent, pluginRoot, skillRoot)
+  const isolated = isManaged
+    ? withPersonalPluginEnvIsolated(() =>
+        buildManagedHookIsolatedEnv(subprocessEnv()),
+      )
+    : null
+  const personalPluginEnvKeys = isManaged ? getPersonalPluginEnvSetKeys() : []
+  if (personalPluginEnvKeys.length > 0) {
+    logForDebugging(
+      `Hooks: ${hookName} is the organization's and starts without a person's plugin's $.env.set of ${personalPluginEnvKeys.join(', ')}`,
+    )
+  }
+  if (isolated && isolated.strippedKeys.length > 0) {
+    logForDebugging(
+      `Hooks: ${hookName} is the organization's and starts without the repository settings' env of ${isolated.strippedKeys.join(', ')}`,
+    )
+  }
+
   // Official SHELL_PREFIX densable wraps the command via POSIX quoting
   // (formatShellPrefixCommand uses shell-quote). This makes no sense for
   // PowerShell — see design §8.1. For now PS hooks ignore the prefix;
   // a CLAUDE_CODE_PS_SHELL_PREFIX (or shell-aware prefix) is a follow-up.
-  let shellPrefix: string | null = process.env.CLAUDE_CODE_SHELL_PREFIX || null
+  const baseEnvForHook = isolated ? isolated.env : subprocessEnv()
+  let shellPrefix: string | null =
+    baseEnvForHook.CLAUDE_CODE_SHELL_PREFIX || null
   try {
     const { resolveShellPrefix } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('./residualFinalEnvGates.js') as typeof import('./residualFinalEnvGates.js')
-    shellPrefix = resolveShellPrefix()
+    shellPrefix = resolveShellPrefix(baseEnvForHook)
   } catch {
     // keep raw env fallback
   }
@@ -745,7 +830,7 @@ export async function execCommandHook(
 
   // Build env vars — all paths go through toHookPath for Windows POSIX conversion
   const envVars: NodeJS.ProcessEnv = {
-    ...subprocessEnv(),
+    ...baseEnvForHook,
     CLAUDE_PROJECT_DIR: toHookPath(projectDir),
   }
 
@@ -909,7 +994,16 @@ export async function execCommandHook(
   } else {
     // On Windows, use Git Bash explicitly (cmd.exe can't run bash syntax).
     // On other platforms, shell: true uses /bin/sh.
-    const shell = isWindows ? findGitBashPath() : true
+    let shell: string | boolean = true
+    if (isWindows) {
+      const gitBashPath = findGitBashPathOrNull()
+      if (!gitBashPath) {
+        throw new Error(
+          `Hook "${hook.command}" requires bash but Git Bash was not found. Install Git for Windows or set CLAUDE_CODE_GIT_BASH_PATH, or set "shell": "powershell" on the hook.`,
+        )
+      }
+      shell = gitBashPath
+    }
     child = spawn(sandboxedCommand, [], {
       env: envVars,
       cwd: safeCwd,
@@ -1587,18 +1681,52 @@ export function isOnFailureBlock(hook: HookWithOnFailure): boolean {
 /**
  * Gold `YQe` — true when `onFailure: "block"` applies to this hook + event.
  */
+/**
+ * Official rRe(e, n) (#698): on Windows without Git for Windows, a PreToolUse
+ * or PermissionRequest command hook that sets no shell (and no onFailure:
+ * "continue") acts as a guard — if it fails, block the call instead of
+ * failing open.
+ */
+export function shouldBlockNoBashGuard(
+  hook: HookWithOnFailure & {
+    type?: string
+    shell?: string
+    args?: unknown
+    async?: boolean
+    asyncRewake?: boolean
+  },
+  hookEvent: HookEvent,
+  isWindows = getPlatform() === 'windows',
+  hasGitBash = isWindows ? findGitBashPathOrNull() !== null : true,
+): boolean {
+  return (
+    hook.type === 'command' &&
+    hook.async !== true &&
+    hook.asyncRewake !== true &&
+    hook.args === undefined &&
+    hook.shell === undefined &&
+    hook.onFailure !== 'continue' &&
+    isWindows &&
+    !hasGitBash &&
+    (hookEvent === 'PreToolUse' || hookEvent === 'PermissionRequest')
+  )
+}
+
 export function shouldBlockOnFailureForEvent(
   hook: HookWithOnFailure,
   hookEvent: HookEvent,
 ): boolean {
   return (
-    isOnFailureBlock(hook) && !ON_FAILURE_BLOCK_IGNORED_EVENTS.has(hookEvent)
+    (isOnFailureBlock(hook) &&
+      !ON_FAILURE_BLOCK_IGNORED_EVENTS.has(hookEvent)) ||
+    shouldBlockNoBashGuard(hook, hookEvent)
   )
 }
 
 /**
  * Gold `$in` — convert a failed or timed-out hook result into a blocking
- * result when `onFailure: "block"` is active for the hook and event (#343).
+ * result when `onFailure: "block"` is active for the hook and event (#343),
+ * or when a Windows PreToolUse/PermissionRequest guard fails without Git Bash (#698).
  */
 export function applyOnFailureBlockToHookResult(
   result: HookResult,
@@ -1606,7 +1734,12 @@ export function applyOnFailureBlockToHookResult(
   signal?: AbortSignal,
 ): HookResult {
   const hook = result.hook as HookResult['hook'] & HookWithOnFailure
-  if (!isOnFailureBlock(hook)) return result
+  const blockReason = isOnFailureBlock(hook)
+    ? 'setting'
+    : shouldBlockNoBashGuard(hook, hookEvent)
+      ? 'noBash'
+      : undefined
+  if (blockReason === undefined) return result
 
   const stoppedAfterItsTimeout =
     (result as HookResult & { stoppedAfterItsTimeout?: boolean })
@@ -1643,10 +1776,14 @@ export function applyOnFailureBlockToHookResult(
       ? att.stderr.trim()
       : ''
   const sanitizedDetail = escapeSystemReminderTags(detail)
-  const blockingText = `[${command}]: ${failureKind}; blocking because onFailure is "block"${sanitizedDetail === '' ? '' : `\n${sanitizedDetail}`}`
+  const reasonPhrase =
+    blockReason === 'noBash'
+      ? "blocking because Git Bash wasn't found"
+      : 'blocking because onFailure is "block"'
+  const blockingText = `[${command}]: ${failureKind}; ${reasonPhrase}${sanitizedDetail === '' ? '' : `\n${sanitizedDetail}`}`
 
   logForDebugging(
-    `Hooks: ${hookEvent} ${hook.type} hook ${failureKind}; blocking (onFailure: "block")`,
+    `Hooks: ${hookEvent} ${hook.type} hook ${failureKind}; ${reasonPhrase}`,
     { level: 'warn' },
   )
 

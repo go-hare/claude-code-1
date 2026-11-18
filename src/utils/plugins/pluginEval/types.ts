@@ -134,6 +134,7 @@ export type CaseDefinition = {
     timeout_seconds: number
     model?: string
     allowed_tools: string[]
+    disallowed_tools?: string[]
     artifact_publish?: boolean
     growthbook_overrides?: Record<string, unknown>
     append_system_prompt?: string
@@ -208,6 +209,7 @@ export type AgentRunResult = {
   mockRecordings: unknown[]
   artifactPublishes: unknown[]
   authRejected: boolean | null
+  endedOnApiError?: boolean
   tracePath: string
 }
 
@@ -221,6 +223,7 @@ export type RunReport = {
   error: string | null
   skipped_paid_graders?: boolean
   auth_rejected?: boolean | null
+  ended_on_api_error?: boolean
   aborted?: { server: string; tool: string; reason: string }
 }
 
@@ -299,6 +302,7 @@ export type RunPluginEvalSuiteParams = {
   maxCostUsd?: number
   threshold: number
   allowTools: string[]
+  disallowTools?: string[]
   /** densable `mc` `n.artifactPublish` — operator opt-in for gold `Ji`. */
   artifactPublish?: boolean
   /** densable `mc` `n.allowFlagOverrides` — gold `lg` GB key allowlist. */

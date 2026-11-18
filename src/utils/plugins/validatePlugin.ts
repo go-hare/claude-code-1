@@ -1,4 +1,4 @@
-import type { Dirent, Stats } from 'fs'
+import { readFileSync, type Dirent, type Stats } from 'fs'
 import { readdir, readFile, stat } from 'fs/promises'
 import * as path from 'path'
 import { z } from 'zod/v4'
@@ -6,6 +6,7 @@ import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
 import { FRONTMATTER_REGEX } from '../frontmatterParser.js'
 import { stripBOM } from '../jsonRead.js'
 import { jsonParse } from '../slowOperations.js'
+import { getSettingsForSource } from '../settings/settings.js'
 import type { HooksSettings } from '../settings/types.js'
 import { parseYaml } from '../yaml.js'
 import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
@@ -883,14 +884,226 @@ function tsIdentifierUsed(
   return used
 }
 
+type TsImportBinding = {
+  specifier: string
+  importedName: string
+}
+
+function collectTsImportsAndExports(
+  ts: typeof import('typescript'),
+  sf: import('typescript').SourceFile,
+): {
+  namedFns: Map<string, import('typescript').FunctionLikeDeclaration>
+  imports: Map<string, TsImportBinding>
+  exports: Map<string, string>
+  defaultExportName?: string
+  defaultExportFn?: import('typescript').FunctionLikeDeclaration
+  reExports: Array<{
+    specifier: string
+    exportedName: string
+    importedName: string
+  }>
+  starReExports: string[]
+} {
+  const namedFns = new Map<
+    string,
+    import('typescript').FunctionLikeDeclaration
+  >()
+  const imports = new Map<string, TsImportBinding>()
+  const exports = new Map<string, string>()
+  const reExports: Array<{
+    specifier: string
+    exportedName: string
+    importedName: string
+  }> = []
+  const starReExports: string[] = []
+  let defaultExportName: string | undefined
+  let defaultExportFn: import('typescript').FunctionLikeDeclaration | undefined
+
+  for (const stmt of sf.statements) {
+    if (ts.isFunctionDeclaration(stmt)) {
+      const isExport =
+        stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ??
+        false
+      const isDefault =
+        stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.DefaultKeyword) ??
+        false
+      if (stmt.name) {
+        namedFns.set(stmt.name.text, stmt)
+        if (isExport) {
+          exports.set(isDefault ? 'default' : stmt.name.text, stmt.name.text)
+        }
+      }
+      if (isExport && isDefault) {
+        defaultExportFn = stmt
+      }
+    } else if (
+      ts.isImportDeclaration(stmt) &&
+      ts.isStringLiteral(stmt.moduleSpecifier) &&
+      stmt.importClause
+    ) {
+      const specifier = stmt.moduleSpecifier.text
+      if (stmt.importClause.name) {
+        imports.set(stmt.importClause.name.text, {
+          specifier,
+          importedName: 'default',
+        })
+      }
+      const bindings = stmt.importClause.namedBindings
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const el of bindings.elements) {
+          imports.set(el.name.text, {
+            specifier,
+            importedName: (el.propertyName ?? el.name).text,
+          })
+        }
+      }
+    } else if (ts.isExportDeclaration(stmt)) {
+      const spec =
+        stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier)
+          ? stmt.moduleSpecifier.text
+          : undefined
+      if (!stmt.exportClause && spec) {
+        starReExports.push(spec)
+      } else if (stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+        for (const el of stmt.exportClause.elements) {
+          const exportedName = el.name.text
+          const importedName = (el.propertyName ?? el.name).text
+          if (spec) {
+            reExports.push({ specifier: spec, exportedName, importedName })
+          } else {
+            exports.set(exportedName, importedName)
+          }
+        }
+      }
+    } else if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
+      if (ts.isIdentifier(stmt.expression)) {
+        defaultExportName = stmt.expression.text
+      } else if (
+        ts.isFunctionExpression(stmt.expression) ||
+        ts.isArrowFunction(stmt.expression)
+      ) {
+        defaultExportFn = stmt.expression
+      }
+    }
+  }
+
+  return {
+    namedFns,
+    imports,
+    exports,
+    defaultExportName,
+    defaultExportFn,
+    reExports,
+    starReExports,
+  }
+}
+
+function resolveExportedTsFunction(
+  ts: typeof import('typescript'),
+  file: string,
+  exportName: string,
+  getFile: (file: string) =>
+    | {
+        sf: import('typescript').SourceFile
+        meta: ReturnType<typeof collectTsImportsAndExports>
+      }
+    | undefined,
+  resolveImport: (
+    specifier: string,
+    fromFile: string,
+  ) => { file: string; source: string } | undefined,
+  visiting = new Set<string>(),
+): import('typescript').FunctionLikeDeclaration | undefined {
+  const key = `${file}\0${exportName}`
+  if (visiting.has(key)) return undefined
+  visiting.add(key)
+  const parsed = getFile(file)
+  if (!parsed) return undefined
+  const { meta } = parsed
+  if (exportName === 'default') {
+    if (meta.defaultExportFn) return meta.defaultExportFn
+    if (meta.defaultExportName) {
+      const local = meta.namedFns.get(meta.defaultExportName)
+      if (local) return local
+      const imp = meta.imports.get(meta.defaultExportName)
+      if (imp) {
+        const target = resolveImport(imp.specifier, file)
+        if (target) {
+          return resolveExportedTsFunction(
+            ts,
+            target.file,
+            imp.importedName,
+            getFile,
+            resolveImport,
+            visiting,
+          )
+        }
+      }
+    }
+  }
+  const localName = meta.exports.get(exportName)
+  if (localName !== undefined) {
+    const fn = meta.namedFns.get(localName)
+    if (fn) return fn
+    const imp = meta.imports.get(localName)
+    if (imp) {
+      const target = resolveImport(imp.specifier, file)
+      if (target) {
+        return resolveExportedTsFunction(
+          ts,
+          target.file,
+          imp.importedName,
+          getFile,
+          resolveImport,
+          visiting,
+        )
+      }
+    }
+  }
+  for (const re of meta.reExports) {
+    if (re.exportedName !== exportName) continue
+    const target = resolveImport(re.specifier, file)
+    if (!target) continue
+    const found = resolveExportedTsFunction(
+      ts,
+      target.file,
+      re.importedName,
+      getFile,
+      resolveImport,
+      visiting,
+    )
+    if (found) return found
+  }
+  if (exportName !== 'default') {
+    for (const spec of meta.starReExports) {
+      const target = resolveImport(spec, file)
+      if (!target) continue
+      const found = resolveExportedTsFunction(
+        ts,
+        target.file,
+        exportName,
+        getFile,
+        resolveImport,
+        visiting,
+      )
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 function isTsHookFnReachingNext(
   ts: typeof import('typescript'),
   fnArg: import('typescript').Node | undefined,
   namedFns: Map<string, import('typescript').FunctionLikeDeclaration>,
+  resolveImportedFn?: (
+    name: string,
+  ) => import('typescript').FunctionLikeDeclaration | undefined,
 ): boolean {
   if (!fnArg) return true
   const fnNode = ts.isIdentifier(fnArg)
-    ? namedFns.get(fnArg.text)
+    ? (namedFns.get(fnArg.text) ?? resolveImportedFn?.(fnArg.text))
     : ts.isFunctionExpression(fnArg) || ts.isArrowFunction(fnArg)
       ? fnArg
       : undefined
@@ -936,7 +1149,13 @@ function extractTsCommandsFromMatcher(
 export function analyzeGatingHooksInSource(
   moduleName: string,
   source: string,
-  options?: { shippedCommands?: ReadonlySet<string> },
+  options?: {
+    shippedCommands?: ReadonlySet<string>
+    resolveImport?: (
+      specifier: string,
+      fromFile: string,
+    ) => { file: string; source: string } | undefined
+  },
 ): {
   gatingHooks: GatingHookInfo[]
   ownCommandRegistrations: string[]
@@ -956,10 +1175,52 @@ export function analyzeGatingHooksInSource(
     ts.ScriptTarget.Latest,
     true,
   )
-  const namedFns = new Map<
+  const fileCache = new Map<
     string,
-    import('typescript').FunctionLikeDeclaration
+    {
+      sf: import('typescript').SourceFile
+      meta: ReturnType<typeof collectTsImportsAndExports>
+    }
   >()
+  const entryMeta = collectTsImportsAndExports(ts, sf)
+  fileCache.set(moduleName, { sf, meta: entryMeta })
+  const resolveImportFn = options?.resolveImport
+  const getFile = (file: string) => {
+    const cached = fileCache.get(file)
+    if (cached) return cached
+    return undefined
+  }
+  const resolveImportCached = (specifier: string, fromFile: string) => {
+    const hit = resolveImportFn?.(specifier, fromFile)
+    if (!hit) return undefined
+    if (!fileCache.has(hit.file)) {
+      const childSf = ts.createSourceFile(
+        hit.file,
+        hit.source,
+        ts.ScriptTarget.Latest,
+        true,
+      )
+      fileCache.set(hit.file, {
+        sf: childSf,
+        meta: collectTsImportsAndExports(ts, childSf),
+      })
+    }
+    return hit
+  }
+  const resolveImportedFn = (name: string) => {
+    const imp = entryMeta.imports.get(name)
+    if (!imp || !resolveImportFn) return undefined
+    const target = resolveImportCached(imp.specifier, moduleName)
+    if (!target) return undefined
+    return resolveExportedTsFunction(
+      ts,
+      target.file,
+      imp.importedName,
+      getFile,
+      resolveImportCached,
+    )
+  }
+  const namedFns = entryMeta.namedFns
   const registeredCommands = new Set<string>()
   const onCalls: import('typescript').CallExpression[] = []
 
@@ -1036,7 +1297,7 @@ export function analyzeGatingHooksInSource(
       ...(catchCall ? catchCall.arguments : []),
     ]
     const reachesNext = handlerNodes.some(h =>
-      isTsHookFnReachingNext(ts, h, namedFns),
+      isTsHookFnReachingNext(ts, h, namedFns, resolveImportedFn),
     )
 
     const isOwnCommand =
@@ -2037,12 +2298,196 @@ export function analyzeHookModuleStateAndMatchers(
   }
 }
 
+const DEFAULT_TYPES_CONTRACT = './types/index.d.ts'
+
+type DeclaredPluginState = { plugin: string; keys: string[] }
+
+function parsePluginStateDeclarations(
+  dtsContent: string,
+): DeclaredPluginState[] {
+  let ts: typeof import('typescript')
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ts = require('typescript') as typeof import('typescript')
+  } catch {
+    return []
+  }
+  const sf = ts.createSourceFile(
+    'index.d.ts',
+    dtsContent,
+    ts.ScriptTarget.Latest,
+    true,
+  )
+  const result: DeclaredPluginState[] = []
+  const visit = (node: import('typescript').Node): void => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === 'PluginState') {
+      for (const member of node.members) {
+        if (
+          ts.isPropertySignature(member) &&
+          member.name &&
+          member.type &&
+          ts.isTypeLiteralNode(member.type)
+        ) {
+          const pluginName =
+            ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)
+              ? member.name.text
+              : undefined
+          if (!pluginName) continue
+          const keys: string[] = []
+          for (const keyMember of member.type.members) {
+            if (ts.isPropertySignature(keyMember) && keyMember.name) {
+              const keyName =
+                ts.isIdentifier(keyMember.name) ||
+                ts.isStringLiteral(keyMember.name)
+                  ? keyMember.name.text
+                  : undefined
+              if (keyName) keys.push(keyName)
+            }
+          }
+          result.push({ plugin: pluginName, keys })
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return result
+}
+
+async function readPluginTypesContract(pluginDir: string): Promise<{
+  hasManifest: boolean
+  owner: string
+  declared: DeclaredPluginState[]
+  conventional?: string
+  refusal?: string
+  isRefused: boolean
+}> {
+  const manifestPath = path.join(pluginDir, '.claude-plugin', 'plugin.json')
+  let owner = path.basename(pluginDir)
+  let manifestTypes: unknown
+  let hasManifest = false
+  try {
+    const raw = await readFile(manifestPath, { encoding: 'utf-8' })
+    const parsed = jsonParse(raw) as Record<string, unknown> | undefined
+    if (parsed && typeof parsed === 'object') {
+      hasManifest = true
+      if (typeof parsed.name === 'string' && parsed.name.length > 0) {
+        owner = parsed.name
+      }
+      manifestTypes = parsed.types
+    }
+  } catch {
+    return { hasManifest: false, owner, declared: [], isRefused: false }
+  }
+
+  if (
+    !hasManifest ||
+    (manifestTypes !== undefined && typeof manifestTypes !== 'string')
+  ) {
+    return { hasManifest: false, owner, declared: [], isRefused: false }
+  }
+
+  const relContract = manifestTypes ?? DEFAULT_TYPES_CONTRACT
+  const resolvedContract = path.resolve(pluginDir, relContract)
+  const relCheck = path.relative(pluginDir, resolvedContract)
+  const conventional =
+    manifestTypes === undefined
+      ? `the types contract at ${DEFAULT_TYPES_CONTRACT}`
+      : undefined
+  if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+    const msg = `${relContract} leaves the plugin's folder`
+    return {
+      hasManifest: true,
+      owner,
+      declared: [],
+      conventional,
+      refusal: conventional
+        ? `the file at ${DEFAULT_TYPES_CONTRACT} could not be taken as the types contract (${msg})`
+        : msg,
+      isRefused: true,
+    }
+  }
+
+  try {
+    const dtsContent = await readFile(resolvedContract, { encoding: 'utf-8' })
+    return {
+      hasManifest: true,
+      owner,
+      declared: parsePluginStateDeclarations(dtsContent),
+      conventional,
+      isRefused: false,
+    }
+  } catch (e: unknown) {
+    const code = getErrnoCode(e)
+    if (
+      manifestTypes === undefined &&
+      (code === 'ENOENT' || code === 'ENOTDIR')
+    ) {
+      return { hasManifest: true, owner, declared: [], isRefused: false }
+    }
+    const msg = errorMessage(e)
+    return {
+      hasManifest: true,
+      owner,
+      declared: [],
+      conventional,
+      refusal: conventional
+        ? `the file at ${DEFAULT_TYPES_CONTRACT} could not be taken as the types contract (${msg})`
+        : msg,
+      isRefused: true,
+    }
+  }
+}
+
+function validateModuleStateAgainstContract(params: {
+  reads: HookModuleStateRef[]
+  writes: HookModuleStateRef[]
+  owner: string
+  declared: DeclaredPluginState[]
+  conventional?: string
+  refusal?: string
+}): string[] {
+  const { reads, writes, owner, declared, conventional, refusal } = params
+  const byPlugin = new Map<string, Set<string>>()
+  for (const entry of declared) {
+    const set = byPlugin.get(entry.plugin) ?? new Set<string>()
+    for (const k of entry.keys) set.add(k)
+    byPlugin.set(entry.plugin, set)
+  }
+  const problems: string[] = []
+  for (const w of writes) {
+    if (w.plugin !== owner) {
+      problems.push(
+        `$.state.set refers to ${w.plugin}.${w.key}, which ${w.plugin} owns: only a value's owner writes it (to change what is written, hook ${w.plugin}'s state.set and rewrite e.value)`,
+      )
+    }
+  }
+  for (const ref of [...reads, ...writes]) {
+    if (ref.plugin !== owner) continue
+    const hasKey = byPlugin.get(ref.plugin)?.has(ref.key) === true
+    if (!hasKey) {
+      const contractLabel = conventional ?? "the manifest's types contract"
+      const suffix =
+        refusal ??
+        `${contractLabel} must name it in interface PluginState { ${ref.plugin}: { ${ref.key}: ... } }`
+      const msg = `${ref.plugin}.${ref.key} is not declared: ${suffix}`
+      if (!problems.includes(msg)) {
+        problems.push(msg)
+      }
+    }
+  }
+  return problems
+}
+
 /**
  * Validate a plugin's hooks.json file. Unlike frontmatter, this one HARD-ERRORS
  * at runtime (pluginLoader uses .parse() not .safeParse()) — a bad hooks.json
  * breaks the whole plugin. Surfacing it here is essential.
  */
-async function validateHooksJson(filePath: string): Promise<ValidationResult> {
+async function validateHooksJson(
+  filePath: string,
+  pluginDir?: string,
+): Promise<ValidationResult> {
   let content: string
   try {
     content = await readFile(filePath, { encoding: 'utf-8' })
@@ -2139,10 +2584,62 @@ async function validateHooksJson(filePath: string): Promise<ValidationResult> {
     )
   }
   const errors: ValidationError[] = []
+  const policySettings = getSettingsForSource('policySettings')
+  const managedHooksNote =
+    policySettings?.disableAllHooks === true
+      ? 'disableAllHooks in managed settings'
+      : policySettings?.allowManagedHooksOnly === true
+        ? 'only managed plugins and built-in plugins run (allowManagedHooksOnly / disableAllHooks)'
+        : undefined
+  const resolveRelativeModuleImport = (
+    specifier: string,
+    fromFile: string,
+  ): { file: string; source: string } | undefined => {
+    if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+      return undefined
+    }
+    const baseDir = path.dirname(
+      path.isAbsolute(fromFile) ? fromFile : path.resolve(hooksDir, fromFile),
+    )
+    const rawTarget = path.resolve(baseDir, specifier)
+    const candidates = [
+      rawTarget,
+      `${rawTarget}.ts`,
+      `${rawTarget}.tsx`,
+      `${rawTarget}.mts`,
+      `${rawTarget}.js`,
+      `${rawTarget}.mjs`,
+      `${rawTarget}.jsx`,
+    ]
+    if (rawTarget.endsWith('.js') || rawTarget.endsWith('.mjs')) {
+      const stem = rawTarget.replace(/\.(?:m?js)$/, '')
+      candidates.unshift(`${stem}.ts`, `${stem}.mts`, `${stem}.tsx`)
+    }
+    for (const candidate of candidates) {
+      try {
+        const src = readFileSync(candidate, 'utf-8')
+        return { file: candidate, source: src }
+      } catch {
+        // try next extension
+      }
+    }
+    return undefined
+  }
   for (const [modName, modFullPath] of modulePaths) {
     try {
       const modSrc = await readFile(modFullPath, { encoding: 'utf-8' })
-      const analysis = analyzeGatingHooksInSource(modName, modSrc)
+      if (managedHooksNote !== undefined) {
+        notes.push(
+          `[${modName}] hooks are skipped here (does not load where only managed hooks may): ${managedHooksNote}`,
+        )
+      }
+      const analysis = analyzeGatingHooksInSource(modName, modSrc, {
+        resolveImport: (spec, from) =>
+          resolveRelativeModuleImport(
+            spec,
+            from === modName ? modFullPath : from,
+          ),
+      })
       notes.push(...analysis.notes)
       gatingHooks.push(...analysis.gatingHooks)
       const stateAnalysis = analyzeHookModuleStateAndMatchers(modName, modSrc)
@@ -2157,6 +2654,41 @@ async function validateHooksJson(filePath: string): Promise<ValidationResult> {
         }
         for (const ref of stateAnalysis.stateWrites) {
           notes.push(`[${modName}] state.set: ${ref.plugin}.${ref.key}`)
+        }
+        if (
+          stateAnalysis.stateReads.length > 0 ||
+          stateAnalysis.stateWrites.length > 0
+        ) {
+          const resolvedPluginDir =
+            pluginDir ?? path.dirname(path.dirname(filePath))
+          const contract = await readPluginTypesContract(resolvedPluginDir)
+          if (contract.hasManifest) {
+            if (
+              contract.isRefused &&
+              contract.refusal &&
+              contract.conventional === undefined
+            ) {
+              errors.push({
+                path: `modules.${modName}`,
+                message: contract.refusal,
+              })
+            } else {
+              const stateProblems = validateModuleStateAgainstContract({
+                reads: stateAnalysis.stateReads,
+                writes: stateAnalysis.stateWrites,
+                owner: contract.owner,
+                declared: contract.declared,
+                conventional: contract.conventional,
+                refusal: contract.refusal,
+              })
+              for (const msg of stateProblems) {
+                errors.push({
+                  path: `modules.${modName}`,
+                  message: msg,
+                })
+              }
+            }
+          }
         }
       }
     } catch {
@@ -2265,6 +2797,7 @@ export async function validatePluginContents(
 
   const hooksResult = await validateHooksJson(
     path.join(pluginDir, 'hooks', 'hooks.json'),
+    pluginDir,
   )
   if (
     hooksResult.errors.length > 0 ||

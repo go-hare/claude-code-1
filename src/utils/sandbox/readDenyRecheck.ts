@@ -8,13 +8,14 @@
  * injection.
  */
 import { realpathSync } from 'fs'
-import { resolve, sep } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime'
 import { logForDebugging } from '../debug.js'
 
 export type ForwardedUntrustedGrant = {
   literal: string
   list: 'allowRead' | 'allowWrite'
+  resolvedAtBuild?: string
 }
 
 export type TrustedDenyRootSnapshot = {
@@ -44,7 +45,24 @@ function tryRealpath(p: string): string | undefined {
 
 function normalizePathForCompare(p: string): string {
   const resolved = resolve(p)
-  return tryRealpath(resolved) ?? resolved
+  const direct = tryRealpath(resolved)
+  if (direct !== undefined) return direct
+  // Official 2.1.299 (#672): for glob entries (e.g. `/dir/**` or `/dir/*.txt`),
+  // `resolved` itself does not exist on disk — walk up to the deepest existing
+  // ancestor directory so replacing that starting directory with a symlink is
+  // detected on re-check.
+  const trailingParts: string[] = []
+  let cur = resolved
+  while (true) {
+    const parent = dirname(cur)
+    if (parent === cur) return resolved
+    trailingParts.push(basename(cur))
+    cur = parent
+    const realAncestor = tryRealpath(cur)
+    if (realAncestor !== undefined) {
+      return join(realAncestor, ...trailingParts.reverse())
+    }
+  }
 }
 
 function isSameOrChildPath(parent: string, candidate: string): boolean {
@@ -79,7 +97,12 @@ export function recordReadDenyRecheckBaseline(params: {
     literal,
     resolvedAtBuild: tryRealpath(literal),
   }))
-  recheckState.forwardedUntrustedGrants = [...params.forwardedUntrustedGrants]
+  recheckState.forwardedUntrustedGrants = params.forwardedUntrustedGrants.map(
+    grant => ({
+      ...grant,
+      resolvedAtBuild: normalizePathForCompare(grant.literal),
+    }),
+  )
 }
 
 export function getReadDenyRecheckBaseline(): {
@@ -205,7 +228,16 @@ export function recheckReadDenyAndCredentialMasksBeforeWrap(deps: {
     }
   }
 
-  if (movedRoots.length === 0) {
+  let grantsMoved = false
+  for (const grant of recheckState.forwardedUntrustedGrants) {
+    const currentGrantResolved = normalizePathForCompare(grant.literal)
+    if (currentGrantResolved !== grant.resolvedAtBuild) {
+      grant.resolvedAtBuild = currentGrantResolved
+      grantsMoved = true
+    }
+  }
+
+  if (movedRoots.length === 0 && !grantsMoved) {
     return { movedCount: 0, droppedGrants: 0, narrowedMasks: 0 }
   }
 

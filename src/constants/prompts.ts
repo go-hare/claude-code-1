@@ -1,5 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { type as osType, version as osVersion, release as osRelease } from 'os'
+import { applyPendingUiInvalidations } from '../utils/plugins/functionHooksModules.js'
+import { clearSystemPromptSections } from './systemPromptSections.js'
 import { env } from '../utils/env.js'
 import { getIsGit } from '../utils/git.js'
 import { getCwd } from '../utils/cwd.js'
@@ -640,6 +642,10 @@ export async function getSystemPrompt(
   mcpClients?: MCPServerConnection[],
   options?: GetSystemPromptOptions,
 ): Promise<string[]> {
+  // densable `cxr()` — flush pending $.ui.invalidate("prompt.section") before reading sections.
+  applyPendingUiInvalidations({
+    'prompt.section': clearSystemPromptSections,
+  })
   // Official CLAUDE_CODE_SIMPLE densable.
   let simpleMode = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
   try {
@@ -1394,7 +1400,7 @@ Use this directory for ALL temporary file needs:
 
 Only use \`/tmp\` if the user explicitly requests it.
 
-The scratchpad directory is session-specific, isolated from the user's project, and can be used freely without permission prompts.`
+The scratchpad directory is session-specific, isolated from the user's project, and can be used freely without permission prompts. Whenever you name a file in it to the user, write the file's complete absolute path in one piece, not a bare filename, a path that starts at the scratchpad folder, or the directory followed by filenames: a shortened path is read against the working directory and leads nowhere.`
 }
 
 /**

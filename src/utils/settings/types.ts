@@ -512,12 +512,24 @@ export const SettingsSchema = lazySchema(() =>
         ),
       // List of approved MCP servers from .mcp.json
       enabledMcpjsonServers: z
-        .array(z.string())
+        .preprocess(
+          val =>
+            typeof val === 'string' && /^[A-Za-z0-9_-]+$/.test(val)
+              ? [val]
+              : val,
+          z.array(z.string()),
+        )
         .optional()
         .describe('List of approved MCP servers from .mcp.json'),
       // List of rejected MCP servers from .mcp.json
       disabledMcpjsonServers: z
-        .array(z.string())
+        .preprocess(
+          val =>
+            typeof val === 'string' && /^[A-Za-z0-9_-]+$/.test(val)
+              ? [val]
+              : val,
+          z.array(z.string()),
+        )
         .optional()
         .describe('List of rejected MCP servers from .mcp.json'),
       // Official residual — disable Claude.ai connectors (any settings source).
@@ -1146,6 +1158,13 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Precompute the compaction summary in the background before it is needed. Only applies when auto-compact is on.',
+        ),
+      // Official 2.1.299 (#567): idleCompaction setting (defaults to true).
+      idleCompaction: z
+        .boolean()
+        .optional()
+        .describe(
+          'Set to false to stop Claude Code from compacting a long conversation while the session is idle. Defaults to true.',
         ),
       // densable 2.1.239 timestamps /config → showMessageTimestamps. GB tengu_silk_hinge.
       showMessageTimestamps: z

@@ -43,6 +43,7 @@ import {
   CLEAR_TAB_STATUS,
   OSC,
   osc,
+  printsUnknownSequences,
   supportsTabStatus,
   wrapForMultiplexer,
 } from './termio/osc.js'
@@ -87,11 +88,14 @@ function extendedKeysOn(): string {
 
 function extendedKeysOff(): string {
   if (!supportsExtendedKeys()) return ''
-  return DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD
+  return (
+    (printsUnknownSequences() ? '' : DISABLE_MODIFY_OTHER_KEYS) +
+    DISABLE_KITTY_KEYBOARD
+  )
 }
 
 function kittyPop(): string {
-  if (!supportsExtendedKeys()) return ''
+  if (!supportsExtendedKeys() || printsUnknownSequences()) return ''
   return DISABLE_KITTY_KEYBOARD
 }
 
@@ -130,7 +134,9 @@ function namedEntry(mode: TerminalModeName): ModeEntry {
       return {
         mode,
         on: ENTER_ALT_SCREEN + ERASE_SCREEN + CURSOR_HOME,
-        off: EXIT_ALT_SCREEN + DISABLE_MODIFY_OTHER_KEYS,
+        off:
+          EXIT_ALT_SCREEN +
+          (printsUnknownSequences() ? '' : DISABLE_MODIFY_OTHER_KEYS),
       }
     case 'altScreenKeys':
       return { mode, on: extendedKeysOn(), off: kittyPop() }

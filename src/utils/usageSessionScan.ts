@@ -3,7 +3,7 @@
  * local transcript scan for `/usage` contributing tables.
  */
 
-import { basename, dirname, extname, join } from 'path'
+import { basename, dirname, extname, join, sep } from 'path'
 import { open, readdir, stat } from 'fs/promises'
 import {
   isPolicyLimitsAllowed,
@@ -107,6 +107,18 @@ const LOOP_PROMPT = Buffer.from('"prompt":"')
 const TASK_KIND_LOOP = Buffer.from('"taskKind":"loop"')
 const CONTENT_QUOTE = Buffer.from('"content":"')
 const TEXT_QUOTE = Buffer.from('"text":"')
+const EFFORT_MAX = Buffer.from('"effort":"max"')
+const CONTENT_FIELD = Buffer.from('"content":')
+const TOOL_USE_ID_FIELD = Buffer.from('"tool_use_id":"')
+const CHAR_QUOTE = 34
+const CHAR_BACKSLASH = 92
+const CHAR_LBRACE = 123
+const CHAR_RBRACE = 125
+const CHAR_LBRACKET = 91
+const CHAR_RBRACKET = 93
+const LARGE_TOOL_RESULT_MIN_TOKENS = 10_000
+const ALWAYS_ON_MIN_TOKENS = 40_000
+const BYTES_PER_TOKEN = 2.5
 
 function tagNeedles(tag: string): Buffer[] {
   return [Buffer.from(`"content":"<${tag}>`), Buffer.from(`"text":"<${tag}>`)]
@@ -206,8 +218,20 @@ export type UsageBehaviorKey =
   | 'high_parallel'
   | 'cron'
 
+export type UsageWarningBehaviorKey =
+  | 'max_effort'
+  | 'workflow'
+  | 'always_on_context'
+  | 'large_tool_results'
+
 export type UsageBehaviorStat = {
   key: UsageBehaviorKey
+  cost: number
+  count: number
+}
+
+export type UsageWarningBehaviorStat = {
+  key: UsageWarningBehaviorKey
   cost: number
   count: number
 }
@@ -222,6 +246,8 @@ export type UsageScanWindow = {
   requestCount: number
   sessionCount: number
   behaviors: UsageBehaviorStat[]
+  warningBehaviors?: UsageWarningBehaviorStat[]
+  peakParallel?: number
   agents: UsageNamedShare[]
   skills: UsageNamedShare[]
   plugins: UsageNamedShare[]
@@ -247,6 +273,10 @@ type ScanRecord = {
   uncached: number
   output: number
   isSubagent: boolean
+  isMaxEffort: boolean
+  isWorkflow: boolean
+  alwaysOnTokens: number
+  largeToolResultTokens: number
   modelTier: number
   model?: string
   attributionAgent?: string
@@ -289,6 +319,14 @@ type WindowAcc = {
   cacheMissCount: number
   longCtxCost: number
   longCtxCount: number
+  maxEffortCost: number
+  maxEffortCount: number
+  workflowCost: number
+  workflowCount: number
+  alwaysOnCost: number
+  alwaysOnCount: number
+  largeToolResultCost: number
+  largeToolResultCount: number
   sessions: Map<string, AccSession>
   buckets: Map<number, AccBucket>
   byAgent: Map<string, number>
@@ -306,6 +344,14 @@ function emptyAcc(): WindowAcc {
     cacheMissCount: 0,
     longCtxCost: 0,
     longCtxCount: 0,
+    maxEffortCost: 0,
+    maxEffortCount: 0,
+    workflowCost: 0,
+    workflowCount: 0,
+    alwaysOnCost: 0,
+    alwaysOnCount: 0,
+    largeToolResultCost: 0,
+    largeToolResultCount: 0,
     sessions: new Map(),
     buckets: new Map(),
     byAgent: new Map(),
@@ -475,6 +521,108 @@ export function recordCostUsd(rec: {
   )
 }
 
+/** Official 2.1.299 (#581) `Vt` — check if `needle` sits at the root JSON object of `buf`. */
+function hasTopLevelNeedle(buf: Buffer, needle: Buffer): boolean {
+  const rootEnd = buf.lastIndexOf(CHAR_RBRACE)
+  for (
+    let pos = buf.lastIndexOf(needle);
+    pos >= 0;
+    pos = pos === 0 ? -1 : buf.lastIndexOf(needle, pos - 1)
+  ) {
+    let depth = 1
+    let inString = false
+    let i = pos + needle.length
+    for (; i < buf.length && depth > 0; i++) {
+      const ch = buf[i]!
+      if (inString) {
+        if (ch === CHAR_BACKSLASH) i++
+        else if (ch === CHAR_QUOTE) inString = false
+      } else if (ch === CHAR_QUOTE) {
+        inString = true
+      } else if (ch === CHAR_LBRACE || ch === CHAR_LBRACKET) {
+        depth++
+      } else if (ch === CHAR_RBRACE || ch === CHAR_RBRACKET) {
+        depth--
+      }
+    }
+    if (depth === 0 && i - 1 === rootEnd) return true
+  }
+  return false
+}
+
+type ContextTracker = {
+  firstPromptBytes: number
+  startTokens: number
+  lastRequest: string | undefined
+  lastContext: number
+  carriedTokens: number
+  pendingToolResultBytes: number
+  largeToolResultTokens: number
+}
+
+function createContextTracker(): ContextTracker {
+  return {
+    firstPromptBytes: 0,
+    startTokens: Infinity,
+    lastRequest: undefined,
+    lastContext: 0,
+    carriedTokens: 0,
+    pendingToolResultBytes: 0,
+    largeToolResultTokens: 0,
+  }
+}
+
+function isLargeToolResultSize(bytes: number): boolean {
+  return bytes / BYTES_PER_TOKEN > LARGE_TOOL_RESULT_MIN_TOKENS
+}
+
+function noteFirstPromptBytes(tracker: ContextTracker, bytes: number): void {
+  if (tracker.lastRequest === undefined && tracker.firstPromptBytes === 0) {
+    tracker.firstPromptBytes = bytes
+  }
+}
+
+function noteToolResultBytes(tracker: ContextTracker, bytes: number): void {
+  if (isLargeToolResultSize(bytes)) {
+    tracker.pendingToolResultBytes += bytes
+  }
+}
+
+function noteAssistantContext(tracker: ContextTracker, rec: ScanRecord): void {
+  const ctx = rec.cached + rec.cacheCreate + rec.uncached
+  if (rec.uuid === tracker.lastRequest) {
+    tracker.carriedTokens = Math.max(tracker.carriedTokens, ctx + rec.output)
+  } else {
+    if (tracker.lastRequest === undefined) {
+      tracker.startTokens =
+        ctx - Math.round(tracker.firstPromptBytes / BYTES_PER_TOKEN)
+    } else if (ctx < tracker.lastContext) {
+      tracker.largeToolResultTokens = Math.max(
+        0,
+        tracker.largeToolResultTokens - (tracker.lastContext - ctx),
+      )
+    } else {
+      const added = Math.min(
+        ctx - tracker.carriedTokens,
+        tracker.pendingToolResultBytes / BYTES_PER_TOKEN,
+      )
+      if (added > LARGE_TOOL_RESULT_MIN_TOKENS) {
+        tracker.largeToolResultTokens += added
+      }
+    }
+    tracker.startTokens = Math.min(tracker.startTokens, ctx)
+    tracker.lastRequest = rec.uuid
+    tracker.lastContext = ctx
+    tracker.carriedTokens = ctx + rec.output
+    tracker.pendingToolResultBytes = 0
+  }
+  rec.largeToolResultTokens = tracker.largeToolResultTokens
+  rec.alwaysOnTokens =
+    !rec.isSubagent && tracker.startTokens > ALWAYS_ON_MIN_TOKENS
+      ? tracker.startTokens
+      : 0
+}
+
 /** densable `Gn` / `Xt` (assistant usage record). */
 function recordFromChunk(
   buf: Buffer,
@@ -482,6 +630,7 @@ function recordFromChunk(
   end: number,
   cutoff: number,
   isSubagentFile = false,
+  isWorkflow = false,
 ): ScanRecord | null {
   if (!hasNeedle(buf, TYPE_ASSISTANT, start, end)) return null
   if (!hasNeedle(buf, USAGE, start, end)) return null
@@ -502,6 +651,10 @@ function recordFromChunk(
     readMessageId(buf, start, end) ??
     readQuoted(buf, UUID, start, end) ??
     ''
+  const isSubagent =
+    isSubagentFile ||
+    hasNeedle(buf, SIDECHAIN, start, end) ||
+    hasNeedle(buf, SIDECHAIN_SP, start, end)
   return {
     ts,
     sessionId,
@@ -510,10 +663,11 @@ function recordFromChunk(
     cacheCreate,
     uncached,
     output,
-    isSubagent:
-      isSubagentFile ||
-      hasNeedle(buf, SIDECHAIN, start, end) ||
-      hasNeedle(buf, SIDECHAIN_SP, start, end),
+    isSubagent,
+    isMaxEffort: hasTopLevelNeedle(buf.subarray(start, end), EFFORT_MAX),
+    isWorkflow,
+    alwaysOnTokens: 0,
+    largeToolResultTokens: 0,
     modelTier: modelTier(model),
     model,
     ...(hasAttr
@@ -560,6 +714,7 @@ function createFileLineConsumer(
   target: { records: ScanRecord[]; fires: LoopFire[] },
   cutoff: number,
   isSubagentFile = false,
+  isWorkflow = false,
 ): (line: Buffer) => void {
   let batchId = 0
   let pendingFires: QueuedFire[] = []
@@ -570,6 +725,7 @@ function createFileLineConsumer(
     | { fire: QueuedFire | undefined; run: boolean; isCommandRecord: boolean }
     | undefined
   let stickyDynamicPrompt: string | undefined
+  const ctxTracker = createContextTracker()
 
   const advanceBatch = () => {
     batchId++
@@ -643,10 +799,18 @@ function createFileLineConsumer(
   return (line: Buffer) => {
     const end = line.length
     if (indexOf(line, TYPE_ASSISTANT, 0, end) >= 0) {
-      const rec = recordFromChunk(line, 0, end, cutoff, isSubagentFile)
+      const rec = recordFromChunk(
+        line,
+        0,
+        end,
+        cutoff,
+        isSubagentFile,
+        isWorkflow,
+      )
       afterAssistant = true
       lastPending = undefined
       if (rec) {
+        noteAssistantContext(ctxTracker, rec)
         if (turnUserCount > 1 && activeFires.length > 0) {
           const share = 1 / turnUserCount
           rec.loopShares = activeFires.map(f => ({ ...f, share }))
@@ -659,6 +823,15 @@ function createFileLineConsumer(
       return
     }
     if (indexOf(line, TYPE_USER, 0, end) >= 0) {
+      const toolUsePos = indexOf(line, TOOL_USE_ID_FIELD, 0, end)
+      if (toolUsePos < 0) {
+        noteFirstPromptBytes(ctxTracker, end)
+      } else {
+        const contentPos = indexOf(line, CONTENT_FIELD, toolUsePos, end)
+        if (contentPos >= 0) {
+          noteToolResultBytes(ctxTracker, end - contentPos)
+        }
+      }
       if (
         indexOf(line, TYPE_TOOL_RESULT, 0, end) >= 0 ||
         indexOf(line, TURN_COMPANION, 0, end) >= 0 ||
@@ -871,6 +1044,24 @@ function addRecord(
     acc.longCtxCost += cost
     acc.longCtxCount++
   }
+  if (rec.isMaxEffort) {
+    acc.maxEffortCost += cost
+    acc.maxEffortCount++
+  }
+  if (rec.isWorkflow) {
+    acc.workflowCost += cost
+    acc.workflowCount++
+  }
+  const inputShareCost = cost - rec.output * 50 * rec.modelTier
+  if (rec.alwaysOnTokens > 0 && ctx > 0) {
+    acc.alwaysOnCost += inputShareCost * Math.min(1, rec.alwaysOnTokens / ctx)
+    acc.alwaysOnCount++
+  }
+  if (rec.largeToolResultTokens > 0 && ctx > 0) {
+    acc.largeToolResultCost +=
+      inputShareCost * Math.min(1, rec.largeToolResultTokens / ctx)
+    acc.largeToolResultCount++
+  }
   let session = acc.sessions.get(rec.sessionId)
   if (!session) {
     session = {
@@ -916,7 +1107,9 @@ function namedShares(
 function finalizeWindow(acc: WindowAcc): UsageScanWindow {
   let highParallelCost = 0
   let highParallelCount = 0
+  let peakParallel = 0
   for (const bucket of acc.buckets.values()) {
+    peakParallel = Math.max(peakParallel, bucket.sids.size)
     if (bucket.sids.size >= HIGH_PARALLEL_SIDS) {
       highParallelCost += bucket.cost
       highParallelCount += bucket.count
@@ -948,11 +1141,28 @@ function finalizeWindow(acc: WindowAcc): UsageScanWindow {
     { key: 'cron', cost: cronCost, count: cronCount },
   ]
   behaviors.sort((a, b) => b.cost - a.cost)
+  const warningBehaviors: UsageWarningBehaviorStat[] = [
+    { key: 'max_effort', cost: acc.maxEffortCost, count: acc.maxEffortCount },
+    { key: 'workflow', cost: acc.workflowCost, count: acc.workflowCount },
+    {
+      key: 'always_on_context',
+      cost: acc.alwaysOnCost,
+      count: acc.alwaysOnCount,
+    },
+    {
+      key: 'large_tool_results',
+      cost: acc.largeToolResultCost,
+      count: acc.largeToolResultCount,
+    },
+  ]
+  warningBehaviors.sort((a, b) => b.cost - a.cost)
   return {
     totalCost: acc.totalCost,
     requestCount: acc.requestCount,
     sessionCount: acc.sessions.size,
     behaviors,
+    warningBehaviors,
+    peakParallel,
     agents: namedShares(acc.byAgent, acc.totalCost),
     skills: namedShares(acc.bySkill, acc.totalCost),
     plugins: namedShares(acc.byPlugin, acc.totalCost),
@@ -967,6 +1177,16 @@ function finalizeWindow(acc: WindowAcc): UsageScanWindow {
 export function behaviorsOverMin(window: UsageScanWindow): UsageBehaviorStat[] {
   if (window.totalCost === 0) return []
   return window.behaviors.filter(
+    b => (b.cost / window.totalCost) * 100 >= BEHAVIOR_PCT_MIN,
+  )
+}
+
+/** Official 2.1.299 (#581) — filter extended warning behaviors >= BEHAVIOR_PCT_MIN. */
+export function warningBehaviorsOverMin(
+  window: UsageScanWindow,
+): UsageWarningBehaviorStat[] {
+  if (window.totalCost === 0) return []
+  return (window.warningBehaviors ?? []).filter(
     b => (b.cost / window.totalCost) * 100 >= BEHAVIOR_PCT_MIN,
   )
 }
@@ -1070,7 +1290,12 @@ async function scanJsonlFile(
     throw error
   }
   if (!st.isFile() || st.mtimeMs < cutoff) return out
-  const onLine = createFileLineConsumer(out, cutoff, pathIsSubagent(path))
+  const onLine = createFileLineConsumer(
+    out,
+    cutoff,
+    pathIsSubagent(path),
+    path.includes(`${sep}subagents${sep}workflows${sep}`),
+  )
   let fh
   try {
     fh = await open(path, 'r')
@@ -1452,10 +1677,13 @@ async function foldRecentRecordsV5(
         const out = { records: [] as ScanRecord[], fires: [] as LoopFire[] }
         if (entry.mtimeMs >= cutoff) {
           const isSubagentFile = entry.key.agentId !== undefined
+          const isWorkflow =
+            typeof entry.key.agentId === 'string' &&
+            entry.key.agentId.startsWith('workflows/')
           await readV5EntryLines(
             storage,
             entry,
-            createFileLineConsumer(out, cutoff, isSubagentFile),
+            createFileLineConsumer(out, cutoff, isSubagentFile, isWorkflow),
           )
         }
         return out

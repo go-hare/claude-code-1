@@ -454,17 +454,55 @@ export function countGraphqlCheckStates(
   return { passed, failed, pending }
 }
 
-/** densable `wJt` */
-function isGraphqlPrNode(value: unknown): value is GraphqlPrNode {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    'number' in value &&
-    typeof (value as { number: unknown }).number === 'number' &&
-    'state' in value &&
-    typeof (value as { state: unknown }).state === 'string'
-  )
-}
+/** Official 2.1.300 (#767) `nN` — per-node GraphQL PR schema for batch tolerance. */
+const graphqlPrNodeSchema = lazySchema(() => {
+  const counts = z
+    .array(z.object({ state: z.string(), count: z.number() }))
+    .nullable()
+  const contexts = z.object({
+    contexts: z
+      .object({
+        checkRunCountsByState: counts,
+        statusContextCountsByState: counts,
+      })
+      .nullable(),
+  })
+  const commitNode = z.object({
+    commit: z.object({
+      statusCheckRollup: contexts.nullable(),
+    }),
+  })
+  return z.object({
+    number: z.number(),
+    title: z.string(),
+    state: z.string(),
+    isDraft: z.boolean(),
+    reviewDecision: z.string().nullable(),
+    additions: z.number(),
+    deletions: z.number(),
+    commits: z.object({
+      nodes: z.array(commitNode.nullable()),
+    }),
+  })
+})
+
+const BATCH_PR_FIELD_NAMES = [
+  'number',
+  'title',
+  'state',
+  'isDraft',
+  'reviewDecision',
+  'additions',
+  'deletions',
+  'commits',
+  'nodes',
+  'commit',
+  'statusCheckRollup',
+  'contexts',
+  'checkRunCountsByState',
+  'statusContextCountsByState',
+  'count',
+] as const
 
 /** densable `kJt` */
 export function mapGraphqlPullRequest(node: GraphqlPrNode): PrStatusCacheEntry {
@@ -616,10 +654,16 @@ query { rateLimit{cost remaining resetAt} ${repoFields.join(' ')} }`
           preserveOutputOnError: true,
         },
       )
-      let parsedJson: { data?: Record<string, unknown> } | null = null
+      let parsedJson: {
+        data?: Record<string, unknown>
+        errors?: unknown
+      } | null = null
       if (stdout.trim()) {
         try {
-          parsedJson = jsonParse(stdout) as { data?: Record<string, unknown> }
+          parsedJson = jsonParse(stdout) as {
+            data?: Record<string, unknown>
+            errors?: unknown
+          }
         } catch {
           parsedJson = null
         }
@@ -661,9 +705,48 @@ query { rateLimit{cost remaining resetAt} ${repoFields.join(' ')} }`
         for (const [alias, prNode] of Object.entries(repoNode)) {
           const url = aliasToUrl.get(alias)
           if (!url) continue
+          const parsedNode = graphqlPrNodeSchema().safeParse(prNode)
+          if (!parsedNode.success && prNode !== null) {
+            const { issues } = parsedNode.error
+            const badPaths = issues
+              .slice(0, 8)
+              .map(issue => issue.path.join('.') || 'the node itself')
+            const graphqlErrors = Array.isArray(parsedJson.errors)
+              ? parsedJson.errors.length
+              : 0
+            logForDebugging(
+              `[ghPrStatus] a PR in the batch reply from ${host} has an unexpected shape (gh exit ${code}; GraphQL errors: ${graphqlErrors}; bad or missing: ${badPaths.join(', ')}); keeping its last-known status`,
+            )
+            if (!shared.malformedBatchNodeLogged) {
+              shared.malformedBatchNodeLogged = true
+              const badFieldSet = new Set(
+                issues.map(issue =>
+                  issue.path.findLast(
+                    (seg): seg is string => typeof seg === 'string',
+                  ),
+                ),
+              )
+              logEvent('tengu_feature_bad', {
+                feature_name:
+                  'github_pr_status_batch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                error_code:
+                  'malformed_node' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                gh_exit_nonzero: code !== 0,
+                graphql_errors: graphqlErrors,
+                github_dot_com: isGithubDotComHost(host),
+                bad_fields: BATCH_PR_FIELD_NAMES.filter(f =>
+                  badFieldSet.has(f),
+                ).join(
+                  ',',
+                ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+            }
+          }
           statuses.set(
             url,
-            isGraphqlPrNode(prNode) ? mapGraphqlPullRequest(prNode) : null,
+            parsedNode.success
+              ? mapGraphqlPullRequest(parsedNode.data as GraphqlPrNode)
+              : null,
           )
         }
       }
@@ -837,6 +920,7 @@ export class PrStatusShared {
   directState: DirectState | null = null
   /** densable xtt.lastLoggedGhAuthState */
   lastLoggedGhAuthState: string | null = null
+  malformedBatchNodeLogged = false
   prStatusByUrl = createAsyncTtlCache(
     fetchPrStatusByUrl,
     PR_STATUS_BY_URL_TTL_MS,
@@ -924,6 +1008,7 @@ export class PrStatusShared {
     this.pollerNotModifiedStreak = 0
     this.directState = null
     this.lastLoggedGhAuthState = null
+    this.malformedBatchNodeLogged = false
     this.lastPersistedCacheBody = ''
     this.ghBackoffUntil = 0
     this.baseRepoCache = null

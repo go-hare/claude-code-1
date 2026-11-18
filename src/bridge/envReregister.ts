@@ -18,10 +18,16 @@ export type ReregisterResult =
   | {
       outcome: 'reregistered'
       environmentSecret: string
+      environmentSecretExpiresIn?: number
       pendingRequeues: string[]
     }
   | { outcome: 'transient'; retryAfterMs?: number }
-  | { outcome: 'fatal' }
+  | {
+      outcome: 'fatal'
+      reason?: 'register_rejected' | 'replaced'
+      status?: number
+      message?: string
+    }
 
 /**
  * Official `It` — environment is gone (404/410 or "environment … not found").
@@ -135,12 +141,27 @@ export async function reconnectAfterReregister(
 /**
  * Official `pn` — remint the same environment_id and re-queue active sessions.
  */
+function extractRejectStatus(err: unknown): number | undefined {
+  if (err instanceof BridgeFatalError) return err.status
+  if (
+    err &&
+    typeof err === 'object' &&
+    'status' in err &&
+    typeof (err as { status?: unknown }).status === 'number'
+  ) {
+    const s = (err as { status: number }).status
+    if (s >= 400 && s < 500 && s !== 408 && s !== 429) return s
+  }
+  return undefined
+}
+
 export async function reregisterEnvironment({
   api,
   config,
   environmentId,
   activeSessions,
   attempt,
+  trigger = 'poll_404',
   signal,
 }: {
   api: BridgeApiClient
@@ -148,23 +169,37 @@ export async function reregisterEnvironment({
   environmentId: string
   activeSessions: { keys(): IterableIterator<string>; has(id: string): boolean }
   attempt: number
+  trigger?: 'poll_404' | 'proactive'
   signal: AbortSignal
 }): Promise<ReregisterResult> {
-  logForDebugging(
-    `[bridge:poll] Poll returned 404; re-registering environment ${environmentId} (attempt ${attempt}/${MAX_ENV_REREGISTER_ATTEMPTS})`,
-    { level: 'warn' },
-  )
+  if (trigger === 'proactive') {
+    logForDebugging(
+      `[bridge:poll] Environment secret expires soon; re-registering environment ${environmentId} to renew it (attempt ${attempt})`,
+      { level: 'info' },
+    )
+  } else {
+    logForDebugging(
+      `[bridge:poll] Poll returned 404; re-registering environment ${environmentId} (attempt ${attempt}/${MAX_ENV_REREGISTER_ATTEMPTS})`,
+      { level: 'warn' },
+    )
+  }
 
-  let registered: { environment_id: string; environment_secret: string }
+  let registered: {
+    environment_id: string
+    environment_secret: string
+    environment_secret_expires_in?: number
+  }
   try {
     registered = await api.registerBridgeEnvironment(
       { ...config, reuseEnvironmentId: environmentId },
       signal,
     )
   } catch (err) {
-    const rejected = isClientReject(err)
+    const status = extractRejectStatus(err)
+    const rejected = status !== undefined || isClientReject(err)
+    const msg = errorMessage(err)
     logForDebugging(
-      `[bridge:poll] Re-registration of ${environmentId} ${rejected ? 'rejected' : 'failed transiently'}: ${errorMessage(err)}`,
+      `[bridge:poll] Re-registration of ${environmentId} ${rejected ? 'rejected' : 'failed transiently'}: ${msg}`,
       { level: rejected ? 'error' : 'warn' },
     )
     if (signal.aborted) {
@@ -180,7 +215,12 @@ export async function reregisterEnvironment({
       logForDiagnosticsNoPII('error', 'bridge_env_reregister', {
         outcome: 'register_rejected',
       })
-      return { outcome: 'fatal' }
+      return {
+        outcome: 'fatal',
+        reason: 'register_rejected',
+        status,
+        message: msg,
+      }
     }
     return { outcome: 'transient', retryAfterMs: retryAfterMs(err) }
   }
@@ -205,7 +245,7 @@ export async function reregisterEnvironment({
           { level: 'warn' },
         ),
       )
-    return { outcome: 'fatal' }
+    return { outcome: 'fatal', reason: 'replaced' }
   }
 
   const sessionIds = [...activeSessions.keys()]
@@ -218,6 +258,14 @@ export async function reregisterEnvironment({
     attempt,
     active_sessions: sessionIds.length,
   })
+  if (trigger === 'proactive') {
+    return {
+      outcome: 'reregistered',
+      environmentSecret: registered.environment_secret,
+      environmentSecretExpiresIn: registered.environment_secret_expires_in,
+      pendingRequeues: [],
+    }
+  }
   logForDebugging(
     `[bridge:poll] Environment ${environmentId} re-registered in place; re-queuing ${sessionIds.length} session(s)`,
     { level: 'info' },
@@ -245,6 +293,7 @@ export async function reregisterEnvironment({
   return {
     outcome: 'reregistered',
     environmentSecret: registered.environment_secret,
+    environmentSecretExpiresIn: registered.environment_secret_expires_in,
     pendingRequeues,
   }
 }

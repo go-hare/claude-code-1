@@ -14,7 +14,11 @@ import {
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
 import { createSystemAPIErrorMessage } from 'src/utils/messages.js'
-import { getAPIProviderForStatsig } from 'src/utils/model/providers.js'
+import {
+  getAPIProvider,
+  getAPIProviderForStatsig,
+} from 'src/utils/model/providers.js'
+import { getDensableCatalogModel } from 'src/utils/model/modelCatalogCapabilities.js'
 import {
   isAnthropicAwsProviderEnabled,
   isMantleProviderEnabled,
@@ -286,7 +290,10 @@ export class CannotRetryError extends Error {
  * reason defaults to "overloaded" (529 capacity path); "model_not_found"
  * is the permanent primary-model failure that yields system/model_fallback.
  */
-export type FallbackTriggeredReason = 'overloaded' | 'model_not_found'
+export type FallbackTriggeredReason =
+  | 'overloaded'
+  | 'model_not_found'
+  | 'permission_denied'
 
 export class FallbackTriggeredError extends Error {
   public readonly reason: FallbackTriggeredReason
@@ -344,6 +351,49 @@ export function isModelNotFoundAPIError(error: unknown): boolean {
   return isNotFound && mentionsModel
 }
 
+/**
+ * Official 2.1.301 A2e — 403 permission_error mentioning `model:`.
+ */
+export function isModelPermissionAPIError(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 403) {
+    return false
+  }
+  const message = error.message ?? ''
+  const body =
+    error.error && typeof error.error === 'object'
+      ? (error.error as { type?: unknown; message?: unknown })
+      : undefined
+  const bodyType = typeof body?.type === 'string' ? body.type : undefined
+  const bodyMessage =
+    typeof body?.message === 'string' ? body.message : undefined
+  const isPermission =
+    bodyType === 'permission_error' ||
+    message.includes('"type":"permission_error"') ||
+    message.includes('"type": "permission_error"')
+  const mentionsModel =
+    message.includes('model:') ||
+    (bodyMessage !== undefined && bodyMessage.includes('model:'))
+  return isPermission && mentionsModel
+}
+
+/**
+ * Official 2.1.301 (#850): when the newest Fable model is not available to an
+ * organization on the first-party Anthropic API, fall back once to the previous
+ * Fable model (`fallback_3p`).
+ */
+export function resolveFableAvailabilityFallbackModel(
+  model: string,
+): string | undefined {
+  if (getAPIProvider() !== 'firstParty') {
+    return undefined
+  }
+  const entry = getDensableCatalogModel(model)
+  if (entry?.family === 'fable' && entry.fallback_3p) {
+    return entry.fallback_3p
+  }
+  return undefined
+}
+
 export async function* withRetry<T>(
   getClient: () => Promise<Anthropic>,
   operation: (
@@ -364,6 +414,7 @@ export async function* withRetry<T>(
   let lastError: unknown
   let persistentAttempt = 0
   let watchdogSpentMs = 0
+  let usageLimitSpentMs = 0
   // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
   let awsAuthRetryCount = 0
   let gcpAuthRetryCount = 0
@@ -566,24 +617,32 @@ export async function* withRetry<T>(
         continue
       }
 
-      // Official densable: permanent model_not_found → FallbackTriggeredError
+      // Official densable: permanent model_not_found / permission_denied → FallbackTriggeredError
       // with reason (before capacity/529 retry path). Host gets system/model_fallback.
+      // Official 2.1.301 (#850): also fall back once on firstParty for Fable availability errors.
+      const isModelNotFound = isModelNotFoundAPIError(error)
+      const isModelPerm = isModelPermissionAPIError(error)
+      const effectiveFallbackModel =
+        options.fallbackModel ??
+        (isModelNotFound || isModelPerm
+          ? resolveFableAvailabilityFallbackModel(options.model)
+          : undefined)
       if (
-        isModelNotFoundAPIError(error) &&
-        options.fallbackModel &&
-        options.fallbackModel !== options.model
+        (isModelNotFound || isModelPerm) &&
+        effectiveFallbackModel &&
+        effectiveFallbackModel !== options.model
       ) {
         logEvent('tengu_api_model_not_found_fallback_triggered', {
           original_model:
             options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           fallback_model:
-            options.fallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            effectiveFallbackModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           provider: getAPIProviderForStatsig(),
         })
         throw new FallbackTriggeredError(
           options.model,
-          options.fallbackModel,
-          'model_not_found',
+          effectiveFallbackModel,
+          isModelNotFound ? 'model_not_found' : 'permission_denied',
         )
       }
 
@@ -817,6 +876,42 @@ export async function* withRetry<T>(
         throw new CannotRetryError(error, retryContext)
       }
 
+      // Official 2.1.301 (#843): CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS
+      let isUsageLimit429 = false
+      let usageLimitOverrideDelay: number | undefined
+      if (watchdogActive && error instanceof APIError && error.status === 429) {
+        const resetDelay = getRateLimitResetDelayMs(error)
+        if (
+          resetDelay !== null &&
+          error.headers?.get?.('anthropic-ratelimit-unified-status') ===
+            'rejected'
+        ) {
+          const maxUsageLimitWaitMs = getRetryWatchdogMaxUsageLimitWaitMs()
+          const remainingUsageLimitWait =
+            (maxUsageLimitWaitMs ?? Infinity) - usageLimitSpentMs
+          if (resetDelay > remainingUsageLimitWait) {
+            const overageStatus = error.headers?.get?.(
+              'anthropic-ratelimit-unified-overage-status',
+            )
+            const overageAllowed =
+              overageStatus === 'allowed' || overageStatus === 'allowed_warning'
+            const disabledReason = error.headers?.get?.(
+              'anthropic-ratelimit-unified-overage-disabled-reason',
+            )
+            if (
+              remainingUsageLimitWait <= 0 ||
+              (!overageAllowed && disabledReason !== 'fetch_error')
+            ) {
+              throw new CannotRetryError(error, retryContext)
+            }
+            usageLimitOverrideDelay = overageAllowed
+              ? Math.min(remainingUsageLimitWait, getRetryDelay(attempt))
+              : remainingUsageLimitWait
+          }
+          isUsageLimit429 = true
+        }
+      }
+
       let delayMs: number
       if (persistent && error instanceof APIError && error.status === 429) {
         persistentAttempt++
@@ -855,9 +950,15 @@ export async function* withRetry<T>(
           overloadedBaseDelayMs,
         )
       }
+      if (usageLimitOverrideDelay !== undefined) {
+        delayMs = usageLimitOverrideDelay
+      }
       if (maxWaitMs !== undefined) {
         delayMs = Math.min(delayMs, Math.max(0, maxWaitMs - watchdogSpentMs))
         watchdogSpentMs += delayMs
+      }
+      if (watchdogActive && isUsageLimit429) {
+        usageLimitSpentMs += delayMs
       }
 
       // In persistent mode the for-loop `attempt` is clamped at maxRetries+1;
@@ -967,6 +1068,12 @@ export function getRetryWatchdogMaxWaitMs(
   }
   return parseOptionalNonNegativeIntEnv(
     'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS',
+  )
+}
+
+export function getRetryWatchdogMaxUsageLimitWaitMs(): number | undefined {
+  return parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS',
   )
 }
 

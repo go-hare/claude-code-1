@@ -4,7 +4,8 @@ import { getCwdState } from '../../bootstrap/state.js';
 import { SandboxSettings } from '../../components/sandbox/SandboxSettings.js';
 import { color } from '@anthropic/ink';
 import { getPlatform } from '../../utils/platform.js';
-import { addToExcludedCommands, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { addToExcludedCommandsWithResult, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { formatSandboxSaveResult } from '../../components/sandbox/SandboxSettings.js';
 import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';
 import type { ThemeName } from '../../utils/theme.js';
 
@@ -82,7 +83,15 @@ export async function call(
       const cleanPattern = commandPattern.replace(/^["']|["']$/g, '');
 
       // Add to excludedCommands
-      addToExcludedCommands(cleanPattern);
+      const saveResult = addToExcludedCommandsWithResult(cleanPattern);
+      if (saveResult.error !== null) {
+        const message = color(
+          'error',
+          themeName,
+        )(formatSandboxSaveResult({ error: saveResult.error }, '', saveResult.settingsSource));
+        onDone(message);
+        return null;
+      }
 
       // Get the local settings path and make it relative to cwd
       const localSettingsPath = getSettingsFilePathForSource('localSettings');

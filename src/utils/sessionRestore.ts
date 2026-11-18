@@ -68,6 +68,7 @@ import { setCwd } from './Shell.js'
 import {
   adoptResumedSessionFile,
   recordContentReplacement,
+  rehydrateAgentNameRegistry,
   resetSessionFilePointer,
   restoreSessionMetadata,
   saveMode,
@@ -215,6 +216,26 @@ export function restoreSessionStateFromLog(
       ...prev,
       mainLoopModel: sessionModel,
     }))
+  }
+
+  // Official xpr (#688): rebuild agentNameRegistry from resumed transcript
+  // messages (skipped on fork so forked session doesn't inherit parent's names).
+  if (!options?.forkSession && result.messages && result.messages.length > 0) {
+    const messages = result.messages
+    try {
+      setAppState(prev => {
+        const next = rehydrateAgentNameRegistry(
+          messages,
+          prev.agentNameRegistry ?? new Map(),
+        )
+        return next === null ? prev : { ...prev, agentNameRegistry: next }
+      })
+    } catch (err) {
+      logForDebugging(
+        `session rehydration threw: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        { level: 'error' },
+      )
+    }
   }
 
   // densable #13 y_u after OMo — interactive / resume only (never continue)

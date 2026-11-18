@@ -208,7 +208,7 @@ function tokenize(
           code === ESC_TYPE.APC &&
           (!x10Mouse ||
             i + 1 >= data.length ||
-            data[i + 1] === KITTY_GRAPHICS_APC_PREFIX[0])
+            isKittyGraphicsApc(data, i + 1, i + 1))
         ) {
           result.state = 'apc'
           i++
@@ -325,8 +325,7 @@ function tokenize(
           x10Mouse &&
           result.state === 'apc' &&
           i >= seqStart + 2 &&
-          i - seqStart - 2 < KITTY_GRAPHICS_APC_PREFIX.length &&
-          data[i] !== KITTY_GRAPHICS_APC_PREFIX[i - seqStart - 2]
+          !isKittyGraphicsApc(data, seqStart + 2, i)
         ) {
           emitSequence(data.slice(seqStart, seqStart + 2))
           textStart = seqStart + 2
@@ -374,4 +373,27 @@ function tokenize(
   }
 
   return { tokens, state: result }
+}
+
+/**
+ * Official 2.1.325 `ae(e, n, s)` — validates Kitty graphics APC payload prefix
+ * (`Gi=...`, `GOK...`, `GE...:`) so non-Kitty `ESC _` in non-bracketed paste
+ * does not swallow subsequent text.
+ */
+function isKittyGraphicsApc(data: string, start: number, idx: number): boolean {
+  const ch = data[idx]
+  const offset = idx - start
+  if (offset === 0) return ch === 'G'
+  if (offset === 1) return ch === 'i' || ch === 'O' || ch === 'E'
+  const second = data[start + 1]
+  if (second === 'i') return offset > 2 || ch === '='
+  const code = data.charCodeAt(idx)
+  const isTerm = code === C0.ESC || code === C0.BEL
+  if (second === 'O') return offset === 2 ? ch === 'K' : isTerm
+  const colon = data.indexOf(':', start + 3)
+  if (colon !== -1 && colon < idx) return true
+  return (
+    (ch !== undefined && ch >= 'A' && ch <= 'Z') ||
+    (offset > 2 && (ch === ':' || isTerm))
+  )
 }

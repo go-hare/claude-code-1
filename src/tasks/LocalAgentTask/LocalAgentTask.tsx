@@ -632,6 +632,15 @@ export type LocalAgentTaskState = TaskStateBase & {
    */
   isObserver?: boolean;
   /**
+   * Official chatEngaged — set when user sends a message to the subagent;
+   * keeps completed backgrounded subagents in /tasks unless forfeited.
+   */
+  chatEngaged?: boolean;
+  /**
+   * Official chatPinForfeited — set when chat pin is forfeited (e.g. /clear).
+   */
+  chatPinForfeited?: boolean;
+  /**
    * Official keepaliveReasons — Set of reason strings (`workflow:id`,
    * `agent:id`, `bash:id`, `monitor:id`, `flag:idle-window`). Non-empty
    * blocks eviction (zle/tB); Gge adds, tB removes.
@@ -933,6 +942,127 @@ export function resolvePanelOwnerAgentId(
 }
 
 /**
+ * Official O1r — resolve the panel parent agent task ID for a task.
+ */
+export function getPanelParentAgentId(
+  task: Pick<TaskStateBase, 'type'> & {
+    parentAgentId?: string;
+    spawnerAgentId?: string;
+    agentId?: string;
+  },
+  tasks: Record<string, TaskStateBase | undefined>,
+): string | undefined {
+  let parentId: string | undefined;
+  switch (task.type) {
+    case 'local_agent':
+      parentId = task.parentAgentId;
+      break;
+    case 'local_workflow':
+      parentId = task.spawnerAgentId;
+      break;
+    case 'local_bash':
+    case 'monitor_mcp':
+    case 'monitor_ws':
+      parentId = task.agentId;
+      break;
+    default:
+      return undefined;
+  }
+  if (parentId === undefined) return undefined;
+  const parent = tasks[parentId];
+  if (!isPanelAgentTask(parent)) return undefined;
+  return (parent as LocalAgentTaskState).isObserver === true ? undefined : parentId;
+}
+
+const chatPinForfeitedAgentIds = new Set<string>();
+
+/**
+ * Official m4 — true when a completed backgrounded subagent was engaged in chat
+ * by the user and should remain in /tasks without an eviction deadline.
+ */
+export function isChatEngagedAgent(task: TaskStateBase | undefined): boolean {
+  if (!task || task.type !== 'local_agent' || task.status !== 'completed') {
+    return false;
+  }
+  const agent = task as LocalAgentTaskState;
+  return (
+    agent.agentType !== 'main-session' &&
+    agent.isBackgrounded === true &&
+    agent.isObserver !== true &&
+    agent.evictAfter !== 0 &&
+    agent.chatEngaged === true &&
+    agent.chatPinForfeited !== true
+  );
+}
+
+/**
+ * Official dqi — mark a local_agent task as chat-engaged (unless forfeited).
+ */
+export function markAgentChatEngaged(taskId: string, registry: TaskRegistry): void {
+  registry.update<LocalAgentTaskState>(taskId, task =>
+    task.chatEngaged === true || task.chatPinForfeited === true ? task : { ...task, chatEngaged: true },
+  );
+}
+
+/**
+ * Official pMs — true if the agent or any parent/owner has forfeited its chat pin.
+ */
+export function hasForfeitedChatPin(
+  task: LocalAgentTaskState,
+  tasks: Record<string, TaskStateBase | undefined>,
+): boolean {
+  for (const key of ['parentAgentId', 'ownerAgentId'] as const) {
+    const id = task[key];
+    if (typeof id !== 'string' || !Object.hasOwn(tasks, id)) continue;
+    const parent = tasks[id] as LocalAgentTaskState | undefined;
+    if (parent?.chatPinForfeited === true) return true;
+  }
+  return typeof task.agentId === 'string' && chatPinForfeitedAgentIds.has(task.agentId);
+}
+
+/**
+ * Official pci — forfeit chat pins across tasks, scheduling eviction for completed
+ * chat-engaged agents that have no other keepalive/retain holds.
+ */
+export function forfeitChatPins(
+  tasks: { [taskId: string]: TaskState },
+  now: number = Date.now(),
+  graceMs: number = 30_000,
+): { [taskId: string]: TaskState } {
+  let next: { [taskId: string]: TaskState } | undefined;
+  for (const [id, raw] of Object.entries(tasks)) {
+    if (!isLocalAgentTask(raw) || raw.chatPinForfeited === true) continue;
+    const wasEngaged = isChatEngagedAgent(raw);
+    next ??= { ...tasks };
+    next[id] = {
+      ...raw,
+      chatPinForfeited: true,
+      ...(wasEngaged && !raw.retain && (raw.keepaliveReasons?.size ?? 0) === 0
+        ? {
+            evictAfter: raw.endTime === undefined ? now : Math.max(now, raw.endTime + graceMs),
+          }
+        : {}),
+    } as LocalAgentTaskState;
+  }
+  return next ?? tasks;
+}
+
+/**
+ * Official cqi — forfeit all chat pins in AppState and record agentIds.
+ */
+export function forfeitAllChatPins(setAppState: SetAppState, now: number = Date.now()): void {
+  setAppState(prev => {
+    for (const raw of Object.values(prev.tasks)) {
+      if (isLocalAgentTask(raw) && raw.agentId) {
+        chatPinForfeitedAgentIds.add(raw.agentId);
+      }
+    }
+    const nextTasks = forfeitChatPins(prev.tasks, now);
+    return nextTasks === prev.tasks ? prev : { ...prev, tasks: nextTasks };
+  });
+}
+
+/**
  * densable sqe(e,t,r,n={}): append `{text, origin, isMeta:n.isMeta??!1}`.
  * Overload accepts a full entry (re-queue path after Qeo) or text + opts.
  */
@@ -961,6 +1091,9 @@ export function queuePendingMessage(
         };
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => ({
     ...task,
+    ...(origin?.kind === 'human' && task.chatEngaged !== true && task.chatPinForfeited !== true
+      ? { chatEngaged: true }
+      : {}),
     pendingMessages: [...task.pendingMessages, entry],
   }));
 }
@@ -1082,6 +1215,22 @@ function claimAgentNotification(
   return { claimed, task };
 }
 
+/**
+ * Official lAr — true when a completed backgrounded agent is still waiting on
+ * its own background work (monitors, workflows, or bash tasks).
+ */
+export function isAgentWaitingOnOwnBackgroundWork(task: TaskState | undefined): boolean {
+  if (!isLocalAgentTask(task) || !task.isBackgrounded || task.status !== 'completed') {
+    return false;
+  }
+  for (const reason of task.keepaliveReasons ?? []) {
+    if (reason.startsWith('monitor:') || reason.startsWith('workflow:') || reason.startsWith('bash:')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function enqueueAgentNotification({
   taskId,
   description,
@@ -1091,6 +1240,7 @@ export async function enqueueAgentNotification({
   finalMessage,
   maxTurnsReached,
   usage,
+  usageLimit,
   toolUseId,
   worktreePath,
   worktreeBranch,
@@ -1113,6 +1263,11 @@ export async function enqueueAgentNotification({
     totalTokens: number;
     toolUses: number;
     durationMs: number;
+  };
+  /** Official E?.limits — when stopped by a usage limit. */
+  usageLimit?: {
+    resetsAt?: number;
+    rateLimitType?: string;
   };
   toolUseId?: string;
   worktreePath?: string;
@@ -1190,11 +1345,20 @@ export async function enqueueAgentNotification({
 
   // densable BRt summary wording
   const killedSummary =
-    killedBy === 'parent' ? 'was stopped by Claude' : killedBy === 'user' ? 'was stopped by user' : 'was stopped';
+    killedBy === 'parent'
+      ? 'was stopped by Claude'
+      : killedBy === 'user'
+        ? 'was stopped by user'
+        : error
+          ? `was stopped: ${error}`
+          : 'was stopped';
   // densable 2.1.246 #54 b2: `_=a?stopped at its ${a}-turn limit…:Pqn`
+  const waitingOnOwnWork = status === 'completed' && isAgentWaitingOnOwnBackgroundWork(claimedTask);
   const completedSummary = maxTurnsReached
     ? `stopped at its ${maxTurnsReached}-turn limit (partial result; ${SEND_MESSAGE_TOOL_NAME} to task-id to continue)`
-    : 'finished';
+    : waitingOnOwnWork
+      ? 'is waiting on its own background work'
+      : 'finished';
   const summary =
     status === 'completed'
       ? `Agent "${description}" ${completedSummary}`
@@ -1216,8 +1380,14 @@ export async function enqueueAgentNotification({
   const worktreeSection = worktreePath
     ? `\n<${WORKTREE_TAG}><${WORKTREE_PATH_TAG}>${escapeXml(worktreePath)}</${WORKTREE_PATH_TAG}>${worktreeBranch ? `<${WORKTREE_BRANCH_TAG}>${escapeXml(worktreeBranch)}</${WORKTREE_BRANCH_TAG}>` : ''}</${WORKTREE_TAG}>`
     : '';
-  const noteSection =
-    '\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>';
+  const lateMessageNote =
+    status === 'completed' && claimedTask && claimedTask.pendingMessages.length > 0
+      ? " One or more messages sent to this agent arrived after this run's last step, too late for the result below. The agent is being resumed with them and will notify again. Wait for that notification before resending."
+      : '';
+  const usageLimitNote = usageLimit
+    ? ` This agent's work so far is saved. Once its requests are accepted again, send the agent a message (${SEND_MESSAGE_TOOL_NAME}) to let it continue from where it stopped instead of starting a new agent.`
+    : '';
+  const noteSection = `\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.${lateMessageNote}${usageLimitNote}</note>`;
 
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
@@ -1889,6 +2059,14 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
     // Gold `l` (hasNonIdleWindowKeepalive) only gates dead `o&&a&&!l` telemetry.
     const prevReasons = task.keepaliveReasons ?? new Set<string>();
     const nextKeepalive = a ? new Set(prevReasons).add(IDLE_WINDOW_KEEPALIVE_REASON) : new Set(prevReasons);
+    const completedCandidate = {
+      ...task,
+      status: 'completed' as const,
+      keepaliveReasons: nextKeepalive,
+    };
+    const evictAfter = isChatEngagedAgent(completedCandidate)
+      ? undefined
+      : computePanelEvictAfter({ retain: task.retain, keepaliveReasons: nextKeepalive }, { park: true });
 
     const next = {
       ...task,
@@ -1906,8 +2084,8 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
       },
       endTime: Date.now(),
       keepaliveReasons: nextKeepalive,
-      // densable QYi(park:true): non-empty KA → no grace; empty → panel grace
-      evictAfter: computePanelEvictAfter({ retain: task.retain, keepaliveReasons: nextKeepalive }, { park: true }),
+      // densable QYi(park:true): non-empty KA or chatEngaged → no grace; empty → panel grace
+      evictAfter,
       abortController: undefined,
       unregisterCleanup: undefined,
       selectedAgent: undefined,

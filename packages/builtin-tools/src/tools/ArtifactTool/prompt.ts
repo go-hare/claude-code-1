@@ -1,3 +1,5 @@
+import { shouldOfferPublishEdits } from './quickstartRules.js'
+
 export const ARTIFACT_TOOL_NAME = 'Artifact'
 
 export async function describeArtifactTool(): Promise<string> {
@@ -5,11 +7,14 @@ export async function describeArtifactTool(): Promise<string> {
 }
 
 export async function getArtifactToolPrompt(): Promise<string> {
+  const publishEditsClause = shouldOfferPublishEdits()
+    ? '\n- For a small change to a page published from a file in this conversation, Claude can send the change as `edits` on the publish call itself (old_str/new_str pairs copied exactly from the file as it now stands) instead of editing the file first.'
+    : ''
   return `Official Artifact tool (densable name \`Artifact\`).
 
 ## Tip cloud-artifacts upload (no action)
 - \`file_path\` (required): absolute HTML/Markdown path
-- \`hash\` / \`ttl\` optional
+- \`hash\` / \`ttl\` optional${publishEditsClause}
 Output: \`{ id, url, expiresAt }\`.
 
 ## densable actions

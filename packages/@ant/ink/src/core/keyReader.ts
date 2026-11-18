@@ -25,6 +25,8 @@ export type KeyReader = {
   byteRunDeadlineAt: number | null
   mousePrefixDropAt: number | null
   droppedPrefixDropAt: number | null
+  /** Official 2.1.325 (#864) `heldReadLate` — ESC held across a late read. */
+  heldReadLate: boolean
 }
 
 export type KeyReadResult = {
@@ -41,6 +43,7 @@ export function createKeyReader(now: number): KeyReader {
     byteRunDeadlineAt: null,
     mousePrefixDropAt: null,
     droppedPrefixDropAt: null,
+    heldReadLate: false,
   }
 }
 
@@ -54,11 +57,12 @@ export function keyReaderHasPending(reader: KeyReader): boolean {
   )
 }
 
-/** densable `Ed`. */
+/** densable `Ed` / 2.1.325 `Jc`. */
 export function readKeys(
   reader: KeyReader,
   input: string | Buffer | null,
   now: number,
+  readLate = false,
 ): KeyReadResult {
   let parse = reader.parse
   let droppedPrefixDropAt = reader.droppedPrefixDropAt
@@ -71,8 +75,24 @@ export function readKeys(
     droppedPrefixDropAt = null
   }
   const prev = parse
-  const [keys, next] = parseMultipleKeypresses(parse, input)
+  const [rawKeys, next] = parseMultipleKeypresses(parse, input)
   const inPaste = next.mode === 'IN_PASTE'
+  const inputReadLate = input !== null && readLate
+  const firstLate =
+    inputReadLate ||
+    reader.heldReadLate ||
+    (input !== null &&
+      prev.incomplete === '\x1b' &&
+      now - reader.lastInputAt >= KEY_READER_NORMAL_MS)
+  const restLate = input === null ? reader.heldReadLate : inputReadLate
+  const keys =
+    firstLate || restLate
+      ? rawKeys.map((k, idx) =>
+          k.kind === 'key' && (idx === 0 ? firstLate : restLate)
+            ? { ...k, readLate: true }
+            : k,
+        )
+      : rawKeys
   let byteRunDeadlineAt = reader.byteRunDeadlineAt
   if (next.pendingByteEvents.length === 0) {
     byteRunDeadlineAt = null
@@ -130,6 +150,8 @@ export function readKeys(
       byteRunDeadlineAt,
       mousePrefixDropAt,
       droppedPrefixDropAt,
+      heldReadLate:
+        next.incomplete !== '' && (rawKeys.length === 0 ? firstLate : restLate),
     },
     wakeAt: waitMs === null ? null : now + waitMs,
   }

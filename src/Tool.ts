@@ -1381,6 +1381,18 @@ type ToolDefaults = typeof TOOL_DEFAULTS
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = ToolDef<any, any, any>
 
+import { applyPendingUiInvalidations } from './utils/plugins/functionHooksModules.js'
+
+/**
+ * densable `eDr.get()?.flushInvalidations()` / `cxr()` — flush pending
+ * `$.ui.invalidate(...)` entries (e.g. `tool.describe`, `tool.list`).
+ */
+export function flushToolUiInvalidations(
+  handlers: Partial<Record<string, () => void>> = {},
+): string[] {
+  return applyPendingUiInvalidations(handlers)
+}
+
 export function buildTool<D extends AnyToolDef>(def: D): BuiltTool<D> {
   // Do NOT object-spread `def`: tools often define `get outputSchema()` (and
   // similar) that close over sibling lazySchema factories. Spreading invokes

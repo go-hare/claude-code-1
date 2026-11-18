@@ -86,6 +86,7 @@ import {
   getDefaultSonnetModel,
   getDefaultHaikuModel,
   getDefaultOpusModel,
+  getMainLoopModel,
 } from './model/model.js'
 import { mergeSkillToolCommands } from '../commands.js'
 import type { ReadResourceResult } from 'src/services/mcp/types.js'
@@ -355,6 +356,8 @@ export type PDFReferenceAttachment = {
   fileSize: number
   /** Path relative to CWD at creation time, for stable display */
   displayPath: string
+  wholeRefusedByModel?: boolean
+  modelReadsByPage?: boolean
 }
 
 export type AlreadyReadFileAttachment = {
@@ -1000,6 +1003,18 @@ export type GetAttachmentsOptions = {
    */
   isRegularUserPrompt?: boolean
   /**
+   * Official 2.1.299 (#679) `deliveredTurnStart`: true on delivered headless
+   * turns (task-notification / skipAttachments / null input) so ultra_effort_enter
+   * is still announced when ultracode is enabled in settings.
+   */
+  deliveredTurnStart?: boolean
+  /**
+   * Official 2.1.300: prompt originated from a connector; when `tengu_pure_squid`
+   * is enabled, `@`-mentions emit path-only `at_mention_reference` instead of
+   * reading file contents.
+   */
+  fromConnector?: boolean
+  /**
    * densable isHumanTypedPrompt = isRegularUserPrompt && Wzn(origin).
    * Required for workflow_keyword_request (p2y).
    */
@@ -1063,7 +1078,14 @@ export async function getAttachments(
           ? []
           : [
               maybe('at_mentioned_files', () =>
-                processAtMentionedFiles(input, context),
+                isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_MENTIONS) ||
+                (options?.fromConnector === true &&
+                  getFeatureValue_CACHED_MAY_BE_STALE(
+                    'tengu_pure_squid',
+                    false,
+                  ) === true)
+                  ? Promise.resolve(processDisabledFileMentions(input))
+                  : processAtMentionedFiles(input, context),
               ),
               maybe('mcp_resources', () =>
                 processMcpResourceAttachments(input, context),
@@ -1284,7 +1306,11 @@ export async function getAttachments(
     // getAttachments call but f2y itself throttles via human-turn counting
     // and only emits when the mode state flips or maintenance is due.
     maybe('ultra_effort', () =>
-      Promise.resolve(getUltraEffortAttachments(messages, toolUseContext)),
+      Promise.resolve(
+        options?.isRegularUserPrompt || options?.deliveredTurnStart
+          ? getUltraEffortAttachments(messages, toolUseContext)
+          : [],
+      ),
     ),
     ...(feature('TRANSCRIPT_CLASSIFIER')
       ? [
@@ -1378,7 +1404,9 @@ export async function getAttachments(
             ),
           ),
         ),
-        ...(input === null && options?.isRegularUserPrompt !== true
+        ...(input === null &&
+        options?.isRegularUserPrompt !== true &&
+        options?.deliveredTurnStart !== true
           ? [
               maybe('silent_turn_reminder', () => {
                 try {
@@ -2309,7 +2337,14 @@ export function getMcpInstructionsDeltaAttachment(
     })
   }
 
-  const delta = getMcpInstructionsDelta(mcpClients, messages ?? [], clientSide)
+  const delta = getMcpInstructionsDelta(
+    mcpClients,
+    messages ?? [],
+    clientSide,
+    {
+      retractionHoldEnabled: true,
+    },
+  )
   if (!delta) return []
   const instructionsByServer = new Map<string, string>()
   for (const c of mcpClients) {
@@ -2708,6 +2743,22 @@ async function getOpenedFileFromIDE(
     {
       type: 'opened_file_in_ide',
       filename: ideSelection.filePath,
+    },
+  ]
+}
+
+/**
+ * Official Ups(): when CLAUDE_CODE_DISABLE_FILE_MENTIONS is set, do not read
+ * or attach `@`-mentioned file contents; emit an `at_mention_reference` with
+ * just the paths so the model can read them with its file tools.
+ */
+export function processDisabledFileMentions(input: string): Attachment[] {
+  const files = extractAtMentionedFiles(input)
+  if (files.length === 0) return []
+  return [
+    {
+      type: 'at_mention_reference',
+      mentions: files,
     },
   ]
 }
@@ -3964,13 +4015,28 @@ export async function* getAttachmentMessages(
  * @param options Optional configuration for file reading
  * @returns A new_file attachment or null if the file couldn't be read
  */
+const CLAUDE_3_PDF_UNSUPPORTED_PREFIXES = [
+  'claude-3-opus',
+  'claude-3-sonnet',
+  'claude-3-haiku',
+]
+
+function modelSupportsWholePdf(model?: string): boolean {
+  const lower = (model ?? getMainLoopModel()).toLowerCase()
+  return !CLAUDE_3_PDF_UNSUPPORTED_PREFIXES.some(prefix =>
+    lower.includes(prefix),
+  )
+}
+
 /**
  * Check if a PDF file should be represented as a lightweight reference
  * instead of being inlined. Returns a PDFReferenceAttachment for large PDFs
- * (more than PDF_AT_MENTION_INLINE_THRESHOLD pages), or null otherwise.
+ * (more than PDF_AT_MENTION_INLINE_THRESHOLD pages) or when the model only
+ * reads PDFs by page (Claude 3 models), or null otherwise.
  */
 export async function tryGetPDFReference(
   filename: string,
+  model?: string,
 ): Promise<PDFReferenceAttachment | null> {
   const ext = parse(filename).ext.toLowerCase()
   if (!isPDFExtension(ext)) {
@@ -3983,11 +4049,16 @@ export async function tryGetPDFReference(
     ])
     // Use page count if available, otherwise fall back to size heuristic (~100KB per page)
     const effectivePageCount = pageCount ?? Math.ceil(stats.size / (100 * 1024))
-    if (effectivePageCount > PDF_AT_MENTION_INLINE_THRESHOLD) {
+    const overThreshold = effectivePageCount > PDF_AT_MENTION_INLINE_THRESHOLD
+    const modelReadsByPage = !modelSupportsWholePdf(model)
+    const wholeRefusedByModel = !overThreshold && modelReadsByPage
+    if (overThreshold || wholeRefusedByModel) {
       logEvent('tengu_pdf_reference_attachment', {
         pageCount: effectivePageCount,
         fileSize: stats.size,
         hadPdfinfo: pageCount !== null,
+        ...(wholeRefusedByModel && { wholeRefusedByModel }),
+        ...(modelReadsByPage && { modelReadsByPage }),
       } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
       return {
         type: 'pdf_reference',
@@ -3995,6 +4066,8 @@ export async function tryGetPDFReference(
         pageCount: effectivePageCount,
         fileSize: stats.size,
         displayPath: relative(getCwd(), filename),
+        ...(wholeRefusedByModel && { wholeRefusedByModel }),
+        ...(modelReadsByPage && { modelReadsByPage }),
       }
     }
   } catch {
@@ -4067,7 +4140,10 @@ export async function generateFileAttachment(
 
   // For large PDFs on @ mention, return a lightweight reference instead of inlining
   if (mode === 'at-mention') {
-    const pdfRef = await tryGetPDFReference(filename)
+    const pdfRef = await tryGetPDFReference(
+      filename,
+      toolUseContext.options.mainLoopModel,
+    )
     if (pdfRef) {
       return pdfRef
     }

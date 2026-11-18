@@ -14,11 +14,69 @@ import {
 } from '@anthropic/ink';
 import * as React from 'react';
 import { useState, useCallback, useLayoutEffect, useRef } from 'react';
+import axios from 'axios';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import figures from 'figures';
 import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle } from '../../utils/config.js';
 import { normalizeApiKeyForConfig } from '../../utils/authPortable.js';
+import { getClaudeAIOAuthTokens, isClaudeAISubscriber } from '../../utils/auth.js';
+import { getOauthConfig } from '../../constants/oauth.js';
 import { runFunctionHookChain } from '../../utils/plugins/functionHooksModules.js';
+
+/**
+ * Official 2.1.299 (#652): sync `/config` push notification toggles to the
+ * account's `/api/claude_code/notification/preferences` endpoint, using the
+ * newly chosen setting rather than reading stale state.
+ */
+export async function syncPushNotificationPreferences(
+  overrides: {
+    agentPushNotifEnabled?: boolean;
+    inputNeededNotifEnabled?: boolean;
+  } = {},
+  patchFn: (
+    url: string,
+    body: unknown,
+    opts: { headers: Record<string, string>; timeout: number },
+  ) => Promise<unknown> = (url, body, opts) => axios.patch(url, body, opts),
+  deps: {
+    isSubscriber?: () => boolean;
+    getTokens?: () => { accessToken?: string } | null;
+    getConfig?: () => GlobalConfig;
+  } = {},
+): Promise<void> {
+  const isSubscriber = deps.isSubscriber ?? isClaudeAISubscriber;
+  const getTokens = deps.getTokens ?? getClaudeAIOAuthTokens;
+  const getConfig = deps.getConfig ?? getGlobalConfig;
+  try {
+    if (!isSubscriber()) return;
+    const tokens = getTokens();
+    if (!tokens?.accessToken) return;
+    const config = getConfig();
+    const agentPush = overrides.agentPushNotifEnabled ?? config.agentPushNotifEnabled;
+    const inputNeeded = overrides.inputNeededNotifEnabled ?? config.inputNeededNotifEnabled;
+    const featurePreference: Record<string, { enable_push: boolean }> = {};
+    if (typeof agentPush === 'boolean') {
+      featurePreference.bogosort = { enable_push: agentPush };
+    }
+    if (typeof inputNeeded === 'boolean') {
+      featurePreference.code_requires_action = { enable_push: inputNeeded };
+    }
+    if (Object.keys(featurePreference).length === 0) return;
+    await patchFn(
+      `${getOauthConfig().BASE_API_URL}/api/claude_code/notification/preferences`,
+      { preferences: { feature_preference: featurePreference } },
+      {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      },
+    );
+  } catch (err) {
+    logError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
 
 export type SaveAutoUpdatesChannelHookResult =
   | { kind: 'saved'; saved: 'latest' | 'stable' }
@@ -1579,6 +1637,13 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   ...getGlobalConfig(),
                   inputNeededNotifEnabled,
                 });
+                void syncPushNotificationPreferences({ inputNeededNotifEnabled }).catch(err => {
+                  logError(err instanceof Error ? err : new Error(String(err)));
+                });
+                logEvent('tengu_push_notif_pref_changed', {
+                  key: 'inputNeededNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: inputNeededNotifEnabled,
+                });
               },
             },
             {
@@ -1594,6 +1659,13 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                 setGlobalConfig({
                   ...getGlobalConfig(),
                   agentPushNotifEnabled,
+                });
+                void syncPushNotificationPreferences({ agentPushNotifEnabled }).catch(err => {
+                  logError(err instanceof Error ? err : new Error(String(err)));
+                });
+                logEvent('tengu_push_notif_pref_changed', {
+                  key: 'agentPushNotifEnabled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  value: agentPushNotifEnabled,
                 });
               },
             },

@@ -25,6 +25,7 @@ import {
   maybeResizeAndDownsampleImageBuffer,
 } from '../../utils/imageResizer.js'
 import { logMCPError } from '../../utils/log.js'
+import { isFirstPartyAnthropicMcpUrl } from './mcpFirstPartyAutoAuth.js'
 import {
   getBinaryBlobSavedMessage,
   getFormatDescription,
@@ -88,6 +89,24 @@ export function getMaxMcpDescriptionLength(isLoaded = false): number {
   return isLoaded
     ? MAX_LOADED_MCP_DESCRIPTION_LENGTH
     : MAX_MCP_DESCRIPTION_LENGTH
+}
+
+/**
+ * SEA 325 `URe(config, isLoaded)` (#726) — exempts first-party
+ * `api.anthropic.com` HTTP/SSE MCP servers from the 4,096-char description/
+ * instructions cap.
+ */
+export function getMaxMcpDescriptionLengthForConfig(
+  config: { type?: string; url?: string },
+  isLoaded = false,
+): number {
+  if (
+    (config.type === 'http' || config.type === 'sse') &&
+    isFirstPartyAnthropicMcpUrl(config.url)
+  ) {
+    return Infinity
+  }
+  return getMaxMcpDescriptionLength(isLoaded)
 }
 
 /**

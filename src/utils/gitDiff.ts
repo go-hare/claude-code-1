@@ -15,6 +15,7 @@ import {
   gitExe,
   RAW_GIT_DIFF_FLAGS,
 } from './git.js'
+import { isReftableRepo } from './git/gitFilesystem.js'
 import type { DiffBaseMode } from './replDiffTab.js'
 
 export type GitDiffStats = {
@@ -678,14 +679,48 @@ export function parseGitDiff(stdout: string): DiffHunksBundle {
   return { hunks, skippedLarge }
 }
 
+const TRANSIENT_REFTABLE_REFS = ['CHERRY_PICK_HEAD', 'REVERT_HEAD'] as const
+const GIT_SHOW_REF_MISSING = 2
+
+/**
+ * Probe transient pseudo-refs (CHERRY_PICK_HEAD, REVERT_HEAD, REBASE_HEAD) in
+ * a reftable repository where they are not stored as loose files.
+ * Returns null only when no ref was found AND at least one probe errored/timed out.
+ */
+export async function probeTransientRefsInReftable(
+  gitDir: string,
+  refs: readonly string[],
+  runGit: (args: string[]) => Promise<number | undefined>,
+): Promise<Set<string> | null> {
+  const found = new Set<string>()
+  if (refs.length === 0 || !(await isReftableRepo(gitDir))) {
+    return found
+  }
+  const codes = await Promise.all(
+    refs.map(ref => runGit(['show-ref', '--exists', ref])),
+  )
+  let hadError = false
+  for (const [i, code] of codes.entries()) {
+    if (code === 0) {
+      found.add(refs[i]!)
+    } else if (code !== GIT_SHOW_REF_MISSING) {
+      hadError = true
+    }
+  }
+  return found.size === 0 && hadError ? null : found
+}
+
 /**
  * Check if we're in a transient git state (merge, rebase, cherry-pick, or revert).
  * During these operations, we skip diff calculation since the working
  * tree contains incoming changes that weren't intentionally made.
  *
- * Uses fs.access to check for transient ref files, avoiding process spawns.
+ * Uses fs.access for loose ref files, falling back to `git show-ref --exists`
+ * in reftable repositories where CHERRY_PICK_HEAD / REVERT_HEAD are stored in reftable.
  */
-async function isInTransientGitState(): Promise<boolean> {
+export async function isInTransientGitState(
+  abort?: AbortSignal,
+): Promise<boolean> {
   const gitDir = await getGitDir(getCwd())
   if (!gitDir) return false
 
@@ -694,16 +729,48 @@ async function isInTransientGitState(): Promise<boolean> {
     'REBASE_HEAD',
     'CHERRY_PICK_HEAD',
     'REVERT_HEAD',
+    'rebase-merge',
+    join('rebase-apply', 'rebasing'),
   ]
 
-  const results = await Promise.all(
+  const [
+    mergeHead,
+    rebaseHead,
+    cherryPickHead,
+    revertHead,
+    rebaseMerge,
+    rebaseApply,
+  ] = await Promise.all(
     transientFiles.map(file =>
       access(join(gitDir, file))
         .then(() => true)
         .catch(() => false),
     ),
   )
-  return results.some(Boolean)
+  const rebaseActive = Boolean(rebaseMerge || rebaseApply)
+  if (
+    mergeHead ||
+    cherryPickHead ||
+    revertHead ||
+    (rebaseHead && rebaseActive)
+  ) {
+    return true
+  }
+  if (abort?.aborted) {
+    return false
+  }
+  const refs = rebaseActive
+    ? [...TRANSIENT_REFTABLE_REFS, 'REBASE_HEAD']
+    : TRANSIENT_REFTABLE_REFS
+  const found = await probeTransientRefsInReftable(gitDir, refs, async args => {
+    const res = await execFileNoThrow(
+      gitExe(),
+      ['--no-optional-locks', ...args],
+      gitOpts(abort),
+    )
+    return res.code
+  })
+  return found !== null && found.size > 0
 }
 
 /**
@@ -713,7 +780,7 @@ async function isInTransientGitState(): Promise<boolean> {
  * @param maxFiles Maximum number of untracked files to include
  * @param includePreSession densable AzS `r` — session mode keeps pre-session files
  */
-async function fetchUntrackedFiles(
+export async function fetchUntrackedFiles(
   maxFiles: number,
   abort?: AbortSignal,
   includePreSession = false,
@@ -731,9 +798,9 @@ async function fetchUntrackedFiles(
     gitOpts(abort),
   )
 
-  if (code !== 0 || !stdout.trim()) return null
+  if (code !== 0) return null
 
-  const untrackedPaths = stdout.trim().split('\n').filter(Boolean)
+  const untrackedPaths = stdout.split('\n').filter(p => p !== '')
   if (untrackedPaths.length === 0) return null
 
   const root = diffRoot()

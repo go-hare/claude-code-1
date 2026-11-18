@@ -31,6 +31,7 @@ import {
   useFocusReclaim,
   useOptionalKeybindingContext,
 } from '@anthropic/ink';
+import { getGlobalConfig } from '../../utils/config.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
 import {
   AbovePromptLeftoverContext,
@@ -1046,6 +1047,22 @@ export type SelectProps<T> = {
   readonly onRowKeyDown?: (event: KeyboardEvent, focusedIndex: number) => void;
 };
 
+/**
+ * #865 — In vim mode, pressing Esc while typing in a free-text input option
+ * transitions INSERT → NORMAL instead of discarding the answer; Esc cancels
+ * only once in NORMAL mode (or when vim mode is off / non-input option focused).
+ */
+export function resolveSelectCancelAction(opts: {
+  vimModeEnabled: boolean;
+  isInputFocused: boolean;
+  inputVimMode: 'INSERT' | 'NORMAL';
+}): 'enter-normal' | 'cancel' {
+  if (opts.vimModeEnabled && opts.isInputFocused && opts.inputVimMode === 'INSERT') {
+    return 'enter-normal';
+  }
+  return 'cancel';
+}
+
 export function Select<T>({
   isDisabled = false,
   hideIndexes = false,
@@ -1210,6 +1227,26 @@ export function Select<T>({
   const innerHint = leftoverLoOn ? leftoverInnerOverflowHint(overflowHint, leftoverAwareVisible) : overflowHintProp;
   const moreRowLines = leftoverLoOn ? leftoverMoreRowLines(overflowHint, leftoverAwareVisible, options.length) : false;
 
+  const vimModeEnabled = getGlobalConfig().editorMode === 'vim';
+  const [inputVimMode, setInputVimMode] = useState<'INSERT' | 'NORMAL'>('INSERT');
+  const inputVimModeRef = useRef<'INSERT' | 'NORMAL'>('INSERT');
+  inputVimModeRef.current = inputVimMode;
+  const focusedValueRef = useRef<T | undefined>(undefined);
+  const effectiveOnCancel = () => {
+    const focusedOpt = options.find(opt => opt.value === focusedValueRef.current);
+    const action = resolveSelectCancelAction({
+      vimModeEnabled,
+      isInputFocused: focusedOpt?.type === 'input',
+      inputVimMode: inputVimModeRef.current,
+    });
+    if (action === 'enter-normal') {
+      inputVimModeRef.current = 'NORMAL';
+      setInputVimMode('NORMAL');
+      return;
+    }
+    onCancel?.();
+  };
+
   const state = useSelectState({
     visibleOptionCount: leftoverWindow,
     moreRowLines,
@@ -1217,10 +1254,15 @@ export function Select<T>({
     defaultValue,
     selectedValue,
     onChange,
-    onCancel,
+    onCancel: onCancel ? effectiveOnCancel : undefined,
     onFocus,
     focusValue: defaultFocusValue,
   });
+  focusedValueRef.current = state.focusedValue;
+  useEffect(() => {
+    inputVimModeRef.current = 'INSERT';
+    setInputVimMode('INSERT');
+  }, [state.focusedValue]);
 
   // densable yln + Dql: disableSelection===true hides onClick; 'numeric' stays clickable.
   const isStrayClick = useStrayClickGuard();
@@ -1608,7 +1650,7 @@ export function Select<T>({
                   onCancel?.();
                 }
               }}
-              onExit={onCancel}
+              onExit={onCancel ? effectiveOnCancel : undefined}
               layout="expanded"
               showLabel={inlineDescriptions}
               onOpenEditor={onOpenEditor}
@@ -1785,7 +1827,7 @@ export function Select<T>({
                     onCancel?.();
                   }
                 }}
-                onExit={onCancel}
+                onExit={onCancel ? effectiveOnCancel : undefined}
                 layout="compact"
                 showLabel={inlineDescriptions}
                 onOpenEditor={onOpenEditor}
@@ -2118,7 +2160,7 @@ export function Select<T>({
                 onCancel?.();
               }
             }}
-            onExit={onCancel}
+            onExit={onCancel ? effectiveOnCancel : undefined}
             layout="compact"
             showLabel={inlineDescriptions}
             onOpenEditor={onOpenEditor}

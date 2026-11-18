@@ -5,7 +5,11 @@
 
 import { resolveAutoCompactWindowOverride } from './residualFinalEnvGates.js'
 import { getSdkBetas } from '../bootstrap/state.js'
-import { getContextWindowForModel } from './context.js'
+import {
+  getContextWindowForModel,
+  isRecognizedModelForWindowEnforcement,
+  isUnknownModelWindowEnforcementDisabled,
+} from './context.js'
 import { getCanonicalName } from './model/model.js'
 import {
   getInitialSettings,
@@ -183,6 +187,28 @@ export function resolveAutoCompactWindow(
       window: Math.min(modelMax, modelDefault),
       configured: modelDefault,
       source: 'model-default',
+    }
+  }
+
+  let autoCompactEnabled = true
+  try {
+    const { isAutoCompactEnabled } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/compact/autoCompact.js') as typeof import('../services/compact/autoCompact.js')
+    autoCompactEnabled = isAutoCompactEnabled()
+  } catch {
+    autoCompactEnabled = true
+  }
+
+  if (
+    autoCompactEnabled &&
+    !isUnknownModelWindowEnforcementDisabled() &&
+    !isRecognizedModelForWindowEnforcement(model)
+  ) {
+    return {
+      window: modelMax,
+      configured: modelMax,
+      source: 'unknown-model',
     }
   }
 

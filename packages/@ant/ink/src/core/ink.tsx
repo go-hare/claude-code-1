@@ -3560,7 +3560,7 @@ export default class Ink {
     }
   }
 
-  dispatchKeyboardEvent(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }): void {
+  dispatchKeyboardEvent(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }): boolean {
     const focusedBefore = this.focusManager.activeElement;
     const target = focusedBefore ?? this.rootNode;
     const event = new KeyboardEvent(parsedKey, extras);
@@ -3591,6 +3591,7 @@ export default class Ink {
         this.logger.debug(`tengu_spatial_focus_nav direction=${parsedKey.name}`);
       }
     }
+    return event.isReadAsEscapeThenKey;
   }
 
   /**

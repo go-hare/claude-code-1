@@ -465,6 +465,44 @@ type InternalInterruptionState =
  * message — they are bookkeeping artifacts that should not mask a genuine
  * interruption. Attachments are kept as part of the turn.
  */
+function findMessageBeforeContextRows(
+  messages: NormalizedMessage[],
+  lastIdx: number,
+): number {
+  let sawMetaContext = false
+  for (let i = lastIdx; i >= 0; i--) {
+    const msg = messages[i]!
+    if (msg.type === 'user' && isToolUseResultMessage(msg)) {
+      return i < lastIdx ? i : -1
+    }
+    const isMetaWrapper =
+      msg.type === 'user' &&
+      (msg.isMeta === true ||
+        msg.isCompactSummary === true ||
+        (msg as { turnCompanion?: boolean }).turnCompanion === true ||
+        typeof (msg as { sourceToolUseID?: unknown }).sourceToolUseID ===
+          'string')
+    if (msg.type === 'user' && !isMetaWrapper) {
+      return i < lastIdx && !sawMetaContext ? i : -1
+    }
+    sawMetaContext ||=
+      msg.type === 'user' &&
+      msg.isMeta === true &&
+      (msg as { turnCompanion?: boolean }).turnCompanion !== true &&
+      typeof (msg as { sourceToolUseID?: unknown }).sourceToolUseID !== 'string'
+    if (
+      msg.type === 'assistant' ||
+      (msg.type === 'user' && msg.isMeta !== true) ||
+      (msg.type === 'attachment' &&
+        (msg.attachment?.type === 'hook_stopped_continuation' ||
+          msg.attachment?.type === 'max_turns_reached'))
+    ) {
+      return -1
+    }
+  }
+  return -1
+}
+
 export function detectTurnInterruption(
   messages: NormalizedMessage[],
 ): InternalInterruptionState {
@@ -500,7 +538,28 @@ export function detectTurnInterruption(
   }
 
   if (lastMessage.type === 'user') {
-    if (lastMessage.isMeta || lastMessage.isCompactSummary) {
+    if (lastMessage.isMeta) {
+      // 2.1.299 #691 (SEA H2r / tengu_partitioned_finch): if trailing meta
+      // context rows sit on top of an unanswered user prompt (e.g. after
+      // compaction + worker replacement), look back past them. Respect
+      // queueTranscriptOnly no-reply notes so silent stops are not re-triggered.
+      if (
+        (lastMessage as { queueTranscriptOnly?: boolean })
+          .queueTranscriptOnly === true
+      ) {
+        return { kind: 'none' }
+      }
+      const prevIdx = findMessageBeforeContextRows(messages, lastMessageIdx)
+      if (prevIdx !== -1) {
+        const inner = detectTurnInterruption(messages.slice(0, prevIdx + 1))
+        if (inner.kind === 'interrupted_prompt') {
+          return { kind: 'interrupted_turn' }
+        }
+        return inner
+      }
+      return { kind: 'none' }
+    }
+    if (lastMessage.isCompactSummary) {
       return { kind: 'none' }
     }
     if (isToolUseResultMessage(lastMessage)) {
@@ -510,9 +569,12 @@ export function detectTurnInterruption(
       // brief-mode session as interrupted mid-turn and injects a phantom
       // "Continue from where you left off." before the user's real next
       // prompt. Look back one step for the originating tool_use.
+      // #692 (SEA Nxn / Kut): also check CLAUDE_CODE_TERMINAL_MCP_TOOLS and
+      // sibling tool_results from the same assistant response for endTurn.
       if (
         isTerminalToolResult(lastMessage, messages, lastMessageIdx) ||
-        isMcpEndTurnToolResult(lastMessage)
+        isMcpEndTurnToolResult(lastMessage) ||
+        hasSiblingEndTurnToolResult(messages, lastMessageIdx)
       ) {
         return { kind: 'none' }
       }
@@ -547,6 +609,15 @@ export function detectTurnInterruption(
  * unpaired ones), but we walk just in case system/progress noise is
  * interleaved.
  */
+function getTerminalMcpTools(): Set<string> {
+  return new Set(
+    (process.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  )
+}
+
 function isTerminalToolResult(
   result: NormalizedUserMessage,
   messages: NormalizedMessage[],
@@ -557,6 +628,7 @@ function isTerminalToolResult(
   const block = content[0]
   if (block?.type !== 'tool_result') return false
   const toolUseId = block.tool_use_id
+  const terminalMcpTools = getTerminalMcpTools()
 
   for (let i = resultIdx - 1; i >= 0; i--) {
     const msg = messages[i]!
@@ -571,12 +643,57 @@ function isTerminalToolResult(
         'id' in b &&
         b.id === toolUseId
       ) {
-        return (
-          ('name' in b ? b.name : undefined) === BRIEF_TOOL_NAME ||
-          ('name' in b ? b.name : undefined) === LEGACY_BRIEF_TOOL_NAME ||
-          ('name' in b ? b.name : undefined) === SEND_USER_FILE_TOOL_NAME
-        )
+        const name = 'name' in b ? b.name : undefined
+        if (
+          name === BRIEF_TOOL_NAME ||
+          name === LEGACY_BRIEF_TOOL_NAME ||
+          name === SEND_USER_FILE_TOOL_NAME
+        ) {
+          return true
+        }
+        if (
+          typeof name === 'string' &&
+          terminalMcpTools.has(name) &&
+          block.is_error !== true
+        ) {
+          return true
+        }
+        return false
       }
+    }
+  }
+  return false
+}
+
+/**
+ * Official `Kut` (#692) — true when any sibling tool_result in the same
+ * assistant response (matching `message.id`) had `isMcpEndTurnToolResult`.
+ */
+export function hasSiblingEndTurnToolResult(
+  messages: NormalizedMessage[],
+  resultIdx: number,
+): boolean {
+  let seenAssistantMsgId: string | undefined
+  let sawEndTurn = false
+  for (let i = resultIdx; i >= 0; i--) {
+    const msg = messages[i]!
+    if (msg.type === 'assistant') {
+      const id = msg.message?.id
+      if (
+        !id ||
+        (seenAssistantMsgId !== undefined && seenAssistantMsgId !== id)
+      ) {
+        return false
+      }
+      if (sawEndTurn) return true
+      seenAssistantMsgId = id
+    } else if (
+      msg.type === 'user' &&
+      (msg as { turnCompanion?: boolean }).turnCompanion !== true &&
+      typeof (msg as { sourceToolUseID?: unknown }).sourceToolUseID !== 'string'
+    ) {
+      if (!isToolUseResultMessage(msg)) return false
+      sawEndTurn ||= isMcpEndTurnToolResult(msg)
     }
   }
   return false
@@ -724,6 +841,105 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
  *   transcript lives outside the current project dir.
  * @returns Object containing the deserialized messages and the original log, or null if not found
  */
+const COMPACT_TRANSCRIPT_PATH_MARKER =
+  'If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: '
+
+/**
+ * #870 (aligning with `eeo` / `Message.tsx:getResumedCompactBoundaryInfo`):
+ * Populate `leadsToSummary` and `savedIn` on a leading `compact_boundary`
+ * message's `compactMetadata` during recovery when resuming from a local
+ * transcript.
+ */
+export function populateResumedCompactBoundarySavedIn(
+  messages: Message[],
+  transcriptPath: string | undefined,
+): void {
+  const firstIdx = messages.findIndex(
+    m =>
+      m.type === 'user' ||
+      m.type === 'assistant' ||
+      (m.type === 'system' && m.subtype === 'compact_boundary'),
+  )
+  if (firstIdx === -1) return
+  const boundary = messages[firstIdx]
+  if (
+    !boundary ||
+    boundary.type !== 'system' ||
+    boundary.subtype !== 'compact_boundary' ||
+    !boundary.compactMetadata
+  ) {
+    return
+  }
+
+  let summaryText: string | undefined
+  for (let i = firstIdx + 1; i < messages.length; i++) {
+    const m = messages[i]!
+    if (m.type === 'system' && m.subtype === 'compact_boundary') break
+    if (m.type === 'user' && m.isCompactSummary) {
+      const content = m.message?.content
+      if (typeof content === 'string') {
+        summaryText = content
+      } else if (Array.isArray(content)) {
+        summaryText = content
+          .map(b =>
+            typeof b === 'object' &&
+            b !== null &&
+            'type' in b &&
+            b.type === 'text' &&
+            'text' in b &&
+            typeof b.text === 'string'
+              ? b.text
+              : '',
+          )
+          .join('')
+      }
+      break
+    }
+  }
+
+  const meta = boundary.compactMetadata as Record<string, unknown>
+  if (summaryText === undefined) {
+    if (meta.leadsToSummary === undefined) {
+      messages[firstIdx] = {
+        ...boundary,
+        compactMetadata: {
+          ...boundary.compactMetadata,
+          leadsToSummary: false,
+        } as typeof boundary.compactMetadata,
+      }
+    }
+    return
+  }
+
+  const markerIdx = summaryText.lastIndexOf(
+    `\n${COMPACT_TRANSCRIPT_PATH_MARKER}`,
+  )
+  let savedIn: string | undefined
+  if (markerIdx !== -1) {
+    const pathStart = markerIdx + 1 + COMPACT_TRANSCRIPT_PATH_MARKER.length
+    const lineEnd = summaryText.indexOf('\n', pathStart)
+    const extractedPath = summaryText.slice(
+      pathStart,
+      lineEnd === -1 ? undefined : lineEnd,
+    )
+    const gcEnabled =
+      process.env.CLAUDE_CODE_TRANSCRIPT_LOCAL_GC === '1' ||
+      process.env.CLAUDE_CODE_TRANSCRIPT_LOCAL_GC === 'true'
+    if (!gcEnabled && transcriptPath && extractedPath === transcriptPath) {
+      savedIn = extractedPath
+    }
+  }
+
+  messages[firstIdx] = {
+    ...boundary,
+    compactMetadata: {
+      ...boundary.compactMetadata,
+      leadsToSummary: true,
+      ...(savedIn !== undefined && { savedIn }),
+    } as typeof boundary.compactMetadata,
+  }
+}
+
 export type OverdueSessionStartHooks = {
   promise: Promise<HookResultMessage[]>
   abort: () => void
@@ -893,6 +1109,7 @@ export async function loadConversationForResume(
       deferredToolUse ? new Set([deferredToolUse.toolUseID]) : undefined,
     )
     messages = deserialized.messages
+    populateResumedCompactBoundarySavedIn(messages, transcriptPath)
 
     // densable 2.1.214 #47: I1e(r.forkSession?"fork":"resume", ...)
     // #520: When CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS is set and

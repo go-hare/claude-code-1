@@ -6,10 +6,18 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
+import {
+  isToolDetailsLoggingEnabled,
+  sanitizeToolNameForAnalytics,
+} from 'src/services/analytics/metadata.js'
 import { getCodeEditToolDecisionCounter } from '../../bootstrap/state.js'
 import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
+import type {
+  PermissionDecisionReason,
+  PermissionMode,
+} from '../../types/permissions.js'
 import { getLanguageName } from '../../utils/cliHighlight.js'
+import { toExternalPermissionMode } from '../../utils/permissions/PermissionMode.js'
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
 import { logOTelEvent } from '../../utils/telemetry/events.js'
 import type {
@@ -23,12 +31,27 @@ type PermissionLogContext = {
   toolUseContext: ToolUseContext
   messageId: string
   toolUseID: string
+  permissionMode?: PermissionMode
+}
+
+type ClassifierDecisionReason = PermissionDecisionReason & {
+  classifierAllowed?: boolean
+  category?: string
 }
 
 // Discriminated union: 'accept' pairs with approval sources, 'reject' with rejection sources
 type PermissionDecisionArgs =
-  | { decision: 'accept'; source: PermissionApprovalSource | 'config' }
-  | { decision: 'reject'; source: PermissionRejectionSource | 'config' }
+  | {
+      decision: 'accept'
+      source: PermissionApprovalSource | 'config'
+      decisionReason?: ClassifierDecisionReason
+      modeAtRecheck?: PermissionMode
+    }
+  | {
+      decision: 'reject'
+      source: PermissionRejectionSource | 'config'
+      decisionReason?: ClassifierDecisionReason
+    }
 
 const CODE_EDITING_TOOLS = ['Edit', 'Write', 'NotebookEdit']
 
@@ -175,6 +198,38 @@ function logRejectionEvent(
   })
 }
 
+/**
+ * Official 325 `BEt(e, n)` — derives `classifier_verdict` and (when
+ * `OTEL_LOG_TOOL_DETAILS=1`) `classifier_category` for OTel `tool_decision`
+ * events on auto-mode classifier decisions (#847, #848).
+ */
+export function buildAutoClassifierOTelAttributes(
+  decision: 'accept' | 'reject',
+  decisionReason?: ClassifierDecisionReason,
+): { classifier_verdict: string; classifier_category?: string } | undefined {
+  if (
+    decisionReason?.type !== 'classifier' ||
+    decisionReason.classifier !== 'auto-mode'
+  ) {
+    return undefined
+  }
+  if (decision === 'accept') {
+    return decisionReason.classifierAllowed === true
+      ? { classifier_verdict: 'allow' }
+      : undefined
+  }
+  const verdict = decisionReason.noVerdict ? 'no_verdict' : 'block'
+  if (verdict !== 'block') {
+    return { classifier_verdict: verdict }
+  }
+  const category = decisionReason.category
+  return {
+    classifier_verdict: 'block',
+    ...(category !== undefined &&
+      isToolDetailsLoggingEnabled() && { classifier_category: category }),
+  }
+}
+
 // Single entry point for all permission decision logging. Called by permission
 // handlers after every approve/reject. Fans out to: analytics events, OTel
 // telemetry, code-edit OTel counters, and toolUseContext decision storage.
@@ -183,7 +238,8 @@ function logPermissionDecision(
   args: PermissionDecisionArgs,
   permissionPromptStartTimeMs?: number,
 ): void {
-  const { tool, input, toolUseContext, messageId, toolUseID } = ctx
+  const { tool, input, toolUseContext, messageId, toolUseID, permissionMode } =
+    ctx
   const { decision, source } = args
 
   const waiting_for_user_permission_ms =
@@ -227,10 +283,23 @@ function logPermissionDecision(
     timestamp: Date.now(),
   })
 
+  const classifierAttrs =
+    source === 'config'
+      ? buildAutoClassifierOTelAttributes(decision, args.decisionReason)
+      : undefined
+  const effectiveMode =
+    (args.decision === 'accept' ? args.modeAtRecheck : undefined) ??
+    permissionMode ??
+    toolUseContext.getAppState?.()?.toolPermissionContext?.mode
+
   void logOTelEvent('tool_decision', {
     decision,
     source: sourceString,
     tool_name: sanitizeToolNameForAnalytics(tool.name),
+    ...classifierAttrs,
+    ...(effectiveMode !== undefined && {
+      permission_mode: toExternalPermissionMode(effectiveMode),
+    }),
   })
 }
 

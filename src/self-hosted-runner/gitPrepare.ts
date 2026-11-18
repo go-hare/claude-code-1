@@ -13,6 +13,7 @@ import {
   readdir,
   readFile,
   rm,
+  unlink,
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -105,6 +106,46 @@ const NO_AUTH_GIT_COMMANDS = new Set(['worktree'])
 /** densable `Njy` — permanent fetch error markers */
 const PERMANENT_REF_MARKERS = ["couldn't find remote ref"]
 
+/** densable `Jt` — case-insensitive (incl. Turkish İ) matcher for permanent ref wording */
+const PERMANENT_REF_WORDING_RE = new RegExp(
+  PERMANENT_REF_MARKERS[0]!.replaceAll('i', '[i\\u0130]'),
+  'gi',
+)
+
+/**
+ * densable `zDn` — sanitize git's missing-ref wording in unrelated setup/session errors
+ * so downstream permanent-ref checks never misclassify them as a deleted source branch.
+ */
+export function sanitizePermanentRefWording(message: string): string {
+  return message.replace(
+    PERMANENT_REF_WORDING_RE,
+    match => `could not${match.slice(8)}`,
+  )
+}
+
+/** densable `VDn` — permanent git fetch failure when ref is missing on remote */
+export class FetchRefNotFoundError extends Error {
+  constructor(message: string) {
+    super(`git fetch failed (permanent): ${message}`)
+    this.name = 'FetchRefNotFoundError'
+  }
+}
+
+/** densable `fo` — permanent setup failure when source branch/ref is missing on remote */
+export class SourceRefNotFoundError extends Error {
+  readonly repo: string
+  readonly ref: string | undefined
+  constructor(repo: string, ref?: string) {
+    const label = ref ? `The branch '${ref}'` : "The session's branch"
+    super(
+      `${label} couldn't be found in the remote repository ${repo}. If it was never pushed, push it. If it was deleted after a merge, restore it from its pull request. Then send a new message, or start a new session from a branch that has been pushed. (couldn't find remote ref)`,
+    )
+    this.name = 'SourceRefNotFoundError'
+    this.repo = repo
+    this.ref = ref
+  }
+}
+
 /** densable `iWd` progress regex */
 const GIT_PROGRESS_RE =
   /^(Counting objects|Compressing objects|Receiving objects|Resolving deltas|Updating files|Checking out files|Filtering content):\s+(\d+)%(?:\s+\((\d+)\/(\d+)\))?(?:, ([\d.]+) (KiB|MiB|GiB))?/
@@ -141,6 +182,7 @@ export type GitPrepareSource = {
   getAuthToken?: () => string
   governedMount?: boolean
   upstreamUrl?: string
+  sanitized?: { onIndexFromHead?: () => void }
 }
 
 export type GitProgress = {
@@ -160,6 +202,7 @@ export type GitRepoCtx = {
   token?: string
   getAuthToken?: () => string
   governedMount?: boolean
+  sanitized?: { onIndexFromHead?: () => void }
   onDebug: (msg: string) => void
   onPhase?: (phase: string, ms: number, extra?: Record<string, string>) => void
   onProgress?: (cmd: string, progress: GitProgress) => void
@@ -840,6 +883,7 @@ export async function runGitPrepare(
   args: string[],
   extraEnv?: NodeJS.ProcessEnv,
   hardCapMs: number = GIT_HARD_CAP_MS,
+  exitInfo?: { exitCode?: number | null },
 ): Promise<string> {
   const hasProxyAuth = ctx.getAuthToken !== undefined
   const verb = gitVerb(args)
@@ -1076,6 +1120,7 @@ export async function runGitPrepare(
         spawnErr = re
       })
       child.on('close', (code, sig) => {
+        if (exitInfo) exitInfo.exitCode = code
         if (escalated) return
         escalated = true
         clearTimeout(silenceTimer)
@@ -1353,6 +1398,9 @@ export async function fetchWithRetry(
         ctx.onDebug(
           `[byoc:git] Fetch cumulative wall-clock ${Date.now() - wallStart}ms ≥ hard cap — not retrying`,
         )
+        if (isPermanentFetchRefError(m)) {
+          throw new FetchRefNotFoundError(m)
+        }
         throw new Error(
           `git fetch failed (cumulative hard cap after ${u + 1} attempts): ${m}`,
         )
@@ -1362,7 +1410,7 @@ export async function fetchWithRetry(
         ctx.onDebug(
           '[byoc:git] Fetch error is permanent (ref not found on a non-empty remote) — skipping remaining retries',
         )
-        throw new Error(`git fetch failed (permanent): ${m}`)
+        throw new FetchRefNotFoundError(m)
       }
     }
   }
@@ -1401,6 +1449,34 @@ export async function fetchAndCheckout(
   )
   if (empty) {
     ctx.onDebug('[byoc:git] Repository is empty, skipping checkout')
+    if (ctx.sanitized) {
+      const gitDir = join(ctx.repoPath, '.git')
+      const exitInfo: { exitCode?: number | null } = {}
+      await runGitPrepare(
+        ctx,
+        ctx.repoPath,
+        ['--git-dir', gitDir, 'read-tree', 'HEAD'],
+        undefined,
+        GIT_HARD_CAP_MS,
+        exitInfo,
+      ).then(
+        () => {
+          ctx.sanitized?.onIndexFromHead?.()
+        },
+        async err => {
+          ctx.signal?.throwIfAborted()
+          ctx.onDebug(
+            `[byoc:git] Could not read HEAD into the index: ${errText(err)}`,
+          )
+          if (
+            typeof exitInfo.exitCode !== 'number' ||
+            exitInfo.exitCode > 128
+          ) {
+            await unlink(join(gitDir, 'index.lock')).catch(() => {})
+          }
+        },
+      )
+    }
     return
   }
   if (!l) throw new Error(`git fetch failed for ${ctx.gitURL}`)
@@ -1622,6 +1698,7 @@ export async function prepareOneRepo(opts: {
     token: r.token,
     getAuthToken: r.getAuthToken,
     governedMount: r.governedMount,
+    sanitized: r.sanitized,
     onDebug: a,
     onPhase: l,
     onProgress: c,

@@ -9,7 +9,7 @@ import { join } from 'path'
 import { permissionRuleValueFromString } from '../../permissions/permissionRuleParser.js'
 import { OFFICIAL_ARTIFACT_TOOL_NAME } from '../../artifactUrl.js'
 import { NEVER_IN_EVAL } from './constants.js'
-import { extraEvalToolDenies } from './evalFence.js'
+import { extraEvalToolDenies, grantEvalAllowedTools } from './evalFence.js'
 import { evalSpawnCgroupExtras } from './evalCgroup.js'
 import type { EvalSandbox, Grader, ResolvedCase } from './types.js'
 import { PluginEvalPathError } from './pathVet.js'
@@ -114,12 +114,21 @@ export function adviseFileCreateGraders(
     scaffolded: boolean
     artifactPublishGranted: boolean
     mockedTools: string[]
+    disallowedTools?: string[]
   },
 ): FileCreateAdvice[] {
+  const disallowedTools = opts.disallowedTools ?? []
+  const disallowedSet = new Set(disallowedTools)
   const mocked = new Set(opts.mockedTools)
-  const allowed = [
-    ...new Set([...cse.execution.allowed_tools, ...operatorAllowed]),
-  ]
+  const allowed = grantEvalAllowedTools(
+    cse.execution.allowed_tools,
+    operatorAllowed,
+    {
+      artifactPublishGranted: opts.artifactPublishGranted,
+      mockedTools: opts.mockedTools,
+      disallowedTools,
+    },
+  ).allowed
   const out: FileCreateAdvice[] = []
   const needs = cse.graders.filter(grader =>
     graderChecksCreatedFile(grader, opts.scaffolded),
@@ -129,28 +138,32 @@ export function adviseFileCreateGraders(
     !opts.artifactPublishGranted &&
     !allowed.some(rule => ruleCreatesFiles(rule, mocked))
   ) {
+    const blockedCreate = disallowedTools.filter(tool =>
+      FILE_CREATE_TOOLS.has(tool),
+    )
     for (const grader of needs) {
       out.push({
         grader: grader.name,
-        text: `grader "${grader.name}" cannot pass with the granted tools: it checks a file the run creates, but no tool the run may use can create one (a plugin hook still could; a skill's own allowed-tools does not count inside a run) — add Write (or Edit / Bash) to the case's allowed_tools and grant it with --allow-tools`,
+        text:
+          blockedCreate.length > 0
+            ? `grader "${grader.name}" cannot pass: it checks a file the run creates, but no tool the run may use can create one (a plugin hook still could), and the case's disallowed_tools or --disallow-tools lists ${blockedCreate.join(', ')} — take one off that list and grant it (allowed_tools and --allow-tools), or drop the grader`
+            : `grader "${grader.name}" cannot pass with the granted tools: it checks a file the run creates, but no tool the run may use can create one (a plugin hook still could; a skill's own allowed-tools does not count inside a run) — add Write (or Edit / Bash) to the case's allowed_tools and grant it with --allow-tools`,
       })
     }
   }
-  // gold `h = tr(case.allowed_tools, operator, {artifact, mocked}).allowed`
-  // then `Ai(h)`. Case listing Bash/Write is not a grant — tr puts
-  // non-ml case tools in denied unless operator/mocked/opt-in already
-  // added them. extraEvalToolDenies on operator+mocked+opt-in Artifact.
-  const grantedForLeftover = [
-    ...operatorAllowed,
-    ...opts.mockedTools,
-    ...(opts.artifactPublishGranted ? [OFFICIAL_ARTIFACT_TOOL_NAME] : []),
-  ]
-  const leftover = new Set(extraEvalToolDenies(grantedForLeftover))
+  const leftover = new Set(extraEvalToolDenies(allowed, disallowedTools))
   // gold yn withheld unless artifactPublishGranted
   if (!opts.artifactPublishGranted) leftover.add(OFFICIAL_ARTIFACT_TOOL_NAME)
   for (const grader of cse.graders) {
     for (const tool of new Set(neededTraceTools(grader))) {
       if (!leftover.has(tool)) continue
+      if (!NEVER_IN_EVAL.has(tool) && disallowedSet.has(tool)) {
+        out.push({
+          grader: grader.name,
+          text: `grader "${grader.name}" cannot pass: it needs a ${tool} call in the trace, but ${tool} is in the case's disallowed_tools or --disallow-tools, so no call can occur — change that list (and grant the tool if it is not granted), or drop the grader`,
+        })
+        continue
+      }
       out.push({
         grader: grader.name,
         text: `grader "${grader.name}" cannot pass with the granted tools: it needs a ${tool} call in the trace, but ${tool} is not granted, so the run withholds it from the model and no call (not even a refused one) can occur — ${withheldToolHint(tool)}`,

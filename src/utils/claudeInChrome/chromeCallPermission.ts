@@ -369,6 +369,9 @@ export async function queryTabUrl(opts?: {
         ) {
           return 'connection_lost'
         }
+        if (err instanceof Error && err.name === 'NoExtensionConnectedError') {
+          return 'no_extension'
+        }
         return 'call_threw'
       }),
       opts?.capMs ?? TAB_LOOKUP_CAP_MS,

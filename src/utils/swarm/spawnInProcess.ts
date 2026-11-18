@@ -18,6 +18,7 @@ import { getSessionId } from '../../bootstrap/state.js'
 import { getSpinnerVerbs } from '../../constants/spinnerVerbs.js'
 import { TURN_COMPLETION_VERBS } from '../../constants/turnCompletionVerbs.js'
 import { logEvent } from '../../services/analytics/index.js'
+import { redactSecretsForDisplay } from '../../services/teamMemorySync/secretScanner.js'
 import type { AppState } from '../../state/AppState.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
 import type {
@@ -199,8 +200,9 @@ export async function spawnInProcessTeammate(
       registerPerfettoAgent(agentId, name, parentSessionId)
     }
 
-    // Create task state
-    const description = `${name}: ${prompt.substring(0, 50)}${prompt.length > 50 ? '...' : ''}`
+    // Create task state (#589: redact credentials before truncating description)
+    const redactedPrompt = redactSecretsForDisplay(prompt)
+    const description = `${name}: ${redactedPrompt.substring(0, 50)}${redactedPrompt.length > 50 ? '...' : ''}`
 
     const taskState: InProcessTeammateTaskState = {
       ...createTaskStateBase(

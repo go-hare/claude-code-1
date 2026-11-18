@@ -41,6 +41,7 @@ import { clearAllPlanSlugs } from '../../utils/plans.js'
 import { setCwd } from '../../utils/Shell.js'
 import { processSessionStartHooks } from '../../utils/sessionStart.js'
 import {
+  clearBridgeSession,
   clearSessionMetadata,
   getAgentTranscriptPath,
   getCurrentSessionTitle,
@@ -312,6 +313,10 @@ export async function clearConversation({
   // densable 2.1.243 #31: keep /rename title for the new session; still wipe
   // tag / agent / mode so they don't leak. Mode/worktree are re-saved below.
   clearSessionMetadata({ keepTitle: true })
+  // #663 SEA 325 Mle: write bridgeSessionId:"" tombstone on the pre-clear
+  // session before rotating the session ID so resuming before /clear does not
+  // reattach to the post-clear Remote Control session.
+  clearBridgeSession()
 
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking

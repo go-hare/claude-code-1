@@ -592,6 +592,28 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       }
     }
     if (!foundCommand) {
+      // densable Mv: strip spurious `anthropic-skills:` prefix and suggest listed name
+      const stripped = normalizedCommandName.startsWith('anthropic-skills:')
+        ? normalizedCommandName.slice('anthropic-skills:'.length)
+        : normalizedCommandName
+      const unprefixed =
+        stripped !== normalizedCommandName
+          ? findCommand(stripped, commands)
+          : undefined
+      if (
+        unprefixed &&
+        unprefixed.name === stripped &&
+        unprefixed.type === 'prompt' &&
+        !unprefixed.disableModelInvocation &&
+        unprefixed.loadedFrom !== 'mcp'
+      ) {
+        logEvent('tengu_skill_tool_unprefixed_match', {})
+        return {
+          result: false,
+          message: `Unknown skill: ${normalizedCommandName}. Did you mean ${unprefixed.name}?`,
+          errorCode: 2,
+        }
+      }
       return {
         result: false,
         message: `Unknown skill: ${normalizedCommandName}`,

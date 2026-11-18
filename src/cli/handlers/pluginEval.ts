@@ -447,6 +447,8 @@ export async function pluginEvalHandler(
       threshold:
         options.threshold !== undefined ? Number(options.threshold) : 1,
       allowTools: options.allowTools ?? [],
+      disallowTools:
+        (options as { disallowTools?: string[] }).disallowTools ?? [],
       noScaffold,
       keepTemp: options.keepTemp ?? false,
       mocks,

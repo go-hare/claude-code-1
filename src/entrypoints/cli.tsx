@@ -405,7 +405,10 @@ async function main(): Promise<void> {
   // Official Iia/emO: loadFastPathPolicy before handleBgStart.
   // densable 2.1.289: disableAgentView / CLAUDE_CODE_DISABLE_AGENT_VIEW also
   // rejects --bg/--background (fleetGateRejected breadth), not only `claude agents`.
-  if (feature('BG_SESSIONS') && (args.includes('--bg') || args.includes('--background'))) {
+  // 2.1.299 #674/#675: scan root flags stopping at `--` and skipping option values
+  // so `claude mcp add x -- cmd --background` or `claude -- --bg` is not hijacked.
+  const hasBgCandidate = args.includes('--bg') || args.includes('--background');
+  if (feature('BG_SESSIONS') && hasBgCandidate && (await import('../cli/bg.js')).hasBackgroundFlag(args)) {
     profileCheckpoint('cli_daemon_path');
     {
       const { getAgentViewDisabledReason } = await import('../utils/residualUiEnvGates.js');

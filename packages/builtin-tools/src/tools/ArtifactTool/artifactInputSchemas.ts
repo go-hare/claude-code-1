@@ -9,6 +9,10 @@ import {
   ARTIFACT_READ_FILE_MAX_PATHS,
 } from 'src/services/artifactAutoReact/outDirPaths.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { shouldOfferPublishEdits } from './quickstartRules.js'
+
+/** Official `Qxo` — max inline `edits` pairs per publish call. */
+export const ARTIFACT_PUBLISH_EDITS_MAX = 64
 
 /** Hosted actions only — gold `Ue()` also gates official-only verbs we skip. */
 const HOSTED_ARTIFACT_ACTIONS = [
@@ -112,6 +116,29 @@ export const inputSchema = lazySchema(() =>
       .describe(
         "quickstart only: false when a design system's link is already in hand (it is then read with its own call) or one was declined. Omitted or true, the result lists the design systems (not for a document) and, for slides or a design, attaches the default one's README.",
       ),
+    ...(shouldOfferPublishEdits()
+      ? {
+          edits: z
+            .array(
+              z.object({
+                old_str: z
+                  .string()
+                  .describe(
+                    'Text copied exactly from the file; must occur once.',
+                  ),
+                new_str: z
+                  .string()
+                  .describe('Its replacement; empty deletes old_str.'),
+              }),
+            )
+            .min(1)
+            .max(ARTIFACT_PUBLISH_EDITS_MAX)
+            .optional()
+            .describe(
+              'publish: small changes to make to the file at `file_path` in this same call, instead of editing the file with Edit and publishing after. Use it on a page (add `url` to update an artifact from another conversation). Each old_str is text copied exactly from the file as it now stands and must occur in it exactly once; new_str takes its place (empty deletes it). The edits apply in order, all or none: the file is published with them and then saved with them on disk, so it stays the source for later changes; on a miss nothing is changed or published, and the result says which edit failed and why.',
+            ),
+        }
+      : {}),
   }),
 )
 

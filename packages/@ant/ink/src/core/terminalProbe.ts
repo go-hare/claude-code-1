@@ -5,6 +5,7 @@
 
 import { spawn } from 'child_process'
 import { DEC } from './termio/dec.js'
+import { printsUnknownSequences } from './termio/osc.js'
 import {
   type TerminalQuerier,
   cellSize,
@@ -95,9 +96,10 @@ export async function probeTerminalIdentity(
     capabilities.get('extendedKeys').state === 'pending' ||
     capabilities.get('kittyKeyboard').state === 'pending'
   const askProgramStatus = capabilities.get('programStatus').state === 'pending'
+  const askXtversion = !printsUnknownSequences()
   const [xtReply, kittyFlags, programStatusReply, flushedKeys] =
     await Promise.all([
-      querier.send(xtversion()),
+      askXtversion ? querier.send(xtversion()) : Promise.resolve(undefined),
       askKeys ? querier.send(kittyKeyboard()) : Promise.resolve(undefined),
       askProgramStatus
         ? querier.send(programStatusQuery()).then(reply => {

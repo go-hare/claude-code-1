@@ -31,7 +31,11 @@ import {
   fileHistoryTrackEdit,
 } from 'src/utils/fileHistory.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
-import { readFileSyncWithMetadata } from 'src/utils/fileRead.js'
+import {
+  formatNonTextFileRefusal,
+  preserveBom,
+  readFileSyncWithMetadata,
+} from 'src/utils/fileRead.js'
 import {
   noteApprovedFileToolPath,
   openApprovedRead,
@@ -609,11 +613,16 @@ export const FileWriteTool = buildTool({
         }
       }
 
+      if (meta?.notText) {
+        throw new Error(formatNonTextFileRefusal(meta.notText))
+      }
+
       const enc = meta?.encoding ?? 'utf8'
       oldContent = meta?.content ?? null
 
       contentToWrite = stampNewMemoryContent(fullFilePath, content)
       memdirStamped = contentToWrite !== content
+      contentToWrite = preserveBom(oldContent, contentToWrite)
 
       await openedWrite.recheckBeforeWrite()
       writeTextContent(openedWrite.ioPath, contentToWrite, enc, 'LF')

@@ -6,6 +6,7 @@ import {
   getToolNameForPermissionCheck,
   mcpInfoFromString,
 } from '../../services/mcp/mcpStringUtils.js'
+import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
 import {
   isChromeMcpReadOnlyTool,
   isChromeMcpSafeForAutoMode,
@@ -125,7 +126,14 @@ import {
   isHearthbotCcrProxyUrl,
 } from '../../services/mcp/ccrInjectedMcp.js'
 import { isCliOwnedConfig } from '../../services/mcp/cliOwnedConfigs.js'
-import { getFeatureValueWithSource } from '../../services/analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  getFeatureValueWithSource,
+} from '../../services/analytics/growthbook.js'
+import {
+  getCommandsByMaxPriority,
+  isMidTurnFoldSuspended,
+} from '../messageQueueManager.js'
 import { getBootstrapSession } from '../sessionRoot.js'
 import { isEnvTruthy, isInProtectedNamespace } from '../envUtils.js'
 import { executePermissionRequestHooks } from '../hooks.js'
@@ -407,12 +415,114 @@ export function getAskRules(context: ToolPermissionContext): PermissionRule[] {
   )
 }
 
+const MCP_PREFIX = 'mcp__'
+
+function compileWildcardMatcher(pattern: string): (value: string) => boolean {
+  const parts = pattern.split('*')
+  const head = parts[0] ?? ''
+  if (parts.length === 1) {
+    return value => head === value
+  }
+  const tail = parts.at(-1) ?? ''
+  const middle = parts.slice(1, -1).filter(p => p !== '')
+  return value => {
+    const endLimit = value.length - tail.length
+    if (
+      endLimit < head.length ||
+      !value.startsWith(head) ||
+      !value.endsWith(tail)
+    ) {
+      return false
+    }
+    let cursor = head.length
+    for (const part of middle) {
+      const idx = value.indexOf(part, cursor)
+      if (idx === -1 || idx + part.length > endLimit) {
+        return false
+      }
+      cursor = idx + part.length
+    }
+    return true
+  }
+}
+
+/**
+ * Official qee(e): returns all possible `mcp__<server>` rule names for a tool.
+ * When `mcpInfo` is present, uses the normalized serverName; otherwise collects
+ * every `__` boundary prefix so deny/ask rules like `mcp__my__server` match
+ * `mcp__my__server__tool` even when the server name contains `__`.
+ */
+export function getMcpServerRuleNames(
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+): string[] {
+  if (tool.mcpInfo) {
+    const norm = normalizeNameForMCP(tool.mcpInfo.serverName)
+    const parsedServer =
+      mcpInfoFromString(`${MCP_PREFIX}${norm}__x`)?.serverName ?? norm
+    return parsedServer === norm
+      ? [`${MCP_PREFIX}${norm}`]
+      : [`${MCP_PREFIX}${norm}`, `${MCP_PREFIX}${parsedServer}`]
+  }
+  const names: string[] = []
+  if (!tool.name.startsWith(MCP_PREFIX)) {
+    return names
+  }
+  for (
+    let idx = tool.name.indexOf('__', MCP_PREFIX.length);
+    idx !== -1;
+    idx = tool.name.indexOf('__', idx + 1)
+  ) {
+    names.push(tool.name.slice(0, idx))
+  }
+  return names
+}
+
+/**
+ * Official zii(e, n): ensures an MCP allow rule only reaches the exact server
+ * it names (e.g. `mcp__a` does not allow `a__b` or `a_`).
+ */
+function mcpAllowRuleMatchesServerExactly(
+  ruleToolName: string,
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+): boolean {
+  const prefixes = tool.mcpInfo
+    ? [`${MCP_PREFIX}${normalizeNameForMCP(tool.mcpInfo.serverName)}`]
+    : getMcpServerRuleNames(tool)
+  return prefixes.every(
+    prefix => ruleToolName === prefix || ruleToolName.startsWith(`${prefix}__`),
+  )
+}
+
+/**
+ * Official oEn(e): checks whether an MCP rule name covers the parsed toolInfo,
+ * supporting `*` globs in the toolName position (e.g. `mcp__a__b__*`).
+ */
+function coversMcpTool(
+  ruleToolName: string,
+  toolInfo: ReturnType<typeof mcpInfoFromString>,
+): boolean {
+  const ruleInfo = mcpInfoFromString(ruleToolName)
+  if (ruleInfo === null || toolInfo === null) {
+    return false
+  }
+  if (ruleInfo.serverName !== toolInfo.serverName) {
+    return false
+  }
+  if (ruleInfo.toolName === undefined || ruleInfo.toolName === '*') {
+    return true
+  }
+  if (!ruleInfo.toolName.includes('*') || toolInfo.toolName === undefined) {
+    return false
+  }
+  return compileWildcardMatcher(ruleInfo.toolName)(toolInfo.toolName)
+}
+
 /**
  * Check if the entire tool matches a rule
  * For example, this matches "Bash" but not "Bash(prefix:*)" for BashTool
  * This also matches MCP tools with a server name, e.g. the rule "mcp__server1"
  */
-function toolMatchesRule(
+export function toolMatchesRule(
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
   rule: PermissionRule,
 ): boolean {
@@ -432,16 +542,34 @@ function toolMatchesRule(
     return true
   }
 
-  // MCP server-level permission: rule "mcp__server1" matches tool "mcp__server1__tool1"
-  // Also supports wildcard: rule "mcp__server1__*" matches all tools from server1
-  const ruleInfo = mcpInfoFromString(rule.ruleValue.toolName)
+  // Glob match on tool name (e.g. mcp__a__b__*)
+  if (
+    rule.ruleValue.toolName.includes('*') &&
+    compileWildcardMatcher(rule.ruleValue.toolName)(nameForRuleMatch)
+  ) {
+    return true
+  }
+
+  // MCP server-level permission:
+  // - For allow rules (#722): require exact server prefix match (zii) so
+  //   `mcp__a` does not allow `a__b` or `a_`; callers must use `mcp__<server>__*`
+  //   when the server name contains `__`.
+  // - For deny/ask rules (#629): also match any `mcp__<server>` prefix in
+  //   getMcpServerRuleNames(tool) so deny/ask `mcp__my__server` works.
   const toolInfo = mcpInfoFromString(nameForRuleMatch)
+  const coversMcp = coversMcpTool(rule.ruleValue.toolName, toolInfo)
+  if (rule.ruleBehavior === 'allow') {
+    if (!coversMcp) {
+      return false
+    }
+    return mcpAllowRuleMatchesServerExactly(rule.ruleValue.toolName, tool)
+  }
 
   return (
-    ruleInfo !== null &&
-    toolInfo !== null &&
-    (ruleInfo.toolName === undefined || ruleInfo.toolName === '*') &&
-    ruleInfo.serverName === toolInfo.serverName
+    coversMcp ||
+    (rule.source !== 'mcpServerPolicy' &&
+      rule.ruleValue.toolName.startsWith(MCP_PREFIX) &&
+      getMcpServerRuleNames(tool).includes(rule.ruleValue.toolName))
   )
 }
 
@@ -477,6 +605,43 @@ export function isMcpServerPolicyAskReason(
  * carrying a server-pushed `mcpServerPolicy` ask rule must hit `plan_mode_floor`
  * instead of being sent to the auto mode classifier.
  */
+export function isPlanModeNonReadOnlyWrite(
+  tool: Pick<
+    Tool,
+    | 'name'
+    | 'mcpInfo'
+    | 'inputSchema'
+    | 'isReadOnly'
+    | 'requiresUserInteraction'
+  >,
+  input: { [key: string]: unknown },
+  context: ToolUseContext,
+): boolean {
+  const permissionContext = getToolPermissionContextFromLayers(context)
+  if (permissionContext.mode !== 'plan') return false
+  try {
+    const parsedInput = tool.inputSchema.parse(input)
+    return (
+      !tool.isReadOnly(parsedInput) &&
+      !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), parsedInput)
+    )
+  } catch {
+    return true
+  }
+}
+
+function isBypassedByPrePlanMode(
+  permissionContext: Pick<
+    ToolPermissionContext,
+    'prePlanMode' | 'isBypassPermissionsModeAvailable'
+  >,
+): boolean {
+  return (
+    permissionContext.prePlanMode === 'bypassPermissions' &&
+    Boolean(permissionContext.isBypassPermissionsModeAvailable)
+  )
+}
+
 export function isPlanModeWriteFloorForMcpServerPolicy(
   reason: PermissionDecisionReason | undefined,
   tool: Pick<Tool, 'name' | 'mcpInfo' | 'inputSchema' | 'isReadOnly'>,
@@ -733,6 +898,24 @@ export function getRuleByContentsForToolName(
 }
 
 /**
+ * Official 325 `Ivt` / `fpn` (#727) — in Cowork cloud sessions (`remote_cowork`)
+ * under auto mode, a `PermissionRequest` hook cannot approve shell commands or
+ * subagents; those prompts must wait or be denied.
+ */
+export function isCoworkCloudAutoHookAllowBlocked(
+  toolName: string,
+  permissionMode: string | undefined,
+): boolean {
+  if (process.env.CLAUDE_CODE_ENTRYPOINT !== 'remote_cowork') return false
+  if (permissionMode !== 'auto') return false
+  return (
+    toolName === BASH_TOOL_NAME ||
+    toolName === POWERSHELL_TOOL_NAME ||
+    toolName === AGENT_TOOL_NAME
+  )
+}
+
+/**
  * Runs PermissionRequest hooks for headless/async agents that cannot show
  * permission prompts. This gives hooks an opportunity to allow or deny
  * tool use before the fallback auto-deny kicks in.
@@ -764,6 +947,14 @@ async function runPermissionRequestHooksForHeadlessAgent(
       const decision = hookResult.permissionRequestResult
       // densable QLn — confined child ignores PermissionRequest allow
       if (isEvalConfined() && decision.behavior === 'allow') {
+        continue
+      }
+      // 2.1.299 #727 — Cowork cloud auto mode blocks PermissionRequest allow for shell & subagents
+      if (
+        decision.behavior === 'allow' &&
+        isCoworkCloudAutoHookAllowBlocked(tool.name, permissionMode)
+      ) {
+        logEvent('tengu_auto_mode_permission_request_allow_ignored', {})
         continue
       }
       if (decision.behavior === 'allow') {
@@ -1226,6 +1417,25 @@ export async function evaluatePermissionWithToolCheck<
         return decided
       }
     }
+    if (
+      normalizedResult.decision === 'allow' &&
+      !tool.requiresUserInteraction?.()
+    ) {
+      const permissionContext = getToolPermissionContextFromLayers(context)
+      if (
+        !isBypassedByPrePlanMode(permissionContext) &&
+        isPlanModeNonReadOnlyWrite(tool, input, context)
+      ) {
+        decided ??= await evaluate()
+        return decided.behavior === 'ask'
+          ? decided
+          : {
+              behavior: 'ask',
+              message: createPermissionRequestMessage(tool.name),
+              decisionReason: { type: 'mode', mode: 'plan' },
+            }
+      }
+    }
     return applyToolCheckHookResult(
       normalizedResult,
       decided,
@@ -1249,6 +1459,90 @@ export function detachedLetGoPermissionDeny(
       type: 'other',
       reason: 'detached tool call was let go',
     },
+  }
+}
+
+export const HELD_FOR_QUEUED_MESSAGE_TOOL_RESULT =
+  '[Tool call not run: a message from the user arrived first, so the user was not asked about this call. The call had no effects.]'
+
+export const HELD_FOR_QUEUED_MESSAGE_DECISION_REASON = {
+  type: 'other' as const,
+  reason: 'tool permission request held back for a queued message',
+}
+
+class HeldAskResponseState {
+  responseOf = new WeakMap<object, string>()
+}
+
+const fallbackHeldAskResponseMap = new WeakMap<object, string>()
+
+/**
+ * Official 325 `cn()` / `askIsHeldForQueuedMessage` (#861) — when a user
+ * message is already queued in the same turn, hold back the permission prompt
+ * and report a non-rejection tool result instead of user-rejected.
+ */
+export function askIsHeldForQueuedMessage(
+  {
+    tool,
+    toolUseContext,
+    forceDecision,
+  }: {
+    tool: Tool
+    toolUseContext: ToolUseContext
+    forceDecision?: PermissionDecision
+  },
+  toolUseID: string,
+  assistantMessage: AssistantMessage,
+): boolean {
+  try {
+    if (
+      toolUseContext.agentId !== undefined ||
+      (assistantMessage as { isVirtual?: boolean }).isVirtual === true ||
+      forceDecision !== undefined ||
+      !Array.isArray(assistantMessage.message.content) ||
+      !assistantMessage.message.content.some(
+        (b: { type?: string; id?: string }) =>
+          b.type === 'tool_use' && b.id === toolUseID,
+      ) ||
+      tool.requiresUserInteraction?.() === true ||
+      isMidTurnFoldSuspended()
+    ) {
+      return false
+    }
+    const msgId = assistantMessage.message.id ?? ''
+    const responseOf =
+      toolUseContext.toolState?.get(HeldAskResponseState).responseOf ??
+      fallbackHeldAskResponseMap
+    const ready: object[] = []
+    for (const cmd of getCommandsByMaxPriority('next')) {
+      const c = cmd as unknown as Record<string, unknown>
+      if (c.drainOnly === true || c.screeningPending === true) break
+      if (
+        typeof c.value === 'string' &&
+        c.mode === 'prompt' &&
+        (c.bearsNoUntypedMark === true || c.typedByPerson === true) &&
+        (responseOf.get(cmd) ?? msgId) === msgId
+      ) {
+        ready.push(cmd)
+      }
+    }
+    if (
+      ready.length === 0 ||
+      !getFeatureValue_CACHED_MAY_BE_STALE('tengu_wild_forest', false)
+    ) {
+      return false
+    }
+    for (const cmd of ready) {
+      responseOf.set(cmd, msgId)
+    }
+    return true
+  } catch {
+    logError(
+      new Error(
+        "askIsHeldForQueuedMessage: the check threw, so this ask was not held back for a queued message. The error text is left out because it may hold a person's words or tool input.",
+      ),
+    )
+    return false
   }
 }
 
@@ -2195,6 +2489,21 @@ const evaluateToolPermission: CanUseToolFn = async (
     }
   }
 
+  if (
+    result.behavior === 'ask' &&
+    askIsHeldForQueuedMessage(
+      { tool, toolUseContext: context, forceDecision },
+      toolUseID,
+      assistantMessage,
+    )
+  ) {
+    return {
+      behavior: 'deny',
+      message: HELD_FOR_QUEUED_MESSAGE_TOOL_RESULT,
+      decisionReason: HELD_FOR_QUEUED_MESSAGE_DECISION_REASON,
+    }
+  }
+
   return result
 }
 
@@ -2347,7 +2656,7 @@ export async function checkRuleBasedPermissions(
   tool: Tool,
   input: { [key: string]: unknown },
   context: ToolUseContext,
-  options?: { crashIsObjection?: boolean },
+  options?: { crashIsObjection?: boolean; planModeWriteFloor?: boolean },
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
   // densable bn: sticky layers overlay for rule-based checks
   const toolPermissionContext = getToolPermissionContextFromLayers(context)
@@ -2446,6 +2755,26 @@ export async function checkRuleBasedPermissions(
     !toolPermissionResult.decisionReason.classifierApprovable
   ) {
     return toolPermissionResult
+  }
+
+  // 1h. Plan-mode write floor (#686): PreToolUse allow must not let a
+  // non-read-only write (file, shell, or MCP) execute unprompted in plan mode.
+  if (
+    options?.planModeWriteFloor === true &&
+    !tool.requiresUserInteraction?.() &&
+    !isBypassedByPrePlanMode(toolPermissionContext) &&
+    isPlanModeNonReadOnlyWrite(tool, input, context)
+  ) {
+    return toolPermissionResult?.behavior === 'ask'
+      ? toolPermissionResult
+      : {
+          behavior: 'ask',
+          decisionReason: {
+            type: 'mode',
+            mode: 'plan',
+          },
+          message: createPermissionRequestMessage(tool.name),
+        }
   }
 
   // No rule-based objection

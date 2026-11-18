@@ -29,6 +29,7 @@ import {
   getAllMcpConfigs,
   getMcpConfigByName,
   getMcpConfigsByScope,
+  isMcpServerAllowedByPolicy,
   isMcpServerDisabled,
   removeMcpConfig,
 } from '../../services/mcp/config.js';
@@ -87,6 +88,10 @@ async function checkMcpServerHealth(
   const disabled = mcpDisabledHealthResult(isMcpServerDisabled(name));
   if (disabled) {
     return disabled;
+  }
+  // #645: never start/connect a server blocked by managed policy.
+  if (!isMcpServerAllowedByPolicy(name, server)) {
+    return { status: '✗ Blocked by enterprise managed policy' };
   }
   // Defense in depth: project-scope servers that are not settings-approved
   // must not be connected from CLI list/get (RCE via self-approved .mcp.json).

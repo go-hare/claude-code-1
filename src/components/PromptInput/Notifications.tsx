@@ -652,6 +652,14 @@ export function Notifications({
   const showLoginNotice = apiKeyStatus === 'invalid' || apiKeyStatus === 'missing';
   const showVerboseTokens = verbose && !showLoginNotice;
   const currentVisible = isNotificationVisible(notifications.current, hold);
+  const isFullscreen = isFullscreenEnvEnabled();
+  const hasActiveGoal = useAppState(s => s.activeGoal?.setAt !== undefined);
+  const [criticalMemoryShowing, setCriticalMemoryShowing] = useState(false);
+  const voiceStateRaw = useVoiceState(s => s.voiceState);
+  const voiceEnabledRaw = useVoiceEnabled();
+  const isVoiceActive = feature('VOICE_MODE')
+    ? voiceEnabledRaw && (voiceStateRaw === 'recording' || voiceStateRaw === 'processing')
+    : false;
   // densable nse `co=!Me` — success copy yields the row to the compact warning.
   const showUpdaterSuccess = !isShowingCompactMessage;
   const hasVisibleAutoUpdaterResult =
@@ -660,19 +668,30 @@ export function Notifications({
       autoUpdaterResult.status === 'install_failed' ||
       autoUpdaterResult.status === 'no_permissions' ||
       (autoUpdaterResult.status === 'success' && showUpdaterSuccess && Boolean(autoUpdaterResult.version)));
-  // densable Ex `Xo` — left side is occupied when a notice is up OR an update is running/rendered.
+  // densable Ex `Xo` — left side is occupied when a notice is up OR (in non-fullscreen) an update is running/rendered.
   const hasLeftContent = Boolean(
     currentVisible ||
       (isInOverageMode && !isTeamOrEnterprise) ||
       showLoginNotice ||
       showVerboseTokens ||
-      isAutoUpdating ||
-      hasVisibleAutoUpdaterResult,
+      (!isFullscreen && (isAutoUpdating || hasVisibleAutoUpdaterResult)),
+  );
+  const hasLeftOrGoalOrStash = hasLeftContent || hasStash || hasActiveGoal;
+  const autoUpdaterElement = (
+    /* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */
+    <AutoUpdaterWrapper
+      verbose={verbose}
+      onAutoUpdaterResult={onAutoUpdaterResult}
+      autoUpdaterResult={autoUpdaterResult}
+      isUpdating={isAutoUpdating}
+      onChangeIsUpdating={onChangeIsUpdating}
+      showSuccessMessage={showUpdaterSuccess}
+    />
   );
 
   return (
     <SentryErrorBoundary>
-      {/* densable Ex: row of [Nn, stashed, ActiveGoalIndicator]. */}
+      {/* densable Ex: row of [Nn, stashed, ActiveGoalIndicator, fullscreen autoUpdater]. */}
       <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" flexShrink={0} overflowX="hidden">
         <Box flexDirection="column" alignItems="flex-end" flexShrink={1} overflowX="hidden">
           <NotificationContent
@@ -683,17 +702,8 @@ export function Notifications({
             apiKeyStatus={apiKeyStatus}
             verbose={verbose}
             tokenUsage={tokenUsage}
-            autoUpdaterElement={
-              /* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */
-              <AutoUpdaterWrapper
-                verbose={verbose}
-                onAutoUpdaterResult={onAutoUpdaterResult}
-                autoUpdaterResult={autoUpdaterResult}
-                isUpdating={isAutoUpdating}
-                onChangeIsUpdating={onChangeIsUpdating}
-                showSuccessMessage={showUpdaterSuccess}
-              />
-            }
+            autoUpdaterElement={isFullscreen ? null : autoUpdaterElement}
+            onCriticalMemoryShowingChange={setCriticalMemoryShowing}
           />
         </Box>
         {hasStash && (
@@ -703,14 +713,30 @@ export function Notifications({
           </Box>
         )}
         <ActiveGoalIndicator withSeparator={hasLeftContent || hasStash} />
+        {isFullscreen && (
+          <Box
+            flexShrink={0}
+            maxWidth={hasLeftOrGoalOrStash ? '60%' : undefined}
+            display={isVoiceActive || criticalMemoryShowing ? 'none' : 'flex'}
+          >
+            {hasLeftOrGoalOrStash && (isAutoUpdating || hasVisibleAutoUpdaterResult) ? (
+              <Text dimColor>{' · '}</Text>
+            ) : null}
+            {autoUpdaterElement}
+          </Box>
+        )}
       </Box>
     </SentryErrorBoundary>
   );
 }
 
-function MemoryUsageIndicator(): ReactNode {
+function MemoryUsageIndicator({ onShowingChange }: { onShowingChange?: (showing: boolean) => void }): ReactNode {
   const memoryUsage = useMemoryUsage();
-  if (getIsRemoteMode() || !memoryUsage || memoryUsage.status !== 'critical') {
+  const isCritical = !getIsRemoteMode() && memoryUsage?.status === 'critical';
+  useEffect(() => {
+    onShowingChange?.(isCritical);
+  }, [isCritical, onShowingChange]);
+  if (!isCritical || !memoryUsage) {
     return null;
   }
   const size = formatFileSize(memoryUsage.heapUsed);
@@ -733,6 +759,7 @@ function NotificationContent({
   verbose,
   tokenUsage,
   autoUpdaterElement,
+  onCriticalMemoryShowingChange,
 }: {
   notifications: {
     current: Notification | null;
@@ -746,6 +773,7 @@ function NotificationContent({
   verbose: boolean;
   tokenUsage: number;
   autoUpdaterElement: ReactNode;
+  onCriticalMemoryShowingChange?: (showing: boolean) => void;
 }): ReactNode {
   const isRemoteMode = getIsRemoteMode();
   const subscriptionType = getSubscriptionType();
@@ -865,7 +893,7 @@ function NotificationContent({
         : null}
       <SandboxPromptFooterHint />
       {isNotificationVisible(notifications.current, hold) && <NotificationBody notification={notifications.current} />}
-      <MemoryUsageIndicator />
+      <MemoryUsageIndicator onShowingChange={onCriticalMemoryShowingChange} />
     </>
   );
 }

@@ -284,6 +284,36 @@ export function formatLeftArrowIhtQueuedToast(queuedCount: number): string {
   return `Cannot open agents — ${n} queued ${plural(n, 'command')} would be lost. Run or clear ${n === 1 ? 'it' : 'them'} first.`
 }
 
+/** Official dse — queued messages that cannot move to the background. */
+export function formatLeftArrowStrandedQueuedMessage(count: number): string {
+  return `Cannot open agents — ${count} queued ${plural(count, 'message')} can't move to the background. Press ← again once Claude has read ${count === 1 ? 'it' : 'them'}.`
+}
+
+/** Official k0e — true when message is a stranded-queued-message notice (dse). */
+export function isLeftArrowStrandedQueuedMessage(message: string): boolean {
+  const countStr = /^Cannot open agents — (\d+) /.exec(message)?.[1]
+  return (
+    countStr !== undefined &&
+    message === formatLeftArrowStrandedQueuedMessage(Number(countStr))
+  )
+}
+
+/**
+ * Official #b — when Remote Control is on, suppress generic left-arrow failure
+ * messages from the screen, EXCEPT stranded-queued-message notices (k0e) so the
+ * user knows why ← stayed put over a queued message.
+ */
+export function shouldShowLeftArrowFailureMessage(
+  message: string,
+  isRemoteControlOn: boolean,
+): string | undefined {
+  if (!message) return undefined
+  if (isLeftArrowStrandedQueuedMessage(message) || !isRemoteControlOn) {
+    return message
+  }
+  return undefined
+}
+
 export type LeftArrowIhtGateReason =
   | 'persistence'
   | 'ended-by-model'

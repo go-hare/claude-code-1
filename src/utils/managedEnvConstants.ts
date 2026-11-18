@@ -128,20 +128,56 @@ export const HOST_TRANSPORT_SENSITIVE_ENV_VARS = new Set([
   'NODE_EXTRA_CA_CERTS',
   'NODE_TLS_REJECT_UNAUTHORIZED',
   'CLAUDE_CODE_OAUTH_SCOPES',
+  // Official 2.1.300 (#809) L7r / H7r / H / HDe / git config:
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE',
+  'HTTPLIB2_CA_CERTS',
+  'AWS_CA_BUNDLE',
+  'DENO_CERT',
+  'CARGO_HTTP_CAINFO',
+  'PIP_CERT',
+  'GIT_SSL_CAINFO',
+  'GRPC_DEFAULT_SSL_ROOTS_FILE_PATH',
+  'NIX_SSL_CERT_FILE',
+  'HEX_CACERTS_PATH',
+  'UV_NATIVE_TLS',
+  'DENO_TLS_CA_STORE',
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG',
 ])
 
-/** densable KVt(key) */
+const GIT_SSL_OR_PROXY_RE = /^GIT_(?:SSL|PROXY)_/i
+const GIT_CONFIG_KV_RE = /^GIT_CONFIG_(KEY|VALUE)_\d+$/i
+
+/** densable KVt(key) + official lqo / V7e (#809) */
 export function isHostTransportSensitiveEnvVar(key: string): boolean {
-  return HOST_TRANSPORT_SENSITIVE_ENV_VARS.has(key.toUpperCase())
+  return (
+    HOST_TRANSPORT_SENSITIVE_ENV_VARS.has(key.toUpperCase()) ||
+    GIT_SSL_OR_PROXY_RE.test(key) ||
+    GIT_CONFIG_KV_RE.test(key)
+  )
 }
 
 /**
- * densable PGm / LLn — proxy vars also stripped under managedByHostFlag.
+ * densable PGm / LLn — proxy vars also stripped under managedByHostFlag (#809).
  */
 export const HOST_PROXY_ENV_VARS = new Set([
   'HTTP_PROXY',
   'HTTPS_PROXY',
+  'ALL_PROXY',
   'NO_PROXY',
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS',
+  'CLAUDE_CODE_HTTP_PROXY',
+  'CLAUDE_CODE_HTTPS_PROXY',
+  'NPM_CONFIG_PROXY',
+  'NPM_CONFIG_HTTP_PROXY',
+  'NPM_CONFIG_HTTPS_PROXY',
 ])
 
 /** densable LLn(key) */

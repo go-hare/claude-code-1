@@ -11,6 +11,7 @@ import {
   estimateMaxTurnGrowth,
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
+  AUTOCOMPACT_THRASHING_MESSAGE,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
 import { buildPostCompactMessages } from './services/compact/compact.js'
@@ -30,6 +31,9 @@ import {
 import { ImageSizeError } from './utils/imageValidation.js'
 import { ImageResizeError } from './utils/imageResizer.js'
 import { findToolByName, type ToolUseContext } from './Tool.js'
+import { applyPendingUiInvalidations } from './utils/plugins/functionHooksModules.js'
+import { clearSystemPromptSections } from './constants/systemPromptSections.js'
+import { getSystemContext, getUserContext } from './context.js'
 import type { SpinnerMode } from './components/Spinner/types.js'
 import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.js'
 import type {
@@ -1196,7 +1200,12 @@ async function* queryLoop(
       )
 
       queryCheckpoint('query_autocompact_start')
-      const { compactionResult, consecutiveFailures } = await deps.autocompact(
+      const {
+        compactionResult,
+        consecutiveFailures,
+        consecutiveRapidRefills,
+        rapidRefillBreakerTripped,
+      } = await deps.autocompact(
         messagesForQuery,
         toolUseContext,
         {
@@ -1211,6 +1220,16 @@ async function* queryLoop(
         snipTokensFreed,
       )
       queryCheckpoint('query_autocompact_end')
+
+      if (rapidRefillBreakerTripped) {
+        yield createAssistantAPIErrorMessage({
+          content: AUTOCOMPACT_THRASHING_MESSAGE,
+          error: 'invalid_request',
+          apiError: 'autocompact_thrashing',
+        })
+        yield* leftoverDrainSpinnerModes()
+        return { reason: 'blocking_limit' }
+      }
 
       if (compactionResult) {
         const {
@@ -1269,6 +1288,7 @@ async function* queryLoop(
           turnId: deps.uuid(),
           turnCounter: 0,
           consecutiveFailures: 0,
+          consecutiveRapidRefills: consecutiveRapidRefills ?? 0,
         }
 
         const postCompactMessages = buildPostCompactMessages(compactionResult)
@@ -1597,6 +1617,15 @@ async function* queryLoop(
             tracking,
             snipTokensFreed,
           )
+          if (predictiveResult.rapidRefillBreakerTripped) {
+            yield createAssistantAPIErrorMessage({
+              content: AUTOCOMPACT_THRASHING_MESSAGE,
+              error: 'invalid_request',
+              apiError: 'autocompact_thrashing',
+            })
+            yield* leftoverDrainSpinnerModes()
+            return { reason: 'blocking_limit' }
+          }
           if (predictiveResult.compactionResult) {
             messagesForQuery = buildPostCompactMessages(
               predictiveResult.compactionResult,
@@ -1608,6 +1637,8 @@ async function* queryLoop(
                   compacted: true,
                   consecutiveFailures:
                     predictiveResult.consecutiveFailures ?? 0,
+                  consecutiveRapidRefills:
+                    predictiveResult.consecutiveRapidRefills ?? 0,
                 }
               : tracking
           }
@@ -4597,5 +4628,13 @@ export async function* query(
   | { type: 'spinner_mode'; mode: SpinnerMode },
   Terminal
 > {
+  // densable `cxr()` — flush pending $.ui.invalidate(...) before turn context loads.
+  applyPendingUiInvalidations({
+    'prompt.section': clearSystemPromptSections,
+    'prompt.context': () => {
+      getUserContext.cache.clear?.()
+      getSystemContext.cache.clear?.()
+    },
+  })
   return yield* withTurnAttributionGenerator(queryBody(params))
 }

@@ -122,9 +122,21 @@ export function parseCronExpression(expr: string): CronFields | null {
  * the gap. Fall-back repeats fire once (the step-forward logic jumps past
  * the second occurrence). This matches vixie-cron behavior.
  */
+/**
+ * Returns true when `d` falls in the second (repeated) occurrence of a
+ * DST fall-back hour. Calling `setMinutes(getMinutes())` normalizes the
+ * wall-clock time to the first occurrence, shifting the epoch timestamp.
+ */
+function isInRepeatedDstHour(d: Date): boolean {
+  const copy = new Date(d.getTime())
+  copy.setMinutes(copy.getMinutes())
+  return copy.getTime() !== d.getTime()
+}
+
 export function computeNextCronRun(
   fields: CronFields,
   from: Date,
+  { oneShot = false }: { oneShot?: boolean } = {},
 ): Date | null {
   const minuteSet = new Set(fields.minute)
   const hourSet = new Set(fields.hour)
@@ -136,13 +148,36 @@ export function computeNextCronRun(
   const domWild = fields.dayOfMonth.length === 31
   const dowWild = fields.dayOfWeek.length === 7
 
-  // Round up to the next whole minute (strictly after `from`)
-  const t = new Date(from.getTime())
-  t.setSeconds(0, 0)
-  t.setMinutes(t.getMinutes() + 1)
+  const dayMatches = (d: Date): boolean =>
+    domWild && dowWild
+      ? true
+      : domWild
+        ? dowSet.has(d.getDay())
+        : dowWild
+          ? domSet.has(d.getDate())
+          : domSet.has(d.getDate()) || dowSet.has(d.getDay())
+
+  // Round up to the next whole minute (strictly after `from`) using epoch
+  // arithmetic so a repeated DST hour does not jump backwards.
+  const t = new Date(Math.floor(from.getTime() / 60_000) * 60_000 + 60_000)
+  if (Number.isNaN(t.getTime())) return null
 
   const maxIter = 366 * 24 * 60
   for (let i = 0; i < maxIter; i++) {
+    if (isInRepeatedDstHour(t)) {
+      if (
+        oneShot &&
+        monthSet.has(t.getMonth() + 1) &&
+        dayMatches(t) &&
+        hourSet.has(t.getHours()) &&
+        minuteSet.has(t.getMinutes())
+      ) {
+        return t
+      }
+      t.setTime(t.getTime() + 60_000)
+      continue
+    }
+
     const month = t.getMonth() + 1
     if (!monthSet.has(month)) {
       // Jump to start of next month
@@ -151,32 +186,21 @@ export function computeNextCronRun(
       continue
     }
 
-    const dom = t.getDate()
-    const dow = t.getDay()
-    // When both dom/dow are constrained, either match is sufficient (OR semantics)
-    const dayMatches =
-      domWild && dowWild
-        ? true
-        : domWild
-          ? dowSet.has(dow)
-          : dowWild
-            ? domSet.has(dom)
-            : domSet.has(dom) || dowSet.has(dow)
-
-    if (!dayMatches) {
+    if (!dayMatches(t)) {
       // Jump to start of next day
       t.setDate(t.getDate() + 1)
       t.setHours(0, 0, 0, 0)
       continue
     }
 
-    if (!hourSet.has(t.getHours())) {
-      t.setHours(t.getHours() + 1, 0, 0, 0)
-      continue
-    }
-
-    if (!minuteSet.has(t.getMinutes())) {
-      t.setMinutes(t.getMinutes() + 1)
+    if (!hourSet.has(t.getHours()) || !minuteSet.has(t.getMinutes())) {
+      if (oneShot) {
+        t.setTime(t.getTime() + 60_000)
+      } else if (!hourSet.has(t.getHours())) {
+        t.setHours(t.getHours() + 1, 0, 0, 0)
+      } else {
+        t.setMinutes(t.getMinutes() + 1)
+      }
       continue
     }
 

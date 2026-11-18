@@ -12,7 +12,9 @@
  * Latch arm/restore densables below; query/withRetry consumers wire them.
  */
 
+import { z } from 'zod'
 import { isEnvTruthy } from './envUtils.js'
+import { getAPIProvider } from './model/providers.js'
 import {
   getInitialSettings,
   getSettingValueWithSource,
@@ -2763,4 +2765,76 @@ export function buildModelRefusalFallbackSystemMessage(input: {
     timestamp: input.timestamp,
     uuid: input.uuid,
   }
+}
+
+/** Official `Zzn` (2.1.299 #735). */
+export const CYBER_SAFEGUARDS_LEARN_MORE_URL =
+  'https://support.claude.com/en/articles/14604842-real-time-cyber-safeguards-on-claude'
+
+/** Official `aUr` — Defense Access in the Cyber Verification Program copy. */
+export const CYBER_VERIFICATION_NOTICE_BY_STATUS = {
+  a: '',
+  b: '',
+  c: 'Your Defense Access in the Cyber Verification Program covers defensive work, such as vulnerability triage and malware analysis.',
+  not_assigned_but_organization_approved:
+    'Ask your admin for Defense Access in the Cyber Verification Program to reduce these interruptions.',
+  organization_not_approved:
+    'Ask your admin to apply to the Cyber Verification Program to reduce these interruptions.',
+} as const
+
+/** Official `_vn` — stop_details cyber_verification schema. */
+export const cyberVerificationStopDetailsSchema = z.object({
+  category: z.literal('cyber'),
+  cyber_verification: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('active'), tier: z.enum(['a', 'b', 'c']) }),
+    z.object({
+      type: z.literal('inactive'),
+      reason: z.enum([
+        'not_assigned_but_organization_approved',
+        'organization_not_approved',
+      ]),
+    }),
+  ]),
+})
+
+/** Official `w4i` — whether 1P stop_details carries a valid cyber_verification status. */
+export function hasCyberVerificationStatus(stopDetails: unknown): boolean {
+  return (
+    getAPIProvider() === 'firstParty' &&
+    cyberVerificationStopDetailsSchema.safeParse(stopDetails).success
+  )
+}
+
+/** Official `Flt` — prepend Defense Access notice when applicable. */
+export function prependCyberVerificationNotice(
+  text: string,
+  stopDetails: unknown,
+): string {
+  if (getAPIProvider() !== 'firstParty') return text
+  const parsed = cyberVerificationStopDetailsSchema.safeParse(stopDetails)
+  if (!parsed.success) return text
+  const cv = parsed.data.cyber_verification
+  const notice =
+    CYBER_VERIFICATION_NOTICE_BY_STATUS[
+      cv.type === 'active' ? cv.tier : cv.reason
+    ]
+  if (notice === '') return text
+  return `${notice} ${text}`
+}
+
+/**
+ * Official `@297784953` — cyber safeguard note for subagent/main refusal:
+ * no longer asks people to apply to the Cyber Verification Program.
+ */
+export function formatCyberSafeguardDefenseAccessNote(
+  stopDetails: { category?: unknown } | null | undefined,
+): string {
+  if (
+    stopDetails?.category === 'cyber' &&
+    getAPIProvider() === 'firstParty' &&
+    !hasCyberVerificationStatus(stopDetails)
+  ) {
+    return ` Defense Access in the Cyber Verification Program reduces these interruptions: ${CYBER_SAFEGUARDS_LEARN_MORE_URL}`
+  }
+  return ''
 }

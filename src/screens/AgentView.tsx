@@ -802,6 +802,7 @@ function FleetPeekPanel({
   replyError,
   termWidth,
   termRows,
+  heldInTerminal = false,
 }: {
   session: SessionEntry;
   jobState: BgJobState | undefined;
@@ -815,6 +816,7 @@ function FleetPeekPanel({
   replyError: string | null;
   termWidth: number;
   termRows: number;
+  heldInTerminal?: boolean;
 }): React.ReactElement {
   const [now, setNow] = useState(() => Date.now());
   const band = deriveBand(session);
@@ -891,7 +893,10 @@ function FleetPeekPanel({
       : undefined;
 
   const questionRows = questions ? 2 + (questions[0]?.options.length ?? 0) : 0;
-  const statusMetaRows = isWaiting || budgetText !== '' ? 1 : 0;
+  // Official 2.1.299 (#574): show "safe mode · customizations are off" when --safe-mode was passed and not held in terminal.
+  const isSafeMode =
+    !heldInTerminal && ((jobState?.respawnFlags ?? session.respawnFlags)?.includes('--safe-mode') ?? false);
+  const statusMetaRows = isWaiting || budgetText !== '' || isSafeMode ? 1 : 0;
   const replyNewlines = countNewlines(replyInput);
   const bodyMaxHeight = Math.max(
     5,
@@ -1082,6 +1087,8 @@ function FleetPeekPanel({
               <Byline>
                 {isWaiting && <Text color={(waitingColor ?? undefined) as never}>waiting {waitingDuration}</Text>}
                 {budgetText !== '' && <Text dimColor>{budgetText}</Text>}
+                {isSafeMode && <Text dimColor>safe mode</Text>}
+                {isSafeMode && <Text dimColor>customizations are off</Text>}
               </Byline>
             </Text>
           </Box>
@@ -1452,7 +1459,12 @@ function AgentViewApp({
   const attachingJobIdRef = useRef<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string | undefined>(undefined);
   const [sessionEffort, setSessionEffort] = useState<string | undefined>(undefined);
-  void sessionEffort;
+  const [sessionFastMode, setSessionFastMode] = useState<boolean | undefined>(undefined);
+  const [settingPicker, setSettingPicker] = useState<{
+    setting: 'model' | 'effort' | 'fast';
+    options: Array<{ value: string; description?: string }>;
+    selected: number;
+  } | null>(null);
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
   const refreshGenerationRef = useRef(0);
@@ -2713,16 +2725,33 @@ function AgentViewApp({
             setCursorOffset(0);
             setSessionModel(undefined);
             setError(null);
-            setInfo('Model reset to default for this session');
+            setInfo('Model for new sessions reset to default');
           } else if (arg) {
             setDispatchInput('');
             setCursorOffset(0);
             setSessionModel(arg);
             setError(null);
-            setInfo(`Model set to ${arg} (session-scoped, not persisted)`);
+            setInfo(`Model set to ${arg} for new sessions from this window (not saved)`);
           } else {
+            setDispatchInput('');
+            setCursorOffset(0);
             setError(null);
-            setInfo('Usage: /model <name> — session-scoped, not persisted');
+            setInfo(null);
+            const opts = [
+              { value: 'sonnet', description: 'Balanced default model' },
+              { value: 'opus', description: 'Most capable model' },
+              { value: 'haiku', description: 'Fastest lightweight model' },
+              { value: 'default', description: 'Reset to configured default' },
+            ];
+            const cur = sessionModel ?? 'default';
+            setSettingPicker({
+              setting: 'model',
+              options: opts,
+              selected: Math.max(
+                0,
+                opts.findIndex(o => o.value === cur),
+              ),
+            });
           }
           return;
         }
@@ -2742,11 +2771,68 @@ function AgentViewApp({
             setError(null);
             setInfo(`Effort set to ${lower} for new sessions from this window (not saved)`);
           } else if (!arg) {
+            setDispatchInput('');
+            setCursorOffset(0);
             setError(null);
-            setInfo('Usage: /effort <low|medium|high|xhigh|max|default>');
+            setInfo(null);
+            const opts = [
+              ...['low', 'medium', 'high', 'xhigh', 'max'].map(v => ({ value: v })),
+              { value: 'default', description: 'Reset to configured default' },
+            ];
+            const cur = sessionEffort ?? 'default';
+            setSettingPicker({
+              setting: 'effort',
+              options: opts,
+              selected: Math.max(
+                0,
+                opts.findIndex(o => o.value === cur),
+              ),
+            });
           } else {
             setError(null);
             setInfo(`Unknown effort '${arg}' — use low, medium, high, xhigh, max or default`);
+          }
+          return;
+        }
+        if (quitToken === '/fast' || quitToken.startsWith('/fast ')) {
+          const arg = dispatchInput.trim().slice(5).trim();
+          const lower = arg.toLowerCase();
+          if (lower === 'default') {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionFastMode(undefined);
+            setError(null);
+            setInfo('Fast mode for new sessions reset to default');
+          } else if (lower === 'on' || lower === 'off') {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionFastMode(lower === 'on');
+            setError(null);
+            setInfo(
+              `Fast mode ${lower} for new sessions from this window (not saved)${lower === 'on' ? '. It draws from usage credits at a higher rate.' : ''}`,
+            );
+          } else if (!arg) {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setError(null);
+            setInfo(null);
+            const opts = [
+              { value: 'on' },
+              { value: 'off' },
+              { value: 'default', description: 'Reset to configured default' },
+            ];
+            const cur = sessionFastMode === undefined ? 'off' : sessionFastMode ? 'on' : 'off';
+            setSettingPicker({
+              setting: 'fast',
+              options: opts,
+              selected: Math.max(
+                0,
+                opts.findIndex(o => o.value === cur),
+              ),
+            });
+          } else {
+            setError(null);
+            setInfo(`Unknown /fast option '${arg}' — use on, off or default`);
           }
           return;
         }
@@ -3680,6 +3766,89 @@ function AgentViewApp({
       return;
     }
 
+    if (settingPicker) {
+      if (key.escape || (key.ctrl && input === 'c') || key.meta) {
+        setSettingPicker(null);
+        return;
+      }
+      if (key.upArrow || (key.ctrl && input === 'p')) {
+        setSettingPicker(p => (p ? { ...p, selected: Math.max(0, p.selected - 1) } : p));
+        return;
+      }
+      if (key.downArrow || (key.ctrl && input === 'n')) {
+        setSettingPicker(p => (p ? { ...p, selected: Math.min(p.options.length - 1, p.selected + 1) } : p));
+        return;
+      }
+      if (key.return) {
+        const picked = settingPicker.options[settingPicker.selected];
+        const which = settingPicker.setting;
+        setSettingPicker(null);
+        if (picked) {
+          if (which === 'model') {
+            setSessionModel(picked.value === 'default' ? undefined : picked.value);
+            setInfo(
+              picked.value === 'default'
+                ? 'Model for new sessions reset to default'
+                : `Model set to ${picked.value} for new sessions from this window (not saved)`,
+            );
+          } else if (which === 'effort') {
+            setSessionEffort(picked.value === 'default' ? undefined : picked.value);
+            setInfo(
+              picked.value === 'default'
+                ? 'Effort for new sessions reset to the default'
+                : `Effort set to ${picked.value} for new sessions from this window (not saved)`,
+            );
+          } else {
+            setSessionFastMode(picked.value === 'default' ? undefined : picked.value === 'on');
+            setInfo(
+              picked.value === 'default'
+                ? 'Fast mode for new sessions reset to default'
+                : `Fast mode ${picked.value} for new sessions from this window (not saved)${picked.value === 'on' ? '. It draws from usage credits at a higher rate.' : ''}`,
+            );
+          }
+        }
+        return;
+      }
+      return;
+    }
+
+    // Official 2.1.300 (#771): multi-character printable bursts (e.g. "up",
+    // "down", "escape") must be inserted as text rather than triggering
+    // key-named shortcuts or peek navigation.
+    if (
+      input &&
+      !key.ctrl &&
+      !key.meta &&
+      !key.escape &&
+      !key.upArrow &&
+      !key.downArrow &&
+      !key.leftArrow &&
+      !key.rightArrow &&
+      !key.return &&
+      !key.tab &&
+      !key.backspace &&
+      !key.delete &&
+      input.length > 1 &&
+      viewMode === 'list' &&
+      !helpOpen &&
+      !previewOpen
+    ) {
+      const normalized = input.replace(/\r\n|\r/g, '\n');
+      const nl = countNewlines(normalized);
+      const at = cursorOffsetRef.current;
+      if (normalized.length > FLEET_PASTE_CHAR_THRESHOLD || nl > 2) {
+        const id = pasteIdRef.current++;
+        pastesRef.current[id] = normalized;
+        const ph = formatPastedTextPlaceholder(id, nl);
+        setDispatchInput(v => v.slice(0, at) + ph + v.slice(at));
+        setCursorOffset(at + ph.length);
+        return;
+      }
+      setDispatchInput(v => v.slice(0, at) + normalized + v.slice(at));
+      setCursorOffset(at + normalized.length);
+      return;
+    }
+
     // Official JIy: non-space cancels a pending peek arm.
     if (input !== ' ') {
       cancelPeekTap();
@@ -4510,7 +4679,7 @@ function AgentViewApp({
     renaming: viewMode === 'rename',
     groupEdit: viewMode === 'group',
     attaching: viewMode === 'reply',
-    resumePicker: resumePicker !== null,
+    resumePicker: resumePicker !== null || settingPicker !== null,
   });
 
   // Render
@@ -5091,6 +5260,32 @@ function AgentViewApp({
             );
           })()}
 
+        {settingPicker && (
+          <Box position="absolute" bottom={0} left={0} right={0} flexDirection="column" opaque>
+            <Box flexDirection="column" borderStyle="round" paddingX={1}>
+              <Text bold>
+                {settingPicker.setting === 'model'
+                  ? 'Select model for new sessions'
+                  : settingPicker.setting === 'effort'
+                    ? 'Select effort for new sessions'
+                    : 'Select fast mode for new sessions'}
+              </Text>
+              {settingPicker.options.map((opt, idx) => {
+                const selected = idx === settingPicker.selected;
+                return (
+                  <Box key={opt.value}>
+                    <Text color={selected ? 'suggestion' : undefined} dimColor={!selected}>
+                      {selected ? figures.pointer : ' '} {opt.value}
+                    </Text>
+                    {opt.description && <Text dimColor> — {opt.description}</Text>}
+                  </Box>
+                );
+              })}
+              <Text dimColor>↑/↓ to navigate · enter to select · esc to close</Text>
+            </Box>
+          </Box>
+        )}
+
         {/* Official Ml + Il (@197656620) Peek / Preview opaque bottom overlay */}
         {previewOpen && selectedSession && !resumePicker && !helpOpen && (
           <FleetPeekPanel
@@ -5134,6 +5329,16 @@ function AgentViewApp({
             replyError={peekReplyError}
             termWidth={termWidth}
             termRows={termRows}
+            heldInTerminal={
+              terminalHolderOf(
+                {
+                  backend: selectedSession.backend,
+                  sessionId: selectedSession.sessionId,
+                  resumeSessionId: selectedSession.resumeSessionId,
+                },
+                terminalHolders,
+              ) !== undefined
+            }
           />
         )}
       </Box>

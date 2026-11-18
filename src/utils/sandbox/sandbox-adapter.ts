@@ -22,6 +22,7 @@ import {
 } from '@anthropic-ai/sandbox-runtime'
 import {
   closeSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -39,6 +40,8 @@ import { URL as NodeURL } from 'node:url'
 import {
   getAdditionalDirectoriesForClaudeMd,
   getCwdState,
+  getInlinePlugins,
+  getInlinePluginsNoMcp,
   getOriginalCwd,
 } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
@@ -63,7 +66,10 @@ import {
   SETTING_SOURCES,
   type SettingSource,
 } from '../settings/constants.js'
-import { getManagedSettingsDropInDir } from '../settings/managedPath.js'
+import {
+  getManagedSettingsDropInDir,
+  WSL_WINDOWS_MANAGED_PATH,
+} from '../settings/managedPath.js'
 import {
   getInitialSettings,
   getSettings_DEPRECATED,
@@ -730,6 +736,23 @@ export function mergeSandboxCredentialsForRuntime():
  *
  * @param settings Merged settings (used for sandbox config like network, ripgrep, etc.)
  */
+/**
+ * Official 325 `i3n()` — deduplicated resolved roots for `--plugin-dir` and
+ * `--plugin-dir-no-mcp` flags.
+ */
+export function getInlinePluginRoots(baseDir = getOriginalCwd()): string[] {
+  const seen = new Set<string>()
+  const roots: string[] = []
+  for (const p of [...getInlinePlugins(), ...getInlinePluginsNoMcp()]) {
+    const resolved = resolve(baseDir, p)
+    if (!seen.has(resolved)) {
+      seen.add(resolved)
+      roots.push(resolved)
+    }
+  }
+  return roots
+}
+
 export function convertToSandboxRuntimeConfig(
   settings: SettingsJson,
 ): SandboxRuntimeConfig {
@@ -813,6 +836,12 @@ export function convertToSandboxRuntimeConfig(
   ).filter((p): p is string => p !== undefined)
   denyWrite.push(...settingsPaths.map(recordSymlinkedDenyPath))
   denyWrite.push(recordSymlinkedDenyPath(getManagedSettingsDropInDir()))
+  // 2.1.299 #598 (SEA OH): On WSL2, protect Windows-side managed settings under DrvFs
+  // only when the directory exists so bwrap does not fail with `Can't mkdir /mnt/c/Program Files/ClaudeCode`.
+  if (getPlatform() === 'wsl' && existsSync(WSL_WINDOWS_MANAGED_PATH)) {
+    denyWrite.push(join(WSL_WINDOWS_MANAGED_PATH, 'managed-settings.json'))
+    denyWrite.push(join(WSL_WINDOWS_MANAGED_PATH, 'managed-settings.d'))
+  }
 
   // Also block settings files in the current working directory if it differs from original
   // This handles the case where the user has cd'd to a different directory
@@ -850,6 +879,14 @@ export function convertToSandboxRuntimeConfig(
     // densable BFs — skip when cwd is the producer or under it (would lock workspace)
     if (isPathEqualOrUnder(abs, cwd)) continue
     denyWrite.push(abs)
+  }
+
+  // 2.1.299 #591 (SEA i3n / pc): Protect `--plugin-dir` / `--plugin-dir-no-mcp` roots
+  // from sandboxed writes unless originalCwd is equal to or under the plugin root.
+  for (const pluginRoot of getInlinePluginRoots(originalCwd)) {
+    if (!isPathEqualOrUnder(pluginRoot, originalCwd)) {
+      denyWrite.push(recordSymlinkedDenyPath(pluginRoot))
+    }
   }
 
   // SECURITY: Git's is_git_directory() treats cwd as a bare repo if it has
@@ -1944,13 +1981,13 @@ async function setSandboxSettings(options: {
   enabled?: boolean
   autoAllowBashIfSandboxed?: boolean
   allowUnsandboxedCommands?: boolean
-}): Promise<void> {
+}): Promise<{ error: Error | null }> {
   const existingSettings = getSettingsForSource('localSettings')
 
   // Note: Memoized caches auto-invalidate when settings change because they use
   // the settings object as the cache key (new settings object = cache miss)
 
-  updateSettingsForSource('localSettings', {
+  return updateSettingsForSource('localSettings', {
     sandbox: {
       ...existingSettings?.sandbox,
       ...(options.enabled !== undefined && { enabled: options.enabled }),
@@ -2168,14 +2205,18 @@ export function isStrictSandboxModeConfigured(): boolean {
   return areSandboxSettingsLockedByPolicy()
 }
 
-export function addToExcludedCommands(
+export function addToExcludedCommandsWithResult(
   command: string,
   permissionUpdates?: Array<{
     type: string
     rules: Array<{ toolName: string; ruleContent?: string }>
   }>,
   source: 'localSettings' | 'userSettings' = 'localSettings',
-): string {
+): {
+  commandPattern: string
+  settingsSource: 'localSettings' | 'userSettings'
+  error: Error | null
+} {
   const existingSettings = getSettingsForSource(source)
   const existingExcludedCommands =
     existingSettings?.sandbox?.excludedCommands || []
@@ -2205,16 +2246,30 @@ export function addToExcludedCommands(
   }
 
   // Add to excludedCommands if not already present
+  let error: Error | null = null
   if (!existingExcludedCommands.includes(commandPattern)) {
-    updateSettingsForSource(source, {
+    const result = updateSettingsForSource(source, {
       sandbox: {
         ...existingSettings?.sandbox,
         excludedCommands: [...existingExcludedCommands, commandPattern],
       },
     })
+    error = result.error
   }
 
-  return commandPattern
+  return { commandPattern, settingsSource: source, error }
+}
+
+export function addToExcludedCommands(
+  command: string,
+  permissionUpdates?: Array<{
+    type: string
+    rules: Array<{ toolName: string; ruleContent?: string }>
+  }>,
+  source: 'localSettings' | 'userSettings' = 'localSettings',
+): string {
+  return addToExcludedCommandsWithResult(command, permissionUpdates, source)
+    .commandPattern
 }
 
 // ============================================================================
@@ -2238,7 +2293,7 @@ export interface ISandboxManager {
     enabled?: boolean
     autoAllowBashIfSandboxed?: boolean
     allowUnsandboxedCommands?: boolean
-  }): Promise<void>
+  }): Promise<{ error: Error | null }>
   getFsReadConfig(): FsReadRestrictionConfig
   getFsWriteConfig(): FsWriteRestrictionConfig
   getNetworkRestrictionConfig(): NetworkRestrictionConfig

@@ -57,7 +57,14 @@ export function getMcpInstructionsDelta(
   mcpClients: MCPServerConnection[],
   messages: Message[],
   clientSideInstructions: ClientSideInstruction[],
+  options?: {
+    retractionHoldEnabled?: boolean
+    holdRemovedAbsentFromClients?: boolean
+  },
 ): McpInstructionsDelta | null {
+  const retractionHoldEnabled = options?.retractionHoldEnabled ?? false
+  const holdRemovedAbsentFromClients =
+    options?.holdRemovedAbsentFromClients ?? false
   const announced = new Set<string>()
   let attachmentCount = 0
   let midCount = 0
@@ -112,10 +119,22 @@ export function getMcpInstructionsDelta(
   // instruction gates are session-stable in practice. (/model can flip
   // the model gate, but deferred_tools_delta has the same property and
   // we treat history as historical — no retroactive retractions.)
-  const removed: string[] = []
+  const pendingNames = new Set(
+    mcpClients.filter(c => c.type === 'pending').map(c => c.name),
+  )
+  const rawRemoved: string[] = []
   for (const n of announced) {
-    if (!connectedNames.has(n)) removed.push(n)
+    if (!connectedNames.has(n)) rawRemoved.push(n)
   }
+  const removed = retractionHoldEnabled
+    ? rawRemoved.filter(
+        n =>
+          !pendingNames.has(n) &&
+          !(
+            holdRemovedAbsentFromClients && !mcpClients.some(c => c.name === n)
+          ),
+      )
+    : rawRemoved
 
   if (added.length === 0 && removed.length === 0) return null
 
@@ -124,6 +143,9 @@ export function getMcpInstructionsDelta(
   logEvent('tengu_mcp_instructions_pool_change', {
     addedCount: added.length,
     removedCount: removed.length,
+    departedWhileConnectingCount: rawRemoved.filter(n => pendingNames.has(n))
+      .length,
+    retractionHoldEnabled,
     priorAnnouncedCount: announced.size,
     clientSideCount: clientSideInstructions.length,
     messagesLength: messages.length,

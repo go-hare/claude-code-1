@@ -171,6 +171,85 @@ export interface ImageLimits {
   maxWidth: number
   maxHeight: number
   maxBase64Size: number
+  maxImageTokens?: number
+}
+
+const IMAGE_TOKEN_PATCH_SIZE = 28
+
+/**
+ * #633 SEA 325 `voe`: estimate image token cost in 28x28 patches.
+ */
+export function estimateImageTokens(width: number, height: number): number {
+  if (width <= 0 || height <= 0) return 0
+  return (
+    Math.ceil(width / IMAGE_TOKEN_PATCH_SIZE) *
+    Math.ceil(height / IMAGE_TOKEN_PATCH_SIZE)
+  )
+}
+
+function roundHalfToEven(n: number): number {
+  const floor = Math.floor(n)
+  const frac = n - floor
+  return frac > 0.5 || (frac === 0.5 && floor % 2 === 1) ? floor + 1 : floor
+}
+
+/**
+ * #633 SEA 325 `tmn`: binary search with round-half-to-even so large
+ * near-square images stay within both maxSide and maxImageTokens.
+ */
+export function fitImageToMaxTokens(
+  width: number,
+  height: number,
+  maxSide = 1568,
+  maxTokens = 1568,
+): [number, number] {
+  if (
+    width <= maxSide &&
+    height <= maxSide &&
+    estimateImageTokens(width, height) <= maxTokens
+  ) {
+    return [width, height]
+  }
+  if (height > width) {
+    const [h, w] = fitImageToMaxTokens(height, width, maxSide, maxTokens)
+    return [w, h]
+  }
+  const aspect = width / height
+  let lo = 1
+  let hi = width
+  while (lo + 1 < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    const h = Math.max(roundHalfToEven(mid / aspect), 1)
+    if (mid <= maxSide && estimateImageTokens(mid, h) <= maxTokens) {
+      lo = mid
+    } else {
+      hi = mid
+    }
+  }
+  return [lo, Math.max(roundHalfToEven(lo / aspect), 1)]
+}
+
+/**
+ * #633 SEA 325 `j6n`: constrain by maxWidth/maxHeight, then maxImageTokens.
+ */
+export function computeTargetDimensions(
+  width: number,
+  height: number,
+  limits: Pick<ImageLimits, 'maxWidth' | 'maxHeight' | 'maxImageTokens'>,
+): [number, number] {
+  let w = width
+  let h = height
+  if (w > limits.maxWidth) {
+    h = Math.round((h * limits.maxWidth) / w)
+    w = limits.maxWidth
+  }
+  if (h > limits.maxHeight) {
+    w = Math.round((w * limits.maxHeight) / h)
+    h = limits.maxHeight
+  }
+  return limits.maxImageTokens === undefined
+    ? [w, h]
+    : fitImageToMaxTokens(w, h, Infinity, limits.maxImageTokens)
 }
 
 /**
@@ -221,16 +300,19 @@ export async function maybeResizeAndDownsampleImageBuffer(
     const originalWidth = metadata.width
     const originalHeight = metadata.height
 
-    // Calculate dimensions while maintaining aspect ratio
-    let width = originalWidth
-    let height = originalHeight
+    // Calculate target dimensions using SEA 325 j6n/tmn (#633)
+    const [targetWidth, targetHeight] = computeTargetDimensions(
+      originalWidth,
+      originalHeight,
+      { maxWidth, maxHeight, maxImageTokens: limits?.maxImageTokens },
+    )
+    let width = targetWidth
+    let height = targetHeight
+    const needsDimensionResize =
+      width !== originalWidth || height !== originalHeight
 
     // Check if the original file just works
-    if (
-      originalSize <= targetRawSize &&
-      width <= maxWidth &&
-      height <= maxHeight
-    ) {
+    if (originalSize <= targetRawSize && !needsDimensionResize) {
       return {
         buffer: imageBuffer,
         mediaType: normalizedMediaType,
@@ -243,7 +325,6 @@ export async function maybeResizeAndDownsampleImageBuffer(
       }
     }
 
-    const needsDimensionResize = width > maxWidth || height > maxHeight
     const isPng = normalizedMediaType === 'png'
 
     // If dimensions are within limits but file is too large, try compression first
@@ -290,17 +371,7 @@ export async function maybeResizeAndDownsampleImageBuffer(
       // Quality reduction alone wasn't enough, fall through to resize
     }
 
-    // Constrain dimensions if needed
-    if (width > maxWidth) {
-      height = Math.round((height * maxWidth) / width)
-      width = maxWidth
-    }
-
-    if (height > maxHeight) {
-      width = Math.round((width * maxHeight) / height)
-      height = maxHeight
-    }
-
+    // Dimensions already constrained by computeTargetDimensions above
     // IMPORTANT: Always create fresh sharp(imageBuffer) instances for each operation.
     // The native image-processor-napi module doesn't properly apply format conversions
     // when reusing a sharp instance after calling toBuffer(). This caused a bug where

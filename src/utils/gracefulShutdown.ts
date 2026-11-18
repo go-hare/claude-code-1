@@ -5,6 +5,7 @@ import { onExit } from 'signal-exit'
 import type { ExitReason } from 'src/entrypoints/agentSdkTypes.js'
 import {
   getIsInteractive,
+  getIsNonInteractiveSession,
   getIsScrollDraining,
   getLastMainRequestId,
   getSessionId,
@@ -47,7 +48,7 @@ import {
   getStdoutDrainBudgetMs,
   markStdoutDrainExternallyClocked,
 } from './process.js'
-import { getCurrentSessionTitle, sessionIdExists } from './sessionStorage.js'
+import { sessionIdExists } from './sessionStorage.js'
 import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
 import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
@@ -57,6 +58,12 @@ import {
   markShutdownCommitted,
   resetShutdownCommittedForTests,
 } from './shutdownCommitted.js'
+import {
+  beginOAuthRefreshLockHold,
+  getHeldOAuthRefreshPromise as getAuthHeldOAuthRefreshPromise,
+  resetOAuthRefreshHoldForTesting,
+  waitForHeldOAuthRefresh as waitForAuthHeldOAuthRefresh,
+} from './auth.js'
 
 /** densable `tlr` — G0 USASCII + SI. */
 const G0_USASCII = '\x1b(B\x0f'
@@ -199,6 +206,149 @@ export function cleanupTerminalModes(): void {
 let resumeHintPrinted = false
 let resumeHintOmitsWorktree = false
 
+const WORKTREE_RESUME_ADVICE = [
+  'This session ran in a worktree',
+  'In its folder, run the command below to resume in it',
+  'To find that folder, try git worktree list',
+]
+
+const LAUNCHER_PROGRAM_RE = /^\w[\w-]*$/
+
+function isSafeWorktreeName(name: string): boolean {
+  if (name.length === 0 || name.startsWith('-')) return false
+  // Reject quotes, backticks, $, newlines, control chars
+  return !/[\r\n\0"'`$\\]/.test(name)
+}
+
+export type FormatResumeHintInput = {
+  sessionId: string
+  worktree?: {
+    name: string
+    recordCleared: boolean
+  }
+  columns?: number
+  envAssignment?: string
+  launchFlags?: string
+  launcherProgram?: string
+}
+
+export type FormatResumeHintResult = {
+  advice: string[]
+  command: string
+  arg: 'id' | 'none'
+  flags: boolean
+  launcher: boolean
+  worktree:
+    | 'absent'
+    | 'printed'
+    | 'printed_short_flags'
+    | 'refused'
+    | 'too_wide'
+    | 'width_unknown'
+}
+
+/**
+ * SEA `wHa` (#728 & #729):
+ * - Always names the session by ID, never by custom title (#728).
+ * - For worktrees, degrades `--worktree "<name>" --resume <id>` to
+ *   `-w "<name>" -r <id>` if long flags don't fit `columns`, and prints
+ *   directory advice above if neither fits a kept worktree (#729).
+ */
+export function formatResumeHint({
+  sessionId,
+  worktree,
+  columns,
+  envAssignment,
+  launchFlags = '',
+  launcherProgram,
+}: FormatResumeHintInput): FormatResumeHintResult {
+  const base =
+    envAssignment === undefined ? 'claude' : `${envAssignment} claude`
+  const idPart = sessionId ? ` ${sessionId}` : ''
+  const arg: 'id' | 'none' = sessionId ? 'id' : 'none'
+
+  if (
+    launcherProgram !== undefined &&
+    LAUNCHER_PROGRAM_RE.test(launcherProgram)
+  ) {
+    return {
+      advice: [],
+      command: `${launcherProgram} --resume${idPart}`,
+      arg,
+      flags: false,
+      launcher: true,
+      worktree: worktree === undefined ? 'absent' : 'refused',
+    }
+  }
+
+  const validColumns =
+    typeof columns === 'number' && Number.isFinite(columns) && columns > 0
+      ? Math.floor(columns)
+      : undefined
+  const includeFlags =
+    launchFlags !== '' &&
+    (!/[/.]/.test(launchFlags) ||
+      (validColumns !== undefined &&
+        `${base} ${launchFlags} --resume${idPart}`.length <= validColumns))
+  const cmdBase = includeFlags ? `${base} ${launchFlags}` : base
+
+  if (worktree === undefined) {
+    return {
+      advice: [],
+      command: `${cmdBase} --resume${idPart}`,
+      arg,
+      flags: includeFlags,
+      launcher: false,
+      worktree: 'absent',
+    }
+  }
+
+  const { name, recordCleared } = worktree
+  const candidates: Array<{
+    command: string
+    worktree: 'printed' | 'printed_short_flags'
+  }> =
+    typeof name === 'string' && isSafeWorktreeName(name)
+      ? [
+          {
+            command: `${cmdBase} --worktree "${name}" --resume${idPart}`,
+            worktree: 'printed',
+          },
+          {
+            command: `${cmdBase} -w "${name}" -r${idPart}`,
+            worktree: 'printed_short_flags',
+          },
+        ]
+      : []
+
+  const fitting = candidates.find(
+    c => validColumns !== undefined && c.command.length <= validColumns,
+  )
+  if (fitting !== undefined) {
+    return {
+      advice: [],
+      arg,
+      flags: includeFlags,
+      launcher: false,
+      ...fitting,
+    }
+  }
+
+  return {
+    advice: recordCleared ? WORKTREE_RESUME_ADVICE : [],
+    command: `${cmdBase} --resume${idPart}`,
+    arg,
+    flags: includeFlags,
+    launcher: false,
+    worktree:
+      candidates.length === 0
+        ? 'refused'
+        : validColumns !== undefined
+          ? 'too_wide'
+          : 'width_unknown',
+  }
+}
+
 /**
  * Print a hint about how to resume the session.
  * Only shown for interactive sessions with persistence enabled.
@@ -220,17 +370,6 @@ function printResumeHint(): void {
       if (!sessionIdExists(sessionId)) {
         return
       }
-      const customTitle = getCurrentSessionTitle(sessionId)
-
-      // Use custom title if available, otherwise fall back to session ID
-      let resumeArg: string
-      if (customTitle) {
-        // Wrap in double quotes, escape backslashes first then quotes
-        const escaped = customTitle.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-        resumeArg = `"${escaped}"`
-      } else {
-        resumeArg = sessionId
-      }
 
       const worktreeSession = resumeHintOmitsWorktree
         ? undefined
@@ -239,12 +378,20 @@ function printResumeHint(): void {
         worktreeSession && !worktreeSession.enteredExisting
           ? worktreeSession.worktreeName
           : undefined
-      const worktreeFlag = worktreeName ? `--worktree ${worktreeName} ` : ''
+
+      const { advice, command } = formatResumeHint({
+        sessionId,
+        worktree: worktreeName
+          ? { name: worktreeName, recordCleared: true }
+          : undefined,
+        columns: process.stdout.columns,
+        launcherProgram: process.env.CLAUDE_CODE_RESUME_HINT_COMMAND,
+      })
 
       writeSync(
         1,
         chalk.dim(
-          `\nResume this session with:\nclaude ${worktreeFlag}--resume ${resumeArg}\n`,
+          ['', ...advice, 'Resume this session with:', command, ''].join('\n'),
         ),
       )
       resumeHintPrinted = true
@@ -534,8 +681,116 @@ export function gracefulShutdownSync(
 
 let shutdownInProgress = false
 let failsafeTimer: ReturnType<typeof setTimeout> | undefined
+let failsafeFiresAtMs: number | undefined
 let orphanCheckInterval: ReturnType<typeof setInterval> | undefined
 let pendingShutdown: Promise<void> | undefined
+let shortenOAuthRefreshWait: (() => void) | undefined
+
+/** Official 325 `F6a = 15000` — minimum failsafe when background work is pending at exit (#765). */
+export const BACKGROUND_EXIT_FAILSAFE_MIN_MS = 15000
+
+const pendingBackgroundShutdownWork = new Set<Promise<unknown>>()
+
+/** Official 325 `O6i` — track a background write/command promise to drain at exit (#765). */
+export function trackBackgroundShutdownWork(promise: Promise<unknown>): void {
+  pendingBackgroundShutdownWork.add(promise)
+  void promise.finally(() => {
+    pendingBackgroundShutdownWork.delete(promise)
+  })
+}
+
+/** Official 325 `mqt()` — true when background writes/commands are pending at exit (#765). */
+export function hasPendingBackgroundShutdownWork(): boolean {
+  return pendingBackgroundShutdownWork.size > 0
+}
+
+/** Official 325 `gqt()` — drain tracked background work before SessionEnd hooks (#765). */
+export async function drainBackgroundShutdownWork(): Promise<void> {
+  if (pendingBackgroundShutdownWork.size === 0) return
+  await Promise.allSettled([...pendingBackgroundShutdownWork])
+}
+
+/** Official 325 `V2e = 2000`, `MVa = 8500` — OAuth refresh lock wait constants (#860). */
+export const OAUTH_REFRESH_WAIT_MS = 2000
+export const OAUTH_REFRESH_SHORT_CMD_CAP_MS = 8500
+
+/** Acquire an in-flight OAuth refresh hold; returns a release callback (#860). */
+export function acquireOAuthRefreshHold(): () => void {
+  return beginOAuthRefreshLockHold()
+}
+
+/** Official 325 `O4t()` — returns a promise if an OAuth refresh lock is held, else null (#860). */
+export function getHeldOAuthRefreshPromise(): Promise<void> | null {
+  return getAuthHeldOAuthRefreshPromise()
+}
+
+/** Official 325 `Sjo()` — short non-interactive commands get up to 8.5s minus uptime (#860). */
+export function getHeldOAuthRefreshTimeoutMs(): number {
+  return getIsNonInteractiveSession()
+    ? Math.max(
+        OAUTH_REFRESH_WAIT_MS,
+        OAUTH_REFRESH_SHORT_CMD_CAP_MS - process.uptime() * 1000,
+      )
+    : OAUTH_REFRESH_WAIT_MS
+}
+
+/** Official 325 `I4t(e)` — await held OAuth refresh release up to `timeoutMs` (#860). */
+export async function waitForOAuthRefreshRelease(
+  timeoutMs: number,
+): Promise<boolean> {
+  return waitForAuthHeldOAuthRefresh(timeoutMs)
+}
+
+function armShutdownFailsafe(budgetMs: number, exitCode: number): void {
+  if (failsafeTimer !== undefined) {
+    clearTimeout(failsafeTimer)
+    failsafeTimer = undefined
+  }
+  failsafeFiresAtMs = Date.now() + budgetMs
+  failsafeTimer = setTimeout(
+    (code: number) => {
+      cleanupTerminalModes()
+      printResumeHint()
+      // densable EDs body: fVt(500,{scaleBudgetToQueue:!1}).then(()=>ADs(r))
+      markStdoutDrainExternallyClocked()
+      void drainStdoutBeforeExit(500, { scaleBudgetToQueue: false })
+        .catch(() => {})
+        .finally(() => {
+          forceExit(code)
+        })
+    },
+    budgetMs,
+    exitCode,
+  )
+  failsafeTimer.unref()
+}
+
+/** Official 325 `waitForHeldOAuthRefresh(e)` (#860). */
+export async function waitForHeldOAuthRefresh(
+  exitCode: number,
+): Promise<boolean> {
+  if (getHeldOAuthRefreshPromise() === null) return true
+  const timeoutMs =
+    exitCode === 0 ? getHeldOAuthRefreshTimeoutMs() : OAUTH_REFRESH_WAIT_MS
+  if (failsafeFiresAtMs !== undefined) {
+    armShutdownFailsafe(
+      Math.max(0, failsafeFiresAtMs - Date.now()) + timeoutMs,
+      exitCode,
+    )
+  }
+  const released = waitForOAuthRefreshRelease(timeoutMs)
+  if (timeoutMs === OAUTH_REFRESH_WAIT_MS) return released
+  const startedAt = Date.now()
+  const { promise, resolve } = Promise.withResolvers<boolean>()
+  shortenOAuthRefreshWait = () => {
+    setTimeout(
+      resolve,
+      Math.max(0, startedAt + OAUTH_REFRESH_WAIT_MS - Date.now()),
+      false,
+    )
+  }
+  return Promise.race([released, promise])
+}
 
 /** Check if graceful shutdown is in progress */
 export function isShuttingDown(): boolean {
@@ -567,6 +822,10 @@ export function resetShutdownState(): void {
     clearTimeout(failsafeTimer)
     failsafeTimer = undefined
   }
+  failsafeFiresAtMs = undefined
+  shortenOAuthRefreshWait = undefined
+  pendingBackgroundShutdownWork.clear()
+  resetOAuthRefreshHoldForTesting()
   pendingShutdown = undefined
 }
 
@@ -600,6 +859,7 @@ export async function gracefulShutdown(
   },
 ): Promise<void> {
   if (shutdownInProgress) {
+    shortenOAuthRefreshWait?.()
     return
   }
   shutdownInProgress = true
@@ -658,18 +918,7 @@ export async function gracefulShutdown(
   // Local also keeps sessionEndHooks budget: max(5s, hooks+3.5s, drain+1.5s).
   const drainBudgetMs = getStdoutDrainBudgetMs()
   const FAILSAFE_DRAIN_HEADROOM_MS = 1500 // densable P8y
-  failsafeTimer = setTimeout(
-    (code: number) => {
-      cleanupTerminalModes()
-      printResumeHint()
-      // densable EDs body: fVt(500,{scaleBudgetToQueue:!1}).then(()=>ADs(r))
-      markStdoutDrainExternallyClocked()
-      void drainStdoutBeforeExit(500, { scaleBudgetToQueue: false })
-        .catch(() => {})
-        .finally(() => {
-          forceExit(code)
-        })
-    },
+  armShutdownFailsafe(
     Math.max(
       5000,
       sessionEndBoundMs + 3500,
@@ -677,7 +926,6 @@ export async function gracefulShutdown(
     ),
     exitCode,
   )
-  failsafeTimer.unref()
 
   // Flush session data first — this is the most critical cleanup. If the
   // terminal is dead (SIGHUP, SSH disconnect), hooks and analytics may hang
@@ -720,6 +968,32 @@ export async function gracefulShutdown(
     clearTimeout(cleanupTimeoutId)
   }
 
+  // 2.1.300 #765 (SEA mqt/F6a/gqt): If background work is pending at exit,
+  // extend failsafe to at least 15s (or sessionEndBoundMs + 5s) and drain it
+  // before killing shell commands and running SessionEnd hooks.
+  if (hasPendingBackgroundShutdownWork()) {
+    armShutdownFailsafe(
+      Math.max(BACKGROUND_EXIT_FAILSAFE_MIN_MS, sessionEndBoundMs + 5000),
+      exitCode,
+    )
+    try {
+      await drainBackgroundShutdownWork()
+    } catch {
+      // best-effort
+    }
+  }
+
+  // 2.1.300 #810 (SEA rkr/Htn): kill live background shell commands and wait up
+  // to 1.5s (SHELL_KILL_BACKSTOP_MS) for SIGKILL backstops before exiting.
+  try {
+    const { awaitPendingShellKillBackstops, killLiveShellCommands } =
+      await import('../tasks/LocalShellTask/killShellTasks.js')
+    killLiveShellCommands()
+    await awaitPendingShellKillBackstops()
+  } catch {
+    // best-effort — never block shutdown
+  }
+
   // Execute SessionEnd hooks. Per-hook default is `_go` (env ?? 1500);
   // overall AbortSignal is `Kfe` (env if set, else matcher timeout clamp).
   try {
@@ -730,6 +1004,15 @@ export async function gracefulShutdown(
     })
   } catch {
     // Ignore SessionEnd hook exceptions (including AbortError on timeout)
+  }
+
+  try {
+    const { awaitPendingShellKillBackstops, killLiveShellCommands } =
+      await import('../tasks/LocalShellTask/killShellTasks.js')
+    killLiveShellCommands()
+    await awaitPendingShellKillBackstops()
+  } catch {
+    // best-effort — never block shutdown
   }
 
   // Log startup perf before analytics shutdown flushes/cancels timers
@@ -768,6 +1051,17 @@ export async function gracefulShutdown(
     ])
   } catch {
     // Ignore analytics shutdown errors
+  }
+
+  // 2.1.301 #860 (SEA waitForHeldOAuthRefresh): Wait for any held OAuth token
+  // refresh lock before exiting so short commands do not time out / sign out.
+  try {
+    const settled = await waitForHeldOAuthRefresh(exitCode)
+    if (settled && getHeldOAuthRefreshPromise() !== null) {
+      await waitForHeldOAuthRefresh(exitCode)
+    }
+  } catch {
+    // best-effort — never block shutdown
   }
 
   if (options?.finalMessage) {

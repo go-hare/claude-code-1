@@ -21,7 +21,7 @@ import {
 import { un } from './store.js'
 
 /** densable h9 — watch cap (same as WATCH_CAP; avoid frameLive cycle). */
-const WATCH_CAP = 5
+const WATCH_CAP = 25
 
 export type PublishContext =
   | 'interactive'

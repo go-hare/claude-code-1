@@ -3052,6 +3052,33 @@ export function dispatchPrintControlExtra(
           deps.sendError(INVALID_HANDOFF_SOME_ANSWERED)
           return true
         }
+        if (hits === 0 && Array.isArray(transcript)) {
+          const heldUuids = new Set(uuidsFromMessages(transcript))
+          let matchedPrefix = 0
+          while (
+            matchedPrefix < request.messages.length &&
+            (() => {
+              const msg = request.messages[matchedPrefix]
+              const uuid =
+                msg !== null &&
+                typeof msg === 'object' &&
+                'uuid' in msg &&
+                typeof (msg as { uuid?: unknown }).uuid === 'string'
+                  ? (msg as { uuid: string }).uuid
+                  : undefined
+              return uuid !== undefined && heldUuids.has(uuid)
+            })()
+          ) {
+            matchedPrefix++
+          }
+          if (matchedPrefix < request.messages.length) {
+            const recovered = new Set(deps.recoveredToolUseIds?.() ?? [])
+            if (recovered.size > 0 && lastIds.every(id => recovered.has(id))) {
+              deps.sendError(RECOVERED_BY_RESTART)
+              return true
+            }
+          }
+        }
       }
     }
     if (toolUseIDs.length > 0 && Array.isArray(transcript)) {

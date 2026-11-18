@@ -63,9 +63,7 @@ export const call: LocalCommandCall = async (args, context) => {
     forced: force && cacheImpact.wouldInvalidateCache,
   })
 
-  const r = await refreshActivePlugins(context.setAppState, {
-    applyStagedInstalls: false,
-  })
+  const r = await refreshActivePlugins(context.setAppState)
 
   const parts = [
     n(r.enabled_count, 'plugin'),

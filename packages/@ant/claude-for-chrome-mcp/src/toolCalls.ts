@@ -7,6 +7,7 @@ import {
 import { basename, extname, resolve as pathResolve } from 'path'
 
 import type { CallToolResult } from '@modelcontextprotocol/server'
+import { NoExtensionConnectedError } from './bridgeClient.js'
 import { BRIDGE_ONLY_BROWSER_TOOLS } from './browserTools.js'
 import { SocketConnectionError } from './mcpSocketClient.js'
 import type {
@@ -125,7 +126,10 @@ export const handleToolCall = async (
       toLoggerDetail(error),
     )
 
-    if (error instanceof SocketConnectionError) {
+    if (
+      error instanceof SocketConnectionError ||
+      error instanceof NoExtensionConnectedError
+    ) {
       return handleToolCallDisconnected(context)
     }
 

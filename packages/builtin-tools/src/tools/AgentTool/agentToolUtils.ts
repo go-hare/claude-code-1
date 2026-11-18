@@ -9,6 +9,12 @@ import {
 } from 'src/constants/tools.js'
 import { startAgentSummarization } from 'src/services/AgentSummary/agentSummary.js'
 import {
+  buildMcpToolName,
+  getMcpPrefix,
+  getToolNameForPermissionCheck,
+  mcpInfoFromString,
+} from 'src/services/mcp/mcpStringUtils.js'
+import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
@@ -284,6 +290,35 @@ export function resolveAgentTools(
   const resolvedToolsSet = new Set<Tool>()
   let allowedAgentTypes: string[] | undefined
 
+  function getMcpServerBases(tool: Tool): string[] {
+    if (tool.mcpInfo) {
+      const prefix = getMcpPrefix(tool.mcpInfo.serverName)
+      return [prefix.slice(0, -2)]
+    }
+    const bases: string[] = []
+    if (!tool.name.startsWith('mcp__')) return bases
+    for (
+      let i = tool.name.indexOf('__', 5);
+      i !== -1;
+      i = tool.name.indexOf('__', i + 1)
+    ) {
+      bases.push(tool.name.slice(0, i))
+    }
+    return bases
+  }
+
+  function matchesMcpServerRule(spec: string, tool: Tool): boolean {
+    const parsedSpec = mcpInfoFromString(spec)
+    const parsedTool = mcpInfoFromString(getToolNameForPermissionCheck(tool))
+    if (parsedSpec === null || parsedTool === null) return false
+    if (parsedSpec.serverName !== parsedTool.serverName) return false
+    if (parsedSpec.toolName !== undefined && parsedSpec.toolName !== '*') {
+      return false
+    }
+    const bases = getMcpServerBases(tool)
+    return bases.every(base => spec === base || spec.startsWith(`${base}__`))
+  }
+
   for (const toolSpec of agentTools) {
     // Parse the tool spec to extract the base tool name and any permission pattern
     const { toolName, ruleContent } = permissionRuleValueFromString(toolSpec)
@@ -302,6 +337,54 @@ export function resolveAgentTools(
       }
       // For main thread, filtering was skipped so Agent is in availableToolMap —
       // fall through to normal resolution below.
+    }
+
+    const parsedMcp = mcpInfoFromString(toolName)
+    if (
+      parsedMcp !== null &&
+      parsedMcp.serverName !== '*' &&
+      (parsedMcp.toolName === undefined || parsedMcp.toolName === '*')
+    ) {
+      validTools.push(toolSpec)
+      let matchedAny = false
+      for (const tool of allowedAvailableTools) {
+        if (!matchesMcpServerRule(toolName, tool)) continue
+        matchedAny = true
+        if (!resolvedToolsSet.has(tool)) {
+          resolved.push(tool)
+          resolvedToolsSet.add(tool)
+        }
+      }
+      if (!matchedAny) {
+        logForDebugging(
+          `Agent tools entry "${toolSpec}" takes no tool: no connected MCP server of that name has one.`,
+          { level: 'warn' },
+        )
+      }
+      continue
+    }
+
+    const serverPrefix = toolName.endsWith('__*')
+      ? toolName.slice(0, -3)
+      : toolName
+    const matchingServerTools =
+      parsedMcp === null
+        ? []
+        : allowedAvailableTools.filter(
+            tool =>
+              tool.mcpInfo !== undefined &&
+              buildMcpToolName(tool.mcpInfo.serverName, '') ===
+                `${serverPrefix}__`,
+          )
+    if (serverPrefix !== toolName && matchingServerTools.length > 0) {
+      validTools.push(toolSpec)
+      for (const tool of matchingServerTools) {
+        if (!resolvedToolsSet.has(tool)) {
+          resolved.push(tool)
+          resolvedToolsSet.add(tool)
+        }
+      }
+      continue
     }
 
     const tool = availableToolMap.get(toolName)

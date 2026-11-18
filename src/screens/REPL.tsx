@@ -88,6 +88,7 @@ import {
   getTurnClassifierCount,
   resetTurnClassifierDuration,
   setMainLoopBusy,
+  clearInvokedSkills,
 } from '../bootstrap/state.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
@@ -605,6 +606,7 @@ import {
   isLeftArrowDeferStickyQueueCmd,
   LEFT_ARROW_IHT_DRAFT_TOAST,
   LEFT_ARROW_STOPPED_TURN_TOAST,
+  shouldShowLeftArrowFailureMessage,
   type LeftArrowConfirmState,
 } from '../utils/leftArrowConfirm.js';
 import { isPersistenceSuppressed } from '../utils/sessionPersistenceStatus.js';
@@ -763,7 +765,7 @@ import {
 } from '../components/messageActions.js';
 import { setClipboard } from '@anthropic/ink';
 import type { ScrollBoxHandle } from '@anthropic/ink';
-import { createAttachmentMessage, getQueuedCommandAttachments } from '../utils/attachments.js';
+import { createAttachmentMessage, getQueuedCommandAttachments, resetSentSkillNames } from '../utils/attachments.js';
 
 // Stable empty array for hooks that accept MCPServerConnection[] — avoids
 // creating a new [] literal on every render in remote mode, which would
@@ -2995,7 +2997,12 @@ export function REPL({
   const lastMsg = messages.at(-1);
   const lastMsgIsHuman = lastMsg != null && isHumanTurn(lastMsg);
   useEffect(() => {
-    if (lastMsgIsHuman) {
+    if (!lastMsgIsHuman) return;
+    const promptSource = (lastMsg as { promptSource?: string }).promptSource;
+    const ownSubmit = promptSource === 'typed' || promptSource === 'suggestion_accepted';
+    if (ownSubmit) {
+      repinScroll(false, 'ownSubmitLanded');
+    } else if (!scrolledAwayRef.current) {
       repinScroll(false, 'lastMsgIsHuman');
     }
   }, [lastMsgIsHuman, lastMsg, repinScroll]);
@@ -3391,6 +3398,8 @@ export function REPL({
   const getStreamingTextRaw = useCallback(() => streamingDisplayStore.getState().raw, [streamingDisplayStore]);
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
+  // Official 2.1.301 (#871): track interrupt/stop timestamp so idle-return hint doesn't re-pop immediately after an interrupt.
+  const [lastTurnStopTime, setLastTurnStopTime] = useState(0);
   const idleReturnTurnSourceRef = useRef<ReturnType<typeof createIdleReturnTurnSource> | null>(null);
   // densable 2.1.246 `[sm]=L(()=>new F$(...))` — construct once during render.
   const [idleReturnController] = useState(() => {
@@ -3451,14 +3460,15 @@ export function REPL({
   useEffect(() => {
     idleReturnController.setLocalOverlayShowing(toolJSX != null);
   }, [idleReturnController, toolJSX]);
-  // Ge publishes isLoading / lastQueryCompletionTime / submitCount; local Turn is a thin adapter.
+  // Ge publishes isLoading / lastQueryCompletionTime / lastTurnStopTime / submitCount; local Turn is a thin adapter.
   useEffect(() => {
     idleReturnTurnSourceRef.current?.publish({
       isLoading,
       lastQueryCompletionTime,
+      lastTurnStopTime,
       submitCount,
     });
-  }, [isLoading, lastQueryCompletionTime, submitCount]);
+  }, [isLoading, lastQueryCompletionTime, lastTurnStopTime, submitCount]);
   // densable 2.1.246 `x(()=>()=>{sm.dispose(),...},[sm,...])`
   useEffect(() => () => idleReturnController.dispose(), [idleReturnController]);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
@@ -3742,6 +3752,33 @@ export function REPL({
       return () => clearTimeout(timer);
     }
   }, [toolPermissionContext.mode, setMessages]);
+
+  // Official 2.1.299 (#575): one-time notice when plan mode won't ask before
+  // most edits or commands because bypass permissions is available.
+  const planModeBypassNoticeShownRef = useRef(false);
+  useEffect(() => {
+    if (planModeBypassNoticeShownRef.current || isRemoteSession) return;
+    if (toolPermissionContext.mode !== 'plan' || toolPermissionContext.isBypassPermissionsModeAvailable !== true) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      planModeBypassNoticeShownRef.current = true;
+      logEvent('tengu_mode_plan_bypass_notice', {});
+      setMessages(prev => [
+        ...prev,
+        createSystemMessage(
+          "Session was started with bypass permissions, so plan mode won't ask before most edits or commands. Start a new session without bypass permissions for prompts in plan mode.",
+          'notice',
+        ),
+      ]);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [
+    toolPermissionContext.mode,
+    toolPermissionContext.isBypassPermissionsModeAvailable,
+    isRemoteSession,
+    setMessages,
+  ]);
 
   // If worktree creation was slow and sparse-checkout isn't configured,
   // nudge the user toward settings.worktree.sparsePaths.
@@ -4440,6 +4477,29 @@ export function REPL({
 
   // Calculate if cost dialog should be shown
   // Determine which dialog should have focus (if any)
+  // #655: When a permission prompt or question was held back while typing an
+  // unsent message, keep it held back for one macrotask after the draft clears
+  // so the Enter that submitted the message cannot also answer the dialog.
+  const hasQueuedInterruptDialog = Boolean(
+    hasBlockingOpenDialogs || workerSandboxPermissions.queue[0] || elicitation.queue[0],
+  );
+  const prevSuppressedDialogsRef = useRef(false);
+  const [, setHeldBackReleaseTick] = useState(0);
+  const heldBackReleasePending = prevSuppressedDialogsRef.current && !isPromptInputActive && hasQueuedInterruptDialog;
+  const isDialogHeldBack = isPromptInputActive || heldBackReleasePending;
+
+  useEffect(() => {
+    if (heldBackReleasePending) {
+      const timer = setTimeout(() => {
+        prevSuppressedDialogsRef.current = false;
+        setHeldBackReleaseTick(t => t + 1);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    prevSuppressedDialogsRef.current = isPromptInputActive && hasQueuedInterruptDialog;
+    return undefined;
+  }, [heldBackReleasePending, isPromptInputActive, hasQueuedInterruptDialog]);
+
   // Permission and interactive dialogs can show even when toolJSX is set,
   // as long as shouldContinueAnimation is true. This prevents deadlocks when
   // agents set background hints while waiting for user interaction.
@@ -4468,7 +4528,7 @@ export function REPL({
     if (leftArrowConfirm) return 'left-arrow-confirm';
 
     // Suppress interrupt dialogs while user is actively typing (gold To)
-    if (isPromptInputActive) return undefined;
+    if (isDialogHeldBack) return undefined;
 
     // Permission/interactive dialogs (show unless blocked by toolJSX)
     const allowDialogsWithAnimation = !toolJSX || toolJSX.shouldContinueAnimation;
@@ -4511,8 +4571,8 @@ export function REPL({
     hasLegacyDialog: legacyFocusForUqc(focusedInputDialog) != null,
     hasBlockingToolProgress: Boolean(toolJSX && !toolJSX.shouldContinueAnimation),
     hasLocalJsxPanel: isShowingLocalJSXCommand,
-    hasDraft,
-    isPromptInputActive,
+    hasDraft: hasDraft || heldBackReleasePending,
+    isPromptInputActive: isDialogHeldBack,
   });
   const hostDialogVisibility = getHostDialogVisibility({
     hasOpenDialogs,
@@ -4521,7 +4581,7 @@ export function REPL({
   });
   const nextHostOffer = pickNextHostOffer({
     exitFlowActive: pke.kind !== 'none',
-    isPromptInputActive,
+    isPromptInputActive: isDialogHeldBack,
     hasBlockingToolProgress: Boolean(toolJSX && !toolJSX.shouldContinueAnimation),
     hasLocalJsxPanel: isShowingLocalJSXCommand,
     hasElicitationRequest: Boolean(elicitation.queue[0]),
@@ -4615,6 +4675,24 @@ export function REPL({
     prevHostPermissionRef.current = hostPermissionOpen;
   }, [hostPermissionOpen, repinScroll]);
 
+  // Official 2.1.299 (#597): onBelowTranscriptSlotChange — only repin when
+  // already sticky at the bottom, so opening/closing /btw while scrolled up in
+  // fullscreen does not jump the transcript to the bottom.
+  const belowTranscriptSlotOpen =
+    hostPermissionOpen ||
+    Boolean(
+      toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !(isFullscreenEnvEnabled() && toolJSX.isLocalJSXCommand),
+    );
+  const prevBelowTranscriptSlotRef = useRef<boolean | undefined>(undefined);
+  useLayoutEffect(() => {
+    const prev = prevBelowTranscriptSlotRef.current;
+    prevBelowTranscriptSlotRef.current = belowTranscriptSlotOpen;
+    if (prev === undefined || prev === belowTranscriptSlotOpen) return;
+    if (scrollRef.current?.isSticky() ?? true) {
+      repinScroll(false, `progressOrPanel→${belowTranscriptSlotOpen}`);
+    }
+  }, [belowTranscriptSlotOpen, repinScroll]);
+
   // Transcript swap (enter/exit agent view): ScrollBox is shared — leftover
   // scrollTop / scrollHeightHwm from the leader (or previous agent) can pin
   // the viewport into empty virtual-scroll spacer until the user scrolls.
@@ -4666,6 +4744,7 @@ export function REPL({
     }
 
     logForDebugging(`[onCancel] focusedInputDialog=${focusedInputDialog} streamMode=${streamMode}`);
+    setLastTurnStopTime(Date.now());
 
     // Official 2.1.295 (#382): ensure direct onCancel also cancels pending /loop wakeups.
     try {
@@ -6168,6 +6247,15 @@ export function REPL({
       // Reset cached microcompact state so stale pinned cache edits
       // don't reference tool_use_ids from truncated messages
       resetMicrocompactState();
+      // #869: Rewind truncates messages, so reset sentSkillNames and clear
+      // main-thread / non-running invokedSkills so skills are listed again.
+      resetSentSkillNames();
+      const preservedAgentIds = new Set(
+        Object.values(store.getState().tasks ?? {})
+          .filter(t => t?.type === 'local_agent' && t.status === 'running')
+          .map(t => t!.id),
+      );
+      clearInvokedSkills(preservedAgentIds);
       if (feature('CONTEXT_COLLAPSE')) {
         // Rewind truncates the REPL array. Commits whose archived span
         // was past the rewind point can't be projected anymore
@@ -8147,17 +8235,28 @@ export function REPL({
 
                                     // densable yi — append Ss(text,"warning") with last-informational dedupe
                                     const yi = (text: string) => {
-                                      if (!text) return;
+                                      const visibleText = shouldShowLeftArrowFailureMessage(
+                                        text,
+                                        Boolean(store.getState().replBridgeEnabled),
+                                      );
+                                      if (!visibleText) {
+                                        if (text) {
+                                          logForDebugging(
+                                            `leftArrowGesture: ← failed; withheld from screen while Remote Control is on: ${text}`,
+                                          );
+                                        }
+                                        return;
+                                      }
                                       setMessages(prev => {
                                         const last = prev.at(-1);
                                         if (
                                           last?.type === 'system' &&
                                           last.subtype === 'informational' &&
-                                          last.content === text
+                                          last.content === visibleText
                                         ) {
                                           return prev;
                                         }
-                                        return [...prev, createSystemMessage(text, 'warning')];
+                                        return [...prev, createSystemMessage(visibleText, 'warning')];
                                       });
                                     };
                                     // densable Sl: jpt.current=false; yi(Ja)

@@ -40,6 +40,7 @@ import {
 } from './processUserInput/promptSubmitWaits.js'
 import { resetTurnHookQueuedPrompts } from './processUserInput/turnHookQueuedPrompts.js'
 import { recordQueueOperation } from './sessionStorage.js'
+import { registerCleanup } from './cleanupRegistry.js'
 import { createSignal, type Signal } from './signal.js'
 import { recordHandbackDelivery } from './subagentHandback.js'
 import { getTurnAttributionKey } from './turnAttribution.js'
@@ -47,8 +48,276 @@ import { getTurnAttributionKey } from './turnAttribution.js'
 export type SetAppState = (f: (prev: AppState) => AppState) => void
 
 // ============================================================================
-// Logging helper
+// Logging helper (densable Qvo — session.append { door: 'queue' } writer)
 // ============================================================================
+
+export const QUEUE_RECORD_HOOK_TIMEOUT_MS = 1000
+
+export type QueueRecordHookRunner = (
+  content: string,
+  hookOrigin?: unknown,
+) => Promise<string> | string | undefined
+
+let queueSessionReadyPromise: Promise<unknown> | null = null
+let customQueueRecordHookRunner: QueueRecordHookRunner | null = null
+
+/** densable `P8i` — hold queue record hooks until session load settles. */
+export function setQueueSessionReadyPromise(
+  promise: Promise<unknown> | null,
+): void {
+  if (promise === null) {
+    queueSessionReadyPromise = null
+    return
+  }
+  const clear = (): void => {
+    if (queueSessionReadyPromise === promise) {
+      queueSessionReadyPromise = null
+    }
+  }
+  queueSessionReadyPromise = promise
+  promise.then(clear, clear)
+}
+
+/** densable `Jvo.set` — override or clear the queue record hook runner. */
+export function setQueueRecordHookRunner(
+  runner: QueueRecordHookRunner | null,
+): void {
+  customQueueRecordHookRunner = runner
+}
+
+function defaultQueueRecordHookRunner(
+  content: string,
+  hookOrigin?: unknown,
+): Promise<string> | undefined {
+  try {
+    // Lazy require avoids static cycle with functionHooksModules.ts.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fhm = require('./plugins/functionHooksModules.js') as {
+      hasMatchingFunctionHook?: (
+        event: string,
+        matcher?: Record<string, unknown>,
+      ) => boolean
+      runFunctionHookChain?: (
+        event: string,
+        payload: Record<string, unknown>,
+        tail: (input: Record<string, unknown>) => Promise<unknown>,
+      ) => Promise<unknown>
+    }
+    if (!fhm.hasMatchingFunctionHook?.('session.append', { door: 'queue' })) {
+      return undefined
+    }
+    if (!fhm.runFunctionHookChain) {
+      return undefined
+    }
+    const syntheticMessage = {
+      type: 'user',
+      message: { role: 'user', content },
+    }
+    return Promise.resolve(
+      fhm.runFunctionHookChain(
+        'session.append',
+        {
+          door: 'queue',
+          message: syntheticMessage,
+          ...(hookOrigin !== undefined && { hookOrigin }),
+        },
+        async input => input.message,
+      ),
+    ).then(
+      answered => {
+        if (typeof answered === 'string') return answered
+        if (answered && typeof answered === 'object') {
+          const msgObj =
+            'message' in answered &&
+            answered.message &&
+            typeof answered.message === 'object'
+              ? (answered.message as { content?: unknown })
+              : (answered as { content?: unknown })
+          const rawContent =
+            'message' in (msgObj as Record<string, unknown>) &&
+            (msgObj as { message?: { content?: unknown } }).message
+              ? (msgObj as { message: { content?: unknown } }).message.content
+              : msgObj.content
+          if (typeof rawContent === 'string') return rawContent
+          if (Array.isArray(rawContent)) {
+            return extractTextContent(rawContent)
+          }
+        }
+        return content
+      },
+      () => content,
+    )
+  } catch {
+    return undefined
+  }
+}
+
+function logQueueRecordError(err: unknown): void {
+  try {
+    if (err instanceof Error && err.name === 'AbortError') {
+      logForDebugging("A queue record's chain was aborted")
+      return
+    }
+    logForDebugging(
+      `A queue record failed: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+  } catch {
+    logForDebugging('A queue record failed with an unreadable error')
+  }
+}
+
+/**
+ * densable `Qvo(e)` — wraps `insertQueueOperation` / `recordQueueOperation`
+ * with FIFO ordering, `session.append` `{ door: 'queue' }` rewrite, and a
+ * 1000ms `.unref()` timeout fallback so disk persistence never stalls.
+ */
+export function createQueueRecordWriter(
+  writeRecord: (record: QueueOperationMessage) => void,
+  options?: { timeoutMs?: number },
+): (record: QueueOperationMessage, hookOrigin?: unknown) => void {
+  const timeoutMs = options?.timeoutMs ?? QUEUE_RECORD_HOOK_TIMEOUT_MS
+  const queue: QueueOperationMessage[] = []
+  const inFlight = new Map<
+    QueueOperationMessage,
+    ReturnType<typeof setTimeout>
+  >()
+  const waitingReady = new Map<QueueOperationMessage, () => boolean>()
+  let cleanupRegistered = false
+  let isClosed = false
+
+  function flushHead(): void {
+    let head = queue[0]
+    while (
+      head !== undefined &&
+      !inFlight.has(head) &&
+      !waitingReady.has(head)
+    ) {
+      queue.shift()
+      try {
+        writeRecord(head)
+      } catch (err) {
+        logQueueRecordError(err)
+      }
+      head = queue[0]
+    }
+  }
+
+  function drainWaiting(settledPromise?: Promise<unknown>): void {
+    const current = queueSessionReadyPromise
+    const ready = current === null || current === settledPromise
+    for (const [rec, start] of ready ? waitingReady : []) {
+      waitingReady.delete(rec)
+      try {
+        if (start()) break
+      } catch (err) {
+        logQueueRecordError(err)
+      }
+    }
+    flushHead()
+  }
+
+  function settleRecord(
+    orig: QueueOperationMessage,
+    updated: QueueOperationMessage,
+  ): void {
+    const timer = inFlight.get(orig)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    inFlight.delete(orig)
+    const idx = queue.indexOf(orig)
+    if (idx !== -1) {
+      queue[idx] = updated
+    }
+    drainWaiting()
+  }
+
+  function closeWriter(): void {
+    isClosed = true
+    for (const timer of inFlight.values()) {
+      clearTimeout(timer)
+    }
+    inFlight.clear()
+    waitingReady.clear()
+    flushHead()
+  }
+
+  function ensureCleanup(): void {
+    if (!cleanupRegistered) {
+      cleanupRegistered = true
+      registerCleanup(async () => {
+        closeWriter()
+      })
+    }
+  }
+
+  function startHook(
+    record: QueueOperationMessage,
+    content: string,
+    hookOrigin?: unknown,
+  ): boolean {
+    const runner = customQueueRecordHookRunner ?? defaultQueueRecordHookRunner
+    const result = runner(content, hookOrigin)
+    if (result === undefined) return false
+    ensureCleanup()
+    const timer = setTimeout(settleRecord, timeoutMs, record, record)
+    timer.unref?.()
+    inFlight.set(record, timer)
+    Promise.resolve(result).then(
+      rewritten => {
+        if (typeof rewritten === 'string') {
+          settleRecord(record, { ...record, content: rewritten })
+          return
+        }
+        logQueueRecordError(
+          new Error('A queue record came back from its hooks no text'),
+        )
+        settleRecord(record, record)
+      },
+      err => {
+        logQueueRecordError(err)
+        settleRecord(record, record)
+      },
+    )
+    return true
+  }
+
+  return (record: QueueOperationMessage, hookOrigin?: unknown): void => {
+    const { content } = record
+    const canHook = typeof content === 'string' && !isClosed
+    const ready = queueSessionReadyPromise
+    if (canHook && (ready !== null || waitingReady.size > 0)) {
+      queue.push(record)
+      waitingReady.set(record, () => startHook(record, content, hookOrigin))
+      ensureCleanup()
+      if (ready !== null && waitingReady.size === 1) {
+        ready.then(
+          () => drainWaiting(ready),
+          () => drainWaiting(ready),
+        )
+      }
+      return
+    }
+    let started = false
+    try {
+      started = canHook && startHook(record, content, hookOrigin)
+    } catch (err) {
+      logQueueRecordError(err)
+      queue.push(record)
+      flushHead()
+      return
+    }
+    if (!started && queue.length === 0) {
+      writeRecord(record)
+      return
+    }
+    queue.push(record)
+  }
+}
+
+const defaultQueueRecordWriter = createQueueRecordWriter(queueOp => {
+  void recordQueueOperation(queueOp)
+})
 
 function logOperation(operation: QueueOperation, content?: string): void {
   const sessionId = getSessionId()
@@ -59,7 +328,7 @@ function logOperation(operation: QueueOperation, content?: string): void {
     sessionId,
     ...(content !== undefined && { content }),
   }
-  void recordQueueOperation(queueOp)
+  defaultQueueRecordWriter(queueOp)
 }
 
 // ============================================================================
@@ -732,7 +1001,7 @@ export class MessageQueueInstance {
       // Preserve the original PastedContent id so imageStore lookups still work.
       if (cmd.pastedContents) {
         for (const content of Object.values(cmd.pastedContents)) {
-          if (content.type === 'image') {
+          if (content.type === 'image' || content.inline === true) {
             images.push(content)
           }
         }
@@ -794,7 +1063,7 @@ export class MessageQueueInstance {
     const images: PastedContent[] = []
     if (cmd.pastedContents) {
       for (const content of Object.values(cmd.pastedContents)) {
-        if (content.type === 'image') {
+        if (content.type === 'image' || content.inline === true) {
           images.push(content)
         }
       }

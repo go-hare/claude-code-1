@@ -21,6 +21,7 @@ import { EvalTokenGate, resolveEvalCredential } from './evalCredential.js'
 import {
   grantEvalAllowedTools,
   isEvalArtifactPublishGranted,
+  parseDisallowedEvalTools,
   resolveInsideEvalRoot,
   seedEvalGrowthbookOverrides,
 } from './evalFence.js'
@@ -85,6 +86,22 @@ function sink(fn: (line: string) => void): (line: string) => void {
       )
     }
   }
+}
+
+function formatDisallowedToolsError(rejected: string[]): string {
+  return `${rejected.map(s => JSON.stringify(s)).join(', ')} cannot be disallowed: ${rejected.length === 1 ? 'it is not a built-in tool' : 'they are not built-in tools'} that this version of Claude Code can remove. Use bare names such as Agent or TaskStop; patterns such as Bash(rm:*) and MCP tools are not accepted.`
+}
+
+function caseDisallowedTools(
+  cse: ResolvedCase,
+  disallowTools: string[],
+): string[] {
+  return [
+    ...new Set([
+      ...parseDisallowedEvalTools(cse.execution.disallowed_tools ?? []).tools,
+      ...disallowTools,
+    ]),
+  ]
 }
 
 function filterAllowTools(entries: string[]): {
@@ -319,6 +336,10 @@ async function runOne(
       case_: arm === 'without' ? { ...cse, pluginDirs: [] } : cse,
       sandbox,
       allowedTools: allowed,
+      disallowedTools: caseDisallowedTools(
+        cse,
+        parseDisallowedEvalTools(params.disallowTools ?? []).tools,
+      ),
       operatorAllowedTools: params.allowTools,
       modelOverride: params.model,
       artifactPublishGranted: grant.granted,
@@ -356,6 +377,23 @@ async function runOne(
             ? agent.error
             : null,
         ...(agent.aborted ? { aborted: agent.aborted } : {}),
+        ...(agent.authRejected !== null
+          ? { auth_rejected: agent.authRejected }
+          : {}),
+        ...(agent.endedOnApiError ? { ended_on_api_error: true } : {}),
+      }
+    }
+    if (agent.endedOnApiError) {
+      failed = true
+      return {
+        score: 0,
+        turns: agent.numTurns,
+        cost_usd: agent.costUsd,
+        judge_cost_usd: 0,
+        graders: [],
+        trace_path: agent.tracePath,
+        error: agent.error,
+        ended_on_api_error: true,
         ...(agent.authRejected !== null
           ? { auth_rejected: agent.authRejected }
           : {}),
@@ -509,11 +547,38 @@ export async function runPluginEvalSuite(
     })
   }
   params.allowTools = allow.allowed
+  const parsedDisallow = parseDisallowedEvalTools(params.disallowTools ?? [])
+  if (parsedDisallow.rejected.length > 0) {
+    errors.push({
+      file: '--disallow-tools',
+      error: `${formatDisallowedToolsError(parsedDisallow.rejected)} No case was run.`,
+    })
+  } else if (parsedDisallow.tools.length > 0) {
+    onNotice(
+      `Removed from Claude's tools in every case (--disallow-tools): ${parsedDisallow.tools.join(', ')}`,
+    )
+  }
+  const suiteDisallowTools = parsedDisallow.tools
+  const candidateCases = parsedDisallow.rejected.length > 0 ? [] : loaded.cases
+  let cases: ResolvedCase[] = []
+  for (const cse of candidateCases) {
+    const { rejected } = parseDisallowedEvalTools(
+      cse.execution.disallowed_tools ?? [],
+    )
+    if (rejected.length === 0) {
+      cases.push(cse)
+      continue
+    }
+    errors.push({
+      file: cse.caseSource === 'prose' ? cse.caseDir : cse.caseFile,
+      error: `disallowed_tools: ${formatDisallowedToolsError(rejected)}`,
+    })
+  }
   for (const error of errors) onLine(`✗ ${error.file}: ${error.error}`)
 
   let ablation: AblationMode =
     params.ablation === 'auto'
-      ? loaded.cases.some(cse => cse.pluginDirs.length > 0)
+      ? cases.some(cse => cse.pluginDirs.length > 0)
         ? 'with-without'
         : 'none'
       : params.ablation
@@ -522,7 +587,6 @@ export async function runPluginEvalSuite(
       'Ablation: defaulting to with-without — a plugin resolved from this path, so each case also runs a no-plugin baseline arm (2× runs) and reports Δ; graders marked with-only (including `tool_used: Skill`) become a plugin-fired indicator rather than part of the score. Pass --ablation none for the previous single-arm run and scoring.',
     )
   }
-  let cases = loaded.cases
   if (params.ablation === 'auto' && ablation === 'with-without') {
     const single = cases.filter(
       cse => ablationArms(cse, ablation, true).length === 1,
@@ -739,6 +803,7 @@ export async function runPluginEvalSuite(
       scaffolded: Boolean(cse.context.scaffold_script) && !params.noScaffold,
       artifactPublishGranted: isEvalArtifactPublishGranted(cse, params),
       mockedTools: mockedToolNames(servers),
+      disallowedTools: caseDisallowedTools(cse, suiteDisallowTools),
     })
     for (const item of advice) {
       onNotice(`⚠ case "${cse.name}": ${item.text}`)
@@ -802,14 +867,24 @@ export async function runPluginEvalSuite(
     if (servers.length > 0)
       onLine(`  ${cse.name}: mocked: ${summarizeMocks(servers)}`)
     const granted = isEvalArtifactPublishGranted(cse, params)
+    const disallowed = caseDisallowedTools(cse, suiteDisallowTools)
     const tools = grantEvalAllowedTools(
       cse.execution.allowed_tools,
       params.allowTools,
       {
         artifactPublishGranted: granted,
         mockedTools: mockedToolNames(servers),
+        disallowedTools: disallowed,
       },
     )
+    const caseDisallowed = parseDisallowedEvalTools(
+      cse.execution.disallowed_tools ?? [],
+    ).tools
+    if (caseDisallowed.length > 0) {
+      onNotice(
+        `  ${cse.name}: removed from Claude's tools by the case's disallowed_tools: ${caseDisallowed.join(', ')}`,
+      )
+    }
     if (tools.denied.length > 0) {
       onLine(
         `  ${cse.name}: not granted (missing --allow-tools grant, or a malformed entry): ${tools.denied.join(', ')}`,

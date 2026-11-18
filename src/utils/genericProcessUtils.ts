@@ -261,6 +261,9 @@ export async function getProcessLstartString(
         'powershell.exe',
         [
           '-NoProfile',
+          '-NonInteractive',
+          '-OutputFormat',
+          'Text',
           '-Command',
           `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate.Ticks`,
         ],
@@ -313,6 +316,9 @@ export async function getProcessStartTimeMs(
         'powershell.exe',
         [
           '-NoProfile',
+          '-NonInteractive',
+          '-OutputFormat',
+          'Text',
           '-Command',
           `[DateTimeOffset]::new((Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate).ToUnixTimeMilliseconds()`,
         ],

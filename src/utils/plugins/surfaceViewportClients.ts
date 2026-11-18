@@ -1611,7 +1611,7 @@ export function clientsWithViewport(): SurfaceViewportClient[] {
  */
 export function clientsWithFullscreenKey(): SurfaceViewportClient[] {
   return listSurfaceViewportClients().filter(
-    c => c.viewport !== undefined && Object.hasOwn(c.viewport, 'isFullscreen'),
+    c => c.viewport?.isFullscreen !== undefined,
   )
 }
 
@@ -1631,7 +1631,7 @@ export function placementFromAttachedSurfaces():
   const ids = sized.map(c => c.clientId).join(', ')
   return {
     isPlaced: false,
-    reason: `no attached surface places panes (${ids}): placed when a surface that does attaches, or once they detach`,
+    reason: `no attached surface places panes (${ids}): placed when a surface that does attaches; once they detach, as a fresh open is`,
   }
 }
 

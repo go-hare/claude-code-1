@@ -245,14 +245,25 @@ export function wrapFirstPartyAutoAuthFetch(
   bag: FirstPartyBearerBag = { last: 'none' },
 ): FetchLike {
   return async (url, init) => {
+    const isFirstPartyUrl = isFirstPartyAnthropicMcpUrl(url)
+    const firstPartyRedirect: RequestRedirect | undefined = isFirstPartyUrl
+      ? init?.redirect === 'error'
+        ? 'error'
+        : 'manual'
+      : init?.redirect
     // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
     const existing = new Headers(init?.headers)
     if (
       existing.has('Authorization') ||
-      !isFirstPartyAnthropicMcpUrl(url) ||
+      !isFirstPartyUrl ||
       !isFirstPartyApiProvider()
     ) {
-      return inner(url, init)
+      return inner(
+        url,
+        firstPartyRedirect !== undefined
+          ? { ...init, redirect: firstPartyRedirect }
+          : init,
+      )
     }
 
     const doRequest = async () => {
@@ -261,7 +272,10 @@ export function wrapFirstPartyAutoAuthFetch(
       if (!resolved) {
         bag.last = 'none'
         return {
-          response: await inner(url, init),
+          response: await inner(url, {
+            ...init,
+            redirect: firstPartyRedirect,
+          }),
           sentToken: undefined as string | undefined,
         }
       }
@@ -270,7 +284,11 @@ export function wrapFirstPartyAutoAuthFetch(
       const headers = new Headers(init?.headers)
       headers.set('Authorization', `Bearer ${resolved.accessToken}`)
       return {
-        response: await inner(url, { ...init, headers }),
+        response: await inner(url, {
+          ...init,
+          headers,
+          redirect: firstPartyRedirect,
+        }),
         sentToken: resolved.accessToken,
       }
     }

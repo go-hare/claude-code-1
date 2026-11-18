@@ -162,6 +162,72 @@ const MAX_COMPACT_STREAMING_RETRIES = 2
  */
 export function stripImagesFromMessages(messages: Message[]): Message[] {
   return messages.map(message => {
+    if (message.type === 'attachment' && message.attachment) {
+      const att = message.attachment as Record<string, unknown>
+      if (att.type === 'queued_command' && Array.isArray(att.prompt)) {
+        let changed = false
+        const strippedPrompt = att.prompt.map(block => {
+          if (block !== null && typeof block === 'object' && 'type' in block) {
+            if ((block as { type: unknown }).type === 'image') {
+              changed = true
+              return { type: 'text', text: '[image]' }
+            }
+            if ((block as { type: unknown }).type === 'document') {
+              changed = true
+              return { type: 'text', text: '[document]' }
+            }
+          }
+          return block
+        })
+        if (!changed) return message
+        return {
+          ...message,
+          attachment: { ...att, prompt: strippedPrompt },
+        } as unknown as Message
+      }
+      if (
+        att.type === 'file' &&
+        att.content !== null &&
+        typeof att.content === 'object' &&
+        'type' in att.content
+      ) {
+        const contentType = (att.content as { type: unknown }).type
+        if (
+          contentType === 'image' ||
+          contentType === 'notebook' ||
+          contentType === 'parts'
+        ) {
+          return {
+            ...message,
+            attachment: {
+              ...att,
+              content: {
+                type: 'text',
+                file: {
+                  filePath: att.filename,
+                  content: `[${contentType}]`,
+                  numLines: 1,
+                  startLine: 1,
+                  totalLines: 1,
+                },
+              },
+            },
+          } as unknown as Message
+        }
+      }
+      if (
+        att.type === 'message_pdf_reads' &&
+        Array.isArray(att.reads) &&
+        att.reads.length > 0
+      ) {
+        return {
+          ...message,
+          attachment: { ...att, reads: [] },
+        } as unknown as Message
+      }
+      return message
+    }
+
     if (message.type !== 'user') {
       return message
     }
@@ -226,18 +292,163 @@ export function stripImagesFromMessages(messages: Message[]): Message[] {
  * No-op when EXPERIMENTAL_SKILL_SEARCH is off (the attachment types
  * don't exist on external builds).
  */
+const REINJECTED_TRANSIENT_ATTACHMENTS = new Set([
+  'poll_events',
+  'dir_sync_notice',
+  'fork_briefing',
+  'thinking_stripped',
+  'advisor_stripped',
+])
+
 export function stripReinjectedAttachments(messages: Message[]): Message[] {
-  if (feature('EXPERIMENTAL_SKILL_SEARCH')) {
-    return messages.filter(
-      m =>
-        !(
-          m.type === 'attachment' &&
-          (m.attachment!.type === 'skill_discovery' ||
-            m.attachment!.type === 'skill_listing')
-        ),
-    )
+  return messages.filter(m => {
+    if (m.type !== 'attachment' || !m.attachment) return true
+    if (REINJECTED_TRANSIENT_ATTACHMENTS.has(m.attachment.type)) return false
+    if (
+      feature('EXPERIMENTAL_SKILL_SEARCH') &&
+      (m.attachment.type === 'skill_discovery' ||
+        m.attachment.type === 'skill_listing')
+    ) {
+      return false
+    }
+    return true
+  })
+}
+
+const NON_ESSENTIAL_TOOL_TEXT_LIMIT = 100
+
+function truncateToolTextForNonEssential(text: string): string {
+  if (text.length <= NON_ESSENTIAL_TOOL_TEXT_LIMIT) return text
+  let end = NON_ESSENTIAL_TOOL_TEXT_LIMIT
+  const code = text.charCodeAt(end - 1)
+  if (code >= 0xd800 && code <= 0xdbff) end--
+  return `${text.slice(0, end)}…[truncated, original ${text.length} chars]`
+}
+
+function truncateToolInputValue(value: unknown): unknown {
+  if (typeof value === 'string') return truncateToolTextForNonEssential(value)
+  if (Array.isArray(value)) {
+    const next = value.map(truncateToolInputValue)
+    return next.some((item, idx) => item !== value[idx]) ? next : value
   }
-  return messages
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>
+    let changed = false
+    const next: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(obj)) {
+      const truncated = truncateToolInputValue(v)
+      if (truncated !== v) changed = true
+      next[k] = truncated
+    }
+    return changed ? next : value
+  }
+  return value
+}
+
+function isThinkingOrRedactedBlock(block: unknown): boolean {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    'type' in block &&
+    ((block as { type: unknown }).type === 'thinking' ||
+      (block as { type: unknown }).type === 'redacted_thinking')
+  )
+}
+
+/**
+ * Official 2.1.300 (#792) `rJr` — when compacting in `stripNonEssential` mode,
+ * strip thinking blocks, `wireToolInputs` / `wireIngestContext`, and truncate
+ * `tool_use.input` strings and `tool_result.content` to 100 chars.
+ */
+export function stripToolPayloadsForNonEssential(
+  messages: Message[],
+): Message[] {
+  return messages.map(msg => {
+    if (msg.type === 'assistant') {
+      const content = msg.message?.content
+      if (!Array.isArray(content)) return msg
+      let changed = content.some(isThinkingOrRedactedBlock)
+      const filtered = changed
+        ? content.filter(b => !isThinkingOrRedactedBlock(b))
+        : content
+      const nextContent = filtered.map(block => {
+        if (
+          typeof block !== 'object' ||
+          block === null ||
+          !('type' in block) ||
+          block.type !== 'tool_use'
+        ) {
+          return block
+        }
+        const truncatedInput = truncateToolInputValue(block.input)
+        if (truncatedInput === block.input) return block
+        changed = true
+        return { ...block, input: truncatedInput }
+      })
+      const record = msg as Message & {
+        wireToolInputs?: unknown
+        wireIngestContext?: unknown
+      }
+      if (
+        !changed &&
+        record.wireToolInputs === undefined &&
+        record.wireIngestContext === undefined
+      ) {
+        return msg
+      }
+      const {
+        wireToolInputs: _wireToolInputs,
+        wireIngestContext: _wireIngestContext,
+        ...rest
+      } = record
+      return {
+        ...rest,
+        message: { ...msg.message, content: nextContent },
+      } as Message
+    }
+    if (msg.type === 'user') {
+      const content = msg.message?.content
+      if (!Array.isArray(content)) return msg
+      let changed = false
+      const nextContent = content.map(block => {
+        if (
+          typeof block !== 'object' ||
+          block === null ||
+          !('type' in block) ||
+          block.type !== 'tool_result'
+        ) {
+          return block
+        }
+        const raw =
+          typeof block.content === 'string'
+            ? block.content
+            : Array.isArray(block.content)
+              ? block.content
+                  .filter(
+                    (b): b is { type: 'text'; text: string } =>
+                      typeof b === 'object' &&
+                      b !== null &&
+                      'type' in b &&
+                      b.type === 'text' &&
+                      'text' in b &&
+                      typeof b.text === 'string',
+                  )
+                  .map(b => b.text)
+                  .join('')
+              : ''
+        const truncated = truncateToolTextForNonEssential(raw)
+        if (block.content === truncated) return block
+        changed = true
+        return { ...block, content: truncated }
+      })
+      if (!changed) return msg
+      return {
+        ...msg,
+        message: { ...msg.message, content: nextContent },
+      } as Message
+    }
+    return msg
+  })
 }
 
 export const ERROR_MESSAGE_NOT_ENOUGH_MESSAGES =
@@ -1663,17 +1874,21 @@ async function streamCompactSummary({
       // densable qjt: stripNonEssential → tools []. Else SearchExtraTools + MCP
       // when enabled (defer_loading), else FileReadTool only.
 
+      const baseSummaryMessages = stripReinjectedAttachments([
+        ...getMessagesAfterCompactBoundary(summarizerMessages),
+        summaryRequest,
+      ])
+      const normalizedSummaryMessages = normalizeMessagesForAPI(
+        stripImagesFromMessages(baseSummaryMessages),
+        context.options.tools,
+      ) as Message[]
+      const streamingMessages = stripNonEssential
+        ? stripToolPayloadsForNonEssential(normalizedSummaryMessages)
+        : normalizedSummaryMessages
+
       const streamingGen = queryModelWithStreaming({
         // No model arg → no api_system at runtime; cast for Message[] query path
-        messages: normalizeMessagesForAPI(
-          stripImagesFromMessages(
-            stripReinjectedAttachments([
-              ...getMessagesAfterCompactBoundary(summarizerMessages),
-              summaryRequest,
-            ]),
-          ),
-          context.options.tools,
-        ) as Message[],
+        messages: streamingMessages,
         systemPrompt: asSystemPrompt([
           'You are a helpful AI assistant tasked with summarizing conversations.',
         ]),

@@ -15,6 +15,8 @@ export const CHILD_ARGV_LENGTH = 3
 export const LATE_TURNS = 3
 export const MAX_PLUGIN_TEST_FILES = 1000
 export const CHILD_TIMEOUT_MS = 30_000
+/** #721: Served `$` method calls in `claude plugin test` fail if unanswered within 10s. */
+export const SERVED_METHOD_TIMEOUT_MS = 10_000
 
 export const PLUGIN_TEST_USAGE = [
   'Usage: claude plugin test [dir]',
@@ -366,6 +368,29 @@ export function formatSessionAppendPinWarning(
     : base
 }
 
+export type UiRenderTreeNode = {
+  type?: string
+  props?: Record<string, unknown>
+  children?: unknown
+  part?: { plugin: string }
+  [key: string]: unknown
+}
+
+/**
+ * #719: In `claude plugin test`, each mod's Box or Text root carries
+ * `part: { plugin }` naming the mod (SEA `_Vt = (e, o) => ({ ...e, part: { plugin: o } })`).
+ */
+export function stampUiRenderPluginPart<T>(tree: T, pluginName: string): T {
+  if (tree === null || typeof tree !== 'object' || Array.isArray(tree)) {
+    return tree
+  }
+  const node = tree as UiRenderTreeNode
+  if (node.type === 'Box' || node.type === 'Text') {
+    return { ...node, part: { plugin: pluginName } } as T
+  }
+  return tree
+}
+
 export type PluginTestKit = {
   test: (
     title: string,
@@ -377,6 +402,25 @@ export type PluginTestKit = {
             uuid?: string
             message: SessionAppendMessage
           }) => Promise<{ message: SessionAppendMessage; uuid: string }>
+        }
+        ui: {
+          render: (event: {
+            component?: string
+            plugin?: string
+            [key: string]: unknown
+          }) => Promise<unknown>
+        }
+        serve: {
+          register: (
+            method: string,
+            handler: (...args: unknown[]) => unknown | Promise<unknown>,
+            pluginName?: string,
+          ) => void
+          call: (
+            method: string,
+            args?: unknown[],
+            timeoutMs?: number,
+          ) => Promise<unknown>
         }
       },
       on: (
@@ -486,6 +530,13 @@ export function createPluginTestKit(): PluginTestKit {
           list.push(hook)
           hooks.set(event, list)
         }
+        const servedMethods = new Map<
+          string,
+          {
+            handler: (...args: unknown[]) => unknown | Promise<unknown>
+            pluginName: string
+          }
+        >()
         const $: Parameters<Parameters<PluginTestKit['test']>[1]>[0] = {
           session: {
             append: async event => {
@@ -537,6 +588,60 @@ export function createPluginTestKit(): PluginTestKit {
               }
               sessionRows.push({ door, uuid, message: pinned.message })
               return { message: pinned.message, uuid }
+            },
+          },
+          ui: {
+            render: async event => {
+              const pluginName =
+                typeof event.plugin === 'string' ? event.plugin : 'plugin'
+              const registered = hooks.get('ui.render') ?? []
+              let idx = 0
+              const dispatch = async (
+                cur: Record<string, unknown>,
+              ): Promise<unknown> => {
+                const h = registered[idx++]
+                if (!h) {
+                  return undefined
+                }
+                const out = await h($, cur, dispatch)
+                return stampUiRenderPluginPart(out, pluginName)
+              }
+              return dispatch({ ...event })
+            },
+          },
+          serve: {
+            register: (method, handler, pluginName = 'plugin') => {
+              servedMethods.set(method, { handler, pluginName })
+            },
+            call: async (
+              method,
+              args = [],
+              timeoutMs = SERVED_METHOD_TIMEOUT_MS,
+            ) => {
+              const entry = servedMethods.get(method)
+              if (!entry) {
+                throw new Error(`serve.call: ${method} is not served`)
+              }
+              let timer: ReturnType<typeof setTimeout> | undefined
+              try {
+                return await Promise.race([
+                  Promise.resolve(entry.handler(...args)),
+                  new Promise<never>((_, reject) => {
+                    timer = setTimeout(() => {
+                      reject(
+                        new Error(
+                          `${entry.pluginName}: ${method} did not answer within ${timeoutMs}ms`,
+                        ),
+                      )
+                    }, timeoutMs)
+                    timer.unref?.()
+                  }),
+                ])
+              } finally {
+                if (timer !== undefined) {
+                  clearTimeout(timer)
+                }
+              }
             },
           },
         }

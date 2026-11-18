@@ -1,4 +1,5 @@
 import {
+  isEscPrefixedKey,
   shiftedKeyFromCsiUSequence,
   type ParsedKey,
 } from '../parse-keypress.js'
@@ -32,6 +33,9 @@ export class KeyboardEvent extends TerminalEvent {
   readonly fn: boolean
   /** densable `soloKeypress` — gold `G(g,Id)===1`. */
   readonly soloKeypress: boolean | undefined
+  /** Official 2.1.325 (#864) `readLate` — true when key arrived after ESC timeout. */
+  readonly readLate: boolean
+  #readAsEscapeThenKey = false
 
   constructor(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) {
     super('keydown', { bubbles: true, cancelable: true })
@@ -45,6 +49,21 @@ export class KeyboardEvent extends TerminalEvent {
     this.superKey = parsedKey.super
     this.fn = parsedKey.fn
     this.soloKeypress = extras?.soloKeypress
+    this.readLate = parsedKey.readLate === true
+  }
+
+  /**
+   * Official 2.1.325 (#864) — request splitting an ESC-prefixed solo keypress
+   * into `[ESC, rest]` (e.g. Vim INSERT mode when ESC+key coalesced on a slow host).
+   */
+  readAsEscapeThenKey(): boolean {
+    this.#readAsEscapeThenKey =
+      this.soloKeypress !== undefined && isEscPrefixedKey(this.sequence)
+    return this.#readAsEscapeThenKey
+  }
+
+  get isReadAsEscapeThenKey(): boolean {
+    return this.#readAsEscapeThenKey
   }
 }
 

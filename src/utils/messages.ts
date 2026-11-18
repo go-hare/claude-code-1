@@ -5920,13 +5920,20 @@ Read the team config to discover your teammates' names. Check the task list peri
       }
     }
     case 'pdf_reference': {
+      const pageWord = attachment.pageCount === 1 ? 'page' : 'pages'
+      const reasonCopy = attachment.wholeRefusedByModel
+        ? `This model cannot be sent a PDF file, only its pages as images${attachment.pageCount > 0 ? `; pages: "1-${attachment.pageCount}" reads all of it` : ''}.`
+        : 'This PDF is too large to read all at once.'
+      const startCopy = attachment.wholeRefusedByModel
+        ? ''
+        : 'Start by reading the first few pages to understand the structure, then read more as needed. '
       return wrapMessagesInSystemReminder([
         createUserMessage({
           content:
-            `PDF file: ${attachment.filename} (${attachment.pageCount} pages, ${formatFileSize(attachment.fileSize)}). ` +
-            `This PDF is too large to read all at once. You MUST use the ${FILE_READ_TOOL_NAME} tool with the pages parameter ` +
+            `PDF file: ${attachment.filename} (${attachment.pageCount} ${pageWord}, ${formatFileSize(attachment.fileSize)}). ` +
+            `${reasonCopy} You MUST use the ${FILE_READ_TOOL_NAME} tool with the pages parameter ` +
             `to read specific page ranges (e.g., pages: "1-5"). Do NOT call ${FILE_READ_TOOL_NAME} without the pages parameter ` +
-            `or it will fail. Start by reading the first few pages to understand the structure, then read more as needed. ` +
+            `or it will fail. ${startCopy}` +
             `Maximum 20 pages per request.`,
           isMeta: true,
         }),

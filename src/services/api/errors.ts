@@ -1713,6 +1713,15 @@ export function classifyAPIError(error: unknown): string {
     return 'image_too_large'
   }
 
+  // Official 2.1.299 (#630): unprocessable image block
+  if (
+    error instanceof APIError &&
+    error.status === 400 &&
+    error.message.includes('Could not process image')
+  ) {
+    return 'image_unprocessable'
+  }
+
   // Tool use errors (400)
   if (
     error instanceof APIError &&

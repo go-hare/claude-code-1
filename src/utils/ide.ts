@@ -589,10 +589,13 @@ export interface IDEExtensionInstallationStatus {
 
 export async function maybeInstallIDEExtension(
   ideType: IdeType,
-): Promise<IDEExtensionInstallationStatus | null> {
+): Promise<
+  (IDEExtensionInstallationStatus & { previouslyInstalled?: boolean }) | null
+> {
   try {
     // Install/update the extension
-    const installedVersion = await installIDEExtension(ideType)
+    const { installedVersion, previouslyInstalled } =
+      await installIDEExtension(ideType)
     // Only track successful installations
     logEvent('tengu_ext_installed', {})
 
@@ -606,6 +609,7 @@ export async function maybeInstallIDEExtension(
       error: null,
       installedVersion,
       ideType: ideType,
+      previouslyInstalled,
     }
   } catch (error) {
     logEvent('tengu_ext_install_error', {})
@@ -912,15 +916,21 @@ export async function isIDEExtensionInstalled(
   return false
 }
 
-async function installIDEExtension(ideType: IdeType): Promise<string | null> {
+async function installIDEExtension(
+  ideType: IdeType,
+): Promise<{ installedVersion: string | null; previouslyInstalled: boolean }> {
   if (isVSCodeIde(ideType)) {
     const command = await getVSCodeIDECommand(ideType)
 
     if (command) {
       if (process.env.USER_TYPE === 'ant') {
-        return await installFromArtifactory(command)
+        return {
+          installedVersion: await installFromArtifactory(command),
+          previouslyInstalled: false,
+        }
       }
       let version = await getInstalledVSCodeExtensionVersion(command)
+      const previouslyInstalled = version !== null
       // If it's not installed or the version is older than the one we have bundled,
       if (!version || lt(version, getClaudeCodeVersion())) {
         // `code` may crash when invoked too quickly in succession
@@ -937,13 +947,13 @@ async function installIDEExtension(ideType: IdeType): Promise<string | null> {
         }
         version = getClaudeCodeVersion()
       }
-      return version
+      return { installedVersion: version, previouslyInstalled }
     }
   }
   // No automatic installation for JetBrains IDEs as it is not supported in native
   // builds. We show a prominent notice for them to download from the marketplace
   // instead.
-  return null
+  return { installedVersion: null, previouslyInstalled: false }
 }
 
 function getInstallationEnv(): NodeJS.ProcessEnv | undefined {
@@ -1349,34 +1359,37 @@ export async function initializeIdeIntegration(
     const ideType = ideToInstallExtension ?? getTerminalIdeType()
     if (ideType) {
       if (isVSCodeIde(ideType)) {
-        void isIDEExtensionInstalled(ideType).then(async isAlreadyInstalled => {
-          void maybeInstallIDEExtension(ideType)
-            .catch(error => {
-              const ideInstallationStatus: IDEExtensionInstallationStatus = {
-                installed: false,
-                error: error.message || 'Installation failed',
-                installedVersion: null,
-                ideType: ideType,
-              }
-              return ideInstallationStatus
-            })
-            .then(status => {
-              onInstallationComplete(status)
+        // Official 2.1.300 (#788): launch the editor CLI once via maybeInstallIDEExtension
+        // (which runs `--list-extensions --show-versions`) instead of calling
+        // isIDEExtensionInstalled (`--list-extensions`) first.
+        void maybeInstallIDEExtension(ideType)
+          .catch(error => {
+            const ideInstallationStatus: IDEExtensionInstallationStatus & {
+              previouslyInstalled?: boolean
+            } = {
+              installed: false,
+              error: error.message || 'Installation failed',
+              installedVersion: null,
+              ideType: ideType,
+            }
+            return ideInstallationStatus
+          })
+          .then(status => {
+            onInstallationComplete(status)
 
-              if (status?.installed) {
-                // If we installed and don't yet have an IDE, search again.
-                void findAvailableIDE().then(onIdeDetected)
-              }
+            if (status?.installed) {
+              // If we installed and don't yet have an IDE, search again.
+              void findAvailableIDE().then(onIdeDetected)
+            }
 
-              if (
-                !isAlreadyInstalled &&
-                status?.installed === true &&
-                !ideOnboardingDialog().hasIdeOnboardingDialogBeenShown()
-              ) {
-                onShowIdeOnboarding(status)
-              }
-            })
-        })
+            if (
+              !status?.previouslyInstalled &&
+              status?.installed === true &&
+              !ideOnboardingDialog().hasIdeOnboardingDialogBeenShown()
+            ) {
+              onShowIdeOnboarding(status)
+            }
+          })
       } else if (isJetBrainsIde(ideType)) {
         // Always check installation to populate the sync cache used by status notices
         void isIDEExtensionInstalled(ideType).then(async installed => {

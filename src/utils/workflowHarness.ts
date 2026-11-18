@@ -12,7 +12,7 @@
  *   : (relay ? lMt(xt)+\\n\\n : "") + BGe(me)
  */
 
-import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   getTurnTail,
   type TurnTailAnalysis,
@@ -53,9 +53,9 @@ export function isWorkflowPromptProvenanceOn(): boolean {
   const e = process.env.CLAUDE_CODE_WORKFLOW_PROMPT_PROVENANCE
   if (e !== undefined) return Boolean(e)
   try {
-    return checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_bubbly_harbor')
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_bubbly_harbor', true)
   } catch {
-    return false
+    return true
   }
 }
 
@@ -143,4 +143,30 @@ export function applyWorkflowHarnessPrompt(
     return `${wrapRelayedUserRequest(xt)}\n\n${wrapComputedWorkflowTask(computed)}`
   }
   return wrapComputedWorkflowTask(computed)
+}
+
+/**
+ * Official `@304215500` (2.1.301 #853): split relayed user request (`cn`) and
+ * computed task (`ye`) into separate user messages when `relay.kind === 'relay'`.
+ */
+export function buildWorkflowHarnessMessages(
+  messages: readonly TurnTailMessage[],
+  computed: string,
+  agentId?: string,
+): { promptMessages: string[]; turnPrompt: string } {
+  if (!isWorkflowPromptProvenanceOn()) {
+    return { promptMessages: [computed], turnPrompt: computed }
+  }
+  const xt = classifyWorkflowHarnessRelay(messages, agentId)
+  const turnPrompt =
+    xt.kind === 'automated'
+      ? wrapAutomatedWorkflowTask(computed)
+      : wrapComputedWorkflowTask(computed)
+  if (xt.kind === 'relay') {
+    return {
+      promptMessages: [wrapRelayedUserRequest(xt), turnPrompt],
+      turnPrompt,
+    }
+  }
+  return { promptMessages: [turnPrompt], turnPrompt }
 }

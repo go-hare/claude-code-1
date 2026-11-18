@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useCallback, useRef, useState } from 'react';
 import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { getSdkBetas } from '../../bootstrap/state.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -18,11 +19,25 @@ import {
   formatAutoCompactWindowStatus,
   resolveAutoCompactWindow,
 } from '../../utils/autoCompactWindow.js';
+import { getContextWindowForModel } from '../../utils/context.js';
 import { formatTokens } from '../../utils/format.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 
 /** densable kSe sentinel for "auto" in the dialog cursor. */
 const AUTO_SENTINEL = 0;
+
+/**
+ * Official jSr — only warn about high token usage when the selected window
+ * exceeds the model's auto-compact window.
+ */
+export function shouldWarnHighTokenUsage(
+  model: string,
+  selectedWindow: number,
+  autoWindow: number = resolveAutoCompactWindow(model, undefined).window,
+): boolean {
+  const modelContextWindow = getContextWindowForModel(model, getSdkBetas());
+  return Math.min(modelContextWindow, selectedWindow) > autoWindow;
+}
 
 function ApplyAutoCompactArgs({ args, onDone }: { args: string; onDone: LocalJSXCommandOnDone }): React.ReactNode {
   const model = useMainLoopModel();
@@ -138,7 +153,7 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
           best cost and performance. You can override it below.
         </Text>
         {!isAutoCompactEnabled() && <Text color="warning">Auto-compact is currently disabled (see /config)</Text>}
-        {cursor !== AUTO_SENTINEL && (
+        {cursor !== AUTO_SENTINEL && shouldWarnHighTokenUsage(model, cursor) && (
           <Text color="warning">
             Overriding auto may result in high token usage, especially when resuming long sessions.
           </Text>

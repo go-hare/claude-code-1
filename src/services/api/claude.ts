@@ -130,6 +130,7 @@ import {
 } from '../../utils/promptCacheTtl.js'
 import { errorMessage } from '../../utils/errors.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
+import { recordApiRequestForReplay } from './requestReplay.js'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
@@ -371,6 +372,11 @@ import {
 } from '../compact/microCompact.js'
 import { shouldDeferLspTool } from '../lsp/manager.js'
 import { isToolFromMcpServer } from '../mcp/utils.js'
+import {
+  getRefusedToolSchemas,
+  RefusedToolSchemaResolver,
+  replaceRefusedToolSchemas,
+} from '../mcp/mcpToolSchema.js'
 import { recordLLMObservation } from '../langfuse/index.js'
 import type { LangfuseSpan } from '../langfuse/index.js'
 import {
@@ -535,6 +541,7 @@ export type Options = {
   extraToolSchemas?: BetaToolUnion[]
   maxOutputTokensOverride?: number
   fallbackModel?: string
+  _availabilityFallbackRetried?: boolean
   onStreamingFallback?: () => void
   querySource: QuerySource
   agents: AgentDefinition[]
@@ -730,6 +737,67 @@ export async function queryModelWithoutStreaming({
   return assistantMessage
 }
 
+export function buildCutShortErrorForMessage(
+  stopReason: string | null | undefined,
+  maxTokens: number,
+  outputTokens: number,
+  isNonStreamingCapped = false,
+): AssistantMessage | undefined {
+  if (stopReason === 'max_tokens') {
+    logEvent('tengu_max_tokens_reached', {
+      max_tokens: maxTokens,
+    })
+    return createAssistantAPIErrorMessage({
+      content: isNonStreamingCapped
+        ? `${API_ERROR_MESSAGE_PREFIX}: Claude's response exceeded the ${
+            maxTokens
+          } output token maximum for a request sent without streaming. The CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable cannot raise this limit.`
+        : `${API_ERROR_MESSAGE_PREFIX}: Claude's response exceeded the ${
+            maxTokens
+          } output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.`,
+      apiError: 'max_output_tokens',
+      error: 'max_output_tokens',
+    })
+  }
+
+  if (stopReason === 'model_context_window_exceeded') {
+    logEvent('tengu_context_window_exceeded', {
+      max_tokens: maxTokens,
+      output_tokens: outputTokens,
+    })
+    return createAssistantAPIErrorMessage({
+      content: `${API_ERROR_MESSAGE_PREFIX}: The model has reached its context window limit.`,
+      apiError: 'max_output_tokens',
+      error: 'max_output_tokens',
+    })
+  }
+
+  return undefined
+}
+
+export function buildCutShortErrorForNonStreamingResponse(
+  result: {
+    stop_reason?: string | null
+    usage?: { output_tokens?: number }
+  },
+  maxOutputTokens: number,
+): AssistantMessage | undefined {
+  try {
+    if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_vast_sunset', true)) {
+      return undefined
+    }
+    return buildCutShortErrorForMessage(
+      result.stop_reason,
+      Math.min(maxOutputTokens, MAX_NON_STREAMING_TOKENS),
+      result.usage?.output_tokens ?? 0,
+      maxOutputTokens >= MAX_NON_STREAMING_TOKENS,
+    )
+  } catch (err) {
+    logError(err)
+    return undefined
+  }
+}
+
 export async function* queryModelWithStreaming({
   messages,
   systemPrompt,
@@ -777,6 +845,7 @@ export async function* executeNonStreamingRequest(
   retryOptions: {
     model: string
     fallbackModel?: string
+    _availabilityFallbackRetried?: boolean
     thinkingConfig: ThinkingConfig
     fastMode?: boolean
     signal: AbortSignal
@@ -1828,6 +1897,11 @@ async function* queryModel(
     | undefined
   // Official Xc (2.1.295 #358) — context-1m beta fallback state machine.
   let context1mBetaRetryPhase: Context1mBetaRetryPhase = 'idle'
+  // Official ALt / class jit (2.1.300 #790) — MCP tool_schema 400 fallback.
+  const toolSchemaResolver = new RefusedToolSchemaResolver(
+    getRefusedToolSchemas(),
+  )
+  let lastSentToolSchemas: typeof allTools | undefined
 
   const recordMediaItemCapSuccess = (): void => {
     try {
@@ -2019,6 +2093,18 @@ async function* queryModel(
         { level: 'warn' },
       )
       return `retry:media-item-limit:${nextLimit}`
+    }
+
+    // Official jit.resolve (2.1.300 #790) — degrade refused MCP tool schema
+    // to { type: 'object' } and retry.
+    const toolSchemaRetry = toolSchemaResolver.resolve(
+      error,
+      lastSentToolSchemas,
+      filteredTools,
+      options.querySource,
+    )
+    if (toolSchemaRetry !== undefined) {
+      return toolSchemaRetry
     }
 
     return undefined
@@ -2588,6 +2674,12 @@ async function* queryModel(
     const sendBetasWithFallback =
       useBetas && (!simulateProxy || requestBetas.length > 0)
 
+    const resolvedTools = replaceRefusedToolSchemas(
+      allTools,
+      getRefusedToolSchemas(),
+    )
+    lastSentToolSchemas = resolvedTools
+
     return {
       model: normalizeModelStringForAPI(options.model),
       messages: addCacheBreakpoints(
@@ -2601,7 +2693,7 @@ async function* queryModel(
         options.agentCacheTtlOverride,
       ),
       system,
-      tools: allTools,
+      tools: resolvedTools,
       tool_choice: toolChoice,
       ...(sendBetasWithFallback && { betas: requestBetas }),
       metadata: getAPIMetadata(),
@@ -2752,6 +2844,11 @@ async function* queryModel(
 
             const params = paramsFromContext(context)
             captureAPIRequest(params, options.querySource) // Capture for bug reports
+            void recordApiRequestForReplay({
+              params: params as unknown as Record<string, unknown>,
+              querySource: options.querySource,
+              agentId: options.agentId,
+            })
 
             maxOutputTokens = params.max_tokens
 
@@ -4897,6 +4994,14 @@ async function* queryModel(
           newMessages.push(m)
           fallbackMessage = m
           yield m
+          stopReason = result.stop_reason ?? null
+          const cutShortError = buildCutShortErrorForNonStreamingResponse(
+            result,
+            maxOutputTokens,
+          )
+          if (cutShortError) {
+            yield cutShortError
+          }
           // densable wa: yield po then yield*wa → server_fallback midStream:!1
           if (
             options.serverRefusalFallback !== undefined &&
@@ -4938,6 +5043,26 @@ async function* queryModel(
         // no-op — the user would just see "Model fallback triggered: X -> Y" as
         // an error message with no actual retry on the fallback model.
         if (errorFromRetry instanceof FallbackTriggeredError) {
+          if (
+            !options.fallbackModel &&
+            !options._availabilityFallbackRetried &&
+            errorFromRetry.fallbackModel !== options.model
+          ) {
+            yield* queryModelWithStreaming({
+              messages,
+              systemPrompt,
+              thinkingConfig,
+              tools,
+              signal,
+              options: {
+                ...options,
+                model: errorFromRetry.fallbackModel,
+                fallbackModel: undefined,
+                _availabilityFallbackRetried: true,
+              },
+            })
+            return
+          }
           throw errorFromRetry
         }
 
@@ -5146,6 +5271,14 @@ async function* queryModel(
             newMessages.push(m)
             fallbackMessage = m
             yield m
+            stopReason = result.stop_reason ?? null
+            const cutShortError = buildCutShortErrorForNonStreamingResponse(
+              result,
+              maxOutputTokens,
+            )
+            if (cutShortError) {
+              yield cutShortError
+            }
             if (
               options.serverRefusalFallback !== undefined &&
               !serverFallbackEmitted

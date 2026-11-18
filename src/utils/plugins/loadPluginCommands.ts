@@ -21,6 +21,7 @@ import {
 import { isBareMode } from '../envUtils.js'
 import { isENOENT } from '../errors.js'
 import {
+  buildSkillFile,
   coerceDescriptionToString,
   type FrontmatterData,
   parseBooleanFrontmatter,
@@ -49,6 +50,8 @@ type PluginMarkdownFile = {
   filePath: string
   baseDir: string
   frontmatter: FrontmatterData
+  frontmatterAsWritten?: FrontmatterData
+  asWrittenProblem?: string
   content: string
 }
 
@@ -122,14 +125,18 @@ async function collectMarkdownFiles(
     async fullPath => {
       if (isDuplicatePath(fs, fullPath, loadedPaths)) return
       const content = await fs.readFile(fullPath, { encoding: 'utf-8' })
-      const { frontmatter, content: markdownContent } = parseFrontmatter(
-        content,
-        fullPath,
-      )
+      const {
+        frontmatter,
+        frontmatterAsWritten,
+        asWrittenProblem,
+        content: markdownContent,
+      } = parseFrontmatter(content, fullPath)
       files.push({
         filePath: fullPath,
         baseDir,
         frontmatter,
+        frontmatterAsWritten,
+        asWrittenProblem,
         content: markdownContent,
       })
     },
@@ -349,6 +356,11 @@ function createPluginCommand(
       contentLength: content.length,
       source: 'plugin' as const,
       loadedFrom: isSkill || config.isSkillMode ? 'plugin' : undefined,
+      skillFile: buildSkillFile(
+        file.frontmatterAsWritten ?? file.frontmatter,
+        file.filePath,
+        file.asWrittenProblem,
+      ),
       pluginInfo: {
         pluginManifest,
         repository: sourceName,
@@ -579,8 +591,12 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
                 const content = await fs.readFile(commandPath, {
                   encoding: 'utf-8',
                 })
-                const { frontmatter, content: markdownContent } =
-                  parseFrontmatter(content, commandPath)
+                const {
+                  frontmatter,
+                  frontmatterAsWritten,
+                  asWrittenProblem,
+                  content: markdownContent,
+                } = parseFrontmatter(content, commandPath)
 
                 // Check if there's metadata for this command (object-mapping format)
                 let commandName: string | undefined
@@ -635,6 +651,8 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
                   filePath: commandPath,
                   baseDir: dirname(commandPath),
                   frontmatter: finalFrontmatter,
+                  frontmatterAsWritten,
+                  asWrittenProblem,
                   content: markdownContent,
                 }
 
@@ -681,11 +699,15 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
           if (metadata.content && !metadata.source) {
             try {
               // Parse inline content for frontmatter
-              const { frontmatter, content: markdownContent } =
-                parseFrontmatter(
-                  metadata.content,
-                  `<inline:${plugin.name}:${name}>`,
-                )
+              const {
+                frontmatter,
+                frontmatterAsWritten,
+                asWrittenProblem,
+                content: markdownContent,
+              } = parseFrontmatter(
+                metadata.content,
+                `<inline:${plugin.name}:${name}>`,
+              )
 
               // Apply metadata overrides to frontmatter
               const finalFrontmatter: FrontmatterData = {
@@ -709,6 +731,8 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
                 filePath: `<inline:${commandName}>`, // Virtual path for inline content
                 baseDir: plugin.path, // Use plugin root as base directory
                 frontmatter: finalFrontmatter,
+                frontmatterAsWritten,
+                asWrittenProblem,
                 content: markdownContent,
               }
 
@@ -794,10 +818,12 @@ async function loadSkillsFromDirectory(
       return skills
     }
     try {
-      const { frontmatter, content: markdownContent } = parseFrontmatter(
-        directSkillContent,
-        directSkillPath,
-      )
+      const {
+        frontmatter,
+        frontmatterAsWritten,
+        asWrittenProblem,
+        content: markdownContent,
+      } = parseFrontmatter(directSkillContent, directSkillPath)
 
       const skillName = `${pluginName}:${basename(skillsPath)}`
 
@@ -805,6 +831,8 @@ async function loadSkillsFromDirectory(
         filePath: directSkillPath,
         baseDir: dirname(directSkillPath),
         frontmatter,
+        frontmatterAsWritten,
+        asWrittenProblem,
         content: markdownContent,
       }
 
@@ -874,10 +902,12 @@ async function loadSkillsFromDirectory(
       }
 
       try {
-        const { frontmatter, content: markdownContent } = parseFrontmatter(
-          content,
-          skillFilePath,
-        )
+        const {
+          frontmatter,
+          frontmatterAsWritten,
+          asWrittenProblem,
+          content: markdownContent,
+        } = parseFrontmatter(content, skillFilePath)
 
         const skillName = `${pluginName}:${entry.name}`
 
@@ -885,6 +915,8 @@ async function loadSkillsFromDirectory(
           filePath: skillFilePath,
           baseDir: dirname(skillFilePath),
           frontmatter,
+          frontmatterAsWritten,
+          asWrittenProblem,
           content: markdownContent,
         }
 

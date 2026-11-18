@@ -461,12 +461,72 @@ async function calculateDeferredToolDescriptionChars(
  * @param source Optional identifier for the caller (for debugging)
  * @returns true if tool search should be enabled for this request
  */
+/**
+ * Official `Jks` (2.1.300 #772) — check whether recorded tool descriptions
+ * already declared ToolSearch (returns true) or ran without it in auto mode
+ * (returns false), or undefined if undecided.
+ */
+export function getAutoToolSearchHeldDecision(
+  recordedToolNames: ReadonlySet<string> | undefined,
+): boolean | undefined {
+  if (recordedToolNames?.has(SEARCH_EXTRA_TOOLS_TOOL_NAME)) return true
+  if (
+    recordedToolNames &&
+    recordedToolNames.size > 0 &&
+    getSearchExtraToolsMode() === 'tst-auto'
+  ) {
+    return false
+  }
+  return undefined
+}
+
+/**
+ * Official `rRo` (2.1.300 #772) — keep automatic tool search active when
+ * ToolSearch was filtered out during an MCP pool refresh / reconnect if the
+ * conversation already declared tools or toolPoolRefreshes is active in auto mode.
+ */
+export function shouldKeepToolSearchOnRefresh(
+  model: string,
+  opts: {
+    toolSearchToolFilteredOut: boolean
+    toolPoolRefreshes: boolean
+    aheadOfRequest: boolean
+    hasDeclaredTools?: boolean
+  },
+): boolean {
+  if (!opts.toolSearchToolFilteredOut) return false
+  const modeOk = opts.aheadOfRequest
+    ? isSearchExtraToolsEnabledOptimistic() &&
+      modelSupportsToolSearch(model) &&
+      !isVertexToolSearchRejected(model)
+    : isSearchExtraToolsEnabledOptimistic() &&
+      modelSupportsToolSearch(model) &&
+      !isVertexToolSearchRejected(model) &&
+      isFoundryCapabilitySupported(model, 'tool_search_server') &&
+      isFoundryCapabilitySupported(model, 'tool_search')
+  if (!modeOk) return false
+  return (
+    opts.hasDeclaredTools === true ||
+    (opts.toolPoolRefreshes && getSearchExtraToolsMode() === 'tst-auto')
+  )
+}
+
+let autoToolSearchLatched = false
+
+export function resetAutoToolSearchLatch(): void {
+  autoToolSearchLatched = false
+}
+
 export async function isSearchExtraToolsEnabled(
   model: string,
   tools: Tools,
   getToolPermissionContext: () => Promise<ToolPermissionContext>,
   agents: AgentDefinition[],
   source?: string,
+  options?: {
+    recordedToolNames?: ReadonlySet<string>
+    toolPoolRefreshes?: boolean
+  },
 ): Promise<boolean> {
   const mcpToolCount = count(tools, t => t.isMcp)
 
@@ -540,7 +600,18 @@ export async function isSearchExtraToolsEnabled(
   }
 
   // Check if SearchExtraToolsTool is available (respects disallowedTools)
-  if (!isSearchExtraToolsToolAvailable(tools)) {
+  const toolAvailable = isSearchExtraToolsToolAvailable(tools)
+  if (
+    !toolAvailable &&
+    !shouldKeepToolSearchOnRefresh(model, {
+      toolSearchToolFilteredOut: true,
+      toolPoolRefreshes: options?.toolPoolRefreshes ?? autoToolSearchLatched,
+      aheadOfRequest: false,
+      hasDeclaredTools:
+        options?.recordedToolNames?.has(SEARCH_EXTRA_TOOLS_TOOL_NAME) ||
+        (source === 'query' && autoToolSearchLatched),
+    })
+  ) {
     logForDebugging(
       `Tool search disabled: SearchExtraToolsTool is not available (may have been disallowed via disallowedTools).`,
     )
@@ -549,6 +620,14 @@ export async function isSearchExtraToolsEnabled(
   }
 
   const mode = getSearchExtraToolsMode()
+  const heldDecision = getAutoToolSearchHeldDecision(options?.recordedToolNames)
+  if (heldDecision === false) {
+    logForDebugging(
+      'Tool search disabled: this conversation has run without ToolSearch, and stays so until it is compacted or cleared. ENABLE_TOOL_SEARCH=true overrides this.',
+    )
+    logModeDecision(false, mode, 'held_off')
+    return false
+  }
 
   switch (mode) {
     case 'tst':
@@ -556,6 +635,17 @@ export async function isSearchExtraToolsEnabled(
       return true
 
     case 'tst-auto': {
+      if (
+        heldDecision === true ||
+        (source === 'query' && autoToolSearchLatched)
+      ) {
+        logForDebugging(
+          'Auto tool search enabled: this conversation already declared ToolSearch',
+        )
+        logModeDecision(true, mode, 'auto_held')
+        return true
+      }
+
       const { enabled, debugDescription, metrics } = await checkAutoThreshold(
         tools,
         getToolPermissionContext,
@@ -564,6 +654,9 @@ export async function isSearchExtraToolsEnabled(
       )
 
       if (enabled) {
+        if (source === 'query') {
+          autoToolSearchLatched = true
+        }
         logForDebugging(
           `Auto tool search enabled: ${debugDescription}` +
             (source ? ` [source: ${source}]` : ''),
@@ -738,7 +831,10 @@ function extractToolNamesFromText(text: string): string[] {
  * Discovered names are re-included in the API tools array (with defer_loading)
  * so the model can call them directly after ToolSearch.
  */
-export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
+export function extractDiscoveredToolNames(
+  messages: Message[],
+  options?: { surfacedOnWire?: ReadonlySet<string> },
+): Set<string> {
   const discoveredTools = new Set<string>()
   let carriedFromBoundary = 0
 
@@ -757,9 +853,25 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
       continue
     }
 
-    // densable Lwe does NOT treat deferred_tools_delta as discovered —
-    // announcement ≠ schema loaded. Only tool_reference / compact carry
-    // actually-fetched tools into the API tools array.
+    if (
+      msg.type === 'attachment' &&
+      msg.attachment?.type === 'deferred_tools_delta'
+    ) {
+      const surfaced = (msg.attachment as { surfacedNames?: unknown })
+        .surfacedNames
+      if (Array.isArray(surfaced)) {
+        for (const name of surfaced) {
+          if (
+            typeof name === 'string' &&
+            (options?.surfacedOnWire === undefined ||
+              options.surfacedOnWire.has(name))
+          ) {
+            discoveredTools.add(name)
+          }
+        }
+      }
+      continue
+    }
 
     // Only user messages contain tool_result blocks (responses to tool_use)
     if (msg.type !== 'user') continue

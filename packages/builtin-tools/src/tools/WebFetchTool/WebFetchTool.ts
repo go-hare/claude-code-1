@@ -1,7 +1,12 @@
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
 import type { PermissionUpdate } from 'src/types/permissions.js'
+import {
+  getEffortValueFromLayers,
+  getMainLoopModelFromLayers,
+} from 'src/engine/permissionLayerReaders.js'
 import { getAgentContext } from 'src/utils/agentContext.js'
+import type { EffortValue } from 'src/utils/effort.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import {
@@ -335,6 +340,11 @@ Please use WebFetch again with the redirect URL.`
           persistedSize,
         } = response as FetchedContent
 
+        const callerOptions = {
+          callerModel: getMainLoopModelFromLayers(context),
+          callerEffort: getEffortValueFromLayers(context),
+        }
+
         const result = prompt
           ? await formatFetchedWebResult({
               url,
@@ -348,6 +358,7 @@ Please use WebFetch again with the redirect URL.`
               persistedSize,
               abortController,
               isNonInteractiveSession,
+              callerOptions,
             })
           : content
 
@@ -422,6 +433,10 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
         persistedSize,
         abortController,
         isNonInteractiveSession,
+        callerOptions: {
+          callerModel: getMainLoopModelFromLayers(context),
+          callerEffort: getEffortValueFromLayers(context),
+        },
       })
 
       const output: Output = {
@@ -487,6 +502,7 @@ export async function formatFetchedWebResult({
   persistedSize,
   abortController,
   isNonInteractiveSession,
+  callerOptions,
 }: {
   url: string
   prompt: string
@@ -499,6 +515,7 @@ export async function formatFetchedWebResult({
   persistedSize?: number
   abortController: AbortController
   isNonInteractiveSession: boolean
+  callerOptions?: { callerModel?: string; callerEffort?: EffortValue }
 }): Promise<string> {
   const isWebFetchAgent = isWebFetchAgentRuntimeContext(getAgentContext() ?? {})
   const isPreapproved = isPreapprovedUrl(url)
@@ -519,6 +536,8 @@ export async function formatFetchedWebResult({
           abortController.signal,
           isNonInteractiveSession,
           isPreapproved,
+          '',
+          callerOptions,
         ),
     })
   } else if (offset > 0 && remaining === '') {
@@ -541,6 +560,7 @@ export async function formatFetchedWebResult({
       isNonInteractiveSession,
       isPreapproved,
       contentLead,
+      callerOptions,
     )
     const startOffset = content.length - remaining.length
     const endOffset =

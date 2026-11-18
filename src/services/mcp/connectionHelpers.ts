@@ -373,7 +373,9 @@ export function createClaudeAiProxyFetch(innerFetch: FetchLike): FetchLike {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       const headers = new Headers(init?.headers)
       headers.set('Authorization', `Bearer ${currentTokens.accessToken}`)
-      const response = await innerFetch(url, { ...init, headers })
+      const redirect: RequestRedirect =
+        init?.redirect === 'error' ? 'error' : 'manual'
+      const response = await innerFetch(url, { ...init, headers, redirect })
       // Return the exact token that was sent. Reading getClaudeAIOAuthTokens()
       // again after the request is wrong under concurrent 401s: another
       // connector's handleOAuth401Error clears the memoize cache, so we'd read
@@ -489,6 +491,28 @@ const MCP_STREAMABLE_HTTP_ACCEPT = 'application/json, text/event-stream'
  *
  * @param baseFetch - The fetch function to wrap
  */
+function isJsonRpcNotificationBody(
+  body: RequestInit['body'] | undefined,
+): boolean {
+  if (typeof body !== 'string') return false
+  try {
+    const parsed: unknown = JSON.parse(body)
+    const messages = Array.isArray(parsed) ? parsed : [parsed]
+    return (
+      messages.length > 0 &&
+      messages.every(
+        (m): m is Record<string, unknown> =>
+          typeof m === 'object' &&
+          m !== null &&
+          'method' in m &&
+          (!('id' in m) || m.id === undefined),
+      )
+    )
+  } catch {
+    return false
+  }
+}
+
 export function wrapFetchWithTimeout(baseFetch: FetchLike): FetchLike {
   return async (url: string | URL, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase()
@@ -541,6 +565,16 @@ export function wrapFetchWithTimeout(baseFetch: FetchLike): FetchLike {
         signal: controller.signal,
       })
       cleanup()
+      // #643: @modelcontextprotocol/client calls await response.text() on
+      // notification replies (e.g. 202 or !hasRequests); cancel the body so a
+      // server that leaves the body open does not hang for 30s.
+      if (
+        method === 'POST' &&
+        response.ok &&
+        isJsonRpcNotificationBody(init?.body)
+      ) {
+        void response.body?.cancel().catch(() => {})
+      }
       return response
     } catch (error) {
       cleanup()

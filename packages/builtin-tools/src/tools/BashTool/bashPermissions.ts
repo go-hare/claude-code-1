@@ -69,6 +69,7 @@ import {
   suggestionForPrefix as sharedSuggestionForPrefix,
 } from 'src/utils/permissions/shellRuleMatching.js'
 import { getPlatform } from 'src/utils/platform.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { windowsPathToPosixPath } from 'src/utils/windowsPaths.js'
@@ -1796,7 +1797,17 @@ export function detectPossiblyEmptyVariableRm(
 }
 
 /** Shells whose `-c` / `-lc` argument is an inline script (densable 2.1.289). */
-const SHELL_INLINE_NAMES = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'ash'])
+const SHELL_INLINE_NAMES = new Set([
+  'bash',
+  'sh',
+  'zsh',
+  'dash',
+  'ksh',
+  'mksh',
+  'ash',
+  'hush',
+  'rbash',
+])
 
 function basenameCommand(token: string): string {
   const base = token.split(/[/\\]/).pop() ?? token
@@ -2166,6 +2177,79 @@ function peelPrivilegePrefixes(tokens: string[]): string[] {
   return cur.slice(i)
 }
 
+const INLINE_SHELL_MAX_SCRIPT_LENGTH = 2000
+
+const NON_SIMPLE_SHELL_SCRIPT_KEYWORDS = new Set([
+  'if',
+  'then',
+  'elif',
+  'else',
+  'fi',
+  'for',
+  'select',
+  'while',
+  'until',
+  'do',
+  'done',
+  'case',
+  'esac',
+  'function',
+  'eval',
+  'trap',
+  'source',
+  '.',
+])
+
+function hasUnquotedAnsiCString(command: string): boolean {
+  let quote: "'" | '"' | null = null
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!
+    if (quote === "'") {
+      if (ch === "'") quote = null
+      continue
+    }
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null
+      continue
+    }
+    if (ch === '$' && command[i + 1] === "'") {
+      return true
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+    }
+  }
+  return false
+}
+
+function isNonSimpleShellDashCScript(script: string): boolean {
+  const parts = splitCommand(script)
+  const units = parts.length > 0 ? parts : [script]
+  for (const unit of units) {
+    const tokens = shellSplitTokens(unit.trim())
+    let idx = 0
+    while (idx < tokens.length && ENV_VAR_ASSIGN_RE.test(tokens[idx]!)) {
+      idx++
+    }
+    const cmd = tokens[idx]
+    if (!cmd) continue
+    if (
+      NON_SIMPLE_SHELL_SCRIPT_KEYWORDS.has(cmd) ||
+      cmd.startsWith('{') ||
+      cmd.startsWith('(') ||
+      cmd === '[[' ||
+      cmd === '(('
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function extractShellDashCFromSimple(
   command: string,
   depth: number,
@@ -2174,9 +2258,9 @@ function extractShellDashCFromSimple(
   const parsed = tryParseShellCommand(stripped)
   if (!parsed.success) {
     const looksLike =
-      /\b(?:bash|sh|zsh|dash|ksh|ash)\b/.test(stripped) &&
+      /\b(?:bash|sh|zsh|dash|ksh|mksh|ash|hush|rbash)\b/.test(stripped) &&
       /-[a-zA-Z]*c/.test(stripped)
-    if (looksLike && /\brm(?:dir)?\b/.test(stripped)) {
+    if (looksLike && shouldPromptUnreadableShellDashC(stripped)) {
       return { scripts: [], hadShellDashC: true, unreadable: true }
     }
     return { scripts: [], hadShellDashC: false, unreadable: false }
@@ -2229,19 +2313,58 @@ function extractShellDashCFromSimple(
   if (!SHELL_INLINE_NAMES.has(name)) {
     return { scripts: [], hadShellDashC: false, unreadable: false }
   }
-  let script: string | undefined
-  for (let j = 1; j < tokens.length; j++) {
-    const arg = tokens[j]!
-    if (arg === '-c' || /^-[A-Za-z]*c[A-Za-z]*$/.test(arg)) {
-      script = tokens[j + 1]
+  // #594 (SEA `VSr`): scan flags, stop at `--`/`-`/positional, skip option args,
+  // and mark unknown `--` or invalid short flags as unreadable.
+  const args = tokens.slice(1)
+  const isBashLike = /^(?:r?ba)?sh$/.test(name)
+  const isKshLike = /ksh$/.test(name)
+  let sawDashC = false
+  let unreadableFlag = false
+  let argIdx = 0
+  for (; argIdx < args.length; argIdx++) {
+    const arg = args[argIdx]!
+    if (arg === '-' || arg === '--') {
+      argIdx++
       break
     }
+    if (!/^[-+]./.test(arg)) {
+      break
+    }
+    const bashLongOpt = isBashLike
+      ? /^--?(?:login|posix|noprofile|norc|noediting|verbose|restricted|debugger|dump-(?:po-)?strings|wordexp|pretty-print|help|version|(rcfile|init-file))$/.exec(
+          arg,
+        )
+      : null
+    if (bashLongOpt !== null) {
+      argIdx += bashLongOpt[1] === undefined ? 0 : 1
+    } else if (arg.startsWith('--')) {
+      unreadableFlag = true
+    } else {
+      unreadableFlag ||=
+        (isBashLike && /[^abcefhiklmnoprstuvxBCDEHIOPT]/.test(arg.slice(1))) ||
+        (isKshLike && /[oO]./.test(arg))
+      sawDashC ||= arg.startsWith('-') && arg.includes('c')
+      argIdx += arg.match(/[oO]/g)?.length ?? 0
+    }
   }
-  if (script === undefined) {
+  if (unreadableFlag) {
+    return args.some(a => /^-[A-Za-z]*c/.test(a))
+      ? { scripts: [args.join(' ')], hadShellDashC: true, unreadable: true }
+      : { scripts: [], hadShellDashC: false, unreadable: false }
+  }
+  const script = args[argIdx]
+  if (!sawDashC || script === undefined) {
     return { scripts: [], hadShellDashC: false, unreadable: false }
   }
   if (script === '') {
     return { scripts: [], hadShellDashC: true, unreadable: true }
+  }
+  if (
+    script.length > INLINE_SHELL_MAX_SCRIPT_LENGTH ||
+    hasUnquotedAnsiCString(stripped) ||
+    isNonSimpleShellDashCScript(script)
+  ) {
+    return { scripts: [script], hadShellDashC: true, unreadable: true }
   }
   const nested = extractShellDashCScripts(script, depth + 1)
   // Nested -c quote collapse (outer parse yields `bash -c bash -c "rm` /
@@ -2433,6 +2556,142 @@ export function checkDangerousRmAfterEutPeel(
   return null
 }
 
+const AWK_COMMANDS = new Set(['awk', 'gawk', 'mawk', 'nawk'])
+
+/**
+ * #673 (SEA `Jfn(e)`): Refuse dangerous awk constructs (`system()`, command pipes,
+ * `@load`/`@include`/`@indirect` calls, `extension()`, `/inet[46]?/`) so
+ * worktree-isolated or rule-allowed sessions cannot bypass isolation via awk.
+ */
+export function checkDangerousAwkProgram(program: string): string | false {
+  if (/(?<![A-Za-z_])system[\s\\]*\(/.test(program)) {
+    return 'awk program contains system() which executes arbitrary commands'
+  }
+  if (
+    /(?:^|[^|])\|&?[^/|%";#{}]*"/.test(program) ||
+    /(?:^|[^|])\|&?[\s\\]*getline\b/.test(program)
+  ) {
+    return 'awk program contains a command pipe (| "cmd" or | getline) which executes arbitrary commands'
+  }
+  if (
+    /@[\s\\]*(?:load|include)\b|@[\s\\]*\w+(?:::\w+)?(?:\[[^\]]*\])*[\s\\]*\(/.test(
+      program,
+    )
+  ) {
+    return 'awk program contains @load/@include or an @indirect call which can execute arbitrary code'
+  }
+  if (/(?<![A-Za-z_])extension[\s\\]*\(/.test(program)) {
+    return 'awk program contains extension() which loads arbitrary native code (legacy gawk)'
+  }
+  if (/"\/inet[46]?\//.test(program)) {
+    return 'awk program opens a gawk /inet/ network socket which can exfiltrate data'
+  }
+  return false
+}
+
+export function checkDangerousAwkInCommand(
+  command: string,
+): PermissionResult | null {
+  const units = splitCommand(command)
+  for (const unit of units.length > 0 ? units : [command]) {
+    const tokens = shellSplitTokens(unit)
+    if (tokens.length === 0) continue
+    const cmdName = tokens[0]!.replace(/^.*\//, '').toLowerCase()
+    if (!AWK_COMMANDS.has(cmdName)) continue
+    for (const arg of tokens.slice(1)) {
+      const reason = checkDangerousAwkProgram(arg)
+      if (reason !== false) {
+        return {
+          behavior: 'ask',
+          message: reason,
+          decisionReason: { type: 'other', reason },
+        }
+      }
+    }
+  }
+  return null
+}
+
+const ANSI_C_QUOTE_ESCAPE_RE = /\$'(?:\\'|[^'])*\\[xuUc0-7]/
+
+function hasAnsiCQuoteEscape(script: string): boolean {
+  return [script, script.replace(/\\\n/g, '')].some(
+    candidate =>
+      ANSI_C_QUOTE_ESCAPE_RE.test(candidate) ||
+      ANSI_C_QUOTE_ESCAPE_RE.test(candidate.replace(/'(?:\\'|"'")'/g, "'")),
+  )
+}
+
+function shellSplitTokens(script: string): string[] {
+  return (
+    script.match(/(?:[^\s'"\\]|\\[\s\S]|'[^']*'|"(?:[^"\\]|\\.)*")+/g) ?? []
+  )
+}
+
+function braceTokenExpandsToRm(token: string): boolean {
+  const match = /^([^{]*)\{([^{}]*)\}(.*)$/s.exec(token.replace(/["'\\]/g, ''))
+  return (
+    match !== null &&
+    match[2]!
+      .split(/,|\.\./)
+      .some(part =>
+        /(?:^|\/)rm(?:dir)?$/i.test(`${match[1]}${part}${match[3]}`),
+      )
+  )
+}
+
+function mayContainRmInvocation(script: string): boolean {
+  const rmWordRe =
+    /(?:^|[^\w.-]|\$\{[^{}:-]*:?-)rm(?:dir)?(?:\.exe)?(?![\w.-])/i
+  const varPatterns = [
+    /\$[=~^]*(?:[A-Za-z_]\w*|[0-9]+|[@*#?!$-]|\{[^{}]*\})/g,
+    /\$(?:[0-9]+|[@*#?!$-]|\{[^{}]*\})/g,
+  ]
+  const unwrapDefault = (s: string): string =>
+    s.replace(/\$\{[^{}:=?+-]*:?[-=?+]([^{}]*)\}/g, '$1')
+  const joined = script.replace(/\\\n/g, '')
+  const dequote = (s: string): string => s.replace(/\$(?=['"])|['"\\]/g, '')
+  const baseForms = [
+    joined,
+    dequote(joined),
+    dequote(joined.replace(/\\[ntr]/g, ' ')),
+  ].flatMap(form => [form, unwrapDefault(form)])
+  const expandedForms = varPatterns.flatMap(re =>
+    [' ', ''].flatMap(rep => [
+      dequote(unwrapDefault(joined).replace(re, rep)),
+      ...baseForms.map(form => form.replace(re, rep)),
+    ]),
+  )
+  if ([...baseForms, ...expandedForms].some(form => rmWordRe.test(form))) {
+    return true
+  }
+  return [
+    ...shellSplitTokens(joined),
+    ...shellSplitTokens(dequote(joined)),
+  ].some(token => braceTokenExpandsToRm(token.replace(/\.exe$/i, '')))
+}
+
+/**
+ * #594 (SEA `PAe` / `qSr`): Only prompt for unreadable `-c` scripts if
+ * `CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT=1` (or `tengu_pale_kestrel` is off)
+ * OR the script may construct an `rm`/`rmdir` call or uses `$'...'` ANSI-C escape sequences.
+ */
+function isRelaxedInlineShellRmPromptEnabled(): boolean {
+  return (
+    !isEnvTruthy(process.env.CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_pale_kestrel', true)
+  )
+}
+
+export function shouldPromptUnreadableShellDashC(
+  ...scripts: string[]
+): boolean {
+  if (!isRelaxedInlineShellRmPromptEnabled()) {
+    return true
+  }
+  return scripts.some(s => mayContainRmInvocation(s) || hasAnsiCQuoteEscape(s))
+}
+
 /**
  * densable 2.1.289 — ask before dangerous rm inside bash/sh -c, even under
  * bypassPermissions or a whole-shell allow rule.
@@ -2440,11 +2699,14 @@ export function checkDangerousRmAfterEutPeel(
 export function checkDangerousRmInShellDashC(
   command: string,
 ): PermissionResult | null {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT)) {
+    return null
+  }
   const { scripts, hadShellDashC, unreadable } =
     extractShellDashCScripts(command)
   if (!hadShellDashC) return null
 
-  if (unreadable && /\brm(?:dir)?\b/.test(command)) {
+  if (unreadable && shouldPromptUnreadableShellDashC(command)) {
     return dangerousRemovalAsk(
       'rm',
       'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
@@ -2461,7 +2723,10 @@ export function checkDangerousRmInShellDashC(
     for (const unit of units) {
       // Nested shell -c inside the script body.
       const nested = extractShellDashCScripts(unit)
-      if (nested.unreadable && /\brm(?:dir)?\b/.test(unit)) {
+      if (
+        nested.unreadable &&
+        shouldPromptUnreadableShellDashC(command, unit)
+      ) {
         return dangerousRemovalAsk(
           'rm',
           'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
@@ -2639,6 +2904,12 @@ export async function bashToolHasPermission(
   const eutPeeledDanger = checkDangerousRmAfterEutPeel(input.command)
   if (eutPeeledDanger) {
     return eutPeeledDanger
+  }
+
+  // #673: refuse dangerous awk programs (system(), pipes, @load/@include/@indirect, extension(), /inet/)
+  const awkDanger = checkDangerousAwkInCommand(input.command)
+  if (awkDanger) {
+    return awkDanger
   }
 
   const result = await bashToolHasPermissionInner(

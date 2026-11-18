@@ -233,6 +233,7 @@ import {
 import {
   getAllMcpConfigs,
   getMcpServerUrlOrigin,
+  isMcpServerAllowedByPolicy,
   isMcpServerDisabled,
 } from './config.js'
 import {
@@ -284,7 +285,7 @@ import {
   DEFAULT_MCP_TOOL_TIMEOUT_MS,
   extractToolUseId,
   filterMcpToolsByNameLength,
-  getMaxMcpDescriptionLength,
+  getMaxMcpDescriptionLengthForConfig,
   getMcpToolIdleTimeoutMs,
   getMcpToolTimeoutMs,
   gracefulShutdownWindowsStdio,
@@ -409,6 +410,19 @@ const connectToServerMemo = memoize(
     },
   ): Promise<MCPServerConnection> => {
     const connectStartTime = Date.now()
+    // #644/#645: never spawn or dial a server blocked by managed policy.
+    if (
+      serverRef.type !== 'sdk' &&
+      !isMcpServerAllowedByPolicy(name, serverRef)
+    ) {
+      return {
+        name,
+        type: 'failed',
+        config: serverRef,
+        error: 'Blocked by enterprise managed policy',
+        errorCode: 'POLICY_BLOCKED',
+      }
+    }
     let inProcessServer:
       | { connect(t: Transport): Promise<void>; close(): Promise<void> }
       | undefined
@@ -453,6 +467,10 @@ const connectToServerMemo = memoize(
           // SDK's handler calls auth() → tokens().
           fetch: wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
           requestInit: {
+            ...((isMcpCcrProxyServerConfig(serverRef) ||
+              isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
+              redirect: 'manual' as const,
+            }),
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...combinedHeaders,
@@ -678,6 +696,10 @@ const connectToServerMemo = memoize(
           fetch: httpBaseFetch,
           requestInit: {
             ...proxyOptions,
+            ...((isMcpCcrProxyServerConfig(serverRef) ||
+              isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
+              redirect: 'manual' as const,
+            }),
             headers: {
               'User-Agent': getMCPUserAgent(),
               ...(bearerToken && {
@@ -1093,6 +1115,10 @@ const connectToServerMemo = memoize(
             fetch: httpFetch,
             requestInit: {
               ...proxyOptions,
+              ...((isMcpCcrProxyServerConfig(serverRef) ||
+                isFirstPartyAnthropicMcpUrl(serverRef.url)) && {
+                redirect: 'manual' as const,
+              }),
               headers: {
                 'User-Agent': getMCPUserAgent(),
                 ...(sessionIngressToken &&
@@ -1701,16 +1727,15 @@ const connectToServerMemo = memoize(
       }
       const serverVersion = client.getServerVersion()
       const rawInstructions = client.getInstructions()
+      const maxInstructionsLength =
+        getMaxMcpDescriptionLengthForConfig(serverRef)
       let instructions = rawInstructions
-      if (
-        rawInstructions &&
-        rawInstructions.length > MAX_MCP_DESCRIPTION_LENGTH
-      ) {
+      if (rawInstructions && rawInstructions.length > maxInstructionsLength) {
         instructions =
-          rawInstructions.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
+          rawInstructions.slice(0, maxInstructionsLength) + '… [truncated]'
         logMCPDebug(
           name,
-          `Server instructions truncated from ${rawInstructions.length} to ${MAX_MCP_DESCRIPTION_LENGTH} chars`,
+          `Server instructions truncated from ${rawInstructions.length} to ${maxInstructionsLength} chars`,
         )
       }
 
@@ -2319,6 +2344,7 @@ export const connectToServer = Object.assign(
 export async function clearServerCache(
   name: string,
   serverRef: ScopedMcpServerConfig,
+  keepAliveOut?: { connection?: ConnectedMCPServer },
 ): Promise<void> {
   const key = getServerCacheKey(name, serverRef)
 
@@ -2334,6 +2360,14 @@ export async function clearServerCache(
       const wrappedClient = await connectToServer(name, serverRef)
 
       if (wrappedClient.type === 'connected') {
+        if (
+          keepAliveOut !== undefined &&
+          wrappedClient.client.transport !== undefined &&
+          (wrappedClient.transportErrorState?.activeCallWatchdogs.size ?? 0) > 0
+        ) {
+          keepAliveOut.connection = wrappedClient
+          return
+        }
         await wrappedClient.cleanup()
       }
     } catch {
@@ -2786,7 +2820,8 @@ export const fetchToolsForClient = memoizeWithLRU(
                 },
               ) {
                 const desc = tool.description ?? ''
-                const cap = getMaxMcpDescriptionLength(
+                const cap = getMaxMcpDescriptionLengthForConfig(
+                  client.config,
                   options?.loadedThroughToolSearch === true,
                 )
                 return desc.length > cap
@@ -3462,11 +3497,13 @@ export async function reconnectMcpServerImpl(
   config: ScopedMcpServerConfig,
   _storageV5?: unknown,
   _credentials?: unknown,
+  options?: { keepConnectionInUse?: boolean },
 ): Promise<{
   client: MCPServerConnection
   tools: Tool[]
   commands: Command[]
   resources?: ServerResource[]
+  keptConnectionInUse?: boolean
 }> {
   const identityEpoch = getMcpIdentityEpoch()
   const identitySensitive = mcpConfigDependsOnAccountIdentity(config)
@@ -3481,8 +3518,15 @@ export async function reconnectMcpServerImpl(
     // use stale cached data and never notice the tokens were removed.
     clearKeychainCache()
 
-    await clearServerCache(name, config)
-    if (identityMoved()) return inertReconnectShape(name, config)
+    const keepAliveOut: { connection?: ConnectedMCPServer } | undefined =
+      options?.keepConnectionInUse ? {} : undefined
+    await clearServerCache(name, config, keepAliveOut)
+    if (identityMoved()) {
+      if (keepAliveOut?.connection !== undefined) {
+        await clearServerCache(name, config)
+      }
+      return inertReconnectShape(name, config)
+    }
     let client = await connectToServer(name, config)
     // Official HWt: needs-auth → one cache-clear retry.
     if (client.type === 'needs-auth') {
@@ -3574,6 +3618,10 @@ export async function reconnectMcpServerImpl(
       tools: [...tools, ...resourceTools],
       commands,
       resources: resources.length > 0 ? resources : undefined,
+      ...(keepAliveOut?.connection !== undefined &&
+      client === keepAliveOut.connection
+        ? { keptConnectionInUse: true }
+        : {}),
     }
   } catch (error) {
     // Handle errors gracefully - connection might have closed during fetch

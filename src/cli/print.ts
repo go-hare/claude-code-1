@@ -991,6 +991,175 @@ export class PrintTextResults {
   }
 }
 
+const SETTINGS_ERRORS_PER_FILE_LIMIT = 10
+const SETTINGS_ERROR_MAX_CODE_UNITS = 500
+
+function truncateCodeUnits(value: string, maxCodeUnits: number): string {
+  if (value.length <= maxCodeUnits) return value
+  return `${value.slice(0, maxCodeUnits)}…`
+}
+
+function formatSettingsValidationGroup(
+  errors: Array<{ file?: string; path?: unknown; message: string }>,
+): string {
+  const byFile = new Map<
+    string,
+    Array<{ file?: string; path?: unknown; message: string }>
+  >()
+  for (const err of errors) {
+    const file = err.file ?? '<unknown>'
+    const list = byFile.get(file)
+    if (list) list.push(err)
+    else byFile.set(file, [err])
+  }
+  const lines: string[] = []
+  for (const [file, list] of byFile) {
+    const fileLabel = truncateCodeUnits(file, SETTINGS_ERROR_MAX_CODE_UNITS)
+    for (const err of list.slice(0, SETTINGS_ERRORS_PER_FILE_LIMIT)) {
+      const pathStr = err.path
+        ? truncateCodeUnits(String(err.path), SETTINGS_ERROR_MAX_CODE_UNITS)
+        : ''
+      const msgStr = truncateCodeUnits(
+        err.message,
+        SETTINGS_ERROR_MAX_CODE_UNITS,
+      )
+      lines.push(`  ${fileLabel}${pathStr ? ` (${pathStr})` : ''}: ${msgStr}`)
+    }
+    if (list.length > SETTINGS_ERRORS_PER_FILE_LIMIT) {
+      lines.push(
+        `  … and ${list.length - SETTINGS_ERRORS_PER_FILE_LIMIT} more in ${fileLabel}`,
+      )
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Official 2.1.299 (#640) `tF(outputFormat)`: log settings validation errors
+ * and print them to stderr in `claude -p` text-output mode.
+ */
+export function reportHeadlessSettingsValidationErrors(
+  outputFormat: string | undefined,
+  writeStderr: (text: string) => void = text => process.stderr.write(text),
+): void {
+  const { errors } = getSettingsWithErrors()
+  const filtered = errors.filter(
+    e =>
+      !e.mcpErrorMetadata &&
+      !(e as { statusOnly?: boolean }).statusOnly &&
+      !(e as { startupFatal?: boolean }).startupFatal,
+  )
+  if (filtered.length === 0) return
+  const notLoaded = filtered.filter(
+    e => (e as { severity?: string }).severity !== 'warning',
+  )
+  const notLoadedFiles = new Set(notLoaded.map(e => e.file))
+  const skipped = filtered.filter(e => !notLoadedFiles.has(e.file))
+  for (const e of filtered) {
+    logForDebugging(
+      `Invalid setting skipped without dialog (automated session): ${e.file ?? '<unknown>'}: ${String(e.path ?? '')}: ${e.message}`,
+      { level: 'error' },
+    )
+  }
+  logEvent('tengu_own_settings_validation_errors', {
+    not_loaded_file_count: notLoadedFiles.size,
+    skipped_entry_count: skipped.length,
+  })
+  if (outputFormat === 'json' || outputFormat === 'stream-json') return
+  const sections: string[] = []
+  if (notLoaded.length > 0) {
+    sections.push(
+      `These settings files did not load, so nothing in them is in effect, including hooks and permission rules. Each loads again once the problem listed for it is fixed:\n${formatSettingsValidationGroup(notLoaded)}`,
+    )
+  }
+  if (skipped.length > 0) {
+    sections.push(
+      `These settings entries were skipped; the rest of each file is in effect:\n${formatSettingsValidationGroup(skipped)}`,
+    )
+  }
+  if (sections.length > 0) {
+    writeStderr(`${sections.join('\n')}\n`)
+  }
+}
+
+/**
+ * Official 2.1.299 (#599) `DE({running, runPhase, inputClosed})`:
+ * Allow scheduled wakeups to fire while waiting for background agents.
+ */
+export function isHeadlessCronLoading(opts: {
+  running: boolean
+  runPhase: string | undefined
+  inputClosed: boolean
+  hasPendingWakeup?: boolean
+}): boolean {
+  if (opts.inputClosed) {
+    return !(
+      opts.running &&
+      opts.runPhase === 'waiting_for_agents' &&
+      opts.hasPendingWakeup === true
+    )
+  }
+  return opts.running && opts.runPhase !== 'waiting_for_agents'
+}
+
+/**
+ * Official 2.1.299 (#632): resize/downsample inline base64 image blocks in
+ * stream-json SDK user messages before queuing.
+ */
+export async function resizeInboundImageBlocks(
+  content: string | ContentBlockParam[],
+): Promise<string | ContentBlockParam[]> {
+  if (!Array.isArray(content)) return content
+  const hasImage = content.some(
+    b =>
+      b !== null &&
+      typeof b === 'object' &&
+      b.type === 'image' &&
+      b.source?.type === 'base64' &&
+      typeof b.source.data === 'string',
+  )
+  if (!hasImage) return content
+  const { maybeResizeAndDownsampleImageBuffer } = await import(
+    '../utils/imageResizer.js'
+  )
+  return Promise.all(
+    content.map(async block => {
+      if (
+        block === null ||
+        typeof block !== 'object' ||
+        block.type !== 'image' ||
+        block.source?.type !== 'base64' ||
+        typeof block.source.data !== 'string'
+      ) {
+        return block
+      }
+      try {
+        const buf = Buffer.from(block.source.data, 'base64')
+        const ext = block.source.media_type?.split('/')[1] || 'png'
+        const resized = await maybeResizeAndDownsampleImageBuffer(
+          buf,
+          buf.length,
+          ext,
+        )
+        const normalized =
+          resized.mediaType === 'jpg' ? 'jpeg' : resized.mediaType
+        return {
+          ...block,
+          source: {
+            ...block.source,
+            type: 'base64' as const,
+            media_type:
+              `image/${normalized}` as import('@anthropic-ai/sdk/resources').Base64ImageSource['media_type'],
+            data: resized.buffer.toString('base64'),
+          },
+        }
+      } catch {
+        return block
+      }
+    }),
+  )
+}
+
 function countsAsHeadlessLastMessage(message: {
   type: string
   subtype?: unknown
@@ -1097,6 +1266,8 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
       process.exit(0)
     }
   }
+
+  reportHeadlessSettingsValidationErrors(options.outputFormat)
 
   // Fire user settings download now so it overlaps with the MCP/tool setup
   // below. Managed settings already started in main.tsx preAction; this gives
@@ -2346,12 +2517,24 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         }
       }
     }
+    const interruptedMsg =
+      turnInterruptionState.message as typeof turnInterruptionState.message & {
+        client_composed?: boolean
+        seeded_summon?: boolean
+        queueSkipSlashCommands?: boolean
+      }
     enqueue({
       mode: 'prompt',
-      value: turnInterruptionState.message.message!.content as
-        | string
-        | ContentBlockParam[],
+      value: interruptedMsg.message!.content as string | ContentBlockParam[],
       uuid: randomUUID(),
+      ...(interruptedMsg.client_composed === true ||
+      interruptedMsg.queueSkipSlashCommands === true
+        ? { skipSlashCommands: true }
+        : {}),
+      ...(interruptedMsg.client_composed === true ||
+      interruptedMsg.seeded_summon === true
+        ? { skipAttachments: true }
+        : {}),
     })
   }
 
@@ -5603,7 +5786,16 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           onSuccess: enqueueAndRun,
         })
       },
-      isLoading: () => running || inputClosed,
+      isLoading: () =>
+        isHeadlessCronLoading({
+          running,
+          runPhase,
+          inputClosed,
+          hasPendingWakeup: hasPendingSessionWakeup(getSessionCronTasks(), {
+            now: Date.now(),
+            parkedSince: null,
+          }),
+        }),
       getJitterConfig: cronJitterConfigModule?.getCronJitterConfig,
       isKilled: () => !cronGate?.isKairosCronEnabled(),
     })
@@ -8722,9 +8914,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         mode: 'prompt' as const,
         // file_attachments rides the protobuf catchall from the web composer.
         // Same-ref no-op when absent (no 'file_attachments' key).
-        value: await resolveAndPrepend(
-          userMsg,
-          (userMsg.message as { content: ContentBlockParam[] }).content,
+        value: await resizeInboundImageBlocks(
+          await resolveAndPrepend(
+            userMsg,
+            (userMsg.message as { content: ContentBlockParam[] }).content,
+          ),
         ),
         uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
         priority: (userMsg as { priority?: string })

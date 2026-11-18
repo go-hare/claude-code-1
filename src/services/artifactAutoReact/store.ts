@@ -717,6 +717,9 @@ export type NoticeCoalesceEntry = {
   timer?: ReturnType<typeof setTimeout>
 }
 
+export const MAX_WATCHED_ARTIFACTS = 25 // Official `BR` (2.1.299 #712: raised from 10 to 25)
+export const MAX_RECENT_ARTIFACTS = 3 * MAX_WATCHED_ARTIFACTS
+
 const REWATCH_TIMING = {
   baseMs: 1000,
   capMs: 30_000,

@@ -13,6 +13,7 @@ import { logForDebugging } from '../debug.js'
 import { calculateCostFromTokens } from '../modelCost.js'
 import { isModelAlias, isModelFamilyAlias } from '../model/aliases.js'
 import { getMainLoopModel } from '../model/model.js'
+import { getAPIProvider } from '../model/providers.js'
 import { getCompiledOrgPricing, lookupOrgModelCosts } from '../modelPricing.js'
 import { recognizePrintModel } from '../model/printSetModel.js'
 import {
@@ -414,6 +415,7 @@ export async function hJ(model: string): Promise<unknown> {
     getBootstrapSession().host.requestLatches.inferenceProfileBackingModels()
   let o = r.get(t)
   if (o === undefined) {
+    if (getAPIProvider() !== 'bedrock') return null
     o = _I(t).then(backing => {
       // densable: keep resolved string|null on the same key after settle
       r.set(t, backing)

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import * as claudeApi from 'src/services/api/claude.js'
 import { formatFetchedWebResult, WebFetchTool } from '../WebFetchTool.js'
 import { wrapRawFetchedWebContent } from '../rawWrap.js'
 
@@ -75,5 +76,38 @@ describe('WebFetchTool 2.1.290 #16 offset + 100k unread', () => {
       {} as never,
     )
     expect(allowed).toBeUndefined()
+  })
+
+  test('#720 formatFetchedWebResult threads callerOptions (callerModel + callerEffort) to applyPromptToMarkdown / queryWithModel', async () => {
+    const spy = spyOn(claudeApi, 'queryWithModel').mockResolvedValue({
+      isApiErrorMessage: false,
+      message: { content: [{ type: 'text', text: 'summarized answer' }] },
+    } as never)
+
+    try {
+      const res = await formatFetchedWebResult({
+        url: 'https://example.com/page',
+        prompt: 'summarize',
+        offset: 0,
+        content: 'hello world',
+        contentType: 'text/plain',
+        code: 200,
+        bytes: 11,
+        abortController: new AbortController(),
+        isNonInteractiveSession: true,
+        callerOptions: { callerModel: 'claude-opus-4-6', callerEffort: 'high' },
+      })
+
+      expect(res).toBe('summarized answer')
+      expect(spy).toHaveBeenCalledTimes(1)
+      const callArgs = spy.mock.calls[0]?.[0] as {
+        options?: { model?: string; effortValue?: string; querySource?: string }
+      }
+      expect(callArgs?.options?.querySource).toBe('web_fetch_apply')
+      expect(callArgs?.options?.model).toBe('claude-opus-4-6')
+      expect(callArgs?.options?.effortValue).toBe('high')
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

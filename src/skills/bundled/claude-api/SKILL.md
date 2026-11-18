@@ -384,7 +384,7 @@ Strategy types: `clear_tool_uses_20250919` (clears old tool results; optional `c
 
 Availability: `shared/platform-availability.md`. For agents on Bedrock / Vertex / Foundry (where Managed Agents is unsupported), use Claude API + tool use.
 
-**Mandatory flow:** Agent (once) → Session (every run). `model`/`system`/`tools` live on the agent, never the session. See `shared/managed-agents-overview.md` for the full reading guide, beta headers, and pitfalls.
+**Mandatory flow:** Agent (once) → Session (every run). `model`/`system`/`tools` live on the agent, never the session. See `shared/managed-agents-overview.md` for the full reading guide, beta headers, and pitfalls. Leave Managed Agents sessions in place unless the user explicitly asks to archive or delete them.
 
 **Beta headers:** `managed-agents-2026-04-01` — the SDK sets this automatically for all `client.beta.{agents,environments,sessions,vaults,memory_stores,deployments,deployment_runs}.*` calls. Skills API uses `skills-2025-10-02` and Files API uses `files-api-2025-04-14`, but you don't need to explicitly pass those in for endpoints other than `/v1/skills` and `/v1/files`.
 
@@ -458,7 +458,7 @@ Server-side tools run on Anthropic's infrastructure — no client-side execution
 
 After detecting the language, read the relevant files based on what the user needs. Every `{lang}/…`, `shared/…`, and `curl/…` path cited in this document is relative to this skill's base directory, and none of those files' content is included above — Read each one on demand before relying on what it covers.
 
-**All SDK languages use the same multi-file layout** — directory `{lang}/claude-api/` containing `README.md` (install, client init, basic request, thinking, caching, stop details, misc), `tool-use.md` (tool definitions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language — fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** → `curl/examples.md`.
+**All SDK languages use the same multi-file layout** — directory `{lang}/claude-api/` containing `README.md` (install, client init, basic request, thinking, caching, stop details, misc), `tool-use.md` (tool definitions, agentic loop, Anthropic-defined tools, structured outputs), `streaming.md`, `batches.md`, `files-api.md`, `opentelemetry.md`. Not every language has every file (e.g., Ruby has no `batches.md`); if a file is absent, that feature's example is not yet documented for that language — fall back to the cURL shape or WebFetch the SDK repo from `shared/live-sources.md`. **cURL** → `curl/examples.md`.
 
 The Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notation for all languages.
 
@@ -499,6 +499,9 @@ The Quick Task Reference below uses the `{lang}/claude-api/FILE.md` path notatio
 
 **Organization administration (members, invites, workspaces, API keys, rate limit reports, service accounts, WIF resources, CMEK):**
 -> Read `shared/admin-api.md` - `client.beta.organization` endpoint/method table, admin credentials, per-language naming and pagination, what stays curl-only
+
+**Monitoring, logging, tracing or observability of Claude API calls or Managed Agents sessions (OpenTelemetry: SDK spans, trace destinations set up through the Admin API or the Console, `traceparent`, span attributes, token counts from spans):**
+-> Read `shared/opentelemetry.md` + `{lang}/claude-api/opentelemetry.md`. OpenTelemetry needs a backend the user runs or signs up for, so don't lead with it for a user who is just starting out. For Managed Agents sessions, first point to the Console session viewer, which needs no setup (`shared/managed-agents-events.md`). Offer OpenTelemetry tracing when the user already has an observability backend, or wants traces outside the Console.
 
 **Debugging HTTP errors or implementing error handling:**
 → Read `shared/error-codes.md` — per-SDK typed exception class table and the Go `errors.As` pattern

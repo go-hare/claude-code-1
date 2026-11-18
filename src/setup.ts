@@ -2,7 +2,7 @@
 
 import { feature } from 'bun:bundle'
 import chalk from 'chalk'
-import { basename } from 'path'
+import { basename, resolve } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -12,9 +12,13 @@ import { checkForReleaseNotes } from 'src/utils/releaseNotes.js'
 import { setCwd } from 'src/utils/Shell.js'
 import { initSinks } from 'src/utils/sinks.js'
 import {
+  getInlinePlugins,
+  getInlinePluginsNoMcp,
   getIsNonInteractiveSession,
   getProjectRoot,
   getSessionId,
+  setInlinePlugins,
+  setInlinePluginsNoMcp,
   setOriginalCwd,
   setProjectRoot,
   switchSession,
@@ -218,6 +222,18 @@ export async function setup(
   // Handle worktree creation if requested
   // IMPORTANT: this must be called befiore getCommands(), otherwise /eject won't be available.
   if (worktreeEnabled) {
+    // 2.1.300 #778 (SEA registerWorktreeHooksAhead): Resolve relative --plugin-dir
+    // paths against cwd before worktree chdir, then load plugin hooks so
+    // plugin WorktreeCreate / WorktreeRemove hooks run under `--worktree`.
+    setInlinePlugins(getInlinePlugins().map(p => resolve(p)))
+    setInlinePluginsNoMcp(getInlinePluginsNoMcp().map(p => resolve(p)))
+    if (!isBareMode()) {
+      const { loadPluginHooks } = await import(
+        './utils/plugins/loadPluginHooks.js'
+      )
+      await loadPluginHooks()
+    }
+
     // Mirrors bridgeMain.ts: hook-configured sessions can proceed without git
     // so createWorktreeForSession() can delegate to the hook (non-git VCS).
     const hasHook = hasWorktreeCreateHook()

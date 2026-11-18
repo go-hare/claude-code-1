@@ -15,13 +15,21 @@ import {
   context as otelContext,
   defaultTextMapGetter,
   defaultTextMapSetter,
+  ROOT_CONTEXT,
+  SpanStatusCode,
   type Context,
+  type Link,
   type Span,
+  type SpanContext as OTelSpanContext,
   trace,
 } from '@opentelemetry/api'
 import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { AsyncLocalStorage } from 'async_hooks'
-import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getSessionId,
+} from '../../bootstrap/state.js'
+import { getAPIProvider } from '../model/providers.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
@@ -234,6 +242,43 @@ function getTracer() {
   return trace.getTracer('com.anthropic.claude_code.tracing', '1.0.0')
 }
 
+/**
+ * Official 2.1.300 (#760) Ft() — map APIProvider to OpenTelemetry GenAI semantic-convention provider name.
+ */
+export function getGenAiProviderName(
+  provider: string = getAPIProvider(),
+): string {
+  switch (provider) {
+    case 'bedrock':
+    case 'mantle':
+      return 'aws.bedrock'
+    case 'vertex':
+      return 'gcp.vertex_ai'
+    case 'firstParty':
+    case 'anthropicAws':
+    case 'anthropicGoogleCloud':
+    case 'foundry':
+    case 'gateway':
+      return 'anthropic'
+    default:
+      return provider
+  }
+}
+
+/**
+ * Official 2.1.300 (#760) xTe() — split mcp__<server>__<tool> for gen_ai.tool.name / anthropic.mcp.server.name.
+ */
+function parseMcpToolNameForGenAi(
+  toolName: string,
+): { serverName: string; mcpToolName: string } | undefined {
+  if (!toolName.startsWith('mcp__')) return undefined
+  const parts = toolName.split('__')
+  const serverName = parts[1]
+  const mcpToolName = parts.slice(2).join('__')
+  if (!serverName || !mcpToolName) return undefined
+  return { serverName, mcpToolName }
+}
+
 function createSpanAttributes(
   spanType: SpanType,
   customAttributes: Record<string, string | number | boolean> = {},
@@ -242,6 +287,7 @@ function createSpanAttributes(
 
   const attributes: Record<string, string | number | boolean> = {
     ...baseAttributes,
+    'gen_ai.provider.name': getGenAiProviderName(),
     'span.type': spanType,
     ...customAttributes,
   }
@@ -249,12 +295,56 @@ function createSpanAttributes(
   return attributes
 }
 
+const ERROR_CLASS_RE = /^[A-Za-z][A-Za-z0-9_]{0,47}$/
+
+function formatErrorAttributes(
+  error?: string,
+  errorClass?: string,
+): Record<string, string> {
+  const sanitizedClass = errorClass?.replace(/[^A-Za-z0-9_]/g, '_')
+  return {
+    ...(error !== undefined ? { error } : {}),
+    ...(sanitizedClass !== undefined && ERROR_CLASS_RE.test(sanitizedClass)
+      ? { error_class: sanitizedClass }
+      : {}),
+  }
+}
+
+function buildErrorStatus(error?: string): {
+  code: SpanStatusCode
+  message?: string
+} {
+  return {
+    code: SpanStatusCode.ERROR,
+    ...(error ? { message: error } : {}),
+  }
+}
+
+function parseTraceparentSpanContext(
+  traceparent: string,
+): OTelSpanContext | undefined {
+  const ctx = new W3CTraceContextPropagator().extract(
+    ROOT_CONTEXT,
+    { traceparent },
+    defaultTextMapGetter,
+  )
+  return trace.getSpanContext(ctx)
+}
+
+export type InteractionTraceContexts = {
+  parent?: { traceparent: string }
+  linked?: Array<{ traceparent: string }>
+}
+
 /**
  * Start an interaction span. This wraps a user request -> Claude response cycle.
  * This is now a root span that includes all session-level attributes.
  * Sets the interaction context for all subsequent operations.
  */
-export function startInteractionSpan(userPrompt: string): Span {
+export function startInteractionSpan(
+  userPrompt: string,
+  traceContexts?: InteractionTraceContexts,
+): Span {
   ensureCleanupInterval()
 
   // Start Perfetto span regardless of OTel tracing state
@@ -289,31 +379,61 @@ export function startInteractionSpan(userPrompt: string): Span {
 
   interactionSequence++
 
-  const attributes = createSpanAttributes('interaction', {
-    user_prompt: promptToLog,
-    user_prompt_length: userPrompt.length,
-    'interaction.sequence': interactionSequence,
-  })
-
   // densable: dn()&&Z.TRACEPARENT ? propagation.extract(...) : active
   // so headless/SDK interaction spans inherit parent trace_id/span_id.
   const activeCtx = otelContext.active()
-  let parentCtx = activeCtx
-  if (getIsNonInteractiveSession() && process.env.TRACEPARENT) {
-    parentCtx = new W3CTraceContextPropagator().extract(
-      activeCtx,
-      {
-        traceparent: process.env.TRACEPARENT,
-        tracestate: process.env.TRACESTATE,
-      },
-      defaultTextMapGetter,
-    )
-  }
+  const propagator = new W3CTraceContextPropagator()
+  const eventParentCtx = traceContexts?.parent
+    ? propagator.extract(
+        activeCtx,
+        { traceparent: traceContexts.parent.traceparent },
+        defaultTextMapGetter,
+      )
+    : activeCtx
+  const envParentCtx =
+    eventParentCtx === activeCtx &&
+    getIsNonInteractiveSession() &&
+    process.env.TRACEPARENT
+      ? propagator.extract(
+          activeCtx,
+          {
+            traceparent: process.env.TRACEPARENT,
+            tracestate: process.env.TRACESTATE,
+          },
+          defaultTextMapGetter,
+        )
+      : activeCtx
+  const parentCtx = eventParentCtx !== activeCtx ? eventParentCtx : envParentCtx
+  const parentSource =
+    eventParentCtx !== activeCtx
+      ? 'event'
+      : envParentCtx !== activeCtx
+        ? 'env'
+        : 'none'
+  const links: Link[] = (traceContexts?.linked ?? []).flatMap(
+    ({ traceparent }) => {
+      const spanCtx = parseTraceparentSpanContext(traceparent)
+      return spanCtx
+        ? [{ context: spanCtx, attributes: { 'link.type': 'queued_send' } }]
+        : []
+    },
+  )
+
+  const attributes = createSpanAttributes('interaction', {
+    'gen_ai.operation.name': 'invoke_agent',
+    user_prompt: promptToLog,
+    user_prompt_length: userPrompt.length,
+    'interaction.sequence': interactionSequence,
+    'gen_ai.conversation.id': getSessionId(),
+    'parent.source': parentSource,
+    queued_sends: links.length,
+  })
 
   const span = tracer.startSpan(
     'claude_code.interaction',
     {
       attributes,
+      links,
     },
     parentCtx,
   )
@@ -413,6 +533,9 @@ export function startLLMRequestSpan(
 
   const attributes = createSpanAttributes('llm_request', {
     model: model,
+    'gen_ai.system': 'anthropic',
+    'gen_ai.request.model': model,
+    'gen_ai.conversation.id': getSessionId(),
     'llm_request.context': parentSpanCtx ? 'interaction' : 'standalone',
     speed: fastMode ? 'fast' : 'normal',
   })
@@ -454,6 +577,17 @@ export function startLLMRequestSpan(
  *
  *   If not provided, falls back to finding the most recent llm_request span (legacy behavior).
  */
+export function addLLMRequestAttemptEvent(
+  span: Span | undefined,
+  { attempt, clientRequestId }: { attempt: number; clientRequestId?: string },
+): void {
+  const attrs: Record<string, string | number> = { attempt }
+  if (clientRequestId !== undefined) attrs.client_request_id = clientRequestId
+  if (span && isAnyTracingEnabled()) {
+    span.addEvent('gen_ai.request.attempt', attrs)
+  }
+}
+
 export function endLLMRequestSpan(
   span?: Span,
   metadata?: {
@@ -464,6 +598,7 @@ export function endLLMRequestSpan(
     success?: boolean
     statusCode?: number
     error?: string
+    errorClass?: string
     attempt?: number
     modelResponse?: string
     /** Text output from the model (non-thinking content) */
@@ -474,10 +609,16 @@ export function endLLMRequestSpan(
     hasToolCall?: boolean
     /** Time to first token in milliseconds */
     ttftMs?: number
+    firstContentMs?: number
+    effort?: string
     /** Time spent in pre-request setup before the successful attempt */
     requestSetupMs?: number
     /** Timestamps (Date.now()) of each attempt start — used to emit retry sub-spans */
     attemptStartTimes?: number[]
+    requestId?: string
+    clientRequestId?: string
+    stopReason?: string
+    traceresponse?: string
   },
 ): void {
   let llmSpanContext: SpanContext | undefined
@@ -547,19 +688,50 @@ export function endLLMRequestSpan(
       endAttributes['success'] = metadata.success
     if (metadata.statusCode !== undefined)
       endAttributes['status_code'] = metadata.statusCode
-    if (metadata.error !== undefined) endAttributes['error'] = metadata.error
+    Object.assign(
+      endAttributes,
+      formatErrorAttributes(metadata.error, metadata.errorClass),
+    )
     if (metadata.attempt !== undefined)
       endAttributes['attempt'] = metadata.attempt
     if (metadata.hasToolCall !== undefined)
       endAttributes['response.has_tool_call'] = metadata.hasToolCall
     if (metadata.ttftMs !== undefined)
       endAttributes['ttft_ms'] = metadata.ttftMs
+    if (metadata.firstContentMs !== undefined)
+      endAttributes['first_content_ms'] = metadata.firstContentMs
+    if (metadata.effort !== undefined) endAttributes['effort'] = metadata.effort
+    if (metadata.requestId !== undefined) {
+      endAttributes['request_id'] = metadata.requestId
+      endAttributes['gen_ai.response.id'] = metadata.requestId
+    }
+    if (metadata.clientRequestId !== undefined) {
+      endAttributes['client_request_id'] = metadata.clientRequestId
+    }
 
     // Add experimental response attributes (model_output, thinking_output)
     addBetaLLMResponseAttributes(endAttributes, metadata)
   }
 
   llmSpanContext.span.setAttributes(endAttributes)
+  if (metadata?.stopReason !== undefined) {
+    llmSpanContext.span.setAttribute('stop_reason', metadata.stopReason)
+    llmSpanContext.span.setAttribute('gen_ai.response.finish_reasons', [
+      metadata.stopReason,
+    ])
+  }
+  if (metadata?.success === false) {
+    llmSpanContext.span.setStatus(buildErrorStatus(metadata.error))
+  }
+  if (metadata?.traceresponse) {
+    const linkedCtx = parseTraceparentSpanContext(metadata.traceresponse)
+    if (linkedCtx) {
+      llmSpanContext.span.addLink({
+        context: linkedCtx,
+        attributes: { 'link.type': 'parent_of' },
+      })
+    }
+  }
   llmSpanContext.span.end()
 
   const spanId = getSpanId(llmSpanContext.span)
@@ -598,8 +770,17 @@ export function startToolSpan(
   const tracer = getTracer()
   const parentSpanCtx = interactionContext.getStore()
 
+  const mcpTool = parseMcpToolNameForGenAi(toolName)
+  const toolCallId =
+    typeof toolAttributes?.tool_use_id === 'string'
+      ? toolAttributes.tool_use_id
+      : undefined
   const attributes = createSpanAttributes('tool', {
     tool_name: toolName,
+    'gen_ai.operation.name': 'execute_tool',
+    'gen_ai.tool.name': mcpTool?.mcpToolName ?? toolName,
+    ...(mcpTool ? { 'anthropic.mcp.server.name': mcpTool.serverName } : {}),
+    ...(toolCallId ? { 'gen_ai.tool.call.id': toolCallId } : {}),
     ...toolAttributes,
   })
 
@@ -771,6 +952,8 @@ export function startToolExecutionSpan(): Span {
 export function endToolExecutionSpan(metadata?: {
   success?: boolean
   error?: string
+  errorClass?: string
+  interrupted?: boolean
 }): void {
   if (!isAnyTracingEnabled()) {
     return
@@ -791,10 +974,19 @@ export function endToolExecutionSpan(metadata?: {
 
   if (metadata) {
     if (metadata.success !== undefined) attributes['success'] = metadata.success
-    if (metadata.error !== undefined) attributes['error'] = metadata.error
+    if (metadata.success === false && !metadata.interrupted) {
+      attributes['error.type'] = 'tool_error'
+    }
+    Object.assign(
+      attributes,
+      formatErrorAttributes(metadata.error, metadata.errorClass),
+    )
   }
 
   executionSpanContext.span.setAttributes(attributes)
+  if (metadata?.success === false) {
+    executionSpanContext.span.setStatus(buildErrorStatus(metadata.error))
+  }
   executionSpanContext.span.end()
 
   const spanId = getSpanId(executionSpanContext.span)

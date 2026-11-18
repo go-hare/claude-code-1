@@ -33,6 +33,12 @@ import { getPluginCommands, getPluginSkills } from './loadPluginCommands.js'
 import { loadPluginHooks } from './loadPluginHooks.js'
 import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
+import {
+  endSyncedPluginReloadHold,
+  getPluginsSyncState,
+  holdSyncedPluginReload,
+  markSyncedPluginsReloaded,
+} from './syncedPluginCloudSync.js'
 import { clearPluginCacheExclusions } from './orphanedPluginFilter.js'
 import { loadAllPlugins } from './pluginLoader.js'
 
@@ -79,134 +85,144 @@ export async function refreshActivePlugins(
   opts: { applyStagedInstalls?: boolean } = {},
 ): Promise<RefreshActivePluginsResult> {
   const applyStagedInstalls = opts.applyStagedInstalls ?? true
-  logForDebugging('refreshActivePlugins: clearing all plugin caches')
-  // densable Tn: `if (l) X(); U(t,a); if (l) re()`.
-  // X = E0a clearInstalledPluginsCache; U = K_t clearAllCaches;
-  // re = v6a clearPluginCacheExclusions. Not staged-copy.
-  if (applyStagedInstalls) clearInstalledPluginsCache()
-  clearAllCaches()
-  if (applyStagedInstalls) clearPluginCacheExclusions()
-
-  // Sequence the full load before cache-only consumers. Before #23693 all
-  // three shared loadAllPlugins()'s memoize promise so Promise.all was a
-  // no-op race. After #23693 getPluginCommands/getAgentDefinitions call
-  // loadAllPluginsCacheOnly (separate memoize) — racing them means they
-  // read installed_plugins.json before loadAllPlugins() has cloned+cached
-  // the plugin, returning plugin-cache-miss. loadAllPlugins warms the
-  // cache-only memoize on completion, so the awaits below are ~free.
-  const pluginResult = await loadAllPlugins()
-  const [pluginCommands, pluginSkills, agentDefinitions] = await Promise.all([
-    getPluginCommands(),
-    getPluginSkills(),
-    getAgentDefinitionsWithOverrides(getOriginalCwd()),
-  ])
-
-  const { enabled, disabled, errors } = pluginResult
-
-  // Populate mcpServers/lspServers on each enabled plugin. These are lazy
-  // cache slots NOT filled by loadAllPlugins() — they're written later by
-  // extractMcpServersFromPlugins/getPluginLspServers, which races with this.
-  // Loading here gives accurate metrics AND warms the cache slots so the MCP
-  // connection manager (triggered by pluginReconnectKey bump) sees the servers
-  // without re-parsing manifests. Errors are pushed to the shared errors array.
-  const [mcpCounts, lspCounts] = await Promise.all([
-    Promise.all(
-      enabled.map(async p => {
-        if (p.mcpServers) return Object.keys(p.mcpServers).length
-        const servers = await loadPluginMcpServers(p, errors)
-        if (servers) p.mcpServers = servers
-        return servers ? Object.keys(servers).length : 0
-      }),
-    ),
-    Promise.all(
-      enabled.map(async p => {
-        if (p.lspServers) return Object.keys(p.lspServers).length
-        const servers = await loadPluginLspServers(p, errors)
-        if (servers) p.lspServers = servers
-        return servers ? Object.keys(servers).length : 0
-      }),
-    ),
-  ])
-  const mcp_count = mcpCounts.reduce((sum, n) => sum + n, 0)
-  const lsp_count = lspCounts.reduce((sum, n) => sum + n, 0)
-
-  setAppState(prev => ({
-    ...prev,
-    plugins: {
-      ...prev.plugins,
-      enabled,
-      disabled,
-      commands: pluginCommands,
-      errors: mergePluginErrors(prev.plugins.errors, errors),
-      needsRefresh: false,
-    },
-    agentDefinitions,
-    mcp: {
-      ...prev.mcp,
-      pluginReconnectKey: prev.mcp.pluginReconnectKey + 1,
-    },
-  }))
-
-  // Re-initialize LSP manager so newly-loaded plugin LSP servers are picked
-  // up. No-op if LSP was never initialized (headless subcommand path).
-  // Unconditional so removing the last LSP plugin also clears stale config.
-  // Fixes issue #15521: LSP manager previously read a stale memoized
-  // loadAllPlugins() result from before marketplaces were reconciled.
-  reinitializeLspServerManager()
-
-  // clearAllCaches() prunes removed-plugin hooks; this does the FULL swap
-  // (adds hooks from newly-enabled plugins too). Catching here so
-  // hook_load_failed can feed error_count; a failure doesn't lose the
-  // plugin/command/agent data above (hooks go to STATE.registeredHooks, not
-  // AppState).
-  let hook_load_failed = false
+  const changesLandedAtStart = getPluginsSyncState().changesLanded
+  const holdToken = holdSyncedPluginReload()
   try {
-    await loadPluginHooks()
-  } catch (e) {
-    hook_load_failed = true
-    logError(e)
-    logForDebugging(
-      `refreshActivePlugins: loadPluginHooks failed: ${errorMessage(e)}`,
-    )
-  }
+    logForDebugging('refreshActivePlugins: clearing all plugin caches')
+    // densable Tn: `if (l) X(); U(t,a); if (l) re()`.
+    // X = E0a clearInstalledPluginsCache; U = K_t clearAllCaches;
+    // re = v6a clearPluginCacheExclusions. Not staged-copy.
+    if (applyStagedInstalls) clearInstalledPluginsCache()
+    clearAllCaches()
+    if (applyStagedInstalls) clearPluginCacheExclusions()
 
-  const hook_count = enabled.reduce((sum, p) => {
-    if (!p.hooksConfig) return sum
-    return (
-      sum +
-      (
-        Object.values(p.hooksConfig) as Array<
-          Array<{ hooks: unknown[] }> | undefined
-        >
-      ).reduce(
-        (s, matchers) =>
-          s +
-          (matchers?.reduce(
-            (h: number, m: { hooks: { length: number } }) => h + m.hooks.length,
-            0,
-          ) ?? 0),
-        0,
+    // Sequence the full load before cache-only consumers. Before #23693 all
+    // three shared loadAllPlugins()'s memoize promise so Promise.all was a
+    // no-op race. After #23693 getPluginCommands/getAgentDefinitions call
+    // loadAllPluginsCacheOnly (separate memoize) — racing them means they
+    // read installed_plugins.json before loadAllPlugins() has cloned+cached
+    // the plugin, returning plugin-cache-miss. loadAllPlugins warms the
+    // cache-only memoize on completion, so the awaits below are ~free.
+    const pluginResult = await loadAllPlugins()
+    const [pluginCommands, pluginSkills, agentDefinitions] = await Promise.all([
+      getPluginCommands(),
+      getPluginSkills(),
+      getAgentDefinitionsWithOverrides(getOriginalCwd()),
+    ])
+
+    const { enabled, disabled, errors } = pluginResult
+
+    // Populate mcpServers/lspServers on each enabled plugin. These are lazy
+    // cache slots NOT filled by loadAllPlugins() — they're written later by
+    // extractMcpServersFromPlugins/getPluginLspServers, which races with this.
+    // Loading here gives accurate metrics AND warms the cache slots so the MCP
+    // connection manager (triggered by pluginReconnectKey bump) sees the servers
+    // without re-parsing manifests. Errors are pushed to the shared errors array.
+    const [mcpCounts, lspCounts] = await Promise.all([
+      Promise.all(
+        enabled.map(async p => {
+          if (p.mcpServers) return Object.keys(p.mcpServers).length
+          const servers = await loadPluginMcpServers(p, errors)
+          if (servers) p.mcpServers = servers
+          return servers ? Object.keys(servers).length : 0
+        }),
+      ),
+      Promise.all(
+        enabled.map(async p => {
+          if (p.lspServers) return Object.keys(p.lspServers).length
+          const servers = await loadPluginLspServers(p, errors)
+          if (servers) p.lspServers = servers
+          return servers ? Object.keys(servers).length : 0
+        }),
+      ),
+    ])
+    const mcp_count = mcpCounts.reduce((sum, n) => sum + n, 0)
+    const lsp_count = lspCounts.reduce((sum, n) => sum + n, 0)
+
+    setAppState(prev => ({
+      ...prev,
+      plugins: {
+        ...prev.plugins,
+        enabled,
+        disabled,
+        commands: pluginCommands,
+        errors: mergePluginErrors(prev.plugins.errors, errors),
+        needsRefresh: false,
+      },
+      agentDefinitions,
+      mcp: {
+        ...prev.mcp,
+        pluginReconnectKey: prev.mcp.pluginReconnectKey + 1,
+      },
+    }))
+
+    // Re-initialize LSP manager so newly-loaded plugin LSP servers are picked
+    // up. No-op if LSP was never initialized (headless subcommand path).
+    // Unconditional so removing the last LSP plugin also clears stale config.
+    // Fixes issue #15521: LSP manager previously read a stale memoized
+    // loadAllPlugins() result from before marketplaces were reconciled.
+    reinitializeLspServerManager()
+
+    // clearAllCaches() prunes removed-plugin hooks; this does the FULL swap
+    // (adds hooks from newly-enabled plugins too). Catching here so
+    // hook_load_failed can feed error_count; a failure doesn't lose the
+    // plugin/command/agent data above (hooks go to STATE.registeredHooks, not
+    // AppState).
+    let hook_load_failed = false
+    try {
+      await loadPluginHooks()
+    } catch (e) {
+      hook_load_failed = true
+      logError(e)
+      logForDebugging(
+        `refreshActivePlugins: loadPluginHooks failed: ${errorMessage(e)}`,
       )
+    }
+    if (!hook_load_failed) {
+      markSyncedPluginsReloaded(changesLandedAtStart)
+    }
+
+    const hook_count = enabled.reduce((sum, p) => {
+      if (!p.hooksConfig) return sum
+      return (
+        sum +
+        (
+          Object.values(p.hooksConfig) as Array<
+            Array<{ hooks: unknown[] }> | undefined
+          >
+        ).reduce(
+          (s, matchers) =>
+            s +
+            (matchers?.reduce(
+              (h: number, m: { hooks: { length: number } }) =>
+                h + m.hooks.length,
+              0,
+            ) ?? 0),
+          0,
+        )
+      )
+    }, 0)
+
+    logForDebugging(
+      `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${pluginSkills.length} skills, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
     )
-  }, 0)
 
-  logForDebugging(
-    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${pluginSkills.length} skills, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
-  )
-
-  return {
-    enabled_count: enabled.length,
-    disabled_count: disabled.length,
-    command_count: pluginCommands.length,
-    skill_count: pluginSkills.length,
-    agent_count: agentDefinitions.allAgents.length,
-    hook_count,
-    mcp_count,
-    lsp_count,
-    error_count: errors.length + (hook_load_failed ? 1 : 0),
-    errors,
-    agentDefinitions,
-    pluginCommands,
+    return {
+      enabled_count: enabled.length,
+      disabled_count: disabled.length,
+      command_count: pluginCommands.length,
+      skill_count: pluginSkills.length,
+      agent_count: agentDefinitions.allAgents.length,
+      hook_count,
+      mcp_count,
+      lsp_count,
+      error_count: errors.length + (hook_load_failed ? 1 : 0),
+      errors,
+      agentDefinitions,
+      pluginCommands,
+    }
+  } finally {
+    endSyncedPluginReloadHold(holdToken)
   }
 }
 

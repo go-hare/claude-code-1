@@ -29,6 +29,7 @@ import { getErrnoCode } from 'src/utils/errors.js'
 import { homedir, hostname } from 'node:os'
 import { dirname, join, resolve as pathResolve } from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
+import { sanitizePermanentRefWording } from './gitPrepare.js'
 import {
   captureGovernedGitConfigSeed,
   codeSignArtifacts,
@@ -1924,8 +1925,18 @@ export async function runPollSkeleton(
 
         const armIdleClock = (
           kind: SessionActivityKind,
-          snap?: BgTaskSnapshot,
+          snap?: BgTaskSnapshot & { childAlive?: boolean },
         ): void => {
+          if (
+            kind === 'startup' &&
+            snap?.childAlive === true &&
+            lastIdleKind !== 'startup'
+          ) {
+            opts.onDebug(
+              `[runner:session] ${sessionId} ignoring child output as a startup-clock restart: the startup phase is over`,
+            )
+            return
+          }
           clearIdleTimer()
           if (!finished && health) {
             if (
@@ -2087,9 +2098,22 @@ export async function runPollSkeleton(
               childAc.abort('idle-release')
               return
             }
+            let releaseFailStreak = 0
+            const logDeclinedOrFailed = (
+              detail: string,
+              retryLabel: string,
+            ): void => {
+              const ending = finished || childAc.signal.aborted
+              const shouldRetry = !ending && !turnInFlight && !deferredHold
+              opts.onStatus(
+                `[runner:session] ${sessionId} ${detail} — ${ending ? 'not retried, the session is ending on this runner' : `keeping session${shouldRetry ? `, ${retryLabel}` : ''}`}`,
+              )
+              if (shouldRetry) armIdleClock(kind)
+            }
             void api
               .releaseSession(opts.tokenState.runnerToken, sessionId)
               .then(({ released }) => {
+                releaseFailStreak = 0
                 if (released) {
                   if (finished || childAc.signal.aborted) return
                   releaseFalseCounts.delete(sessionId)
@@ -2106,17 +2130,17 @@ export async function runPollSkeleton(
                 if (finished || childAc.signal.aborted) return
                 releasedAwaitingDeassign.delete(sessionId)
                 if (initObserved) {
-                  opts.onStatus(
-                    `[runner:session] ${sessionId} release declined (${kind === 'awaiting-action' ? 'queued event behind the parked prompt' : 'pending user event'}) ${standingWhile()} — keeping session${turnInFlight || deferredHold ? '' : `, retrying ${whenLabel()}`}`,
+                  logDeclinedOrFailed(
+                    `release declined (${kind === 'awaiting-action' ? 'queued event behind the parked prompt' : 'pending user event'}) ${standingWhile()}`,
+                    `retrying ${whenLabel()}`,
                   )
-                  if (!turnInFlight && !deferredHold) armIdleClock(kind)
                   return
                 }
                 if (kind === 'awaiting-action') {
-                  opts.onStatus(
-                    `[runner:session] ${sessionId} released=false while parked at prompt (queued event behind prompt) — keeping session${turnInFlight || deferredHold ? '' : ', re-arming'}`,
+                  logDeclinedOrFailed(
+                    'released=false while parked at prompt (queued event behind prompt)',
+                    're-arming',
                   )
-                  if (!turnInFlight && !deferredHold) armIdleClock(kind)
                   return
                 }
                 const n = (releaseFalseCounts.get(sessionId) ?? 0) + 1
@@ -2136,10 +2160,15 @@ export async function runPollSkeleton(
               })
               .catch(err => {
                 releasedAwaitingDeassign.delete(sessionId)
-                opts.onStatus(
-                  `[runner:session] ${sessionId} releaseSession failed: ${errMsg(err)} — keeping session${turnInFlight || deferredHold ? '' : `, retrying ${whenLabel()}`}`,
+                releaseFailStreak++
+                const streakNote =
+                  releaseFailStreak > 1
+                    ? ` (${releaseFailStreak} failures in a row)`
+                    : ''
+                logDeclinedOrFailed(
+                  `releaseSession failed: ${errMsg(err)}${streakNote}`,
+                  `retrying ${whenLabel()}`,
                 )
-                if (!turnInFlight && !deferredHold) armIdleClock(kind)
               })
           }, baseMs)
         }
@@ -2207,10 +2236,10 @@ export async function runPollSkeleton(
 
         const onSessionActivity = (
           kind: SessionActivityKind,
-          snap?: BgTaskSnapshot,
+          snap?: BgTaskSnapshot & { childAlive?: boolean },
         ): void => {
           if (kind === 'startup') {
-            armIdleClock('startup')
+            armIdleClock('startup', snap)
             return
           }
           if (retiringThis && kind === 'activity') {
@@ -2347,12 +2376,15 @@ export async function runPollSkeleton(
               ht === 'failed' ||
               (ht === 'interrupted' && !childAc.signal.aborted)
             ) {
+              const rawReason = failureReason ?? 'failed (no reason captured)'
               failureInFlight.add(sessionId)
               void api
                 .reportSessionFailure(
                   opts.tokenState.runnerToken,
                   sessionId,
-                  failureReason ?? 'failed (no reason captured)',
+                  setupFailureKind === 'SETUP_FAILURE_KIND_SOURCE_REF_NOT_FOUND'
+                    ? rawReason
+                    : sanitizePermanentRefWording(rawReason),
                   setupFailureKind,
                   failureKind,
                 )
@@ -2666,15 +2698,23 @@ export async function selfHostedRunnerMain(
       '[runner:exit] log-file flush',
     ).catch(() => {})
   }
+  const logWriter =
+    process.platform === 'win32'
+      ? undefined
+      : (await import('./nonBlockingLog.js')).createNonBlockingRunnerLogWriter({
+          stamp: s => s,
+        })
   const onDebug = (q: string): void => {
     if (!debugEnabled) return
     const Y = `${ts()} [DEBUG] ${redactLogText(q)}`
-    console.error(Y)
+    if (logWriter) logWriter.write('stderr', Y)
+    else console.error(Y)
     writeLogFile(Y)
   }
   const onStatus = (q: string): void => {
     const Y = `${ts()} [self-hosted-runner] ${redactLogText(q)}`
-    console.log(Y)
+    if (logWriter) logWriter.write('stdout', Y)
+    else console.log(Y)
     writeLogFile(Y)
   }
 
@@ -3127,5 +3167,6 @@ export async function selfHostedRunnerMain(
     process.removeListener('SIGTERM', onTerm)
     process.removeListener('SIGINT', onInt)
     await flushLog()
+    logWriter?.close()
   }
 }

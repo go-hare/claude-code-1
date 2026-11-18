@@ -5,7 +5,8 @@ import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { CommandResultDisplay } from '../../types/command.js';
 import type { SandboxDependencyCheck } from '../../utils/sandbox/sandbox-adapter.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
-import { getSettings_DEPRECATED } from '../../utils/settings/settings.js';
+import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';
+import { getErrnoCode } from '../../utils/errors.js';
 import { Select } from '../CustomSelect/select.js';
 import { SandboxConfigTab } from './SandboxConfigTab.js';
 import { SandboxDependenciesTab } from './SandboxDependenciesTab.js';
@@ -17,6 +18,22 @@ type Props = {
 };
 
 type SandboxMode = 'auto-allow' | 'regular' | 'disabled';
+
+const UNWRITABLE_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+export function formatSandboxSaveResult(
+  result: { error: Error | null },
+  successMessage: string,
+  settingsSource: 'localSettings' | 'userSettings' = 'localSettings',
+): string {
+  if (result.error === null) return successMessage;
+  const err = result.error.cause instanceof Error ? result.error.cause : result.error;
+  const code = getErrnoCode(err);
+  const filePath = getSettingsFilePathForSource(settingsSource) ?? '.claude/settings.local.json';
+  const hint =
+    code !== undefined && UNWRITABLE_CODES.has(code) ? ' Start Claude Code in a project folder you can write to.' : '';
+  return `✗ Sandbox settings not changed: ${filePath} couldn't be updated (${code ?? err.message}).${hint}`;
+}
 
 export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNode {
   const currentEnabled = SandboxManager.isSandboxingEnabled();
@@ -38,11 +55,11 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
 
   const options = [
     {
-      label: 'Sandbox BashTool, with auto-allow',
+      label: 'Sandbox commands, with auto-allow',
       value: 'auto-allow',
     },
     {
-      label: 'Sandbox BashTool, with regular permissions',
+      label: 'Sandbox commands, with regular permissions',
       value: 'regular',
     },
     {
@@ -55,27 +72,30 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
     const mode = value as SandboxMode;
 
     switch (mode) {
-      case 'auto-allow':
-        await SandboxManager.setSandboxSettings({
+      case 'auto-allow': {
+        const res = await SandboxManager.setSandboxSettings({
           enabled: true,
           autoAllowBashIfSandboxed: true,
         });
-        onComplete('✓ Sandbox enabled with auto-allow for bash commands');
+        onComplete(formatSandboxSaveResult(res, '✓ Sandbox enabled with auto-allow for bash commands'));
         break;
-      case 'regular':
-        await SandboxManager.setSandboxSettings({
+      }
+      case 'regular': {
+        const res = await SandboxManager.setSandboxSettings({
           enabled: true,
           autoAllowBashIfSandboxed: false,
         });
-        onComplete('✓ Sandbox enabled with regular bash permissions');
+        onComplete(formatSandboxSaveResult(res, '✓ Sandbox enabled with regular bash permissions'));
         break;
-      case 'disabled':
-        await SandboxManager.setSandboxSettings({
+      }
+      case 'disabled': {
+        const res = await SandboxManager.setSandboxSettings({
           enabled: false,
           autoAllowBashIfSandboxed: false,
         });
-        onComplete('○ Sandbox disabled');
+        onComplete(formatSandboxSaveResult(res, '○ Sandbox disabled'));
         break;
+      }
     }
   }
 

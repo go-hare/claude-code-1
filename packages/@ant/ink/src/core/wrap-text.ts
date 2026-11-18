@@ -26,6 +26,23 @@ function sliceFit(text: string, start: number, end: number): string {
   return sliced
 }
 
+function truncateMiddle(
+  text: string,
+  textWidth: number,
+  columns: number,
+): { head: string; tail: string } {
+  const half = sliceFit(text, 0, Math.floor(columns / 2))
+  const tail = sliceFit(
+    text,
+    textWidth - (columns - 1 - stringWidth(half)),
+    textWidth,
+  )
+  return {
+    head: sliceFit(text, 0, columns - 1 - stringWidth(tail)),
+    tail,
+  }
+}
+
 /**
  * densable `YTt` — null when the (r7) text already fits. columns===1 is
  * `{head:"",tail:""}` so `p0` becomes just the ellipsis.
@@ -43,11 +60,9 @@ function truncateParts(
     return { head: '', tail: sliceFit(sanitized, length - columns + 1, length) }
   }
   if (position === 'middle') {
-    const half = Math.floor(columns / 2)
-    return {
-      head: sliceFit(sanitized, 0, half),
-      tail: sliceFit(sanitized, length - (columns - half) + 1, length),
-    }
+    const parts = truncateMiddle(sanitized, length, columns)
+    const used = stringWidth(parts.head) + 1 + stringWidth(parts.tail)
+    return used < columns ? truncateMiddle(sanitized, length, used) : parts
   }
   return { head: sliceFit(sanitized, 0, columns - 1), tail: '' }
 }

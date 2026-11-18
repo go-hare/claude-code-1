@@ -512,7 +512,10 @@ export function leftoverEvalBuiltinDenies(allowedRules: string[]): string[] {
  * Ungranted Bash/PowerShell + always Monitor/EnterWorktree/ExitWorktree
  * + uf leftover builtins.
  */
-export function extraEvalToolDenies(allowedRules: string[]): string[] {
+export function extraEvalToolDenies(
+  allowedRules: string[],
+  disallowedTools: string[] = [],
+): string[] {
   const granted = new Set(
     allowedRules.map(raw => permissionRuleValueFromString(raw).toolName),
   )
@@ -522,7 +525,46 @@ export function extraEvalToolDenies(allowedRules: string[]): string[] {
   }
   out.push(...NEVER_IN_EVAL)
   out.push(...leftoverEvalBuiltinDenies(allowedRules))
+  out.push(...disallowedTools)
   return uniqueRules(out)
+}
+
+/**
+ * densable `Br` @331725872 — validate bare built-in tool names for
+ * `--disallow-tools` / `disallowed_tools`. Rejects patterns (`Bash(rm:*)`),
+ * MCP tools, and unknown names.
+ */
+export function parseDisallowedEvalTools(entries: string[]): {
+  tools: string[]
+  rejected: string[]
+} {
+  const knownBuiltins = new Set<string>([
+    ...getAllBaseTools()
+      .filter(tool => !tool.mcpInfo && tool.name !== 'EndConversation')
+      .map(tool => tool.name),
+    ...EVAL_TR_CASE_KEEP,
+    ...EVAL_SHELL_TOOLS,
+    ...NEVER_IN_EVAL,
+  ])
+  const tools: string[] = []
+  const rejected: string[] = []
+  for (const entry of entries) {
+    for (const part of entry
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0)) {
+      const parsed = permissionRuleValueFromString(part)
+      if (
+        parsed.ruleContent === undefined &&
+        knownBuiltins.has(parsed.toolName)
+      ) {
+        tools.push(parsed.toolName)
+      } else {
+        rejected.push(part)
+      }
+    }
+  }
+  return { tools: uniqueRules(tools), rejected: uniqueRules(rejected) }
 }
 
 /**
@@ -578,6 +620,7 @@ export function grantEvalAllowedTools(
   opts: {
     artifactPublishGranted?: boolean
     mockedTools?: string[]
+    disallowedTools?: string[]
   } = {},
 ): { allowed: string[]; denied: string[] } {
   const allowed: string[] = []
@@ -607,7 +650,13 @@ export function grantEvalAllowedTools(
     }
     if (!operatorCoversCaseTool(granted, rule)) denied.push(rule)
   }
-  return { allowed: uniqueRules(allowed), denied: uniqueRules(denied) }
+  const disallowedSet = new Set(opts.disallowedTools ?? [])
+  return {
+    allowed: uniqueRules(allowed).filter(
+      rule => !disallowedSet.has(evalToolName(rule)),
+    ),
+    denied: uniqueRules(denied),
+  }
 }
 
 /**

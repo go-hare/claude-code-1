@@ -1290,9 +1290,35 @@ export function saveGlobalConfig(
       ...config,
       projects: removeProjectHistory(currentConfig.projects),
     }
-    saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
-    writeThroughGlobalConfigCache(written)
+    try {
+      saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
+      writeThroughGlobalConfigCache(written)
+    } catch (fallbackError) {
+      const code =
+        fallbackError !== null &&
+        typeof fallbackError === 'object' &&
+        'code' in fallbackError
+          ? String((fallbackError as { code: unknown }).code)
+          : undefined
+      if (
+        fullDiskSaveCode === undefined &&
+        (code === 'ENOSPC' || code === 'EDQUOT')
+      ) {
+        fullDiskSaveCode = code
+      }
+      logForDebugging(
+        `Config fallback write also failed; continuing without persisting: ${fallbackError}`,
+        { level: 'error' },
+      )
+    }
   }
+}
+
+let fullDiskSaveCode: string | undefined
+
+/** Official 2.1.301 (#851) `pQs()` — ENOSPC/EDQUOT code from config fallback write. */
+export function getFullDiskSaveCode(): string | undefined {
+  return fullDiskSaveCode
 }
 
 // Cache for global config

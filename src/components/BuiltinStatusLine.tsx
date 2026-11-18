@@ -73,8 +73,8 @@ function BuiltinStatusLineInner({
   const hasFiveHour = rateLimits.five_hour != null;
   const hasSevenDay = rateLimits.seven_day != null;
 
-  const fiveHourPct = hasFiveHour ? Math.round(rateLimits.five_hour!.utilization * 100) : 0;
-  const sevenDayPct = hasSevenDay ? Math.round(rateLimits.seven_day!.utilization * 100) : 0;
+  const fiveHourPct = hasFiveHour ? Math.min(100, Math.max(0, Math.round(rateLimits.five_hour!.utilization * 100))) : 0;
+  const sevenDayPct = hasSevenDay ? Math.min(100, Math.max(0, Math.round(rateLimits.seven_day!.utilization * 100))) : 0;
 
   // Token display: "50k/1M"
   const tokenDisplay = `${formatTokens(usedTokens)}/${formatTokens(contextWindowSize)}`;

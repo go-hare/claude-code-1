@@ -15,7 +15,8 @@ import {
 } from 'src/services/analytics/index.js';
 import { notifyVscodeFileUpdated } from 'src/services/mcp/vscodeSdkMcp.js';
 import type { SetToolJSXFn, ToolCallProgress, ToolUseContext, ValidationResult } from 'src/Tool.js';
-import { buildTool, type ToolDef } from 'src/Tool.js';
+import { buildTool, findToolByName, type ToolDef } from 'src/Tool.js';
+import { formatDuration } from 'src/utils/format.js';
 import {
   backgroundExistingForegroundTask,
   markTaskNotified,
@@ -26,6 +27,8 @@ import {
 import {
   isBackgroundedToDeliverMessage,
   isBackgroundedByTurnAbort,
+  isLocalShellTask,
+  type LocalShellTaskState,
   backgroundShellReapedAtFinalResponse,
 } from 'src/tasks/LocalShellTask/guards.js';
 import { isInterruptAbortReason } from 'src/utils/abortController.js';
@@ -1061,6 +1064,40 @@ export async function trackBashSingleFileReads(
   );
 }
 
+export function findMatchingBackgroundShellTask(
+  {
+    command,
+    cwd,
+    agentId,
+    toolUseId,
+  }: {
+    command: string;
+    cwd: string;
+    agentId: string | undefined;
+    toolUseId: string | undefined;
+  },
+  tasks: AppState['tasks'],
+): LocalShellTaskState | undefined {
+  if (toolUseId === undefined) return undefined;
+  const trimmed = command.trim();
+  return Object.values(tasks)
+    .filter(isLocalShellTask)
+    .find(task => {
+      const taskCwd = (task as LocalShellTaskState & { cwd?: string }).cwd;
+      return (
+        task.isBackgrounded &&
+        task.status === 'running' &&
+        task.shellCommand?.status === 'backgrounded' &&
+        (task.caller === 'turn' || task.caller === 'agent') &&
+        task.toolUseId !== undefined &&
+        (task.shell === undefined || task.shell === 'bash') &&
+        task.agentId === agentId &&
+        (taskCwd === undefined || taskCwd === cwd) &&
+        task.command.trim() === trimmed
+      );
+    });
+}
+
 export const BashTool = buildTool({
   name: BASH_TOOL_NAME,
   searchHint: 'execute shell commands',
@@ -1175,7 +1212,7 @@ export const BashTool = buildTool({
     const desc = input.description ?? truncate(input.command, TOOL_SUMMARY_MAX_LENGTH);
     return `Running ${desc}`;
   },
-  async validateInput(input: BashToolInput): Promise<ValidationResult> {
+  async validateInput(input: BashToolInput, context?: ToolUseContext): Promise<ValidationResult> {
     // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
     const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
     if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
@@ -1186,6 +1223,24 @@ export const BashTool = buildTool({
           result: false,
           message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
           errorCode: 10,
+        };
+      }
+    }
+    if (context?.getAppState && context.options?.tools) {
+      const matchingBg = findMatchingBackgroundShellTask(
+        {
+          command: input.command,
+          cwd: getCwd(),
+          agentId: context.agentId,
+          toolUseId: context.toolUseId,
+        },
+        context.getAppState().tasks,
+      );
+      if (matchingBg !== undefined && findToolByName(context.options.tools, 'TaskStop') !== undefined) {
+        return {
+          result: false,
+          errorCode: 15,
+          message: `Not started: this same command, in this directory, was moved to the background and has been running for ${formatDuration(Date.now() - matchingBg.startTime, { mostSignificantOnly: true })} (ID: ${matchingBg.id}). Its output is being written to: ${matchingBg.outputFile}. Let it finish, or, to run it again now, stop it first with TaskStop.`,
         };
       }
     }

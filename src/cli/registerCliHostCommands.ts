@@ -506,6 +506,10 @@ export function registerCliHostCommands(
       (value: string, previous: string[]) => [...previous, value],
       [] as string[],
     )
+    .option(
+      '--disallow-tools <tools...>',
+      'Built-in tools to keep from Claude in every case, even if granted (e.g. Agent TaskStop)',
+    )
     .option('--scaffold', 'Run each case scaffold_script as you')
     .option('--no-scaffold', 'Do not run scaffold_script (default)')
     .option('--mocks <mode>', 'Mock responders: record | off')

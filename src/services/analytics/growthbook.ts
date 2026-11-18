@@ -1,4 +1,4 @@
-import { GrowthBook } from '@growthbook/growthbook'
+import { GrowthBook, helpers, setPolyfills } from '@growthbook/growthbook'
 import { isEqual, memoize } from 'lodash-es'
 import {
   getIsNonInteractiveSession,
@@ -26,6 +26,7 @@ import {
   processRemoteEvalFeatures,
 } from '../../utils/growthbookRemoteEvalPayload.js'
 import { getAuthHeaders } from '../../utils/http.js'
+import { getProxyFetchOptions } from '../../utils/proxy.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import { logError } from '../../utils/log.js'
 import { resolveGbRefreshIntervalMsOrDefault } from '../../utils/residualFinalEnvGates.js'
@@ -720,6 +721,39 @@ function getUserAttributes(): GrowthBookUserAttributes {
 }
 
 /**
+ * Official `@282138941` (`rn.fetchRemoteEvalCall` / `setPolyfills`) (2.1.300 #796):
+ * Route GrowthBook SDK HTTP requests through CLI's proxy + TLS/OS-cert-store
+ * fetch options so feature flags stay fresh behind TLS-inspecting proxies.
+ */
+export function growthbookFetch(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url
+  const fetchOpts = getProxyFetchOptions({ url })
+  return globalThis.fetch(input, { ...init, ...fetchOpts } as RequestInit)
+}
+
+let growthbookFetchConfigured = false
+
+export function configureGrowthBookFetchPolyfill(): void {
+  if (growthbookFetchConfigured) return
+  growthbookFetchConfigured = true
+  setPolyfills({ fetch: growthbookFetch })
+  helpers.fetchRemoteEvalCall = ({ host, clientKey, payload, headers }) =>
+    growthbookFetch(`${host}/api/eval/${clientKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: jsonStringify(payload),
+    })
+}
+
+/**
  * Get or create the GrowthBook client instance
  */
 const getGrowthBookClient = memoize(
@@ -782,6 +816,7 @@ const getGrowthBookClient = memoize(
 
     // Capture in local variable so the init callback operates on THIS client,
     // not a later client if reinitialization happens before init completes
+    configureGrowthBookFetchPolyfill()
     const thisClient = new GrowthBook({
       apiHost: baseUrl,
       clientKey,

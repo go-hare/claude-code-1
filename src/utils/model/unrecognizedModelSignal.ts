@@ -17,9 +17,65 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { resolveAutoCompactWindow } from '../autoCompactWindow.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { recognizePrintModel } from './printSetModel.js'
+
+export const MODEL_CONFIG_DOCS_URL =
+  'https://code.claude.com/docs/en/model-config'
+export const MODEL_CONFIG_WINDOW_DOCS_URL = `${MODEL_CONFIG_DOCS_URL}#correct-the-window-for-a-gateway-or-custom-model-id`
+
+export type UnrecognizedModelNotice = {
+  model: string
+  window: number
+  suggestion?: string
+}
+
+const MODEL_NOTICE_CLEAN_RE = /[^A-Za-z0-9._:/@[\]-]/g
+const MODEL_NOTICE_MAX_LEN = 128
+
+/**
+ * densable `ep` — sanitize a model ID for display in notices.
+ */
+export function sanitizeModelForNotice(model: string): string {
+  const cleaned = model.replace(MODEL_NOTICE_CLEAN_RE, '')
+  if (cleaned.length === 0) return '(unrecognized model name)'
+  return cleaned.length > MODEL_NOTICE_MAX_LEN
+    ? `${cleaned.slice(0, MODEL_NOTICE_MAX_LEN)}\u2026`
+    : cleaned
+}
+
+/**
+ * densable `wSr` / `yC` (2.1.302 #706) — build a short single-line startup
+ * warning for an unrecognized model ID, or null if recognized / suppressed.
+ */
+export function buildUnrecognizedModelNotice(
+  model: string,
+): UnrecognizedModelNotice | null {
+  try {
+    if (!model) return null
+    const resolved = resolveAutoCompactWindow(model)
+    if (resolved.source !== 'unknown-model') {
+      return null
+    }
+    const maxCtx = Number(process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+    if (Number.isFinite(maxCtx) && maxCtx > 0) {
+      return null
+    }
+    const recognition = recognizePrintModel(model)
+    const suggestion = !recognition.recognized
+      ? recognition.suggestion
+      : undefined
+    return {
+      model,
+      window: resolved.window,
+      ...(suggestion !== undefined && { suggestion }),
+    }
+  } catch {
+    return null
+  }
+}
 
 /** densable xLS */
 export const UNRECOGNIZED_MODEL_SIGNAL_TAG =
@@ -86,6 +142,7 @@ export function signalUnrecognizedModel(
   querySource: string | undefined,
 ): void {
   try {
+    if (querySource === 'model_validation') return
     if (!model || isIncompleteInferenceProfile(model)) return
     const stripped = stripModelContextSuffixes(model)
     const claimKey = `unrecognized-model-signal:${stripped}`

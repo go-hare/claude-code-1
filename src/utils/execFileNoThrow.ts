@@ -23,6 +23,7 @@ type ExecFileOptions = {
   env?: NodeJS.ProcessEnv
   stdin?: 'ignore' | 'inherit' | 'pipe'
   input?: string
+  inheritFd?: number
 }
 
 export function execFileNoThrow(
@@ -43,6 +44,7 @@ export function execFileNoThrow(
     env: options.env,
     stdin: options.stdin,
     input: options.input,
+    inheritFd: options.inheritFd,
   })
 }
 
@@ -61,6 +63,7 @@ type ExecFileWithCwdOptions = {
   shell?: boolean | string | undefined
   stdin?: 'ignore' | 'inherit' | 'pipe'
   input?: string
+  inheritFd?: number
   /** densable git harden `stripFinalNewline:!1` — keep trailing NL for `Ae`. */
   stripFinalNewline?: boolean
 }
@@ -154,6 +157,7 @@ export function execFileNoThrowWithCwd(
     shell,
     stdin: finalStdin,
     input: finalInput,
+    inheritFd: finalInheritFd,
     stripFinalNewline: finalStripFinalNewline,
   }: ExecFileWithCwdOptions = {
     timeout: 10 * SECONDS_IN_MINUTE * MS_IN_SECOND,
@@ -174,7 +178,16 @@ export function execFileNoThrowWithCwd(
       env: finalEnv,
       ...(extendEnv === false ? { extendEnv: false } : {}),
       shell,
-      stdin: finalStdin,
+      ...(finalInheritFd === undefined
+        ? { stdin: finalStdin }
+        : {
+            stdio: [
+              finalStdin ?? 'pipe',
+              'pipe',
+              'pipe',
+              finalInheritFd as unknown as 'inherit',
+            ],
+          }),
       input: finalInput,
       ...(finalStripFinalNewline === false ? { stripFinalNewline: false } : {}),
       reject: false, // Don't throw on non-zero exit codes

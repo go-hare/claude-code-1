@@ -35,6 +35,83 @@ import { rememberBashTaskSnapshot } from '../../utils/bashTaskDeliveryOutcomes.j
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 
+/** SEA `PKt = 1500` — backstop wait before SIGKILL on exit (#810). */
+export const SHELL_KILL_BACKSTOP_MS = 1500
+
+export type LiveShellKillHandle = {
+  status: string
+  kill: () => void
+  pid?: number
+  result?: Promise<unknown>
+}
+
+const liveShellCommands = new Set<LiveShellKillHandle>()
+const pendingKillBackstops = new Set<Promise<void>>()
+
+export function registerLiveShellCommand(
+  handle: LiveShellKillHandle,
+): () => void {
+  liveShellCommands.add(handle)
+  return () => {
+    liveShellCommands.delete(handle)
+  }
+}
+
+function trackKillBackstop(handle: LiveShellKillHandle): void {
+  if (!handle.result && handle.pid === undefined) return
+  const p = (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const settled = handle.result
+      ? handle.result.then(
+          () => true,
+          () => true,
+        )
+      : Promise.resolve(false)
+    const timedOut = new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(false), SHELL_KILL_BACKSTOP_MS)
+      timer.unref?.()
+    })
+    const didSettle = await Promise.race([settled, timedOut])
+    if (timer) clearTimeout(timer)
+    if (!didSettle && handle.pid !== undefined) {
+      try {
+        process.kill(handle.pid, 'SIGKILL')
+      } catch {
+        // Process already exited
+      }
+    }
+  })()
+  pendingKillBackstops.add(p)
+  void p.finally(() => {
+    pendingKillBackstops.delete(p)
+  })
+}
+
+/** SEA `rkr()` — kill all running live shell commands at shutdown (#810). */
+export function killLiveShellCommands(): void {
+  for (const cmd of Array.from(liveShellCommands)) {
+    if (cmd.status === 'running' || cmd.status === 'backgrounded') {
+      try {
+        cmd.kill()
+        trackKillBackstop(cmd)
+      } catch (error) {
+        logError(error)
+      }
+    }
+  }
+}
+
+/** SEA `Htn()` — wait for pending shell kill backstops to settle (#810). */
+export async function awaitPendingShellKillBackstops(): Promise<void> {
+  await Promise.allSettled(Array.from(pendingKillBackstops))
+}
+
+/** Testing-only: clear live shell command & backstop sets. */
+export function _resetLiveShellKillStateForTesting(): void {
+  liveShellCommands.clear()
+  pendingKillBackstops.clear()
+}
+
 /** densable `zN(e,n)` — n is Xm/taskRegistry. */
 export function killTask(taskId: string, registry: TaskRegistry): void {
   // densable jLe does not tB itself — bXi releaseBgCap does on result.settle.

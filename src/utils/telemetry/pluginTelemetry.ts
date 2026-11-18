@@ -297,7 +297,8 @@ export function logPluginsEnabledForSession(
       command_path_count:
         (plugin.commandsPath ? 1 : 0) + (plugin.commandsPaths?.length ?? 0),
       has_mcp: plugin.manifest.mcpServers !== undefined,
-      has_hooks: plugin.hooksConfig !== undefined,
+      has_hooks:
+        plugin.hooksConfig !== undefined || plugin.modulePath !== undefined,
       ...(plugin.manifest.version && {
         version: plugin.manifest
           .version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

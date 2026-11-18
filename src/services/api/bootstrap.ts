@@ -16,6 +16,7 @@ import { logError } from '../../utils/log.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
+import { filterAnthropicSendableApiKey } from '../policyLimits/index.js'
 
 const bootstrapResponseSchema = lazySchema(() =>
   z.object({
@@ -88,8 +89,9 @@ async function fetchBootstrapAPI(): Promise<BootstrapResponse | null> {
   }
 
   // OAuth preferred (requires user:profile scope — service-key OAuth tokens
-  // lack it and would 403). Fall back to API key auth for console users.
-  const apiKey = getAnthropicApiKey()
+  // lack it and would 403). Fall back to API key auth for console users,
+  // filtering out third-party gateway keys under custom ANTHROPIC_BASE_URL (2.1.299 #634).
+  const apiKey = filterAnthropicSendableApiKey(getAnthropicApiKey())
   const hasUsableOAuth =
     getClaudeAIOAuthTokens()?.accessToken && hasProfileScope()
   if (!hasUsableOAuth && !apiKey) {

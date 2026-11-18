@@ -4,7 +4,12 @@ import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
 import { getGlobalConfig } from '../../utils/config.js'
-import { getContextWindowForModel } from '../../utils/context.js'
+import {
+  getContextWindowForModel,
+  isRecognizedModelForWindowEnforcement,
+} from '../../utils/context.js'
+import { isFableModel } from '../../utils/fableConsent.js'
+import { isFableCreditsSuffixExempt } from '../../utils/model/fableCreditsLabel.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
@@ -15,6 +20,7 @@ import { getEnabledSettingSources } from '../../utils/settings/constants.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { tokenCountWithEstimation } from '../../utils/tokens.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { logEvent } from '../analytics/index.js'
 import { getMaxOutputTokensForModel } from '../api/claude.js'
 import { notifyCompaction } from '../api/promptCacheBreakDetection.js'
 import { setLastSummarizedMessageId } from '../SessionMemory/sessionMemoryUtils.js'
@@ -49,7 +55,8 @@ export function getEffectiveContextWindowSize(model: string): number {
     if (
       resolved.source === 'env' ||
       resolved.source === 'settings' ||
-      resolved.source === 'model-default'
+      resolved.source === 'model-default' ||
+      resolved.source === 'unknown-model'
     ) {
       contextWindow = Math.min(contextWindow, resolved.window)
     }
@@ -85,6 +92,30 @@ export type AutoCompactTrackingState = {
   // Used as a circuit breaker to stop retrying when the context is
   // irrecoverably over the limit (e.g., prompt_too_long).
   consecutiveFailures?: number
+  // #863 SEA 325 G_o: rapid-refill breaker counter across compactions.
+  consecutiveRapidRefills?: number
+}
+
+const RAPID_REFILL_TURN_THRESHOLD = 3
+const RAPID_REFILL_TRIP_COUNT = 3
+
+export const AUTOCOMPACT_THRASHING_MESSAGE =
+  'Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.'
+
+export function checkRapidRefillBreaker(tracking?: AutoCompactTrackingState): {
+  action: 'trip' | 'proceed'
+  consecutiveRapidRefills: number
+} {
+  const consecutiveRapidRefills =
+    tracking?.compacted === true &&
+    tracking.turnCounter < RAPID_REFILL_TURN_THRESHOLD
+      ? (tracking?.consecutiveRapidRefills ?? 0) + 1
+      : 0
+  return {
+    action:
+      consecutiveRapidRefills >= RAPID_REFILL_TRIP_COUNT ? 'trip' : 'proceed',
+    consecutiveRapidRefills,
+  }
 }
 
 export const AUTOCOMPACT_BUFFER_TOKENS = 13_000
@@ -378,6 +409,64 @@ export async function shouldAutoCompact(
   return isAboveAutoCompactThreshold
 }
 
+/**
+ * #862 / #882 SEA 325 bJr + wJr:
+ * When switching to a model with a smaller context window and the conversation
+ * is already at the new model's blocking limit, summarize with the previous
+ * larger-window model first — unless that previous model requires usage credits
+ * without exemption/consent (#862).
+ */
+export function findLargerPreviousModelForCompact(
+  messages: Message[],
+  currentModel: string,
+  snipTokensFreed = 0,
+): string | undefined {
+  const lastAssistant = messages.findLast(
+    m => m.type === 'assistant' && !m.isApiErrorMessage && m.message?.model,
+  )
+  const prevModel =
+    lastAssistant?.type === 'assistant'
+      ? lastAssistant.message?.model
+      : undefined
+  if (typeof prevModel !== 'string' || !prevModel) return undefined
+
+  const betas = getSdkBetas()
+  if (
+    getContextWindowForModel(prevModel, betas) <=
+    getContextWindowForModel(currentModel, betas)
+  ) {
+    return undefined
+  }
+  if (!isRecognizedModelForWindowEnforcement(prevModel)) {
+    return undefined
+  }
+
+  const tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
+  if (!calculateTokenWarningState(tokenCount, currentModel).isAtBlockingLimit) {
+    return undefined
+  }
+
+  // #862 SEA 325 wJr: do not silently spend usage credits on a summary by the
+  // previous model when it requires usage credits without exemption/consent.
+  const calmSealModels = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+    'tengu_calm_seal',
+    null,
+  )
+  const requiresCredits =
+    isFableModel(prevModel) ||
+    (Array.isArray(calmSealModels) &&
+      calmSealModels.some(
+        entry =>
+          typeof entry === 'string' &&
+          entry.trim().toLowerCase() === prevModel.trim().toLowerCase(),
+      ))
+  if (requiresCredits && !isFableCreditsSuffixExempt()) {
+    return undefined
+  }
+
+  return prevModel
+}
+
 export async function autoCompactIfNeeded(
   messages: Message[],
   toolUseContext: ToolUseContext,
@@ -389,6 +478,8 @@ export async function autoCompactIfNeeded(
   wasCompacted: boolean
   compactionResult?: CompactionResult
   consecutiveFailures?: number
+  consecutiveRapidRefills?: number
+  rapidRefillBreakerTripped?: boolean
 }> {
   if (isEnvTruthy(process.env.DISABLE_COMPACT)) {
     return { wasCompacted: false }
@@ -414,6 +505,24 @@ export async function autoCompactIfNeeded(
 
   if (!shouldCompact) {
     return { wasCompacted: false }
+  }
+
+  // #863 SEA 325 G_o: rapid-refill thrashing breaker
+  const rapidRefill = checkRapidRefillBreaker(tracking)
+  if (rapidRefill.action === 'trip') {
+    logForDebugging(
+      `autocompact: rapid-refill breaker tripped — ${rapidRefill.consecutiveRapidRefills} consecutive refills within <${RAPID_REFILL_TURN_THRESHOLD} turns each (last was ${tracking?.turnCounter} turns)`,
+      { level: 'warn' },
+    )
+    logEvent('tengu_auto_compact_rapid_refill_breaker', {
+      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
+      turnsSincePreviousCompact: tracking?.turnCounter ?? -1,
+    })
+    return {
+      wasCompacted: false,
+      rapidRefillBreakerTripped: true,
+      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
+    }
   }
 
   const recompactionInfo: RecompactionInfo = {
@@ -446,13 +555,29 @@ export async function autoCompactIfNeeded(
     return {
       wasCompacted: true,
       compactionResult: sessionMemoryResult,
+      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
     }
   }
 
   try {
+    const largerPrevModel =
+      (tracking?.consecutiveFailures ?? 0) === 0
+        ? findLargerPreviousModelForCompact(messages, model, snipTokensFreed)
+        : undefined
+    const compactContext =
+      largerPrevModel !== undefined
+        ? {
+            ...toolUseContext,
+            options: {
+              ...toolUseContext.options,
+              mainLoopModel: largerPrevModel,
+            },
+          }
+        : toolUseContext
+
     const compactionResult = await compactConversation(
       messages,
-      toolUseContext,
+      compactContext,
       cacheSafeParams,
       true, // Suppress user questions for autocompact
       undefined, // No custom instructions for autocompact
@@ -472,6 +597,7 @@ export async function autoCompactIfNeeded(
       compactionResult,
       // Reset failure count on success
       consecutiveFailures: 0,
+      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
     }
   } catch (error) {
     if (!hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT)) {

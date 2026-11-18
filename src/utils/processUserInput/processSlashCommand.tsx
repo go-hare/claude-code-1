@@ -44,7 +44,7 @@ import { createAttachmentMessage, getAttachmentMessages } from '../attachments.j
 import { logForDebugging } from '../debug.js';
 import { isCoordinatorMainThread } from '../../coordinator/coordinatorMode.js';
 import { SKILL_TOOL_NAME } from '@claude-code/builtin-tools/tools/SkillTool/constants.js';
-import { AbortError, errorMessage, MalformedCommandError } from '../errors.js';
+import { AbortError, errorMessage, isAbortError, MalformedCommandError } from '../errors.js';
 import { getDisplayPath } from '../file.js';
 import { extractResultText, prepareForkedCommandContext } from '../forkedAgent.js';
 import {
@@ -53,7 +53,11 @@ import {
   shouldBackgroundForkedSkill,
 } from '../forkedSkillBackground.js';
 import { getFsImplementation } from '../fsOperations.js';
-import { runUserPromptExpansionHook } from '../hooks.js';
+import {
+  executeUserPromptSubmitHooks,
+  getUserPromptSubmitHookBlockingMessage,
+  runUserPromptExpansionHook,
+} from '../hooks.js';
 import { isFullscreenEnvEnabled } from '../fullscreen.js';
 import { isCommandImmediate } from '../immediateCommand.js';
 import { toArray } from '../generators.js';
@@ -108,7 +112,12 @@ import { createAgentId } from '../uuid.js';
 import { finalizeAutonomyRunCompleted, finalizeAutonomyRunFailed } from '../autonomyRuns.js';
 import { getWorkload } from '../workloadContext.js';
 import { takeCommandRunWait, wrapCommandRunWait } from './commandRunWaits.js';
-import type { ProcessUserInputBaseResult, ProcessUserInputContext } from './processUserInput.js';
+import type {
+  ProcessUserInputBaseResult,
+  ProcessUserInputContext,
+  SlashLineCheckFn,
+  SlashLineCheckResult,
+} from './processUserInput.js';
 import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT } from './stackedSlashExpansion.js';
 
 type SlashCommandResult = ProcessUserInputBaseResult & {
@@ -800,7 +809,15 @@ function isSlashCommandOff(cmd: Command): boolean {
 }
 
 /** densable `pe("cmd_dispatch", errorCode)` → tengu_feature_bad. */
-function logCmdDispatch(errorCode: 'cmd_parse_failed' | 'cmd_unknown' | 'cmd_unavailable_headless'): void {
+function logCmdDispatch(
+  errorCode:
+    | 'cmd_parse_failed'
+    | 'cmd_unknown'
+    | 'cmd_unavailable_headless'
+    | 'cmd_prompt_aborted'
+    | 'cmd_prompt_submit_hook_blocked'
+    | 'cmd_prompt_submit_hook_stopped',
+): void {
   logEvent('tengu_feature_bad', {
     feature_name: 'cmd_dispatch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     error_code: errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -835,6 +852,7 @@ async function processSlashCommandBody(
   wakeupSource?: string,
   /** densable yn pt — ELt host_initiator on tengu_input_command. */
   hostInitiator?: unknown,
+  checkLine?: SlashLineCheckFn,
 ): Promise<ProcessUserInputBaseResult> {
   const parsed = parseSlashCommand(inputString);
   if (!parsed) {
@@ -961,8 +979,26 @@ async function processSlashCommandBody(
 
   // Track slash command usage for feature discovery
 
-  const runCoreSlashCommand = (argsToRun: string): Promise<SlashCommandResult> =>
-    getMessagesForSlashCommand(
+  const canonicalCommandName = getCommandName(resolvedCommand);
+  const checkLineCache = new Map<string, Promise<SlashLineCheckResult>>();
+
+  const runCoreSlashCommand = async (argsToRun: string): Promise<SlashCommandResult> => {
+    const checkLineForArgs = checkLine
+      ? async (): Promise<boolean> => {
+          const existing = checkLineCache.get(argsToRun);
+          const pending =
+            existing ??
+            checkLine({
+              name: canonicalCommandName,
+              args: parsedArgs,
+              argsRanWith: argsToRun,
+            });
+          if (!existing) checkLineCache.set(argsToRun, pending);
+          const resolved = await pending;
+          return resolved.outcome?.kind === 'proceed';
+        }
+      : undefined;
+    const ran = await getMessagesForSlashCommand(
       commandName,
       argsToRun,
       setToolJSX,
@@ -975,9 +1011,12 @@ async function processSlashCommandBody(
       autonomy,
       modelScheduledOrigin,
       submissionOrigin,
+      checkLineForArgs,
     );
+    const lineCheck = await checkLineCache.get(argsToRun);
+    return lineCheck === undefined ? ran : { ...ran, lineCheck };
+  };
 
-  const canonicalCommandName = getCommandName(resolvedCommand);
   const hasCommandRunHook =
     hasMatchingFunctionHook('command.run', { command: canonicalCommandName }) ||
     (canonicalCommandName !== commandName && hasMatchingFunctionHook('command.run', { command: commandName }));
@@ -1033,7 +1072,7 @@ async function processSlashCommandBody(
             },
           );
         } catch (err) {
-          if (coreThrown !== undefined || err instanceof AbortError || context.abortController.signal.aborted) {
+          if (coreThrown !== undefined || isAbortError(err) || context.abortController.signal.aborted) {
             throw err;
           }
           logForDebugging(
@@ -1110,6 +1149,8 @@ async function processSlashCommandBody(
     nextInput,
     submitNextInput,
     deferAutonomyCompletion,
+    lineCheck,
+    forkDispatched,
   } = slashResult;
 
   // Local slash commands that skip messages
@@ -1169,6 +1210,8 @@ async function processSlashCommandBody(
       nextInput,
       submitNextInput,
       deferAutonomyCompletion,
+      ...(lineCheck !== undefined && { lineCheck }),
+      ...(forkDispatched && { forkDispatched }),
     };
   }
 
@@ -1260,6 +1303,8 @@ async function processSlashCommandBody(
     nextInput,
     submitNextInput,
     deferAutonomyCompletion,
+    ...(lineCheck !== undefined && { lineCheck }),
+    ...(forkDispatched && { forkDispatched }),
   };
 }
 
@@ -1279,6 +1324,7 @@ export async function processSlashCommand(
   submissionOrigin?: { kind?: string },
   wakeupSource?: string,
   hostInitiator?: unknown,
+  checkLine?: SlashLineCheckFn,
 ): Promise<ProcessUserInputBaseResult> {
   using commandRun = wrapCommandRunWait(takeCommandRunWait(uuid));
   try {
@@ -1297,6 +1343,7 @@ export async function processSlashCommand(
       submissionOrigin,
       wakeupSource,
       hostInitiator,
+      checkLine,
     );
     commandRun.settle({
       text: result.resultText,
@@ -1345,6 +1392,8 @@ async function getMessagesForSlashCommand(
   modelScheduledOrigin?: boolean,
   /** densable `g` — WGw `submissionOrigin`. */
   submissionOrigin?: { kind?: string },
+  /** Official 2.1.325 (#731): pre-expansion UserPromptSubmit / prompt.submit check. */
+  checkLine?: () => Promise<boolean>,
 ): Promise<SlashCommandResult> {
   let resolvedName = commandName;
   let resolvedArgs = args;
@@ -1711,6 +1760,29 @@ async function getMessagesForSlashCommand(
               stacked_count: stackedCommands.length,
             });
           }
+          // Official 2.1.325 (#731): UserPromptSubmit / prompt.submit BEFORE
+          // UserPromptExpansion and skill/slash expansion (`!h && await Me?.() === !1`).
+          const isForked =
+            resolveSkillExecutionContext(command, trailingArgs, context) === 'fork' &&
+            !isCoordinatorMainThread(context.agentId);
+          if (!isForked && (await checkLine?.()) === false) {
+            logCmdDispatch(
+              context.abortController?.signal.aborted ? 'cmd_prompt_aborted' : 'cmd_prompt_submit_hook_blocked',
+            );
+            return {
+              messages: [
+                createUserMessage({
+                  content: prepareUserContent({
+                    inputString: formatCommandInput(command, argsForDispatch),
+                    precedingInputBlocks,
+                  }),
+                  uuid,
+                }),
+              ],
+              shouldQuery: true,
+              command,
+            };
+          }
           // densable Ze @208164542 — UserPromptExpansion before effort / fork / Le.
           const expansionContext = withSafeSessionHooksContext(context);
           const expansion = await runUserPromptExpansionHook(command, trailingArgs, expansionContext);
@@ -1731,11 +1803,86 @@ async function getMessagesForSlashCommand(
               }
             }
           }
-          // densable `k_n(...)==="fork"&&!IQ(o)` — coordinator main falls through to Le.
-          if (
-            resolveSkillExecutionContext(command, trailingArgs, context) === 'fork' &&
-            !isCoordinatorMainThread(context.agentId)
-          ) {
+          // Official 2.1.325 (#731): forked slash commands run
+          // executeUserPromptSubmitHooks BEFORE executeForkedSlashCommand.
+          if (isForked) {
+            const rawSlashText = `/${resolvedName} ${argsForDispatch}`.trim();
+            const precedingText = precedingInputBlocks
+              .filter((b): b is TextBlockParam => b.type === 'text')
+              .map(b => b.text)
+              .join('\n');
+            const hookPrompt = precedingText ? `${precedingText}\n${rawSlashText}` : rawSlashText;
+            const additionalContextAttachments: AttachmentMessage[] = [];
+            const hookErrors: string[] = [];
+            const mode = expansionContext.getAppState().toolPermissionContext?.mode ?? 'default';
+            for await (const hookResult of executeUserPromptSubmitHooks(hookPrompt, mode, expansionContext)) {
+              if (hookResult.message?.type === 'progress') continue;
+              if (hookResult.message?.type === 'attachment') {
+                const att = hookResult.message.attachment;
+                if (att && 'hookEvent' in att && att.hookEvent === 'UserPromptSubmit') {
+                  if (att.type === 'hook_non_blocking_error') {
+                    const stderr = 'stderr' in att && typeof att.stderr === 'string' ? att.stderr : '';
+                    const exitCode = 'exitCode' in att ? String(att.exitCode) : '';
+                    hookErrors.push(stderr || `Exit code ${exitCode}`);
+                  } else if (att.type === 'hook_error_during_execution') {
+                    const content = 'content' in att && typeof att.content === 'string' ? att.content : '';
+                    if (content) hookErrors.push(content);
+                  }
+                }
+              }
+              if (hookResult.blockingError) {
+                logCmdDispatch('cmd_prompt_submit_hook_blocked');
+                const blockingMessage = getUserPromptSubmitHookBlockingMessage(hookResult.blockingError);
+                const msg =
+                  hookResult.suppressOriginalPrompt === true
+                    ? blockingMessage
+                    : `${blockingMessage}\n\nOriginal prompt: ${hookPrompt}`;
+                return {
+                  messages: [createSystemMessage(msg, 'warning', undefined, true)],
+                  shouldQuery: false,
+                  resultText: msg,
+                  command,
+                  forkDispatched: true,
+                };
+              }
+              if (hookResult.preventContinuation) {
+                logCmdDispatch('cmd_prompt_submit_hook_stopped');
+                const stopMsg = hookResult.stopReason
+                  ? `Operation stopped by hook: ${hookResult.stopReason}`
+                  : 'Operation stopped by hook';
+                return {
+                  messages: [
+                    createUserMessage({ content: stopMsg }),
+                    createSystemMessage(stopMsg, 'warning', undefined, true),
+                  ],
+                  shouldQuery: false,
+                  resultText: stopMsg,
+                  command,
+                  forkDispatched: true,
+                };
+              }
+              if (hookResult.additionalContexts && hookResult.additionalContexts.length > 0) {
+                additionalContextAttachments.push(
+                  createAttachmentMessage({
+                    type: 'hook_additional_context',
+                    content: hookResult.additionalContexts,
+                    hookName: 'UserPromptSubmit',
+                    toolUseID: `hook-${randomUUID()}`,
+                    hookEvent: 'UserPromptSubmit',
+                  }),
+                );
+              }
+            }
+            // Official 2.1.325 (#676): abort race check before forked skill expansion / embedded shell lines.
+            if (context.abortController?.signal.aborted) {
+              logCmdDispatch('cmd_prompt_aborted');
+              return {
+                messages: [createUserInterruptionMessage({ toolUse: false })],
+                shouldQuery: false,
+                command,
+                forkDispatched: true,
+              };
+            }
             const forked = await executeForkedSlashCommand(
               command,
               trailingArgs,
@@ -1745,13 +1892,25 @@ async function getMessagesForSlashCommand(
               canUseTool ?? hasPermissionsToUseTool,
               autonomy,
             );
-            if (expansion.hookMessages.length > 0) {
-              forked.messages.splice(1, 0, ...expansion.hookMessages);
+            if (hookErrors.length > 0) {
+              forked.messages.push(
+                createSystemMessage(`UserPromptSubmit hook error: ${hookErrors.join('; ')}`, 'warning'),
+              );
+            }
+            const injected = [...expansion.hookMessages, ...additionalContextAttachments];
+            if (injected.length > 0) {
+              forked.messages.splice(1, 0, ...injected);
             }
             if (effortNotice) {
               forked.messages.splice(1, 0, effortNotice);
             }
+            forked.forkDispatched = true;
             return forked;
+          }
+
+          // Official 2.1.325 (#676): abort race check before getPromptForCommand / embedded shell lines.
+          if (context.abortController?.signal.aborted) {
+            throw new AbortError();
           }
 
           const loaded = await getMessagesForPromptSlashCommand(
@@ -1805,6 +1964,9 @@ async function getMessagesForSlashCommand(
                   invocation_trigger: 'user-slash' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 });
               }
+              if (context.abortController?.signal.aborted) {
+                throw new AbortError();
+              }
               const next = await getMessagesForPromptSlashCommand(
                 stackedCommand,
                 trailingArgs,
@@ -1825,7 +1987,7 @@ async function getMessagesForSlashCommand(
               loaded.model = next.model ?? loaded.model;
               loaded.effort = next.effort ?? loaded.effort;
             } catch (stackedError) {
-              if (stackedError instanceof MalformedCommandError) throw stackedError;
+              if (stackedError instanceof MalformedCommandError || isAbortError(stackedError)) throw stackedError;
               logError(stackedError);
               logForDebugging('stacked slash command expansion threw');
               loaded.messages.push(
@@ -1849,8 +2011,8 @@ async function getMessagesForSlashCommand(
           }
           return loaded;
         } catch (e) {
-          // Handle abort errors specially to show proper "Interrupted" message
-          if (e instanceof AbortError) {
+          // Handle abort errors specially to show proper "Interrupted" message (SEA `Ue(h)` = isAbortError)
+          if (isAbortError(e)) {
             return {
               messages: [
                 createUserMessage({

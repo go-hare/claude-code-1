@@ -112,6 +112,7 @@ import {
   fetchOutcomeBranches,
   fetchPriorOutcomeBranch,
   mapOutcomeBranchLists,
+  FetchRefNotFoundError,
   mapPushTargetsFromRemote,
   prepareSources,
   prepClonePhaseEvent,
@@ -122,6 +123,7 @@ import {
   resetStaleGitProxyCredHelper,
   revParseVerify,
   sanitizeCanonicalGitState,
+  sanitizePermanentRefWording,
   shouldSanitizeCanonical,
   unsetGitProxyRepoLocalCredHelper,
   wireGitProxyRepoLocalCredHelper,
@@ -268,9 +270,12 @@ function classifyThrownFailure(
   )
   const status = extractErrorHttpStatus(err)
   const refMiss =
-    isSourceRefNotFoundMessage(tr) ||
+    err instanceof FetchRefNotFoundError ||
     (err instanceof Error &&
-      (err.name === 'SourceRefNotFound' || err.name === 'VJl'))
+      (err.name === 'SourceRefNotFound' ||
+        err.name === 'SourceRefNotFoundError' ||
+        err.name === 'VJl'))
+  const displayMsg = refMiss ? tr : sanitizePermanentRefWording(tr)
   let failureKind: string | undefined
   let setupFailureKind: string | undefined
   if (status !== undefined && status >= 500) {
@@ -280,7 +285,7 @@ function classifyThrownFailure(
   }
   if (refMiss) setupFailureKind = 'SETUP_FAILURE_KIND_SOURCE_REF_NOT_FOUND'
   return {
-    failureReason: `${prefix}: ${tr}`,
+    failureReason: `${prefix}: ${displayMsg}`,
     setupFailureKind,
     failureKind,
   }
@@ -1143,9 +1148,11 @@ export async function handleSession(
           // densable built-in aWd path (no checkout hook)
           const worktreePath = multiCap ? join(sessionDir, slug) : canon
           await withCanonicalLock(canonicalLocks, canon, async () => {
+            let didSanitize = false
             if (anthropicProxy || (governed && !multiCap)) {
               if (shouldSanitizeCanonical(onStatus, canon)) {
                 await sanitizeCanonicalGitState(canon, onDebug, src.url)
+                didSanitize = true
               }
             } else {
               await resetStaleGitProxyCredHelper(canon, onDebug, !multiCap)
@@ -1158,6 +1165,9 @@ export async function handleSession(
               getAuthToken: src.getAuthToken,
               governedMount: src.governedMount,
               upstreamUrl: src.upstreamUrl,
+              ...(didSanitize && {
+                sanitized: { onIndexFromHead: () => {} },
+              }),
             }
             await prepareSources({
               baseDir,
@@ -1235,7 +1245,10 @@ export async function handleSession(
           })
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
-          if (isSourceRefNotFoundMessage(msg)) {
+          if (
+            err instanceof FetchRefNotFoundError ||
+            (Boolean(checkoutHookPath) && isSourceRefNotFoundMessage(msg))
+          ) {
             if (!isWorkRepo) {
               const refLabel = src.ref ? `'${src.ref}'` : 'the configured ref'
               onDebug(
@@ -1962,11 +1975,12 @@ export async function handleSession(
       sessionGone,
       epochStale: epochStaleForCleanup,
     })
+    const safeStderrTail = sanitizePermanentRefWording(childResult.stderrTail)
     if (finalResult === 'failed') {
       return {
         result: 'failed',
         exitCode: childResult.exitCode,
-        failureReason: `child exited ${childResult.exitCode ?? 'null'}: ${childResult.stderrTail}`,
+        failureReason: `child exited ${childResult.exitCode ?? 'null'}: ${safeStderrTail}`,
         failureKind: 'SESSION_FAILURE_KIND_RUNNER_CRASH',
       }
     }
@@ -1976,7 +1990,7 @@ export async function handleSession(
         exitCode: childResult.exitCode,
         failureReason:
           finalReason ??
-          `child interrupted (SIGTERM/watchdog): ${childResult.stderrTail}`,
+          `child interrupted (SIGTERM/watchdog): ${safeStderrTail}`,
       }
     }
     return {

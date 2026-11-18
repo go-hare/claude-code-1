@@ -16,7 +16,9 @@ import { MAX_MARKDOWN_LENGTH, sliceFromOffset, sliceToMax } from './utils.js'
 const RAW_OVERFLOW_SUMMARY_CHARS = 8000
 
 /** Official `A1i` = `abt - 2000`. `abt` is WebFetch maxResultSizeChars. */
-const RAW_OVERFLOW_BUDGET = MAX_MARKDOWN_LENGTH - 2000
+function getRawOverflowBudget(): number {
+  return MAX_MARKDOWN_LENGTH - 2000
+}
 
 /** Official `Nhr`. */
 export function httpStatusText(code: number): string {
@@ -90,7 +92,8 @@ ${WEB_FETCH_QUOTE_RULES}
   const offsetTag = offset > 0 ? ` from character ${offset}` : ''
   const budget = Math.max(
     0,
-    RAW_OVERFLOW_BUDGET - (href.length + mime.length + reportingRules.length),
+    getRawOverflowBudget() -
+      (href.length + mime.length + reportingRules.length),
   )
   let body = fromOffset
   let charCount = `${scrubbed.length} characters${

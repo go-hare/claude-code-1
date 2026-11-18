@@ -312,6 +312,10 @@ const environmentArgs = new Map<string, LoadedFunctionHooksModule>()
 export type HookServingContext = {
   cwd?: string
   turnHeld?: string
+  listedMedia?: readonly string[]
+  isDispatching?: () => boolean
+  budgetTracker?: StepBudgetTracker
+  isPersonInitiated?: boolean
 }
 
 const activeHookModuleAls = new AsyncLocalStorage<LoadedFunctionHooksModule>()
@@ -327,6 +331,119 @@ export const HOOK_DEPTH_LIMIT_MESSAGE =
   'nesting deeper than 100000 levels is not supported'
 export const HOOK_VM_DEPTH_LIMIT_MESSAGE =
   'nesting deeper than 28000 levels is not supported'
+
+/**
+ * #622/#623/#639: Iterative boundary sanitizer matching SEA `SBo` / `Zgn` / `l()`:
+ * - Explicit work-stack traversal up to `MAX_HOOK_VALUE_DEPTH` (no stack overflow)
+ * - Refuses `__proto__` own property (`protoKey: 'left-out'`) instead of silently stripping
+ * - Per-key `RangeError` getter refusal: omits only the throwing key, keeps the rest
+ */
+export function sanitizeHookBoundaryValue<T>(
+  value: T,
+  maxDepth: number = MAX_HOOK_VALUE_DEPTH,
+): { value: T; refusedKeys: string[] } {
+  if (typeof value !== 'object' || value === null) {
+    return { value, refusedKeys: [] }
+  }
+  const refusedKeys: string[] = []
+  const seen = new WeakMap<object, unknown>()
+  const cloneContainer = (src: object): object =>
+    Array.isArray(src) ? [] : Object.create(null)
+
+  const rootOut = cloneContainer(value)
+  seen.set(value, rootOut)
+  type Frame = { src: object; dst: object; depth: number }
+  const stack: Frame[] = [{ src: value, dst: rootOut, depth: 1 }]
+
+  while (stack.length > 0) {
+    const { src, dst, depth } = stack.pop()!
+    if (depth > maxDepth) {
+      throw new RangeError(
+        maxDepth === MAX_HOOK_VM_DEPTH
+          ? HOOK_VM_DEPTH_LIMIT_MESSAGE
+          : HOOK_DEPTH_LIMIT_MESSAGE,
+      )
+    }
+    if (Array.isArray(src)) {
+      const arrDst = dst as unknown[]
+      for (let i = 0; i < src.length; i++) {
+        let item: unknown
+        try {
+          item = src[i]
+        } catch (err) {
+          if (err instanceof RangeError) {
+            refusedKeys.push(String(i))
+            arrDst[i] = undefined
+            continue
+          }
+          throw err
+        }
+        if (typeof item === 'object' && item !== null) {
+          const proto = Object.getPrototypeOf(item)
+          if (
+            Array.isArray(item) ||
+            proto === Object.prototype ||
+            proto === null
+          ) {
+            const existing = seen.get(item)
+            if (existing !== undefined) {
+              arrDst[i] = existing
+            } else {
+              const childDst = cloneContainer(item)
+              seen.set(item, childDst)
+              arrDst[i] = childDst
+              stack.push({ src: item, dst: childDst, depth: depth + 1 })
+            }
+            continue
+          }
+        }
+        arrDst[i] = item
+      }
+      continue
+    }
+
+    if (Object.hasOwn(src, '__proto__')) {
+      throw new Error('object contains disallowed __proto__ key')
+    }
+    const objDst = dst as Record<string, unknown>
+    for (const key of Object.keys(src)) {
+      if (key === '__proto__') {
+        throw new Error('object contains disallowed __proto__ key')
+      }
+      let propVal: unknown
+      try {
+        propVal = (src as Record<string, unknown>)[key]
+      } catch (err) {
+        if (err instanceof RangeError) {
+          refusedKeys.push(key)
+          continue
+        }
+        throw err
+      }
+      if (typeof propVal === 'object' && propVal !== null) {
+        const proto = Object.getPrototypeOf(propVal)
+        if (
+          Array.isArray(propVal) ||
+          proto === Object.prototype ||
+          proto === null
+        ) {
+          const existing = seen.get(propVal)
+          if (existing !== undefined) {
+            objDst[key] = existing
+          } else {
+            const childDst = cloneContainer(propVal)
+            seen.set(propVal, childDst)
+            objDst[key] = childDst
+            stack.push({ src: propVal, dst: childDst, depth: depth + 1 })
+          }
+          continue
+        }
+      }
+      objDst[key] = propVal
+    }
+  }
+  return { value: rootOut as T, refusedKeys }
+}
 
 /**
  * Iterative depth check (`T7s` / `X5e` in SEA #381) so deeply nested tool
@@ -522,9 +639,12 @@ export function setLoadedFunctionHooksModules(
   return removedKeys
 }
 
+let hookRegistrationEpoch = 0
+
 function replaceLoadedFunctionHooksModules(
   modules: readonly LoadedFunctionHooksModule[],
 ): void {
+  hookRegistrationEpoch += 1
   environmentArgs.clear()
   loadedModules = modules.map(mod => {
     const entry: LoadedFunctionHooksModule = {
@@ -788,6 +908,176 @@ export function createPromptEditComposer(host: {
   }
 }
 
+export type PromptChangeOrigin =
+  | { kind: 'history' }
+  | { kind: 'clear' }
+  | { kind: 'undo' }
+  | { kind: 'engine' }
+  | { kind: 'composer' }
+  | { kind: 'landing' }
+  | { kind: 'plugin'; name: string }
+
+const PROMPT_CHANGE_STALL_CAP = 8
+const PROMPT_CHANGE_CLEAR_ORIGIN: PromptChangeOrigin = Object.freeze({
+  kind: 'clear',
+})
+const PROMPT_CHANGE_ENGINE_ORIGIN: PromptChangeOrigin = Object.freeze({
+  kind: 'engine',
+})
+
+function resolvePromptChangeOrigin(
+  change: { after: string; origin?: PromptChangeOrigin },
+  previous: PromptChangeOrigin | undefined,
+): PromptChangeOrigin {
+  const fallback =
+    change.after === ''
+      ? PROMPT_CHANGE_CLEAR_ORIGIN
+      : PROMPT_CHANGE_ENGINE_ORIGIN
+  const origin = change.origin
+  if (origin === undefined || origin.kind === 'composer') return fallback
+  if (origin.kind === 'landing') return previous ?? fallback
+  return origin
+}
+
+/**
+ * densable `fNe` / `GMt` — coalesces non-typed prompt box changes
+ * (history recall, clear, undo, plugin fill) and raises `prompt.change`
+ * with anti-loop stall detection after 8 consecutive plugin fills.
+ */
+export function createPromptChangeCoordinator(
+  readBox: () => PromptEditBox,
+  options: {
+    raise?: (
+      payload: { text: string; cursor: number; origin: PromptChangeOrigin },
+      signal: AbortSignal,
+    ) => Promise<unknown>
+    later?: (cb: () => void) => void
+    isHooked?: () => boolean
+    report?: (message: string) => void
+    stall?: (plugins: readonly string[]) => void
+  } = {},
+): {
+  changed: (change: {
+    before: string
+    after: string
+    origin?: PromptChangeOrigin
+  }) => void
+  dispose: () => void
+} {
+  const raise =
+    options.raise ??
+    (payload =>
+      runFunctionHookChain('prompt.change', payload, async () => undefined))
+  const later = options.later ?? queueMicrotask
+  const isHooked =
+    options.isHooked ?? (() => hasMatchingFunctionHook('prompt.change', {}))
+  const report =
+    options.report ?? (msg => logForDebugging(msg, { level: 'warn' }))
+  const stall =
+    options.stall ??
+    ((plugins: readonly string[]) => {
+      const unique = [...new Set(plugins)].sort().join(', ')
+      const msg = `prompt.change: ${plugins.length} dispatches in a row for fills by ${unique}; not raised again until the box changes another way`
+      logForDebugging(msg, { level: 'warn' })
+    })
+
+  const abort = new AbortController()
+  let baseline: string | undefined
+  let clearedAfter: string | undefined
+  let pendingOrigin: PromptChangeOrigin | undefined
+  let lastOrigin: PromptChangeOrigin | undefined
+  let pluginFillChain: string[] = []
+  let stalled = false
+  let inFlight = false
+  let scheduled = false
+
+  const checkStall = (origin: PromptChangeOrigin): boolean => {
+    if (origin.kind !== 'plugin') return false
+    const hitCap = pluginFillChain.length >= PROMPT_CHANGE_STALL_CAP
+    if (hitCap && !stalled) {
+      stalled = true
+      stall(pluginFillChain)
+    }
+    if (!hitCap) {
+      pluginFillChain = [...pluginFillChain, origin.name]
+    }
+    return hitCap
+  }
+
+  const flush = (): void => {
+    scheduled = false
+    const origin = pendingOrigin
+    if (
+      inFlight ||
+      abort.signal.aborted ||
+      baseline === undefined ||
+      origin === undefined
+    ) {
+      return
+    }
+    const current = readBox()
+    const changedFromClear =
+      clearedAfter !== undefined && current.text !== clearedAfter
+    const changed = current.text !== baseline || changedFromClear
+    baseline = undefined
+    clearedAfter = undefined
+    pendingOrigin = undefined
+    if (!changed || !isHooked() || checkStall(origin)) {
+      return
+    }
+    inFlight = true
+    Promise.resolve(
+      raise(
+        { text: current.text, cursor: current.cursor, origin },
+        abort.signal,
+      ),
+    )
+      .catch(err => {
+        report(`prompt.change: ${describeThrown(err)}`)
+      })
+      .finally(() => {
+        inFlight = false
+      })
+      .then(flush)
+  }
+
+  return {
+    changed(change) {
+      if (abort.signal.aborted) return
+      const isComposer = change.origin?.kind === 'composer'
+      lastOrigin = isComposer
+        ? undefined
+        : resolvePromptChangeOrigin(change, lastOrigin)
+      if (lastOrigin?.kind !== 'plugin') {
+        pluginFillChain = []
+        stalled = false
+      }
+      if (lastOrigin === undefined) {
+        clearedAfter = baseline === undefined ? undefined : change.after
+        return
+      }
+      if (!isHooked()) {
+        baseline = undefined
+        clearedAfter = undefined
+        pendingOrigin = undefined
+        return
+      }
+      baseline ??= change.before
+      pendingOrigin = lastOrigin
+      if (!scheduled && !inFlight) {
+        scheduled = true
+        later(flush)
+      }
+    },
+    dispose() {
+      baseline = undefined
+      clearedAfter = undefined
+      pendingOrigin = undefined
+      abort.abort()
+    },
+  }
+}
+
 export type FunctionHookTail = (
   event: Record<string, unknown>,
   floors?: readonly HopFloor[],
@@ -805,10 +1095,51 @@ function budgetMsForHookEvent(event: string): number {
   return HOOK_DEFAULT_STEP_BUDGET_MS
 }
 
+type StepBudgetTracker = {
+  pause: () => void
+  resume: () => void
+  budget: () => FunctionHookBudget
+}
+
+function createStepBudgetTracker(
+  budgetMs: number,
+  deadline: number,
+): StepBudgetTracker {
+  let pausedMs = 0
+  let activePauses = 0
+  let pauseStartedAt = 0
+  const remaining = (): number => {
+    const currentPause = activePauses > 0 ? Date.now() - pauseStartedAt : 0
+    return Math.max(0, deadline + pausedMs + currentPause - Date.now())
+  }
+  return {
+    pause: () => {
+      if (activePauses === 0) pauseStartedAt = Date.now()
+      activePauses += 1
+    },
+    resume: () => {
+      if (activePauses === 0) return
+      activePauses -= 1
+      if (activePauses === 0) {
+        pausedMs += Math.max(0, Date.now() - pauseStartedAt)
+      }
+    },
+    budget: () =>
+      Object.freeze({
+        ms: budgetMs,
+        get remainingMs(): number {
+          return remaining()
+        },
+      }),
+  }
+}
+
 function makeStepBudget(
   budgetMs: number,
   deadline: number,
+  tracker?: StepBudgetTracker,
 ): FunctionHookBudget {
+  if (tracker) return tracker.budget()
   return Object.freeze({
     ms: budgetMs,
     get remainingMs(): number {
@@ -1316,6 +1647,10 @@ export async function runFunctionHookChain(
     let hasDownstreamResult = false
     const downstreamResults: Record<string, unknown>[] = []
     const beneathHolder: { beneath?: HookTraceNode } = {}
+    const stepBudgetTracker = createStepBudgetTracker(budgetMs, stepDeadline)
+    let downstreamSettled = false
+    let downstreamRejected = false
+    let downstreamError: unknown
 
     const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
       const named =
@@ -1352,6 +1687,17 @@ export async function runFunctionHookChain(
     ): Promise<unknown> => {
       nextCalled = true
       let onward = isEventRecord(passed) ? passed : value
+      if (passed !== undefined && !Object.is(passed, value)) {
+        try {
+          onward = sanitizeHookBoundaryValue(onward).value
+        } catch (err) {
+          return Promise.reject(
+            new Error(
+              `${step.mod.name}: next() passed an invalid value: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          )
+        }
+      }
       const isCoreStep = step.hook.isCore === true || step.mod.isCore === true
       if (!isCoreStep && callOptions?.site !== undefined) {
         const candidate = Object.is(onward, value) ? onward : { ...onward }
@@ -1364,6 +1710,18 @@ export async function runFunctionHookChain(
               `${step.mod.name}: next() passed an argument with ${problem}`,
             ),
           )
+        }
+        const unapplied = callOptions.site.unappliedArgument?.(candidate, value)
+        if (unapplied !== undefined) {
+          functionHooksHost.hookFailed({
+            plugin: step.mod.name,
+            environmentId: step.mod.environmentId ?? step.mod.name,
+            event,
+            reason: `${step.mod.name}: ${unapplied}`,
+            effect: UNAPPLIED_REWRITE_EFFECT,
+            hasOverrun: false,
+            skip: { kind: 'unapplied', why: unapplied },
+          })
         }
         onward = restored
       }
@@ -1385,14 +1743,23 @@ export async function runFunctionHookChain(
         .run(outerHookOrigin, () =>
           callAt(index + 1, onward, targetFloors, childNode),
         )
-        .then(res => {
-          if (isEventRecord(res)) {
-            downstreamResults.push(res)
-          }
-          lastDownstreamResult = res
-          hasDownstreamResult = true
-          return res
-        })
+        .then(
+          res => {
+            downstreamSettled = true
+            if (isEventRecord(res)) {
+              downstreamResults.push(res)
+            }
+            lastDownstreamResult = res
+            hasDownstreamResult = true
+            return res
+          },
+          err => {
+            downstreamSettled = true
+            downstreamRejected = true
+            downstreamError = err
+            throw err
+          },
+        )
       inFlightDownstream = pending
       return pending
     }
@@ -1412,7 +1779,7 @@ export async function runFunctionHookChain(
       enumerable: true,
     })
     Object.defineProperty(next, 'budget', {
-      get: () => makeStepBudget(stepBudgetMs, stepDeadline),
+      get: () => makeStepBudget(stepBudgetMs, stepDeadline, stepBudgetTracker),
       enumerable: true,
     })
     if (
@@ -1484,9 +1851,17 @@ export async function runFunctionHookChain(
         callOptions?.signal?.throwIfAborted()
         return hostHandler.run(value, next as FunctionHookNext)
       }
-      return activeHookOriginAls.run(stepHookOrigin, () =>
-        activeHookModuleAls.run(step.mod, () =>
-          step.hook.hook(engine, value, next),
+      const servingStore = activeHookServingAls.getStore()
+      const stepServingStore: HookServingContext = {
+        ...servingStore,
+        budgetTracker: stepBudgetTracker,
+        isDispatching: () => !downstreamSettled,
+      }
+      return activeHookServingAls.run(stepServingStore, () =>
+        activeHookOriginAls.run(stepHookOrigin, () =>
+          activeHookModuleAls.run(step.mod, () =>
+            step.hook.hook(engine, value, next),
+          ),
         ),
       )
     })
@@ -1596,6 +1971,7 @@ export async function runFunctionHookChain(
         }
         if (
           !step.hook.catch ||
+          (downstreamRejected && Object.is(err, downstreamError)) ||
           (nextCalled && isSignalAbortedNotInterrupt(callOptions?.signal))
         ) {
           runNode.entry = Object.freeze({
@@ -1724,6 +2100,10 @@ export type FunctionHookHopSite = {
     passed: Record<string, unknown>,
     original: Record<string, unknown>,
   ) => Record<string, unknown>
+  unappliedArgument?: (
+    passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ) => string | undefined
   restoreResult?: (
     returned: Record<string, unknown>,
     priorResults: readonly Record<string, unknown>[],
@@ -1901,6 +2281,10 @@ export async function runFunctionHookHop(
     let hasDownstreamResult = false
     const downstreamResults: Record<string, unknown>[] = []
     const beneathHolder: { beneath?: HookTraceNode } = {}
+    const stepBudgetTracker = createStepBudgetTracker(budgetMs, stepDeadline)
+    let downstreamSettled = false
+    let downstreamRejected = false
+    let downstreamError: unknown
     const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
       const named =
         tiers.length === 1 && Array.isArray(tiers[0])
@@ -1934,14 +2318,23 @@ export async function runFunctionHookHop(
         .run(outerHookOrigin, () =>
           callAt(index + 1, onward, targetFloors, childNode),
         )
-        .then(res => {
-          if (isEventRecord(res)) {
-            downstreamResults.push(res)
-          }
-          lastDownstreamResult = res
-          hasDownstreamResult = true
-          return res
-        })
+        .then(
+          res => {
+            downstreamSettled = true
+            if (isEventRecord(res)) {
+              downstreamResults.push(res)
+            }
+            lastDownstreamResult = res
+            hasDownstreamResult = true
+            return res
+          },
+          err => {
+            downstreamSettled = true
+            downstreamRejected = true
+            downstreamError = err
+            throw err
+          },
+        )
       inFlightDownstream = pending
       return pending
     }
@@ -3022,6 +3415,156 @@ function unwrapOpHookResult(
   return out.value
 }
 
+/**
+ * densable #696 (`NNa`/`FNa`/`$Na`/`EWe`/`UNa`/`k7e` @278647963) — track
+ * `$.env.set` keys written by non-managed/personal plugins so managed command
+ * hooks (`hooks.ts`) can isolate them cleanly.
+ */
+export type PersonalPluginEnvWrite = {
+  name: string
+  before: string | undefined
+  theirs: string | undefined
+  writer?: string
+}
+
+const personalPluginEnvWrites = new Map<string, PersonalPluginEnvWrite>()
+let envIsolationOpen = false
+
+function normalizeEnvKeyForMatch(key: string): string {
+  return process.platform === 'win32' ? key.toUpperCase() : key
+}
+
+function entriesMatchingEnvKey(
+  key: string,
+): Array<[string, PersonalPluginEnvWrite]> {
+  const target = normalizeEnvKeyForMatch(key)
+  return [...personalPluginEnvWrites.entries()].filter(
+    ([, entry]) => normalizeEnvKeyForMatch(entry.name) === target,
+  )
+}
+
+function isPersonalEnvWriteActive(entry: PersonalPluginEnvWrite): boolean {
+  return process.env[entry.name] === entry.theirs
+}
+
+function activePersonalEnvWrites(): PersonalPluginEnvWrite[] {
+  const entries = [...personalPluginEnvWrites.values()]
+  return envIsolationOpen ? entries : entries.filter(isPersonalEnvWriteActive)
+}
+
+function setOrDeleteProcessEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name]
+  } else {
+    process.env[name] = value
+  }
+}
+
+function beginPersonalEnvSetTrack(
+  name: string,
+  writer: string | undefined,
+): () => void {
+  if (!envIsolationOpen) {
+    for (const [key, entry] of entriesMatchingEnvKey(name)) {
+      if (!isPersonalEnvWriteActive(entry)) {
+        personalPluginEnvWrites.delete(key)
+      }
+    }
+  }
+  const existing = personalPluginEnvWrites.get(name) ?? {
+    name,
+    before: process.env[name],
+    theirs: undefined,
+  }
+  return () => {
+    personalPluginEnvWrites.set(name, {
+      ...existing,
+      theirs: undefined,
+      writer,
+    })
+    for (const [key, entry] of entriesMatchingEnvKey(name)) {
+      personalPluginEnvWrites.set(key, {
+        ...entry,
+        theirs: process.env[entry.name],
+        writer,
+      })
+    }
+  }
+}
+
+function clearPersonalEnvSetTrack(name: string): () => void {
+  return () => {
+    const current = process.env[name]
+    for (const [key, entry] of entriesMatchingEnvKey(name)) {
+      if (process.env[entry.name] === current) {
+        personalPluginEnvWrites.delete(key)
+      }
+    }
+  }
+}
+
+export function dropPersonalPluginEnvSetIfMatches(
+  env: Record<string, string | undefined>,
+): void {
+  if (envIsolationOpen) return
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue
+    for (const [key, entry] of entriesMatchingEnvKey(name)) {
+      if (process.env[entry.name] === value) {
+        personalPluginEnvWrites.delete(key)
+      }
+    }
+  }
+}
+
+export function getPersonalPluginEnvSetKeys(): string[] {
+  return activePersonalEnvWrites().map(entry => entry.name)
+}
+
+export function hasPersonalPluginEnvChangeForKeys(
+  keys: readonly string[],
+): boolean {
+  const target = new Set(keys.map(normalizeEnvKeyForMatch))
+  return activePersonalEnvWrites().some(
+    entry =>
+      (entry.theirs || undefined) !== (entry.before || undefined) &&
+      target.has(normalizeEnvKeyForMatch(entry.name)),
+  )
+}
+
+export function withPersonalPluginEnvIsolated<T>(
+  fn: () => T,
+  allowWriter?: (writer: string) => boolean,
+): T {
+  if (envIsolationOpen) return fn()
+  const active = activePersonalEnvWrites()
+  if (active.length === 0) return fn()
+  const isolated = active.filter(
+    entry =>
+      entry.writer === undefined ||
+      allowWriter === undefined ||
+      !allowWriter(entry.writer),
+  )
+  for (let i = isolated.length - 1; i >= 0; i--) {
+    const entry = isolated[i]!
+    setOrDeleteProcessEnv(entry.name, entry.before)
+  }
+  envIsolationOpen = true
+  try {
+    return fn()
+  } finally {
+    for (const entry of isolated) {
+      setOrDeleteProcessEnv(entry.name, entry.theirs)
+    }
+    envIsolationOpen = false
+  }
+}
+
+export function clearPersonalPluginEnvSetKeysForReset(): void {
+  personalPluginEnvWrites.clear()
+  envIsolationOpen = false
+}
+
 async function runSettingsRead(
   rec: Record<string, unknown> | undefined,
   op: string,
@@ -3049,6 +3592,297 @@ async function runSettingsRead(
     },
   )
   return unwrapOpHookResult('settings.read', out, plugin)
+}
+
+/**
+ * densable #614 (`Ue` @278027752, `G6a`/`z6a` @287713470, `Opo` @293473956) —
+ * `askedOf` / `askedAbout` / `visited` / `unsettled` tracking for `settings.read`
+ * engine merge so oscillating plugin reloads settle cleanly.
+ */
+export type HookedMergeEntry = {
+  key: string
+  value: unknown
+  source?: (typeof SETTINGS_READ_SOURCES)[number]
+}
+
+export type HookedMergeError = {
+  path: string
+  severity: 'warning'
+  statusOnly: true
+  message: string
+}
+
+export type HookedMergeAnswers = {
+  values: Map<string, unknown>
+  errors: HookedMergeError[]
+  source?: (typeof SETTINGS_READ_SOURCES)[number]
+}
+
+export type HookedMergeState = {
+  answers: HookedMergeAnswers | null
+  computed: Record<string, unknown> | null
+  pass: Promise<void>
+  queuedFor: string | undefined
+  isAnnouncing: boolean
+  askedOf: string
+  askedAbout: Record<string, unknown> | null
+  visited: string[]
+  unsettled: Set<string>
+}
+
+function createInitialHookedMergeState(): HookedMergeState {
+  return {
+    answers: null,
+    computed: null,
+    pass: Promise.resolve(),
+    queuedFor: undefined,
+    isAnnouncing: false,
+    askedOf: '',
+    askedAbout: null,
+    visited: [],
+    unsettled: new Set<string>(),
+  }
+}
+
+let hookedMergeState: HookedMergeState = createInitialHookedMergeState()
+
+export function getHookedMergeState(): HookedMergeState {
+  return hookedMergeState
+}
+
+export function resetHookedMergeState(): void {
+  hookedMergeState = createInitialHookedMergeState()
+}
+
+function mergeAnswersFingerprint(values: Map<string, unknown>): string {
+  const keys = [...values.keys()].toSorted()
+  return JSON.stringify([keys, keys.map(k => values.get(k))])
+}
+
+export function settingsReadPlugins(): string[] {
+  const hookOrigin = buildOpHookOrigin(undefined)
+  return loadedModules
+    .filter(
+      mod =>
+        mod.status !== 'unloaded' &&
+        mod.patterns.some(pat =>
+          functionHookPatternMatches(pat, 'settings.read'),
+        ),
+    )
+    .filter(mod => {
+      if (hookOrigin === undefined) return true
+      return true
+    })
+    .map(mod => mod.name)
+}
+
+export async function engineMergeRead(): Promise<
+  HookedMergeEntry[] | undefined
+> {
+  const hookOrigin = buildOpHookOrigin(undefined)
+  if (!hasMatchingFunctionHookForOp('settings.read', {}, hookOrigin)) {
+    return undefined
+  }
+  const layers: Array<{ source: string; settings: Record<string, unknown> }> =
+    []
+  let base: Record<string, unknown> = hookedMergeState.computed ?? {}
+  try {
+    const { getSettingsForSource, getInitialSettings } = await import(
+      '../settings/settings.js'
+    )
+    for (const source of SETTINGS_READ_SOURCES) {
+      const s = getSettingsForSource(source) as
+        | Record<string, unknown>
+        | undefined
+      if (s && Object.keys(s).length > 0) {
+        layers.push({ source, settings: { ...s } })
+      }
+    }
+    if (hookedMergeState.computed === null) {
+      base = (getInitialSettings() ?? {}) as Record<string, unknown>
+    }
+  } catch {
+    // Keep empty layers / computed fallback in isolated test environments.
+  }
+
+  let answered: Record<string, unknown>
+  try {
+    const out = await runFunctionHookChain(
+      'settings.read',
+      { layers },
+      async () => ({ value: { ...base } }),
+      undefined,
+      undefined,
+      {
+        origin: resolveHookCallOrigin(undefined),
+        hookOrigin,
+      },
+    )
+    const unwrapped = unwrapOpHookResult('settings.read', out, undefined)
+    answered = isEventRecord(unwrapped) ? unwrapped : base
+  } catch (err) {
+    logForDebugging(
+      `settings.read: refused to the engine (${describeThrown(err)}); the settings' own values stand`,
+    )
+    answered = base
+  }
+
+  const allKeys = new Set([...Object.keys(answered), ...Object.keys(base)])
+  const diffs: HookedMergeEntry[] = []
+  for (const key of allKeys) {
+    const nextVal = Object.hasOwn(answered, key) ? answered[key] : undefined
+    const baseVal = Object.hasOwn(base, key) ? base[key] : undefined
+    if (isDeepStrictEqual(nextVal, baseVal)) continue
+    const lastLayer = layers.findLast(layer =>
+      Object.hasOwn(layer.settings, key),
+    )
+    diffs.push({
+      key,
+      value: nextVal,
+      ...(lastLayer !== undefined &&
+        SETTINGS_READ_SOURCES.includes(
+          lastLayer.source as (typeof SETTINGS_READ_SOURCES)[number],
+        ) && {
+          source: lastLayer.source as (typeof SETTINGS_READ_SOURCES)[number],
+        }),
+    })
+  }
+  return diffs
+}
+
+export async function raiseEngineSettingsMerge(
+  reason: string,
+  deps?: {
+    engineMergeRead?: () => Promise<HookedMergeEntry[] | undefined>
+    settingsReadPlugins?: () => string[]
+    notifyChange?: (source: (typeof SETTINGS_READ_SOURCES)[number]) => void
+  },
+): Promise<void> {
+  const state = hookedMergeState
+  state.queuedFor = undefined
+  try {
+    const prevAnswers = state.answers
+    if (loadedModules.length === 0 && prevAnswers === null) return
+
+    const askedOf = JSON.stringify(
+      loadedModules.map(mod => mod.environmentId ?? mod.name),
+    )
+    const askedAbout = state.computed
+    if (
+      askedOf === state.askedOf &&
+      askedAbout === state.askedAbout &&
+      state.unsettled.size === 0
+    ) {
+      logForDebugging(
+        `settings.read: the engine's merge is not raised again (${reason}): neither the loaded plugins nor the settings changed.`,
+      )
+      return
+    }
+
+    const startMs = performance.now()
+    const rawEntries = await (deps?.engineMergeRead ?? engineMergeRead)()
+    if (rawEntries === undefined && state.visited.length === 0) {
+      state.unsettled = new Set()
+    }
+    const entries = rawEntries ?? []
+    logForDebugging(
+      `settings.read: the engine's merge was raised (${reason}) in ${(performance.now() - startMs).toFixed(1)} ms; ${entries.length} keys answered otherwise than the files.`,
+    )
+
+    const prevValues = prevAnswers?.values ?? new Map<string, unknown>()
+    const candidateMap = new Map<string, unknown>(
+      entries
+        .filter(entry => !state.unsettled.has(entry.key))
+        .map(entry => [entry.key, entry.value]),
+    )
+    const candidateFp = mergeAnswersFingerprint(candidateMap)
+    if (state.visited.includes(candidateFp)) {
+      const allKeys = new Set([...candidateMap.keys(), ...prevValues.keys()])
+      const oscillating = [...allKeys].filter(
+        key =>
+          candidateMap.has(key) !== prevValues.has(key) ||
+          !isDeepStrictEqual(candidateMap.get(key), prevValues.get(key)),
+      )
+      if (oscillating.length > 0) {
+        state.unsettled = new Set([...state.unsettled, ...oscillating])
+        logForDebugging(
+          `settings.read: the merge never settles for ${oscillating.join(', ')}; no hook's answer is taken for it.`,
+          { level: 'warn' },
+        )
+      }
+    }
+
+    const settledEntries = entries.filter(
+      entry => !state.unsettled.has(entry.key),
+    )
+    const pluginNames = (deps?.settingsReadPlugins ?? settingsReadPlugins)()
+    const nextAnswers: HookedMergeAnswers | null =
+      settledEntries.length + state.unsettled.size === 0
+        ? null
+        : {
+            values: new Map(
+              settledEntries.map(entry => [entry.key, entry.value]),
+            ),
+            errors: [...state.unsettled].map(key => ({
+              path: key,
+              severity: 'warning',
+              statusOnly: true,
+              message: `${key} never settles under a settings.read hook (one of: ${pluginNames.join(', ')}): taking its answer was followed by a reload of the plugins, and the plugins then loaded answered as before it. No hook's answer is taken for this key; the settings files' own value stands.`,
+            })),
+            source: SETTINGS_READ_SOURCES.findLast(src =>
+              settledEntries.some(entry => entry.source === src),
+            ),
+          }
+
+    if (isDeepStrictEqual(nextAnswers, prevAnswers)) {
+      state.visited = []
+      state.askedOf = askedOf
+      state.askedAbout = askedAbout
+      return
+    }
+
+    state.answers = nextAnswers
+    state.isAnnouncing = true
+    const regBefore = hookRegistrationEpoch
+    try {
+      const changedSource =
+        SETTINGS_READ_SOURCES.findLast(
+          src => src === nextAnswers?.source || src === prevAnswers?.source,
+        ) ?? 'policySettings'
+      deps?.notifyChange?.(changedSource)
+    } finally {
+      state.isAnnouncing = false
+    }
+    const didReload = hookRegistrationEpoch !== regBefore
+    state.visited = didReload
+      ? [...state.visited, mergeAnswersFingerprint(prevValues)]
+      : []
+  } catch (err) {
+    logForDebugging(`settings.read: merge failed (${describeThrown(err)})`, {
+      level: 'error',
+    })
+  }
+}
+
+export function scheduleEngineSettingsMerge(
+  reason: string,
+  deps?: Parameters<typeof raiseEngineSettingsMerge>[1],
+): Promise<void> {
+  const state = hookedMergeState
+  if (state.queuedFor === undefined && !state.isAnnouncing) {
+    state.queuedFor = reason
+    state.pass = state.pass.then(() => raiseEngineSettingsMerge(reason, deps))
+  }
+  return state.pass
+}
+
+export function onSettingsChangedForMerge(
+  deps?: Parameters<typeof raiseEngineSettingsMerge>[1],
+): Promise<void> {
+  if (!hookedMergeState.isAnnouncing) {
+    hookedMergeState.unsettled = new Set()
+  }
+  return scheduleEngineSettingsMerge('the settings changed', deps)
 }
 
 function pickAgentRegister(
@@ -5056,10 +5890,133 @@ function pathFrom(args: unknown[], key = 'path'): string | undefined {
   return typeof args[0] === 'string' ? args[0] : undefined
 }
 
+const PROMPT_MEDIA_MAX_CHUNK = 4 * 1024 * 1024
+const PROMPT_MEDIA_B64_ALIGN = 3
+const PROMPT_MEDIA_ABSENT = Object.freeze({
+  deny: 'no prompt.submit in flight carries an attachment under that id',
+})
+
+export type PromptMediaAttachmentInput = {
+  attachment: { type: 'image' | 'document'; [key: string]: unknown }
+  read: () => Promise<
+    | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
+    | { deny: string }
+    | { unreadable: string }
+  >
+}
+
+const promptMediaEntries = new Map<
+  string,
+  () => Promise<
+    | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
+    | { deny: string }
+    | { unreadable: string }
+  >
+>()
+let promptMediaSeq = 0
+
+function slicePromptMediaChunk(
+  entry:
+    | { type: 'image' | 'document'; mediaType: string; bytes: Buffer }
+    | { deny: string }
+    | { unreadable: string },
+  offset: number,
+): Record<string, unknown> {
+  if (!('bytes' in entry) || entry.bytes === undefined) {
+    return entry as Record<string, unknown>
+  }
+  const total = entry.bytes.length
+  if (offset > 0 && offset >= total) {
+    return { deny: `offset ${offset} is at or past the item's ${total} bytes` }
+  }
+  const rawEnd = Math.min(offset + PROMPT_MEDIA_MAX_CHUNK, total)
+  const alignedEnd =
+    rawEnd < total
+      ? rawEnd - ((rawEnd - offset) % PROMPT_MEDIA_B64_ALIGN)
+      : rawEnd
+  return {
+    type: entry.type,
+    mediaType: entry.mediaType,
+    base64: entry.bytes.subarray(offset, alignedEnd).toString('base64'),
+    size: total,
+    ...(alignedEnd < total ? { next: alignedEnd } : {}),
+  }
+}
+
+export async function withPromptSubmitMedia<T>(
+  items: readonly PromptMediaAttachmentInput[],
+  fn: (listedMedia: readonly string[]) => Promise<T>,
+): Promise<T> {
+  const ids: string[] = []
+  for (const item of items) {
+    const id = `media_${++promptMediaSeq}`
+    let cached: ReturnType<PromptMediaAttachmentInput['read']> | undefined
+    promptMediaEntries.set(id, () => (cached ??= item.read()))
+    ids.push(id)
+  }
+  const prev = activeHookServingAls.getStore()
+  try {
+    return await activeHookServingAls.run(
+      { ...prev, listedMedia: ids, isDispatching: () => true },
+      () => fn(ids),
+    )
+  } finally {
+    for (const id of ids) promptMediaEntries.delete(id)
+  }
+}
+
+export async function readPromptMediaById(
+  id: string,
+  offset = 0,
+): Promise<Record<string, unknown>> {
+  const reader = promptMediaEntries.get(id)
+  if (!reader) return PROMPT_MEDIA_ABSENT
+  const entry = await reader()
+  if (!promptMediaEntries.has(id)) return PROMPT_MEDIA_ABSENT
+  return slicePromptMediaChunk(entry, offset)
+}
+
+export type UiViewShowResult =
+  | 'shown'
+  | 'unknown'
+  | 'hidden'
+  | 'ended'
+  | 'moved'
+  | 'elsewhere'
+
+let uiViewHostHandler:
+  | ((args: { agentId?: string }) => Promise<UiViewShowResult>)
+  | undefined
+
+export function setUiViewHost(
+  handler:
+    | ((args: { agentId?: string }) => Promise<UiViewShowResult>)
+    | undefined,
+): void {
+  uiViewHostHandler = handler
+}
+
 export async function handleHostOp(
   op: string,
   args: unknown[],
   plugin?: string,
+): Promise<unknown> {
+  const serving = activeHookServingAls.getStore()
+  const pauseBudget =
+    serving?.budgetTracker !== undefined && serving.isDispatching?.() === false
+  serving?.budgetTracker && pauseBudget && serving.budgetTracker.pause()
+  try {
+    return await handleHostOpInner(op, args, plugin, serving)
+  } finally {
+    if (pauseBudget) serving?.budgetTracker?.resume()
+  }
+}
+
+async function handleHostOpInner(
+  op: string,
+  args: unknown[],
+  plugin?: string,
+  serving?: HookServingContext,
 ): Promise<unknown> {
   const [namespace, method] = op.split('.')
   pluginHostCalls.push({
@@ -5345,8 +6302,156 @@ export async function handleHostOp(
   if (op === 'env.set') {
     const name = rec ? rec.name : args[0]
     const value = rec ? rec.value : args[1]
-    if (typeof name === 'string') process.env[name] = String(value ?? '')
-    return undefined
+    if (
+      typeof name !== 'string' ||
+      name === '' ||
+      name.includes('=') ||
+      name.includes('\0')
+    ) {
+      hostCheck(op, 'takes { name, value? } (a valid variable name)', plugin)
+    }
+    if (value !== undefined && typeof value !== 'string') {
+      hostCheck(op, 'takes value as a string or undefined to unset', plugin)
+    }
+    const mod = plugin
+      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      : undefined
+    const isTrustedEnvWriter =
+      mod !== undefined &&
+      (mod.isManaged === true ||
+        mod.tier === 'prepend' ||
+        mod.tier === 'builtin' ||
+        mod.tier === 'core')
+    const commitTrack = isTrustedEnvWriter
+      ? clearPersonalEnvSetTrack(name)
+      : beginPersonalEnvSetTrack(name, mod?.pluginStorageId ?? plugin)
+    if (value === undefined) {
+      delete process.env[name]
+    } else {
+      process.env[name] = value
+    }
+    commitTrack()
+    return {}
+  }
+  if (op === 'prompt.media') {
+    const id = rec?.id
+    const offset = rec?.offset
+    if (typeof id !== 'string' || id === '') {
+      hostCheck(
+        op,
+        "takes { id } (an attachment's id, from the prompt.submit in flight)",
+        plugin,
+      )
+    }
+    if (
+      offset !== undefined &&
+      (typeof offset !== 'number' ||
+        !Number.isSafeInteger(offset) ||
+        offset < 0)
+    ) {
+      hostCheck(
+        op,
+        `takes offset, a whole number of bytes from 0 (got ${String(offset)})`,
+        plugin,
+      )
+    }
+    const mod = plugin
+      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      : undefined
+    const isManaged =
+      mod !== undefined &&
+      (mod.isManaged === true ||
+        mod.tier === 'prepend' ||
+        mod.tier === 'builtin' ||
+        mod.tier === 'core')
+    const inFlight =
+      isManaged &&
+      serving?.listedMedia?.includes(id) === true &&
+      serving?.isDispatching?.() === true
+    if (!inFlight) return PROMPT_MEDIA_ABSENT
+    const result = await readPromptMediaById(id, offset ?? 0)
+    return serving?.isDispatching?.() === true ? result : PROMPT_MEDIA_ABSENT
+  }
+  if (op === 'session.identity') {
+    const mod = plugin
+      ? loadedModules.find(m => m.name === plugin && m.status !== 'unloaded')
+      : undefined
+    const isManaged =
+      mod !== undefined &&
+      (mod.isManaged === true ||
+        mod.tier === 'prepend' ||
+        mod.tier === 'builtin' ||
+        mod.tier === 'core')
+    if (!isManaged) {
+      return {
+        deny: `$.session.identity answers only a mod that managed settings enable and that is loaded in place from a source they name; ${plugin ?? 'unknown'} is not one`,
+      }
+    }
+    const { getSettingsForSource } = await import('../settings/settings.js')
+    const policy = getSettingsForSource('policySettings') as
+      | { forceLoginOrgUUID?: string | string[] }
+      | undefined
+    const allowedOrgs = policy?.forceLoginOrgUUID
+    const orgList =
+      typeof allowedOrgs === 'string'
+        ? [allowedOrgs]
+        : Array.isArray(allowedOrgs)
+          ? allowedOrgs
+          : []
+    const { getOauthAccountInfo } = await import('../auth.js')
+    const acct = getOauthAccountInfo()
+    const orgUuid = acct?.organizationUuid
+    const kind = acct
+      ? 'claude.ai'
+      : process.env.ANTHROPIC_API_KEY
+        ? 'api-key'
+        : 'none'
+    if (!orgUuid || !orgList.includes(orgUuid)) {
+      return { kind, isVerified: false }
+    }
+    return {
+      kind,
+      organizationId: orgUuid,
+      ...(acct?.emailAddress ? { email: acct.emailAddress } : {}),
+      isVerified: true,
+    }
+  }
+  if (op === 'ui.view') {
+    if (
+      !isEventRecord(rec) ||
+      Reflect.ownKeys(rec).some(k => k !== 'agentId') ||
+      ('agentId' in rec &&
+        (typeof rec.agentId !== 'string' || rec.agentId === ''))
+    ) {
+      hostCheck(
+        op,
+        'takes { agentId } (whose transcript the main view shows, by its id in $.agent.list()) or {} for the main conversation',
+        plugin,
+      )
+    }
+    if (!uiViewHostHandler) {
+      return { deny: 'no main view here' }
+    }
+    if (serving?.isPersonInitiated === false) {
+      return { deny: 'not person-initiated' }
+    }
+    const status = await uiViewHostHandler(
+      'agentId' in rec ? { agentId: rec.agentId as string } : {},
+    )
+    switch (status) {
+      case 'shown':
+        return {}
+      case 'unknown':
+        return { deny: 'no agent under that id' }
+      case 'hidden':
+        return { deny: 'that agent is not one the tasks list shows' }
+      case 'ended':
+        return { deny: 'that agent has ended' }
+      case 'moved':
+        return { deny: 'the view moved meanwhile' }
+      case 'elsewhere':
+        return { deny: "that agent's transcript is not in this session" }
+    }
   }
   if (op === 'clock.now') return Date.now()
   if (op === 'clock.sleep') {
@@ -5426,6 +6531,8 @@ export async function handleHostOp(
     return { text, cursor: Math.min(Math.max(0, cursor), text.length) }
   }
   if (op === 'prompt.fill') {
+    const decErr = validatePromptDecorations(rec?.decorations)
+    if (decErr !== undefined) hostCheck(op, decErr, plugin)
     // densable Qit: OFr()?.write ?? no_composer. Iss.write is the remote
     // ui_prompt_fill client; unbound TUI (promptBoxBound) is OFr null.
     const text = typeof rec?.text === 'string' ? rec.text : ''
@@ -6192,6 +7299,22 @@ function forkUsageOf(usage: {
   }
 }
 
+const turnCacheSafeParams = new Map<
+  string,
+  import('../forkedAgent.js').CacheSafeParams
+>()
+
+export function setTurnRequestCacheSafeParams(
+  turnId: string,
+  params: import('../forkedAgent.js').CacheSafeParams,
+): void {
+  turnCacheSafeParams.set(turnId, params)
+}
+
+export function clearTurnRequestCacheSafeParams(turnId: string): void {
+  turnCacheSafeParams.delete(turnId)
+}
+
 /** densable `T_t` `$.model.fork`. */
 async function runModelFork(
   input: Record<string, unknown>,
@@ -6200,7 +7323,10 @@ async function runModelFork(
   const { getLastCacheSafeParams, runForkedAgent } = await import(
     '../forkedAgent.js'
   )
-  const params = getLastCacheSafeParams()
+  const heldTurn = getCurrentHeldTurnId()
+  const params =
+    (heldTurn !== undefined ? turnCacheSafeParams.get(heldTurn) : undefined) ??
+    getLastCacheSafeParams()
   if (!params) {
     return { isAnswered: false, reason: 'nothing-to-fork' }
   }
@@ -7285,6 +8411,7 @@ export function agentSpawnUnappliedWarning(
 }
 
 export const AGENT_SPAWN_HOP_SITE: FunctionHookHopSite = {
+  unappliedArgument: agentSpawnUnappliedWarning,
   restoreArgument: (passed, original) => {
     const restored = restorePinnedKeys(
       RESTORE_AGENT_SPAWN_KEYS,
@@ -8297,9 +9424,43 @@ const UI_INVALIDATE_EVENTS = [
   'prompt.context',
   'prompt.attachment',
   'tool.describe',
+  'tool.list',
   'command.describe',
   'config.describe',
 ] as const
+const pendingUiInvalidations = new Set<string>()
+
+export function getPendingUiInvalidations(): ReadonlySet<string> {
+  return pendingUiInvalidations
+}
+
+const defaultUiInvalidationHandlers: Partial<Record<string, () => void>> = {}
+
+export function registerUiInvalidationHandlers(
+  handlers: Partial<Record<string, () => void>>,
+): void {
+  Object.assign(defaultUiInvalidationHandlers, handlers)
+}
+
+export function applyPendingUiInvalidations(
+  handlers: Partial<Record<string, () => void>> = {},
+): string[] {
+  const merged = { ...defaultUiInvalidationHandlers, ...handlers }
+  const applied: string[] = []
+  for (const event of pendingUiInvalidations) {
+    try {
+      merged[event]?.()
+      applied.push(event)
+    } catch (err) {
+      logForDebugging(
+        `$.ui.invalidate("${event}"): the cache drop threw: ${describeThrown(err)}`,
+        { level: 'error' },
+      )
+    }
+  }
+  pendingUiInvalidations.clear()
+  return applied
+}
 const pluginPanes: Array<{
   id: string
   plugin: string
@@ -9609,6 +10770,11 @@ export async function evaluateUiRender(
   if (hoverReason !== undefined) {
     logUiRenderRefused(component, hoverReason)
     throw new Error(hoverReason)
+  }
+  const rowsReason = uiRenderDialogRowsCheck(tree, component, surface)
+  if (rowsReason !== undefined) {
+    logUiRenderRefused(component, rowsReason)
+    throw new Error(rowsReason)
   }
   if (
     isEventRecord(tree) &&
@@ -12680,6 +13846,214 @@ export function uiRenderTreeCheck(tree: unknown): string | undefined {
     : 'something that is not a tree element'
 }
 
+const UI_LARGE_SURFACES = new Set(['desktop', 'vscode', 'mobile'])
+const UI_DIALOG_ROWS_MAX_LARGE = 48
+const UI_DIALOG_ROWS_MAX_DEFAULT = 12
+const UI_DIALOG_COLUMN_WIDTH = 40
+const UI_BOX_BORDER_ROWS = 2
+const UI_BOX_ROW_MULTIPLIER: Record<string, number> = {
+  padding: 2,
+  paddingY: 2,
+  paddingTop: 1,
+  paddingBottom: 1,
+  margin: 2,
+  marginY: 2,
+  marginTop: 1,
+  marginBottom: 1,
+}
+const UI_INLINE_ELEMENTS = new Set(['Text', 'Link', 'Button'])
+
+/** densable `C8s` — 48 rows on desktop/vscode/mobile, 12 otherwise. */
+export function getSurfaceUiRenderCaps(surface?: string): {
+  rowsMax: number
+  isMarkdownDrawn: boolean
+} {
+  const isLarge = surface !== undefined && UI_LARGE_SURFACES.has(surface)
+  return {
+    rowsMax: isLarge ? UI_DIALOG_ROWS_MAX_LARGE : UI_DIALOG_ROWS_MAX_DEFAULT,
+    isMarkdownDrawn: isLarge,
+  }
+}
+
+function countWrappedTextRows(
+  text: string,
+  width: number,
+  rowsMax: number,
+): number {
+  let newlines = 0
+  let idx = text.indexOf('\n')
+  while (idx !== -1) {
+    newlines += 1
+    if (newlines > rowsMax) return newlines
+    idx = text.indexOf('\n', idx + 1)
+  }
+  const budgetChars = width * (rowsMax + 1)
+  const sampleLen = Math.min(text.length, budgetChars)
+  return newlines + Math.floor(sampleLen / width)
+}
+
+/**
+ * densable `I0e` row cap — enforces `C8s(surface).rowsMax` (48 or 12) around
+ * `AskUserQuestion` dialogs, refusing `more than ${rowsMax} rows around the dialog`.
+ */
+export function uiRenderDialogRowsCheck(
+  tree: unknown,
+  component: string,
+  surface?: string,
+): string | undefined {
+  if (component !== ENGINE_ALONE_UI_RENDER) return undefined
+  const caps = getSurfaceUiRenderCaps(surface)
+  let rows = 0
+
+  function visit(
+    node: unknown,
+    inInline: boolean,
+    inButton: boolean,
+  ): string | undefined {
+    if (typeof node === 'string') {
+      if (!inButton) {
+        rows +=
+          (inInline ? 0 : 1) +
+          countWrappedTextRows(node, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      }
+      return undefined
+    }
+    if (!isEventRecord(node) || typeof node.type !== 'string') {
+      return undefined
+    }
+    const { type, props, children } = node
+    if (type === 'engine') return undefined
+    if (type === 'Markdown') {
+      if (!caps.isMarkdownDrawn) {
+        return 'Markdown around the dialog (its rows are not bounded there)'
+      }
+      const text =
+        isEventRecord(props) && typeof props.text === 'string' ? props.text : ''
+      rows +=
+        1 + countWrappedTextRows(text, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      return undefined
+    }
+    if (type === 'Raster' || type === 'Image') {
+      if (isEventRecord(props) && typeof props.rows === 'number') {
+        rows += props.rows
+      }
+      return undefined
+    }
+    if (type === 'Input') {
+      const baseRows =
+        isEventRecord(props) && typeof props.rows === 'number' ? props.rows : 1
+      const label =
+        isEventRecord(props) && typeof props.label === 'string'
+          ? props.label
+          : ''
+      rows +=
+        baseRows +
+        countWrappedTextRows(label, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      return undefined
+    }
+    if (type === 'Progress') {
+      const hasVal = isEventRecord(props) && props.value !== undefined
+      const label =
+        isEventRecord(props) && typeof props.label === 'string'
+          ? props.label
+          : ''
+      rows +=
+        (hasVal ? 2 : 1) +
+        countWrappedTextRows(label, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      return undefined
+    }
+    if (type === 'Code') {
+      const source =
+        isEventRecord(props) && typeof props.source === 'string'
+          ? props.source
+          : ''
+      rows +=
+        1 + countWrappedTextRows(source, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      return undefined
+    }
+    if (type === 'Svg') {
+      const alt =
+        isEventRecord(props) && typeof props.alt === 'string' ? props.alt : ''
+      rows +=
+        1 + countWrappedTextRows(alt, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      return undefined
+    }
+    if (type === 'Button') {
+      const label =
+        isEventRecord(props) && typeof props.label === 'string'
+          ? props.label
+          : ''
+      rows +=
+        1 + countWrappedTextRows(label, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          const err = visit(child, true, true)
+          if (err !== undefined) return err
+        }
+      }
+      return undefined
+    }
+    if (type === 'Link') {
+      const label =
+        isEventRecord(props) && typeof props.label === 'string'
+          ? props.label
+          : isEventRecord(props) && typeof props.href === 'string'
+            ? props.href
+            : ''
+      rows += countWrappedTextRows(label, UI_DIALOG_COLUMN_WIDTH, caps.rowsMax)
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          const err = visit(child, true, inButton)
+          if (err !== undefined) return err
+        }
+      }
+      return undefined
+    }
+    const nextInline = inInline || UI_INLINE_ELEMENTS.has(type)
+    if (!inInline && UI_INLINE_ELEMENTS.has(type)) {
+      rows += 1
+    }
+    let gapMultiplier = 0
+    if (isEventRecord(props)) {
+      for (const [key, val] of Object.entries(props)) {
+        let numVal: number | undefined
+        if (typeof val === 'number') {
+          numVal = Math.abs(val)
+        } else if (
+          typeof val === 'string' &&
+          Object.hasOwn(UI_BOX_NAMED_SPACING, val)
+        ) {
+          numVal =
+            UI_BOX_NAMED_SPACING[val as keyof typeof UI_BOX_NAMED_SPACING].down
+        }
+        if (numVal !== undefined) {
+          rows += numVal * (UI_BOX_ROW_MULTIPLIER[key] ?? 0)
+          if (key === 'gap' || key === 'rowGap') {
+            gapMultiplier += numVal
+          }
+        } else if (key === 'borderStyle') {
+          rows += UI_BOX_BORDER_ROWS
+        }
+      }
+    }
+    if (Array.isArray(children)) {
+      rows += gapMultiplier * children.length
+      for (const child of children) {
+        const err = visit(child, nextInline, inButton)
+        if (err !== undefined) return err
+      }
+    }
+    return undefined
+  }
+
+  const problem = visit(tree, false, false)
+  if (problem !== undefined) return problem
+  if (rows > caps.rowsMax) {
+    return `more than ${caps.rowsMax} rows around the dialog`
+  }
+  return undefined
+}
+
 function valueIsProxy(value: unknown): boolean {
   if (
     value === null ||
@@ -12716,7 +14090,123 @@ const HOVER_TEXT_PROPS = new Set([
   'underline',
   'strikethrough',
   'inverse',
+  'mono',
+  'tabular',
 ])
+export const UI_TEXT_SIZES = new Set([
+  'caption',
+  'footnote',
+  'body',
+  'heading',
+  'title',
+])
+export const UI_TEXT_WEIGHTS = new Set([
+  'regular',
+  'medium',
+  'semibold',
+  'bold',
+])
+export const UI_TEXT_DIRS = new Set(['ltr', 'rtl'])
+export const UI_BOX_NAMED_SPACING = {
+  xs: { across: 1, down: 0 },
+  sm: { across: 1, down: 0 },
+  md: { across: 2, down: 1 },
+  lg: { across: 3, down: 1 },
+  xl: { across: 4, down: 2 },
+} as const
+export const UI_BOX_SPACING_AXES: Record<string, 'across' | 'down'> = {
+  columnGap: 'across',
+  rowGap: 'down',
+  marginX: 'across',
+  marginY: 'down',
+  marginLeft: 'across',
+  marginRight: 'across',
+  marginTop: 'down',
+  marginBottom: 'down',
+  paddingX: 'across',
+  paddingY: 'down',
+  paddingLeft: 'across',
+  paddingRight: 'across',
+  paddingTop: 'down',
+  paddingBottom: 'down',
+}
+export const UI_BOX_SHORTHAND_SPACING: Record<string, [string, string]> = {
+  gap: ['columnGap', 'rowGap'],
+  margin: ['marginX', 'marginY'],
+  padding: ['paddingX', 'paddingY'],
+}
+export const PROMPT_DECORATION_STYLE_KEYS = new Set([
+  'color',
+  'backgroundColor',
+  'dimColor',
+  'bold',
+  'italic',
+  'underline',
+  'strikethrough',
+])
+export const PROMPT_DECORATION_VIRTUAL_TEXT = 'virtualText'
+export const PROMPT_DECORATION_KEYS = new Set([
+  'start',
+  'end',
+  ...PROMPT_DECORATION_STYLE_KEYS,
+  PROMPT_DECORATION_VIRTUAL_TEXT,
+])
+
+export function validatePromptDecorations(
+  decorations: unknown,
+): string | undefined {
+  if (decorations === undefined) return undefined
+  if (!Array.isArray(decorations)) {
+    return 'decorations must be an array of { start, end } runs'
+  }
+  for (let i = 0; i < decorations.length; i++) {
+    const run = decorations[i]
+    if (!isEventRecord(run)) {
+      return `decorations[${i}] must be an object with start and end`
+    }
+    const badKey = Object.keys(run).find(k => !PROMPT_DECORATION_KEYS.has(k))
+    if (badKey !== undefined) {
+      return `decorations[${i}].${badKey} is not a decoration key (${[...PROMPT_DECORATION_KEYS].join(', ')})`
+    }
+    if (!Number.isInteger(run.start)) {
+      return `decorations[${i}].start must be an integer (a UTF-16 offset)`
+    }
+    if (!Number.isInteger(run.end)) {
+      return `decorations[${i}].end must be an integer (a UTF-16 offset)`
+    }
+    if (
+      run[PROMPT_DECORATION_VIRTUAL_TEXT] !== undefined &&
+      typeof run[PROMPT_DECORATION_VIRTUAL_TEXT] !== 'string'
+    ) {
+      return `decorations[${i}].${PROMPT_DECORATION_VIRTUAL_TEXT} must be a string`
+    }
+  }
+  return undefined
+}
+
+export function resolveModBoxSpacingProp(
+  prop: string,
+  value: unknown,
+): number | { across: number; down: number } | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && Object.hasOwn(UI_BOX_NAMED_SPACING, value)) {
+    const step =
+      UI_BOX_NAMED_SPACING[value as keyof typeof UI_BOX_NAMED_SPACING]
+    const axis = UI_BOX_SPACING_AXES[prop]
+    if (axis !== undefined) return step[axis]
+    if (prop in UI_BOX_SHORTHAND_SPACING) return step
+  }
+  return undefined
+}
+
+export function normalizeModTextProps(
+  props: Record<string, unknown>,
+): Record<string, unknown> {
+  if (props.bold === true && props.weight === undefined) {
+    return { ...props, weight: 'bold' }
+  }
+  return props
+}
 const HOVER_SHIFT_PROPS = new Set(['top', 'left', 'right', 'bottom'])
 const HOVER_SCOPE_MAX = 64
 
@@ -12776,46 +14266,69 @@ export function uiRenderDrawingPlainCheck(
 ): string | undefined {
   const seen = new WeakMap<object, true>()
   const lead = plugin === '' ? 'ui.render' : plugin
-  const walk = (
-    value: unknown,
-    key: string | undefined,
-  ): string | undefined => {
-    if (value === null || value === undefined) return undefined
+  const stack: Array<{ value: unknown; key: string | undefined }> = [
+    { value: tree, key: undefined },
+  ]
+  while (stack.length > 0) {
+    const { value, key } = stack.pop()!
+    if (value === null || value === undefined) continue
     if (
       typeof value === 'string' ||
       typeof value === 'number' ||
       typeof value === 'boolean'
     ) {
-      return undefined
+      continue
     }
     if (valueIsProxy(value)) {
       return `${lead}: returned a drawing that holds a Proxy; an element, its props and its hover are plain objects and arrays`
     }
     if (typeof value === 'function') {
-      if (key === 'onPress' || key === 'onEvent') return undefined
+      if (key === 'onPress' || key === 'onEvent') continue
       return `${lead}: returned a drawing with a function where plain data goes; a closure rides only in an element's onPress or onEvent`
     }
-    if (typeof value !== 'object') return undefined
-    if (seen.has(value)) return undefined
+    if (typeof value !== 'object') continue
+    if (seen.has(value)) continue
     seen.set(value, true)
     if (Array.isArray(value)) {
-      for (const child of value) {
-        const reason = walk(child, undefined)
-        if (reason !== undefined) return reason
+      for (let i = value.length - 1; i >= 0; i--) {
+        let child: unknown
+        try {
+          child = value[i]
+        } catch (err) {
+          if (err instanceof RangeError) {
+            return `${lead}: returned a drawing whose index ${i} getter threw RangeError`
+          }
+          throw err
+        }
+        stack.push({ value: child, key: undefined })
       }
-      return undefined
+      continue
     }
     if (!isPlainDataObject(value)) {
       return `${lead}: returned a drawing that holds an object that is not plain data (a class instance); an element, its props and its hover are plain objects and arrays`
     }
-    for (const [field, child] of Object.entries(value)) {
-      if (field === '__proto__') continue
-      const reason = walk(child, field)
-      if (reason !== undefined) return reason
+    if (Object.hasOwn(value, '__proto__')) {
+      return `${lead}: returned a drawing that holds a __proto__ key; an element, its props and its hover are plain objects without __proto__`
     }
-    return undefined
+    const entries = Object.keys(value)
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const field = entries[i]!
+      if (field === '__proto__') {
+        return `${lead}: returned a drawing that holds a __proto__ key; an element, its props and its hover are plain objects without __proto__`
+      }
+      let child: unknown
+      try {
+        child = (value as Record<string, unknown>)[field]
+      } catch (err) {
+        if (err instanceof RangeError) {
+          return `${lead}: returned a drawing whose "${field}" getter threw RangeError`
+        }
+        throw err
+      }
+      stack.push({ value: child, key: field })
+    }
   }
-  return walk(tree, undefined)
+  return undefined
 }
 
 /**
@@ -13150,7 +14663,7 @@ function runInterfaceCall(
   )
 }
 
-async function runUiHost(
+export async function runUiHost(
   op: string,
   input: Record<string, unknown>,
   plugin?: string,
@@ -13163,18 +14676,29 @@ async function runUiHost(
     ) {
       hostCheck(
         op,
-        'takes "ui.render", "prompt.section", "prompt.context", "prompt.attachment", "tool.describe", "command.describe" or "config.describe"',
+        'takes "ui.render", "prompt.section", "prompt.context", "prompt.attachment", "tool.describe", "tool.list", "command.describe" or "config.describe"',
         plugin,
       )
     }
-    if (event === 'ui.render') {
-      // densable `budgets.renders.invalidate(r.plugin)` (`jis`).
-      if (typeof plugin === 'string' && plugin !== '') {
-        invalidatePluginRender(plugin)
-      } else {
-        bumpFaultRenderFv()
-        bumpRasterFrames()
-      }
+    switch (event) {
+      case 'ui.render':
+        // densable `budgets.renders.invalidate(r.plugin)` (`jis`).
+        if (typeof plugin === 'string' && plugin !== '') {
+          invalidatePluginRender(plugin)
+        } else {
+          bumpFaultRenderFv()
+          bumpRasterFrames()
+        }
+        break
+      case 'prompt.section':
+      case 'prompt.context':
+      case 'prompt.attachment':
+      case 'tool.describe':
+      case 'tool.list':
+      case 'command.describe':
+      case 'config.describe':
+        pendingUiInvalidations.add(event)
+        break
     }
     return undefined
   }
@@ -13619,22 +15143,33 @@ async function runToolCall(
   }
 
   let phase: keyof typeof TOOL_CALL_WITHHELD_SUFFIX = 'nothing'
-  const out = await runFunctionHookChain(
-    'tool.call',
-    callPayload,
-    async passed => {
-      phase = 'started'
-      const result = await executeBottom(passed)
-      phase = 'ran'
-      return result
-    },
-    undefined,
-    undefined,
-    {
-      origin: resolveHookCallOrigin(plugin),
-      hookOrigin,
-    },
-  )
+  let out: unknown
+  try {
+    out = await runFunctionHookChain(
+      'tool.call',
+      callPayload,
+      async passed => {
+        phase = 'started'
+        const result = await executeBottom(passed)
+        phase = 'ran'
+        return result
+      },
+      undefined,
+      undefined,
+      {
+        origin: resolveHookCallOrigin(plugin),
+        hookOrigin,
+      },
+    )
+  } catch (err) {
+    if (phase !== 'nothing') {
+      const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+      throw new Error(
+        `${prefix}$.tool.call${TOOL_CALL_WITHHELD_SUFFIX[phase]}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    throw err
+  }
   if (isEventRecord(out) && out.deny !== undefined) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(
@@ -18476,10 +20011,12 @@ export const FUNCTION_HOOK_EVENTS = [
   'session.surface',
   'session.surfaces',
   'session.authorize',
+  'session.identity',
   'session.usage',
   'session.version',
   'turn.abort',
   'prompt.read',
+  'prompt.media',
   'flag.value',
   'tool.list',
   'tool.register',
@@ -18502,6 +20039,7 @@ export const FUNCTION_HOOK_EVENTS = [
   'theme.clear',
   'ui.selection',
   'ui.copy',
+  'ui.view',
   'ui.blit',
   'fs.read',
   'fs.write',

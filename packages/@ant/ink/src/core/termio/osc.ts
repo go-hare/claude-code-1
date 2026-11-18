@@ -482,6 +482,14 @@ export function hasUnknownSequencePrintingBug(
   )
 }
 
+/**
+ * Official `pre()` — true when the terminal prints unknown CSI/OSC sequences
+ * literally (VTE < 0.53).
+ */
+export function printsUnknownSequences(): boolean {
+  return hasUnknownSequencePrintingBug(envTerminalName())
+}
+
 export async function setClipboard(text: string): Promise<string> {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   const ssh = isSshSession()

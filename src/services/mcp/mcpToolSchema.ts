@@ -9,6 +9,9 @@
  * Invent-ban: WMf dropped-tool allowlist + client.droppedTools UI host.
  */
 
+import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
+import { APIError } from '@anthropic-ai/sdk'
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { logEvent } from '../analytics/index.js'
@@ -531,4 +534,209 @@ export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
     })
   }
   return kept
+}
+
+/**
+ * Official `Hit` / `y$r` / `Bit` / `jbn` / `a2o` / `class jit` (2.1.300 #790):
+ * When the API returns HTTP 400 rejecting an MCP tool's `input_schema`,
+ * degrade that tool's schema to `{ type: 'object' }` for the rest of the
+ * conversation and retry.
+ */
+export const EMPTY_OBJECT_TOOL_SCHEMA = { type: 'object' } as const
+export const MAX_REFUSED_TOOL_SCHEMA_REPLACEMENTS = 8
+
+const sessionRefusedToolSchemas = new Map<string, Set<string>>()
+
+export function getRefusedToolSchemas(): Map<string, Set<string>> {
+  return sessionRefusedToolSchemas
+}
+
+export function resetRefusedToolSchemas(): void {
+  sessionRefusedToolSchemas.clear()
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(v => canonicalJson(v)).join(',')}]`
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort()
+  return `{${keys
+    .map(
+      k =>
+        `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`,
+    )
+    .join(',')}}`
+}
+
+export function hashToolInputSchema(schema: unknown): string {
+  return createHash('sha256').update(canonicalJson(schema)).digest('hex')
+}
+
+export function replaceRefusedToolSchemas<T>(
+  toolSchemas: T[],
+  refusedToolSchemas: Map<string, Set<string>> = sessionRefusedToolSchemas,
+): T[] {
+  if (refusedToolSchemas.size === 0) return toolSchemas
+  try {
+    return toolSchemas.map(s => {
+      if (s === null || typeof s !== 'object') return s
+      const rec = s as {
+        name?: unknown
+        input_schema?: unknown
+        eager_input_streaming?: unknown
+      }
+      if (
+        typeof rec.name !== 'string' ||
+        !('input_schema' in rec) ||
+        refusedToolSchemas
+          .get(rec.name)
+          ?.has(hashToolInputSchema(rec.input_schema)) !== true
+      ) {
+        return s
+      }
+      const { eager_input_streaming: _omit, ...rest } = rec
+      return {
+        ...rest,
+        input_schema: { ...EMPTY_OBJECT_TOOL_SCHEMA },
+      } as unknown as T
+    })
+  } catch {
+    return toolSchemas
+  }
+}
+
+export function parseMessageToolSchemaError(error: APIError): {
+  field: string
+  place?: { message: number; block: number }
+} | null {
+  const errObj = error.error as
+    | { error?: { param?: unknown }; param?: unknown }
+    | undefined
+  const param =
+    typeof errObj?.error?.param === 'string'
+      ? errObj.error.param
+      : typeof errObj?.param === 'string'
+        ? errObj.param
+        : undefined
+  if (!param) return null
+  const m =
+    /^(?:body\.)?messages\.(\d+)\.((?:(?:content|tool_changes)\.\d+\.)*)tool\.definition\.(\w+)/.exec(
+      param,
+    )
+  if (!m?.[3]) return null
+  const blockMatch = /^content\.(\d+)\.$/.exec(m[2] ?? '')?.[1]
+  return {
+    field: m[3],
+    place:
+      blockMatch === undefined
+        ? undefined
+        : { message: Number(m[1]), block: Number(blockMatch) },
+  }
+}
+
+export type RefusedToolSchemaLookupTool = {
+  name: string
+  isMcp?: boolean
+  mcpInfo?: { serverName: string; toolName: string }
+}
+
+export class RefusedToolSchemaResolver {
+  #refusedToolSchemas: Map<string, Set<string>>
+  #replacements = 0
+
+  constructor(
+    refusedToolSchemas: Map<string, Set<string>> = sessionRefusedToolSchemas,
+  ) {
+    this.#refusedToolSchemas = refusedToolSchemas
+  }
+
+  get replacements(): number {
+    return this.#replacements
+  }
+
+  resolve(
+    error: unknown,
+    toolSchemas: ReadonlyArray<unknown> | undefined,
+    tools: ReadonlyArray<RefusedToolSchemaLookupTool>,
+    querySource?: string,
+  ): string | undefined {
+    if (!(error instanceof APIError) || error.status !== 400) return undefined
+    const msgMatch = /\btools\.(\d+)\.(?:custom\.)?input_schema\b/.exec(
+      error.message,
+    )?.[1]
+    const parsedPlace = parseMessageToolSchemaError(error)
+    const fieldPlace =
+      parsedPlace?.field === 'input_schema' ? parsedPlace.place : undefined
+    if (msgMatch === undefined && fieldPlace === undefined) return undefined
+
+    if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_calm_crescent', true)) {
+      this.#logOutcome('switched_off', querySource)
+      return undefined
+    }
+
+    const rawTarget =
+      msgMatch !== undefined ? toolSchemas?.[Number(msgMatch)] : undefined
+    if (
+      rawTarget === null ||
+      typeof rawTarget !== 'object' ||
+      !('name' in rawTarget) ||
+      typeof (rawTarget as { name?: unknown }).name !== 'string' ||
+      !('input_schema' in rawTarget)
+    ) {
+      this.#logOutcome('no_mcp_tool_at_index', querySource)
+      return undefined
+    }
+    const target = rawTarget as { name: string; input_schema: unknown }
+
+    const matchedTool = tools.find(t => t.name === target.name)
+    if (!matchedTool?.isMcp && !target.name.startsWith('mcp__')) {
+      this.#logOutcome('no_mcp_tool_at_index', querySource)
+      return undefined
+    }
+
+    if (isDeepStrictEqual(target.input_schema, EMPTY_OBJECT_TOOL_SCHEMA)) {
+      this.#logOutcome('already_replaced', querySource)
+      return undefined
+    }
+
+    if (this.#replacements >= MAX_REFUSED_TOOL_SCHEMA_REPLACEMENTS) {
+      this.#logOutcome('bound_reached', querySource)
+      return undefined
+    }
+
+    const existing =
+      this.#refusedToolSchemas.get(target.name) ?? new Set<string>()
+    existing.add(hashToolInputSchema(target.input_schema))
+    this.#refusedToolSchemas.set(target.name, existing)
+    this.#replacements++
+
+    this.#logOutcome(
+      fieldPlace === undefined ? 'replaced' : 'replaced_in_message',
+      querySource,
+    )
+
+    if (matchedTool?.mcpInfo) {
+      logMCPError(
+        matchedTool.mcpInfo.serverName,
+        `Tool "${matchedTool.mcpInfo.toolName}": the API refused this tool's input schema. Claude can still call the tool in this conversation, but does not see its parameters. Fix the schema on the MCP server, then start a new conversation. The API said: ${error.message}`,
+      )
+    }
+
+    return `retry:tool-schema-refused-${this.#replacements}`
+  }
+
+  #logOutcome(outcome: string, querySource?: string): void {
+    logEvent('tengu_api_tool_schema_replacement', {
+      outcome:
+        outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      replacements: this.#replacements,
+      ...(querySource !== undefined && {
+        query_source:
+          querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+    })
+  }
 }

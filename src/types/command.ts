@@ -117,6 +117,15 @@ export type PromptCommand = {
   // Glob patterns for file paths this skill applies to
   // When set, the skill is only visible after the model touches matching files
   paths?: string[]
+  /**
+   * densable `skillFile` (`Wme`/`Zko`) — original parsed frontmatter + optional
+   * parse problem + absolute path, consumed by `skillPromptHook.ts` (`skill.prompt`).
+   */
+  skillFile?: {
+    path?: string
+    frontmatterAsWritten?: unknown
+    frontmatterProblem?: string
+  }
   getPromptForCommand(
     args: string,
     context: ToolUseContext,

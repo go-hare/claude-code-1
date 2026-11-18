@@ -135,6 +135,7 @@ import {
 import { decidePrintSetModel } from 'src/utils/model/printSetModel.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import {
+  AUTO_GATE_DENIED_TRIGGER,
   getAutoModeUnavailableNotification,
   getAutoModeUnavailableReason,
   isAutoModeGateEnabled,
@@ -142,10 +143,14 @@ import {
   transitionPermissionMode,
 } from 'src/utils/permissions/permissionSetup.js'
 import { isRemoteEnvEnabled } from 'src/utils/residualFinalEnvGates.js'
+import { isSafeModeEnabled } from 'src/utils/safeMode.js'
 import { AwsAuthStatusManager } from 'src/utils/awsAuthStatusManager.js'
 import { findUnresolvedToolUse } from 'src/utils/sessionStorage.js'
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
-import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import {
+  getSettings_DEPRECATED,
+  getSettingsForSource,
+} from 'src/utils/settings/settings.js'
 import { resetSettingsCache } from 'src/utils/settings/settingsCache.js'
 import type { Stream } from 'src/utils/stream.js'
 import type {
@@ -364,12 +369,40 @@ export class HeadlessControlPlane {
       clearFastModeCooldown()
     }
     // densable 2.1.218 #31 — print/SDK set_model also runs uU/dU (MB)
+    // Official 2.1.299 (#605) — exit auto mode when the new model doesn't support it
     this.deps.setAppState(prev => {
       const applied = applyFastModeOnModelSwitch(decision.model, prev.fastMode)
+      let nextToolPermissionContext = prev.toolPermissionContext
+      if (
+        feature('TRANSCRIPT_CLASSIFIER') &&
+        prev.toolPermissionContext.mode === 'auto'
+      ) {
+        let gateOk = true
+        try {
+          gateOk = isAutoModeGateEnabled()
+        } catch {
+          gateOk = false
+        }
+        if (!gateOk) {
+          const transitioned = transitionPermissionMode(
+            'auto',
+            'default',
+            prev.toolPermissionContext,
+            AUTO_GATE_DENIED_TRIGGER,
+          )
+          nextToolPermissionContext = {
+            ...transitioned,
+            mode: 'default',
+          }
+        }
+      }
       return {
         ...prev,
         mainLoopModelForSession: decision.model,
         ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
+        ...(nextToolPermissionContext !== prev.toolPermissionContext
+          ? { toolPermissionContext: nextToolPermissionContext }
+          : null),
       }
     })
     const { notifySessionMetadataChanged } =
@@ -1784,11 +1817,15 @@ export async function handleMcpSetServers<
     string,
     McpServerConfigForProcessTransport
   > = allowedServers
-  const exclusiveIgnoreReason = isRemoteHermeticSession()
-    ? HERMETIC_MCP_SET_SERVERS_IGNORE_REASON
-    : isRemoteEnvEnabled() && doesEnterpriseMcpConfigExist()
-      ? ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON
-      : undefined
+  const exclusiveIgnoreReason = isSafeModeEnabled()
+    ? 'Ignored in safe mode'
+    : isRemoteHermeticSession()
+      ? HERMETIC_MCP_SET_SERVERS_IGNORE_REASON
+      : isRemoteEnvEnabled() && doesEnterpriseMcpConfigExist()
+        ? ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON
+        : getSettingsForSource('policySettings')?.disableSideloadFlags === true
+          ? 'Blocked by managed policy (disableSideloadFlags)'
+          : undefined
   if (exclusiveIgnoreReason !== undefined) {
     const kept: Record<string, McpServerConfigForProcessTransport> = {}
     for (const [name, config] of Object.entries(allowedServers)) {
@@ -1936,6 +1973,30 @@ export async function reconcileMcpServers<
 
     if ((config.type as string) === 'sdk') {
       added.push(name)
+      continue
+    }
+
+    const { blocked: preConnectBlocked } = filterMcpServersByPolicy({
+      [name]: config,
+    })
+    if (preConnectBlocked.length > 0) {
+      errors[name] = `MCP server "${name}" is blocked by managed policy`
+      continue
+    }
+    if (isSafeModeEnabled()) {
+      errors[name] = 'Ignored in safe mode'
+      continue
+    }
+    if (isRemoteHermeticSession()) {
+      errors[name] = HERMETIC_MCP_SET_SERVERS_IGNORE_REASON
+      continue
+    }
+    if (isRemoteEnvEnabled() && doesEnterpriseMcpConfigExist()) {
+      errors[name] = ENTERPRISE_MCP_SET_SERVERS_IGNORE_REASON
+      continue
+    }
+    if (getSettingsForSource('policySettings')?.disableSideloadFlags === true) {
+      errors[name] = 'Blocked by managed policy (disableSideloadFlags)'
       continue
     }
 

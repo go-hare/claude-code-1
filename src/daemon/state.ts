@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { isProcessRunning } from '../utils/genericProcessUtils.js'
 
 /**
  * Daemon state persisted to disk so that `status` / `stop` can work
@@ -64,14 +65,10 @@ export function removeDaemonState(name = 'remote-control'): void {
 
 /**
  * Check if a process with the given PID is alive.
+ * Delegates to `isProcessRunning` so Windows uses FFI/bounded process checks (#697).
  */
 function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
+  return isProcessRunning(pid)
 }
 
 /**

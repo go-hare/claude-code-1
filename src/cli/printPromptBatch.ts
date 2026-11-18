@@ -42,6 +42,18 @@ function toBlocks(value: QueuedPromptValue): ContentBlockParam[] {
   return typeof value === 'string' ? [{ type: 'text', text: value }] : value
 }
 
+function concatPromptBlockArrays(
+  prev: ContentBlockParam[],
+  next: ContentBlockParam[],
+): ContentBlockParam[] {
+  const last = prev.at(-1)
+  const first = next[0]
+  if (last?.type === 'text' && first?.type === 'text') {
+    return [...prev.slice(0, -1), { ...last, text: last.text + '\n' }, ...next]
+  }
+  return [...prev, ...next]
+}
+
 /** densable `LP` — joinPromptValues. */
 export function joinPromptValues(
   values: QueuedPromptValue[],
@@ -50,7 +62,7 @@ export function joinPromptValues(
   if (values.every(v => typeof v === 'string')) {
     return values.join('\n')
   }
-  return values.flatMap(toBlocks)
+  return values.map(toBlocks).reduce(concatPromptBlockArrays)
 }
 
 /** densable `tp` for print Uf — main thread. */

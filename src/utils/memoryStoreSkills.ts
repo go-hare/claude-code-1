@@ -8,7 +8,7 @@
 
 import type { Command } from '../types/command.js'
 import { isAbsolute, join, sep as pathSep } from 'path'
-import { parseFrontmatter } from './frontmatterParser.js'
+import { buildSkillFile, parseFrontmatter } from './frontmatterParser.js'
 import { isENOENT } from './errors.js'
 import { getDisableSlashCommands } from '../bootstrap/state.js'
 import {
@@ -355,10 +355,12 @@ export async function loadMemoryStoreSkillCommands(
       }
       continue
     }
-    const { frontmatter, content: markdownContent } = parseFrontmatter(
-      content,
-      skillFilePath,
-    )
+    const {
+      frontmatter,
+      frontmatterAsWritten,
+      asWrittenProblem,
+      content: markdownContent,
+    } = parseFrontmatter(content, skillFilePath)
     const skillName = `${MEMORY_STORE_SKILL_NAME_PREFIX}${T.name}`
     const parsed = parseSkillFrontmatterFields(
       frontmatter,
@@ -375,6 +377,11 @@ export async function loadMemoryStoreSkillCommands(
         loadedFrom: 'memoryStore',
         userInvocable: false,
         paths: undefined,
+        skillFile: buildSkillFile(
+          frontmatterAsWritten,
+          skillFilePath,
+          asWrittenProblem,
+        ),
       }),
     )
   }
@@ -527,10 +534,13 @@ export async function registerMemoryStoreSkills(
               skip(D.mount, `read failed for ${T.name} (${file.kind})`)
               continue
             }
-            const { frontmatter, content: markdownContent } = parseFrontmatter(
-              file.content,
-              join(Z, T.name, 'SKILL.md'),
-            )
+            const skillFilePath = join(Z, T.name, 'SKILL.md')
+            const {
+              frontmatter,
+              frontmatterAsWritten,
+              asWrittenProblem,
+              content: markdownContent,
+            } = parseFrontmatter(file.content, skillFilePath)
             const skillName = `${MEMORY_STORE_SKILL_NAME_PREFIX}${T.name}`
             const parsed = parseSkillFrontmatterFields(
               frontmatter,
@@ -547,6 +557,11 @@ export async function registerMemoryStoreSkills(
                 loadedFrom: 'memoryStore',
                 userInvocable: false,
                 paths: undefined,
+                skillFile: buildSkillFile(
+                  frontmatterAsWritten,
+                  skillFilePath,
+                  asWrittenProblem,
+                ),
               }),
             )
           }

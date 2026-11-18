@@ -129,7 +129,12 @@ import {
 import { clearHeldClearedDraft, holdCleared, restoreCleared } from '../../utils/clearedDraftHold.js';
 import { resolveThemeSetting } from '../../utils/systemTheme.js';
 import { logForDebugging } from '../../utils/debug.js';
-import { createPromptEditComposer, hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
+import {
+  createPromptChangeCoordinator,
+  createPromptEditComposer,
+  hasMatchingFunctionHook,
+  type PromptChangeOrigin,
+} from '../../utils/plugins/functionHooksModules.js';
 import { parseDirectMemberMessage, sendDirectMemberMessage } from '../../utils/directMemberMessage.js';
 import { type EffortLevel, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
 import { env } from '../../utils/env.js';
@@ -602,6 +607,7 @@ function PromptInput({
   // Init after liveInputRef / cursorOffsetRef (below).
   const promptEditHooked = hasMatchingFunctionHook('prompt.edit');
   const promptEditComposerRef = useRef<ReturnType<typeof createPromptEditComposer> | null>(null);
+  const promptChangeCoordinatorRef = useRef<ReturnType<typeof createPromptChangeCoordinator> | null>(null);
   const [leftArrowHintShown, setLeftArrowHintShown] = useState(false);
   /** densable odp/idp/sdp gesture state (2.1.218 editing-quiet confirm) */
   const leftArrowGestureRef = useRef(createLeftArrowGestureState());
@@ -632,7 +638,9 @@ function PromptInput({
   // `live = input` each render would wipe mid-batch typed chars on sibling re-render.
   const liveInputRef = React.useRef(input);
   const prevPropInputRef = React.useRef(input);
+  const pendingExternalChangeRef = React.useRef<{ before: string; after: string } | null>(null);
   if (input !== prevPropInputRef.current) {
+    pendingExternalChangeRef.current = { before: prevPropInputRef.current, after: input };
     prevPropInputRef.current = input;
     liveInputRef.current = input;
   }
@@ -643,6 +651,21 @@ function PromptInput({
   draftControllerRef.current = draftController;
   const onInputChangeRef = React.useRef(onInputChange);
   onInputChangeRef.current = onInputChange;
+  if (promptChangeCoordinatorRef.current === null) {
+    promptChangeCoordinatorRef.current = createPromptChangeCoordinator(() => ({
+      text: liveInputRef.current,
+      cursor: cursorOffsetRef.current,
+    }));
+  }
+  if (pendingExternalChangeRef.current !== null) {
+    const ext = pendingExternalChangeRef.current;
+    pendingExternalChangeRef.current = null;
+    promptChangeCoordinatorRef.current.changed({
+      before: ext.before,
+      after: ext.after,
+      origin: { kind: 'landing' },
+    });
+  }
   if (promptEditComposerRef.current === null) {
     promptEditComposerRef.current = createPromptEditComposer({
       read: () => ({
@@ -670,7 +693,13 @@ function PromptInput({
         : 'prompt.edit: unhooked; the composer relays nothing',
     );
   }, [promptEditHooked]);
-  useEffect(() => () => promptEditComposerRef.current?.dispose(), []);
+  useEffect(
+    () => () => {
+      promptEditComposerRef.current?.dispose();
+      promptChangeCoordinatorRef.current?.dispose();
+    },
+    [],
+  );
   // densable 2.1.211 ht dual-write for N1 / multi-paste / submit. densable also
   // assigns ht.current=H every render; that would wipe dual-write when a sibling
   // setAppState (cacheImagePath) re-renders with still-empty parent state.
@@ -683,7 +712,7 @@ function PromptInput({
   );
   // Wrap onInputChange to track internal changes before they trigger re-render
   const trackAndSetInput = React.useCallback(
-    (value: string) => {
+    (value: string, key?: string, origin?: PromptChangeOrigin) => {
       const before = { text: liveInputRef.current, cursor: cursorOffsetRef.current };
       lastInternalInputRef.current = value;
       liveInputRef.current = value;
@@ -695,6 +724,12 @@ function PromptInput({
       promptEditComposerRef.current?.record({
         before,
         after: { text: value, cursor: cursorOffsetRef.current },
+        ...(key !== undefined ? { key } : {}),
+      });
+      promptChangeCoordinatorRef.current?.changed({
+        before: before.text,
+        after: value,
+        origin,
       });
     },
     [draftController, onInputChange],
@@ -1550,7 +1585,7 @@ function PromptInput({
       // Deselect footer items when user types
       setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
 
-      trackAndSetInput(processedValue);
+      trackAndSetInput(processedValue, undefined, { kind: 'composer' });
     },
     [trackAndSetInput, onModeChange, input, cursorOffset, pushToBuffer, pastedContents, dismissStashHint, setAppState],
   );
@@ -1595,7 +1630,7 @@ function PromptInput({
     // densable Ey: restoreCleared before queue / history when prompt empty.
     const restored = restoreCleared(liveInputRef.current);
     if (restored) {
-      trackAndSetInput(restored.text);
+      trackAndSetInput(restored.text, undefined, { kind: 'history' });
       setCursorOffset(restored.text.length);
       setPastedContents(restored.pastedContents);
       pastedContentsRef.current = restored.pastedContents;
@@ -1835,7 +1870,7 @@ function PromptInput({
               priority: 'immediate',
               timeoutMs: 3000,
             });
-            trackAndSetInput('');
+            trackAndSetInput('', undefined, { kind: 'clear' });
             setCursorOffset(0);
             clearBuffer();
             resetHistory();
@@ -2283,7 +2318,7 @@ function PromptInput({
     if (canUndo) {
       const previousState = undo();
       if (previousState) {
-        trackAndSetInput(previousState.text);
+        trackAndSetInput(previousState.text, undefined, { kind: 'undo' });
         setCursorOffset(previousState.cursorOffset);
         setPastedContents(previousState.pastedContents);
         pastedContentsRef.current = previousState.pastedContents;
@@ -2295,8 +2330,10 @@ function PromptInput({
   const handleNewline = useCallback(() => {
     pushToBuffer(input, cursorOffset, pastedContents);
     const newInput = input.slice(0, cursorOffset) + '\n' + input.slice(cursorOffset);
-    trackAndSetInput(newInput);
-    setCursorOffset(cursorOffset + 1);
+    const nextCursor = cursorOffset + 1;
+    setCursorOffset(nextCursor);
+    cursorOffsetRef.current = nextCursor;
+    trackAndSetInput(newInput, '\n');
   }, [input, cursorOffset, trackAndSetInput, setCursorOffset, pushToBuffer, pastedContents]);
 
   // Handler for chat:externalEditor - edit in $EDITOR
@@ -2356,7 +2393,7 @@ function PromptInput({
       // Drop the Ctrl+C hold so empty ↑ restores this stash, not that draft.
       clearHeldClearedDraft();
       setStashedPrompt({ text: input, cursorOffset, pastedContents });
-      trackAndSetInput('');
+      trackAndSetInput('', undefined, { kind: 'clear' });
       setCursorOffset(0);
       setPastedContents({});
       pastedContentsRef.current = {};
@@ -3330,7 +3367,7 @@ function PromptInput({
           const entryMode = getModeFromInput(renumbered.display);
           const value = getValueFromInput(renumbered.display);
           onModeChange(entryMode);
-          trackAndSetInput(value);
+          trackAndSetInput(value, undefined, { kind: 'history' });
           setPastedContents(renumbered.pastedContents);
           pastedContentsRef.current = renumbered.pastedContents;
           setCursorOffset(value.length);
@@ -3502,7 +3539,7 @@ function PromptInput({
       ? () => {
           const previousState = undo();
           if (previousState) {
-            trackAndSetInput(previousState.text);
+            trackAndSetInput(previousState.text, undefined, { kind: 'undo' });
             setCursorOffset(previousState.cursorOffset);
             setPastedContents(previousState.pastedContents);
             pastedContentsRef.current = previousState.pastedContents;

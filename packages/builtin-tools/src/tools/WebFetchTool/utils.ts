@@ -4,7 +4,9 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { queryHaiku } from 'src/services/api/claude.js'
+import { queryHaiku, queryWithModel } from 'src/services/api/claude.js'
+import { type EffortValue, resolveAppliedEffort } from 'src/utils/effort.js'
+import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
   AbortError,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -670,6 +672,34 @@ export function sliceToMax(text: string, max: number): string {
   return code >= 0xd800 && code <= 0xdbff ? sliced.slice(0, -1) : sliced
 }
 
+/**
+ * #720: Pick effort for WebFetch page reads as web searches do:
+ * the caller's level on the caller's own model, otherwise the level
+ * settings give the small model.
+ */
+export function resolveWebFetchModelAndEffort(
+  callerModel?: string,
+  callerEffort?: EffortValue,
+): {
+  model: string
+  useCallerModel: boolean
+  effortValue: EffortValue | undefined
+} {
+  if (callerModel !== undefined) {
+    return {
+      model: callerModel,
+      useCallerModel: true,
+      effortValue: callerEffort ?? resolveAppliedEffort(callerModel, undefined),
+    }
+  }
+  const smallModel = getSmallFastModel()
+  return {
+    model: smallModel,
+    useCallerModel: false,
+    effortValue: resolveAppliedEffort(smallModel, undefined),
+  }
+}
+
 export async function applyPromptToMarkdown(
   prompt: string,
   markdownContent: string,
@@ -677,6 +707,7 @@ export async function applyPromptToMarkdown(
   isNonInteractiveSession: boolean,
   isPreapprovedDomain: boolean,
   contentLead = '',
+  callerOptions?: { callerModel?: string; callerEffort?: EffortValue },
 ): Promise<string> {
   // Truncate content to avoid "Prompt is too long" errors from the secondary model
   const truncatedContent =
@@ -690,20 +721,36 @@ export async function applyPromptToMarkdown(
     prompt,
     isPreapprovedDomain,
   )
-  const assistantMessage = await queryHaiku({
-    systemPrompt: asSystemPrompt([]),
-    userPrompt: `${contentLead}${modelPrompt}`,
-    signal,
-    options: {
-      // densable querySource:"web_fetch_apply" — in swh/FOREGROUND_529 so 529/429
-      // get bounded backoff via withRetry (#35).
-      querySource: 'web_fetch_apply',
-      agents: [],
-      isNonInteractiveSession,
-      hasAppendSystemPrompt: false,
-      mcpTools: [],
-    },
-  })
+  const { model, useCallerModel, effortValue } = resolveWebFetchModelAndEffort(
+    callerOptions?.callerModel,
+    callerOptions?.callerEffort,
+  )
+  const sharedOptions = {
+    // densable querySource:"web_fetch_apply" — in swh/FOREGROUND_529 so 529/429
+    // get bounded backoff via withRetry (#35).
+    querySource: 'web_fetch_apply' as const,
+    agents: [],
+    isNonInteractiveSession,
+    hasAppendSystemPrompt: false,
+    mcpTools: [],
+    effortValue,
+  }
+  const assistantMessage = useCallerModel
+    ? await queryWithModel({
+        systemPrompt: asSystemPrompt([]),
+        userPrompt: `${contentLead}${modelPrompt}`,
+        signal,
+        options: {
+          ...sharedOptions,
+          model,
+        },
+      })
+    : await queryHaiku({
+        systemPrompt: asSystemPrompt([]),
+        userPrompt: `${contentLead}${modelPrompt}`,
+        signal,
+        options: sharedOptions,
+      })
 
   // We need to bubble this up, so that the tool call throws, causing us to return
   // an is_error tool_use block to the server, and render a red dot in the UI.

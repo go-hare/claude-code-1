@@ -11,7 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
-import { Box, useApp, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
+import { Box, instances, useApp, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
 import { TextHoverColorContext } from './design-system/ThemedText.js';
 import { ScrollChromeContext } from './FullscreenLayout.js';
 
@@ -360,7 +360,7 @@ type VirtualItemProps = {
   expanded: boolean | undefined;
   hovered: boolean;
   clickable: boolean;
-  onClickK: (msg: RenderableMessage, cellIsBlank: boolean) => void;
+  onClickK: (k: string, msg: RenderableMessage, cellIsBlank: boolean, isExpanded: boolean) => void;
   onEnterK: (k: string) => void;
   onLeaveK: (k: string) => void;
   children: React.ReactNode;
@@ -404,7 +404,7 @@ function VirtualItem({
         clickable
           ? e => {
               if (e.hyperlinkUrl) return e.allowDefault();
-              onClickK(msg, e.cellIsBlank);
+              onClickK(k, msg, e.cellIsBlank, expanded === true);
             }
           : undefined
       }
@@ -1222,12 +1222,53 @@ export function VirtualMessageList({
   // scroll = 1800 short-lived closures/sec. With stable refs the item
   // wrapper props don't change → VirtualItem.memo bails for the ~35
   // unchanged items, only ~25 fresh items pay createElement cost.
-  const handlersRef = useRef({ onItemClick, setHoveredKey });
-  handlersRef.current = { onItemClick, setHoveredKey };
-  const onClickK = useCallback((msg: RenderableMessage, cellIsBlank: boolean) => {
-    const h = handlersRef.current;
-    if (!cellIsBlank) h.onItemClick?.(msg);
-  }, []);
+  const handlersRef = useRef({ onItemClick, isItemExpanded, setHoveredKey });
+  handlersRef.current = { onItemClick, isItemExpanded, setHoveredKey };
+  const [pendingClicks] = useState(() => new Map<string, (fire: boolean) => void>());
+  useEffect(
+    () => () => {
+      for (const cancel of Array.from(pendingClicks.values())) cancel(false);
+    },
+    [pendingClicks],
+  );
+  const onClickK = useCallback(
+    (k: string, msg: RenderableMessage, cellIsBlank: boolean, isExpanded: boolean) => {
+      const h = handlersRef.current;
+      if (cellIsBlank || !h.onItemClick) return;
+      const existing = pendingClicks.get(k);
+      if (existing) {
+        existing(true);
+        return;
+      }
+      if (!isExpanded) {
+        h.onItemClick(msg);
+        return;
+      }
+      // Official 2.1.299 (#595): delay collapsing an expanded row by 250ms so
+      // a double-click that starts a word selection cancels the collapse.
+      const ink = instances.get(process.stdout);
+      const unsub = ink?.subscribeToSelectionChange(() => {
+        if (ink.hasTextSelection()) pendingClicks.get(k)?.(false);
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const poll = () => {
+        if (ink?.selection.isDragging) {
+          timer = setTimeout(poll, 250);
+          return;
+        }
+        pendingClicks.get(k)?.(true);
+      };
+      timer = setTimeout(poll, 250);
+      pendingClicks.set(k, (fire: boolean) => {
+        pendingClicks.delete(k);
+        unsub?.();
+        if (timer !== undefined) clearTimeout(timer);
+        const cur = handlersRef.current;
+        if (fire && cur.isItemExpanded?.(msg)) cur.onItemClick?.(msg);
+      });
+    },
+    [pendingClicks],
+  );
   const onEnterK = useCallback((k: string) => {
     handlersRef.current.setHoveredKey(k);
   }, []);

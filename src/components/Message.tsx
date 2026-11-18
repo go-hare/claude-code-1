@@ -97,6 +97,31 @@ export type Props = {
   latestBashOutputUUID?: string | null;
 };
 
+export type ResumedCompactBoundaryInfo = {
+  leadsToSummary: boolean;
+  savedIn?: string;
+};
+
+/**
+ * Official Uu / eeo — extract resumed-session compaction metadata (savedIn /
+ * leadsToSummary) when present on a compact_boundary system message.
+ */
+export function getResumedCompactBoundaryInfo(
+  message: { compactMetadata?: unknown } | Record<string, unknown>,
+): ResumedCompactBoundaryInfo | null {
+  if (typeof message !== 'object' || message === null || !('compactMetadata' in message) || !message.compactMetadata) {
+    return null;
+  }
+  const meta = message.compactMetadata as { savedIn?: string; leadsToSummary?: boolean };
+  if (meta.savedIn === undefined && meta.leadsToSummary === undefined) {
+    return null;
+  }
+  return {
+    leadsToSummary: meta.leadsToSummary ?? false,
+    ...(meta.savedIn !== undefined && { savedIn: meta.savedIn }),
+  };
+}
+
 function MessageImpl({
   message,
   lookups,
@@ -255,13 +280,14 @@ function MessageImpl({
     }
     case 'system':
       if (message.subtype === 'compact_boundary') {
-        // Fullscreen keeps pre-compact messages in the ScrollBox (REPL.tsx
-        // appends instead of resetting, Messages.tsx skips the boundary
-        // filter) — scroll up for history, no need for the ctrl+o hint.
-        if (isFullscreenEnvEnabled()) {
+        const resumedInfo = getResumedCompactBoundaryInfo(message);
+        // Fullscreen keeps pre-compact messages in the ScrollBox for live
+        // compactions (resumedInfo === null); resumed sessions still show the
+        // boundary row with savedIn / summary info.
+        if (isFullscreenEnvEnabled() && resumedInfo === null) {
           return null;
         }
-        return <CompactBoundaryMessage />;
+        return <CompactBoundaryMessage leadsToSummary={resumedInfo?.leadsToSummary} savedIn={resumedInfo?.savedIn} />;
       }
       if (message.subtype === 'microcompact_boundary') {
         // Logged at creation time in createMicrocompactBoundaryMessage

@@ -3,6 +3,7 @@
  * Extracts and parses YAML frontmatter between --- delimiters
  */
 
+import { isAbsolute } from 'path'
 import { logForDebugging } from './debug.js'
 import type { HooksSettings } from './settings/types.js'
 import { parseYaml } from './yaml.js'
@@ -61,7 +62,29 @@ export type FrontmatterData = {
 
 export type ParsedMarkdown = {
   frontmatter: FrontmatterData
+  frontmatterAsWritten: FrontmatterData
+  asWrittenProblem?: string
   content: string
+}
+
+/**
+ * densable `Wme` — builds `Command.skillFile` from `parseFrontmatter` output.
+ * Only attaches `path` when `filePath` is absolute (omits `<inline:...>`).
+ */
+export function buildSkillFile(
+  frontmatterAsWritten: unknown,
+  filePath?: string,
+  frontmatterProblem?: string,
+): {
+  frontmatterAsWritten: unknown
+  frontmatterProblem?: string
+  path?: string
+} {
+  return {
+    frontmatterAsWritten,
+    ...(frontmatterProblem !== undefined && { frontmatterProblem }),
+    ...(filePath !== undefined && isAbsolute(filePath) && { path: filePath }),
+  }
 }
 
 // Characters that require quoting in YAML values (when unquoted)
@@ -146,6 +169,7 @@ export function parseFrontmatter(
     // No frontmatter found
     return {
       frontmatter: {},
+      frontmatterAsWritten: {},
       content: raw,
     }
   }
@@ -154,10 +178,13 @@ export function parseFrontmatter(
   const content = stripped.slice(match[0].length)
 
   let frontmatter: FrontmatterData = {}
+  let asWrittenProblem: string | undefined
   try {
     const parsed = parseYaml(frontmatterText) as FrontmatterData | null
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       frontmatter = parsed
+    } else if (parsed !== null && parsed !== undefined) {
+      asWrittenProblem = 'is a list or a single value, not a table'
     }
   } catch {
     // YAML parsing failed - try again after quoting problematic values
@@ -166,12 +193,17 @@ export function parseFrontmatter(
       const parsed = parseYaml(quotedText) as FrontmatterData | null
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         frontmatter = parsed
+      } else if (parsed !== null && parsed !== undefined) {
+        asWrittenProblem = 'is a list or a single value, not a table'
       }
     } catch (retryError) {
       // Still failed - log for debugging so users can diagnose broken frontmatter
+      const errMsg =
+        retryError instanceof Error ? retryError.message : String(retryError)
+      asWrittenProblem = `did not parse as YAML (${errMsg})`
       const location = sourcePath ? ` in ${sourcePath}` : ''
       logForDebugging(
-        `Failed to parse YAML frontmatter${location}: ${retryError instanceof Error ? retryError.message : retryError}`,
+        `Failed to parse YAML frontmatter${location}: ${errMsg}`,
         { level: 'warn' },
       )
     }
@@ -179,6 +211,8 @@ export function parseFrontmatter(
 
   return {
     frontmatter,
+    frontmatterAsWritten: frontmatter,
+    ...(asWrittenProblem !== undefined && { asWrittenProblem }),
     content,
   }
 }

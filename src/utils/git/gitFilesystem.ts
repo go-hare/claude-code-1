@@ -18,7 +18,8 @@ import { join, resolve } from 'path'
 import { waitForScrollIdle } from '../../bootstrap/state.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getCwd } from '../cwd.js'
-import { findGitRoot } from '../git.js'
+import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
+import { findGitRoot, gitExe } from '../git.js'
 import { parseGitConfigValue } from './gitConfigParser.js'
 
 // ---------------------------------------------------------------------------
@@ -130,6 +131,42 @@ export function isValidGitSha(s: string): boolean {
   return /^[0-9a-f]{40}$/.test(s) || /^[0-9a-f]{64}$/.test(s)
 }
 
+export const REFTABLE_HEAD_REF = 'refs/heads/.invalid'
+const REFTABLE_GIT_TIMEOUT_MS = 5000
+
+/**
+ * Returns true when `gitDir/HEAD` uses git's reftable dummy symref
+ * (`ref: refs/heads/.invalid`).
+ */
+export async function isReftableRepo(gitDir: string): Promise<boolean> {
+  try {
+    const content = (await readFile(join(gitDir, 'HEAD'), 'utf-8')).trim()
+    return (
+      content.startsWith('ref:') &&
+      content.slice('ref:'.length).trim() === REFTABLE_HEAD_REF
+    )
+  } catch {
+    return false
+  }
+}
+
+async function runReftableGit(
+  gitDir: string,
+  args: string[],
+): Promise<{ code: number; stdout: string } | null> {
+  try {
+    const res = await execFileNoThrowWithCwd(gitExe(), args, {
+      cwd: gitDir,
+      timeout: REFTABLE_GIT_TIMEOUT_MS,
+      preserveOutputOnError: false,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    })
+    return { code: res.code, stdout: res.stdout }
+  } catch {
+    return null
+  }
+}
+
 // ---------------------------------------------------------------------------
 // readGitHead — parse .git/HEAD
 // ---------------------------------------------------------------------------
@@ -141,6 +178,7 @@ export function isValidGitSha(s: string): boolean {
  *   - `ref: refs/heads/<branch>\n`  — on a branch
  *   - `ref: <other-ref>\n`          — unusual symref (e.g. during bisect)
  *   - `<hex-sha>\n`                 — detached HEAD (e.g. during rebase)
+ *   - `ref: refs/heads/.invalid\n`  — reftable repo (query git symbolic-ref / show-ref)
  *
  * Git strips trailing whitespace via strbuf_rtrim; .trim() is equivalent.
  * Git allows any whitespace between "ref:" and the path; we handle
@@ -154,7 +192,23 @@ export async function readGitHead(
   try {
     const content = (await readFile(join(gitDir, 'HEAD'), 'utf-8')).trim()
     if (content.startsWith('ref:')) {
-      const ref = content.slice('ref:'.length).trim()
+      let ref = content.slice('ref:'.length).trim()
+      if (ref === REFTABLE_HEAD_REF) {
+        const res = await runReftableGit(gitDir, [
+          'symbolic-ref',
+          '-q',
+          '--no-recurse',
+          'HEAD',
+        ])
+        if (res?.code === 1) {
+          const sha = await resolveRef(gitDir, 'HEAD')
+          return sha ? { type: 'detached', sha } : null
+        }
+        if (res === null || res.code !== 0) {
+          return null
+        }
+        ref = res.stdout.trim()
+      }
       if (ref.startsWith('refs/heads/')) {
         const name = ref.slice('refs/heads/'.length)
         // Reject path traversal and argument injection from a tampered HEAD.
@@ -204,6 +258,21 @@ export async function resolveRef(
   gitDir: string,
   ref: string,
 ): Promise<string | null> {
+  if (await isReftableRepo(gitDir)) {
+    if (ref !== 'HEAD' && (!ref.startsWith('refs/') || !isSafeRefName(ref))) {
+      return null
+    }
+    const res = await runReftableGit(gitDir, [
+      'show-ref',
+      '--verify',
+      '--hash',
+      '--end-of-options',
+      ref,
+    ])
+    const sha = res?.code === 0 ? res.stdout.trim() : null
+    return sha !== null && isValidGitSha(sha) ? sha : null
+  }
+
   const result = await resolveRefInDir(gitDir, ref)
   if (result) {
     return result
@@ -289,6 +358,25 @@ export async function readRawSymref(
   refPath: string,
   branchPrefix: string,
 ): Promise<string | null> {
+  if (await isReftableRepo(gitDir)) {
+    if (!refPath.startsWith('refs/') || !isSafeRefName(refPath)) {
+      return null
+    }
+    const res = await runReftableGit(gitDir, [
+      'symbolic-ref',
+      '-q',
+      '--no-recurse',
+      '--end-of-options',
+      refPath,
+    ])
+    const target = res?.code === 0 ? res.stdout.trim() : ''
+    if (!target.startsWith(branchPrefix)) {
+      return null
+    }
+    const name = target.slice(branchPrefix.length)
+    return isSafeRefName(name) ? name : null
+  }
+
   try {
     const content = (await readFile(join(gitDir, refPath), 'utf-8')).trim()
     if (content.startsWith('ref:')) {

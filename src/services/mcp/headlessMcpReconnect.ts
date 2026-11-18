@@ -404,7 +404,9 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     )
 
     const result = await module
-      .reconnectMcpServerImpl(name, config, deps.storageV5, deps.credentials)
+      .reconnectMcpServerImpl(name, config, deps.storageV5, deps.credentials, {
+        keepConnectionInUse: true,
+      })
       .catch(err => ({
         client: {
           name,

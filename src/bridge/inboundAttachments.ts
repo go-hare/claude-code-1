@@ -31,14 +31,26 @@ import {
   maybeResizeAndDownsampleImageBuffer,
 } from '../utils/imageResizer.js'
 import { lazySchema } from '../utils/lazySchema.js'
-import { getBridgeAccessToken, getBridgeBaseUrl } from './bridgeConfig.js'
+import {
+  checkAndRefreshOAuthTokenIfNeeded,
+  clearOAuthTokenCache,
+} from '../utils/auth.js'
+import {
+  getBridgeAccessToken,
+  getBridgeBaseUrl,
+  getBridgeTokenOverride,
+} from './bridgeConfig.js'
 
-/** densable qpe — 30 MiB transfer cap. */
+/** densable qpe / Dre — 30 MiB transfer cap (sha256-verified). */
 export const INBOUND_ATTACHMENT_MAX_BYTES = 31_457_280
+/** densable jhs — 35 MiB transfer cap for non-sha256 attachments (#695). */
+export const INBOUND_ATTACHMENT_UNVERIFIED_MAX_BYTES = 36_700_160
 /** densable Uee — max attachments materialized per message. */
 export const INBOUND_ATTACHMENT_MAX_COUNT = 16
 
 const DOWNLOAD_TIMEOUT_MS = 30_000
+const DOWNLOAD_MAX_ATTEMPTS = 3
+const DOWNLOAD_RETRY_BASE_MS = 500
 
 /** densable e8 — image inline resize limits. */
 const INLINE_IMAGE_LIMITS: ImageLimits = {
@@ -317,6 +329,39 @@ function createConcurrencyGate(limit: number) {
   }
 }
 
+function isRetryableDownloadStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429
+}
+
+function isRetryableDownloadError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return true
+  const code = (err as { code?: unknown }).code
+  if (
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === 'ERR_CANCELED' ||
+    code === 'EPIPE' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN'
+  ) {
+    return true
+  }
+  const msg = (err as { message?: unknown }).message
+  if (typeof msg === 'string' && /timeout|stall|socket|network/i.test(msg)) {
+    return true
+  }
+  return true
+}
+
+function sleepBackoff(attempt: number): Promise<void> {
+  const ms = DOWNLOAD_RETRY_BASE_MS * 2 ** attempt
+  return new Promise(resolve => {
+    const t = setTimeout(resolve, ms)
+    t.unref?.()
+  })
+}
+
 /**
  * densable Acv — fetch + write one attachment; optionally inline as image.
  * @param registerChromeDigest densable `t` — register digest for Chrome upload allowlist
@@ -328,18 +373,26 @@ async function resolveOne(
   registerChromeDigest: boolean,
   allowInline: boolean,
 ): Promise<ResolveOneResult> {
-  const token = getBridgeAccessToken()
+  // 2.1.299 #694: refresh OAuth token before downloading in long-running sessions.
+  if (!getBridgeTokenOverride()) {
+    await checkAndRefreshOAuthTokenIfNeeded().catch(() => {})
+  }
+
+  let token = getBridgeAccessToken()
   if (!token) {
     debug('skip: no oauth token')
     return { failure: 'download' }
   }
 
-  let data: Buffer
+  // 2.1.299 #695: 35 MiB cap for non-sha256 attachments, 30 MiB for sha256-verified.
+  const maxBytes =
+    att.sha256 === undefined
+      ? INBOUND_ATTACHMENT_UNVERIFIED_MAX_BYTES
+      : INBOUND_ATTACHMENT_MAX_BYTES
+
+  let data: Buffer | undefined
   try {
-    if (
-      typeof att.file_size === 'number' &&
-      att.file_size > INBOUND_ATTACHMENT_MAX_BYTES
-    ) {
+    if (typeof att.file_size === 'number' && att.file_size > maxBytes) {
       return { failure: 'download' }
     }
     // getOauthConfig() (via getBridgeBaseUrl) throws on a non-allowlisted
@@ -347,21 +400,63 @@ async function resolveOne(
     // FedStart URL degrades to "no @path" instead of crashing print.ts's
     // reader loop (which has no catch around the await).
     const url = `${getBridgeBaseUrl()}/api/oauth/files/${encodeURIComponent(att.file_uuid)}/content`
-    const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      responseType: 'arraybuffer',
-      timeout: DOWNLOAD_TIMEOUT_MS,
-      maxContentLength: INBOUND_ATTACHMENT_MAX_BYTES,
-      maxBodyLength: INBOUND_ATTACHMENT_MAX_BYTES,
-      validateStatus: () => true,
-    })
-    if (response.status !== 200) {
-      debug(`fetch ${att.file_uuid} failed: status=${response.status}`)
-      return { failure: 'download' }
+    let retried401 = false
+    for (let attempt = 0; attempt < DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'arraybuffer',
+          timeout: DOWNLOAD_TIMEOUT_MS,
+          maxContentLength: maxBytes,
+          maxBodyLength: maxBytes,
+          validateStatus: () => true,
+        })
+        if (response.status === 200) {
+          const buf = Buffer.from(response.data)
+          if (buf.length > maxBytes) {
+            debug(`fetch ${att.file_uuid} over size cap (${buf.length} bytes)`)
+            return { failure: 'download' }
+          }
+          data = buf
+          break
+        }
+        if (
+          response.status === 401 &&
+          !retried401 &&
+          !getBridgeTokenOverride()
+        ) {
+          retried401 = true
+          clearOAuthTokenCache()
+          await checkAndRefreshOAuthTokenIfNeeded().catch(() => {})
+          const refreshed = getBridgeAccessToken()
+          if (refreshed) {
+            token = refreshed
+            attempt--
+            continue
+          }
+        }
+        debug(`fetch ${att.file_uuid} failed: status=${response.status}`)
+        if (
+          isRetryableDownloadStatus(response.status) &&
+          attempt + 1 < DOWNLOAD_MAX_ATTEMPTS
+        ) {
+          await sleepBackoff(attempt)
+          continue
+        }
+        return { failure: 'download' }
+      } catch (err) {
+        debug(`fetch ${att.file_uuid} attempt ${attempt + 1} threw: ${err}`)
+        if (
+          isRetryableDownloadError(err) &&
+          attempt + 1 < DOWNLOAD_MAX_ATTEMPTS
+        ) {
+          await sleepBackoff(attempt)
+          continue
+        }
+        return { failure: 'download' }
+      }
     }
-    data = Buffer.from(response.data)
-    if (data.length > INBOUND_ATTACHMENT_MAX_BYTES) {
-      debug(`fetch ${att.file_uuid} over size cap (${data.length} bytes)`)
+    if (!data) {
       return { failure: 'download' }
     }
   } catch (e) {
@@ -381,16 +476,17 @@ async function resolveOne(
   const dir = uploadsDir()
   const outPath = join(dir, `${prefix}-${safeName}`)
 
+  let wroteFile = false
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await writeFile(outPath, data, { mode: 0o600 })
+    wroteFile = true
   } catch (e) {
     debug(`write ${outPath} failed: ${e}`)
-    return { failure: 'write' }
   }
 
   // densable SEA: chrome digest only when sha256 === void 0 (not null / not string).
-  if (registerChromeDigest && att.sha256 === undefined) {
+  if (wroteFile && registerChromeDigest && att.sha256 === undefined) {
     try {
       const real = await realpath(outPath)
       registerChromeUploadAttachmentDigest(real, sha256Hex(data))
@@ -399,10 +495,13 @@ async function resolveOne(
     }
   }
 
-  debug(`resolved ${att.file_uuid} → ${outPath} (${data.length} bytes)`)
+  if (wroteFile) {
+    debug(`resolved ${att.file_uuid} → ${outPath} (${data.length} bytes)`)
+  }
 
   // densable SEA exact: r&&e.is_image===!0&&e.sha256===void 0
   // Schema catch(null) on bad sha → null → does NOT inline (not truthiness).
+  // 2.1.299 #693: still inline image from downloaded buffer even when disk write failed.
   if (allowInline && att.is_image === true && att.sha256 === undefined) {
     const imageBlock = await bufferToInlineImageBlock(data).catch(e => {
       debug(`inline ${att.file_uuid} threw: ${e}`)
@@ -412,8 +511,15 @@ async function resolveOne(
       debug(`inlined ${att.file_uuid} (${data.length} bytes)`)
       return { imageBlock }
     }
+    if (!wroteFile) {
+      return { failure: 'write' }
+    }
     debug(`inline ${att.file_uuid} fell back to @path ref`)
     return { path: outPath, inlineFellBack: true }
+  }
+
+  if (!wroteFile) {
+    return { failure: 'write' }
   }
 
   return { path: outPath }

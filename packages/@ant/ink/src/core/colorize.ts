@@ -201,8 +201,41 @@ function leftoverDualInkXy(text: string): string {
 }
 
 /**
+ * Official `CAo` / `class S` (`@283958850`): true when `color` at the current
+ * `chalk.level` emits SGR 30 (`\x1b[30m`) or SGR 37 (`\x1b[37m`) as foreground.
+ * On 16-color terminals / dark-ansi theme, secondary text (`inactive`) shares
+ * those codes with normal text and needs SGR `\x1b[2m` (`faintInk`) to look dim.
+ */
+const ANSI_BLACK_FG = '\x1b[30m'
+const ANSI_WHITE_FG = '\x1b[37m'
+const NEUTRAL_ANSI_CACHE_MAX = 256
+const neutralAnsiCache = new Map<Color, boolean>()
+let neutralAnsiCacheLevel = -1
+
+function openingSgrOf(styled: string, marker: string): string {
+  const idx = styled.indexOf(marker)
+  return idx > 0 ? styled.slice(0, idx) : ''
+}
+
+function isNeutralAnsi16Color(color: Color): boolean {
+  if (chalk.level !== neutralAnsiCacheLevel) {
+    neutralAnsiCacheLevel = chalk.level
+    neutralAnsiCache.clear()
+  }
+  const cached = neutralAnsiCache.get(color)
+  if (cached !== undefined) return cached
+  if (neutralAnsiCache.size >= NEUTRAL_ANSI_CACHE_MAX) {
+    neutralAnsiCache.clear()
+  }
+  const sgr = openingSgrOf(colorize(' ', color, 'foreground'), ' ')
+  const neutral = sgr === ANSI_BLACK_FG || sgr === ANSI_WHITE_FG
+  neutralAnsiCache.set(color, neutral)
+  return neutral
+}
+
+/**
  * densable DualInk `QUe` @185517750.
- * Gold: inverse → xY, then strikethrough/underline/italic/bold/dim, then fg/bg.
+ * Gold: inverse → xY, then strikethrough/underline/italic/bold/dim/faintInk, then fg/bg.
  * DualInk leftover DualInkGs caret color is leftoverXy gray intern, not this
  * skip. QUe still wraps color after xY (search overlay needs inverse+fg).
  */
@@ -238,6 +271,18 @@ export function applyTextStyles(text: string, styles: TextStyles): string {
   }
 
   if (styles.dim) {
+    result = chalk.dim(result)
+  }
+
+  if (
+    styles.faintInk &&
+    styles.faintInk === styles.color &&
+    !styles.bold &&
+    !styles.dim &&
+    !styles.inverse &&
+    isNeutralAnsi16Color(styles.color) &&
+    (!styles.backgroundColor || isNeutralAnsi16Color(styles.backgroundColor))
+  ) {
     result = chalk.dim(result)
   }
 

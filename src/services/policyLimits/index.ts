@@ -28,6 +28,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { classifyAxiosError } from '../../utils/errors.js'
 import { safeParseJSON } from '../../utils/json.js'
+import { isFirstPartyAnthropicBaseUrl } from '../../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
@@ -252,19 +253,47 @@ export async function waitForPolicyLimitsToLoad(): Promise<void> {
   }
 }
 
+const FIRST_PARTY_ANTHROPIC_API_KEY_RE = /^(sk-ant-|sk-[\w-]{86}$)/
+
+/**
+ * Official BNa — true when the key matches Anthropic's first-party key format.
+ */
+function isFirstPartyAnthropicApiKey(apiKey: string): boolean {
+  return FIRST_PARTY_ANTHROPIC_API_KEY_RE.test(apiKey.trim())
+}
+
+/**
+ * Official `ose` (2.1.299 #634): when `ANTHROPIC_BASE_URL` is a custom
+ * third-party host, do not send a non-Anthropic gateway API key to Anthropic
+ * endpoints (`bootstrap`, `policy_limits`, etc.). First-party Anthropic keys
+ * (`sk-ant-...` / `sk-<86>`) are still sent.
+ */
+export function filterAnthropicSendableApiKey(
+  apiKey: string | null | undefined,
+): string | null {
+  if (!apiKey) {
+    return null
+  }
+  if (!isFirstPartyAnthropicBaseUrl() && !isFirstPartyAnthropicApiKey(apiKey)) {
+    return null
+  }
+  return apiKey
+}
+
 /**
  * Get auth headers for policy limits without calling getSettings()
- * Supports both API key and OAuth authentication
+ * Supports both API key and OAuth authentication.
  */
-function getAuthHeaders(): {
+export function getAuthHeaders(): {
   headers: Record<string, string>
   error?: string
 } {
   // Try API key first (for Console users)
   try {
-    const { key: apiKey } = getAnthropicApiKeyWithSource({
+    const { key: rawApiKey } = getAnthropicApiKeyWithSource({
       skipRetrievingKeyFromApiKeyHelper: true,
     })
+    const apiKey = filterAnthropicSendableApiKey(rawApiKey)
     if (apiKey) {
       return {
         headers: {

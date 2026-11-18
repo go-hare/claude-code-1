@@ -414,6 +414,7 @@ export function logAPIError({
     statusCode: status ? parseInt(status, 10) : undefined,
     error: errStr,
     attempt,
+    requestId: requestId ?? undefined,
   })
 
   // Log first error for teleported sessions (reliability tracking)
@@ -761,12 +762,26 @@ export function logAPISuccessAndDuration({
     betas,
   })
   // Log API request event for OTLP (densable: client_request_id)
+  const cacheCreationBreakdown = (
+    usage as {
+      cache_creation?: {
+        ephemeral_5m_input_tokens?: number | null
+        ephemeral_1h_input_tokens?: number | null
+      } | null
+    }
+  ).cache_creation
   void logOTelEvent('api_request', {
     model,
     input_tokens: String(usage.input_tokens),
     output_tokens: String(usage.output_tokens),
     cache_read_tokens: String(usage.cache_read_input_tokens),
     cache_creation_tokens: String(usage.cache_creation_input_tokens),
+    cache_creation_5m_tokens: String(
+      cacheCreationBreakdown?.ephemeral_5m_input_tokens ?? 0,
+    ),
+    cache_creation_1h_tokens: String(
+      cacheCreationBreakdown?.ephemeral_1h_input_tokens ?? 0,
+    ),
     cost_usd: String(costUSD),
     duration_ms: String(durationMs),
     speed: fastMode ? 'fast' : 'normal',
@@ -856,6 +871,8 @@ export function logAPISuccessAndDuration({
     ttftMs: ttftMs ?? undefined,
     requestSetupMs,
     attemptStartTimes,
+    requestId: requestId ?? undefined,
+    stopReason: stopReason ?? undefined,
   })
 
   // Log first successful message for teleported sessions (reliability tracking)

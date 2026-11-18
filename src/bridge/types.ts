@@ -152,6 +152,7 @@ export type BridgeApiClient = {
   ): Promise<{
     environment_id: string
     environment_secret: string
+    environment_secret_expires_in?: number
   }>
   pollForWork(
     environmentId: string,

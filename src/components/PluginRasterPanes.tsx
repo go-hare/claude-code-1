@@ -3587,6 +3587,7 @@ function PluginPressInput({
   placeholder,
   value,
   submitLabel,
+  rows,
 }: {
   plugin: string;
   handle: unknown;
@@ -3595,6 +3596,7 @@ function PluginPressInput({
   placeholder?: string;
   value?: string;
   submitLabel?: string;
+  rows?: number;
 }): ReactNode {
   const focus = useContext(FocusedInputContext);
   const clicked = useContext(ClickedPressContext);
@@ -3613,7 +3615,7 @@ function PluginPressInput({
   /** densable `Wt` `h` — `Xjt.textOf(plugin, element) ?? value ?? ""`. */
   const shown = (fields !== null && fieldKey !== '' ? fields.textOf(plugin, fieldKey) : undefined) ?? value ?? '';
   const [cursor, setCursor] = useState(shown.length);
-  const { columns: terminalColumns } = useTerminalSize();
+  const { columns: terminalColumns, rows: terminalRows } = useTerminalSize();
   // densable Wt — prefer XXt body columns over full terminal width.
   const bodyColumns = useContext(PaneBodyColumnsContext);
   const columns = bodyColumns ?? terminalColumns;
@@ -3621,14 +3623,21 @@ function PluginPressInput({
     if (isInputFocused) setCursor(Number.MAX_SAFE_INTEGER);
   }, [isInputFocused]);
   const empty = shown === '';
+  const visibleRows = Math.max(1, Math.min(rows ?? 1, terminalRows));
+  const isMultiline = visibleRows > 1;
   const prefix = label === undefined ? '' : `${label}: `;
   const submit = ` ⏎ ${submitLabel ?? 'submit'}`;
-  const fieldColumns = Math.max(12, columns - stringWidth(prefix) - stringWidth(submit));
+  const multilineHint = isMultiline && isInputFocused ? `${submit} · shift+⏎ / \\⏎ new line` : submit;
+  const remainingColumns = columns - stringWidth(prefix);
+  const hint = remainingColumns - stringWidth(multilineHint) >= columns / 2 ? multilineHint : submit;
+  const fieldColumns = Math.max(12, remainingColumns - stringWidth(hint));
   return (
     <Box
       ref={hasKeyboardFocus ? reportHeldFocus : undefined}
       flexDirection="row"
       flexShrink={0}
+      height={isMultiline ? visibleRows : undefined}
+      overflow={isMultiline ? 'hidden' : undefined}
       {...(fieldKey !== '' && { elementKey: fieldKey, elementPlugin: plugin })}
       onClick={event => {
         if (event.isWindowActivation) return;
@@ -3661,17 +3670,19 @@ function PluginPressInput({
           columns={fieldColumns}
           cursorOffset={Math.min(cursor, shown.length)}
           onChangeCursorOffset={setCursor}
+          inputFilter={isMultiline ? next => next.replace(/\r\n?/g, '\n') : undefined}
+          maxVisibleLines={isMultiline ? visibleRows : undefined}
           focus
           showCursor
-          multiline={false}
+          multiline={isMultiline}
           disableEscapeDoublePress
         />
       ) : (
-        <Text dimColor={empty} wrap="truncate-end">
+        <Text dimColor={empty} wrap={isMultiline ? 'wrap' : 'truncate-end'}>
           {empty ? (placeholder ?? '') : shown}
         </Text>
       )}
-      {isInputFocused && <Text dimColor>{submit}</Text>}
+      {isInputFocused && <Text dimColor>{hint}</Text>}
     </Box>
   );
 }
@@ -4434,6 +4445,7 @@ export function DrawingNode({
         placeholder={stringProp(props, node, 'placeholder')}
         value={stringProp(props, node, 'value')}
         submitLabel={stringProp(props, node, 'submitLabel')}
+        rows={numberProp(props, node, 'rows')}
       />
     );
   }
@@ -6829,6 +6841,23 @@ function rewriteAskUserQuestionEngineChild(
   return cloneElement(element, patches, ...(nextChildren !== undefined ? [nextChildren as ReactNode] : []));
 }
 
+const ASK_USER_QUESTION_RICH_SURFACES = new Set(['desktop', 'vscode', 'mobile']);
+
+/**
+ * #885: SEA `C8s(surface)` — VS Code, desktop and mobile allow 48 rows + Markdown
+ * above AskUserQuestion; terminal keeps 12 plain rows.
+ */
+export function getAskUserQuestionSurfacePolicy(surface?: string): {
+  rowsMax: number;
+  isMarkdownDrawn: boolean;
+} {
+  const isRich = surface !== undefined && ASK_USER_QUESTION_RICH_SURFACES.has(surface);
+  return {
+    rowsMax: isRich ? 48 : 12,
+    isMarkdownDrawn: isRich,
+  };
+}
+
 /**
  * densable 2.1.289 `AskUserQuestion` `ui.render` site (`cc-plugin-mods-guide`
  * Clawd cooking `Raster` header + `{ type: "engine", ref: 0 }` slot).
@@ -6914,6 +6943,7 @@ function PluginAskUserQuestionActiveSite({
     [children, questions, rewrittenQuestions],
   );
   const [resetKey, setResetKey] = useState(0);
+  const askPolicy = getAskUserQuestionSurfacePolicy('terminal');
   if (!hasPluginDrawing(drawn)) {
     return engineElement;
   }
@@ -6927,14 +6957,16 @@ function PluginAskUserQuestionActiveSite({
         setResetKey(n => n + 1);
       }}
     >
-      <DrawingNode
-        node={drawn}
-        plugin={ownerPlugin}
-        requestId={requestId}
-        index={0}
-        engine={engineElement}
-        component="AskUserQuestion"
-      />
+      <Box flexDirection="column" maxHeight={askPolicy.rowsMax} overflow="hidden">
+        <DrawingNode
+          node={drawn}
+          plugin={ownerPlugin}
+          requestId={requestId}
+          index={0}
+          engine={engineElement}
+          component="AskUserQuestion"
+        />
+      </Box>
     </PaneErrorBoundary>
   );
 }

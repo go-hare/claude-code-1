@@ -603,11 +603,75 @@ type SyncErrorRow =
 type PluginsSyncState = {
   syncErrors: SyncErrorRow[]
   pendingTrashRemovals: Array<Promise<void>>
+  changesLanded: number
+  changesReloaded: number
+  reloadsCompleted: number
+  holdsSet: number
+  reloadHeld: boolean
+  lastSyncedLaneLoad: number | null
+  syncedLaneOpened: boolean
+  syncedDirsLoadedHere: Set<string>
+  dirsNewHere: Set<string>
+  awaitsFirstRun: boolean
 }
 
 const pluginsSync: PluginsSyncState = {
   syncErrors: [],
   pendingTrashRemovals: [],
+  changesLanded: 0,
+  changesReloaded: 0,
+  reloadsCompleted: 0,
+  holdsSet: 0,
+  reloadHeld: false,
+  lastSyncedLaneLoad: null,
+  syncedLaneOpened: false,
+  syncedDirsLoadedHere: new Set(),
+  dirsNewHere: new Set(),
+  awaitsFirstRun: false,
+}
+
+export function getPluginsSyncState(): Readonly<PluginsSyncState> {
+  return pluginsSync
+}
+
+export function holdSyncedPluginReload(): number {
+  pluginsSync.reloadHeld = true
+  pluginsSync.holdsSet++
+  return pluginsSync.holdsSet
+}
+
+export function endSyncedPluginReloadHold(holdToken: number): void {
+  if (pluginsSync.holdsSet === holdToken) {
+    pluginsSync.reloadHeld = false
+  }
+}
+
+export function markSyncedPluginsReloaded(landedStamp: number): void {
+  pluginsSync.changesReloaded = Math.max(
+    pluginsSync.changesReloaded,
+    landedStamp,
+  )
+  pluginsSync.reloadsCompleted++
+}
+
+export function markSyncedDirsLoaded(dirs: readonly string[]): void {
+  for (const dir of dirs) {
+    pluginsSync.syncedDirsLoadedHere.add(dir)
+    pluginsSync.dirsNewHere.delete(dir)
+  }
+  pluginsSync.syncedLaneOpened = true
+  pluginsSync.lastSyncedLaneLoad = Date.now()
+  if (pluginsSync.dirsNewHere.size === 0) {
+    pluginsSync.awaitsFirstRun = false
+  }
+}
+
+export function resetSyncedLaneState(): void {
+  pluginsSync.syncedLaneOpened = false
+  pluginsSync.syncedDirsLoadedHere.clear()
+  pluginsSync.dirsNewHere.clear()
+  pluginsSync.lastSyncedLaneLoad = null
+  pluginsSync.awaitsFirstRun = false
 }
 
 export type SyncedSyncPlan = {
@@ -1399,9 +1463,27 @@ export async function syncCloudSyncedPlugins(): Promise<void> {
     })
 
     const kept = [...carryoverKept, ...downloaded, ...previousOnFail]
+    const nextDirs = dirsFromSyncedManifest(kept, root)
     assertGuard(ctx)
-    setSyncedPluginDirs(dirsFromSyncedManifest(kept, root))
+    setSyncedPluginDirs(nextDirs)
     registered = true
+    const nextDirSet = new Set(nextDirs)
+    let dirsChanged = downloaded.length > 0 || plan.toRemove.length > 0
+    for (const dir of nextDirs) {
+      if (!pluginsSync.syncedDirsLoadedHere.has(dir)) {
+        pluginsSync.dirsNewHere.add(dir)
+        dirsChanged = true
+      }
+    }
+    for (const loadedDir of pluginsSync.syncedDirsLoadedHere) {
+      if (!nextDirSet.has(loadedDir)) {
+        dirsChanged = true
+      }
+    }
+    if (dirsChanged) {
+      pluginsSync.changesLanded++
+    }
+    pluginsSync.awaitsFirstRun = pluginsSync.dirsNewHere.size > 0
     await writeSyncedManifest(
       ctx,
       {

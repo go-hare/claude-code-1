@@ -4,7 +4,19 @@
  * Pure functions for resolving vim motions to cursor positions.
  */
 
-import type { Cursor } from '@anthropic/ink'
+import { Cursor } from '@anthropic/ink'
+import { findTextObject } from './textObjects.js'
+
+function findMatchingBracket(text: string, offset: number): number | null {
+  const lineEnd = text.indexOf('\n', offset)
+  const end = lineEnd === -1 ? text.length : lineEnd
+  const rel = text.slice(offset, end).search(/[()[\]{}]/)
+  if (rel === -1) return null
+  const bracketOffset = offset + rel
+  const range = findTextObject(text, bracketOffset, text[bracketOffset]!, false)
+  if (!range) return null
+  return range.start === bracketOffset ? range.end - 1 : range.start
+}
 
 /**
  * Resolve a motion to a target cursor position.
@@ -62,6 +74,12 @@ function applySingleMotion(key: string, cursor: Cursor): Cursor {
       return cursor.lastCharInLogicalLine()
     case 'G':
       return cursor.startOfLastLine()
+    case '%': {
+      const matchOffset = findMatchingBracket(cursor.text, cursor.offset)
+      return matchOffset === null
+        ? cursor
+        : new Cursor(cursor.measuredText, matchOffset)
+    }
     default:
       return cursor
   }
@@ -71,7 +89,7 @@ function applySingleMotion(key: string, cursor: Cursor): Cursor {
  * Check if a motion is inclusive (includes character at destination).
  */
 export function isInclusiveMotion(key: string): boolean {
-  return 'eE$'.includes(key)
+  return 'eE$%'.includes(key)
 }
 
 /**
